@@ -1689,13 +1689,36 @@ const lifecycleCapabilities = {
 // hetzner + azure are prod (the two matrix columns), fake is dev-tier (FILTERED
 // out of the matrix). The false cells prove the honesty grammar: some carry the
 // server-owned gap reason (hetzner.pause, azure.adopt), some are a bare dash with
-// NO reason (hetzner.catalog, azure.audit) — the UI pads neither.
+// NO reason (azure.audit) — the UI pads neither.
+//
+// cch-w45-bl — `catalog` IS TRUE FOR BOTH NEUTRAL KINDS, AND CANNOT BE ANYTHING
+// ELSE. This fixture models the bytes GET /v1/providers/capabilities SERVES, and
+// that response is POST-OVERLAY: own_catalog_capability/2 (cloud router,
+// @neutral_kinds ~w(hetzner azure)) rewrites `catalog` to true for those two
+// kinds whenever the key is present, because THIS control plane builds their
+// catalogs itself (build_provider_catalog/2 behind GET /v1/providers/:kind/
+// catalog). So no deployment can emit hetzner.catalog:false here — the value was
+// copied from the GO SEAM fixture (priv/static/__fixtures__/
+// providers_capabilities.json, where `false` is honest: no Go provider
+// implements Cataloger) and landed on the wrong side of the overlay. azure was
+// already carrying the post-overlay `true`, so the fixture was internally
+// inconsistent about its own two neutral kinds.
+//
+// This is NOT a green bought by editing a fixture. It is the ONLY cell of this
+// payload whose value the server fixes rather than passes through, and getting
+// it wrong made the console — which now correctly consults the conduit before
+// mounting a catalog — withhold the launch wizard's `.launch-connect-provider`
+// door on `providers-connected`, an unreachable state in production. The
+// no_catalog arm keeps its coverage in __app.test.mjs, where the payload is
+// authored per-assertion rather than claimed of a real deployment. Do NOT
+// "resync" this with the Go fixture: the two sit on opposite sides of the
+// overlay, and the router's own comment forbids the reverse edit.
 const settingsProviderCapabilities = {
   providers: {
     hetzner: {
       tier: "prod",
       capabilities: {
-        core: true, catalog: false, labels: true, pause: false,
+        core: true, catalog: true, labels: true, pause: false,
         archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
       },
       gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
@@ -2843,6 +2866,23 @@ export const SCENARIOS = {
         { full_name: "acme/web", private: false },
         { full_name: "acme/internal-docs", private: true },
       ],
+      // cch-w48-bl — AND THE DEPLOYMENT FACT THE PICKER PRESUPPOSES. loadSite
+      // now consults GET /v1/github/installation's `configured` before offering
+      // #site-github at all, because on a deployment with NO GitHub App the
+      // control can only open a modal that says the feature does not exist —
+      // for an admin exactly as for a member.
+      //
+      // THIS IS NOT A FIXTURE ADDED TO KEEP A GREEN. Without it this scenario
+      // falls to the terminal `/v1/` 200 {} at the bottom of route(), whose body
+      // carries no `configured` key at all — the band reads "unknown", the door
+      // is honestly withheld, and every #site-github assertion in smoke.mjs goes
+      // red. That red is CORRECT for a deployment with no GitHub App; it is
+      // wrong for THIS scenario, which serves a site already linked to acme/web
+      // and a repo picker listing two repos. A site cannot be connected to a
+      // GitHub repo on a deployment that has no GitHub App, so `configured:true`
+      // is what this fixture was always implicitly claiming — it just had no
+      // route arm to say it through.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before

@@ -510,9 +510,40 @@ defmodule Barkpark.Content.Broadcast do
     # a savepoint that rejection poisons the enclosing transaction, so "history
     # failed, keep the content write" would silently become "history failed,
     # LOSE the content write" — the exact inversion the error arm below refuses.
-    # Outside a transaction the option is inert, so the pre-existing callers
-    # (BlockOps batch revisions, ValueWriteback provenance) are unchanged.
-    |> Repo.insert(mode: :savepoint)
+    #
+    # THE OPTION IS PASSED CONDITIONALLY, AND THAT IS NOT A STYLE CHOICE.
+    # #15715's comment here used to claim "outside a transaction the option is
+    # inert, so the pre-existing callers are unchanged". That was FALSE, and it
+    # took `main` red: on an `:idle` connection `mode: :savepoint` falls through
+    # `Postgrex.Protocol.handle_begin/2`'s
+    # `:savepoint when postgres == :transaction` clause, the catch-all returns
+    # the connection STATUS `:idle`, and `DBConnection` turns that into
+    # `%DBConnection.TransactionError{message: "transaction is not started"}` and
+    # DISCONNECTS. The api container crashed at first boot on
+    # `Seeds.Clean.seed_welcome_paper/1 -> Papers.BlockOps.persist_blocks_doc/9
+    # -> save_upsert_revision/5 -> here`, and every deployed paper save 500'd
+    # AFTER its document write had committed — so the log-and-continue arm below,
+    # the arm #15715 existed to protect, was never reached. This is the IDENTICAL
+    # trap #15827 shipped for `Media.delete_file/2` and #15874/#15895 reverted the
+    # same day; the full mechanical chain is recorded at `media.ex:621-646`.
+    #
+    # WHY THE SANDBOX CANNOT SEE IT: `Ecto.Adapters.SQL.Sandbox` issues a `BEGIN`
+    # on the checked-out connection and never commits it, so under `mix test` the
+    # connection is NEVER `:idle` — the savepoint clause matches, a real SAVEPOINT
+    # is issued, and CI stays green while every real request raises.
+    # `Repo.in_transaction?/0` reads the PROCESS DICTIONARY, which only
+    # `Repo.transaction/2` populates, so it answers FALSE under the sandbox — and
+    # that is fine HERE: the sandboxed suite then takes the plain insert, which is
+    # exactly what ran before #15715. `media_delete_savepoint_reproduction_test.exs`
+    # and `test/barkpark/content/broadcast_savepoint_idle_test.exs` pin both halves
+    # (the mask, and the reproduction through `Sandbox.unboxed_run/2`).
+    |> then(fn changeset ->
+      if Repo.in_transaction?() do
+        Repo.insert(changeset, mode: :savepoint)
+      else
+        Repo.insert(changeset)
+      end
+    end)
     |> case do
       {:ok, revision} ->
         {:ok, revision}
@@ -530,8 +561,11 @@ defmodule Barkpark.Content.Broadcast do
         # [acrc-publish-atomicity-txn-boundary] The parenthetical here used to
         # assert that a returned `{:error, changeset}` was "savepoint-protected"
         # and so could not poison the surrounding transaction. Nothing in the
-        # code made that true — no `mode: :savepoint` was passed. It is true NOW,
-        # and only because the insert above passes it explicitly.
+        # code made that true — no `mode: :savepoint` was passed. It is true NOW
+        # WHEREVER IT MATTERS: the insert above passes the option explicitly on
+        # exactly the calls that have a surrounding transaction to poison. With
+        # no surrounding transaction there is nothing to protect, and passing it
+        # anyway raises before this arm is ever reached (see above).
         Logger.error(
           "revision insert failed for #{doc.type}/#{doc.doc_id} (#{action}): " <>
             inspect(changeset.errors)

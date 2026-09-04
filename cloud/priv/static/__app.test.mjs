@@ -16475,7 +16475,10 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   // cch-w48-s2: the sixth argument is the authority band, and it FAILS CLOSED —
   // #site-github is admin-gated, so this pin (which asserts the control) names
   // "grant" explicitly. The closed arms have their own pins below.
-  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant");
+  // cch-w48-bl: the 10th argument is githubReadinessState()'s band and it too
+  // FAILS CLOSED — a pin that ASSERTS the button must now name a deployment
+  // where GitHub exists ("ready"), or the control is honestly withheld.
+  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant", null, null, null, "ready");
   assert.match(html, /id="site-domains"/);            // the domains rungs mount
   assert.match(html, /id="deploy-rail-slot"/);        // the live rail slot survives
   // Scale: a read-only rail value — no input/select/toggle control for it (GR28).
@@ -16518,10 +16521,10 @@ test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admi
   // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
   // byte-identically. Without this, a siteDetailHtml that rendered NOTHING at
   // all would satisfy every negative assertion below.
-  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant");
+  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.equal((admin.match(/id="site-github"/g) || []).length, 1);
   assert.match(admin, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
-  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant");
+  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.match(adminBare, /id="site-github" type="button">Connect GitHub repo<\/button>/);
 
   // MEMBER + UNCONNECTED → OMITTED ENTIRELY. D428's ONLY-clause: disable-and-
@@ -16562,6 +16565,91 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
   // A garbage authority is not a grant either (only the literal "grant" is).
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
+});
+
+// ── cch-w48-bl: THE SECOND AXIS — IS GITHUB CONFIGURED ON THIS DEPLOYMENT ────
+//
+// cch-w48-s2 fenced #site-github on AUTHORITY and said in its own comment that
+// it deliberately did not gate on GitHub.configured?. On a deployment with no
+// GitHub App credential — which the live control plane is — that leaves an
+// ADMIN offered a button whose modal can only reach the 503 arm. The role fence
+// cannot see this: the refusal is the same for every actor, which is exactly
+// what makes it a DIFFERENT axis and not a stronger version of the same one.
+test("cch-w48-bl: githubReadinessFrom — only a 200 body carrying the BOOLEAN may claim a configuration state", () => {
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: true } }), "ready");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: false } }), "unconfigured");
+  // A body without the key says NOTHING — an older control plane, or the
+  // preview corpus's benign empty 200. Not "unconfigured": that would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: {} }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: "yes" } }), "unknown");
+  // Every failure class reads unknown — a 500, a 403 and a dead socket are not
+  // evidence about configuration (the rule cch-w67-s4 wrote into loadGithub).
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 500, data: { error: "boom" } }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 0, transport: "offline" }), "unknown");
+  assert.equal(hooks.githubReadinessFrom(null), "unknown");
+});
+
+test("cch-w48-bl: siteDetailHtml withholds #site-github on an UNCONFIGURED deployment — for an ADMIN too", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+
+  // THE ARM THAT DISTINGUISHES THIS FROM THE AUTHORITY FENCE: the actor is a
+  // team ADMIN — "grant" on the band cch-w48-s2 fenced — and the control is
+  // still withheld, because the deployment has no GitHub App at all.
+  const adminUnconfigured = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminUnconfigured, /id="site-github"/);
+  assert.doesNotMatch(adminUnconfigured, /Connect GitHub repo/);
+  // No ghost and no invented sentence: the badges cluster carries no disabled
+  // button and no title, exactly as the member arms do.
+  assert.doesNotMatch(s2Badges(adminUnconfigured), /<button|disabled|title=/);
+  assert.doesNotMatch(adminUnconfigured, /not configured|isn't configured|admin on this team/i);
+  // …and the read-legal fact SURVIVES. site.github_repo came from a require_user
+  // GET; whether the App is wired up today says nothing about whether this site
+  // is linked, so deleting the repo name would destroy information the payload
+  // handed the person.
+  assert.match(adminUnconfigured, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+
+  // An UNCONNECTED site on an unconfigured deployment loses the whole control —
+  // there is no fact left to keep.
+  const adminBareUnconfigured = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminBareUnconfigured, /site-github/);
+  assert.doesNotMatch(s2Badges(adminBareUnconfigured), /<button|disabled|title=/);
+
+  // A MEMBER on a CONFIGURED deployment is still refused by the role fence —
+  // the two axes are independent, and neither subsumes the other.
+  const memberReady = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse",
+    null, null, null, "ready");
+  assert.doesNotMatch(memberReady, /id="site-github"/);
+
+  // PAIRED POSITIVE CONTROL, so the negatives above are not satisfied by an
+  // empty render: admin + ready is the one combination that opens the door.
+  const open = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "ready");
+  assert.equal((open.match(/id="site-github"/g) || []).length, 1);
+});
+
+test("cch-w48-bl: the readiness argument FAILS CLOSED — unknown, garbage and an OMITTED argument all withhold", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // "unknown" is the band while the one-shot read is in flight, and terminally
+  // after it failed. A readiness we cannot prove is not an offer.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "unknown"),
+    /id="site-github"/);
+  // Only the literal "ready" opens it.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "configured"),
+    /id="site-github"/);
+  // AN OMITTED ARGUMENT — a call site that never heard about this parameter —
+  // takes the closed arm. This is the OPPOSITE default from `authority`, and
+  // deliberately so: here the closed arm is the whole point of the term.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /id="site-github"/);
+  // …and the chip survives every closed arm.
+  assert.match(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
 });
 
 test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
@@ -21979,6 +22067,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     // that would break its relay.
     deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
     no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures, pinned with the same byte-exactness as every other registered slug.
+    // repo_not_in_installation shipped in #12128 and was never pinned here; it
+    // joins now, with the two this diff registers.
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.",
+    github_error: "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.",
+    invalid_name: "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -22017,6 +22112,10 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     // exists for it (the fence's shadow law), so listing it here would red the
     // registered-slug assertion by design.
     "deploy_not_started", "no_content_binding",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures join the ban sweep; repo_not_in_installation is a backfill (#12128
+    // registered it without adding it here).
+    "repo_not_in_installation", "github_error", "invalid_name",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -26875,6 +26974,294 @@ test("cch-bl-tier-card: renderTiers threads the SAME trial field trialCardHtml r
     .includes("sub.trial_days_remaining"),
     "…and it must be the SAME field the trial card reads, not a second source");
 });
+// ── cch-w45-bl · THE CONDUIT'S CATALOG ANSWER IS NO LONGER DECORATIVE ────────
+//
+// w45-s4 taught GET /v1/providers/capabilities to state the CATALOG capability
+// honestly. The READING side never asked: mountLaunchCatalog and
+// loadTheaterCatalog fetched /v1/providers/<kind>/catalog unconditionally, so
+// for a kind whose catalog bool is honestly FALSE the console mounted the panel
+// and discovered the truth as a 404 unknown_kind or a 502 — a request known in
+// advance to fail, and a capability answer doing no work on the surface that
+// most depends on it.
+//
+// THE THREE ARMS ARE DRIVEN, not read: the tests below run the REAL mounts
+// against a stubbed fetch and assert THE WIRE — whether GET …/catalog was
+// issued at all — because the rendered panel alone cannot tell "we skipped the
+// request" from "we made it and handled the 404".
+
+test("cch-w45-bl: catalogCapability — only an explicit false is a refusal; absence is 'unknown'", () => {
+  const payload = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+      bare: { tier: "prod", capabilities: { catalog: false }, gaps: {} },
+    },
+  };
+  // Field-by-field, not deepEqual: the object is minted inside the node:vm
+  // realm, so its Object prototype is not this realm's and deepStrictEqual
+  // refuses a structurally identical answer.
+  assert.equal(hooks.catalogCapability(payload, "hetzner").state, "supported");
+  assert.equal(hooks.catalogCapability(payload, "hetzner").reason, "");
+  assert.equal(hooks.catalogCapability(payload, "azure").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "azure").reason,
+    "Azure doesn't publish a size-and-region catalog here yet.");
+  // A stated gap with no sentence is still a refusal — the console must not
+  // invent the reason, and the render arm has its own honest fallback.
+  assert.equal(hooks.catalogCapability(payload, "bare").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "bare").reason, "");
+  // UNKNOWN IS NOT A REFUSAL. A kind the conduit does not list (an older control
+  // plane, or a newly connectable kind), a payload that never arrived, and a
+  // shape we cannot read all proceed — withholding on any of them would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.catalogCapability(payload, "cloudflare").state, "unknown");
+  assert.equal(hooks.catalogCapability(null, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({}, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: {} } }, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: { capabilities: {} } } }, "hetzner").state, "unknown");
+});
+
+// The catalog slot + the container the wizard hands the mount. `isConnected` is
+// real state here: mountLaunchCatalog aborts on a detached slot, so a fakeNode
+// (isConnected === undefined) would make every assertion below vacuous.
+function catalogHost() {
+  const slot = fakeNode();
+  slot.isConnected = true;
+  const host = fakeNode();
+  host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+  host.querySelectorAll = () => [];
+  return { host, slot };
+}
+
+test("cch-w45-bl: mountLaunchCatalog consults caps.catalog BEFORE fetching — and an unsupported kind is never asked", async () => {
+  const CAPS = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+    },
+  };
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    const body = p.indexOf("/capabilities") !== -1
+      ? CAPS
+      : { server_types: [{ slug: "cx22", cores: 2, ram_gb: 8, disk_gb: 40, monthly_price: 6 }],
+          regions: [{ slug: "fsn1", name: "Falkenstein" }], currency: "EUR" };
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    // ── the REFUSED kind: the conduit says catalog:false ────────────────────
+    const az = catalogHost();
+    hooks.mountLaunchCatalog(az.host, {}, "azure", "g1");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the mount issued GET /v1/providers/azure/catalog against a conduit that already said catalog:false — " +
+      "a request known in advance to fail; wire: " + JSON.stringify(wire));
+    // …and the SERVER's own gaps.catalog sentence is what renders, verbatim.
+    assert.match(az.slot.innerHTML, /Azure doesn&#39;t publish a size-and-region catalog here yet\./);
+    assert.doesNotMatch(az.slot.innerHTML, /Couldn't load/);
+    // No phantom selection is left behind for submit to send.
+    assert.equal(az.host._launchHosting.region, null);
+    assert.equal(az.host._launchHosting.server_type, null);
+
+    // ── the SUPPORTED kind: byte-for-byte the shipped path ──────────────────
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g2");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "a catalog-capable kind must still be fetched exactly once; wire: " + JSON.stringify(wire));
+    assert.match(hz.slot.innerHTML, /cx22/);
+
+    // ── the UNKNOWN kind: not listed by the conduit, so NOT refused ─────────
+    const cf = catalogHost();
+    hooks.mountLaunchCatalog(cf.host, {}, "cloudflare", "g3");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/cloudflare/catalog") !== -1).length, 1,
+      "a kind the conduit does not list must still be fetched — an unknown answer is not a refusal; wire: " +
+      JSON.stringify(wire));
+
+    // ── ONE conduit read for all three mounts ───────────────────────────────
+    assert.equal(wire.filter((p) => p.indexOf("/v1/providers/capabilities") !== -1).length, 1,
+      "the capability answer must be read once per page life, not once per mount; wire: " + JSON.stringify(wire));
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: the gate does not swallow the degraded states — a catalog-capable kind that 502s still says so", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    // The conduit answer is already cached from the test above (one read per
+    // page life), so only the catalog call reaches here — and it fails.
+    return Promise.resolve({
+      ok: false, status: 502,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "catalog_unavailable" }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g4");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1);
+    assert.match(hz.slot.innerHTML, /catalog is unavailable right now/);
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: loadTheaterCatalog asks the conduit too — a catalog-less kind gets no price request", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    wire.push(String(url).split("?")[0]);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ server_types: [], regions: [] }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    let ready = 0;
+    hooks.loadTheaterCatalog({ provider: "azure", server_type: "Standard_B2s" }, () => { ready += 1; });
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the price line asked a kind the conduit says has no catalog; wire: " + JSON.stringify(wire));
+    // The waiter still resolves — an unpriceable answer omits the line, exactly
+    // as a 404/502 already did. The gate must not strand the caller.
+    assert.equal(ready, 1, "the onReady waiter was never called — the mount is stranded, not degraded");
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+// ── cch-w45-bl · THE CONDUIT READ THAT NEVER ANSWERS, AND THE DOOR BEHIND IT ──
+//
+// FOUND BY THE BROWSER, NOT BY READING. The gate above is a READINESS narrowing
+// on top of a network read, and a narrowing placed in front of a door has two
+// ways to fail, not one: it can fail to withhold (the shipped tests cover that)
+// and it can fail OPEN-ENDED — withhold on an answer it never actually got. The
+// catalog panel is the ONLY thing that renders `.launch-connect-provider`, the
+// launch wizard's connect door, so a mount that stalls or refuses on an
+// unanswered conduit read costs the person the one control that lets them
+// connect a provider at all. The overflow guard measured exactly that class on
+// the PR head (10 findings across W24-cred-dialog-button-alive and
+// W25-launch-catalog-after-connect: "the launch wizard never rendered a
+// .launch-connect-provider door").
+//
+// `providerCapsCache` is ONE read per page life, so these arms cannot run in the
+// module sandbox — the tests above already resolved it. Each gets its own realm,
+// which is also what makes the assertion honest: it drives the mount's FIRST
+// conduit read, the only one whose failure the person can be standing in front
+// of. A fresh realm per arm; nothing here touches the shared sandbox.
+function w45FreshHooks() {
+  const h = {};
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading",
+      addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => ({ ...inertEl }),
+      documentElement: { ...inertEl, getAttribute: () => null },
+      body: { ...inertEl, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: storage, sessionStorage: storage, navigator: {},
+    URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"), box);
+  return { h, box };
+}
+
+test("cch-w45-bl: a conduit read that FAILS still reaches the catalog — and the connect door with it", async () => {
+  // Every way the capability read can come back without a usable answer. Each
+  // one is "unknown", and unknown is not a refusal: the shipped path must run.
+  const ARMS = {
+    "a rejected fetch (offline / DNS / refused)": () => Promise.reject(new TypeError("Failed to fetch")),
+    "a 500 from the conduit itself": () => Promise.resolve({
+      ok: false, status: 500, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "internal" }),
+    }),
+    "a 200 carrying an HTML error page (a proxy in the way)": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "text/html" },
+      text: () => Promise.resolve("<html>502 Bad Gateway</html>"),
+    }),
+    "a 200 whose JSON body is null": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve(null),
+    }),
+    "a 200 whose body is not the payload shape at all": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ providers: "not-an-object" }),
+    }),
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  for (const [label, capAnswer] of Object.entries(ARMS)) {
+    const { h, box } = w45FreshHooks();
+    const wire = [];
+    box.fetch = (url) => {
+      const p = String(url).split("?")[0];
+      wire.push(p);
+      if (p.indexOf("/v1/providers/capabilities") !== -1) return capAnswer();
+      // The catalog read answers exactly as a control plane with no connected
+      // provider does — 404 no_provider — because THAT is the response the
+      // connect door is rendered from.
+      return Promise.resolve({
+        ok: false, status: 404, headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ error: "no_provider" }),
+      });
+    };
+    const slot = fakeNode();
+    slot.isConnected = true;
+    const host = fakeNode();
+    host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+    host.querySelectorAll = () => [];
+
+    h.mountLaunchCatalog(host, {}, "hetzner", "gx");
+    await flushP();
+
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "with " + label + " the conduit told us NOTHING about hetzner, yet the catalog was not fetched — " +
+      "the gate withheld on an absence; wire: " + JSON.stringify(wire));
+    assert.match(slot.innerHTML, /launch-connect-provider/,
+      "with " + label + " the panel resolved no_provider but rendered no .launch-connect-provider door — " +
+      "the person has no way to connect a provider at all; panel: " + JSON.stringify(slot.innerHTML));
+    // Not the no_catalog arm: a conduit we could not read has not told us that
+    // this kind publishes no catalog, so its sentence must never appear.
+    assert.doesNotMatch(slot.innerHTML, /size-and-region catalog/,
+      "with " + label + " the console printed a no-catalog claim it cannot have; panel: " +
+      JSON.stringify(slot.innerHTML));
+    // And the mount is not stranded on its loading frame.
+    assert.doesNotMatch(slot.innerHTML, /Loading /,
+      "with " + label + " the mount never left its loading frame — the conduit read stranded it");
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // cch-w65-bl — THE FRIENDLY() ARITY RATCHET + THE CURATED-RUNG GUARD.
@@ -27140,6 +27527,7 @@ const CCHW65_MUST_ANSWER = [
   "invalid", "invalid_code", "invalid_credentials", "limit_reached", "live_twin",
   "malformed_body", "malformed_request", "name_required", "network_error",
   "no_active_subscription", "no_admin_token", "no_content_binding", "no_subscription",
+  "github_error", "invalid_name",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
   "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
   "server_error", "suspended", "unsupported_media_type", "validation_failed",
@@ -27211,4 +27599,124 @@ test("cch-w65-bl G2 CONTROL: registering a fence slug reds the shadow-law guard"
   assert.equal(mutantHooks.friendly({ error: "instance_not_live", detail: "wait for provisioning" }, CCHW65_FB),
     "The instance has no URL yet.",
     "the curated rung swallows the relay — which is why the guard above must red");
+});
+
+// ---------------------------------------------------------------------------
+// cch-w72-bl — THE GITHUB ARM SPEAKS: three curated truths, two honest silences.
+//
+// Charter D875 (github_error claims no specific cause), D878 (invalid_name is a
+// measured lie today), D881 (the seal). Every slug below is minted BARE —
+// `json(conn, S, %{error: "<slug>"})` with no `detail` and no `reason` — so none
+// of these entries is a relay and the 5xx detail-relay fence does not bind them.
+//
+// REACHABILITY LIMITS, recorded here and in the census file header (the two
+// durable venues this merge carries) — stated because none of the three has a
+// live capture, and a guess dressed as a measurement is the fault this wave
+// exists to kill:
+//
+//   github_error       — the three emit sites (router.ex GET /v1/github/repos;
+//                        the create_repo_from_template 502 arm of POST
+//                        /v1/github/repos; connect_site_github) each match the
+//                        cause AWAY before minting (`{:error, _reason}`,
+//                        `{:error, {:github_error, _reason}}`). Outage,
+//                        rate-limit and token-death are indistinguishable at the
+//                        wire. LIMIT: reachability is by construction (any GitHub
+//                        API fault), never captured live — which is precisely why
+//                        the sentence may name NO cause.
+//   invalid_name       — minted by the router's OWN `valid_repo_name?/1`
+//                        pre-check (router.ex:12708), not by GitHub. Human-typed
+//                        and human-reachable by construction: #new-gh-name is
+//                        free text and newCreateRepo POSTs it verbatim. LIMIT: no
+//                        live capture; the reachability proof is the free-text
+//                        input plus a deterministic server-side rule, and the
+//                        rule's location is why the copy does NOT say "GitHub
+//                        refused" (see below).
+//   repo_not_in_installation — human-reachable by construction via a TOCTOU
+//                        window: the repo picker's GET /v1/github/repos lists a
+//                        repo, the operator revokes it from the GitHub App
+//                        installation, and the connect POST then refuses. LIMIT:
+//                        that race has no live capture and cannot be driven from
+//                        a test — the D870 precedent for accepting a constructed
+//                        reachability proof. (Shipped in #12128; asserted here
+//                        for the first time alongside its two siblings.)
+
+test("cch-w72-bl D875: github_error names NO cause — it locates the fault and nothing more", () => {
+  // ONE entry, THREE emit sites: openSiteGithub's fallback and the
+  // newCreateRepo / submitSiteGithub fallback both lose to the curated rung.
+  for (const fb of ["Couldn't load your repositories.", "Please try again."]) {
+    const copy = hooks.friendly({ error: "github_error" }, fb);
+    assert.notEqual(copy, fb, "github_error still renders the caller's generic");
+    assert.equal(copy,
+      "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.");
+  }
+  const copy = hooks.friendly({ error: "github_error" }, "Please try again.");
+  // D875 — the emit DISCARDS the cause, so naming one would be an invention.
+  for (const cause of [/token/i, /expired/i, /revoked/i, /rate.?limit/i, /outage/i,
+                       /permission/i, /credential/i, /unauthori[sz]ed/i]) {
+    assert.ok(!cause.test(copy), "github_error claims a cause the emit discarded: " + cause);
+  }
+  // …and it does not blame the reader's input, which is the one thing the three
+  // emit sites do prove it is not.
+  assert.ok(/not your input/.test(copy), "github_error must locate the fault away from the reader");
+});
+
+test("cch-w72-bl D878: invalid_name names the refused NAME and the rule it broke — NO transience verb", () => {
+  const copy = hooks.friendly({ error: "invalid_name" }, "Please try again.");
+  assert.notEqual(copy, "Please try again.", "invalid_name still renders the caller's generic");
+  assert.equal(copy,
+    "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.");
+  // It names the refused thing.
+  assert.ok(/repository name/i.test(copy), "the sentence must name what was refused");
+  // WHAT THE FILING GOT WRONG: the wave's ruled copy was "GitHub refused that
+  // repository name — pick a different name." Re-derived on origin/main, the
+  // slug is minted by `valid_repo_name?/1` BEFORE any GitHub call, so GitHub
+  // never saw the name. Attributing the refusal to GitHub is the same class of
+  // measured lie D878 was opened to remove, so this guard bans it BY NAME.
+  assert.ok(!/GitHub (refused|rejected|said|declined)/i.test(copy),
+    "invalid_name must not attribute a local pre-check refusal to GitHub: " + copy);
+  // The rule is deterministic and permanent for that name — no transience verb.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i,
+                      /temporar/i, /keeps happening/i]) {
+    assert.ok(!verb.test(copy), "invalid_name paints a permanent refusal as transient: " + verb);
+  }
+});
+
+test("cch-w75-s1 D883: repo_not_in_installation still renders the permanent truth — the pin now covers it", () => {
+  const copy = hooks.friendly({ error: "repo_not_in_installation" }, "Please try again.");
+  assert.equal(copy,
+    "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.");
+  // States only the lost-visibility fact + the one remedy. No transience verb:
+  // the state is permanent until access is re-granted, so retrying cannot work.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i, /temporar/i]) {
+    assert.ok(!verb.test(copy), "repo_not_in_installation paints a permanent state as transient: " + verb);
+  }
+});
+
+test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
+  // These are NOT paid, on purpose, and their census rows STAY:
+  //
+  //   installation_not_found  — POST /v1/github/installations has zero callers in
+  //                             app.js, internal/ or js/: no GitHub App
+  //                             setup_action callback consumer was ever built, so
+  //                             no person can reach the emit.
+  //   repo_full_name_required — guard-shielded: the connect select is built only
+  //                             when repos.length is nonzero and always submits a
+  //                             member of it; only a hand-built request omits it.
+  //
+  // A curated sentence for either would be copy for a reader that does not
+  // exist. This control reds if a future diff registers one WITHOUT retiring its
+  // census row — the mirror of the rot arm, on the JS side.
+  for (const slug of ["installation_not_found", "repo_full_name_required"]) {
+    for (const fb of ["Please try again.", "Couldn't load your repositories."]) {
+      assert.equal(hooks.friendly({ error: slug }, fb), fb,
+        slug + " gained an ERRORS entry — pay it in the census too, or drop the entry");
+    }
+  }
+  // Non-vacuity: the same call shape DOES resolve for the three slugs this arm
+  // did pay, so an equal-to-fallback green above is a real absence, not a broken
+  // rig.
+  for (const slug of ["github_error", "invalid_name", "repo_not_in_installation"]) {
+    assert.notEqual(hooks.friendly({ error: slug }, "Please try again."), "Please try again.",
+      slug + ": the control's rig is broken — every slug would look unregistered");
+  }
 });

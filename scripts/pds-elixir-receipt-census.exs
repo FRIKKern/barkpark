@@ -419,6 +419,58 @@ defmodule PDS.Census do
   # SAME FOUR LITERALS BY ONE, from 106/97/93/55. Green apart, wrong together: #15090
   # landed first and took them to 107/98/94/56, so this branch RE-DERIVED BY RUN on the
   # merged tree rather than taking either diff. The run is the instrument.
+
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the two moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, @evidence_depth 6, @route_depth 12,
+  # `transaction` NOT a write verb, corpus api/lib/**/*.ex = 842 files, CORPUS-INTACT
+  # this run); engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28
+  # (erts 16.3.1) · aarch64-apple-darwin24.6.0, printed live by report_engine/0,
+  # 2026-09-04.
+  #
+  # WHAT MOVED IT: task-a0ce4e18f6776400 (PR #15897) gave
+  # `Barkpark.Content.Writer.do_create_document/5` a function-wide
+  # `rescue e in DBConnection.ConnectionError` and moved its former body into a new
+  # `do_create_document!/5`. NOTHING ENTERED OR LEFT THE POPULATION — textual, ast,
+  # phantom, consumer, emitted and unrouted all read `==` in the same run, which is the
+  # tell: no success literal was written or removed. ONE EXTRA defp HOP was inserted in
+  # the middle of an existing route, and two receipts that were reaching a Repo write
+  # with their last unit of budget stopped reaching it:
+  #
+  #   write   60 -> 58   barkpark_web/controllers/bulldocs_form_controller.ex:50 and :54,
+  #                      BOTH inside `BulldocsFormController.submit/2` (the `ok: true`
+  #                      success arm and the honeypot's identical-shaped decoy). Their
+  #                      route is submit/2 -> store/3 -> Content.create_document/4 ->
+  #                      Writer.create_document/4 -> do_create_document_from_attrs/4 ->
+  #                      do_create_document/5 -> Repo write. That reached the write verb
+  #                      at EXACTLY depth 6; do_create_document!/5 now sits between the
+  #                      last two, so the write verb is at depth 7 and falls outside
+  #                      @evidence_depth.
+  #   read    23 -> 25   the SAME TWO SITES, arriving. They still reach a READ verb
+  #                      within 6 (submit/2's own `fetch_paper/1` lookup), so the pair
+  #                      moves in opposite directions by exactly two: write + read is 83
+  #                      before and after. A pair moving oppositely by the same amount is
+  #                      a RECLASSIFICATION, never an arrival.
+  #
+  # THE RUN SAYS IT IS THE BUDGET AND NOT THE CODE, in its own depth table: write-routed
+  # reads 60 @depth 7 on BOTH trees and 60 @6 on main against 58 @6 here. One hop, one
+  # depth, two sites — the census's own "the floor moves with the lens" block.
+  #
+  # ISOLATED BY RUN, not by reading the diff. Reverting ONLY
+  # api/lib/barkpark/content/writer.ex to its origin/main bytes and re-running the census
+  # printed all eight rows `==` and CENSUS OK at exit 0. The PR's other four files move
+  # NOTHING and that half is worth naming: content/errors.ex adds a `build/1` clause that
+  # holds no `ok: true` literal and sits on no route to a Repo verb; the three test files
+  # are outside the corpus (api/lib/**/*.ex) entirely.
+  #
+  # WHAT WAS *NOT* DONE, DELIBERATELY. The hop is removable — a `rescue` can hang off
+  # `do_create_document/5` itself with no helper — and doing so would have kept the
+  # baseline at 60/23. That would be restructuring the FIX to flatter the LENS, which is
+  # the same defect as editing the literal blind, wearing better clothes. The two
+  # bulldocs receipts still reach the same write; only this census's depth budget stopped
+  # seeing it, and PDS-D480 already ruled that @evidence_depth is a compliance dial and
+  # not a claim about the code.
   @rederived %{
     textual: 108,
     ast: 99,
@@ -431,8 +483,14 @@ defmodule PDS.Census do
     # their own), the capture edge and the variable-module-head edge. Engine and lens are
     # printed live by the run above. Not one of these is a widened tolerance: each is a
     # route the old lens could not see and the code has always taken.
-    write: 60,
-    read: 23,
+    #
+    # AND THEN RE-DERIVED AGAIN at task-a0ce4e18f6776400 (see the block above): 60 -> 58
+    # and 23 -> 25, the two bulldocs_form_controller.ex receipts reclassifying across
+    # ONE inserted defp hop. `unrouted` is INHERITED UNCHANGED at 12 — the two sites did
+    # not fall out of the route relation, they landed in the other routed class, and a
+    # row that did not move is evidence too.
+    write: 58,
+    read: 25,
     unrouted: 12
   }
 

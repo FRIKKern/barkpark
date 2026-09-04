@@ -679,10 +679,15 @@ if [ "$MODE" = selftest ]; then
   # the same run is exactly the vacuity it is meant to catch. Measured
   # 2026-09-03 at origin/main 0cb244bfb:
   #
-  #   MIN  =  67  every optional block skipped (no python3/curl, no flock, no api/)
-  #   FULL = 433  all blocks run — this is what CI gets (405 + the 10 rows of
+  #   MIN  =  76  every optional block skipped (no python3/curl, no flock, no api/)
+  #   FULL = 458  all blocks run — this is what CI gets (430 + the 10 rows of
   #                the static-miss 404 block + the 18 rows of the already-armed
   #                hide-UPGRADE block, both of which need a real caddy(1))
+  #
+  # 2026-09-04: +25 (67->76, 433->458) for the three failure arms that had no row
+  # at all — the disarm's awk/mv revert (9, unconditional, so BOTH floors move),
+  # the arm's lock-never-taken branch (8) and the arm's awk/mv revert (8), the
+  # last two inside the python3/curl e2e block so they land on FULL only.
   #
   # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
@@ -693,8 +698,8 @@ if [ "$MODE" = selftest ]; then
   #
   # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
   # the same commit. A red here is either a missing block or an unraised floor.
-  SELFTEST_FLOOR_MIN=67
-  SELFTEST_FLOOR_FULL=433
+  SELFTEST_FLOOR_MIN=76
+  SELFTEST_FLOOR_FULL=458
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -983,6 +988,55 @@ RCF
   check "lock-starved teardown KEPT the release tree" [ -d "$TL/sites/stuck/releases/b1" ]
   check "lock-starved teardown left the Caddyfile byte-identical" \
     cmp -s "$TR/Caddyfile" "$TL/Caddyfile"
+
+  # -------------------------------------------------------------------------
+  # TEARDOWN, THE REWRITE ITSELF FAILED (D77) — the THIRD way disarm_caddy_site_route
+  # returns 2, and the only one no fixture reached. The two blocks above both
+  # drive the `caddy validate` revert; the awk/mv arm
+  # (`awk … > "$tmp" && mv "$tmp" "$CADDYFILE" || { … mv "$bak" … ; return 2; }`)
+  # fires when the Caddyfile could not be REWRITTEN at all — a full /tmp, a
+  # read-only filesystem, an ENOSPC — and on origin/main nothing asserted that it
+  # too refuses TORN_DOWN=, restores the backup and keeps the tree.
+  #
+  # THE FIXTURE: a bare `mktemp` (no arguments) is called by exactly the two
+  # Caddyfile rewriters in this engine — the arm and the disarm. Every OTHER
+  # mktemp caller passes an explicit template (the health body, the build log,
+  # this self-test's own scratch dir), so a stub that only redirects the ZERO-ARG
+  # form and execs the real binary otherwise arms this one branch and nothing
+  # else. Pointed at a path under a directory that does not exist, the
+  # `awk … > "$tmp"` redirect fails, the `&&` chain short-circuits and the revert
+  # arm runs — the same state an ENOSPC produces, without needing a full disk or
+  # a root-owned mount (a chmod-based fixture would be a no-op under a root CI).
+  # -------------------------------------------------------------------------
+  echo "[selftest] --teardown REFUSES to claim TORN_DOWN when the Caddyfile REWRITE itself fails (D77)"
+  TM="$TD/teardown-mv"; mkdir -p "$TM/bin" "$TM/sites/stuck/releases/b1"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/caddy"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/systemctl"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/flock"
+  printf '#!/usr/bin/env bash\nif [ "$#" = 0 ]; then echo "%s/no-such-dir/tmp"; exit 0; fi\nif [ -x /usr/bin/mktemp ]; then exec /usr/bin/mktemp "$@"; fi\nexec /bin/mktemp "$@"\n' "$TM" > "$TM/bin/mktemp"
+  chmod +x "$TM/bin/"*
+  ln -sfn releases/b1 "$TM/sites/stuck/current"
+  cp "$TL/Caddyfile" "$TM/Caddyfile"
+  cp "$TM/Caddyfile" "$TM/Caddyfile.orig"
+  env PATH="$TM/bin:$PATH" SITE_SLUG=stuck BARKPARK_SITES_DIR="$TM/sites" \
+    BARKPARK_CADDYFILE="$TM/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TM/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TM/cflock" BARKPARK_SITE_LOG_FILE="$TM/log" \
+    bash "$SELF" --teardown > "$TM/out" 2>&1; tdrc5=$?
+  check "un-rewritable teardown exits 25 (not 0)"   [ "$tdrc5" = 25 ]
+  check "un-rewritable teardown names the REWRITE as what failed (not caddy validate)" \
+    grep -q 'could not rewrite .* for the /sites/stuck disarm — restoring the backup' "$TM/out"
+  check "un-rewritable teardown printed NO TORN_DOWN= on stdout" absent 'TORN_DOWN=' "$TM/out"
+  check "un-rewritable teardown logged NO TORN_DOWN= to the durable log" absent 'TORN_DOWN=' "$TM/log"
+  check "un-rewritable teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=stuck detail="' "$TM/out"
+  check "un-rewritable teardown claims a MEASURED still-live route (the disarm DID run)" \
+    grep -q 'STILL LIVE' "$TM/out"
+  check "un-rewritable teardown KEPT the release tree (recoverable)" \
+    [ -d "$TM/sites/stuck/releases/b1" ]
+  check "un-rewritable teardown left the Caddyfile byte-identical (the backup was restored)" \
+    cmp -s "$TM/Caddyfile" "$TM/Caddyfile.orig"
+  check "un-rewritable teardown left no .bak.teardown turd beside the Caddyfile" \
+    sh -c "! ls '$TM'/Caddyfile.bak.teardown.* >/dev/null 2>&1"
 
   # -------------------------------------------------------------------------
   # HEALTH finder integrity — the gate must refuse a finder build whose seed is
@@ -2021,6 +2075,83 @@ FAKECP
     check "the release still went live on disk (the flip is independent of Caddy)" \
       [ "$(readlink "$E2E/sites/routefail/current" 2>/dev/null)" = releases/rf2 ]
     check "SWITCH still ok"                              grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf2' "$RF/bad.out"
+
+    # -----------------------------------------------------------------------
+    # (c) THE ARM'S LOCK-NEVER-TAKEN BRANCH. `with_caddy_lock` returns 1 out of
+    #     its OWN guard, so arm_caddy_site_route is never entered and the route's
+    #     state is UNKNOWN to this run — a DIFFERENT claim from (b)'s "tried, was
+    #     rejected, reverted". The teardown direction has had this row since D77
+    #     ("lock-starved teardown says the route was NEVER CHECKED"); the arm
+    #     direction inherited the MESSAGE at the flip site but never the test, so
+    #     collapsing the arm's two non-zero details into one string was invisible.
+    #     Same fixture as the teardown's: a flock that grants the non-blocking
+    #     DEPLOY lock (`flock -n 9`, whose refusal is the separate exit 23) and
+    #     refuses the WAITING Caddyfile lock (`flock -w 120 8`).
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an arm whose Caddyfile lock is NEVER TAKEN says UNKNOWN, not NOT ARMED (engine-D77, arm direction)"
+    mkdir -p "$RF/lockbin"
+    cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$RF/lockbin/"
+    printf '#!/usr/bin/env bash\ncase "$1" in -w) exit 1;; *) exit 0;; esac\n' > "$RF/lockbin/flock"
+    chmod +x "$RF/lockbin/"*
+    # NB: NOT `Caddyfile.lock` — rf_deploy pins BARKPARK_CADDYFILE_LOCK to
+    # "$RF/caddyfile.lock", and on a case-INSENSITIVE filesystem (macOS APFS by
+    # default) that is the SAME inode: `exec 8>"$CADDY_LOCK"` would truncate the
+    # fixture Caddyfile, and this block would red on a platform difference
+    # instead of on the branch it exists to pin.
+    rf_caddyfile "$RF/Caddyfile.locked"
+    cp "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
+    rc="$(rf_deploy "$RF/lockbin" rf3 "$RF/Caddyfile.locked" "$RF/lock.out")"
+    check "lock-starved arm STILL exits 0 (a lock we could not take must not fail a healthy build)" \
+      [ "$rc" = 0 ]
+    check "lock-starved arm speaks a ROUTE failure on the machine channel" \
+      grep -q '^BPSTAGE name=ROUTE status=failed build_id=rf3 detail="' "$RF/lock.out"
+    check "lock-starved arm says the route was NEVER CHECKED" \
+      grep -q 'NEVER CHECKED' "$RF/lock.out"
+    check "lock-starved arm does NOT claim it tried and was rejected (it never read the file)" \
+      absent 'this run tried to add it' "$RF/lock.out"
+    check "lock-starved arm left the Caddyfile byte-identical (never opened)" \
+      cmp -s "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
+    check "lock-starved arm wrote NO route marker" \
+      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.locked"
+    check "lock-starved arm STOPS advertising the public URL in the sign-off" \
+      absent "live at build rf3 (https://" "$RF/lock.out"
+    check "lock-starved arm still switched the release live on disk" \
+      grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf3' "$RF/lock.out"
+
+    # -----------------------------------------------------------------------
+    # (d) THE ARM'S AWK/MV REVERT ARM. (b) drives the `caddy validate` revert;
+    #     this drives the OTHER one — the Caddyfile could not be REWRITTEN at all
+    #     (full /tmp, read-only fs, ENOSPC), so the `awk … > "$tmp" && mv` chain
+    #     short-circuits, the backup goes back and the function returns 2 WITHOUT
+    #     caddy ever being consulted. Both arms end in the same NOT ARMED detail,
+    #     which is why the distinguishing assertion is the log line only this arm
+    #     writes. Fixture: the zero-arg `mktemp` stub (see the teardown block
+    #     above for why that targets exactly the two Caddyfile rewriters).
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an arm whose Caddyfile REWRITE fails reverts, reports NOT ARMED, and never consults caddy"
+    mkdir -p "$RF/mvbin"
+    cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$RF/mvbin/"
+    printf '#!/usr/bin/env bash\nif [ "$#" = 0 ]; then echo "%s/no-such-dir/tmp"; exit 0; fi\nif [ -x /usr/bin/mktemp ]; then exec /usr/bin/mktemp "$@"; fi\nexec /bin/mktemp "$@"\n' "$RF" > "$RF/mvbin/mktemp"
+    chmod +x "$RF/mvbin/"*
+    rf_caddyfile "$RF/Caddyfile.mv"
+    cp "$RF/Caddyfile.mv" "$RF/Caddyfile.mv.orig"
+    rc="$(rf_deploy "$RF/mvbin" rf4 "$RF/Caddyfile.mv" "$RF/mv.out")"
+    check "un-rewritable arm STILL exits 0 (charter-D327: report, do not fail a healthy build)" \
+      [ "$rc" = 0 ]
+    check "un-rewritable arm names the REWRITE as what failed, not caddy validate" \
+      grep -q 'could not rewrite .* for the /sites/routefail arm — restoring the backup' "$RF/mv.out"
+    check "un-rewritable arm reports ROUTE failed on the machine channel" \
+      grep -q '^BPSTAGE name=ROUTE status=failed build_id=rf4 detail="' "$RF/mv.out"
+    check "un-rewritable arm left the Caddyfile byte-identical (the backup was restored)" \
+      cmp -s "$RF/Caddyfile.mv" "$RF/Caddyfile.mv.orig"
+    check "un-rewritable arm left no .bak.site turd beside the Caddyfile" \
+      sh -c "! ls '$RF'/Caddyfile.mv.bak.site.* >/dev/null 2>&1"
+    check "un-rewritable arm wrote NO route marker" \
+      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.mv"
+    check "un-rewritable arm STOPS advertising the public URL in the sign-off" \
+      absent "live at build rf4 (https://" "$RF/mv.out"
+    check "un-rewritable arm still switched the release live on disk" \
+      grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf4' "$RF/mv.out"
     # The ROUTE line is deliberately OUTSIDE DeployRunner's @stage_names
     # whitelist (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE): parse_stage_line/2 skips
     # it, so it can never reach stage_exit_code/1 and flip a green run to -1.

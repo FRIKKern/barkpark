@@ -56,6 +56,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The ONE job/step boundary, shared with scripts/check-deploy-smoke.sh. The awk
+# rule this file used to carry (`/^  [a-zA-Z0-9_-]+:/`) matched TEXT, so a
+# top-level block scalar with a 2-space body could hand it a STRING that reads as
+# the `changes` job — see the lib header.
+# shellcheck source=scripts/lib/deploy-yaml-scope.sh
+. "$REPO_ROOT/scripts/lib/deploy-yaml-scope.sh"
+
 DEPLOY_YML_DEFAULT=".github/workflows/deploy.yml"
 
 # ── yaml validity (runs BEFORE any text scan) ────────────────────────────────
@@ -184,12 +192,8 @@ extract_paths() {
 # lose. A regex outside the `changes` job dispatches nothing, so it may not
 # answer for a path.
 extract_regexes() {
-  awk '
-    /^  [a-zA-Z0-9_-]+:/ {
-      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
-    }
-    job == "changes"
-  ' "$1" | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'$//"
+  deploy_yaml_job_lines "$1" changes \
+    | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'$//"
 }
 
 # A path glob reduced to ONE representative file path, which is what the job
@@ -705,10 +709,11 @@ check_file() {
   regexes="$(extract_regexes "$yml")"
   if [ -z "$regexes" ]; then
     echo "FAIL[$label]: no 'grep -qE' job filters found inside the 'changes' job — the extractor is broken, not the workflow" >&2
-    echo "Cause: extract_regexes ends the job at the next line indented exactly two spaces and ending in ':'," >&2
-    echo "so a 2-space-indented heredoc body (or any such line) inside the job truncates the scan. Re-indent it," >&2
-    echo "or teach the awk boundary about it — do NOT widen the scan back to the whole file (a regex outside the" >&2
-    echo "'changes' job dispatches nothing and would let a new job green this gate for free)." >&2
+    echo "Cause: the 'changes' job is absent or renamed, or its filters no longer use single-quoted" >&2
+    echo "\`grep -qE '...'\`. The job boundary is now a real YAML parse (scripts/lib/deploy-yaml-scope.sh)," >&2
+    echo "so a heredoc or any string body can no longer truncate the scan — and must NOT be blamed for this." >&2
+    echo "Do NOT widen the scan back to the whole file: a regex outside the 'changes' job dispatches nothing" >&2
+    echo "and would let a new job green this gate for free." >&2
     return 1
   fi
 

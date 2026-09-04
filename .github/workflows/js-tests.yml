@@ -197,9 +197,27 @@ jobs:
       # signDraftModeToken async (breaking); relaxing means an amendment ADR.
       # Tracked in docs/decisions/deferred.md. Same advisory-job precedent as
       # elixir.yml's format job.
-      - name: "No node: imports in edge packages (ADVISORY — ADR-002 conflict)"
-        continue-on-error: true
-        run: bash scripts/check-no-node-imports.sh
+      #
+      # The ADVISORY posture covers exit 1 — a real ADR-002 violation — ONLY. The
+      # guard's exit 3 is a HARNESS failure (a corpus dir vanished, or scanned
+      # zero source files) and MUST red: a corpus floor that `continue-on-error`
+      # swallows cannot fire, and the vanished-corpus mode is the one that used
+      # to print "clean" at exit 0. Hence the explicit status split below instead
+      # of `continue-on-error: true` on the step.
+      - name: "No node: imports in edge packages (ADVISORY on violations, BLOCKING on an unreadable corpus)"
+        run: |
+          set +e
+          bash scripts/check-no-node-imports.sh
+          status=$?
+          set -e
+          if [ "$status" -eq 3 ]; then
+            echo "edge gate FAILED: check-no-node-imports could not read its corpus (exit 3) — it scanned nothing and proved nothing" >&2
+            exit 1
+          fi
+          if [ "$status" -eq 1 ]; then
+            echo "::warning::check-no-node-imports found violation(s) — ADVISORY pending the ADR-002 decision (docs/decisions/deferred.md)"
+          fi
+          exit 0
 
       # ADVISORY (cqv3-p3): emit REAL line coverage so the codebase-quality
       # tooling (tooling/risk) ingests coverage-final.json instead of the

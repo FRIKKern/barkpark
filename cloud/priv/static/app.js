@@ -335,7 +335,37 @@
     // reader (submitSiteGithub -> friendly(r.data, "Please try again.")) without
     // relaying any server reason. It names the state and the ONE remedy — regrant
     // then reconnect — with no transience verb.
-    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect."
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.",
+    // cch-w72-bl (charter D875/D878) — the github arm's two remaining unread
+    // refusals. Both are minted BARE (`%{error: slug}`, no detail, no reason), so
+    // nothing here is a relay: the curated rung is the only thing a person can
+    // read, and today all three github_error sites and the invalid_name site
+    // render their caller's generic ("Couldn't load your repositories." /
+    // "Please try again.").
+    //
+    // github_error — ONE entry covers all three emit sites (router.ex
+    // GET /v1/github/repos, the create_repo_from_template 502 arm of
+    // POST /v1/github/repos, and connect_site_github). Every one of them matches
+    // the cause away (`{:error, _reason}` / `{:error, {:github_error, _reason}}`)
+    // before minting the slug, so outage, rate-limit and token-death are
+    // INDISTINGUISHABLE at the wire. The sentence therefore names NO specific
+    // cause; it states only what the refusal proves — the failure is upstream of
+    // the reader's input. Readers: openSiteGithub, newCreateRepo,
+    // submitSiteGithub, all via friendly(r.data, …), so the curated rung wins
+    // first and no 5xx body can reach copy past it. (The 5xx exclusion binds
+    // detail RELAYS, not curated entries — this slug carries no detail to relay.)
+    github_error: "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.",
+    // invalid_name — the 422 from POST /v1/github/repos. MEASURED, and it is NOT
+    // what the wave's filing assumed: the slug is minted by the router's OWN
+    // `valid_repo_name?/1` pre-check (router.ex:12708 — non-empty, not "." or
+    // "..", ≤ 100 chars, ^[A-Za-z0-9._-]+$), which runs BEFORE any GitHub call.
+    // GitHub never sees the name, so a sentence saying "GitHub refused …" would
+    // be exactly the class of lie this wave is hunting. The state is DETERMINISTIC
+    // and permanent for that name, so there is no transience verb: the sentence
+    // names the refused thing, the rule it broke, and the only remedy. Reader:
+    // newCreateRepo (#new-gh-name free text), whose sibling repo_exists 409
+    // already has its own honest arm — this closes the in-file parity gap.
+    invalid_name: "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
@@ -2908,6 +2938,38 @@
     return kind === "azure" ? "from ~" + sym + n + "/mo compute" : sym + n + "/mo";
   }
 
+  // ── cch-w45-bl · THE CONDUIT'S CATALOG ANSWER, ON THE READING SIDE ─────────
+  //
+  // w45-s4 made GET /v1/providers/capabilities tell the truth about the CATALOG
+  // capability (own_catalog_capability/2 in the cloud router overlays the
+  // `catalog` key for the neutral kinds). Nothing ever asked. mountLaunchCatalog
+  // and loadTheaterCatalog fetched /v1/providers/<kind>/catalog unconditionally,
+  // so the conduit's bool was decorative on the two surfaces that most depend on
+  // it: for a kind whose catalog bool is honestly FALSE the console mounted the
+  // panel anyway and discovered the truth as a 404 unknown_kind or a 502.
+  // catalogViewState maps those honestly, so it degraded rather than lied — but
+  // the next catalog-less connectable kind (cloudflare is already connectable
+  // without being a neutral kind) walks the same path.
+  //
+  // THREE VALUES, AND "unknown" IS NOT A REFUSAL. This is a READINESS narrowing,
+  // not an authority fence: withholding a catalog because the conduit has not
+  // answered yet — or does not list this kind — would be a determinate claim
+  // made out of an absence, and would break every kind an older control plane
+  // does not enumerate. Only an explicit `catalog: false` short-circuits, and it
+  // carries the SERVER's own gaps.catalog sentence rather than one minted here.
+  // Never re-derives the bool client-side: the conduit is the only source.
+  function catalogCapability(capPayload, kind) {
+    var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
+    var entry = providers && typeof providers === "object" ? providers[kind] : null;
+    if (!entry || typeof entry !== "object") return { state: "unknown", reason: "" };
+    var caps = entry.capabilities && typeof entry.capabilities === "object" ? entry.capabilities : {};
+    if (caps.catalog === true) return { state: "supported", reason: "" };
+    if (caps.catalog !== false) return { state: "unknown", reason: "" };
+    var gaps = entry.gaps && typeof entry.gaps === "object" ? entry.gaps : {};
+    var g = typeof gaps.catalog === "string" && gaps.catalog.trim() !== "" ? gaps.catalog.trim() : "";
+    return { state: "unsupported", reason: g };
+  }
+
   // Map an api() catalog response to a render state. The catalog needs a
   // connected provider of that kind (404 no_provider = connect-first), degrades
   // honestly on an upstream failure (502 unavailable), and never white-screens on
@@ -3805,6 +3867,71 @@
     };
   }
 
+  // ── cch-w48-bl · IS GITHUB CONFIGURED ON THIS DEPLOYMENT AT ALL ────────────
+  //
+  // THE HOLE cch-w48-s2 LEFT, and it said so itself: that slice fenced
+  // #site-github on AUTHORITY, which is losable regardless of configuration,
+  // and deliberately did NOT gate on GitHub.configured? because the flag is not
+  // on the site payload. Measured consequence on an unconfigured deployment —
+  // which the live control plane is, carrying no ^GITHUB env: EVERY actor,
+  // admin included, is offered a control whose modal can only reach the honest
+  // 503 arm. A door that opens on a room that does not exist.
+  //
+  // WHICH CALL SUPPLIES THE FLAG, AND WHY IT IS NOT A PER-RENDER FETCH.
+  // `configured` ships on GET /v1/github/installation — github_installation_json
+  // in the cloud router folds `GitHub.configured?()` into that body, beside
+  // `connected`/`account_login`/`install_url`. It is a DEPLOYMENT fact: it reads
+  // application config, not the team, not the site, not the actor. So it is
+  // asked AT MOST ONCE per page life (ensureGithubReadiness below is a no-op on
+  // every call after the first) and the answer is held in module state — the
+  // ensureArchiveStore shape, verbatim. loadSite renders from that state; it
+  // issues no request of its own, so N site renders still cost ONE read, and
+  // the Providers view's own loadGithub donates its answer for free.
+  //
+  // THE BAND IS THREE-VALUED and only a 200 body carrying the BOOLEAN may claim
+  // a configuration state — the rule cch-w67-s4 already wrote into loadGithub's
+  // failure arm. A 500, a dead socket and a body without the key all read
+  // "unknown", and unknown is NOT an offer: a readiness we cannot prove must
+  // not sell a door, the same direction every authority band on this screen
+  // fails. It is terminal by design — one ask per page life — so an unreadable
+  // control plane costs the control until a reload, which is the cheap side of
+  // the trade against promising a feature the deployment does not have.
+  var githubReadiness = "unknown";
+  var githubReadinessAsked = false;
+
+  // Pure: the band an api() answer earns. Exported for the harness — this is
+  // the whole discrimination, and it is losable on a hand-built response.
+  function githubReadinessFrom(r) {
+    if (!r || !r.ok || !r.data || typeof r.data !== "object") return "unknown";
+    if (r.data.configured === true) return "ready";
+    if (r.data.configured === false) return "unconfigured";
+    return "unknown";
+  }
+
+  function githubReadinessState() { return githubReadiness; }
+
+  // Absorb an installation read this console already made (loadGithub's), so
+  // the Providers view never leaves the site screen asking a second time.
+  function absorbGithubReadiness(r) {
+    var next = githubReadinessFrom(r);
+    if (next === "unknown") return;
+    githubReadinessAsked = true;
+    githubReadiness = next;
+  }
+
+  // The one-shot read. `after` repaints the surface that asked, if the answer
+  // lands after its paint — the ensureArchiveStore contract.
+  function ensureGithubReadiness(after) {
+    if (githubReadinessAsked) return;
+    githubReadinessAsked = true;
+    api("GET", "/v1/github/installation").then(function (r) {
+      var next = githubReadinessFrom(r);
+      if (next === githubReadiness) return; // nothing learned; nothing to repaint
+      githubReadiness = next;
+      if (after) after();
+    });
+  }
+
   function loadGithub() {
     var box = $("#github-card");
     if (!box) return;
@@ -3828,6 +3955,9 @@
         if (rb) rb.addEventListener("click", loadGithub);
         return;
       }
+      // cch-w48-bl: the site screen's readiness band rides along on this read —
+      // same route, same body, zero extra requests.
+      absorbGithubReadiness(r);
       renderGithub(r.data || {});
     });
   }
@@ -8141,6 +8271,10 @@
       // admin-only writes it offers (Attach domain, Roll back) are decided here,
       // at OFFER time, instead of by the server after the click.
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());
+      // cch-w46-rv: remember WHAT was painted with WHICH authority, so a /v1/me
+      // that answers after this line can repaint the header strip and the
+      // Updates panel from the bp already held — no second read of anything.
+      instanceAuthorityMount = { bp: bp, tab: tab };
       // D437: a still-checking control needs a way out — the shipped
       // [data-me-retry] exit, present only while the answer is unknown, repaints
       // this whole view once /v1/me lands (no-op when it is absent).
@@ -8368,34 +8502,25 @@
       "</div>";
   }
 
-  // cch-w45-s5: `authority` is instanceAdminAuthority()'s three-valued answer,
-  // threaded from the render site (loadInstance) rather than read here — the
-  // lifecycleActionsModel precedent. Absent (every pure-helper call site) it
-  // defaults to "grant", which is byte-identical to the shipped header.
-  function instanceHeaderHtml(bp, authority) {
+  // cch-w46-rv — THE AUTHORITY-BEARING HALF OF THE HEADER, LIFTED OUT WHOLE.
+  //
+  // Every control in this strip is decided by instanceAdminAuthority(), read
+  // ONCE at paint time in loadInstance. That made the strip a PAINT that
+  // outlives its authority: a /v1/me answering after the render left Attach
+  // domain, Connect agent, Update and Retry removal reading "Checking
+  // capabilities…" against an answer the console already held, on every tab.
+  // repaintLifecycleAuthority repainted ONE box (#inst-lifecycle-actions) and
+  // this strip is not inside it.
+  //
+  // So the strip is now a function of (bp, authority) alone — no closure over
+  // instanceHeaderHtml's locals beyond what instanceLifecycle(bp) and the
+  // module's own instanceCliOpen already give it — and repaintInstanceAuthority
+  // re-renders it into #inst-header-actions from the bp it already holds. Pure:
+  // it fetches nothing and decides nothing the shipped header did not decide.
+  function instanceHeaderActionsHtml(bp, authority) {
+    bp = bp || {};
     authority = authority || "grant";
     var lc = instanceLifecycle(bp);
-
-    // The address line (screens/02): mono URL + the shared [data-copy]
-    // affordance for an up box; the in-flight / failed states keep their
-    // honest chips (the SSE fast path in loadInstance patches
-    // .fleet-url.provisioning in place — that class stays load-bearing).
-    var url = lc.removing
-      ? '<div class="fleet-url provisioning">&mdash; removing</div>'
-      : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
-        : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
-          : lc.provisioning
-            ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
-
-    // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
-    // already carries label + detail ("Degraded · Health down"); its rules are
-    // consumed, never edited here (GR25 quarantine).
-    var pill = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
     // cch-w38-s1: POST /v1/barkparks/:id/self-update is `admin` in the router's
@@ -8480,6 +8605,38 @@
                   '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
                   connectBtn + domainBtn + cliToggle
                 : "";
+    return actions;
+  }
+
+  // cch-w45-s5: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from the render site (loadInstance) rather than read here — the
+  // lifecycleActionsModel precedent. Absent (every pure-helper call site) it
+  // defaults to "grant", which is byte-identical to the shipped header.
+  function instanceHeaderHtml(bp, authority) {
+    authority = authority || "grant";
+    var lc = instanceLifecycle(bp);
+
+    // The address line (screens/02): mono URL + the shared [data-copy]
+    // affordance for an up box; the in-flight / failed states keep their
+    // honest chips (the SSE fast path in loadInstance patches
+    // .fleet-url.provisioning in place — that class stays load-bearing).
+    var url = lc.removing
+      ? '<div class="fleet-url provisioning">&mdash; removing</div>'
+      : lc.removeFailed
+        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        : lc.failed
+          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          : lc.provisioning
+            ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
+            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
+    // already carries label + detail ("Degraded · Health down"); its rules are
+    // consumed, never edited here (GR25 quarantine).
+    var pill = statusPill(bp);
+    var actions = instanceHeaderActionsHtml(bp, authority);
 
     // The failed case is owned by the timeline now (its fail block shows the
     // verbatim provision_error), so no duplicate "provisioning failed" banner.
@@ -8499,7 +8656,12 @@
 
     return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
       '<div class="detail-title-row"><h1>' + esc(bp.name) + "</h1>" + pill + "</div>" + url + "</div>" +
-      (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div>" +
+      // cch-w46-rv: the id is the REPAINT SEAM's target, not decoration —
+      // repaintInstanceAuthority re-renders instanceHeaderActionsHtml into it.
+      // Still conditional: the arms that emit "" carry no authority-decided
+      // control at all (removing, and a hostless non-failed box), so an empty
+      // strip has nothing to strand.
+      (actions ? '<span class="detail-actions" id="inst-header-actions">' + actions + "</span>" : "") + "</div>" +
       failBanner;
   }
 
@@ -8617,12 +8779,18 @@
       "</div>";
   }
 
-  function wireInstanceActions(bp) {
+  // cch-w46-rv: THE HEADER STRIP'S OWN WIRING, split out so the repaint seam can
+  // re-arm exactly what it re-rendered. Every id here lives inside
+  // #inst-header-actions (instanceHeaderActionsHtml), so replacing that node's
+  // innerHTML destroys these handlers in a browser and they must be re-added —
+  // while everything left in wireInstanceActions below sits OUTSIDE the strip
+  // and must NOT be re-wired (a second listener on #fleet-add-support would open
+  // two modals, and loadSupportPresence would re-issue its roster read).
+  function wireInstanceHeaderActions(bp) {
     var openBtn = $("#inst-open-studio");
     if (openBtn) openBtn.addEventListener("click", function () { openStudio(bp.id, openBtn); });
     var update = $("#inst-update");
     if (update) update.addEventListener("click", function () { confirmUpdateInstance(bp); });
-    wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
     // Same add-listener-if-present shape: on the refuse/unknown arms
@@ -8630,6 +8798,10 @@
     // click with.
     var connect = $("#inst-connect-agent");
     if (connect) connect.addEventListener("click", function () { connectAgent(bp, connect); });
+    // The bare Remove button is superseded by the lifecycle action row's typed
+    // Decommission (see wireLifecycleActions); the header keeps only Retry removal.
+    var removeRetry = $("#inst-remove-retry");
+    if (removeRetry) removeRetry.addEventListener("click", function () { removeInstance(bp, removeRetry); });
     // GR24: the "bp CLI ▾" disclosure — show/hide the CLI card and remember the
     // choice across SSE repaints (module state, see instanceCliOpen).
     var cliT = $("#inst-cli-toggle");
@@ -8640,10 +8812,11 @@
       cliT.setAttribute("aria-expanded", instanceCliOpen ? "true" : "false");
       cliT.classList.toggle("is-open", instanceCliOpen);
     });
-    // The bare Remove button is superseded by the lifecycle action row's typed
-    // Decommission (see wireLifecycleActions); the header keeps only Retry removal.
-    var removeRetry = $("#inst-remove-retry");
-    if (removeRetry) removeRetry.addEventListener("click", function () { removeInstance(bp, removeRetry); });
+  }
+
+  function wireInstanceActions(bp) {
+    wireInstanceHeaderActions(bp);
+    wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     // MVP-0 fleet card: both add-support affordances (head button + the empty
     // state's CTA) open the same modal; the presence slots fill from ONE
     // app-token-direct roster read (add-listener-if-present — the card only
@@ -8733,6 +8906,74 @@
     paintLifecycleActions(box, lifecycleRail.bp,
       lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState(),
         archiveStoreSnapshot()));
+  }
+
+  // cch-w46-rv — WHAT ELSE IS ON THIS SCREEN, and the record that lets it be
+  // repainted. {bp, tab} for the instance loadInstance last rendered; `tab`
+  // matters because the re-wire below re-enters the SAME loader the header's
+  // shipped [data-me-retry] exit re-enters, and that exit must not silently
+  // change tab under the person.
+  var instanceAuthorityMount = null;
+
+  // cch-w46-rv — THE SEAM EXTENDED PAST THE RAIL. THE SIBLING SET, DERIVED FROM
+  // CODE, not from the filing: `grep -n "adminWriteControlHtml(" app.js` returns
+  // every authority-keyed control in the console. Nine call sites, and the ones
+  // that render on the INSTANCE route are:
+  //
+  //   instanceHeaderActionsHtml — Update (#inst-update), Attach domain
+  //     (#inst-domain), Connect agent (#inst-connect-agent), Retry removal
+  //     (#inst-remove-retry).  ► REPAINTED HERE (#inst-header-actions).
+  //   updatePanelActionsHtml    — the four [data-au] autoupdate toggles and
+  //     Roll back ([data-rollback]).  ► REPAINTED HERE (#inst-update-actions).
+  //   lifecycleActionRowHtml    — the CLI rail's verbs.
+  //     ► already repainted by repaintLifecycleAuthority (cch-w46-s3).
+  //
+  // TWO ARE DELIBERATELY LEFT, and neither is a paint this seam could fix
+  // without inventing state it does not hold:
+  //   * the verify card's Re-provision (data-vf-reprovision) is painted by
+  //     loadInstanceVerify from a per-instance PROBE RESPONSE this module never
+  //     retains — repainting it would mean re-issuing that read, which is the
+  //     second request cch-w46-s3 refused for the rail.
+  //   * the timeline's docked Retry setup (data-tl-retry) renders only on a
+  //     provision-FAILED box, whose screen is driven by live SSE ticks that
+  //     re-render it wholesale on their own; it has no stranded steady state.
+  // Both are named here so the omission is a decision with a reason attached
+  // rather than a gap somebody has to rediscover.
+  //
+  // It is STILL NOT reloadInstanceView(): that call hard-returns on the usage
+  // and webhooks tabs, and the header renders on every tab — so routing through
+  // it would fix Overview and strand exactly the tabs cch-w46-s3's own smoke
+  // guard is pinned on. No fetch is issued by any arm below.
+  function repaintInstanceAuthority() {
+    repaintLifecycleAuthority();
+    if (!instanceAuthorityMount || !instanceAuthorityMount.bp) return;
+    var bp = instanceAuthorityMount.bp;
+    var h = parseHash();
+    if (h.view !== "instance") return;
+    // The same one-instance guard the rail takes: a stale mount from a previous
+    // drill-down is never repainted with this instance's authority.
+    if (String(h.id) !== String(bp.id)) return;
+    var authority = instanceAdminAuthority();
+
+    var strip = $("#inst-header-actions");
+    if (strip && strip.isConnected !== false) {
+      strip.innerHTML = instanceHeaderActionsHtml(bp, authority);
+      wireInstanceHeaderActions(bp);
+      // The unknown arm's exit rides this strip (meRetryHtml on Attach domain /
+      // Connect agent / Retry removal), and the innerHTML above just destroyed
+      // the wired button. selfHealing:false for the reason loadInstance gives —
+      // loadMe has no instance seam that re-enters this LOADER, only this
+      // repaint, so a SUCCESSFUL retry must still re-render.
+      wireMeRetry(strip, function () {
+        loadInstance(bp.id, (instanceAuthorityMount || {}).tab);
+      }, false);
+    }
+
+    var updates = $("#inst-update-actions");
+    if (updates && updates.isConnected !== false) {
+      updates.innerHTML = updatePanelActionsHtml(bp, authority);
+      wireUpdatePanel(bp);
+    }
   }
 
   function paintLifecycleActions(box, bp, model) {
@@ -10188,6 +10429,45 @@
   // cch-w45-s5: `authority` gates the Rollback OFFER only (the autoupdate
   // policy buttons are a different route and are not this slice's business);
   // absent it defaults to "grant" — byte-identical to the shipped panel.
+  // cch-w46-rv: THE UPDATES PANEL'S AUTHORITY-BEARING HALF, lifted out for the
+  // same reason the header strip above was. All five of these controls are
+  // decided by the authority read taken once in loadInstance, and none of them
+  // is inside #inst-lifecycle-actions — so a /v1/me that answered LATE left
+  // Roll back and the four autoupdate toggles disabled against an answer the
+  // console already held. Pure and self-contained: autoupdateActions(bp) is the
+  // same read updatePanelHtml already makes, so the repaint costs no request.
+  function updatePanelActionsHtml(bp, authority) {
+    bp = bp || {};
+    authority = authority || "grant";
+    var acts = autoupdateActions(bp);
+    var buttons = "";
+    if (acts.policy) {
+      // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
+      // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
+      // Auth.require_current_team_admin — and they were appended with no
+      // authority argument at all, so a plain member was offered four writes the
+      // server answers 403. Same seam, same grammar: the live `data-au` mount
+      // hook exists on the grant arm only (D428/D439).
+      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "");
+      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "");
+      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "");
+      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "");
+    }
+    // isu-w6: Rollback is offered for every hosted box (this panel only renders
+    // when the box has a host). It's a DISTINCT affordance from the policy toggles
+    // — data-rollback, never data-au — and the SERVER owns whether a previous slot
+    // exists: a box with nothing to flip to gets the honest no_previous_slot typed
+    // conflict on click, never a flip to garbage (charter D23).
+    // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
+    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
+    // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
+    // write on the screen and got a 403 on the confirm. The offer is now
+    // authority-gated (no exit here: the page's one [data-me-retry] rides the
+    // header, where the still-checking arm first appears).
+    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "");
+    return buttons;
+  }
+
   function updatePanelHtml(bp, authority) {
     bp = bp || {};
     authority = authority || "grant";
@@ -10199,7 +10479,6 @@
     var latest = bp.update_latest_release ? vRel(bp.update_latest_release) : "—";
     var channel = bp.channel ? cap(String(bp.channel)) : "—";
     var policy = autoupdatePolicyLabel(bp);
-    var acts = autoupdateActions(bp);
 
     var badgeHtml =
       '<span class="status-pill status-pill--' + esc(b.role) + ' update-badge" data-update-state="' + esc(b.state) + '">' +
@@ -10234,32 +10513,10 @@
       (cdLine ? railRowPlain("Vs main", cdLine) : "") +
       (policy ? railRowHtml("Autoupdate", badge(policy.text, policy.dot)) : "");
 
-    var buttons = "";
-    if (acts.policy) {
-      // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
-      // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
-      // Auth.require_current_team_admin — and they were appended with no
-      // authority argument at all, so a plain member was offered four writes the
-      // server answers 403. Same seam, same grammar: the live `data-au` mount
-      // hook exists on the grant arm only (D428/D439).
-      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "");
-      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "");
-      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "");
-      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "");
-    }
-    // isu-w6: Rollback is offered for every hosted box (this panel only renders
-    // when the box has a host). It's a DISTINCT affordance from the policy toggles
-    // — data-rollback, never data-au — and the SERVER owns whether a previous slot
-    // exists: a box with nothing to flip to gets the honest no_previous_slot typed
-    // conflict on click, never a flip to garbage (charter D23).
-    // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
-    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
-    // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
-    // write on the screen and got a 403 on the confirm. The offer is now
-    // authority-gated (no exit here: the page's one [data-me-retry] rides the
-    // header, where the still-checking arm first appears).
-    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "");
-    var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
+    var buttons = updatePanelActionsHtml(bp, authority);
+    // cch-w46-rv: same seam, second surface. Roll back is appended
+    // unconditionally above, so this row exists whenever the panel does.
+    var actionsHtml = buttons ? '<div class="update-panel-actions" id="inst-update-actions">' + buttons + "</div>" : "";
 
     return '<div class="card update-panel">' +
       '<div class="update-panel-head"><h2>Updates</h2>' + badgeHtml + "</div>" +
@@ -14040,7 +14297,16 @@
       setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       // cch-w48-s2 (D539): the ONE authority read this screen takes, taken HERE
       // and threaded in — #site-github is the only admin-gated control on it.
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault, previewFault, instFault);
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault, previewFault, instFault, githubReadinessState());
+      // cch-w48-bl: ask the deployment ONCE whether GitHub exists here, and
+      // repaint this screen if the answer lands after the paint. Identical in
+      // shape to loadMe's own `currentView() === "site"` seam two files down —
+      // quiet:true because the screen is already painted; this is a re-decide,
+      // not a first load. A no-op on every call after the first, so a session
+      // that visits ten sites still issues ONE /v1/github/installation.
+      ensureGithubReadiness(function () {
+        if (String(currentSiteId) === String(id)) loadSite(id, { quiet: true });
+      });
       var dlr = $("#site-deploys-retry");
       if (dlr) dlr.addEventListener("click", function () { loadSite(id, { quiet: true }); });
       var d = $("#site-deploy");
@@ -14252,8 +14518,18 @@
   // deployFault/previewFault shape) — with it set and no bp resolved, the head's
   // instance segment says the list couldn't be loaded instead of silently
   // rendering as a site with no instance. 8-arg callers are unchanged.
-  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault, previewFault, instFault) {
+  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault, previewFault, instFault,
+                          githubReady) {
     previews = previews || [];
+    // cch-w48-bl: the 10th argument is githubReadinessState()'s band, threaded
+    // from the ONE DOM render site (loadSite) exactly as `authority` is. It
+    // DEFAULTS CLOSED — an omitted argument reads "unknown", which withholds the
+    // button — because a call site that never heard about this parameter must
+    // not silently re-open a door onto a feature the deployment may not have.
+    // (That is the OPPOSITE default from `authority`, whose "grant" default was
+    // chosen when the closed arm did not yet exist; here the closed arm is the
+    // whole point.)
+    githubReady = githubReady || "unknown";
     var auto = site.github_webhook_configured;
     // ssw8 (D82): the content binding, derived once for the rail rows below.
     var binding = siteBindingModel(site);
@@ -14318,7 +14594,30 @@
     // refusal (submitSiteGithub's, which already routes through friendly() ->
     // forbiddenEvidenceCopy). A sentence at a PRE-hoc omit would invent a
     // refusal for something the person never attempted.
-    var githubControl = authority === "grant"
+    // cch-w48-bl — AND THE SECOND AXIS, WHICH IS NOT THE ROLE ONE. s2's three
+    // arms above all assume the feature EXISTS on this deployment. Where it does
+    // not, the button is a promise the console cannot keep for anybody: both of
+    // its outcomes route through openSiteGithub, whose first read answers 503
+    // service_unavailable for an admin exactly as it does for a member. So the
+    // BUTTON is withheld unless the band says "ready" — and "unknown" withholds
+    // too (see githubReadiness: a readiness we cannot prove is not an offer).
+    //
+    // THE CHIP IS NOT WITHHELD WITH IT, and that distinction is load-bearing.
+    // `site.github_repo` is a fact GET /v1/sites/:id (require_user) already
+    // handed this person; whether the App is wired up today says nothing about
+    // whether this site is linked to a repo. Deleting the repo name would
+    // destroy information the payload carries to answer a question nobody asked.
+    // The chip is exactly the arm a non-admin already gets — one grammar, one
+    // .set-chip, no new CSS.
+    //
+    // NO SENTENCE, at either withholding. This function's own s2 note settles
+    // it: sentences belong to the POST-hoc refusal (the server's own words
+    // through friendly()); a sentence at a PRE-hoc omit invents a refusal for
+    // something the person never attempted. And D428's disable-and-explain is an
+    // only-clause over the seven instance-detail lifecycle verbs — it does not
+    // reach this screen, so a ghosted button is not available here either.
+    var githubOffered = authority === "grant" && githubReady === "ready";
+    var githubControl = githubOffered
       ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
       : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
     // gh-6: branch previews render in their own section, distinct from the
@@ -17182,8 +17481,43 @@
     if (vs.state === "unavailable") {
       return '<p class="launch-catalog-note dim">' + name + "'s catalog is unavailable right now — you can still launch and we'll pick sensible defaults.</p>";
     }
+    // cch-w45-bl: THE CONDUIT SAID SO, so nothing was asked. Distinct from
+    // "unavailable" (a catalog that exists and did not answer) — this kind
+    // publishes no size-and-region catalog here at all, and the SERVER owns the
+    // sentence: `gaps.catalog` off GET /v1/providers/capabilities, rendered
+    // verbatim through esc() and never rewritten. The || arm is the honest
+    // fallback for a conduit that states the gap without explaining it — it
+    // claims only what the bool says. Same class heads as the arm above; zero
+    // new CSS.
+    if (vs.state === "no_catalog") {
+      return '<p class="launch-catalog-note dim">' +
+        esc(vs.reason || (name + " doesn't publish a size-and-region catalog here, so we'll pick sensible defaults.")) +
+        "</p>";
+    }
     return '<div class="launch-catalog-empty"><p class="dim">Couldn\'t load the ' + name + " catalog.</p>" +
       '<button class="btn btn-ghost btn-sm launch-catalog-retry" type="button" data-kind="' + esc(kind) + '">Retry</button></div>';
+  }
+
+  // cch-w45-bl — ONE conduit read per page life, shared by both catalog mounts.
+  // GET /v1/providers/capabilities is member-readable and its answer is a
+  // DEPLOYMENT fact (which kinds the control plane can serve a catalog for), so
+  // it is asked once and queued behind, exactly like theaterCatalogCache below.
+  // A FAILED read caches `null`, which catalogCapability reads as "unknown" —
+  // i.e. every mount proceeds exactly as it does today. Failing that direction
+  // is deliberate: the gate exists to skip a request that CANNOT succeed, and a
+  // conduit we could not read has not told us that about anything.
+  var providerCapsCache = { done: false, payload: null, waiters: [], asked: false };
+
+  function withProviderCapabilities(then) {
+    if (providerCapsCache.done) { then(providerCapsCache.payload); return; }
+    providerCapsCache.waiters.push(then);
+    if (providerCapsCache.asked) return;
+    providerCapsCache.asked = true;
+    api("GET", "/v1/providers/capabilities").then(function (r) {
+      providerCapsCache.done = true;
+      providerCapsCache.payload = r && r.ok && r.data ? r.data : null;
+      providerCapsCache.waiters.splice(0).forEach(function (f) { f(providerCapsCache.payload); });
+    });
   }
 
   // Fetch + paint the catalog into the picker's slot, tracking the selection on
@@ -17195,6 +17529,30 @@
     if (!slot) return;
     container._launchHosting = { provider: kind, region: null, server_type: null };
     slot.innerHTML = '<div class="loading">Loading ' + esc(providerMeta(kind).name) + " catalog&hellip;</div>";
+    // cch-w45-bl: ASK THE CONDUIT FIRST. On an explicit `catalog: false` the
+    // fetch below is a request that can only 404/502, so it is not made at all
+    // and the server's own gap sentence is what renders. On "supported" and on
+    // "unknown" (no answer, an unreadable one, or a kind the conduit does not
+    // list) the shipped path runs byte-for-byte — the honest 404/502/error arms
+    // of catalogViewState are untouched for every catalog-capable kind.
+    withProviderCapabilities(function (caps) {
+      if (!container._launchHosting || container._launchHosting.provider !== kind) return;
+      if (!slot.isConnected) return;
+      var cap = catalogCapability(caps, kind);
+      if (cap.state === "unsupported") {
+        container._launchHosting = { provider: kind, region: null, server_type: null };
+        slot.innerHTML = catalogPanelHtml({ state: "no_catalog", reason: cap.reason }, kind,
+          { region: null, server_type: null }, groupName);
+        wireLaunchCatalog(container, opts, kind, groupName);
+        return;
+      }
+      mountLaunchCatalogFetch(container, slot, opts, kind, groupName);
+    });
+  }
+
+  // The shipped fetch+paint half, unchanged — split out only so the gate above
+  // reads as one decision instead of a nested callback.
+  function mountLaunchCatalogFetch(container, slot, opts, kind, groupName) {
     api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/catalog").then(function (r) {
       // A tab switch mid-flight: ignore a stale response for a provider we left.
       if (!container._launchHosting || container._launchHosting.provider !== kind) return;
@@ -18791,7 +19149,12 @@
         // does. See repaintLifecycleAuthority for why this is not
         // reloadInstanceView() — that call fixes Overview and leaves the usage
         // and webhooks tabs, which it hard-returns on, stranded.
-        repaintLifecycleAuthority();
+        // cch-w46-rv: …and it was never only the rail. The header strip
+        // (#inst-header-actions) and the Updates panel's actions row
+        // (#inst-update-actions) carry six more authority-decided controls that
+        // this seam did not reach. repaintInstanceAuthority calls
+        // repaintLifecycleAuthority first, so the rail's behaviour is unchanged.
+        repaintInstanceAuthority();
         // cch-w47-s1 — THE SEVENTH TWIN, on the screen every member reaches
         // first. The empty-fleet runway, the head's subline and the two header
         // launch buttons were all decided while this answer was out.
@@ -18840,7 +19203,8 @@
         // it), so without this the rail keeps saying "Checking capabilities…"
         // about a read that already answered; repainting swaps that for the
         // fault's own sentence plus the one Retry that can move it.
-        repaintLifecycleAuthority();
+        // cch-w46-rv: the mirror, widened for the same six controls.
+        repaintInstanceAuthority();
         // cch-w47-s1 — the mirror. A failed read is terminal, so without this
         // the runway keeps saying "Checking your account…" about a read that
         // already answered, with no exit on the screen it strands.
@@ -20907,11 +21271,24 @@
     if (c && c.done) { if (onReady) onReady(); return; }
     if (c) { if (onReady) c.waiters.push(onReady); return; }
     c = theaterCatalogCache[kind] = { done: false, catalog: null, waiters: onReady ? [onReady] : [] };
-    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/catalog").then(function (r) {
-      var vs = catalogViewState(r);
-      c.done = true;
-      c.catalog = vs.state === "ready" ? vs.catalog : null;
-      c.waiters.splice(0).forEach(function (f) { f(); });
+    // cch-w45-bl: the same consultation, on the same conduit answer, before the
+    // same request. A kind the conduit states has NO catalog has no price to
+    // read either, so the line stays omitted — which is what an unpriceable
+    // answer already cached — without a request known to fail. "unknown" and
+    // "supported" both fetch, so the honest 404/502 caching below is untouched.
+    withProviderCapabilities(function (caps) {
+      if (catalogCapability(caps, kind).state === "unsupported") {
+        c.done = true;
+        c.catalog = null;
+        c.waiters.splice(0).forEach(function (f) { f(); });
+        return;
+      }
+      api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/catalog").then(function (r) {
+        var vs = catalogViewState(r);
+        c.done = true;
+        c.catalog = vs.state === "ready" ? vs.catalog : null;
+        c.waiters.splice(0).forEach(function (f) { f(); });
+      });
     });
   }
 
@@ -26713,6 +27090,16 @@
       accountWriteFailureCopy: accountWriteFailureCopy,
       sessionExpiredCopy: SESSION_EXPIRED_COPY,
       openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
+      // ── console-3 preflight batch (cch-w48-bl / cch-w45-bl / cch-w46-rv) ────
+      // cch-w48-bl: the deployment-readiness band for GitHub.
+      githubReadinessFrom: githubReadinessFrom, githubReadinessState: githubReadinessState,
+      ensureGithubReadiness: ensureGithubReadiness,
+      // cch-w45-bl: the served catalog capability, consulted BEFORE a mount.
+      catalogCapability: catalogCapability, mountLaunchCatalog: mountLaunchCatalog,
+      loadTheaterCatalog: loadTheaterCatalog,
+      // cch-w46-rv: the two authority-bearing regions the repaint seam targets.
+      instanceHeaderActionsHtml: instanceHeaderActionsHtml,
+      updatePanelActionsHtml: updatePanelActionsHtml,
       // cch-w31-bl — THE ROLE VOCABULARY, exported as DATA so the census can
       // diff the shipped set against Authz's own attribute text rather than
       // re-typing it here (a re-typed literal pins itself and catches nothing).

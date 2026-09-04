@@ -12835,10 +12835,30 @@ defmodule BarkparkCloud.Web.Router do
   # azh-w6 (S14c): the resurrect worker's claim payload = the FULL provision claim
   # (agent token minted at claim, azure creds decrypted, region/size nil-honest —
   # all unchanged) PLUS `bundle_ref`, the object-storage archive to pull +
-  # rehydrate onto the fresh box. Reusing claim_json keeps the provision claim
-  # bytes untouched (the `bundle_ref` key is additive and only present here).
+  # rehydrate onto the fresh box, MINUS `template`. Reusing claim_json keeps the
+  # provision claim bytes untouched (the `bundle_ref` key is additive and only
+  # present here).
+  #
+  # NO TEMPLATE (cch-w53-bl-the-resurrect-claim-discards-env-and-template). A
+  # resurrect is NOT a launch: the box's content comes from the BUNDLE, and the
+  # restore chain says so in its own header — `internal/provisioner/restore.go`'s
+  # `content` step is "fetch db.dump + media from the bundle store, DROP + CREATE
+  # the database the MANIFEST names, pg_restore --no-owner, unpack media,
+  # best-effort migrate. Template bootstrap is suppressed." The suppression is
+  # structural, not a flag: `translateResurrect`
+  # (internal/provisioner/restore_driver.go) builds its `JobSpec` field by field
+  # and never sets `Template`, and the only reader of `job.Template` —
+  # `provision.go`'s dwb-4 bootstrap branch — is on the provision chain the
+  # resurrect drain does not run. So `resurrectClaimSpec` declaring no `template`
+  # field is CORRECT, and the emission was the defect: the plane was shipping a
+  # content-bootstrap slug to a decoder that must never act on it, and
+  # `encoding/json` dropped it in silence. Giving the spec the field would have
+  # been the WRONG half of the either/or — it would model a value the restore
+  # path is documented to suppress. Provision + support still carry `template`;
+  # only this claim drops it.
   defp resurrect_claim_json(job, barkpark) do
     claim_json(job, barkpark)
+    |> Map.drop([:template])
     |> Map.put(:bundle_ref, job.bundle_ref)
   end
 
