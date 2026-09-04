@@ -482,6 +482,21 @@ jobs:
       - name: A platform-provided vips mode is never selected bare
         run: bash scripts/vips-hedge-tripwire.sh
 
+      # ── the diff-scoped format verdict, end to end ───────────────────────
+      # It rides HERE and not in the `format` job, deliberately: `format`
+      # carries `if: needs.changes.outputs.compile == 'true'`, so on a docs-only
+      # diff it skips — and a harness that goes dark exactly when someone edits
+      # this workflow's wiring is not a guard. This job carries no `if:`, so the
+      # harness runs on EVERY head, and it is in the aggregator's `needs` with
+      # the gate value NEVER, so its red is a red on a REQUIRED context.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      - name: A touched unformatted file reds the gate, an untouched one does not
+        run: bash scripts/format-diff-scope.test.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
     # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`
@@ -509,11 +524,50 @@ jobs:
     # the script reads — and that is the point: it PRINTS the version it judged
     # under, so no future reader has to re-derive which formatter produced the
     # verdict, and a matrix bump can never silently change the answer.
-    name: Format (mix format --check-formatted, advisory)
-    continue-on-error: true
+    #
+    # ── SINCE task-e31b816b4b416db6 IT IS DIFF-SCOPED, NOT ADVISORY ──────────
+    # It used to carry `continue-on-error: true` and nothing read it. So
+    # unformatted Elixir merged (measured on main run 33843359350, 2026-09-04
+    # 06:12Z: three files), and from then on this job was RED ON EVERY PULL
+    # REQUEST for drift the author never touched. A permanently-red advisory
+    # gate teaches the fleet to skip the one red that is real.
+    #
+    # Simply making it blocking is the same disease with a merge button: it
+    # would refuse every PR in the fleet over someone else's merge. So the
+    # verdict is SCOPED TO THE DIFF, in scripts/format-diff-scope.sh:
+    #   * a file THIS DIFF TOUCHES that the formatter objects to -> the job
+    #     FAILS, and `Elixir gate` reds naming the file;
+    #   * the same unformatted state in a file the diff never touched ->
+    #     PRINTED, and neutral. Not this pull request's red.
+    #   * a REFUSAL from the guard (wrong Elixir, unfetched deps, unreadable
+    #     pin, formatter never ran) -> neutral. No claim was made, so none is
+    #     enforced.
+    #   * on push:main there is NO PR diff, so nothing can be diff-scoped: the
+    #     standing debt is printed and this job is green. Main is where the
+    #     debt is VISIBLE, never where it is enforced — enforcement happens on
+    #     the PR that touches the file.
+    #
+    # NO NEW REQUIRED CONTEXT, and this job's own rendered name is still not
+    # one: `Elixir gate` is the only name branch protection reads, and it reds
+    # through `needs` + a `decide` line like every other upstream. The
+    # continue-on-error had to go for that: a coe job may never enter the
+    # aggregator's `needs` (`needs.<job>.result` reads `success` for a FAILED
+    # coe job), which scripts/elixir-path-escape-check.test.sh asserts as
+    # `coe_in_needs = ""` — and without `needs` the aggregator can read neither
+    # this job's result nor its outputs. That harness named this slice in
+    # advance ("S4's format ceiling is the next one").
+    name: Format (mix format --check-formatted, diff-scoped)
     needs: changes
     if: needs.changes.outputs.compile == 'true'
     runs-on: ubuntu-latest
+    # Read by `elixir-gate`'s Decide step so the ::error:: the check-run API
+    # publishes NAMES THE FILES rather than saying only "format failed" — the
+    # D770/D771 lesson ("`bad` says THAT something is wrong, never WHICH")
+    # applied to this arm. Job outputs survive a failing job, which is the only
+    # case that matters here.
+    outputs:
+      unformatted_in_diff: ${{ steps.scope.outputs.unformatted_in_diff }}
+      unformatted_total: ${{ steps.scope.outputs.unformatted_total }}
     strategy:
       fail-fast: false
       matrix:
@@ -592,9 +646,64 @@ jobs:
         working-directory: .
         run: bash scripts/format-check.sh --selftest
 
-      - name: mix format --check-formatted (via the version-aware guard)
+      # The scope reader carries its own refusals, so it proves them here — same
+      # contract as the guard's --selftest above, and it needs no toolchain.
+      - name: The diff scope must be able to refuse, to red, and to stay neutral
         working-directory: .
-        run: bash scripts/format-check.sh
+        run: bash scripts/format-diff-scope.sh --selftest
+
+      # CAPTURED, NOT DECIDED ON. This step is deliberately the last one in this
+      # job that may not fail: `mix format --check-formatted` answers "is the
+      # WHOLE TREE formatted", which is a question nobody on a pull request can
+      # be held to. The step-level continue-on-error keeps its output and its
+      # exit code as DATA; `scope` below turns that data into the verdict.
+      #
+      # continue-on-error here and NOT at the job level: at job level it would
+      # also swallow a scope red, and `needs.format.result` would read `success`
+      # for a failed job — the exact laundering the aggregator refuses.
+      - name: mix format --check-formatted (via the version-aware guard)
+        id: guard
+        continue-on-error: true
+        working-directory: .
+        run: |
+          set -uo pipefail
+          log="${RUNNER_TEMP:-/tmp}/format-verdict.log"
+          bash scripts/format-check.sh > "$log" 2>&1
+          rc=$?
+          cat "$log"
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Which unformatted files does THIS diff touch?
+        id: scope
+        # always(): the guard step above is expected to "fail" whenever main
+        # carries inherited drift, and that must not skip the step that decides
+        # whether the drift is this PR's problem.
+        if: always()
+        working-directory: .
+        env:
+          GUARD_RC: ${{ steps.guard.outputs.rc }}
+        run: |
+          set -uo pipefail
+          tmp="${RUNNER_TEMP:-/tmp}"
+          changed="${tmp}/changed.txt"
+          : > "$changed"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # actions/checkout checks out refs/pull/N/merge on a pull_request,
+            # so HEAD^1 IS the base tip and `HEAD^1..HEAD` IS the merge-base
+            # diff — no extra fetch, and the same derivation the path-escape
+            # job above already uses. If it cannot be computed the file stays
+            # EMPTY, which the scope reader reports as "no PR diff" and scores
+            # NEUTRAL: an unreadable diff must never manufacture a red.
+            if base="$(git rev-parse --verify --quiet 'HEAD^1')" && [ -n "$base" ]; then
+              git diff --name-only "$base" HEAD > "$changed" || : > "$changed"
+            fi
+          fi
+          echo "PR diff: $(wc -l < "$changed" | tr -d ' ') changed path(s) (empty = push, or no computable diff)"
+          bash scripts/format-diff-scope.sh \
+            --verdict-log "${tmp}/format-verdict.log" \
+            --guard-rc "${GUARD_RC:-2}" \
+            --changed "$changed"
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
@@ -1298,11 +1407,20 @@ jobs:
     #     aggregator that merely printed `needs.will-fail.result` reported
     #     `success`, and a PR merged through it (charter D19).
     #
-    #   * `format` is NOT in `needs`. It carries `continue-on-error: true`, and
-    #     for such a job `needs.<job>.result` reads `success` EVEN WHEN IT
-    #     FAILED. Including it would launder the run-level lie straight into the
-    #     required context. Do not add it here; make it blocking first (that is
-    #     a separate slice), then add it.
+    #   * `format` IS in `needs` since task-e31b816b4b416db6 — and it is in
+    #     `needs` BECAUSE it stopped being `continue-on-error`. That order is
+    #     the whole rule, and it is not negotiable: for a coe job
+    #     `needs.<job>.result` reads `success` EVEN WHEN IT FAILED, so adding
+    #     one here launders a run-level lie straight into the required context.
+    #     scripts/elixir-path-escape-check.test.sh asserts `coe_in_needs = ""`.
+    #     The separate slice that comment used to point at is this one.
+    #
+    #     What it now judges is NOT "is the tree formatted" — nobody on a pull
+    #     request can be held to that. The `format` job only fails when a file
+    #     THE DIFF TOUCHES is unformatted (scripts/format-diff-scope.sh);
+    #     inherited drift is printed and the job stays green. So the arm below
+    #     is diff-scoped by construction, and on push:main — where there is no
+    #     PR diff — it is neutral by construction.
     #
     # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
     # dispatcher output that gated that job was literally 'false'. Everything
@@ -1310,7 +1428,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Elixir gate
     if: always()
-    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]
+    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, format]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -1320,8 +1438,13 @@ jobs:
           R_PROD: ${{ needs.mix-prod-compile.result }}
           R_PERF: ${{ needs.validation-perf.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
+          R_FORMAT: ${{ needs.format.result }}
           O_COMPILE: ${{ needs.changes.outputs.compile }}
           O_TEST: ${{ needs.changes.outputs.test }}
+          # NOT a second verdict — R_FORMAT above is the verdict. This is the
+          # NAMES, so the ::error:: (the only line the check-run API carries)
+          # says WHICH file, per D770/D771. Empty on every green path.
+          F_IN_DIFF: ${{ needs.format.outputs.unformatted_in_diff }}
         run: |
           set -euo pipefail
 
@@ -1448,8 +1571,22 @@ jobs:
           decide "mix-test"                "${R_TEST}"    "${O_TEST}"
           decide "mix-prod-compile"        "${R_PROD}"    "${O_COMPILE}"
           decide "validation-perf"         "${R_PERF}"    "${O_COMPILE}"
+          # DIFF-SCOPED. This job fails only when a file the PR TOUCHES is
+          # unformatted; inherited main drift leaves it green. See the format
+          # job's header for why the arm lives there and not in this step: the
+          # diff is only computable where the checkout is.
+          decide "format (diff-scoped)"    "${R_FORMAT}" "${O_COMPILE}"
 
           echo
+          # The format arm is the one upstream whose red has a NAMEABLE cause
+          # the aggregator can carry, so it carries it. Appended to `reds`
+          # rather than printed separately: `reds` is what the ::error:: emits,
+          # and a second channel is a second thing to go quiet.
+          if [ -n "${F_IN_DIFF:-}" ]; then
+            echo "  files this diff touches that are unformatted: ${F_IN_DIFF}"
+            reds="${reds:+${reds} — }unformatted in this diff: ${F_IN_DIFF}"
+          fi
+
           if [ "$bad" -ne 0 ]; then
             echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
             exit 1

@@ -475,18 +475,18 @@ run_gate() {
 elixir_step="$TMPROOT/step-elixir.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/elixir.yml" elixir-gate "$elixir_step"
 run_gate "Elixir gate: docs-only, nothing dispatched" "$elixir_step" yes 0 \
-  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=skipped \
   O_COMPILE=false O_TEST=false
 run_gate "Elixir gate: the suite actually ran" "$elixir_step" no 0 \
-  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 # PARTIAL dispatch is NOT "nothing ran": one real job is enough to make the
 # green mean something, and a notice there would be its own false statement.
 run_gate "Elixir gate: only the test lane ran" "$elixir_step" no 0 \
-  R_CHANGES=success R_TEST=success R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=success R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=skipped \
   O_COMPILE=false O_TEST=true
 run_gate "Elixir gate: RED — no reassuring notice on a failure" "$elixir_step" no 1 \
-  R_CHANGES=success R_TEST=failure R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=failure R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=skipped \
   O_COMPILE=false O_TEST=false
 
 cloud_step="$TMPROOT/step-cloud.sh"
@@ -531,7 +531,7 @@ body_says() { # body_says <label> <sentinel> <needle>
   fi
 }
 run_gate "Elixir gate: docs-only" "$elixir_step" yes 0 \
-  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=skipped \
   O_COMPILE=false O_TEST=false
 body_says "Elixir gate" - "NOTHING ELIXIR RAN"
 body_says "Elixir gate" - "NOT because anything was tested"
@@ -644,10 +644,10 @@ red_names() {
 }
 
 red_names "Elixir gate: mix-test failed" "$elixir_step" "mix-test" "mix-prod-compile" \
-  R_CHANGES=success R_TEST=failure R_PROD=success R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=failure R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 red_names "Elixir gate: mix-prod-compile failed" "$elixir_step" "mix-prod-compile" "mix-test" \
-  R_CHANGES=success R_TEST=success R_PROD=failure R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=success R_PROD=failure R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 
 red_names "Cloud gate: test failed" "$cloud_step" "test" "compile" \
