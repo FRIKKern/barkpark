@@ -51,14 +51,71 @@ defmodule Barkpark.Content.PaperAccess do
   @max_limit 500
 
   @doc """
-  Append one access row. ALWAYS returns `:ok` — see the moduledoc.
+  Append one access row OFF the caller's process, and return `:ok` at once.
+
+  THE STATEMENT MUST LEAVE THE REQUEST. The reader's connected mount runs
+  inside a pinned statement budget (`reader_query_baseline_test.exs`), and a
+  trail write is not worth one of those statements: it is bookkeeping nobody on
+  the page is waiting for. Running it synchronously also put a DB round-trip in
+  front of first render, so any contention — a checkpoint, an Oban tick — would
+  have stalled the paper itself for exactly that hiccup. The same reasoning
+  `Search.Intelligence.submit_event/1` records for its own event write.
+
+  Fire-and-forget on `Barkpark.TaskSupervisor` (started in application.ex).
+  `Task.Supervisor.start_child/2` propagates `$callers`, so the test sandbox
+  still owns the connection and `DataCase.drain_owned_tasks/3` still awaits the
+  write before stopping the owner.
 
   `attrs` is a map carrying `:slug`, `:dataset`, `:action` and the actor triple
   (`:actor_kind`, `:actor_id`, `:actor_label`), plus an optional
   `:workspace_id`.
   """
   @spec record(map()) :: :ok
-  def record(attrs) when is_map(attrs) do
+  def record(attrs) do
+    if enabled?() do
+      spawn_record(attrs)
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Whether the trail is being written at all (`:paper_access_log_enabled`,
+  default true).
+
+  The switch exists for ONE caller: `reader_query_baseline_test.exs`, whose
+  pinned statement budget measures what the anonymous reader makes a visitor
+  wait for. That census attributes a statement by process LINEAGE, so a
+  fire-and-forget task still counts against the request that spawned it —
+  making the write asynchronous moves it off the request's critical path (which
+  is why it IS asynchronous) but does not move it out of the census. Rather
+  than raise a budget the reader has not actually spent, that one test turns
+  the trail off and says so.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: Application.get_env(:barkpark, :paper_access_log_enabled, true) != false
+
+  defp spawn_record(attrs) do
+    case Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> record_now(attrs) end) do
+      {:ok, _pid} ->
+        :ok
+
+      other ->
+        # The supervisor is unreachable (a boot-order surprise, a shutting-down
+        # node). Losing a trail row is strictly better than losing the page, so
+        # this does NOT fall back to a synchronous write.
+        Logger.warning("paper access log task not started: #{inspect(other)}")
+        :ok
+    end
+  end
+
+  @doc """
+  The synchronous write `record/1` schedules. Public so a caller that is
+  ALREADY off the request path (a backfill, a test asserting the row shape)
+  can write without a second hop. Same always-`:ok` contract.
+  """
+  @spec record_now(map()) :: :ok
+  def record_now(attrs) when is_map(attrs) do
     %PaperAccessLog{}
     |> PaperAccessLog.changeset(attrs)
     |> Repo.insert()
@@ -79,7 +136,7 @@ defmodule Barkpark.Content.PaperAccess do
       :ok
   end
 
-  def record(_attrs), do: :ok
+  def record_now(_attrs), do: :ok
 
   @doc """
   Build the `record/1` attrs for one access event from a paper identity and an

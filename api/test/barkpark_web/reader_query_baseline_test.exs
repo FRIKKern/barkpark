@@ -122,6 +122,20 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   @max_n_plus_one_slope 1.0
 
   setup do
+    # The paper ACCESS TRAIL is off for this census, and that is a measurement
+    # decision, not a workaround. This file budgets what the anonymous reader
+    # makes a visitor WAIT for. The trail write (edit-on-the-link slice 4) is
+    # fire-and-forget on `Barkpark.TaskSupervisor` — the mount neither awaits it
+    # nor renders anything from it — but `drain_counts/3` attributes a statement
+    # by process LINEAGE, and `Task.Supervisor` propagates `$callers`, so an
+    # abandoned task still lands in the request's census. Counting it would
+    # price a wait nobody does, and raising the budget to absorb it would spend
+    # a ratchet on a statement the reader does not pay. So it is excluded HERE,
+    # named, instead. Its own coverage is
+    # `test/barkpark_web/controllers/paper_access_controller_test.exs`.
+    Application.put_env(:barkpark, :paper_access_log_enabled, false)
+    on_exit(fn -> Application.delete_env(:barkpark, :paper_access_log_enabled) end)
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 

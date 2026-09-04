@@ -23,11 +23,12 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Auth, Content}
-  alias Barkpark.Content.PaperAccess
+  alias Barkpark.{Auth, Content, Repo}
+  alias Barkpark.Content.{PaperAccess, PaperAccessLog}
 
   @dataset "production"
 
@@ -81,6 +82,34 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
     get(conn, "/v1/papers/#{slug}/access" <> query)
   end
 
+  # The reader's trail write is fire-and-forget on `Barkpark.TaskSupervisor`
+  # (`PaperAccess.record/1`), so a row is not in the table the instant `live/2`
+  # or an op returns. Poll for the expected count against a deadline rather
+  # than sleeping: a sleep proves a row arrived eventually, a bounded poll
+  # proves it arrived at all and fails loudly naming what was missing.
+  #
+  # It also keeps the sandbox honest — the test cannot finish, and its owner
+  # cannot stop, while the write is still in flight.
+  @await_ms 2_000
+  defp await_rows(slug, expected, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + @await_ms
+    count = Repo.aggregate(from(r in PaperAccessLog, where: r.slug == ^slug), :count)
+
+    cond do
+      count >= expected ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk(
+          "only #{count} access row(s) for #{slug} after #{@await_ms}ms, expected #{expected}"
+        )
+
+      true ->
+        Process.sleep(20)
+        await_rows(slug, expected, deadline)
+    end
+  end
+
   describe "criterion 3 — the rows the reader actually produces" do
     test "a view and an edit are both listed, with principal and time", %{
       conn: conn,
@@ -97,6 +126,8 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
         "id" => "b-body",
         "patch" => %{"content" => [%{"type" => "text", "value" => "Edited"}]}
       })
+
+      await_rows(slug, 2)
 
       body = conn |> admin_conn() |> get_access(slug) |> json_response(200)
 
@@ -129,6 +160,8 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
         })
       end
 
+      await_rows(slug, 3)
+
       body = conn |> admin_conn() |> get_access(slug) |> json_response(200)
 
       assert Enum.map(body["access"], & &1["action"]) == ["edit", "edit", "view"]
@@ -143,6 +176,7 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
       slug: slug
     } do
       {:ok, _view, _html} = live(conn, "/papers/#{slug}")
+      await_rows(slug, 1)
 
       body = conn |> admin_conn() |> get_access(slug) |> json_response(200)
 
@@ -174,6 +208,8 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
         })
       end
 
+      await_rows(slug, 4)
+
       full = conn |> admin_conn() |> get_access(slug) |> json_response(200)
       assert full["count"] == 4
 
@@ -191,6 +227,7 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
 
     test "a malformed limit falls back instead of 500ing", %{conn: conn, slug: slug} do
       {:ok, _view, _html} = live(conn, "/papers/#{slug}")
+      await_rows(slug, 1)
 
       assert conn |> admin_conn() |> get_access(slug, "?limit=banana") |> json_response(200)
       assert conn |> admin_conn() |> get_access(slug, "?limit[]=1") |> json_response(200)
@@ -230,16 +267,45 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
   end
 
   describe "the store beneath it" do
-    test "record/1 never raises and never fails a caller" do
+    test "record_now/1 never raises and never fails a caller" do
       # Invalid on every axis the changeset checks.
-      assert PaperAccess.record(%{}) == :ok
-      assert PaperAccess.record(%{slug: "s", dataset: "d", action: "nonsense"}) == :ok
-      assert PaperAccess.record(:not_even_a_map) == :ok
+      assert PaperAccess.record_now(%{}) == :ok
+      assert PaperAccess.record_now(%{slug: "s", dataset: "d", action: "nonsense"}) == :ok
+      assert PaperAccess.record_now(:not_even_a_map) == :ok
+    end
+
+    test "record/1 schedules the write off the caller and still says :ok", %{slug: slug} do
+      assert PaperAccess.record(%{
+               slug: slug,
+               dataset: @dataset,
+               action: "view",
+               actor_kind: "anonymous"
+             }) == :ok
+
+      await_rows(slug, 1)
+      assert [_row] = PaperAccess.list(slug, workspace_id: nil)
+    end
+
+    test "record/1 is a no-op when the trail is switched off", %{slug: slug} do
+      Application.put_env(:barkpark, :paper_access_log_enabled, false)
+      on_exit(fn -> Application.delete_env(:barkpark, :paper_access_log_enabled) end)
+
+      refute PaperAccess.enabled?()
+
+      assert PaperAccess.record(%{
+               slug: slug,
+               dataset: @dataset,
+               action: "view",
+               actor_kind: "anonymous"
+             }) == :ok
+
+      # Nothing scheduled, so nothing to wait for.
+      assert PaperAccess.list(slug, workspace_id: nil) == []
     end
 
     test "an anonymous row cannot carry an identity, however it is handed one", %{slug: slug} do
       :ok =
-        PaperAccess.record(%{
+        PaperAccess.record_now(%{
           slug: slug,
           dataset: @dataset,
           action: "view",
@@ -256,7 +322,7 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
 
     test "prune/1 deletes past the window and leaves the rest", %{slug: slug} do
       :ok =
-        PaperAccess.record(%{
+        PaperAccess.record_now(%{
           slug: slug,
           dataset: @dataset,
           action: "view",
@@ -268,7 +334,7 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
       assert PaperAccess.list(slug, workspace_id: nil) == []
 
       :ok =
-        PaperAccess.record(%{
+        PaperAccess.record_now(%{
           slug: slug,
           dataset: @dataset,
           action: "view",
@@ -282,7 +348,7 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
 
     test "the sweeper worker runs the prune", %{slug: slug} do
       :ok =
-        PaperAccess.record(%{
+        PaperAccess.record_now(%{
           slug: slug,
           dataset: @dataset,
           action: "view",
