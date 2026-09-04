@@ -246,6 +246,10 @@ export interface MediaAsset {
   originalName?: string
   path?: string
   originalUrl?: string
+  /** Absolute (scheme + host) delivery url — the one field fetchable as-is from
+   *  any origin. Server-derived from the configured CDN base, else the API's own
+   *  public origin. The sibling url fields stay relative delivery paths. */
+  absoluteUrl?: string
   thumbnailUrl?: string
   previewUrl?: string
   renditions?: Record<string, unknown>

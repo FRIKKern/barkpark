@@ -151,6 +151,10 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_T
 
 Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
+## 8d. Media asset record — `absoluteUrl`
+
+Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, scheme+host from `:media_cdn, :base_url` else the API's own origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied. Fetchable as-is from any origin.
+
 ## 9. Error Codes
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.

@@ -69,6 +69,10 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
     # `renditions` are the signed surface; cdnUrls is the edge-cacheable one.
     cdn_opts = [scope_prefix: scope_prefix]
 
+    # ONE original-URL build, reused by `url`, `originalUrl` and the absolute
+    # field below, so the three can never disagree byte-for-byte.
+    original = Urls.original_url(file, url_opts)
+
     base = %{
       id: file.id,
       # THE BLOB ID, NAMED (task-57ee9fff4aae9217 #11). `id` is the media_files
@@ -82,8 +86,17 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       filename: file.filename,
       originalName: file.original_name,
       path: file.path,
-      url: Urls.original_url(file, url_opts),
-      originalUrl: Urls.original_url(file, url_opts),
+      url: original,
+      originalUrl: original,
+      # THE ONE FIELD A CLIENT CAN FETCH AS-IS (jf-backlog-media-absolute-url).
+      # Every sibling URL here is a relative delivery PATH — documented, read by
+      # persisted webhook payloads and the JS SDK, and therefore frozen — so
+      # nothing in a receipt said WHICH ORIGIN serves them. `absoluteUrl` is
+      # ADDITIVE: `Urls.absolutize/1` prefixes the configured CDN base when one
+      # is set (it already is, via Cdn.public_url/1) and otherwise the app's own
+      # public origin, over a URL that already carries this request's scope
+      # prefix. Nothing above changed value.
+      absoluteUrl: Urls.absolutize(original),
       thumbnailUrl: Urls.thumbnail_url(file, url_opts),
       previewUrl: Urls.preview_url(file, url_opts),
       renditions: Urls.rendition_urls(file, url_opts),
