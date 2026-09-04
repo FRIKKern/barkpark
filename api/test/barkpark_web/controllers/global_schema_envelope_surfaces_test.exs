@@ -171,7 +171,8 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
       ref_type: @gtype,
       ref_id: doc_id,
       access: "read",
-      token: raw,
+      # Only the digest — the plaintext column was retired
+      # (arpss-w8-bl-share-link-raw-token-at-rest); `resolve/1` matches the hash.
       token_hash: Links.hash_token(raw)
     })
 

@@ -161,8 +161,9 @@ defmodule BarkparkWeb.ShareLinkRouteBindingOneOwnerTest do
 
     link =
       Repo.insert!(%ShareLink{
+        # Only the digest — the plaintext column was retired
+        # (arpss-w8-bl-share-link-raw-token-at-rest); `resolve/1` matches the hash.
         token_hash: Links.hash_token(raw),
-        token: raw,
         workspace_id: ws.id,
         project_id: proj.id,
         dataset: @dataset,

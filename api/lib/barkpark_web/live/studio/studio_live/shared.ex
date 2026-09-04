@@ -1537,14 +1537,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def scope_slug(_, default), do: default
 
   @doc false
-  def load_item_links(socket, %{kind: kind, ref_type: ref_type, ref_id: ref_id}) do
+  # `fresh` is `%{link_id => raw_token}` for links MINTED IN THIS SESSION, held
+  # in socket assigns and never in the database
+  # (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02: retire the
+  # plaintext column). A stored row carries only its SHA256 digest, so a link
+  # this socket did not just mint has NO url — `nil` here is the honest answer,
+  # not a missing value, and the popover renders the regenerate affordance for
+  # it. This is the Studio half of the same one-way rule the HTTP mint 201 obeys.
+  def load_item_links(socket, item, fresh \\ %{})
+
+  def load_item_links(socket, %{kind: kind, ref_type: ref_type, ref_id: ref_id}, fresh) do
     case socket.assigns[:current_workspace] do
       %{id: ws_id} ->
         base = Barkpark.Sharing.share_link_base()
 
         Barkpark.Sharing.Links.list_for(ws_id, kind, ref_type, ref_id)
         |> Enum.map(fn l ->
-          %{id: l.id, access: l.access, url: l.token && link_url(base, l.token)}
+          raw = Map.get(fresh || %{}, l.id)
+          %{id: l.id, access: l.access, url: raw && link_url(base, raw)}
         end)
 
       _ ->
@@ -1552,7 +1562,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
-  def load_item_links(_socket, _), do: []
+  def load_item_links(_socket, _, _), do: []
 
   @doc false
   def link_url(nil, token), do: "/s/#{token}"

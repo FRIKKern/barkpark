@@ -16,15 +16,32 @@ defmodule Barkpark.Sharing.Links do
   revocation + expiry in the query, so a dead link looks identical to a missing
   one.
 
-  THE RAW TOKEN IS STORED, unlike `Barkpark.Auth.ApiToken`: `create/1` writes
-  BOTH `token_hash` and the PLAINTEXT `token`, because P7's stable re-copyable
-  link needs a later read to re-emit `/s/<token>` (see
-  `Barkpark.Sharing.ShareLink`). A ShareLink row is therefore a LIVE CREDENTIAL
-  at rest and every read path that serialises one must be AUTHORISED BEFORE it
-  serialises — arpss-w8 closed exactly that hole in
-  `BarkparkWeb.ShareLinkController.list/2`. The older "returned once, only the
-  SHA256 is stored" wording that stood here was false, and believing it is what
-  made the leak look harmless.
+  THE RAW TOKEN IS RETURNED ONCE AND NEVER STORED, exactly like
+  `Barkpark.Auth.ApiToken`: `create/1` persists only `token_hash` and hands the
+  plaintext back in its `{:ok, {raw, link}}`; the mint 201 is the ONE place a
+  raw token leaves this system. No read path can re-emit `/s/<token>`, because
+  no row carries it.
+
+  THIS IS A DELIBERATE, RULED TRADEOFF, recorded here and at the schema so the
+  next auditor finds the reasoning instead of re-opening it
+  (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED by team-lead 2026-09-02:
+  "RETIRE the plaintext token column"). Until
+  `20260904020000_drop_token_from_share_links.exs`, `create/1` wrote BOTH the
+  hash and the PLAINTEXT token, so that P7's stable re-copyable link could be
+  re-shown by a later read. The migration that added it argued plaintext at
+  rest from "a self-hosted/LAN context — anyone who can read this column can
+  already read the shared content directly". THE MULTI-TENANT THREAT MODEL
+  VOIDS THAT PREMISE: on a shared install the readers of the column are not the
+  readers of the content, so every row was a LIVE CREDENTIAL at rest and every
+  serialising read path was one tenancy bug away from handing a stranger
+  working access — arpss-w8 closed exactly that hole in
+  `BarkparkWeb.ShareLinkController.list/2`, one path at a time. Retiring the
+  column closes the disclosure CLASS instead: there is no secret left on the
+  row for a future regression to leak. WHAT IT COSTS, plainly: a link can be
+  listed, labelled and revoked, but its URL cannot be RE-DISPLAYED. An operator
+  who has lost the URL revokes and mints a new one. (An older wording here
+  claimed "returned once, only the SHA256 is stored" while the code stored
+  both; that is now true of the code, not just of the sentence.)
 
   THIS CONTEXT OWNS TWO INVARIANTS THAT ITS CALLERS USED TO RE-DERIVE, because
   both doors onto the share surface (the HTTP controller and the Studio
@@ -216,8 +233,9 @@ defmodule Barkpark.Sharing.Links do
   Create an item link. `attrs` must carry `:workspace_id`, `:project_id`,
   `:dataset`, `:kind` (`"doc"`/`"media"`), `:ref_id`, `:access`; `:ref_type`
   for docs; optional `:label`, `:ttl` (seconds — omit / nil for no expiry).
-  Returns `{:ok, {raw_token, %ShareLink{}}}`. The raw token is ALSO persisted on
-  the row (see the moduledoc), so this is not a show-once secret.
+  Returns `{:ok, {raw_token, %ShareLink{}}}`. THIS RETURN IS THE ONLY PLACE THE
+  RAW TOKEN EXISTS — only its SHA256 digest is persisted (see the moduledoc), so
+  a caller that discards it cannot recover the URL from any later read.
 
   `:workspace_id` and `:project_id` are REQUIRED and a nil is a 422-shaped
   `{:error, changeset}`, not a persisted row (`task-2da739b78e938be0`). This is
@@ -249,7 +267,6 @@ defmodule Barkpark.Sharing.Links do
       attrs
       |> Map.drop([:ttl, "ttl"])
       |> Map.put(:token_hash, hash_token(raw))
-      |> Map.put(:token, raw)
       |> Map.put(:expires_at, expires_at)
       |> normalize_ref_id()
 
@@ -372,16 +389,17 @@ defmodule Barkpark.Sharing.Links do
   end
 
   @doc """
-  List the links for ONE item (newest first). RETURNS LIVE CREDENTIALS: each row
-  carries the PLAINTEXT `token` (and its hash), so a caller must be authorised
-  against `workspace_id` BEFORE it serialises anything this returns — the raw is
-  NOT unrecoverable. `ref_type` may be nil (media).
+  List the links for ONE item (newest first). Rows carry `token_hash`, never a
+  plaintext token, so this no longer returns live credentials — but a caller
+  must still be authorised against `workspace_id` before it serialises anything
+  here, because a link's existence, label, access level and revocability are
+  themselves tenant facts. `ref_type` may be nil (media).
 
   `opts` NARROWS the workspace to one tenant slice: `:project_id` and
   `:dataset`. A row is bound to a `(workspace_id, project_id, dataset)` triple
   (see `Barkpark.Sharing.ShareLink`), but the workspace-only filter answers a
-  scoped question with every sibling project's rows — and each row it returns
-  carries a LIVE `/s/<token>`. Callers that KNOW their project and dataset
+  scoped question with every sibling project's rows — a response that
+  contradicts its own `scope=`. Callers that KNOW their project and dataset
   (`GET /v1/shares/links`, whose `scope=` names both) must pass them; the
   4-arity stays for the callers that legitimately have only a workspace.
   """

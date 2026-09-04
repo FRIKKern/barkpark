@@ -40,9 +40,12 @@ defmodule BarkparkWeb.ShareLinkController do
     * `mint` — against the SCOPE's workspace (403). Ungated it minted a real
       `access: "edit"` credential INTO a foreign workspace.
     * `list` — against the SCOPE's workspace (403). Ungated it serialised
-      foreign rows through `link_json/1`, whose `url:` carries the PLAINTEXT
-      `/s/<token>` (see `Barkpark.Sharing.ShareLink` — the raw token IS stored),
-      i.e. it handed a stranger a LIVE credential, not merely metadata.
+      foreign rows through `link_json/1`, which then carried a `url:` holding
+      the PLAINTEXT `/s/<token>`, i.e. it handed a stranger a LIVE credential
+      rather than metadata. The credential half is now closed a second way and
+      structurally: the raw token no longer exists on the row and `link_json/1`
+      emits no `url:` at all (see `Barkpark.Sharing.ShareLink`). The gate stays
+      — a foreign admin must not read this workspace's link inventory either.
     * `revoke` — against the TARGET ROW's own workspace (404, byte-identical to
       a missing row).
 
@@ -64,7 +67,7 @@ defmodule BarkparkWeb.ShareLinkController do
   422 (item enumeration, whose loudest positive form is the 201 leak itself).
   Placing it before the query is also what makes the fix AUTHORIZE-BEFORE-
   SERIALIZE structurally: `link_json/1` is unreachable for a row the caller
-  cannot administer, so a foreign token is never rendered into a string at all —
+  cannot administer, so a foreign row is never rendered into a string at all —
   not hidden afterwards, not redacted afterwards.
 
   ## Denial-shape law — THE SHAPE FOLLOWS THE INPUT, NOT THE VERB
@@ -569,10 +572,13 @@ defmodule BarkparkWeb.ShareLinkController do
       access: l.access,
       dataset: l.dataset,
       label: l.label,
-      # the STABLE, re-copyable link (P7 UX) on the advertised share host (tunnel
-      # / LAN / domain). Present whenever the raw token was stored; `token_hash`
-      # (the secret-at-rest digest) is never exposed.
-      url: l.token && share_url(l.token),
+      # NO `url:` KEY, and none is possible. The raw token was retired from the
+      # table (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02), so
+      # a listed row holds only its SHA256 digest and this serializer cannot
+      # reconstruct `/s/<token>` from it. The mint 201 below is the ONE place a
+      # raw token — and therefore a URL — is returned. A caller that needs the
+      # URL again revokes and mints a new link. The key is DROPPED rather than
+      # emitted as nil so `url` names a value that is always real when present.
       expires_at: l.expires_at,
       revoked_at: l.revoked_at,
       inserted_at: Map.get(l, :inserted_at)
