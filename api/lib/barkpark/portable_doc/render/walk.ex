@@ -339,8 +339,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # pane because there were no `<p>` margins to space them. compose_block
   # paragraph/ingress/byline emit PdParagraph in article mode so the editor's
   # body typography (font-size 18px, line-height 1.70, margin rhythm)
-  # actually applies. Email/default mode keeps PdText (`<span>`) for
-  # byte-stable export.
+  # actually applies. STALE-NOTE CORRECTED (2026-09-02): the old line here
+  # claimed "email/default mode keeps PdText (`<span>`) for byte-stable export".
+  # It has not been true since the gp-w3 email-view wave — compose_block/2 emits
+  # PdParagraph for paragraph, eyebrow, byline, ingress AND pullquote in EVERY
+  # style (compose.ex `_ = style` in each of those clauses), so a real `:email`
+  # render is block-level throughout. The `<span>` role output visible in
+  # `email_golden.html` is a FIXTURE artifact: ParityFixture hand-builds
+  # `PdText` role nodes (test/support/portable_doc_parity_fixture.ex text_roles/0),
+  # bypassing compose entirely.
   # Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
   # 2026-07-31): published readers emit only visible semantic groups — an empty
   # PdParagraph scaffold (Enter, Enter) stays editable in the Pd-tree (compose
@@ -398,11 +405,53 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
-    out = Enum.reverse(out)
+    out = body_type(n, pal) ++ Enum.reverse(out)
 
     style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
     class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
     "<p#{class_attr}#{style_attr}>#{inner}</p>"
+  end
+
+  # Body-copy type for the ordinary paragraph under a STYLESHEET-LESS palette
+  # (`:email`, and a bare standalone export). Mail clients strip stylesheets, so
+  # every other block already carries its type inline — headings via
+  # heading_style/2, lists via the list clause, roles via apply_text_role/4 —
+  # and the plain `<p>`, the commonest block in any paper, was the one leg that
+  # emitted NO style attribute at all. It then inherited the client default
+  # (~16px/normal, and in Outlook a system sans, because the wrapper's
+  # font-family does not descend into `<p>`), so body copy read SMALLER and
+  # looser than the 18px/1.55 ingress that introduces it.
+  #
+  # Values are sourced from the palette (`pal.font_body`, `pal.text`) — never a
+  # re-typed hex — so a theme override moves these bytes with the rest of the
+  # skin. Emitted FIRST so an author mark (weight/italic/deco/`color`) parsed
+  # later still wins the cascade: a coloured paragraph keeps its author colour.
+  #
+  # Two deliberate exemptions:
+  #   * `:article` — its `<p>` is bare BY CONTRACT; `.bp-paper-surface p` owns
+  #     the typography in both View and Edit (see the moduledoc theme-vs-data
+  #     contract). Stamping here would fork that single source.
+  #   * a role-hinted paragraph (eyebrow/byline/ingress/pullquote) — it already
+  #     carries a complete, measure-tuned stamp from apply_text_role/4; adding a
+  #     base underneath it would only be overridden.
+  defp body_type(_n, %{style: :article}), do: []
+
+  defp body_type(n, pal) do
+    if Map.get(n, "_role") do
+      []
+    else
+      # An author `color` mark already paints this paragraph; emitting the
+      # palette ink underneath it would only be overridden, so it is dropped —
+      # one `color` declaration per `<p>`, never a dead duplicate.
+      base = [
+        "margin:0 0 16px",
+        "font-family:#{pal.font_body}",
+        "font-size:17px",
+        "line-height:1.55"
+      ]
+
+      if Map.get(n, "color"), do: base, else: base ++ ["color:#{pal.text}"]
+    end
   end
 
   # Real semantic heading (the compose clause emits PdHeading exclusively under
