@@ -18048,7 +18048,47 @@
   // arity and answer are unchanged; this is the fifth copy of a server role
   // table losing its independence, not a gate moving.
   function billingCanManage(role) { return actorRoleIn(role, CONSOLE_OWNER_ROLES); }
-  function billingIsOwner() { return !!(meCache && billingCanManage(meCache.role)); }
+
+  // cch-w49-s6 (D557) — THE OWNER BAND. `grep -c 'ta.owner' app.js` returned
+  // ZERO until this line: the console had never once read the `owner` key
+  // /v1/me has sent since wave 41, while all three money routes
+  // (Auth.require_current_team_owner on checkout, portal and cancel) test
+  // Authz.team_owner?/2 — the IDENTICAL function that serializes as
+  // team_authority.owner. So this band cannot disagree with the gate by
+  // construction, which is the whole reason it replaces a role-literal read.
+  //
+  // A NEW five-valued SIBLING of teamAuthorityState(), not a widening of the
+  // boolean (D439): widening billingIsOwner() to a string would ship green AND
+  // make `if (billingIsOwner())` true for "failed"/"loading" — the fail-open
+  // the honest-states rule forbids. Callers branch on the band BY NAME;
+  // billingIsOwner() delegates and stays two-valued (canManageOnboarding() is
+  // the shipped precedent for exactly that shape).
+  //
+  // WHY IT IS A SECOND BAND AND NOT ONE BAND RETURNING THE ROLE (the design
+  // question this slice had to decide in writing): teamAuthorityState() answers
+  // the ADMIN question and this one answers the OWNER question, and each is a
+  // direct mirror of the ONE server predicate its routes actually run. A single
+  // band handing back a role string would put the role→capability mapping back
+  // in the console at every call site — a sixth hand-copy of a server table,
+  // the exact class the CONSOLE_OWNER_ROLES declaration above exists to end —
+  // and it would have to encode loading/failed/stale in the same string as the
+  // roles, so no caller could tell "member" from "we do not know".
+  //
+  // FAILS CLOSED, unlike launchCheckoutAuthority (see its comment): here a
+  // wrong grant hands a non-owner the Stripe portal and Cancel.
+  function billingOwnerAuthority() {
+    var state = meState();
+    if (state !== "loaded") return state === "failed" ? "failed" : "loading";
+    var ta = meCache && meCache.team_authority;
+    // Teamless is a determinate NO, and the server sends nil for exactly that.
+    if (!ta) return "refuse";
+    // Checked BEFORE the owner read, for the reason teamAuthorityState() gives:
+    // a moved pin is exactly what invalidates the answer the next line reads.
+    if (meTeamPinMoved()) return "stale";
+    return ta.owner ? "grant" : "refuse";
+  }
+
+  function billingIsOwner() { return billingOwnerAuthority() === "grant"; }
 
   // Pure: does the team hold a REAL paid subscription (a catalog plan that isn't
   // Free) in a state the Stripe portal can act on? A trial (plan "trial", not in
@@ -18114,12 +18154,23 @@
     // empty. The unknown arm goes AHEAD of the refusal, and it is fail-CLOSED —
     // it renders the same button-free plan card the member gets, hides the
     // grid, and hides Cancel; the only control it adds is the Retry.
-    if (meState() !== "loaded") { renderBillingMeUnknown(box); return; }
+    // cch-w49-s6 — AND THE ARM BRANCHES ON THE BAND BY NAME, not on the
+    // boolean. `if (!billingIsOwner())` alone is a wave-39 REGRESSION under the
+    // fifth band value: with a moved team pin meState() is still "loaded", so a
+    // `meState() !== "loaded"` arm cannot fire, control reaches the refusal, and
+    // a genuine OWNER reads "Only the team owner can manage billing." — the
+    // exact sentence cch-w39-s1 existed to kill, resurrected by a stale pin.
+    // The band's loading/failed values make the old meState() line redundant:
+    // this one line routes all three not-an-answer states to the same fail-
+    // closed unknown surface, and only a DETERMINATE refuse reaches the member
+    // surface below.
+    var band = billingOwnerAuthority();
+    if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
 
     // GR36 plain-member law: a non-owner (admin OR member) sees the plan state
     // read-only with NO write CTA anywhere — never a disabled ghost. The honest
     // "Only the team owner can manage billing." copy lives in the Manage section.
-    if (!billingIsOwner()) { renderBillingReadOnly(box); return; }
+    if (band === "refuse") { renderBillingReadOnly(box); return; }
 
     renderPlanState(box);
     renderBillingManage(true);
@@ -18150,15 +18201,30 @@
   // (charter D444): #billing-manage holds the unknown block and nothing else,
   // and the six plain-member expectations still render at meState()=="loaded",
   // untouched.
-  function renderBillingMeUnknown(box) {
+  // cch-w49-s6 — IT TAKES THE BAND NOW, and the `stale` arm gets its OWN
+  // sentence rather than borrowing this one. The shipped copy is
+  // meFailureCopy()-shaped — "until it answers" — which is TRUE for a read in
+  // flight or a 500 and FALSE for a pin that simply moved: there the server
+  // answered fine, just about a different team. Reusing a pre-live hint as an
+  // account-state claim is the D530(i) failure mode, so it is authored, not
+  // inherited. The HEADLINE stays meUnknownHtml's non-failed one ("Checking
+  // your account…") on purpose: the Retry below re-drives /v1/me, whose absorb
+  // RE-TAKES the pin, so a re-check is literally what happens next.
+  var BILLING_UNKNOWN_CONSEQUENCE =
+    "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.";
+  var BILLING_STALE_CONSEQUENCE =
+    "This answer was fetched for a different team, so it can't tell us whether this account may manage billing here — nothing was changed and nothing was refused.";
+
+  function renderBillingMeUnknown(box, band) {
     box.innerHTML = readOnlyPlanCardHtml(subCache);
     var grid = $("#billing-tiers");
     if (grid) grid.hidden = true;
     showBillingSection("#billing-manage-section", true);
     var body = $("#billing-manage");
     if (body) {
-      body.innerHTML = meUnknownHtml(meState(),
-        "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.");
+      var state = band || meState();
+      body.innerHTML = meUnknownHtml(state,
+        state === "stale" ? BILLING_STALE_CONSEQUENCE : BILLING_UNKNOWN_CONSEQUENCE);
       wireMeRetry(body, renderBilling);
     }
     renderBillingCancel(false);
@@ -27375,6 +27441,14 @@
       // section mounts (renderBillingManage/renderBillingCancel/openCancelPlanModal)
       // are smoke+browser-verified.
       billingCanManage: billingCanManage,
+      // cch-w49-s6 — the OWNER band and the boolean that delegates to it, plus
+      // renderBilling itself: until now the money fence's ONLY unit guard was a
+      // source-text indexOf inside a D444 ordering pin, which greens on a full
+      // bypass inserted above it and reds on a behaviour-identical rewrite. A
+      // guard that cannot see the fence run is not a guard.
+      billingOwnerAuthority: billingOwnerAuthority,
+      billingIsOwner: billingIsOwner,
+      renderBilling: renderBilling,
       // cch-w41-s3 — the other three owner|admin authority predicates, exported
       // for the SAME reason billingCanManage is: until now they were pinned by
       // nothing. Measured on the shipped bytes: rewriting providerCanWrite /
