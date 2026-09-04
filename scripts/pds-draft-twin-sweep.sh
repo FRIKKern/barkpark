@@ -27,14 +27,13 @@
 #     (a) the published twin is SEALED — lifecycle_status is `done` or
 #         `cancelled`. Anything else (open / in_progress / blocked / …) is a
 #         live row and the draft may be a live edit -> LIST.
-#     (b) the published twin carries a READABLE close timestamp
-#         (`claim.closed_at`). 264 of the 5983 sealed published rows in the
-#         census walk carry NO closed_at — for those the "before the close"
-#         question is UNANSWERABLE, and an unanswerable question is not a yes.
-#         The guard FAILS CLOSED: no timestamp -> LIST, never DISCARD.
-#     (c) the draft's `_updatedAt` is STRICTLY EARLIER than that close
-#         timestamp — the draft is a pre-close snapshot. A draft at or after
-#         the close is a live edit someone made to a sealed row -> LIST.
+#     (b) the draft's WORK FIELDS are BYTE-EQUAL to the published row's —
+#         the work_digest set: title, description, brief, acceptance_criteria,
+#         tags (main's ruling, DECISIONS 2026-09-04 02:56Z, OPTION B). Any
+#         difference in any of the five -> LIST. The first cut of this guard
+#         ruled by TIMESTAMP (draft _updatedAt before claim.closed_at) and
+#         discarded 1 of 452, because the fork is minted by a patch AFTER the
+#         close; the timestamp columns are still printed but gate nothing.
 #   LIST is not a soft DISCARD. Nothing on the LIST is ever written.
 #
 # WHAT THE FIRST DRY RUN MEASURED, AND WHY IT IS NOT A BUG IN THIS SCRIPT.
@@ -122,7 +121,7 @@ die() { printf 'pds-draft-twin-sweep: %s\n' "$1" >&2; exit "${2:-2}"; }
 pull_raw() {
   local out="$1"
   env -u BARKPARK_TOKEN "$BP" doc ls "$DOC_TYPE" --perspective raw --all \
-    --fields lifecycle_status,claim,close_reason,acceptance_criteria,title \
+    --fields lifecycle_status,claim,close_reason,acceptance_criteria,title,description,brief,tags \
     -o json 2>/dev/null | grep -v '^bp: ' > "$out"
 }
 
@@ -148,6 +147,13 @@ classify() {
     def bare: sub("^drafts\\.";"");
     def metcount: ((.acceptance_criteria // []) | map(select(.met == true)) | length);
     def totcount: ((.acceptance_criteria // []) | length);
+    # THE WORK FIELDS (the byte-equality set main ruled). Absent and null are the same
+    # absence; an absent list is an empty list. Nothing else is normalised —
+    # a met flag, a tag strength, a trailing space: each counts as a difference.
+    def work: {title: (.title // null), description: (.description // null),
+               brief: (.brief // null), acceptance_criteria: (.acceptance_criteria // []),
+               tags: (.tags // [])};
+    def differing: . as [$a,$b] | [ ($a|keys[]) | select($a[.] != $b[.]) ];
 
     ($byhand | split(" ")) as $BH
     | (.documents | map(select(._id | startswith("drafts.") | not))
@@ -164,6 +170,8 @@ classify() {
         | (($ps == "done") or ($ps == "cancelled")) as $sealed
         | ($closed_at != null and ($closed_at|tostring) != "") as $has_close_ts
         | ($has_close_ts and (($d._updatedAt|tostring) < ($closed_at|tostring))) as $pre_close
+        | ([($p|work), ($d|work)] | differing) as $diff
+        | (($diff|length) == 0) as $equal
         # ONE decision, read out twice. The verdict and the reason are both
         # derived from $code, so each clause of guard 1 has exactly ONE place it
         # can be deleted from — measured the hard way: when verdict and why were
@@ -173,9 +181,8 @@ classify() {
         # a mutation cannot find.
         | (if   ($BH | index($id))  then "BY-HAND"
            elif ($sealed | not)     then "NOT-SEALED"
-           elif ($has_close_ts|not) then "NO-CLOSE-TS"
-           elif ($pre_close | not)  then "POST-CLOSE"
-           else "PRE-CLOSE" end) as $code
+           elif ($equal | not)      then "WORK-DIFFERS"
+           else "WORK-EQUAL" end) as $code
         | {
             id: $id,
             diverging: ($ps != $ds),
@@ -189,14 +196,13 @@ classify() {
             draft_close_reason: (if ($d.close_reason // null) != null then "yes" else "no" end),
             verdict: (
               if   $code == "BY-HAND"   then "BY-HAND"
-              elif $code == "PRE-CLOSE" then "DISCARD"
+              elif $code == "WORK-EQUAL" then "DISCARD"
               else "LIST" end),
             why: (
               if   $code == "BY-HAND"     then "named by main; never in the bulk write"
               elif $code == "NOT-SEALED"  then "published twin is NOT sealed (\($ps)) — a live row"
-              elif $code == "NO-CLOSE-TS" then "published twin is sealed but carries NO readable close timestamp — guard 1 fails closed"
-              elif $code == "POST-CLOSE"  then "draft _updatedAt (\($d._updatedAt)) is NOT before the close (\($closed_at)) — a live edit"
-              else "pre-close snapshot of a sealed row" end)
+              elif $code == "WORK-DIFFERS" then "draft work fields DIFFER from the published (\($diff|join(","))) — a live edit or the only copy of something"
+              else "sealed twin; work fields byte-equal — the draft says nothing the published row does not\(if $pre_close then "" else " (draft touched after the close: \($d._updatedAt) vs \($closed_at))" end)" end)
           })
     | .[] | select(.diverging)
     | [.id,.pub_status,.draft_status,.closed_at,.draft_updated,.pub_rev,.draft_rev,
@@ -383,22 +389,22 @@ selftest() {
 
   cat > "$tmp/fixture.json" <<'JSON'
 {"documents":[
- {"_id":"pre-close-pair","_rev":"p1","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done",
+ {"_id":"equal-pair","_rev":"p1","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done","title":"t","description":"d","brief":"b","tags":[{"tag":"x"}],
   "close_reason":"shipped","claim":{"epoch":3,"closed_at":"2026-09-01T09:00:00Z"},
   "acceptance_criteria":[{"met":true},{"met":true}]},
- {"_id":"drafts.pre-close-pair","_rev":"d1","_updatedAt":"2026-09-01T08:00:00Z","lifecycle_status":"open",
-  "claim":null,"acceptance_criteria":[{"met":false},{"met":false}]},
+ {"_id":"drafts.equal-pair","_rev":"d1","_updatedAt":"2026-09-01T11:30:00Z","lifecycle_status":"open","title":"t","description":"d","brief":"b","tags":[{"tag":"x"}],
+  "claim":null,"acceptance_criteria":[{"met":true},{"met":true}]},
 
- {"_id":"post-close-pair","_rev":"p2","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done",
+ {"_id":"differs-pair","_rev":"p2","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done","title":"t","description":"d","brief":"b","tags":[],
   "close_reason":"shipped","claim":{"epoch":3,"closed_at":"2026-09-01T09:00:00Z"},
   "acceptance_criteria":[{"met":true}]},
- {"_id":"drafts.post-close-pair","_rev":"d2","_updatedAt":"2026-09-01T11:30:00Z","lifecycle_status":"open",
-  "claim":null,"acceptance_criteria":[{"met":false}]},
+ {"_id":"drafts.differs-pair","_rev":"d2","_updatedAt":"2026-09-01T08:00:00Z","lifecycle_status":"open","title":"t","description":"d EDITED","brief":"b","tags":[],
+  "claim":null,"acceptance_criteria":[{"met":true}]},
 
- {"_id":"no-close-ts-pair","_rev":"p3","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"cancelled",
+ {"_id":"met-differs-pair","_rev":"p3","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"cancelled","title":"t",
   "close_reason":"dropped","claim":{"epoch":1},
   "acceptance_criteria":[{"met":true}]},
- {"_id":"drafts.no-close-ts-pair","_rev":"d3","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open",
+ {"_id":"drafts.met-differs-pair","_rev":"d3","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open","title":"t",
   "claim":null,"acceptance_criteria":[{"met":false}]},
 
  {"_id":"not-sealed-pair","_rev":"p4","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"open",
@@ -444,10 +450,10 @@ JSON
   }
 
   printf 'GUARD 1 — the discard rule\n'
-  expect_verdict pre-close-pair  DISCARD
-  expect_verdict post-close-pair LIST
-  expect_verdict no-close-ts-pair LIST
-  expect_verdict not-sealed-pair LIST
+  expect_verdict equal-pair       DISCARD
+  expect_verdict differs-pair     LIST
+  expect_verdict met-differs-pair LIST
+  expect_verdict not-sealed-pair  LIST
 
   # THE VERDICT ALONE DOES NOT REACH CLAUSE (b). Both (b) and (c) answer LIST
   # for the missing-timestamp row, so an arm that only checks the verdict stays
@@ -468,8 +474,9 @@ JSON
       *) bad "$label" "expected a reason containing '$needle', got: ${got:-<empty>}" ;;
     esac
   }
-  expect_reason no-close-ts-pair "NO readable close timestamp" "no-close-ts-pair is listed BY CLAUSE (b), not by accident"
-  expect_reason post-close-pair  "NOT before the close"        "post-close-pair is listed BY CLAUSE (c)"
+  expect_reason differs-pair     "DIFFER from the published (description)"         "differs-pair is listed BY CLAUSE (b) and names the field"
+  expect_reason met-differs-pair "DIFFER from the published (acceptance_criteria)" "a met-flag difference is a work-field difference (byte-equality, not a heuristic)"
+  expect_reason equal-pair       "draft touched after the close"                   "equal-pair is DISCARDED despite the post-close touch — the timestamp gates nothing"
   expect_reason not-sealed-pair  "NOT sealed"                  "not-sealed-pair is listed BY CLAUSE (a)"
   printf 'THE TWO BY-HAND ROWS\n'
   expect_verdict task-2b7cbaf8265f6b4e BY-HAND
@@ -507,8 +514,8 @@ JSON
   printf 'THE DIAGNOSTIC IS A DIAGNOSTIC\n'
   local diag
   diag="$(diagnostic_line "$tmp/table.tsv")"
-  # THREE fixture twins are content-poorer sealed twins — pre-close-pair
-  # (DISCARD), post-close-pair (LIST) and no-close-ts-pair (LIST). The
+  # THREE fixture twins are content-poorer sealed twins — equal-pair
+  # (DISCARD), differs-pair (LIST) and met-differs-pair (LIST). The
   # diagnostic must count all three while the verdict column DISCARDs one: a
   # diagnostic that agreed with the verdict would be measuring nothing new.
   if printf "%s" "$diag" | grep -q "content-poorer drafts on sealed twins = 3"; then
