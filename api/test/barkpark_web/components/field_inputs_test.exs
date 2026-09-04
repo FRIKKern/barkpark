@@ -419,6 +419,47 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       refute html =~ ~s(class="image-field")
     end
 
+    test "hotspot + alt opt-ins reach the picker as attributes; absent → no attribute at all (Gyldendal E1)" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover", "hotspot" => true, "alt" => true},
+          editor_form: %{"cover" => ""}
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
+      assert html =~ ~r{<bp-media-picker[^>]*\salt[^>]*>}
+
+      nested =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover", "options" => %{"hotspot" => true}},
+          editor_form: %{"cover" => ""}
+        })
+
+      assert nested =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
+
+      plain =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{"cover" => ""}
+        })
+
+      refute plain =~ ~r{<bp-media-picker[^>]*\shotspot}
+      refute plain =~ ~r{<bp-media-picker[^>]*\salt}
+    end
+
+    test "a decoded image map is handed to the picker as its JSON wire string" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{"cover" => %{"url" => "/x.png", "assetId" => "a1", "focalX" => 0.5}}
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*value="\{[^"]*focalX[^"]*\}"}
+
+      assert html =~
+               ~r{<input type="hidden"[^>]*name="doc\[cover\]"[^>]*value="\{[^"]*focalX[^"]*\}"}
+    end
+
     test "empty value still renders the WC wrapper (WC owns empty UX)" do
       html =
         render_input(%{

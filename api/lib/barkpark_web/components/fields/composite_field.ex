@@ -182,7 +182,37 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     textarea_input(leaf_assigns)
   end
 
-  # Fall-through for remaining v1 leaf types (string, slug, richText, image, …)
+  # Gyldendal parity E1 — an `image` SUBFIELD inside a composite renders the
+  # same picker a top-level image field does (hotspot / alt opt-ins included),
+  # bridged into the composite's own input name. Before this it fell through
+  # to a bare text input, so the twin's `cover` composite showed eight raw
+  # boxes where Sanity shows one image with a hotspot.
+  defp render_subfield(assigns, %{type: "image"} = sub) do
+    raw = get_value(assigns.value, sub.name, "")
+    value = if is_map(raw), do: Jason.encode!(raw), else: to_string(raw || "")
+    opts = Map.get(sub, :raw) || %{}
+
+    leaf_assigns = %{
+      input_name: child_path(assigns.path, sub.name),
+      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      value: value,
+      hotspot:
+        if(Map.get(opts, "hotspot") == true or get_in(opts, ["options", "hotspot"]) == true,
+          do: true,
+          else: nil
+        ),
+      alt:
+        if(Map.get(opts, "alt") == true or get_in(opts, ["options", "alt"]) == true,
+          do: true,
+          else: nil
+        ),
+      readonly: assigns.readonly
+    }
+
+    image_subfield_input(leaf_assigns)
+  end
+
+  # Fall-through for remaining v1 leaf types (string, slug, richText, …)
   defp render_subfield(assigns, sub) do
     leaf_assigns = %{
       field: sub,
@@ -194,6 +224,20 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     }
 
     leaf_input(leaf_assigns)
+  end
+
+  defp image_subfield_input(assigns) do
+    ~H"""
+    <div id={"bp-mp-wrap-#{@input_id}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-mp-hidden-#{@input_id}"} name={@input_name} value={@value} phx-debounce="500" />
+      <bp-media-picker
+        value={@value}
+        data-bridge-target={"bp-mp-hidden-#{@input_id}"}
+        hotspot={@hotspot}
+        alt={@alt}
+      ></bp-media-picker>
+    </div>
+    """
   end
 
   defp leaf_input(%{field: %{type: "boolean"}} = assigns) do

@@ -36,6 +36,41 @@ defmodule BarkparkWeb.Components.Fields.CompositeFieldTest do
       assert html =~ ~s(phx-change="form_change")
     end
 
+    test "an image SUBFIELD renders the media picker with hotspot/alt opt-ins, not a text input (Gyldendal E1)" do
+      field = %Field{
+        name: "cover",
+        type: "composite",
+        fields: [
+          %Field{
+            name: "image",
+            type: "image",
+            title: "Bilde",
+            raw: %{"hotspot" => true, "alt" => true}
+          },
+          %Field{name: "credit", type: "string", title: "Credit"}
+        ]
+      }
+
+      html =
+        render_component(&CompositeField.composite_field/1, %{
+          field: field,
+          value: %{
+            "image" => %{"url" => "/x.png", "assetId" => "a1", "focalX" => 0.5},
+            "credit" => "c"
+          }
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*value="\{[^"]*focalX[^"]*\}"[^>]*>}
+      assert html =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
+      assert html =~ ~r{<bp-media-picker[^>]*\salt[^>]*>}
+
+      assert html =~
+               ~r{<input type="hidden"[^>]*name="(image|[^"]*\[image\])"[^>]*value="\{[^"]*focalX[^"]*\}"}
+
+      assert html =~ ~r{phx-hook="BarkparkFieldBridge"}
+      refute html =~ ~r{<input[^>]*type="text"[^>]*name="(image|[^"]*\[image\])"}
+    end
+
     test "round-trips: rendered values match input value map keys" do
       field = %Field{
         name: "person",
