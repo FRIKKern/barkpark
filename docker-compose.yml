@@ -67,6 +67,8 @@ services:
       - BARKPARK_INDX_STATE_DIR
       - BARKPARK_OPERATOR_EMAILS
       - BARKPARK_OPERATOR_TOKEN_IDS
+      # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
+      - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST
