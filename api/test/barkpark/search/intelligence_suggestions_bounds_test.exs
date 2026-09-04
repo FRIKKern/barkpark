@@ -14,37 +14,19 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
   # output-parity test (parity is asserted separately, below the cap).
   use Barkpark.DataCase, async: false
 
+  alias Barkpark.QueryCounter
   alias Barkpark.Search.{Crystal, Event, Intelligence}
   alias Barkpark.Repo
 
   @surface "media"
   @scope "production"
 
-  defp attach_sql_capture do
-    handler = "sql-capture-#{System.unique_integer([:positive])}"
-    test_pid = self()
-
-    :ok =
-      :telemetry.attach(
-        handler,
-        [:barkpark, :repo, :query],
-        fn _event, _measurements, metadata, _config ->
-          send(test_pid, {:sql, metadata.query})
-        end,
-        nil
-      )
-
-    on_exit(fn -> :telemetry.detach(handler) end)
-    :ok
-  end
-
-  defp drain_sql(acc \\ []) do
-    receive do
-      {:sql, sql} -> drain_sql([sql | acc])
-    after
-      0 -> Enum.reverse(acc)
-    end
-  end
+  # LINEAGE-SCOPED SQL capture, via the shared `Barkpark.QueryCounter`. The
+  # local copy this replaced was node-global: it captured every statement the
+  # VM issued inside the window, and both assertions below are shape claims
+  # over that capture — `length(crystal_grouped) == 2` reds on a foreign
+  # GROUP BY, and the `refute` reds on a foreign `SELECT DISTINCT`. Ownership
+  # is now decided by process lineage. See `Barkpark.QueryCounterTest`.
 
   defp insert_event(attrs) do
     %Event{}
@@ -76,7 +58,6 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
 
   describe "SQL bounds (fail-before harness)" do
     test "every popular/nohits GROUP BY aggregate carries a SQL LIMIT" do
-      attach_sql_capture()
 
       # Seed one crystal with BOTH success_count>0 and zero_hit_count>0 so the two
       # crystal helpers fire, plus events with zero_hits false/true so the two
@@ -97,9 +78,10 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
       insert_event(%{query: "helios", query_normalized: "helios", zero_hits: false})
       insert_event(%{query: "voidquery", query_normalized: "voidquery", zero_hits: true})
 
-      _ = Intelligence.suggestions(@surface, @scope, "actor-1", nil, min_search_count: 1)
-
-      sqls = drain_sql()
+      {_, sqls} =
+        QueryCounter.sql(fn ->
+          Intelligence.suggestions(@surface, @scope, "actor-1", nil, min_search_count: 1)
+        end)
 
       grouped_intel =
         Enum.filter(sqls, fn s ->
@@ -135,17 +117,16 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
     end
 
     test "distinct correction-session count emits COUNT(DISTINCT …), not a full fetch" do
-      attach_sql_capture()
 
-      {:ok, _} =
-        Intelligence.record_correction(
-          @surface,
-          @scope,
-          %{"from" => "colour", "to" => "color"},
-          session_key: "sess-1"
-        )
-
-      sqls = drain_sql()
+      {{:ok, _}, sqls} =
+        QueryCounter.sql(fn ->
+          Intelligence.record_correction(
+            @surface,
+            @scope,
+            %{"from" => "colour", "to" => "color"},
+            session_key: "sess-1"
+          )
+        end)
 
       # Fixed: a single COUNT(DISTINCT session_key) aggregate.
       assert Enum.any?(sqls, fn s ->

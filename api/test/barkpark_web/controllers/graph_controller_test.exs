@@ -22,7 +22,7 @@ defmodule BarkparkWeb.GraphControllerTest do
   use BarkparkWeb.ConnCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
 
-  alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.{Auth, Content, QueryCounter, Repo, Tasks, TenancyFixtures}
   alias Barkpark.EdgeProjector.ProjectorWorker
 
   @token "barkpark-test-graph-token"
@@ -526,33 +526,16 @@ defmodule BarkparkWeb.GraphControllerTest do
   # The scan fix is covered by the edges/phantom test below, which proves the
   # same graph comes out when the fold is fed already-read documents.
   describe "GET /v1/graph query cost" do
+    # LINEAGE-SCOPED, via the shared `Barkpark.QueryCounter`. This file's own
+    # copy was the ORIGINAL of the shape (the reader baseline copied it) and
+    # was node-global: an unscoped `:telemetry.attach/4` counts statements from
+    # the application's background processes too — `async: false` fences
+    # sibling TEST processes, not the supervision tree. The differential the
+    # guard below measures is small, so one stray sweeper statement inside a
+    # measured window moves it. See `Barkpark.QueryCounterTest`.
     defp count_repo_queries(fun) do
-      ref = make_ref()
-      test_pid = self()
-      handler_id = {:graph_query_counter, ref}
-
-      :telemetry.attach(
-        handler_id,
-        [:barkpark, :repo, :query],
-        fn _event, _measurements, _meta, _cfg -> send(test_pid, {ref, :query}) end,
-        nil
-      )
-
-      try do
-        fun.()
-      after
-        :telemetry.detach(handler_id)
-      end
-
-      drain = fn drain, acc ->
-        receive do
-          {^ref, :query} -> drain.(drain, acc + 1)
-        after
-          0 -> acc
-        end
-      end
-
-      drain.(drain, 0)
+      {_, count} = QueryCounter.count(fun)
+      count
     end
 
     test "the corpus derivation does not issue a query per document", %{
