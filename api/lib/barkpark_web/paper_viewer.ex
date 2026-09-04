@@ -15,6 +15,12 @@ defmodule BarkparkWeb.PaperViewer do
     * `:api_token` — the verified `%Barkpark.Auth.ApiToken{}` behind
       `session["api_token"]` (or, in dev only, the seeded
       `:dev_browser_token`), or `nil`;
+    * `:api_token_raw` — the RAW string behind that verified token, or `""`.
+      Mirrors `BarkparkWeb.LiveAuth.on_mount(:fetch_api_token, …)`: the
+      client-side editor bridges (`data-token=…`) need the raw credential the
+      browser already presented, and slice 2's editor passes it straight to
+      `paper_block_editor/1`. Only ever set for a token that VERIFIED, so an
+      unverifiable string is `""`, never echoed back;
     * `:viewer` — a small scalar summary of the principal the page should
       treat as "you": `%{kind: :user | :token | :share | :anonymous, ...}`
       (see `viewer/3`);
@@ -85,12 +91,13 @@ defmodule BarkparkWeb.PaperViewer do
 
   def on_mount(:viewer, _params, session, socket) do
     user = user_from_session(session)
-    token = token_from_session(session)
+    {token, raw} = token_from_session(session)
 
     {:cont,
      socket
      |> assign(:current_user, user)
      |> assign(:api_token, token)
+     |> assign(:api_token_raw, raw)
      |> assign(:viewer, viewer(user, token, session))
      |> assign(:can_edit?, false)}
   end
@@ -155,6 +162,9 @@ defmodule BarkparkWeb.PaperViewer do
     end
   end
 
+  # `{token, raw}` — the verified struct and the raw string it verified from.
+  # `{nil, ""}` for every absent / unverifiable credential, so the raw value is
+  # never echoed back for a token the server did not accept.
   defp token_from_session(session) do
     raw =
       case session["api_token"] do
@@ -164,9 +174,9 @@ defmodule BarkparkWeb.PaperViewer do
 
     with raw when is_binary(raw) <- raw,
          {:ok, %ApiToken{} = token} <- Auth.verify_token(raw) do
-      token
+      {token, raw}
     else
-      _ -> nil
+      _ -> {nil, ""}
     end
   end
 

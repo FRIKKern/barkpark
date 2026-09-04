@@ -57,6 +57,7 @@ on:
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
@@ -233,6 +234,7 @@ on:
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
