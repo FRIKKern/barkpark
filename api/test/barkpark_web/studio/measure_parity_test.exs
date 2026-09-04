@@ -259,7 +259,9 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
     base =
       case top_level_blocks(src, selector) do
         [] ->
-          flunk("`#{selector}` matches no TOP-LEVEL rule in #{file} — its column geometry is GONE")
+          flunk(
+            "`#{selector}` matches no TOP-LEVEL rule in #{file} — its column geometry is GONE"
+          )
 
         blocks ->
           case Enum.filter(blocks, &(&1 =~ ~r/--paper-gutter\s*:/)) do
@@ -713,6 +715,7 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
                "root, not a chromeless surface, and it negotiates space like the rest"
     end
   end
+
   describe "BOTH shells step their gutters on ONE ladder (task-414967096bbe011b)" do
     # The criterion this block exists for: "Editor and reader gutters step
     # identically (40/24/16 at 767/479) and measure_parity_test.exs asserts both
@@ -815,7 +818,8 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
 
       widths =
         for {_h, body} <- bodies,
-            [w] <- Regex.scan(~r/--bp-evidence-width\s*:\s*([^;}]+)/, body, capture: :all_but_first),
+            [w] <-
+              Regex.scan(~r/--bp-evidence-width\s*:\s*([^;}]+)/, body, capture: :all_but_first),
             do: String.trim(w)
 
       assert widths != [],
@@ -842,10 +846,15 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   # `--paper-bg-deep`; on a `--paper-bg-deep` page that is delta-L 0). These
   # pins hold the two shells to one var, and that var to the page token.
   describe "the page ground — the Studio surface and the public reader stand on one token" do
-    defp studio_ground!, do: value!(blocks!(css(), @reader_selector), "background", @reader_selector)
+    defp studio_ground!,
+      do: value!(blocks!(css(), @reader_selector), "background", @reader_selector)
 
     defp reader_ground! do
-      value!(blocks!(File.read!(@bulldocs), @reader_ground_selector), "background", @reader_ground_selector)
+      value!(
+        blocks!(File.read!(@bulldocs), @reader_ground_selector),
+        "background",
+        @reader_ground_selector
+      )
     end
 
     test "both shells paint the SAME ground var (View↔Edit ground parity)" do

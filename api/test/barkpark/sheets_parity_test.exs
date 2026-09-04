@@ -795,7 +795,8 @@ defmodule Barkpark.SheetsParityTest do
   defp extract_fmt_classes(src) do
     body =
       case Regex.run(~r/const\s+FMT_CLASSES\s*=\s*new\s+Set\(\[(.*?)\]\)/s, src,
-             capture: :all_but_first) do
+             capture: :all_but_first
+           ) do
         [body] -> body
         _ -> flunk(fmt_extractor_refusal("no `const FMT_CLASSES = new Set([...])` literal"))
       end

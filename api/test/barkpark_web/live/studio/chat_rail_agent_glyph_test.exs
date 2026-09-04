@@ -44,6 +44,7 @@ defmodule BarkparkWeb.Studio.ChatRailAgentGlyphTest do
     refute cases == [], "an empty fixture is a lock that proves nothing"
 
     glyphs = cases |> Enum.map(& &1["glyph"]) |> Enum.uniq() |> Enum.sort()
+
     assert glyphs == Enum.sort(["✕", "✓", "●"]),
            "the fixture must exercise every arm of rail_agent_glyph/1, got #{inspect(glyphs)}"
   end
