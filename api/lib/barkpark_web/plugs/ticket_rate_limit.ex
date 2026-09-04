@@ -77,9 +77,9 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
         # coverage test's allow-list is the helper ALONE, and so a future test
         # that pins a fixed `ticket_key` id cannot re-open the shared-bucket
         # class through the one `check/2` site that opted out.
-        key = RateLimiter.scoped_key(conn, {:ticket, key_id, class})
+        key = {:ticket, key_id, class}
 
-        case RateLimiter.check(key, bucket_opts(limit)) do
+        case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts(limit)) do
           :ok -> conn
           :rate_limited -> deny(conn, retry_after_seconds(limit))
         end

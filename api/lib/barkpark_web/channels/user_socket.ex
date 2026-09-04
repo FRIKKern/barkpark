@@ -109,9 +109,10 @@ defmodule BarkparkWeb.UserSocket do
 
     token
     |> budget_keys(connect_info)
-    |> Enum.map(&RateLimiter.scoped_key(connect_info, &1))
     |> Enum.reduce_while(:ok, fn key, :ok ->
-      case RateLimiter.check(key, opts) do
+      # `connect_info`, not a conn: a socket handshake has none. See
+      # `RateLimiter.scoped_key/2` — a no-op unless a test stamped a scope.
+      case RateLimiter.check(RateLimiter.scoped_key(connect_info, key), opts) do
         :ok -> {:cont, :ok}
         :rate_limited -> {:halt, :rate_limited}
       end

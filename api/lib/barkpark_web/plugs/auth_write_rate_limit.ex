@@ -75,9 +75,9 @@ defmodule BarkparkWeb.Plugs.AuthWriteRateLimit do
     class = Keyword.get(opts, :class, :register)
     limit = limit_for(class)
 
-    key = RateLimiter.scoped_key(conn, {:auth_write, class, RateLimiter.client_ip(conn)})
+    key = {:auth_write, class, RateLimiter.client_ip(conn)}
 
-    case RateLimiter.check(key, bucket_opts(limit)) do
+    case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts(limit)) do
       :ok -> conn
       :rate_limited -> deny(conn, retry_after_seconds(limit))
     end

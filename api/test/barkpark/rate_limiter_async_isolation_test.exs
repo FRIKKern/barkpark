@@ -33,6 +33,9 @@ defmodule Barkpark.RateLimiterAsyncIsolationTest do
   # be a hole big enough to hide a real test in.
   @not_exercising [
     "test/barkpark/rate_limiter_async_isolation_test.exs",
+    # A grep over `lib/` for unscoped `check/2` call sites. It never opens a
+    # bucket, so it needs no reset and is safe to run concurrently.
+    "test/barkpark/rate_limiter_scoped_key_coverage_test.exs",
     "test/support/rate_limiter_sandbox.ex"
   ]
 
