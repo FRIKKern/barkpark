@@ -795,10 +795,21 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_wide?(_), do: false
 
-  # Render opts threaded into every block render. Article papers carry
-  # `style: :article`; the empty map keeps the email default byte-unchanged.
+  # Render opts threaded into every block render. BOTH clauses name
+  # `style: :article`: this is a SCREEN — the public LiveView paper reader —
+  # and nothing rendered here is ever mailed.
+  #
+  # task-c46967eb3dc49e77: the `false` clause used to return `%{}`, so
+  # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default decided
+  # and a NON-article paper read live came out in inline MAIL typography. That
+  # was a second, independent style-less source on the very surface #16037
+  # fixed for the stored `body_html`, so after that PR the live reader and the
+  # cache disagreed byte-for-byte for exactly the non-article population. The
+  # two clauses are kept SEPARATE (not collapsed) because the article /
+  # non-article split is a distinction the reader may re-acquire — today both
+  # map to `:article`, the same way `Labels.paper_render_opts/3` does.
   defp render_opts(true), do: %{style: :article}
-  defp render_opts(false), do: %{}
+  defp render_opts(false), do: %{style: :article}
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
