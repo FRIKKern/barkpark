@@ -394,6 +394,22 @@ defmodule Barkpark.Content.Errors do
       details: %{quota: quota}
     }
 
+  # Oversize mutate batch — BarkparkWeb.Plugs.RequireWithinQuota. Deliberately
+  # REUSES the sheets ops door's already-registered `batch_too_large` (422): the
+  # meaning ("your batch exceeds this endpoint's cap — split and resend") and the
+  # status are identical, and a second token for it would have grown the public
+  # Error.code enum and docs/api-v1.md §9 for no client-visible gain. The hint is
+  # set here rather than in @hints because the code lives in
+  # @public_inline_codes, whose entries are owned by their inline emitters.
+  defp build({:error, {:batch_too_large, n, max}}) when is_integer(n) and is_integer(max),
+    do: %{
+      code: "batch_too_large",
+      message: "the mutations list carries #{n} mutations; the cap is #{max} per request",
+      status: 422,
+      details: %{count: n, max: max},
+      hint: "Split the batch into requests of at most #{max} mutations and resend."
+    }
+
   defp build({:error, :forbidden_origin}),
     do: %{code: "cors_forbidden", message: "origin not allowed for dataset", status: 403}
 
