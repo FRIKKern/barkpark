@@ -38,6 +38,46 @@ defmodule BarkparkWeb.TasksController do
   `assignee`, `dependencies`, and related task fields. The `bp task` CLI
   consumes this shape. See `render_doc/1`.
 
+  ## Paging past the window: the keyset cursor on `GET /v1/tasks`
+  ## (bl-api-tasks-stable-cursor)
+
+  The index serves a WINDOW, not the corpus: `limit` rows (default 100, capped
+  at `Params.index_limit_cap/0` = 1000) ordered `desc: updated_at, desc: id`.
+  Every write to any task re-stamps `updated_at` and rotates that row to the
+  head, so the window's tail falls off under ordinary traffic. A reader that
+  walked the window and asked "is task X still here?" got ONE answer — absent —
+  for two different facts: X was CLOSED, or X was pushed past row 1000 by a
+  thousand unrelated touches. **Absence was not decidable.** The CLI lane's
+  `internal/taskboard/merge.go` carries a client-side heuristic built on that
+  ambiguity (PR #14251); this is the server-side fix it was standing in for.
+
+  `?cursor=` is an OPT-IN keyset (seek) cursor over the tuple the ordering
+  already uses — `(updated_at, id)`, or `(inserted_at, id)` on the `parent=`
+  rail. Pass `?cursor=` (empty) to start at the head and receive
+  `page.next_cursor`; pass that token back to get the next page. Paging is
+  bounded by a WHERE clause, not by OFFSET, so a caller can walk **past the
+  cap** to the end of the corpus: a row that rotated out of page 1 is reached
+  on a later page, and a row that went terminal is reached and renders
+  `lifecycle_status: "done"`. Absence now means "not in the corpus".
+
+  ADDITIVE. `page.next_cursor` appears only when the caller spelled `?cursor=`
+  at all, so a request that names no cursor gets the pre-change envelope key
+  for key. `cursor` and a non-zero `offset` together are a 400 — they are two
+  different paging models and silently honouring one would page from a place
+  the caller did not ask for. A malformed or wrong-ordering cursor is a 400
+  too, never a silent restart from the head (which reads exactly like a
+  finished walk).
+
+  THE REJECTED ALTERNATIVE was a closed-since delta feed
+  (`?closed_since=<ts>`, terminal transitions only). Cheap, but a SECOND source
+  of truth about task state with its own window and drift, and still blind to a
+  row that rotated out WITHOUT closing (moved, re-parented, relabelled).
+  `GET /v1/tasks/events` already answers "what changed since". Making the ONE
+  list route complete beat adding a second incomplete one.
+
+  Full rationale, including the honest limit of a keyset over a MUTABLE key:
+  `TasksController.Params`, the cursor section.
+
   ## Why the doc_id is a URL segment for close but a body field for claim
 
   Claim's contract is "pick the next ready row" — there is no specific row
@@ -139,7 +179,28 @@ defmodule BarkparkWeb.TasksController do
 
     %{ok: true, docs: render_task_list(docs, conn, params)}
     |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
-    |> Map.put(:page, Params.page_meta(docs, page_opts))
+    |> Map.put(:page, page_block(docs, page_opts))
+  end
+
+  # `page` + the OPT-IN `next_cursor`. The key is added only when the caller
+  # spelled `?cursor=` at all, so every pre-cursor caller reads a byte-identical
+  # envelope. It is minted from the SEALED docs this response actually renders
+  # (sealing rewrites `content` only — `id` and the timestamps survive), and it
+  # is `nil` on a short page: `returned < limit` PROVES the walk is finished, so
+  # a token there would invite one more round-trip to learn nothing.
+  defp page_block(docs, page_opts) do
+    meta = Params.page_meta(docs, page_opts)
+
+    if Keyword.get(page_opts, :cursor_requested?, false) do
+      next =
+        if meta.has_more,
+          do: Params.next_cursor(docs, Keyword.fetch!(page_opts, :cursor_axis)),
+          else: nil
+
+      Map.put(meta, :next_cursor, next)
+    else
+      meta
+    end
   end
 
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
@@ -361,7 +422,13 @@ defmodule BarkparkWeb.TasksController do
     # it must be the cheap answer; the cap is what an informed one may ask for
     # and stays 1000. `?limit=` is honoured up to that cap exactly as before —
     # nothing a caller can spell changed, only what silence means.
-    limit = Params.parse_limit(params["limit"], 100, 1000)
+    # The cap is `Params.index_limit_cap/0` (1000) rather than a literal, so a
+    # test can shrink it and prove the ACROSS-THE-BOUNDARY cursor property on a
+    # small corpus instead of seeding 1001 rows. The default is the cheap
+    # answer (100) or the cap, whichever is smaller — a default above the cap
+    # would be clamped anyway and would misreport itself.
+    cap = Params.index_limit_cap()
+    limit = Params.parse_limit(params["limit"], min(100, cap), cap)
 
     # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
     # every page repeated page 0 and `bp task ls --all` self-aborted with
@@ -423,8 +490,33 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_label(filters["label"])
       |> Params.apply_index_order(parent)
 
-    docs = Repo.all(query)
-    json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
+    # bl-api-tasks-stable-cursor: the keyset seek. Parsed AFTER `parent` is
+    # bound because the cursor's axis is the ORDERING's axis, and the ordering
+    # is what `parent` selects. Fail-closed on a bad token (see the moduledoc).
+    case Params.parse_index_cursor(params, parent) do
+      {:ok, cursor} when cursor != nil and offset > 0 ->
+        bad_request(
+          conn,
+          "cursor and offset are two different paging models — drop `offset` " <>
+            "(the cursor already names where the page starts)"
+        )
+
+      {:ok, cursor} ->
+        docs = query |> Params.apply_index_cursor(cursor) |> Repo.all()
+
+        json(
+          conn,
+          task_list_response(docs, conn, params,
+            limit: limit,
+            offset: offset,
+            cursor_axis: Params.cursor_axis(parent),
+            cursor_requested?: Params.cursor_requested?(params)
+          )
+        )
+
+      {:error, reason} ->
+        bad_request(conn, reason)
+    end
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
