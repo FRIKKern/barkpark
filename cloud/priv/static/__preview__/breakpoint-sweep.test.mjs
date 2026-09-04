@@ -843,13 +843,28 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // line, never carried from the filing — whose 110->112 / 85->87 / 26 cells /
   // 25 distinct were all stale against a base that already measured
   // 118/25/24/94.
-  assert.equal(r.total, 120);
+  // cch-w12-followup-login-fixture-gap moves it by ONE: `activity-identity-change`,
+  // the corpus's ONLY fixture that answers POST /v1/auth/login with a session —
+  // until it, route()'s own `status < 400` login branch was unreachable from
+  // every committed scenario and no drive in this harness had ever completed a
+  // sign-in. Total 120 -> 121, residue 96 -> 97. CELLS (25), distinctCovered
+  // (24) and families (13) are DELIBERATELY UNMOVED: it lands in the residue,
+  // not a cell, and its `familyOf` is `hash:#overview` — a family that already
+  // had eleven members, so it cannot create a 14th. Its deepLink is #overview
+  // and NOT #activity on purpose: `hash:#activity` is one of the two ZERO-residue
+  // families this file names by hand ("the two ZERO-residue families are named"),
+  // and a fixture landing there would silently retire that arm's subject. The
+  // Activity screen it ends on is reached by a warm hash navigation inside
+  // smoke.mjs, which is what the drive is measuring anyway.
+  // Both integers were RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on this
+  // branch and reading what it PRINTED, never by adding one.
+  assert.equal(r.total, 121);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 96, "96 is the RESIDUE, not the census");
+  assert.equal(r.residue, 97, "97 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 96, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 97, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

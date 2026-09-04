@@ -74,6 +74,12 @@
 // Stable ids so smoke.mjs can deep-link #instance/<id> deterministically.
 export const IDS = {
   team: "5b2c1e00-0000-4000-8000-000000000001",
+  // cch-w12-followup-login-fixture-gap: the OTHER team. The corpus has always
+  // held exactly one, because every scenario is one account's screen — but the
+  // one seam this file could not reach (a sign-out followed by a sign-in as
+  // somebody else, with no reload in between) needs two, or "the previous
+  // team's members" has no second team to be previous TO.
+  teamBeta: "5b2c1e00-0000-4000-8000-000000000002",
   liveInstance: "5b2c1e00-0000-4000-8000-0000000000a1",
   behindInstance: "5b2c1e00-0000-4000-8000-0000000000a2",
   provisioningInstance: "5b2c1e00-0000-4000-8000-0000000000a3",
@@ -1555,6 +1561,35 @@ const teamInvites = [
   { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
 ];
+
+// ── cch-w12-followup-login-fixture-gap · THE SECOND IDENTITY ─────────────────
+// A roster of a DIFFERENT team, sharing not one user id with `teamMembers`.
+// That disjointness is the whole assertion: after signing in as one of these
+// people, a Who axis that still names lin or rex is naming the previous team's
+// members, and there is no innocent reading of it.
+// NOT routed through `corpusActorEmail` on purpose — that helper's contract is
+// "the ACME corpus's actors, id → email, read straight off the roster fixtures",
+// and it throws on an unknown id precisely so a typo cannot silently render as
+// ada. These two belong to another team's roster, so they are stated whole
+// here, in the same member_json shape (`{user_id, email, role, joined_at}`) the
+// server serializes.
+const teamMembersBeta = [
+  { user_id: "usr_zed", email: "zed@beta.io", role: "owner", joined_at: tMinus(90 * 86400) },
+  { user_id: "usr_qi", email: "qi@beta.io", role: "member", joined_at: tMinus(10 * 86400) },
+];
+// The /v1/me envelope the second sign-in lands. Built by MOVING the identity
+// fields of a `me()` envelope rather than by typing a fresh object literal, so
+// it is key-for-key what every other logged-in scenario answers — the
+// __me_envelope_census diffs served keys against router.ex's own response map,
+// and a hand-typed twin is exactly how a fixture drifts out from under it.
+const betaMe = (() => {
+  const env = me("Beta Works", { instance: true, published_doc: true, completed: true });
+  env.user = { id: "usr_zed", email: "zed@beta.io", confirmed: true, two_factor_enabled: false };
+  env.team = { id: IDS.teamBeta, name: "Beta Works", slug: "beta-works" };
+  env.teams = [{ id: IDS.teamBeta, name: "Beta Works", slug: "beta-works", role: "owner" }];
+  env.team_authority = { team_id: IDS.teamBeta, role: "owner", admin: true, owner: true };
+  return env;
+})();
 
 // ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
 // Each meter is {value|"unmetered", quota, warn_at, source, measured_at}; a
@@ -5092,6 +5127,57 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+
+  // ── cch-w12-followup-login-fixture-gap · THE SUCCESSFUL LOGIN ──────────────
+  // THE HOLE THIS CLOSES. Until now this file answered POST /v1/auth/login from
+  // exactly ONE fixture (`loggedout-twofactor`), and that fixture returns
+  // `two_factor_required` — so the success branch of route()'s own login arm
+  // (`if (state && d.login.status && d.login.status < 400) delete state.loggedOut`)
+  // was unreachable from every committed scenario, and no drive in this harness
+  // had ever COMPLETED a sign-in. The consequence is bigger than a missing
+  // branch: render()'s logged-out arm is the one seam where a console lie about
+  // IDENTITY can be built — it serves the sign-out click AND the 401
+  // auto-bounce, neither of which reloads — so every per-account cache clear
+  // standing in it (meCache via clearMe, subCache, capCache, overviewData.*,
+  // and activityActors) was pinned by SOURCE SHAPE alone. Nothing could DRIVE
+  // an account change, so nothing could observe one going wrong.
+  //
+  // WHAT THIS FIXTURE MODELS, AND WHAT IT HONESTLY CANNOT. route() is handed
+  // (name, method, path, state) — there is NO REQUEST BODY on that signature,
+  // in this harness or in mock.js — so the fixture cannot match credentials to
+  // an account and must not pretend to. It models the only thing it can see:
+  // this scenario boots ALREADY signed in as ada, so any successful
+  // POST /v1/auth/login reaching it is by construction a SECOND sign-in, and it
+  // lands the second identity (`secondIdentity` below). The claim under test is
+  // the console's, not the server's: what the client keeps across an account
+  // change it was told about. Credential matching is the server's, and
+  // cloud/test owns it.
+  "activity-identity-change": {
+    label: "Sign out and back in as ANOTHER TEAM, no reload — the Activity Who axis must not name the previous team's members",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: activityFeed,
+      // Identity one's roster: ada (the actor) / lin / rex — the same three the
+      // `activity` scenario's Who axis renders, and the three that must be GONE
+      // after the switch.
+      members: teamMembers,
+      // The successful sign-in itself. 200 + a session body in the shape
+      // loginResponseKind() folds to "session" (`grep -n 'function
+      // loginResponseKind' cloud/priv/static/app.js`): a token, and the team it
+      // is scoped to — which is the SECOND team, because that is who signs in.
+      login: { status: 200, body: { token: "preview-second", team_id: IDS.teamBeta } },
+      // Everything that changes with the account. Read through `state` by
+      // route(), so the switch is a STATE CHANGE the fixture can be asked about
+      // — not two static objects a check picks between, which would prove
+      // nothing about what the console did.
+      secondIdentity: { me: betaMe, members: teamMembersBeta },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -5199,7 +5285,18 @@ export function route(name, method, path, state) {
     // A successful sign-in mints a new token, so it lifts the revocation the
     // logout arm below records — otherwise a sign-out is a one-way trap the
     // fixture can never leave, which no real server does.
-    if (state && d.login.status && d.login.status < 400) delete state.loggedOut;
+    if (state && d.login.status && d.login.status < 400) {
+      delete state.loggedOut;
+      // cch-w12-followup-login-fixture-gap: …and, for a scenario that carries a
+      // SECOND identity, this is the moment the account changes. Recorded on
+      // the per-boot state bag (never on this module's shared scenario object,
+      // which smoke.mjs drives across many scenarios in one process), and the
+      // per-account READS below go through it — a switch nothing re-reads would
+      // prove nothing, which is this file's founding sin in a smaller costume.
+      // Until wave 12's follow-up NO fixture had a `login` under 400 at all, so
+      // this success branch had never once executed.
+      if (d.secondIdentity) state.secondIdentity = true;
+    }
     return d.login;
   }
   if (method === "POST" && p === "/v1/auth/two-factor-challenge" && d.twoFactorChallenge) return d.twoFactorChallenge;
@@ -5338,6 +5435,13 @@ export function route(name, method, path, state) {
     } else {
       return d.meFault;
     }
+  }
+  // cch-w12-followup-login-fixture-gap: after a successful second sign-in, the
+  // authority read answers the SECOND account. Above the ordinary arm because
+  // the ordinary arm is unconditional; the flag is only ever set by the login
+  // arm, so no scenario without a `secondIdentity` fixture can reach this.
+  if (p === "/v1/me" && state && state.secondIdentity && d.secondIdentity) {
+    return { status: 200, body: d.secondIdentity.me };
   }
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
@@ -5818,6 +5922,13 @@ export function route(name, method, path, state) {
   // since cch-w10, actually DRIVEN: members-populated clicks Remove and Revoke
   // for real, so both lists are served from the per-boot store and shrink.
   if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
+    // cch-w12-followup-login-fixture-gap: the roster is TEAM-scoped, so after
+    // the account change it is the second team's. The two rosters share no user
+    // id, which is what makes "the Who axis still names lin" an unambiguous
+    // reading rather than a coincidence of two similar fixtures.
+    if (state && state.secondIdentity && d.secondIdentity && d.secondIdentity.members) {
+      return { status: 200, body: { members: d.secondIdentity.members } };
+    }
     return { status: 200, body: { members: listOf(d, state, "members") } };
   }
   const memberOne = p.match(/^\/v1\/teams\/[^/]+\/members\/([^/]+)$/);
