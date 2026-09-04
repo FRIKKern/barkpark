@@ -193,7 +193,7 @@ defmodule BarkparkWeb.Contract.ScopedFederatedGrantNarrowingTest do
       {:ok, _} = Tenancy.Auth.create_membership(ctx.ws.id, ctx.alice.id, "admin", "user")
 
       request = fn ->
-        build_conn()
+        scoped_conn()
         |> alice_conn(ctx)
         |> get(search_path(ctx.ws, ctx.proj))
         |> json_response(200)
