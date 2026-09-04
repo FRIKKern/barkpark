@@ -86,7 +86,23 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       selected: Enum.at(segments, 0)
     }
 
-    walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
+    {panes, editor} = walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
+
+    # Every pane carries the NORMALIZED segments that address it (`:path`), so a
+    # row click in pane `i` can build `pane.path ++ [id]` instead of slicing the
+    # raw URL by the pane's rendered index. The two diverge exactly when
+    # `resolve/4` normalized a demoted type into its group: the pane stack is
+    # then one longer than the URL, and `Enum.take(nav_path, i) ++ [id]` kept
+    # the OLD doc id and appended the new one (Gyldendal field report #35b:
+    # `/studio/publication/pub-a` → click → `/studio/publication/pub-a/pub-b`).
+    # Pane `i` is addressed by the first `i` segments: the root pane by none,
+    # the pane opened by consuming segment 0 by one, and so on.
+    panes =
+      panes
+      |> Enum.with_index()
+      |> Enum.map(fn {pane, i} -> Map.put(pane, :path, Enum.take(segments, i)) end)
+
+    {panes, editor}
   end
 
   # Pick the tree to walk and the (possibly normalized) segments to walk it

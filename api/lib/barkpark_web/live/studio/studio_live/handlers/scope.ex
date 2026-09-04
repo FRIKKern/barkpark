@@ -12,7 +12,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def select(%{"pane" => pane_str, "id" => id}, socket) do
     case Integer.parse(pane_str) do
       {pane_idx, ""} when pane_idx >= 0 ->
-        new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
+        # The clicked pane's own address (`:path`, stamped by PaneBuilder.build/3
+        # from the NORMALIZED segments) is the prefix — never a slice of the raw
+        # URL by rendered index, which appended the id whenever the desk had
+        # normalized a demoted type into its group (#35b). The fallback keeps the
+        # old formula for a pane built without the stamp (plugin panes that
+        # bypass build/3).
+        prefix =
+          case Enum.at(socket.assigns[:panes] || [], pane_idx) do
+            %{path: path} when is_list(path) -> path
+            _ -> Enum.take(socket.assigns.nav_path, pane_idx)
+          end
+
+        new_path = prefix ++ [id]
 
         # spd-bl-focus-after-select — THE DECISION, bucket by bucket (full
         # write-up in studio_focus_after_select_test.exs):
