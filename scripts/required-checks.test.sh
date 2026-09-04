@@ -743,7 +743,16 @@ fi
 RC3C_COPY="$TMP/rc3c-renamed"
 mkdir -p "$RC3C_COPY"
 cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_COPY/"
-RC3C_KEEP1="$(printf '%s\n' "$RC3C_CLEAN_OUT" | awk '/^  keep     / { print substr($0, 12); exit }')"
+# FIRST MATCH WINS WITHOUT `exit`, AND THAT IS NOT A STYLE CHOICE. This line
+# used to end `{ print substr($0, 12); exit }`. Under `set -o pipefail` an awk
+# that exits early closes the pipe while `printf` is still writing the
+# generator's multi-kilobyte log, printf takes SIGPIPE and returns 141, pipefail
+# hands 141 to the command substitution and `set -e` kills the whole suite —
+# MEASURED here twice in a row on this file's own §3c, `line 746: printf: write
+# error: Broken pipe`, with the run dying mid-section and no tally line. It is
+# payload-size- and load-dependent, which is why CI has not shown it. Draining
+# the input costs nothing and the flag preserves first-match-wins exactly.
+RC3C_KEEP1="$(printf '%s\n' "$RC3C_CLEAN_OUT" | awk '/^  keep     / && !seen { print substr($0, 12); seen = 1 }')"
 RC3C_CTX="${RC3C_KEEP1%%  (*}"
 RC3C_PROV="${RC3C_KEEP1#*  (}"; RC3C_PROV="${RC3C_PROV%)}"
 RC3C_FILE="${RC3C_PROV%% job *}"
