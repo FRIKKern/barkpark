@@ -156,7 +156,7 @@ defmodule BarkparkWeb.Studio.Caps do
     discard-draft confirm-discard publish unpublish confirm-unpublish
     duplicate-doc toggle-doc-checkbox
     paper-edit-block paper-block-autosave sidebar-slug-change
-    paper-op paper-ops valueref-accept-baseline paper-add-block
+    paper-op paper-ops field-block-ops valueref-accept-baseline paper-add-block
     paper-materialize-slot paper-slash-insert paper-add-property
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm

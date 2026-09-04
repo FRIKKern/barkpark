@@ -152,6 +152,59 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
                ~r{<bp-rich-text-editor[^>]*value="[^"]*"[^>]*data-bridge-target="bp-rt-hidden-body"}
     end
 
+    test "richText with editor: blocks renders the FIELD CANVAS — no hidden input, no bridge (Gyldendal E1)" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "richText",
+            "name" => "description",
+            "editor" => "blocks",
+            "blocks" => %{"styles" => ["normal", "h2"], "marks" => ["strong"]}
+          },
+          editor_form: %{
+            "description" => %{
+              "blocks" => [
+                %{
+                  "id" => "p1",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "hi"}]
+                }
+              ],
+              "html" => "<p>hi</p>"
+            }
+          },
+          doc_key: "pub-1"
+        })
+
+      assert html =~
+               ~r{<div[^>]*id="bp-fc-wrap-pub-1-description"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldCanvas"}
+
+      assert html =~ ~s(data-field="description")
+      assert html =~ ~s(data-doc-key="pub-1")
+      assert html =~ ~r{data-canvas-blocks="[^"]*p1[^"]*"}
+      assert html =~ ~r{data-canvas-vocabulary="[^"]*h2[^"]*"}
+      assert html =~ "<bp-paper-canvas></bp-paper-canvas>"
+      refute html =~ "bp-rich-text-editor"
+      refute html =~ ~s(type="hidden")
+      refute html =~ "BarkparkFieldBridge"
+    end
+
+    test "richText with editor: blocks seeds a legacy plain-string value as one paragraph" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "richText",
+            "name" => "description",
+            "editor" => "blocks",
+            "blocks" => %{}
+          },
+          editor_form: %{"description" => "Old prose"}
+        })
+
+      assert html =~ ~r{data-canvas-blocks="[^"]*paragraph[^"]*"}
+      assert html =~ ~r{data-canvas-blocks="[^"]*Old prose[^"]*"}
+    end
+
     test "explicit rows override wins" do
       html =
         render_input(%{

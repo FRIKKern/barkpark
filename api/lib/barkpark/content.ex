@@ -746,6 +746,13 @@ defmodule Barkpark.Content do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
 
+  @doc "Field-scoped block ops for a `richText` field with `editor: blocks` — see `Papers.apply_field_block_ops/6`."
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
+    do: Papers.apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+
+  @doc "The block array behind a field value — see `Papers.field_blocks/1`."
+  def field_blocks(value), do: Papers.field_blocks(value)
+
   @doc "Propose insert-only draft paper edits with provenance (lvw-t4). See `Content.Papers`."
   def propose_paper_blocks(
         slug,

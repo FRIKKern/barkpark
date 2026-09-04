@@ -29,7 +29,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render, Slots}
+  alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
 
   @paper_type "paper"
@@ -453,7 +453,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content type. Threading `type` through here is safe by construction.
     case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title, opts)
+        persist_blocks_doc(
+          type,
+          content,
+          attrs,
+          existing,
+          dataset,
+          slug,
+          scope_attrs,
+          title,
+          opts
+        )
 
       {:error, _} = error ->
         error
@@ -1170,6 +1180,105 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} = err -> err
     end
   end
+
+  @doc """
+  Apply an ordered batch of block ops to ONE FIELD's block array — the write
+  path of a schema `richText` field that opted into the block editor
+  (`"editor": "blocks"`, Gyldendal parity stage E1).
+
+  The field's stored value is the shape `Projection.project_body/2` writes:
+  `%{"blocks" => [...], "html" => rendered}` — so the Classic reader
+  (`Forms.classic_form_value/1`) and every renderer keep working unchanged. A
+  legacy plain string is upgraded to one paragraph block on first edit; an
+  absent value starts empty.
+
+  Deliberately NOT `apply_document_block_op/5`: that path writes the
+  document-level `content["blocks"]` partition and re-projects every bound
+  field, so routing a field edit through it would collide with the Beta
+  document editor on any doc that has both. This one touches exactly
+  `content[field]` and nothing else.
+
+  The batch is checked against the field's declared vocabulary
+  (`FieldVocabulary.validate/2`) BEFORE anything is written — the client
+  vetoes the same vocabulary calmly, this is the truth.
+
+  Returns `{:ok, %{field, blocks, written_doc_id}}` or `{:error, reason}`.
+  """
+  @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ [])
+      when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
+    with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         {:ok, field_def} <- field_definition(type, dataset, field, opts),
+         blocks = field_blocks(Map.get(doc.content || %{}, field)),
+         {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
+         :ok <- FieldVocabulary.validate(FieldVocabulary.from_field(field_def), new_blocks) do
+      scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+
+      content =
+        (doc.content || %{})
+        |> Map.put(field, Projection.project_body(new_blocks, Labels.render_opts(dataset, scope)))
+
+      attrs = %{
+        "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
+        "title" => doc.title,
+        "status" => doc.status,
+        "content" => content
+      }
+
+      case Content.upsert_document(type, attrs, dataset, opts) do
+        {:ok, _saved} ->
+          {:ok, %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"]}}
+
+        {:error, _} = err ->
+          err
+      end
+    else
+      {:error, _reason} = err -> err
+    end
+  end
+
+  # The field's raw schema map — the vocabulary rides on it. A field that did
+  # not opt into the block editor is refused: the Classic form owns it.
+  defp field_definition(type, dataset, field, opts) do
+    with {:ok, schema} <-
+           Content.resolve_schema(type, dataset, Keyword.take(opts, [:workspace_id, :project_id])),
+         %{} = f <- Enum.find(schema.fields || [], &(Map.get(&1, "name") == field)),
+         true <- FieldVocabulary.blocks_field?(f) do
+      {:ok, f}
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, {:no_such_field, field}}
+      false -> {:error, {:not_a_blocks_field, field}}
+      other -> other
+    end
+  end
+
+  @doc """
+  The block array behind a field value, in every shape a `richText` field has
+  ever stored: the projected body map, a legacy plain string (one paragraph),
+  or nothing.
+  """
+  @spec field_blocks(term()) :: [map()]
+  def field_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+
+  def field_blocks(text) when is_binary(text) do
+    case String.trim(text) do
+      "" ->
+        []
+
+      t ->
+        [
+          %{
+            "id" => "b-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower),
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => t}]
+          }
+        ]
+    end
+  end
+
+  def field_blocks(_), do: []
 
   # ── Papers — internal ──────────────────────────────────────────────────────
 

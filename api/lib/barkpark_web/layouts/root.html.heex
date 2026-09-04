@@ -7067,6 +7067,59 @@
     // Patch.apply_patches + persist path the per-block `paper-op` uses. The server
     // owns the model. Structure mirrors BarkparkPaperEditor; the existing editor
     // hook is untouched (this is additive).
+    // Gyldendal parity E1 — a block-configured richText FIELD's canvas. The
+    // twin of BarkparkPaperCanvas for ONE field's block array: seeds the WC
+    // with data-canvas-blocks + the field's vocabulary (data-vocabulary, read
+    // LIVE by the WC's slash menu and filterTransaction once the client half
+    // lands), forwards bp-canvas-ops as `field-block-ops` {field, ops}, and
+    // advances the WC baseline from the server echo `bp:field-canvas-update`
+    // addressed by {doc_key, field} — never by re-render, the wrapper is
+    // phx-update="ignore".
+    Hooks.BarkparkFieldCanvas = {
+      mounted() {
+        const field = this.el.dataset.field;
+        const docKey = this.el.dataset.docKey;
+        const seed = (el) => {
+          if (!el) return;
+          const ds = this.el.dataset.canvasDataset;
+          const tok = this.el.dataset.canvasToken;
+          const vocab = this.el.dataset.canvasVocabulary;
+          if (ds != null) el.setAttribute("data-dataset", ds);
+          if (tok != null) el.setAttribute("data-token", tok);
+          if (vocab != null) el.setAttribute("data-vocabulary", vocab);
+          const raw = this.el.dataset.canvasBlocks;
+          if (!raw) return;
+          try {
+            el.blocks = JSON.parse(raw);
+          } catch (_e) {
+            // Malformed payload — leave the element on its empty default.
+          }
+        };
+        seed(this.el.querySelector("bp-paper-canvas"));
+        customElements.whenDefined("bp-paper-canvas").then(() => {
+          seed(this.el.querySelector("bp-paper-canvas"));
+        });
+
+        this._onCanvasOps = (e) => {
+          const ops = e.detail && e.detail.ops;
+          if (!Array.isArray(ops) || ops.length === 0) return;
+          this.pushEvent("field-block-ops", { field, ops });
+        };
+        this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+
+        this._onUpdate = (payload) => {
+          if (!payload || payload.field !== field || payload.doc_key !== docKey) return;
+          const wc = this.el.querySelector("bp-paper-canvas");
+          if (!wc || typeof wc.applyServerBlocks !== "function") return;
+          wc.applyServerBlocks(payload.blocks || []);
+        };
+        this.handleEvent("bp:field-canvas-update", this._onUpdate);
+      },
+      destroyed() {
+        if (this._onCanvasOps) this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+      },
+    };
+
     Hooks.BarkparkPaperCanvas = {
       mounted() {
         // Seed the run into the element. Pre-upgrade-safe: assigning `el.blocks`
