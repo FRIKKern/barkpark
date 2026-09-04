@@ -86,6 +86,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The ONE job/step boundary. Four hand-rolled awk copies of `/^  [a-zA-Z0-9_-]+:/`
+# used to live in this file and in check-deployyml-filters.sh; a top-level block
+# scalar (`run-name: |`) with a 2-space body defeated every one of them by
+# handing the text scanner a STRING that looks like the control-plane job. See
+# the lib header for the full shape and the mutation that proves it.
+# shellcheck source=scripts/lib/deploy-yaml-scope.sh
+. "$REPO_ROOT/scripts/lib/deploy-yaml-scope.sh"
+
 DEPLOY_YML_DEFAULT=".github/workflows/deploy.yml"
 
 # ── yaml validity (runs BEFORE any text scan) ────────────────────────────────
@@ -188,33 +197,17 @@ PY
 # on exactly the invariant this file exists to hold. The deploy job cannot be
 # allowed to satisfy its own gate with a log line.
 extract_cp_smoke() {
-  awk '
-    /^  [a-zA-Z0-9_-]+:/ {
-      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
-      instep = 0
-    }
-    job == "control-plane" && /^      - / { instep = ($0 ~ /^      - name: .*Smoke test/) ? 1 : 0 }
-    job == "control-plane" && instep { print }
-  ' "$1"
+  deploy_yaml_step_lines "$1" control-plane "Smoke test"
 }
 
-# The INSTANCE job's `Smoke test` step, verbatim. A deliberate near-copy of
-# extract_cp_smoke rather than a shared parameterised helper: the job-boundary
-# awk is shared prose with scripts/check-deployyml-filters.sh, and unifying the
-# three is its own held task (dr-w25-followup-yaml-job-scope-helper). Copying
-# eight lines is cheaper than a refactor nobody asked for, and the step-boundary
-# rule ('      - ', not '      - name: ') is copied WITH it — that rule is what
-# stops an unnamed trailing step from answering for the smoke, the disarm shape
-# selftest 4 encodes.
+# The INSTANCE job's `Smoke test` step, verbatim. Same primitive as
+# extract_cp_smoke, one argument apart — the near-copy this used to be, and the
+# job-boundary awk it shared with check-deployyml-filters.sh, are both gone
+# (dr-w25-followup-yaml-job-scope-helper). The rule that stops an UNNAMED
+# trailing step from answering for the smoke — a step ends where the next SEQUENCE
+# ITEM begins, named or not — now lives in the parser, not in a copied regex.
 extract_instance_smoke() {
-  awk '
-    /^  [a-zA-Z0-9_-]+:/ {
-      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
-      instep = 0
-    }
-    job == "instance" && /^      - / { instep = ($0 ~ /^      - name: .*Smoke test/) ? 1 : 0 }
-    job == "instance" && instep { print }
-  ' "$1"
+  deploy_yaml_step_lines "$1" instance "Smoke test"
 }
 
 # The instance smoke's own invariants. Until this existed the instance job had
@@ -289,12 +282,7 @@ check_instance_smoke() {
 # Every line of one job. Job boundaries are the 2-space keys under `jobs:` — the
 # same rule extract_cp_smoke uses, so the two agree on where a job ends.
 extract_job_lines() {
-  awk -v want="$2" '
-    /^  [a-zA-Z0-9_-]+:/ {
-      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
-    }
-    job == want { print }
-  ' "$1" | grep -v '^[[:space:]]*#' || true
+  deploy_yaml_job_lines "$1" "$2" | grep -v '^[[:space:]]*#' || true
 }
 
 # The logic half: drop BARE echo/printf lines. A line that pipes into a test
@@ -417,18 +405,13 @@ check_file() {
   if [ -z "$step" ]; then
     echo "FAIL[$label]: no 'Smoke test' step found in the control-plane job — the extractor is broken, not the workflow" >&2
     echo "Cause, in order of likelihood:" >&2
-    echo "  1. A line indented EXACTLY two spaces and ending in ':' appeared inside the control-plane job" >&2
-    echo "     — typically a heredoc body written at that indent inside a 'run: |' block. extract_cp_smoke" >&2
-    echo "     reads that line as the next JOB key, so everything after it is attributed to a job named" >&2
-    echo "     after your heredoc line and the smoke step is never seen. Re-indent the heredoc body." >&2
-    echo "  2. The step was renamed: the boundary matches '      - name: ' containing 'Smoke test'." >&2
-    echo "  3. The job was renamed from 'control-plane'." >&2
-    echo "  4. A line inside the Smoke test step's own 'run: |' body is indented EXACTLY six spaces and" >&2
-    echo "     starts with '- ' (a bullet inside an echo, say). The step boundary is every 6-space '- '" >&2
-    echo "     list item — that is what stops an UNNAMED trailing step from being absorbed into the smoke —" >&2
-    echo "     so such a line closes the step early and the invariants after it go unseen. This direction" >&2
-    echo "     fails CLOSED (you are reading this message, not an OK), but the fix is to re-indent the body," >&2
-    echo "     never to loosen the boundary back to '- name: '." >&2
+    echo "  1. The step was renamed: the boundary matches a step whose 'name' CONTAINS 'Smoke test'." >&2
+    echo "  2. The job was renamed from 'control-plane', or it declares no 'steps:'." >&2
+    echo "  3. NOT the indentation. The boundary is a real YAML parse (scripts/lib/deploy-yaml-scope.sh)," >&2
+    echo "     so a heredoc body, a block scalar, or any string content can no longer truncate the scan" >&2
+    echo "     — nor can it ANSWER for the step, which is the direction that used to certify a deleted probe." >&2
+    echo "  4. NOT a '- ' bullet inside the step's own run: body either — a sequence item is now a PARSED" >&2
+    echo "     node, so only the next real step closes this one." >&2
     return 1
   fi
 
