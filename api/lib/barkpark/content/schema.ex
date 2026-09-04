@@ -202,6 +202,24 @@ defmodule Barkpark.Content.Schema do
   """
   @spec resolve_schema(String.t(), String.t(), keyword()) :: {:ok, SchemaDefinition.t()} | :error
   def resolve_schema(name, dataset, opts \\ []) do
+    if Keyword.has_key?(opts, :workspace_id) do
+      resolve_schema_scoped(name, dataset, opts)
+    else
+      # NO tenant scope at all — an internal / unscoped caller (a pane build
+      # outside a workspace mount, a mix task, a test). This is the explicit
+      # global read `get_schema/2` always was: the "global rung admits only a
+      # shared row" rule below exists to stop a SCOPED caller reaching another
+      # tenant's schema, and has no caller to protect here. Without this arm an
+      # unscoped read of a tenant-owned schema answered :error — the pane then
+      # lost its desk groups and orderings (found by E3.1's own test).
+      case get_schema(name, dataset, opts) do
+        {:ok, schema} -> {:ok, schema}
+        _ -> :error
+      end
+    end
+  end
+
+  defp resolve_schema_scoped(name, dataset, opts) do
     workspace_only = Keyword.delete(opts, :project_id)
     global = Keyword.drop(opts, [:workspace_id, :project_id])
 
@@ -682,6 +700,8 @@ defmodule Barkpark.Content.Schema do
       actions: schema.actions || [],
       groups: schema.groups || [],
       deskGroups: schema.desk_groups || [],
+      # Gyldendal parity E3 — the schema-level desk block (orderings today).
+      desk: schema.desk || %{},
       crossValidations: schema.cross_validations || [],
       # Generic list-row preview declaration (badge + meta content fields);
       # empty map == no declaration, SDK/TUI rows render unchanged.

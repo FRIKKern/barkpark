@@ -995,9 +995,14 @@ defmodule Barkpark.Structure do
   into a map suitable for `Barkpark.Content.list_documents/3`'s
   `:filter_map` option. Returns `%{}` for nil / "" / malformed input.
   """
-  @spec parse_filter(String.t() | nil) :: map()
+  @spec parse_filter(String.t() | map() | nil) :: map()
   def parse_filter(nil), do: %{}
   def parse_filter(""), do: %{}
+  # Gyldendal parity E3.1 — a node may carry a FULL `Content.Query` filter map
+  # (the shape desk_groups and :plugin_document_list already use), so a
+  # declared list such as «Uten omslag» = %{"content.cover.assetId" => %{"is"
+  # => "null"}} rides the same node type as the legacy "field=value" string.
+  def parse_filter(%{} = map), do: map
 
   def parse_filter(s) when is_binary(s) do
     case String.split(s, "=", parts: 2) do

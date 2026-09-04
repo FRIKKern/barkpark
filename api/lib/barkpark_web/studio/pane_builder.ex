@@ -361,6 +361,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               ),
             else: list_opts
 
+        # Gyldendal parity E3.1 — the declared sort: a desk group's own
+        # `orderings` win, else the schema's `desk.orderings` (Sanity's
+        # `orderings`, first entry = default). Absent → today's order.
+        list_opts =
+          case desk_order(active_group, schema) do
+            [] -> list_opts
+            order -> Keyword.put(list_opts, :order, order)
+          end
+
         {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
 
         doc_pane = %{
@@ -775,6 +784,37 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
            "#{inspect(to_string(field))}, so it could not be applied. No documents are shown — " <>
            "fix the filter in this type's schema (desk groups)."}
     end
+  end
+
+  # The `Content.Query` `:order` specs for a list — from the active desk group's
+  # `orderings`, else the schema's `desk.orderings`. Each entry
+  # %{"field" => f, "direction" => "asc"|"desc"} becomes {:field, f, dir}; an
+  # entry the changeset would have refused is skipped, never raised on.
+  @doc false
+  def desk_order(active_group, schema) do
+    group_orderings =
+      active_group && (Map.get(active_group, "orderings") || Map.get(active_group, :orderings))
+
+    schema_orderings =
+      case schema && (Map.get(schema, :desk) || Map.get(schema, "desk")) do
+        %{} = desk -> Map.get(desk, "orderings") || Map.get(desk, :orderings)
+        _ -> nil
+      end
+
+    (group_orderings || schema_orderings || [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{} = o ->
+        field = Map.get(o, "field") || Map.get(o, :field)
+        dir = Map.get(o, "direction") || Map.get(o, :direction) || "asc"
+
+        if is_binary(field) and field != "" and dir in ["asc", "desc"],
+          do: [{:field, field, String.to_atom(dir)}],
+          else: []
+
+      _ ->
+        []
+    end)
   end
 
   defp schema_desk_groups(nil), do: []
