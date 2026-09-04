@@ -90,7 +90,8 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
     # :optional — returns the conn unchanged for an anonymous caller, which then
     # reaches the shared `ip:` bucket. These do NOT protect a pipeline.
     "OptionalToken" =>
-      {:optional, "no bearer (or a non-Bearer scheme) falls straight through, strict arm included"},
+      {:optional,
+       "no bearer (or a non-Bearer scheme) falls straight through, strict arm included"},
     "OptionalSessionToken" => {:optional, "moduledoc: \"Never halts\"; anon passes through"},
     "RequireShareEditToken" =>
       {:optional,

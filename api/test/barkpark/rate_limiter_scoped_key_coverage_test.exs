@@ -167,7 +167,9 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     # and is not. This is the assertion that keeps the rule syntactic.
     indirect = String.replace(fixed, "RateLimiter.scoped_key(conn, key)", "key")
 
-    assert scan([{"lib/fixture/indirect.ex", indirect}]) == [{"lib/fixture/indirect.ex", 6, "key"}],
+    assert scan([{"lib/fixture/indirect.ex", indirect}]) == [
+             {"lib/fixture/indirect.ex", 6, "key"}
+           ],
            "a key scoped on an EARLIER line and passed by variable must still be refused — " <>
              "that shape reads compliant and is not"
   end

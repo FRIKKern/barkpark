@@ -65,6 +65,7 @@ defmodule Barkpark.RateLimiterScopedKeyTest do
       # `inspect/1` of whatever was there.
       for junk <- [nil, :not_a_scope, 7, %{}] do
         conn = Plug.Conn.put_private(Phoenix.ConnTest.build_conn(), @scope_key, junk)
+
         assert RateLimiter.scoped_key(conn, {:app_token_revoke, "1.2.3.4"}) ===
                  {:app_token_revoke, "1.2.3.4"}
       end
