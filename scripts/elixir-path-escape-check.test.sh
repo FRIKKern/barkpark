@@ -730,12 +730,17 @@ src, dst = sys.argv[1], sys.argv[2]
 lines = open(src).read().splitlines(keepends=True)
 target = None
 for i, line in enumerate(lines):
-    if 'openers="$(grep -noE' in line:
+    # The opener scan is BATCHED: one `grep -EonH` over the whole file list in
+    # list_escapes' pre-scan, not a `grep -noE` per file. Neuter it by giving
+    # that one grep a pattern nothing matches — the pipeline shape, and so the
+    # `O)` drain below it, stay valid, and `openers` comes out empty for every
+    # file exactly as the old per-file `openers=""` made it.
+    if 'grep -EonH' in line:
         target = i
         break
 assert target is not None, "the shape-6 opener-scan line was not found — mutation would prove nothing"
 indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
-lines[target] = indent + 'openers=""\n'
+lines[target] = indent + "xargs -0 grep -EonH 'ZZZ_OPENER_SCAN_DISABLED_BY_HARNESS' 2>/dev/null |\n"
 open(dst, "w").writelines(lines)
 PY
 if ! cmp -s "$MUT_MULTI" "$SCRIPT"; then
@@ -880,12 +885,15 @@ src, dst = sys.argv[1], sys.argv[2]
 lines = open(src).read().splitlines(keepends=True)
 target = None
 for i, line in enumerate(lines):
-    if 'lits="$(grep -Eoh' in line and '~[sScC]' in line:
+    # Same batching as the opener scan: the literal/sigil grep is one
+    # `grep -EoH` over the whole file list in the pre-scan. Strip the sigil
+    # arms from THAT alternation, leaving the plain double-quoted arm.
+    if 'grep -EoH' in line and '~[sScC]' in line:
         target = i
         break
 assert target is not None, "the shape-5 sigil alternation was not found — mutation would prove nothing"
 indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
-lines[target] = indent + 'lits="$(grep -Eoh \'"\\.\\./[^"]*"\' "$REPO_ROOT/$f" || true)"\n'
+lines[target] = indent + 'xargs -0 grep -EoH \'"\\.\\./[^"]*"\' 2>/dev/null |\n'
 open(dst, "w").writelines(lines)
 PY
 if ! cmp -s "$MUT_SIGIL" "$SCRIPT"; then
