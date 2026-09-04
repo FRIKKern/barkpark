@@ -29,6 +29,20 @@ defmodule Barkpark.Content.Revision do
     # history into a who-edited-what content trail.
     field :actor_user_id, :string
 
+    # WHO produced this revision, in the vocabulary the paper reader has
+    # (edit-on-the-link slice 4). `actor_user_id` above is a bare id with no
+    # kind — it cannot say whether the string names a user, an API token or a
+    # share link, and carries no display label. These three do, and they are
+    # written from ONE source: `CallerContext.actor_stamp/1`.
+    #
+    # `actor_kind` is "user" | "api_token" | "share" | "anonymous"; `actor_id`
+    # is nil for anonymous; `actor_label` is a display string (an email, a token
+    # name) or nil. ALL NULLABLE — history written before these columns existed
+    # recorded no kind and cannot be backfilled.
+    field :actor_kind, :string
+    field :actor_id, :string
+    field :actor_label, :string
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
@@ -54,6 +68,9 @@ defmodule Barkpark.Content.Revision do
       :action,
       :rev,
       :actor_user_id,
+      :actor_kind,
+      :actor_id,
+      :actor_label,
       :document_id,
       :workspace_id,
       :project_id

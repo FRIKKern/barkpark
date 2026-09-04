@@ -122,6 +122,11 @@ defmodule BarkparkWeb.HistoryController do
       # NULL on history written before the column existed.
       rev: rev.rev,
       actor_user_id: rev.actor_user_id,
+      # Edit-on-the-link slice 4: WHO, with the kind that makes the id
+      # readable. NULL on history written before the columns existed.
+      actor_kind: rev.actor_kind,
+      actor_id: rev.actor_id,
+      actor_label: rev.actor_label,
       title: rev.title,
       status: rev.status,
       timestamp: rev.inserted_at
@@ -137,6 +142,9 @@ defmodule BarkparkWeb.HistoryController do
       action: rev.action,
       rev: rev.rev,
       actor_user_id: rev.actor_user_id,
+      actor_kind: rev.actor_kind,
+      actor_id: rev.actor_id,
+      actor_label: rev.actor_label,
       title: rev.title,
       status: rev.status,
       # `owner_id` is unknown for a stored snapshot (revisions carry none), so an

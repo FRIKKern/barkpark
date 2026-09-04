@@ -2589,6 +2589,18 @@ defmodule BarkparkWeb.Router do
     delete("/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # ── Paper access trail — who viewed and edited one paper ────────────────
+  # Edit-on-the-link slice 4 (task-e99a8e946f80f52c). `:flat_admin_api`, not
+  # `[:api, :require_admin]`: the trail is workspace-scoped off `scope_opts`, so
+  # on the naive pipeline every caller would have been served the SEEDED DEFAULT
+  # workspace's rows (D45/D49). The pipeline also supplies the refusals — no
+  # token 401s at RequireToken, a non-admin token 403s at RequireAdmin.
+  scope "/v1/papers", BarkparkWeb do
+    pipe_through(:flat_admin_api)
+
+    get("/:slug/access", PaperAccessController, :index)
+  end
+
   # ── Desk structure — the canonical Studio tree, served for the TUI ──────
   # `:flat_admin_api`, not `[:api, :require_admin]`: the desk tree is built from
   # `Structure.build(dataset, scope_opts(conn))`, so on the naive pipeline every
