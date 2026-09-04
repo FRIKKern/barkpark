@@ -12,7 +12,15 @@
 #   PLUGINS_ROOT  — override the root scan path (default api/priv/plugins).
 #   GITHUB_OUTPUT — when set, also writes `matrix=` and `empty=` lines.
 #
-# Exit 0 in all expected cases, including "no plugins found".
+# Exit codes — a failed READ must never look like a genuine "no plugins":
+#   0  matrix built (possibly [] / empty=true, when the root exists but no
+#      plugin.json declares a top-level "node" key — a real, honest zero).
+#   4  HARNESS FAILURE: PLUGINS_ROOT does not exist. This used to emit
+#      [] / empty=true at exit 0, so a moved or renamed plugins tree made
+#      plugin-node.yml skip every per-plugin job and end GREEN. The
+#      consumer (.github/workflows/plugin-node.yml `discover` step, no
+#      continue-on-error) turns this exit into a failed job, and the
+#      `plugin` job that `needs: discover` is then never dispatched.
 
 set -euo pipefail
 
@@ -30,17 +38,25 @@ emit() {
   fi
 }
 
+EXIT_MISSING_ROOT=4
+
 if [ ! -d "$PLUGINS_ROOT" ]; then
-  emit "[]" "true"
-  exit 0
+  echo "CANNOT READ: PLUGINS_ROOT $PLUGINS_ROOT missing" >&2
+  exit "$EXIT_MISSING_ROOT"
 fi
 
 # Collect manifests with a top-level "node" key. jq is preinstalled on
 # ubuntu-latest runners; locally it is required.
-mapfile -t MANIFESTS < <(find "$PLUGINS_ROOT" -mindepth 2 -maxdepth 2 -name "plugin.json" 2>/dev/null | sort)
+# `mapfile` is bash 4+; macOS ships bash 3.2, where it made this script — and
+# therefore its own selftest — die at exit 127 the moment PLUGINS_ROOT existed.
+MANIFESTS=()
+while IFS= read -r manifest_path; do
+  MANIFESTS+=("$manifest_path")
+done < <(find "$PLUGINS_ROOT" -mindepth 2 -maxdepth 2 -name "plugin.json" 2>/dev/null | sort)
 
 ENTRIES="[]"
-for manifest in "${MANIFESTS[@]}"; do
+# ${a[@]+"${a[@]}"} — an empty array is an unbound variable under set -u in 3.2.
+for manifest in ${MANIFESTS[@]+"${MANIFESTS[@]}"}; do
   has_node=$(jq 'has("node")' "$manifest")
   if [ "$has_node" != "true" ]; then
     continue

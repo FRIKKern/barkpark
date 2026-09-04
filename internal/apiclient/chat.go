@@ -420,17 +420,30 @@ func (c *Client) chatURL(suffix string) string {
 // server's error envelope through humanAPIError (the same one-line-message path
 // the rest of the client uses). The caller decodes the returned bytes.
 func (c *Client) chatSend(method, endpoint string, payload interface{}, okStatuses ...int) ([]byte, error) {
+	_, body, err := c.chatSendRaw(method, endpoint, payload, okStatuses...)
+	return body, err
+}
+
+// chatSendRaw is chatSend with the RESPONSE STATUS surfaced alongside the body.
+// It exists for the MCP write surface: internal/cli's shared write fence
+// (writeReceiptVerdict) is a verdict over (status, body), and a caller that only
+// ever sees a decoded struct cannot tell "the server minted a session" from "the
+// server answered 200 and said nothing" — the decode of `{}` and of a real
+// session are both a nil error. The typed decode stays where it was; this is the
+// smallest surface that lets a caller screen the untouched receipt. Non-ok
+// statuses still return humanAPIError, with the status alongside it.
+func (c *Client) chatSendRaw(method, endpoint string, payload interface{}, okStatuses ...int) (int, []byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		bodyReader = bytes.NewReader(b)
 	}
 	req, err := http.NewRequest(method, endpoint, bodyReader)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -440,16 +453,16 @@ func (c *Client) chatSend(method, endpoint string, payload interface{}, okStatus
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	for _, s := range okStatuses {
 		if resp.StatusCode == s {
-			return respBody, nil
+			return resp.StatusCode, respBody, nil
 		}
 	}
-	return nil, humanAPIError(resp.StatusCode, respBody)
+	return resp.StatusCode, nil, humanAPIError(resp.StatusCode, respBody)
 }
 
 // CreateChatSession opens a new chat session. mode/model/effort are all
@@ -473,6 +486,18 @@ type ChatSessionCreateOptions struct {
 }
 
 func (c *Client) CreateChatSessionWithOptions(opts ChatSessionCreateOptions) (ChatSession, error) {
+	s, _, _, err := c.CreateChatSessionWithOptionsRaw(opts)
+	return s, err
+}
+
+// CreateChatSessionWithOptionsRaw is CreateChatSessionWithOptions plus the
+// UNTOUCHED receipt (status + body) the server answered with. The typed decode
+// is identical — a 200 `{}` still decodes to a zero ChatSession with a nil error
+// — so a caller that must not hand an empty session id onward as a spawned agent
+// (internal/cli's MCP chat_spawn_session tool) can run these bytes through the
+// one shared write fence instead of re-deciding honesty here. This client stays
+// free of any verdict of its own.
+func (c *Client) CreateChatSessionWithOptionsRaw(opts ChatSessionCreateOptions) (ChatSession, int, []byte, error) {
 	payload := map[string]string{}
 	if opts.Provider != "" {
 		payload["provider"] = opts.Provider
@@ -492,15 +517,15 @@ func (c *Client) CreateChatSessionWithOptions(opts ChatSessionCreateOptions) (Ch
 	if opts.Effort != "" {
 		payload["effort"] = opts.Effort
 	}
-	body, err := c.chatSend(http.MethodPost, c.chatURL("/sessions"), payload, http.StatusCreated, http.StatusOK)
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions"), payload, http.StatusCreated, http.StatusOK)
 	if err != nil {
-		return ChatSession{}, err
+		return ChatSession{}, status, body, err
 	}
 	var s ChatSession
 	if err := json.Unmarshal(body, &s); err != nil {
-		return ChatSession{}, fmt.Errorf("decode create-session response: %w", err)
+		return ChatSession{}, status, body, fmt.Errorf("decode create-session response: %w", err)
 	}
-	return s, nil
+	return s, status, body, nil
 }
 
 // ListChatSessions returns the sidebar list. archived selects the active set
@@ -554,9 +579,18 @@ func (c *Client) UpdateChatSession(id string, patch ChatSessionPatch) error {
 // distinguish a fresh turn from a mid-turn queued steer (D12) — the client
 // badges "queued" from its own local turn state, not from this response.
 func (c *Client) SendChatMessage(id, content string) error {
-	payload := map[string]string{"content": content}
-	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/messages"), payload, http.StatusAccepted, http.StatusOK)
+	_, _, err := c.SendChatMessageRaw(id, content)
 	return err
+}
+
+// SendChatMessageRaw is SendChatMessage plus the untouched receipt (status +
+// body), for the same reason as CreateChatSessionWithOptionsRaw: the MCP
+// chat_send tool synthesises `{"accepted":true}` from a nil error, so without
+// the raw bytes a 200 that says nothing is indistinguishable from a real 202
+// accept.
+func (c *Client) SendChatMessageRaw(id, content string) (int, []byte, error) {
+	payload := map[string]string{"content": content}
+	return c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/messages"), payload, http.StatusAccepted, http.StatusOK)
 }
 
 // UploadChatAttachment stores one attachment in a session's CHAT-OWNED store

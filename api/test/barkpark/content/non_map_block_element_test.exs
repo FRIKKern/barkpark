@@ -19,7 +19,7 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
         render.ex:367  render_blocks/2
         projection.ex     project_body/2
         projection.ex:162  project/4
-        writer.ex:443  scaffold_expectation/3      (create / createOrReplace)
+        writer.ex:Writer.scaffold_expectation/3      (create / createOrReplace)
         writer.ex:Writer.maybe_project_document_content/2  (upsert)
         mutations.ex:155 · mutate_controller.ex:22
 
