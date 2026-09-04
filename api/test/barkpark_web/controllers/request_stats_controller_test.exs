@@ -140,7 +140,7 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
       assert %{lv_dead: %{count: 1, authed: 0, anon: 0, auth_unknown: 1}} = classes
     end
 
-    test "HIGH-FLIP-RISK pin: a SIGNED-IN browser session dead render is lv_dead.auth_unknown and moves NO anon counter anywhere",
+    test "HIGH-FLIP-RISK pin: a SIGNED-IN paper-reader dead render is lv_dead.authed and moves NO anon counter anywhere",
          %{conn: conn, name: name} do
       slug = "reqstats-signed-paper-#{System.unique_integer([:positive])}"
       seed_paper(slug)
@@ -155,13 +155,19 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
 
       assert html_response(conn, 200) =~ "Metered"
 
-      # The session carries a real token, but the flat reader's pipelines run
-      # no :api_token-resolving plug — the identity is UNKNOWN at stop, and the
-      # one thing this sample must never do is move an anon counter (D11).
+      # The flat reader's PIPELINES still run no :api_token-resolving plug, but
+      # since edit-on-the-link slice 1 (task-0c242c8dc61f6b13) the reader's own
+      # on_mount hook, `BarkparkWeb.PaperViewer`, verifies the session token
+      # during the dead render and assigns `:api_token` — the same way
+      # `LiveAuth.:fetch_api_token` does for Studio. The dead render copies the
+      # socket assigns onto the conn, so the token is PRESENT at stop: `authed`
+      # is the honest word (D11 never assigns absence; presence is presence).
+      # Before slice 1 this sample was `auth_unknown`; the flip is deliberate.
+      # The invariant that must never move: no anon counter, anywhere.
       %{classes: classes, count: 1} = RequestStats.stats(name)
       # lv_dead is the ONLY class present…
       assert Map.keys(classes) == [:lv_dead]
-      assert %{count: 1, authed: 0, anon: 0, auth_unknown: 1} = classes[:lv_dead]
+      assert %{count: 1, authed: 1, anon: 0, auth_unknown: 0} = classes[:lv_dead]
       # …and no class row anywhere carries an anon tick.
       assert Enum.all?(classes, fn {_class, row} -> row.anon == 0 end)
     end
