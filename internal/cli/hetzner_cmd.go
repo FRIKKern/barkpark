@@ -1112,9 +1112,6 @@ var hzServerPostConditionExemptions = map[string]string{
 		"so its receipt is observation and not a request echo",
 	"delete": "a deleted server has no state to re-read: its honest post-condition is a 404 on GET /servers/<id>, " +
 		"which the delete action completing already implies",
-	"create-image": "create-image changes no field on hcloud.Server — it returns an *hcloud.Image, so its honest post-condition " +
-		"is GET /images/<id>, a different resource (filed: pds-w26-create-image-image-postcondition)",
-
 	// The `instance` verbs (hetzner_instance_cmd.go). They are exempt from the
 	// SERVER post-condition table because none of them asserts a state of the
 	// server this table describes — each observes something else, and the
@@ -1150,6 +1147,26 @@ func hzBoundPost(verb, want string) hzPost {
 	}
 	post.holds, post.unmet = post.bindHolds(want)
 	return post
+}
+
+// hzForeignPostConditions names the verbs whose post-condition is REAL but
+// lives on a resource OTHER than the server the receipt names, with the read it
+// performs spelled out. It is the third classification the derivation gate
+// knows about, and it exists because the other two both lie about create-image:
+// keying it in hzServerPostConditions would claim a server field the verb never
+// moves, and excusing it in hzServerPostConditionExemptions says "nothing is
+// re-read", which stopped being true when the verb learnt to GET /images/<id>.
+//
+// A verb here is NOT exempt from anything. The entry states what it re-reads;
+// the derivation gate refuses a verb that is in two of the three maps at once,
+// and refuses an entry naming a verb that emits no receipt, exactly as it does
+// for the other two.
+var hzForeignPostConditions = map[string]string{
+	"create-image": "create-image moves no field on hcloud.Server — it produces an IMAGE, so it re-reads THAT: " +
+		"GET /images/<id> once the create action has completed. The receipt carries the OBSERVED image_status, " +
+		"image_description and image_ready, never the CreateImage response echo, and a read-back that fails is " +
+		"`confirmation: unavailable` at exit 0 — the same escape hzFlagVerbDone takes when only the confirming " +
+		"read failed (pds-w26-create-image-image-postcondition)",
 }
 
 // hzImageMatches / hzServerTypeMatches / hzISOMatches read the OBSERVED ref the
@@ -1586,15 +1603,63 @@ func runHetznerServerCreateImage(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create-image for server "+srv.Name+": action failed", werr)
 	}
-	// DECLARED EXEMPTION — see hzServerPostConditionExemptions["create-image"].
-	// This verb moves no field on hcloud.Server, so there is nothing to
-	// re-read on the server; its honest post-condition is a GET /images/<id>,
-	// a different resource, and it is filed rather than faked here.
+	// THE POST-CONDITION, on the IMAGE — see hzForeignPostConditions["create-image"].
+	// The action completing says the snapshot JOB finished, not that an image
+	// exists in a state anyone can use, so the id the response handed back is
+	// RE-READ and the receipt reports what that read observed.
+	return hzDone(out, "create-image", srv, hzCreateImageObserved(ctx, hc, result.Image, imgType))
+}
+
+// hzCreateImageObserved builds the IMAGE half of a create-image receipt by
+// re-reading the image the action produced.
+//
+// WHAT EACH OUTCOME SAYS, AND WHY IT SAYS IT
+//
+//   - THE READ CONFIRMS. image_status and image_description are the values
+//     GET /images/<id> reported, not the ones CreateImage echoed, and
+//     image_ready is the status compared against `available`. A snapshot that
+//     never materialised therefore CANNOT print the same receipt as one that
+//     did — which is the entire defect this replaced.
+//   - THE IMAGE IS STILL `creating`. Not a failure and not ready: the status is
+//     reported verbatim with image_ready false. Nothing in the receipt says the
+//     snapshot can be restored from, because at that moment it cannot.
+//   - THE READ FAILS. The action was fired AND waited to success; only the
+//     confirming read failed, so this is `confirmation: unavailable` at exit 0
+//     — the same escape, and the same two keys, hzFlagVerbDone takes. image_id
+//     is still reported because it is the only handle the operator has, but
+//     NOTHING is claimed about the image's state.
+//
+// Unlike instArchive this does not POLL through `creating`: nothing downstream
+// boots from this image, so making the operator wait buys nothing an honest
+// `image_status: creating` does not already tell them.
+func hzCreateImageObserved(ctx context.Context, hc *hcloud.Client, img *hcloud.Image, imgType hcloud.ImageType) map[string]any {
 	extra := map[string]any{"type": string(imgType)}
-	if result.Image != nil {
-		extra["image_id"] = result.Image.ID
+	if img == nil {
+		extra["confirmation"] = "unavailable"
+		extra["confirmation_error"] = "the create-image action completed but the response named no image, " +
+			"so there is no id to re-read"
+		return extra
 	}
-	return hzDone(out, "create-image", srv, extra)
+	extra["image_id"] = img.ID
+	fresh, _, gerr := hc.Image.GetByID(ctx, img.ID)
+	switch {
+	case gerr != nil:
+		extra["confirmation"] = "unavailable"
+		extra["confirmation_error"] = fmt.Sprintf("image %d could not be re-read: %v", img.ID, gerr)
+	case fresh == nil:
+		extra["confirmation"] = "unavailable"
+		extra["confirmation_error"] = fmt.Sprintf("the create-image action completed but GET /images/%d reports "+
+			"no such image, so nothing confirms the snapshot exists", img.ID)
+	default:
+		extra["image_id"] = fresh.ID
+		extra["image_status"] = string(fresh.Status)
+		extra["image_description"] = fresh.Description
+		extra["image_ready"] = fresh.Status == hcloud.ImageStatusAvailable
+		if fresh.Type != "" {
+			extra["type"] = string(fresh.Type)
+		}
+	}
+	return extra
 }
 
 func runHetznerServerAttachISO(out *writer, g globals, args []string) int {
