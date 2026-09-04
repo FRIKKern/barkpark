@@ -882,6 +882,107 @@ async function assertLateMeRepaintsTheRail() {
     process.exit(1);
   }
 }
+// ── cch-w46-rv · THE SAME GUARD, PAST THE RAIL ───────────────────────────────
+// The guard above proved the CLI rail heals. It proved nothing about the other
+// six authority-decided controls on that screen, and cch-w45-s5 had already put
+// two of them there: the header's Attach domain (#inst-domain, inside
+// #inst-header-actions) and the Updates panel's Roll back ([data-rollback],
+// inside #inst-update-actions). On origin/main a late /v1/me left BOTH reading
+// "Checking capabilities…" against an answer the console already held — the
+// exact defect the rail guard exists to red, still open two-thirds of the way.
+//
+// TWO BOOTS, because the two surfaces do not co-render:
+//   * usage-quota — the tab reloadInstanceView() HARD-RETURNS on, and the tab
+//     the rail guard is pinned on for the same reason. The header renders on
+//     EVERY tab, so an Overview-only seam reds right here.
+//   * panel-overview — the Updates panel is an Overview-tab card and exists
+//     nowhere else, so its half has to be driven where it actually renders.
+// HOW A REGION IS READ IN THIS SHIM, and why it takes two lookups. The shim
+// models the DOM as a flat markup STRING per registry (#id) mount plus a
+// registry of id-addressed stubs. A region that app.js only ever emits INSIDE a
+// parent's innerHTML — like the header's actions strip — has no registry entry
+// until something writes through `$("#id").innerHTML`, so its stub reads "".
+// The repaint under test is exactly such a write. So: the region's own node
+// once it has been written, else the parent's markup FROM the region's opening
+// tag onward. The tail-slice is deliberate, not sloppy — it makes the
+// "the live hook is ABSENT before" half assert absence across everything that
+// follows the region, which is a strictly stronger claim than a bounded slice.
+function regionAfterOpen(boot, mountId, elId) {
+  const own = ((boot.registry.get(elId) || {}).innerHTML) || "";
+  if (own) return own;
+  const mount = (boot.byId(mountId).innerHTML) || "";
+  const at = mount.indexOf('id="' + elId + '"');
+  if (at === -1) return "";
+  const gt = mount.indexOf(">", at);
+  return gt === -1 ? "" : mount.slice(gt + 1);
+}
+
+async function assertLateMeRepaintsTheInstanceScreen() {
+  const broken = [];
+
+  // ── half 1: the header strip, on a tab reloadInstanceView refuses ─────────
+  const boot = bootScenario("usage-quota", { deferMe: true });
+  await flush();
+  const mountBefore = (boot.byId("instance-body").innerHTML) || "";
+  const stripBefore = regionAfterOpen(boot, "instance-body", "inst-header-actions");
+  boot.resolveMe();
+  await flush();
+  const stripAfter = regionAfterOpen(boot, "instance-body", "inst-header-actions");
+
+  if (mountBefore.indexOf('id="inst-header-actions"') === -1) {
+    broken.push("#inst-header-actions is not in the painted instance body — the header strip lost the id the " +
+      "repaint seam targets, so nothing below can be measured");
+  }
+  if (stripBefore.indexOf('id="inst-domain"') !== -1) {
+    broken.push("an UNKNOWN authority already emitted the LIVE Attach domain hook (id=\"inst-domain\") — the " +
+      "control is not fenced at all, and the after-assertion below would be vacuous");
+  }
+  if (stripBefore.indexOf("Checking capabilities") === -1) {
+    broken.push("the in-flight header strip carries no \"Checking capabilities…\" note, so there is no unknown " +
+      "arm to heal FROM — the scenario, the fence or the header moved");
+  }
+  if (stripAfter.indexOf('id="inst-domain"') === -1) {
+    broken.push("a /v1/me that answered LATE left the HEADER unhealed: no live Attach domain hook in " +
+      "#inst-header-actions with NO click. Note the tab — reloadInstanceView() refuses #usage, so a seam routed " +
+      "through it passes on Overview and fails here. Got: " + stripAfter.slice(0, 300));
+  }
+  if (stripAfter.indexOf("Checking capabilities") !== -1) {
+    broken.push("the repainted header still says \"Checking capabilities…\" about a read that already answered");
+  }
+
+  // ── half 2: the Updates panel's Roll back, on Overview ────────────────────
+  const ov = bootScenario("panel-overview", { deferMe: true });
+  await flush();
+  const ovMount = (ov.byId("instance-body").innerHTML) || "";
+  const upBefore = regionAfterOpen(ov, "instance-body", "inst-update-actions");
+  ov.resolveMe();
+  await flush();
+  const upAfter = regionAfterOpen(ov, "instance-body", "inst-update-actions");
+
+  if (ovMount.indexOf('id="inst-update-actions"') === -1) {
+    broken.push("#inst-update-actions is not in the painted instance body — the Updates panel's actions row lost " +
+      "the id the repaint seam targets");
+  }
+  if (upBefore.indexOf('data-rollback="1"') !== -1) {
+    broken.push("an UNKNOWN authority already emitted the LIVE Roll back hook (data-rollback) — the control is " +
+      "not fenced, so the after-assertion below would be vacuous");
+  }
+  if (upAfter.indexOf('data-rollback="1"') === -1) {
+    broken.push("a /v1/me that answered LATE left the Updates panel's Roll back unhealed — still the checking " +
+      "arm against an answer the console already holds. Got: " + upAfter.slice(0, 300));
+  }
+
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " late-/v1/me   — usage-tab header strip heals (#inst-domain: " +
+    (stripBefore.indexOf('id="inst-domain"') !== -1) + " → " + (stripAfter.indexOf('id="inst-domain"') !== -1) +
+    "), overview Updates row heals ([data-rollback]: " + (upBefore.indexOf('data-rollback="1"') !== -1) + " → " +
+    (upAfter.indexOf('data-rollback="1"') !== -1) + ")\n");
+  if (broken.length) {
+    process.stdout.write("\nlate-/v1/me instance-screen guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+
 // cch-w46-s7 — THIS CALL MOVED INTO main(). It used to fire at module top level,
 // which made `import("./smoke.mjs")` boot a scenario and leak its verdict line to
 // stdout (measured: 117 bytes). A module that runs a corpus on import cannot be a
@@ -5521,6 +5622,7 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
 
 async function main() {
   await assertLateMeRepaintsTheRail();
+  await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
   if (!assertCensus()) {

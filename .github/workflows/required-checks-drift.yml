@@ -19,7 +19,13 @@
 #
 # A THIRD JOB THAT IS NOT ABOUT THE REQUIRED SET AT ALL, AND WHY IT IS HERE
 #
-#   `Every workflow job has runs-on+steps or uses`   Hermetic. The subject is
+#   `Every workflow job has runs-on+steps or uses`   Hermetic. Since wave 42 it
+#                                       also enforces the same rule one level
+#                                       down — every STEP carries exactly one of
+#                                       `run:`/`uses:` — after two `name:`+`env:`
+#                                       steps with no `run:` shipped green and
+#                                       silently disabled the job that existed to
+#                                       surface a red main push. The subject is
 #                                       the whole .github/workflows tree, not
 #                                       this workflow. It is here for ONE
 #                                       property this file has and the repo's
@@ -346,6 +352,12 @@ jobs:
       # legal `uses:` job in mktemp fixtures and asserts red/red/red/green, plus
       # the coverage floor (an empty scan exits 2, never a vacuous green) and an
       # unknown flag exiting 2 rather than 0.
+      #
+      # It also proves the STEP clause, and it does that on a COPY OF THIS FILE:
+      # the plant deletes the `run:` line from the step directly below, leaving
+      # the `name:`-only shape that ships green through every YAML parser in the
+      # repo, and asserts the red names the file, the job id and the step index.
+      # So the step below is both the check and the checked.
       - name: Prove the shape checker on planted fixtures (--selftest)
         run: bash scripts/workflow-job-shape-check.sh --selftest
 

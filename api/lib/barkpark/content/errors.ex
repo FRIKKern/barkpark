@@ -626,6 +626,52 @@ defmodule Barkpark.Content.Errors do
           "outage to report, not a document to fix."
     }
 
+  # The database connection was lost MID-WRITE on the create path
+  # (`Content.Writer.do_create_document/5`'s rescue): a pool checkout dropped
+  # from the queue, a `tcp recv: closed`, a statement killed with the
+  # connection. Before this arm existed the raise escaped the Writer entirely
+  # and Phoenix RenderErrors rendered it through `BarkparkWeb.ErrorJSON` as 500
+  # `internal_error / "unknown error (DBConnection.ConnectionError)"` — the
+  # WRONG CLASS of answer. `BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # grants retry grace by matching the error CODE and `internal_error` is not on
+  # its transient list, and the CLI's `internal_error` hint says to "report the
+  # request_id to the API operator": a condition that clears on its own was
+  # described to every caller as a permanent server defect to escalate.
+  #
+  # WHY THE `code` IS "storage_unavailable" (the `dedup_unavailable` reasoning
+  # above, applied a second time). One public code maps to ONE status —
+  # `internal/cli/errors.go` keys the CLI exit code on `code` and
+  # `internal/cli/errors_api_parity_test.go` refuses a code this file emits at
+  # two statuses — and minting a brand-new code is a four-place change
+  # (`@hints` → `known_codes/0` → the served OpenAPI `Error.code` enum behind a
+  # drift gate → `docs/api-v1.md` §9 under a byte cap). This arm is the same
+  # transient-storage SHAPE the sibling already wears: public, 503, CLI exit 8,
+  # retry-is-the-right-reflex. `reason: "connection_unavailable"` discriminates
+  # it from a media-volume fault and from the dedup-scan outage, exactly as
+  # `:replay` does under "unauthorized".
+  #
+  # THE MESSAGE CARRIES THE AMBIGUITY. Unlike the dedup outage — where the scan
+  # never ran, so provably nothing was written — a connection lost mid-write
+  # leaves the caller unable to know whether the draft row landed. The Writer
+  # builds that sentence (it names `bp doc ls task --perspective drafts`) and it
+  # rides through verbatim, because telling a caller to "resend the identical
+  # request" without telling them to CHECK FIRST walks them into the dedup wall
+  # and a duplicate-of-your-own-first-attempt refusal.
+  defp build({:error, {:connection_unavailable, reason}}),
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "connection_unavailable",
+      hint:
+        "Transient: the database connection dropped mid-write, so this write " <>
+          "was neither confirmed nor refused on its merits. CHECK WHETHER IT " <>
+          "LANDED before retrying — `bp doc ls task --perspective drafts` for " <>
+          "a task, otherwise re-read the id you sent — then resend the " <>
+          "identical request only if it did not. If it keeps failing the " <>
+          "database is degraded: an outage to report, not a document to fix."
+    }
+
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
   # legacy exemption ledger. 422 with the validator's documentation-grade

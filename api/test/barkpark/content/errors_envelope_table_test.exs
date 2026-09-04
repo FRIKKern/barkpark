@@ -105,6 +105,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # `reason` discriminating it from a media-volume fault.
       {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}},
        "storage_unavailable", 503, [:reason]},
+      # THE OTHER OUTAGE (task-a0ce4e18f6776400) — the connection dropped
+      # MID-WRITE on the create path rather than during the dedup scan, so
+      # unlike the arm above the write is AMBIGUOUS. Same public code, same 503,
+      # its own `reason` and its own hint (which says to check for the debris
+      # before resending). Pinned here so a later status edit to either transient
+      # arm cannot move the other one silently.
+      {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
+       "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},
