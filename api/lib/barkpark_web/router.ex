@@ -194,7 +194,7 @@ defmodule BarkparkWeb.Router do
   #
   # Sobelow triage (task-f76e9b7b):
   #   * Config.Headers — FIXED. SamlController.slo renders a real HTML page (the
-  #     esaml HTTP-POST LogoutResponse auto-submit form, saml_controller.ex:118)
+  #     esaml HTTP-POST LogoutResponse auto-submit form, SamlController.slo/2)
   #     that was served with NO secure headers. put_secure_browser_headers now
   #     adds X-Frame-Options/nosniff/referrer-policy on every response this
   #     pipeline emits (redirects included) — clickjacking + MIME-sniff + Referer

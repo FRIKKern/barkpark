@@ -10,6 +10,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.EmailSettings
   alias BarkparkCloud.Notifications.FakeHttpClient
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Workers.ChatNotificationWorker
@@ -18,6 +19,19 @@ defmodule BarkparkCloud.Notifications.ChatTest do
     n = System.unique_integer([:positive])
     {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
     team
+  end
+
+  # cch-w32-bl: BOTH legs of the test endpoint now spend one per-team stamp, so
+  # any test that presses twice inside the 10s window must age it out on
+  # purpose. Same manoeuvre `notifications_test.exs` already uses for the email
+  # leg — the point is that the second press is DELIBERATE, not accidental.
+  defp age_test_stamp(team) do
+    old = DateTime.add(DateTime.utc_now(), -11, :second) |> DateTime.truncate(:microsecond)
+
+    team
+    |> Notifications.get_or_create_settings()
+    |> EmailSettings.changeset(%{last_test_sent_at: old})
+    |> Repo.update!()
   end
 
   defp team_with_member do
@@ -323,6 +337,8 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       assert [%{args: %{"payload" => %{"alerts_muted" => false}}}] = all_enqueued()
 
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
+      # cch-w32-bl: the first press above burned the shared per-team window.
+      _ = age_test_stamp(team)
       assert {:ok, 1} = Notifications.send_test_chat(team)
 
       assert Enum.any?(all_enqueued(), fn job ->

@@ -76,7 +76,10 @@ defmodule BarkparkWeb.Studio.Caps do
     * `:write` — every mutation (save/publish/delete/paper-ops/…), incl.
       `access-revoke` (the Access panel's one-click revoke; `Access.revoke/2`
       re-authorizes grantor-or-admin server-side regardless of this gate).
-    * `:admin` — share / item-share (tenant-control) events.
+    * `:admin` — share / item-share (tenant-control) events, plus STRUCTURAL
+      mutation: `schema_action` + its two confirm-modal steps, and
+      `bulk-publish` / `bulk-unpublish` (RULED admin-tier,
+      `arpss-schema-action-write-tier-ruling`).
     * `:deny` — the DEFAULT for any event not in a set above → require `admin`.
 
   Enforcement per tier:
@@ -128,10 +131,19 @@ defmodule BarkparkWeb.Studio.Caps do
   # no-escalation, so the gate only requires the caller be able to read here.
   @read_events ~w(airdrop-open airdrop-create)
 
-  # Admin (tenant-control): the network-shares panel + per-item share popover.
+  # Admin (tenant-control): the network-shares panel + per-item share popover,
+  # plus STRUCTURAL mutation — schema-declared doc actions and bulk
+  # publish/unpublish (arpss-schema-action-write-tier-ruling, RULED admin-tier
+  # 2026-09-02). `schema_action` only OPENS the confirm modal, but the two
+  # confirm steps are the SAME operation continued: `confirm-modal-dryrun`
+  # dispatches the action with `:dryrun` and `confirm-modal-real` with `:real`,
+  # so classifying the opener :admin and the steps :write would gate the
+  # mutation one tier too low at the step that performs it.
   @admin_events ~w(
     shares-open shares-add shares-remove
     item-share-open item-share-create item-share-revoke
+    schema_action confirm-modal-dryrun confirm-modal-real
+    bulk-publish bulk-unpublish
   )
 
   # Mutations — every event that writes persisted state. Everything NOT listed
@@ -142,8 +154,7 @@ defmodule BarkparkWeb.Studio.Caps do
     array_op select-media clear-image upload-image select-ref clear-ref
     restore-revision save-profile delete-doc confirm-delete
     discard-draft confirm-discard publish unpublish confirm-unpublish
-    duplicate-doc toggle-doc-checkbox bulk-publish bulk-unpublish
-    schema_action confirm-modal-dryrun confirm-modal-real
+    duplicate-doc toggle-doc-checkbox
     paper-edit-block paper-block-autosave sidebar-slug-change
     paper-op paper-ops valueref-accept-baseline paper-add-block
     paper-materialize-slot paper-slash-insert paper-add-property

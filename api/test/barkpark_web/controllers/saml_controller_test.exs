@@ -438,4 +438,81 @@ defmodule BarkparkWeb.SamlControllerTest do
       refute Accounts.verify_user_session_token(token)
     end
   end
+
+  # task arpss-classa-lowsev-hygiene-rulings, site 2 (REDACT). Both arms below
+  # are PRE-AUTH — an unauthenticated caller reaches them — so the esaml/xmerl
+  # validation term, which names the exact check that failed, must not be
+  # echoed. These fences pin BOTH halves of the ruling: the client sees only
+  # the coarse class, and the raw term is still in the log for ops.
+  describe "pre-auth SAML failures answer a coarse reason, not the raw term" do
+    test "a forged ACS assertion answers assertion_invalid; the raw term is log-only",
+         %{conn: _conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+      attacker = idp()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          body =
+            scoped_conn()
+            |> post("/v1/auth/saml/#{@slug}/acs", %{
+              "SAMLResponse" =>
+                signed_response("victim@samlctrl.com", attacker.key, attacker.cert_der)
+            })
+            |> json_response(401)
+
+          send(self(), {:acs_body, body})
+        end)
+
+      assert_received {:acs_body, body}
+      assert body["error"]["details"]["reason"] == "assertion_invalid"
+
+      # Control: the raw term IS on the server log (ops keep the triage value).
+      raw = raw_reason!(log, "SAML ACS rejected an assertion")
+      refute raw == "assertion_invalid"
+      assert String.length(raw) > 4
+
+      # The fence: none of that raw term reaches the client.
+      refute Jason.encode!(body) =~ raw
+    end
+
+    test "a forged SLO LogoutRequest answers logout_request_invalid; raw term is log-only",
+         %{conn: _conn} do
+      i = idp()
+      setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+      attacker = idp()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          body =
+            scoped_conn()
+            |> post("/v1/auth/saml/#{@slug}/slo", %{
+              "SAMLRequest" =>
+                signed_logout_request("victim@samlctrl.com", attacker.key, attacker.cert_der,
+                  session_index: "idx-redact"
+                )
+            })
+            |> json_response(401)
+
+          send(self(), {:slo_body, body})
+        end)
+
+      assert_received {:slo_body, body}
+      assert body["error"]["details"]["reason"] == "logout_request_invalid"
+
+      raw = raw_reason!(log, "SAML SLO rejected a LogoutRequest")
+      refute raw == "logout_request_invalid"
+      assert String.length(raw) > 4
+
+      refute Jason.encode!(body) =~ raw
+    end
+  end
+
+  # Pulls the `inspect(reason)` tail off the controller's Logger.warning line.
+  defp raw_reason!(log, prefix) do
+    case Regex.run(~r/#{Regex.escape(prefix)} \(org_slug=[^)]*\): (.+)/, log) do
+      [_, raw] -> String.trim(raw)
+      nil -> flunk("no #{inspect(prefix)} log line found in:\n#{log}")
+    end
+  end
 end

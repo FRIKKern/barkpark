@@ -13,6 +13,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.Http.IfNoneMatch
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -714,18 +715,17 @@ defmodule BarkparkWeb.QueryController do
       |> maybe_vendor_content_type()
 
     if conditional_safe?(conn) do
-      conn = put_resp_header(conn, "etag", ~s("#{validator}"))
+      entity_tag = ~s("#{validator}")
+      conn = put_resp_header(conn, "etag", entity_tag)
 
-      case get_req_header(conn, "if-none-match") do
-        [hv | _] ->
-          if etag_matches?(hv, validator) do
-            conn |> send_resp(304, "") |> halt()
-          else
-            respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
-          end
-
-        _ ->
-          respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
+      # Compare against the ENTITY-TAG we just emitted (quotes included), not
+      # the bare validator: the old matcher stripped the quotes off the client's
+      # entry, so a bare `abc123` — a token this server never sends — bought a
+      # 304. It also read only the first header line.
+      if IfNoneMatch.match?(conn, entity_tag) do
+        conn |> send_resp(304, "") |> halt()
+      else
+        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
       end
     else
       # No header, and therefore no 304 branch: a validator we would refuse to
@@ -766,18 +766,6 @@ defmodule BarkparkWeb.QueryController do
       etag: etag,
       schemaHash: schema_hash
     }
-  end
-
-  defp etag_matches?(header, etag) do
-    header
-    |> String.split(",")
-    |> Enum.map(&String.trim/1)
-    |> Enum.map(&strip_etag/1)
-    |> Enum.any?(fn v -> v == etag or v == "*" end)
-  end
-
-  defp strip_etag(v) do
-    v |> String.trim_leading("W/") |> String.trim() |> String.trim("\"")
   end
 
   # Fold each doc's `_id` AND `_rev` into the ETag IN LIST ORDER (not a sorted

@@ -84,7 +84,7 @@ vm.runInContext(
 // ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
 // The server refuses two DIFFERENT things on this one screen: launching needs
 // team-ADMIN (go_live's inline gate), paying needs OWNER
-// (Auth.require_primary_team_owner). So the 402 paywall used to hand a team
+// (Auth.require_current_team_owner). So the 402 paywall used to hand a team
 // admin a "Choose Supporter" button the server had already decided to refuse,
 // and a plain member's ROLE refusal rendered as "Plan limit reached".
 //
@@ -4368,6 +4368,91 @@ test("D32: the SPA attention vocabulary matches attention_order.json", () => {
     "deploy_stalled must sit after unreported and before behind");
 });
 
+// ── the PREDICATE gets a cross-surface asserter too (dr-w25) ────────────────
+//
+// The D32 test above holds the SPA's RANK TABLE to attention_order.json. It says
+// nothing about classifyBp — a rung could keep its fixture rank forever and
+// still be unreachable, or reachable only through half its inputs. That is
+// exactly the defect this slice repairs: `behind` was reachable through
+// update_state and NOT through commit_ancestry, so a box the control plane had
+// measured 2,493 commits behind main classified `ok` and rendered live-green.
+//
+// The expected side is DERIVED from the fixture (states minus the named gap),
+// never a second hand-typed ladder: a state added to attention_order.json with
+// no witness here reds this test rather than scanning green.
+test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is reachable by commit ancestry", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+  );
+  const SPA_GAP = ["strained", "filling"]; // same named gap the D32 test pins
+  const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
+  assert.ok(expected.length >= 10,
+    "derived from a fixture carrying only " + expected.length + " classifiable states — an empty corpus would green every loop below");
+
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // One witness payload per fixture state, keyed BY THE FIXTURE'S NAMES.
+  const WITNESS = {
+    removal_failed: { deprovision_status: "failed" },
+    failed: { provision_status: "failed" },
+    suspended: { host: "h", suspended: true },
+    degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    unreported: { host: "h", last_seen_at: null },
+    deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
+    behind: { ...LIVE, update_state: "behind" },
+    removing: { deprovision_status: "pending" },
+    provisioning: {},
+    ok: { ...LIVE },
+  };
+  assert.deepEqual(Object.keys(WITNESS).slice().sort(), expected.slice().sort(),
+    "a fixture state gained or lost a witness — the predicate and attention_order.json have drifted");
+
+  for (const state of expected) {
+    assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
+    const rank = fixture.states.find((st) => st.state === state).rank;
+    assert.equal(hooks.attentionRank(WITNESS[state]), rank,
+      state + ": classifyBp's witness ranks " + hooks.attentionRank(WITNESS[state]) + ", fixture says " + rank);
+  }
+
+  // THE ROW THIS SLICE REPAIRS — the production payload, verbatim: the control
+  // plane measured 2,493 commits behind main while the release-tag grade read
+  // `current` (no tag has been cut since 2026-07-08). Before this slice the
+  // SECOND source was invisible to the predicate and this box classified "ok".
+  const tagCurrentCommitBehind = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: 2493 };
+  assert.equal(hooks.classifyBp(tagCurrentCommitBehind), "behind",
+    "a box the plane measured behind main must not classify live-green because its release tag grades itself current");
+  assert.equal(hooks.attentionRank(tagCurrentCommitBehind),
+    fixture.states.find((st) => st.state === "behind").rank);
+  assert.equal(hooks.bucketOf(tagCurrentCommitBehind), "attention");
+
+  // …and the RENDERED heading an operator reads (criterion 1's paste).
+  const s = hooks.statusOf(tagCurrentCommitBehind);
+  assert.equal(s.label, "Update available");
+  assert.equal(s.role, "info");
+  // Not the false all-clear "A newer release is available": the detail names the
+  // disagreement, in the Go twin's phrasing (behindDetail).
+  assert.equal(s.detail, "2493 commits behind main · release-tag grade still reads current");
+
+  // The unmetered arm: ancestry behind, distance null — still `behind`, and the
+  // detail never fabricates a number.
+  const unmetered = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: null };
+  assert.equal(hooks.classifyBp(unmetered), "behind");
+  assert.equal(hooks.statusOf(unmetered).detail,
+    "behind main by an unmeasured number of commits · release-tag grade still reads current");
+
+  // NON-REGRESSION, both directions: ancestry `current` is not behind, an absent
+  // ancestry (older control plane) is not behind, and a release-tag behind keeps
+  // its pre-existing release sentence rather than inheriting the commit one.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "current", commit_distance: 0 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_distance: 2493 }), "ok");
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A box that is BOTH is still one rung, and the tag sentence wins (the UPDATE
+  // column already shows running → latest) — Go's precedence, verbatim.
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", commit_ancestry: "behind", commit_distance: 7, update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
+  assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
+  assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+});
+
 // ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
 
 test("jpf-w1: a 5-minute unclaimed queued deploy is deploy_stalled — warn, attention, age named", () => {
@@ -4879,13 +4964,16 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
 });
 
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
-// The CP marks a GitHub push deployment born-failed (the builder can't run it
-// until the gh-1 App integration lands). FailureCopy.humanize maps the raw
+// The CP marked a GitHub push deployment born-failed when no source build was
+// available. Source builds have since arrived (the router's
+// `github_build_available?/1` is repo-present), so this family is now the
+// LEGACY tail plus the no-linked-repo defensive fallback — the copy explains
+// those rows and promises nothing. FailureCopy.humanize maps the raw
 // machine reason to human copy at the JSON boundary, so the client usually
 // already receives the human string — the mapping must be IDEMPOTENT.
 
 const GH_HUMAN =
-  "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+  "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
 
 test("failureCopy: raw github-push reason → the exact server-humanized copy", () => {
   assert.equal(
@@ -4906,7 +4994,7 @@ test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) s
   // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
   // curly apostrophe, casing, or can't→cannot, the client must still recognize
   // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
-  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  const curly = "This push predates GitHub source builds and can’t be built yet — push again to build.";
   assert.equal(hooks.failureCopy(curly), GH_HUMAN);
   assert.equal(hooks.failureTone(curly), "blocked");
   assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");
@@ -13024,7 +13112,7 @@ test("isu-w5: updatePanelHtml escapes a hostile channel value (no markup injecti
 
 // ── cch-w45-s5: the two member-reachable instance writes are decided at OFFER
 // time ────────────────────────────────────────────────────────────────────────
-// BOTH routes are require_primary_team_admin server-side while every read this
+// BOTH routes are require_current_team_admin server-side while every read this
 // screen makes is `user`, so a plain member painted the whole instance and got a
 // 403 on click. Re-derived on the PRE-FIX tree by booting the committed
 // panel-overview-member scenario: #instance-body carried a LIVE
@@ -13208,7 +13296,7 @@ test("connect agent: the URL half is escaped and rides the shipped .detail-url g
 // ── cch-w47-s2: the FOUR autoupdate policy buttons are decided at OFFER time
 // too ────────────────────────────────────────────────────────────────────────
 // `patch "/v1/barkparks/:id/autoupdate"` (web/router.ex) opens with
-// Auth.require_primary_team_admin — the same tier as the Rollback button four
+// Auth.require_current_team_admin — the same tier as the Rollback button four
 // lines below it in the SAME button strip — yet the four `data-au` toggles were
 // appended with no authority argument at all. Same remedy, same grammar: the
 // live mount hook (`data-au=`) exists on the grant arm ONLY.
@@ -17071,7 +17159,7 @@ test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refu
 // ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
 test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
   // Owner-only writes: only the literal "owner" role manages billing (stricter
-  // than admin — require_primary_team_owner).
+  // than admin — require_current_team_owner).
   assert.equal(hooks.billingCanManage("owner"), true);
   assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
   assert.equal(hooks.billingCanManage("member"), false);
@@ -17979,6 +18067,33 @@ test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => 
   const legacy = hooks.notifChatTestToast({ ok: true, status: 202, data: { ok: true } }, "slack", true);
   assert.equal(legacy.kind, "success");
   assert.match(legacy.body, /Sent to slack\./);
+});
+
+// ── cch-w32-bl: the chat leg's refusal is as readable as the email leg's ─────
+//
+// The chat leg jumped the 10s/team guard entirely, so `rate_limited` was
+// UNREACHABLE on this button and the toast never learned to read it — a 429
+// rendered "Try again shortly." while `retry_after` sat unused in the body.
+// Both legs now spend one budget, so both toasts must say the same number.
+test("cch-w32-bl notifChatTestToast: a rate-limited chat test reads the countdown, like the email one", () => {
+  const t = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited", retry_after: 7 } }, "slack", true);
+  assert.equal(t.kind, "error");
+  assert.match(t.body, /wait 7s/i, "the wire carried the number — the toast must show it");
+  assert.match(t.body, /share one per-team limit/i,
+    "a caller who just pressed the EMAIL button must be told why the CHAT button refused");
+
+  // The shared-limit sentence is what makes a cross-leg refusal legible; a
+  // generic 'try again' would leave the caller hunting a chat bug that is not
+  // there. And an older server that omits retry_after still gets a number.
+  const noNumber = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited" } }, "slack", true);
+  assert.match(noNumber.body, /wait 10s/i, "an absent retry_after falls back to the window itself");
+
+  // A NON-rate-limit failure must not gain the countdown sentence.
+  const other = hooks.notifChatTestToast(
+    { ok: false, status: 502, data: { error: "send_failed" } }, "slack", true);
+  assert.doesNotMatch(other.body, /per-team limit/i);
 });
 
 // ── cch-w40-bl: the EMAIL test button stops answering yes when it cannot know ─
@@ -21203,7 +21318,7 @@ test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusa
 test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (its first assertion in this harness)", async () => {
   // attachDomain had ZERO assertions across 15k lines. Its 422 arm sat ABOVE
   // the friendly() fallthrough, so `422 {error:"no_team"}` — what
-  // require_primary_team_admin answers a caller with no team — was reported as
+  // require_current_team_admin answers a caller with no team — was reported as
   // "Only <name>.barkpark.cloud domains are supported for now."
   const drive = async (status, payload) => {
     const saved = { fetch: sandbox.fetch, document: sandbox.document };
@@ -21714,7 +21829,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   // DEVIATION FROM THE BRIEF, PINNED HERE SO IT IS VISIBLE RATHER THAN SILENT.
   // The slice brief predicted the five owner-gated billing writes would keep
   // ERRORS.forbidden verbatim, "because the owner gate's evidence is
-  // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
+  // billing-scoped or absent". It is neither: Auth.require_current_team_owner
   // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
   // "owner", scope: "team")` arm) ships evidence, so the fence DOES fire
   // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
@@ -21729,7 +21844,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   assert.ok(hooks.friendly(portal403, "Please try again in a moment.").indexOf("try again") === -1);
   // cch-w40-s1 — THE SHARPEST ATTACK ON D447'S INVERSION DIES HERE, and this is
   // the assertion that proves it. All three billing ROUTES (router.ex:5202/5243/
-  // 5278) gate first-statement on require_primary_team_owner, which sends
+  // 5278) gate first-statement on require_current_team_owner, which sends
   // `required: "owner"` — so forbiddenEvidenceCopy wins and the inverted default
   // is STRUCTURALLY UNREACHABLE from a billing screen. The arm above is the owner
   // arm and is untouched; the arm below is the BARE one, which is where the
@@ -22086,7 +22201,7 @@ test("cch-w40-s1 THE INVERSION CANNOT REACH A BILLING SCREEN — proved, not ass
   // The sharpest attack on D447 is "you just deleted the billing refusal copy".
   // It dies on TWO independent structures, and this test pins both.
   //
-  // (1) All three billing ROUTES gate first-statement on require_primary_team_owner,
+  // (1) All three billing ROUTES gate first-statement on require_current_team_owner,
   //     which sends `required: "owner"` — so forbiddenEvidenceCopy WINS there and
   //     the inverted default is unreachable from a billing refusal.
   assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }, "Please try again in a moment."),

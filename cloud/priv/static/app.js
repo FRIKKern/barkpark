@@ -244,7 +244,7 @@
     // PROVES. This key used to read "Only the team owner can manage billing."
     // (GR36, written when the billing writes were the only refusals that reached
     // it). Three waves of fences moved the ground under it: the billing gate
-    // itself (Auth.require_primary_team_owner) sends `required: "owner"`, so
+    // itself (Auth.require_current_team_owner) sends `required: "owner"`, so
     // forbiddenEvidenceCopy wins there and this string is now STRUCTURALLY
     // UNREACHABLE from every billing screen — it could only ever render where it
     // was FALSE. Measured on origin/main: friendly({error:"forbidden",
@@ -390,7 +390,7 @@
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
   //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
-  //     require_primary_team_admin reads conn.assigns[:current_team], which
+  //     require_current_team_admin reads conn.assigns[:current_team], which
   //     resolve_team fills from the x-barkpark-team header — so the label used
   //     to say "primary_team" even when a SECOND team refused an owner of their
   //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
@@ -4815,7 +4815,22 @@
   // already holds, never invented here.
   function notifChatTestToast(r, type, alertsEnabled) {
     if (!(r && (r.ok || r.status === 202))) {
-      return { kind: "error", title: "Couldn't send test", body: friendly(r && r.data, "Try again shortly.") };
+      // cch-w32-bl: the chat leg now spends the SAME per-team test budget as
+      // the email leg, so `rate_limited` is a reachable answer HERE too. It
+      // used to fall through to `friendly()`'s "Try again shortly." — true but
+      // useless, and the one number the caller needs (how long) was on the wire
+      // and thrown away. Same reason key, same countdown sentence as
+      // notifEmailTestToast: one endpoint, one budget, one thing to read.
+      var d = r && r.data;
+      if (d && d.error === "rate_limited") {
+        return {
+          kind: "error",
+          title: "Couldn't send test",
+          body: "Please wait " + (d.retry_after || 10) + "s before another test. " +
+            "The email and chat tests share one per-team limit."
+        };
+      }
+      return { kind: "error", title: "Couldn't send test", body: friendly(d, "Try again shortly.") };
     }
     var queued = r.data && typeof r.data.queued === "number" ? r.data.queued : null;
     var muted = alertsEnabled === false
@@ -6433,7 +6448,18 @@
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
         bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
-    if (live && bp.update_state === "behind") return "behind";     // 9
+    // dr-w25: TWO independent sources can say `behind`, and until this slice the
+    // console read only the weaker one. `update_state` is the box's RELEASE-TAG
+    // self-grade; `commit_ancestry` is the control plane's own compare of the
+    // sha the box serves against main (see behindByCommits below). A box pinned
+    // at the newest tag grades itself `current` however far main runs ahead — so
+    // a row reading commit_ancestry "behind" + update_state "current" rendered
+    // live-green here while the SAME payload's commit column said 2,493 behind.
+    // Ported byte-for-byte from the Go twin's predicate (cloud_status_cmd.go
+    // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
+    // — same rung, same label, same bucket; it simply stops missing the boxes
+    // whose release-tag grade cannot express the gap.
+    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 9
     if (removing) return "removing";                              // 10
     if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
     return "ok";                                                // 12
@@ -6584,7 +6610,17 @@
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
     // and says the fact that makes the wait a problem.
     if (kind === "deploy_stalled") return { role: "warn", label: "Deploy stalled", detail: "Deploy queued " + Math.floor(bp.queued_deploy_age_seconds / 60) + "m — no builder claimed it" };
-    if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    // dr-w25 / Go attentionDetail: a row behind by its RELEASE TAG explains
+    // itself (the UPDATE column already shows running → latest), so it keeps the
+    // release sentence. A row behind BY COMMITS does NOT — its tag grade is
+    // sitting on the same row saying `current` — so commitBehindDetail names the
+    // disagreement, verbatim Go phrasing, instead of the false all-clear
+    // "A newer release is available" over a box no release can describe.
+    if (kind === "behind") {
+      var commitWhy = commitBehindDetail(bp);
+      if (commitWhy && bp.update_state !== "behind") return { role: "info", label: "Update available", detail: commitWhy };
+      return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    }
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
@@ -6687,6 +6723,9 @@
   //     → "" — the segment collapses out entirely, byte-identical to before.
   // `== null` (never truthiness) is what keeps a MEASURED zero rendering
   // "even" instead of collapsing into the unmetered arm.
+  // dr-w25: behindByCommits is no longer display-only — classifyBp's `behind`
+  // rung reads it too, so a box whose tag grade says `current` can never render
+  // live-green while the plane's own compare says it is behind main.
   var COMMIT_DISTANCE_UNMETERED = "UNMETERED";
   function behindByCommits(bp) {
     return String((bp && bp.commit_ancestry) || "").trim() === "behind";
@@ -8257,7 +8296,7 @@
   // cch-w45-s5 — THE OFFER-TIME AUTHORITY OF THE TWO MEMBER-REACHABLE INSTANCE
   // WRITES. POST /v1/barkparks/:id/domain (attachDomain) and POST
   // /v1/barkparks/:id/rollback (rollbackInstance) are both
-  // require_primary_team_admin server-side, while EVERY read this screen makes
+  // require_current_team_admin server-side, while EVERY read this screen makes
   // is `user` — so a plain member painted the instance in full and both writes
   // answered 403 on click. Measured, not assumed: booting the committed
   // panel-overview-member scenario served BOTH controls live.
@@ -8375,7 +8414,7 @@
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
-    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_primary_team_admin,
+    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_current_team_admin,
     // so the OFFER is authority-gated too — a member gets the disabled control
     // and the server's own sentence instead of a 403 after the modal.
     // D437: the still-checking arm carries the page's ONE shipped exit
@@ -8979,7 +9018,7 @@
   // (decision 25 — a failed confirm never dies into a toast): terminal refusals
   // (rollbackRefusalTerminal) offer Close, transient ones Try again.
   //
-  // NO noBounce: this route is session-gated (require_primary_team_admin), so a 401
+  // NO noBounce: this route is session-gated (require_current_team_admin), so a 401
   // is a genuinely-expired session that SHOULD bounce to login. noBounce is ONLY
   // for the worker-gated fleet-banner probe (loadFleetRollout above) where a plain
   // session token 401s by design.
@@ -10199,7 +10238,7 @@
     if (acts.policy) {
       // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
       // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
-      // Auth.require_primary_team_admin — and they were appended with no
+      // Auth.require_current_team_admin — and they were appended with no
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
@@ -10214,7 +10253,7 @@
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
     // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
-    // /v1/barkparks/:id/rollback is require_primary_team_admin, and this button
+    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
@@ -14310,7 +14349,7 @@
           // carries ["root"], so require_ability can never refuse one and
           // Registry.get_team_site filters on TENANCY only — no role read exists
           // anywhere on that path. Gating it on instanceAdminAuthority (the
-          // INSTANCE Decommission's band, require_primary_team_admin — a
+          // INSTANCE Decommission's band, require_current_team_admin — a
           // strictly higher tier) would withhold a control the server honours.
           '<button class="btn btn-danger btn-sm" id="site-delete" type="button">Delete</button></div></div>' +
       '<div class="detail-grid">' +
@@ -14457,8 +14496,10 @@
   // the call site, so escaping is unchanged).
   // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
   // born-failed GitHub-push family — a push conjures a deployment the builder
-  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
-  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // could not run at the time — LEGACY rows, born failed before the router's
+  // `github_build_available?/1` became a real repo-present predicate; source
+  // builds have arrived, but no retro-build moves the rows already written.
+  // Shared by failureCopy (what to say) and failureTone (how to paint
   // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
   // side maps the raw machine reason to human copy at the JSON boundary, so the
   // client usually already RECEIVES the human string — match a substring
@@ -14482,7 +14523,7 @@
   function failureCopy(reason) {
     if (!reason) return reason;
     if (isGithubPushBlocked(reason))
-      return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+      return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
     if (reason.indexOf("artifact_url is empty") !== -1 ||
@@ -17406,7 +17447,7 @@
 
   // cch-w36-s1 — THE LAUNCH/CHECKOUT AUTHORITY SEAM. Two authorities disagree by
   // design: launching is TEAM-ADMIN (go_live's inline gate) while paying is
-  // OWNER-only (Auth.require_primary_team_owner). So the 402 paywall hands a
+  // OWNER-only (Auth.require_current_team_owner). So the 402 paywall hands a
   // team ADMIN a checkout door the server has already decided to refuse — the
   // console must not advertise it. The billing page already knows this shape
   // (renderTiers folds to renderBillingReadOnly for a non-owner); these two plan
@@ -17614,7 +17655,7 @@
   function activePlan() { return planFromSub(subCache); }
 
   // GR36: billing WRITES (Stripe portal + cancel) are owner-only —
-  // `require_primary_team_owner`, stricter than every other settings gate. The
+  // `require_current_team_owner`, stricter than every other settings gate. The
   // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
   // node test pins the gate; the DOM branch reads it via billingIsOwner().
   // cch-w31-bl: the owner literal is CONSOLE_OWNER_ROLES now — the same one
@@ -18523,7 +18564,7 @@
   //     router.ex:10812-10815). Proven by a live probe: an admin pinned on team
   //     A writing team B gets 403 {scope:"team"}; a member pinned on B writing
   //     A gets 200.
-  //   * everything else → Auth.require_primary_team_admin/owner reads
+  //   * everything else → Auth.require_current_team_admin/owner reads
   //     :current_team, which resolve_team/2 fills FROM x-barkpark-team
   //     (auth.ex:122-130, :405-421). Its NAME lies ("primary"); its BEHAVIOUR
   //     agrees with meCache.

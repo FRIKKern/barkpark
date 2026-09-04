@@ -477,7 +477,10 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path, grant_admin_to: operator_grant(conn)) do
+    case WorkspaceBundle.import_bundle_file(path,
+           grant_admin_to: operator_grant(conn),
+           expected_root_slug: expected_root_slug(conn)
+         ) do
       {:ok, stats} ->
         json(
           conn,
@@ -503,7 +506,8 @@ defmodule BarkparkWeb.WorkspaceController do
   defp merge_import(conn, path, receipt) do
     case WorkspaceBundle.import_bundle_file(path,
            mode: :merge,
-           grant_admin_to: operator_grant(conn)
+           grant_admin_to: operator_grant(conn),
+           expected_root_slug: expected_root_slug(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -658,6 +662,14 @@ defmodule BarkparkWeb.WorkspaceController do
     |> json(%{
       error: %{
         code: "import_constraint_violation",
+        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+        # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
+        # colliding key values, and that IS the deliverable: the only caller
+        # who can reach this arm is a GLOBAL admin (the router's
+        # `:require_admin` pipeline gates the whole import action) importing a
+        # bundle they supplied, who needs the constraint + values to repair it.
+        # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
+        # import 500'd with nothing but "exit status 8".
         message: Exception.message(e),
         details: %{
           pg_code: Atom.to_string(code),
@@ -861,6 +873,17 @@ defmodule BarkparkWeb.WorkspaceController do
       _ -> nil
     end
   end
+
+  # The operator's stated target, handed to the engine as an EXPECTATION
+  # (task-b8218812cee2e4cc). `POST /api/workspaces/:workspace_slug/import` has
+  # always carried the workspace the caller MEANT in its path, and this
+  # controller used to discard it — so a merge-import of a bundle whose root
+  # slug is "default", POSTed at some other workspace's path, walked into the
+  # PDS-D9 empty-shell adopt branch and evicted the migrate-seeded Default,
+  # capturing the instance default scope. The engine cannot tell that from the
+  # supported `bp cloud support add --ws default` flow by state alone; the path
+  # segment is the only place the difference is written down.
+  defp expected_root_slug(conn), do: conn.params["workspace_slug"]
 
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.

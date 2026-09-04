@@ -391,4 +391,91 @@ defmodule BarkparkWeb.Contract.QueryTest do
 
     assert Enum.map(b["documents"], & &1["_id"]) == ["n1"]
   end
+
+  describe "If-None-Match is the shared RFC 9110 §13.1.2 matcher (D11)" do
+    # The header this route emits is the QUOTED entity-tag `"<validator>"`.
+    # The old private matcher compared `strip_etag(candidate)` (W/ AND the
+    # quotes stripped) against the UNQUOTED validator, and read only the FIRST
+    # header line. Both are fixed by delegating to BarkparkWeb.Http.IfNoneMatch.
+
+    # POSITIVE CONTROL — a client that echoes our ETag byte-for-byte must 304.
+    # Green before AND after; it is what proves the two pins below are not
+    # simply switching 304 off.
+    test "the exact emitted entity-tag still 304s", %{conn: conn} do
+      [etag | _] =
+        conn |> get("/v1/data/query/test/post") |> Plug.Conn.get_resp_header("etag")
+
+      resp =
+        conn |> put_req_header("if-none-match", etag) |> get("/v1/data/query/test/post")
+
+      assert resp.status == 304
+    end
+
+    # DECIDED CHANGE — an unquoted bare validator is NOT an entity-tag we ever
+    # put on the wire. The old strip_etag/1 accepted it (over-lenient, the row's
+    # words). PIN: reds on the pre-delegation matcher (it answered 304).
+    test "an UNQUOTED bare validator no longer 304s", %{conn: conn} do
+      [etag | _] =
+        conn |> get("/v1/data/query/test/post") |> Plug.Conn.get_resp_header("etag")
+
+      bare = String.trim(etag, ~s("))
+      refute bare == etag, "fixture is vacuous: the emitted etag carries no quotes"
+
+      resp =
+        conn |> put_req_header("if-none-match", bare) |> get("/v1/data/query/test/post")
+
+      assert resp.status == 200
+    end
+
+    # The weak form of our own strong tag DOES select it (§13.1.2 weak compare).
+    test "the weak form of the emitted tag 304s", %{conn: conn} do
+      [etag | _] =
+        conn |> get("/v1/data/query/test/post") |> Plug.Conn.get_resp_header("etag")
+
+      resp =
+        conn
+        |> put_req_header("if-none-match", "W/" <> etag)
+        |> get("/v1/data/query/test/post")
+
+      assert resp.status == 304
+    end
+
+    # MULTI-LINE FOLDING — the old matcher took `[hv | _]`, so a match on any
+    # line but the first was invisible. PIN: reds on the pre-delegation matcher.
+    test "a match on the SECOND If-None-Match line 304s", %{conn: conn} do
+      [etag | _] =
+        conn |> get("/v1/data/query/test/post") |> Plug.Conn.get_resp_header("etag")
+
+      resp =
+        conn
+        |> then(fn c ->
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
+        end)
+        |> get("/v1/data/query/test/post")
+
+      assert resp.status == 304
+    end
+
+    # NEGATIVE CONTROL — a validator we never emitted gets the body.
+    test "a foreign validator gets 200", %{conn: conn} do
+      resp =
+        conn
+        |> put_req_header("if-none-match", ~s("not-a-validator-we-ever-sent"))
+        |> get("/v1/data/query/test/post")
+
+      assert resp.status == 200
+    end
+
+    # The wildcard still short-circuits.
+    test "the * wildcard 304s", %{conn: conn} do
+      resp =
+        conn |> put_req_header("if-none-match", "*") |> get("/v1/data/query/test/post")
+
+      assert resp.status == 304
+    end
+  end
 end

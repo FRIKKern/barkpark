@@ -95,6 +95,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   alias Barkpark.EpicFleet
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Workspace
+  alias BarkparkWeb.Http.IfNoneMatch
 
   @bucket_seconds 604_800
 
@@ -269,20 +270,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
     ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{bucket}")
   end
 
-  # D11: fold all values, comma-split, trim, honor *, weak compare.
-  defp if_none_match?(conn, etag) do
-    conn
-    |> get_req_header("if-none-match")
-    |> Enum.flat_map(&String.split(&1, ","))
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.any?(fn candidate ->
-      candidate == "*" or strip_weak(candidate) == strip_weak(etag)
-    end)
-  end
-
-  defp strip_weak("W/" <> opaque_tag), do: opaque_tag
-  defp strip_weak(opaque_tag), do: opaque_tag
+  # D11 lives in BarkparkWeb.Http.IfNoneMatch now — this plug was its original source.
+  defp if_none_match?(conn, etag), do: IfNoneMatch.match?(conn, etag)
 
   defp has_live_task_blocks?(%{"blocks" => blocks}) when is_list(blocks),
     do: any_live_task?(blocks)

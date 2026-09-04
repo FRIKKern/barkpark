@@ -3178,7 +3178,7 @@ const EXPECTATIONS = {
       // ── cch-w45-s5: and the rail is not the only place the screen was
       // selling this member a 403. Measured on the PRE-FIX tree by booting THIS
       // scenario: #instance-body carried a LIVE `id="inst-domain"` button and a
-      // LIVE `data-rollback="1"` button, both against require_primary_team_admin
+      // LIVE `data-rollback="1"` button, both against require_current_team_admin
       // routes, while every read the screen makes is `user`. Same remedy, same
       // sentence, same grammar — asserted on the BODY, not the CLI card.
       const body = (reg.get("instance-body") || {}).innerHTML || "";
@@ -3192,7 +3192,7 @@ const EXPECTATIONS = {
         "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
       // cch-w47-s2: FOUR, not two — the same screen was also offering this
       // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
-      // require_primary_team_admin). With bpBase carrying the CP's real policy
+      // require_current_team_admin). With bpBase carrying the CP's real policy
       // block, `autoupdateActions` offers Pause + Pin on this row, and
       // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
       // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.

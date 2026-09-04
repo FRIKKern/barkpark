@@ -36,11 +36,20 @@
 #   presence a small allowlist of paths that must stay LISTED, because a path
 #            deleted together with its regex prefix leaves nothing for either
 #            direction to judge.
+
+#   target   a declared table of (path prefix -> the job that MUST fire for it),
+#            each row derived from what a deploy script actually BUILDS from that
+#            tree. Forward/reverse/presence all read a path routed to the WRONG
+#            job as a path routed — first match wins — so none of them can see
+#            `cmd/` matching the control-plane filter while instance-deploy.sh is
+#            the only thing that builds the agent binary out of it.
 #
 # `--selftest` PROVES the tripwire on temp copies (plants nothing in the tree):
 # the real file passes, a copy with `templates` stripped from the instance regex
 # FAILS, an unexplained targetless path FAILS, an unreachable job-filter prefix
-# FAILS, a deleted required path FAILS, and a copy that is not parseable YAML at
+# FAILS, a deleted required path FAILS, a copy with `cmd` stripped from the
+# instance regex FAILS ON THE TARGET ARM ALONE (every other arm reads clean —
+# that is the whole point of the arm), and a copy that is not parseable YAML at
 # all FAILS. Modelled on scripts/connectors-catalog-drift-check.sh's bundled
 # selftest.
 
@@ -223,7 +232,13 @@ check_required_paths() {
   local present missing=0 req
   present="$(extract_paths "$yml" | cut -f1)"
   for req in "${REQUIRED_PATHS[@]}"; do
-    if printf '%s\n' "$present" | grep -qxF "$req"; then
+    # HERE-STRING, NOT A PIPE. `printf ... | grep -q` races: grep -q exits on the
+    # first match, printf takes SIGPIPE, and `set -o pipefail` hands the whole
+    # pipeline 141 — so a MATCH intermittently reads as a MISS. Measured on
+    # origin/main at ~0.7% per call (2 misses in 300), which is a required gate
+    # printing `MISSING scripts/connectors/**` against a file that lists it.
+    # Every `grep -q` test in this file is fed by a here-string for that reason.
+    if grep -qxF "$req" <<<"$present"; then
       echo "  present  $req (required on.push.paths entry)"
     else
       echo "  MISSING  $req  ->  required on.push.paths entry absent (a merge here would deploy nothing)" >&2
@@ -362,7 +377,7 @@ EOF
       matched=""
       while IFS=$'\t' read -r entry_re entry; do
         [ -n "$entry_re" ] || continue
-        if printf '%s\n' "$sample" | grep -qE "$entry_re"; then
+        if grep -qE "$entry_re" <<<"$sample"; then
           matched="$entry"
           break
         fi
@@ -569,6 +584,111 @@ check_producer() {
   return "$rc"
 }
 
+# ── target direction: the RIGHT job, not merely SOME job ─────────────────────
+
+# THE HOLE THIS ARM CLOSES
+#
+# Every arm above asks whether a path targets AT LEAST ONE deploy job, and the
+# forward loop stops at the FIRST regex that matches. So a path routed to the
+# WRONG job reads exactly like a path routed correctly: `ok cmd/** -> ^(cloud|
+# deploy|internal|cmd)/`, rc=0. That is how `cmd/` sat outside the INSTANCE
+# filter unseen — cmd/** matched the control-plane regex, the gate was satisfied,
+# and a cmd/-only merge deployed the control plane while never running
+# instance-deploy.sh, the ONLY thing that rebuilds /usr/local/bin/barkpark-agent
+# (instance-deploy.sh:1071). Green run, stale agent. No mutation of the instance
+# regex could red the gate, because `cmd` was never in it to remove.
+#
+# So: a DECLARED table of (path prefix -> job that MUST fire), each row derived
+# from what a deploy script actually BUILDS from that tree — not from what the
+# regexes currently say, which would make this a tautology. For each row we DRIVE
+# the real `changes` step body (the same extract_changes_step/classify pair the
+# producer arm uses — the regexes are never re-typed here) against a synthetic
+# change containing only `<prefix>/x`, and assert the named job flag comes back
+# true. A row may name a prefix BOTH jobs must claim; `cmd` is exactly that.
+#
+# This subsumes nothing above and is subsumed by nothing: forward asks "some
+# job?", reverse asks "can this prefix even start the run?", presence asks "is
+# the path still listed?" — only this arm asks "the job that BUILDS it?".
+
+# prefix|job|why this job must fire for that tree. The `why` is the evidence the
+# row is derived from the deploy scripts and not from the regexes under test.
+TARGET_PAIRS=(
+  "cmd|instance|instance-deploy.sh:1071 builds /usr/local/bin/barkpark-agent from ./cmd/barkpark-agent"
+  "cmd|cp|deploy.yml's control-plane job cross-builds bp-provisioner from ./cmd/barkpark-provisioner"
+  "connectors|instance|instance-deploy.sh npm-installs connectors/ and restarts barkpark-connectors"
+  "scripts/connectors|instance|instance-deploy.sh installs the cloud-sandbox-runner from that tree (D275)"
+  "templates|instance|the content box builds sites FROM templates/ (charter D57a)"
+  "api|instance|instance-deploy.sh builds and releases the api/ Phoenix app onto the box"
+  "cloud|cp|the control plane is what cloud/ runs on"
+)
+
+# Set by check_target so the OK line can report a NON-ZERO count — an arm that
+# silently checked nothing is a green line that means nothing.
+TARGET_CHECKED=0
+
+# One fixture branch per prefix, built lazily off the shared base and reused:
+# a single new file at <prefix>/x, which is exactly the `git diff --name-only`
+# shape the job filters run against.
+target_branch() {
+  local prefix="$1" dr="$PRODUCER_TMP/repo" br
+  br="target-$(printf '%s' "$prefix" | tr '/' '-')"
+  if ! git -C "$dr" rev-parse --verify -q "refs/heads/$br" >/dev/null 2>&1; then
+    git -C "$dr" checkout -q -b "$br" "$PRODUCER_BASE"
+    mkdir -p "$dr/$prefix"
+    printf 'x\n' >"$dr/$prefix/x"
+    git -C "$dr" add -A >/dev/null 2>&1
+    git -C "$dr" -c user.email=t@t -c user.name=t commit -qm "$br" >/dev/null 2>&1
+  fi
+  printf '%s\n' "$br"
+}
+
+# check_target <yml> <label> — 0 if every declared pair reaches its named job.
+check_target() {
+  local yml="$1" label="$2" step rc=0 pair prefix job why br got failures=0
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "HARNESS-UNAVAILABLE[$label]: python3 not on PATH — the target arm cannot run." >&2
+    return 2
+  fi
+  producer_fixture
+  step="$PRODUCER_TMP/changes-step.sh"
+  if ! extract_changes_step "$yml" "$step" 2>"$PRODUCER_TMP/extract.err"; then
+    echo "FAIL[$label]: could not extract the 'changes' job's step id 'f' for the target arm: $(cat "$PRODUCER_TMP/extract.err")" >&2
+    return 1
+  fi
+
+  TARGET_CHECKED=0
+  for pair in "${TARGET_PAIRS[@]}"; do
+    prefix="${pair%%|*}"
+    why="${pair##*|}"
+    job="${pair#*|}"; job="${job%%|*}"
+    br="$(target_branch "$prefix")"
+    got="$(classify "$step" "$br" "$job")"
+    TARGET_CHECKED=$((TARGET_CHECKED + 1))
+    if [ "$got" = "true" ]; then
+      echo "  target   $prefix/x  ->  $job=true"
+    else
+      echo "  WRONG-JOB  $prefix/x  ->  $job=${got:-<none>}, wanted true" >&2
+      echo "             $why" >&2
+      failures=$((failures + 1))
+      rc=1
+    fi
+  done
+
+  # Non-vacuity, asserted and not assumed: an empty table would otherwise print
+  # a clean arm forever.
+  if [ "$TARGET_CHECKED" -eq 0 ]; then
+    echo "FAIL[$label]: the target arm checked 0 pair(s) — TARGET_PAIRS is empty, so the arm certified nothing" >&2
+    return 1
+  fi
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL[$label]: $failures declared (prefix -> job) pair(s) reached the WRONG job." >&2
+    echo "Fix: add the prefix to that job's grep -qE regex in the 'changes' job. A prefix already" >&2
+    echo "matched by the OTHER job's regex is invisible to the forward arm — that is this arm's job." >&2
+  fi
+  return "$rc"
+}
+
 # ── the check ────────────────────────────────────────────────────────────────
 
 check_file() {
@@ -606,7 +726,7 @@ check_file() {
     matched=""
     while IFS= read -r re; do
       [ -n "$re" ] || continue
-      if printf '%s\n' "$sample" | grep -qE "$re"; then
+      if grep -qE "$re" <<<"$sample"; then
         matched="$re"
         break
       fi
@@ -657,11 +777,19 @@ EOF
     return 2
   fi
 
-  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ]; then
+  # The target arm: the RIGHT job, not merely some job. Runs unconditionally
+  # alongside the others so ONE run reports every drift it can see.
+  local target_rc=0
+  check_target "$yml" "$label" || target_rc=$?
+  if [ "$target_rc" -eq 2 ]; then
+    return 2
+  fi
+
+  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ]; then
     return 1
   fi
 
-  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths."
+  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it."
   return 0
 }
 
@@ -678,14 +806,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/11: the real workflow passes"
+  echo "selftest 1/12: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/11: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/12: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -698,7 +826,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/11: an unexplained targetless path must FAIL"
+  echo "selftest 3/12: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -710,7 +838,7 @@ selftest() {
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an unrouted path read GREEN" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'DRIFT    totally-unrouted/\*\*'; then
+    elif ! grep -q 'DRIFT    totally-unrouted/\*\*' <<<"$out"; then
       # The FORWARD arm must still own this verdict. Once a second direction
       # exists, "it red" stops being evidence that the direction under test red
       # — so the diagnostic is pinned by name.
@@ -723,7 +851,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/11: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/12: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -747,7 +875,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/11: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/12: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -779,7 +907,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/11: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/12: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -798,7 +926,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/11: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/12: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -812,7 +940,7 @@ YML
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an unreachable job-filter prefix read GREEN — the reverse arm cannot fail" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'UNREACHABLE  web/'; then
+    elif ! grep -q 'UNREACHABLE  web/' <<<"$out"; then
       echo "SELFTEST FAIL: the gate red, but not on the reverse arm and not naming 'web'" >&2
       printf '%s\n' "$out" >&2
       rc=1
@@ -822,7 +950,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/11: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/12: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -832,11 +960,11 @@ YML
     echo "SELFTEST FAIL: the real deploy.yml did not pass with the reverse arm wired in" >&2
     printf '%s\n' "$out" >&2
     rc=1
-  elif ! printf '%s\n' "$out" | grep -qE 'reverse: [1-9][0-9]* regex prefix\(es\), all reachable'; then
+  elif ! grep -qE 'reverse: [1-9][0-9]* regex prefix\(es\), all reachable' <<<"$out"; then
     echo "SELFTEST FAIL: no non-zero reverse count in the output — the arm ran vacuously" >&2
     printf '%s\n' "$out" >&2
     rc=1
-  elif ! printf '%s\n' "$out" | grep -q 'reach    scripts/connectors/'; then
+  elif ! grep -q 'reach    scripts/connectors/' <<<"$out"; then
     echo "SELFTEST FAIL: the reverse arm did not judge the scripts/connectors prefix (charter D275)" >&2
     printf '%s\n' "$out" >&2
     rc=1
@@ -845,7 +973,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/11: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/12: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -861,11 +989,11 @@ YML
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: both halves deleted read GREEN — the presence allowlist cannot fail" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'MISSING  scripts/connectors/\*\*'; then
+    elif ! grep -q 'MISSING  scripts/connectors/\*\*' <<<"$out"; then
       echo "SELFTEST FAIL: it red, but not on the presence allowlist" >&2
       printf '%s\n' "$out" >&2
       rc=1
-    elif printf '%s\n' "$out" | grep -qE 'DRIFT|UNREACHABLE'; then
+    elif grep -qE 'DRIFT|UNREACHABLE' <<<"$out"; then
       echo "SELFTEST FAIL: the drift or reverse arm also red — this fixture is meant to prove" >&2
       echo "               they see NOTHING once both halves are gone, which is why the" >&2
       echo "               presence allowlist is load-bearing and not redundant" >&2
@@ -877,7 +1005,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/11: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/12: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -893,7 +1021,7 @@ YML
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an undecomposable dispatch filter read GREEN — the arm fails OPEN" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'cannot decompose'; then
+    elif ! grep -q 'cannot decompose' <<<"$out"; then
       echo "SELFTEST FAIL: it red, but not on the undecomposable-filter arm" >&2
       printf '%s\n' "$out" >&2
       rc=1
@@ -903,7 +1031,7 @@ YML
   fi
 
   echo
-  echo "selftest 11/11: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  echo "selftest 11/12: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
   # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
   # the line that feeds them, back to exactly what deploy.yml carried before the
   # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
@@ -941,15 +1069,15 @@ PYMUT
       echo "SELFTEST FAIL: the PRE-FIX producer read GREEN — the behaviour arm cannot fail" >&2
       printf '%s\n' "$out" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'ESCAPE   a cloud/ path containing a double quote'; then
+    elif ! grep -q 'ESCAPE   a cloud/ path containing a double quote' <<<"$out"; then
       echo "SELFTEST FAIL: the quote-bearing path did not escape under the pre-fix producer" >&2
       printf '%s\n' "$out" >&2
       rc=1
-    elif ! printf '%s\n' "$out" | grep -q 'ESCAPE   a cloud/ file renamed OUT of cloud/'; then
+    elif ! grep -q 'ESCAPE   a cloud/ file renamed OUT of cloud/' <<<"$out"; then
       echo "SELFTEST FAIL: the rename-out case did not escape under the pre-fix producer" >&2
       printf '%s\n' "$out" >&2
       rc=1
-    elif printf '%s\n' "$out" | grep -qE 'DRIFT|UNREACHABLE|MISSING'; then
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING' <<<"$out"; then
       echo "SELFTEST FAIL: a LIST arm also red — this fixture is meant to prove the list arms" >&2
       echo "               see NOTHING when only the producer regresses, which is why the" >&2
       echo "               behaviour arm is load-bearing and not redundant" >&2
@@ -958,6 +1086,87 @@ PYMUT
     else
       echo "  ok: both false-green shapes escape; the list arms read clean, only behaviour reds"
     fi
+  fi
+
+  echo
+  echo "selftest 12/12: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
+  # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. cmd/**
+  # stays listed in on.push.paths and stays matched by the CONTROL-PLANE regex,
+  # so the forward arm still prints `ok`, the reverse arm still finds every
+  # prefix reachable, the presence allowlist still finds its path, and the
+  # producer still classifies correctly. Only the declared pair
+  # cmd -> instance can notice that the tree whose ./cmd/barkpark-agent build
+  # lives in instance-deploy.sh:1071 no longer reaches the instance job.
+  #
+  # Anchor asserted to match EXACTLY ONCE and the copy asserted to DIFFER: a
+  # mutation that never applied yields a red meaning nothing and a green meaning
+  # less.
+  python3 - "$real" "$tmp/nocmd.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+new = "'^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'"
+old = "'^(api|internal|deploy|connectors|templates|scripts/connectors)/'"
+n = s.count(new)
+if n != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted exactly 1 — the instance regex no "
+             "longer looks as this selftest expects. Fix the anchor, do not loosen it." % n)
+out = s.replace(new, old)
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the cmd mutation could not be applied — case 12 proves nothing" >&2
+    rc=1
+  elif cmp -s "$real" "$tmp/nocmd.yml"; then
+    echo "SELFTEST FAIL: the cmd mutation changed nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/nocmd.yml" "nocmd" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a cmd-less instance regex read GREEN — the target arm cannot fail" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'WRONG-JOB  cmd/x  ->  instance=false' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the target arm naming the cmd -> instance pair" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING|ESCAPE' <<<"$out"; then
+      echo "SELFTEST FAIL: another arm also red — this fixture is meant to prove every other arm" >&2
+      echo "               reads a WRONG-JOB path as a routed path, which is why the target arm" >&2
+      echo "               is load-bearing and not redundant" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q '  ok       cmd/\*\*  ->  ' <<<"$out"; then
+      echo "SELFTEST FAIL: the forward arm did not print its cheerful 'ok' for cmd/** — the" >&2
+      echo "               false-green this arm exists for is not present in the fixture" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: forward still prints 'ok cmd/**'; only the target arm reds, naming cmd -> instance"
+    fi
+  fi
+
+  echo
+  echo "selftest: the target arm must be NON-VACUOUS on the real workflow"
+  sub_rc=0
+  out="$(check_file "$real" "target-count" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the real deploy.yml did not pass with the target arm wired in" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -qE 'target: [1-9][0-9]* declared \(prefix -> job\) pair\(s\)' <<<"$out"; then
+    echo "SELFTEST FAIL: no non-zero target count in the output — the arm ran vacuously" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -q '  target   cmd/x  ->  instance=true' <<<"$out"; then
+    echo "SELFTEST FAIL: the target arm did not judge the cmd -> instance pair" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    printf '%s\n' "$out" | grep -oE 'target: [0-9]+ declared \(prefix -> job\) pair\(s\)' | sed 's/^/  ok: /'
   fi
 
   rm -rf "$tmp"

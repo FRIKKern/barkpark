@@ -18,6 +18,8 @@ defmodule BarkparkWeb.SamlController do
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
 
+  require Logger
+
   def start(conn, %{"org_slug" => slug}) do
     case Saml.connection_for_org_slug(slug) do
       nil ->
@@ -103,8 +105,20 @@ defmodule BarkparkWeb.SamlController do
       {:error, reason} ->
         Sso.record_login_failure("saml", slug, reason)
 
+        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+        # site 2) — REDACT. This arm is PRE-AUTH: the caller is not an
+        # authenticated Barkpark actor, and the esaml/xmerl term names the
+        # EXACT assertion check that failed (audience, recipient, clock,
+        # digest) — an oracle a forger can iterate against. The client now gets
+        # one fixed coarse class; the full term goes to the server log with the
+        # request id, so ops keep every bit of the triage value.
+        Logger.warning(
+          "SAML ACS rejected an assertion (org_slug=" <>
+            slug <> ", request_id=" <> request_id(conn) <> "): " <> inspect(reason)
+        )
+
         ErrorResponse.emit_custom(conn, 401, "unauthorized", "SAML assertion rejected", %{
-          reason: inspect(reason)
+          reason: "assertion_invalid"
         })
     end
   end
@@ -172,8 +186,16 @@ defmodule BarkparkWeb.SamlController do
         ErrorResponse.emit_custom(conn, 400, "malformed", "SAMLRequest is not valid base64")
 
       {:error, reason} ->
+        # Same Class-A ruling as acs/2 above (site 2, REDACT): the SLO arm is
+        # PRE-AUTH too, so the raw LogoutRequest validation term is logged, not
+        # echoed. The caller gets one coarse class.
+        Logger.warning(
+          "SAML SLO rejected a LogoutRequest (org_slug=" <>
+            slug <> ", request_id=" <> request_id(conn) <> "): " <> inspect(reason)
+        )
+
         ErrorResponse.emit_custom(conn, 401, "unauthorized", "SAML LogoutRequest rejected", %{
-          reason: inspect(reason)
+          reason: "logout_request_invalid"
         })
     end
   end
@@ -191,6 +213,16 @@ defmodule BarkparkWeb.SamlController do
   # single-clause private helper keeps the waiver honest and the gate green.
   defp refuse_missing(conn, message),
     do: ErrorResponse.emit_custom(conn, 400, "malformed", message)
+
+  # The correlator that makes the redacted 401s triageable: the coarse `reason`
+  # the client sees plus this id is enough for ops to find the raw term in the
+  # log. Plug.RequestId (endpoint.ex) sets both the header and Logger metadata.
+  defp request_id(conn) do
+    case get_resp_header(conn, "x-request-id") do
+      [id | _] -> id
+      _ -> Logger.metadata()[:request_id] || "unknown"
+    end
+  end
 
   # A browser's form POST / redirect chain advertises text/html; API clients
   # (interop suite, SDKs) don't. Drives the redirect-vs-JSON fork above.

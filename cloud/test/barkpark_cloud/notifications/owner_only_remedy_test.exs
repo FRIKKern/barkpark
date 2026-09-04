@@ -7,7 +7,7 @@ defmodule BarkparkCloud.Notifications.OwnerOnlyRemedyTest do
 
   `subscription_past_due` said "Update your billing to avoid interruption." and
   `trial_expiring` said "Upgrade to keep your instance running". Both imperatives
-  route to `require_primary_team_owner` doors (`POST /v1/billing/checkout`,
+  route to `require_current_team_owner` doors (`POST /v1/billing/checkout`,
   `POST /v1/billing/portal`) whose 403 for a member — AND for a non-owner ADMIN —
   is pinned by run in `router_test.exs`. But the alert fan-out reads
   `Accounts.list_team_member_emails/1`, which has no role predicate, so every
@@ -97,7 +97,7 @@ defmodule BarkparkCloud.Notifications.OwnerOnlyRemedyTest do
   end
 
   describe "an ADMIN is NOT an owner here — the gate is Authz.team_owner?" do
-    # `require_primary_team_owner` refuses a non-owner admin too (pinned by
+    # `require_current_team_owner` refuses a non-owner admin too (pinned by
     # `router_test.exs`). A builder reusing this epic's usual `owner|admin` band
     # would ship the wrong split, and this is the test that catches it.
     test "both events render the non-owner copy to an admin" do
