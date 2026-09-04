@@ -27,13 +27,22 @@ defmodule BarkparkCloud.Billing.Subscription do
   `stripe_past_due` / `stripe_cancel_at_period_end` / `stripe_refunded_at`):
 
     * `past_due`            — a payment failed; the team is in dunning. Still
-      ENTITLED while inside the grace window (`current_period_end`), matching
+      ENTITLED while inside the grace window (`grace_ends_at`), matching
       Coolify's `isSubscriptionActive()` staying true through `stripe_past_due`.
     * `cancel_at_period_end` — the customer requested cancel-at-period-end
       (reversible grace); stays entitled until Stripe later posts
       `customer.subscription.deleted`.
-    * `current_period_end`  — the grace-window anchor, lifted straight off the
-      Stripe event's `current_period_end`.
+    * `grace_ends_at`       — the DUNNING grace anchor, and nothing else. Written
+      ONLY by `Billing.mark_past_due/2` (`now + @grace_days`), read ONLY by
+      `Billing.entitled?/1` and `Billing.maybe_enforce/1`. It is deliberately NOT
+      lifted off any Stripe payload: cch-w57-bl split it out of
+      `current_period_end` precisely so a payload-sourced renewal date can never
+      move a dunning deadline. A NULL `grace_ends_at` on a `past_due` row means
+      NOT entitled — an unanchored dunning row is closed, not open forever.
+    * `current_period_end`  — the TRIAL EXPIRY, and nothing else. Written by
+      `Billing.grant_trial/1` (14 days out) and read by the `trial` arm of
+      `entitled?/1`, `expire_trial/2` and `trial_days_remaining/1`. A PAID plan
+      stores none (`promise_actor_manifest_test.exs` reds if one ever does).
     * `canceled_at`         — when the subscription went terminal.
     * `refunded_at`         — RESERVED for the deferred refund seam (column
       exists, unused now — Coolify `RefundSubscription.php`).
@@ -77,6 +86,7 @@ defmodule BarkparkCloud.Billing.Subscription do
     field :past_due, :boolean, default: false
     field :cancel_at_period_end, :boolean, default: false
     field :current_period_end, :utc_datetime_usec
+    field :grace_ends_at, :utc_datetime_usec
     field :canceled_at, :utc_datetime_usec
     # Reserved for the deferred refund seam — column added, unused now.
     field :refunded_at, :utc_datetime_usec
@@ -106,6 +116,7 @@ defmodule BarkparkCloud.Billing.Subscription do
       :past_due,
       :cancel_at_period_end,
       :current_period_end,
+      :grace_ends_at,
       :canceled_at,
       :refunded_at,
       :team_id

@@ -21,6 +21,44 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   (`build_request/3`), which tests assert; the live HTTP call is NEVER made in
   the test suite.
 
+  ## Pinned API version — `2025-02-24.acacia`
+
+  Every request `build_request/3` builds carries `Stripe-Version:
+  2025-02-24.acacia` (the `@api_version` attribute, echoed by `api_version/0`).
+  Before cch-w57-bl it sent exactly two headers and NO
+  `Stripe-Version`, so both the API response shape AND — because Stripe versions
+  webhook payloads off the same account default — the WEBHOOK payload shape were
+  whatever the Stripe DASHBOARD happened to be set to. That is a decision made
+  outside this repo, changeable by anyone with dashboard access, that silently
+  reshapes the objects `Billing.handle_webhook/2` destructures. Pinning it makes
+  the shape a decision this tree makes.
+
+  ### Why this version, field by field
+
+  The webhook path reads exactly five things off an event, and this pin is the
+  newest version on which ALL FIVE are where the code looks:
+
+    * `type` — envelope, version-invariant.
+    * `data.object.customer` (Invoice, Checkout Session, Subscription) — a
+      top-level id on all three objects in `acacia`.
+    * `data.object.status` (Subscription) — top level.
+    * `data.object.cancel_at_period_end` (Subscription) — top level; the ONLY
+      Subscription field the tree lifts (`Billing.sync_cancel_flag/2`).
+    * `data.object.subscription` + `data.object.metadata` (Checkout Session) —
+      top level.
+
+  `2025-03-31.basil` is deliberately NOT the pin: it MOVES `current_period_end`
+  off the Subscription object onto its items, and reparents the Invoice's
+  subscription reference under `parent.subscription_details`. This tree refuses
+  to read `current_period_end` off any payload at all (charter D672 / cch-w57-bl
+  — the grace anchor is now its own `grace_ends_at` column), so the first of
+  those costs it nothing today; the pin is what guarantees the SECOND one cannot
+  arrive as a dashboard flip. Moving the pin forward is a deliberate change with
+  a re-derivation of the five fields above, which is the point.
+
+  Nothing here reads the version at runtime to branch on it — it is an assertion
+  about the wire shape, not a feature switch.
+
   ## Webhook verification — IMPLEMENTED (real Stripe v1 scheme)
 
   `verify_webhook/2` is NOT a skeleton: it implements Stripe's documented
@@ -50,6 +88,12 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   require Logger
 
   @api_base "https://api.stripe.com/v1"
+
+  # The PINNED Stripe API version. See the moduledoc section "Pinned API version"
+  # for why this exact string and what depends on it. Sent as `Stripe-Version` on
+  # every request `build_request/3` builds, and asserted by
+  # `stripe_gateway_test.exs` so a silent edit reds.
+  @api_version "2025-02-24.acacia"
 
   # Replay-protection window for webhook signatures: reject an event whose
   # `t=<timestamp>` is more than this many seconds away from now (in either
@@ -210,7 +254,11 @@ defmodule BarkparkCloud.Billing.StripeGateway do
       %{
         method:  :post,
         url:     "https://api.stripe.com/v1/customers",
-        headers: [{"Authorization", "Bearer sk_…"}, {"Content-Type", "…"}],
+        headers: [
+          {"Authorization", "Bearer sk_…"},
+          {"Content-Type", "…"},
+          {"Stripe-Version", "2025-02-24.acacia"}
+        ],
         body:    "email=a%40b.com&name=Acme"   # URL-encoded form
       }
 
@@ -218,6 +266,13 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   body without anything leaving the box. `path` is appended to the Stripe API
   base; `params` is form-encoded (Stripe's API is form-encoded, not JSON).
   """
+  @doc """
+  The pinned Stripe API version this gateway sends on every request. Public so a
+  test can assert the SHIPPED constant rather than a re-typed copy of it.
+  """
+  @spec api_version() :: String.t()
+  def api_version, do: @api_version
+
   @spec build_request(String.t(), :get | :post | :delete, map()) :: %{
           method: :get | :post | :delete,
           url: String.t(),
@@ -230,7 +285,8 @@ defmodule BarkparkCloud.Billing.StripeGateway do
       url: @api_base <> path,
       headers: [
         {"Authorization", "Bearer " <> secret_key()},
-        {"Content-Type", "application/x-www-form-urlencoded"}
+        {"Content-Type", "application/x-www-form-urlencoded"},
+        {"Stripe-Version", @api_version}
       ],
       body: encode_form(params)
     }
