@@ -138,20 +138,15 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
       assert {:held, :active_subscription, _} = Registry.provisioning_fqdn_claim(host)
     end
 
+    # cch-w57-bl re-pointed the grace anchor from `current_period_end` to
+    # `grace_ends_at`. Seeding the OLD column here would leave this case green for
+    # the wrong reason — a past_due row with no anchor at all, which the leg now
+    # reads as unbilled — so the case would stop testing "inside grace".
     test "a past_due row INSIDE its grace window is a billed customer and holds its name" do
       team = team_fixture()
       host = unique_host()
       silent_ghost(team, host)
-      subscription(team, plan: "supporter", status: "past_due", current_period_end: days_ahead(3))
-
-      assert {:held, :active_subscription, _} = Registry.provisioning_fqdn_claim(host)
-    end
-
-    test "a past_due row with NO period end is inside grace by definition and holds its name" do
-      team = team_fixture()
-      host = unique_host()
-      silent_ghost(team, host)
-      subscription(team, plan: "supporter", status: "past_due", current_period_end: nil)
+      subscription(team, plan: "supporter", status: "past_due", grace_ends_at: days_ahead(3))
 
       assert {:held, :active_subscription, _} = Registry.provisioning_fqdn_claim(host)
     end
@@ -211,7 +206,24 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
       team = team_fixture()
       host = unique_host()
       silent_ghost(team, host)
-      subscription(team, plan: "supporter", status: "past_due", current_period_end: days_ago(5))
+      subscription(team, plan: "supporter", status: "past_due", grace_ends_at: days_ago(5))
+
+      assert :free == Registry.provisioning_fqdn_claim(host)
+    end
+
+    # INVERTED by cch-w57-bl, and moved here from the steal direction above. It
+    # used to read "a past_due row with NO period end is inside grace BY
+    # DEFINITION and holds its name" — the old `entitled?/1` returned true on
+    # `is_nil(current_period_end)`, which is precisely the hazard that row was
+    # filed for: an unpaid team whose anchor is missing was entitled FOREVER and
+    # `maybe_enforce/1` no-opped on the same nil, so its boxes never suspended.
+    # An unanchored dunning row is now CLOSED, and this leg — which defers to
+    # `entitled?/1` rather than keeping a second copy of the rule — follows it.
+    test "a past_due row with NO grace anchor does not hold the name" do
+      team = team_fixture()
+      host = unique_host()
+      silent_ghost(team, host)
+      subscription(team, plan: "supporter", status: "past_due", grace_ends_at: nil)
 
       assert :free == Registry.provisioning_fqdn_claim(host)
     end
@@ -239,8 +251,8 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
       {[plan: "trial", status: "active", current_period_end_days: 7], "a live trial"},
       {[plan: "trial", status: "active", current_period_end_days: -30], "an EXPIRED trial"},
       {[plan: "trial", status: "active"], "a trial with no window"},
-      {[plan: "supporter", status: "past_due", current_period_end_days: 3], "past_due in grace"},
-      {[plan: "supporter", status: "past_due", current_period_end_days: -5],
+      {[plan: "supporter", status: "past_due", grace_ends_at_days: 3], "past_due in grace"},
+      {[plan: "supporter", status: "past_due", grace_ends_at_days: -5],
        "past_due past grace"},
       {[plan: "supporter", status: "past_due"], "past_due with no window"},
       {[plan: "supporter", status: "canceled"], "a canceled subscription"}
@@ -258,6 +270,18 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
         attrs =
           if offset,
             do: Keyword.put(attrs, :current_period_end, days_ahead(offset)),
+            else: attrs
+
+        # cch-w57-bl: the dunning window is its OWN column. A past_due shape that
+        # kept seeding `current_period_end` would still AGREE with entitled?/1 —
+        # the table self-validates — but both sides would be answering about an
+        # absent anchor, so "in grace" and "past grace" would stop being
+        # distinguishable rows.
+        {grace_offset, attrs} = Keyword.pop(attrs, :grace_ends_at_days)
+
+        attrs =
+          if grace_offset,
+            do: Keyword.put(attrs, :grace_ends_at, days_ahead(grace_offset)),
             else: attrs
 
         subscription(team, attrs)
