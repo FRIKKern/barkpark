@@ -22,13 +22,15 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
   `tasks_controller_test.exs` is exactly the test that would red if this file
   were async and leaked.)
 
-  THE MUTATION THAT REDS THESE TESTS. Make `Params.apply_index_cursor/2` a
-  no-op (`def apply_index_cursor(query, _), do: query`) — the ONE line that
-  turns the token into a WHERE clause. Every walk then re-serves page one
-  forever: `walks the whole corpus` collects `@page_size` distinct ids instead
-  of the full corpus and reds, and `a terminal row past the clamp is REACHED`
-  never reaches its row and reds. Nothing else in the suite notices, because
-  nothing else pages past the first window.
+  THE MUTATION THAT REDS THESE TESTS. Collapse the `:updated_desc` clause of
+  `Params.apply_index_cursor/2` to `do: query` — the ONE line that turns the
+  token into a WHERE clause. Every walk then re-serves page one forever.
+  MEASURED: 3 of these 12 tests red — `the walk reaches every row in a corpus
+  LARGER than the clamp`, `a terminal row past the clamp is REACHED`, and `a
+  row that was never created is absent from the FULL walk`. The other nine stay
+  green, which is the point: the envelope, the validation and the token minting
+  are all still correct under the mutation, and only the tests that actually
+  PAGE can see it.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -91,13 +93,20 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
     {:ok, doc} =
       Content.create_document(
         "task",
-        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        # A RANDOM title, not the doc_id. `Content.create_document` runs a
+        # near-duplicate guard over task titles, and a corpus of
+        # `cursor-noise-1`, `cursor-noise-2`, … trips it at ~0.7 similarity —
+        # the fixture would fail to seed, which reads as a cursor bug. These
+        # tests are about paging, not about titles.
+        %{"doc_id" => doc_id, "title" => rand_title(), "content" => content},
         @dataset,
         scope
       )
 
     doc
   end
+
+  defp rand_title, do: "t-" <> Base.encode16(:crypto.strong_rand_bytes(10), case: :lower)
 
   defp authed(conn) do
     conn
