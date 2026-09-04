@@ -280,7 +280,10 @@ jobs:
       # arm in the advisory job's third step, which is the precedent this
       # copies rather than a second convention.
       - name: Prove the toolchain by mutation (hermetic)
+        id: s1
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           set -euo pipefail
           rc=0
           bash scripts/required-checks.test.sh --hermetic || rc=$?
@@ -329,10 +332,17 @@ jobs:
       # spec-gate failure and is not one. The floor then compares the candidate
       # against the NEWEST main, which is the reference it wants.
       - name: Fetch the floor's reference (origin/main's committed spec)
-        run: git fetch --depth=1 origin +main:refs/remotes/origin/main
+        id: s2
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          git fetch --depth=1 origin +main:refs/remotes/origin/main
 
       - name: The committed spec holds the floor (contexts, _readme, enforced)
+        id: s3
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           set -euo pipefail
           rc=0
           bash scripts/required-checks-floor.sh .github/required-checks.json || rc=$?
@@ -342,6 +352,34 @@ jobs:
             2) echo "::error::FLOOR GROWTH — this PR ADDS required context(s). Every PR in this repo must render them forever, and a job that is green today and paths-filtered tomorrow deadlocks main (D69). CI never passes --acknowledge-growth on its own: a human decides each added name belongs, and says so in the PR."; exit 1 ;;
             *) echo "::error::the floor could not be evaluated (exit $rc) — an unreadable reference is a refusal, never a pass."; exit 1 ;;
           esac
+
+      # ── main-red circuit breaker (task-50b343c0403f8b06) ──────────────────
+      # THE MEASURED MISS THIS CLOSES. #15784 added prose that tripped
+      # required-checks-verify.sh's advisory-prose clause INSIDE a step main was
+      # already red on from a different file. Before the signature layer that
+      # fresh hit read as inherited; after it, this job had no Decide step at
+      # all, so the opposite failure applied — a red main already carries here
+      # landed on the PR author as their own, with no verdict line saying which
+      # it was. required-checks-drift accounted for 148 of the 631 measured
+      # inherited reds in 14 days, the third-largest source, and it was the one
+      # source with no breaker.
+      #
+      # SAFE HERE FOR THE SAME REASON THE OTHER NINE JOBS ARE: this job is NOT a
+      # required context (required-checks-floor.sh guards those four names and
+      # main-red-breaker.sh's harness asserts it names none of them), the
+      # check-run name is unchanged, and on push:main the breaker never
+      # forgives — main's own red stays main's red.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Prove the toolchain by mutation (hermetic)\", \"s2\": \"Fetch the floor's reference (origin/main's committed spec)\", \"s3\": \"The committed spec holds the floor (contexts, _readme, enforced)\"}"
+          JOB_NAME: "Required-check spec gate"
+          WORKFLOW_FILE: required-checks-drift.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   # ── the workflow-file shape ratchet ─────────────────────────────────────────
   # WHY IT LIVES HERE AND NOT IN shell-harnesses.yml, where every other

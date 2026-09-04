@@ -130,19 +130,50 @@ has "$out" "RC=0" "14) rc 0"
 # two arm jobs became one. A gate step is a step carrying the breaker's own
 # continue-on-error marker inside a workflow that has a Decide step, so a step
 # that becomes a gate step tomorrow is counted tomorrow with no edit here.
-gate_capture_audit() { # $1 = workflows dir -> "OK <n>" (rc 0) or "<m> of <n> … UNWIRED" (rc 1)
+gate_capture_audit() { # $1 = workflows dir -> "OK <n> … <j> breaker job(s)" (rc 0) or "<m> of <n> … UNWIRED" (rc 1)
   python3 - "$1" <<'AUDIT'
 import os, re, sys
 MARK = "main-red breaker: the Decide step below owns the verdict"
 ARM  = "scripts/breaker-capture.sh"
+DECIDE = "main-red-breaker.sh"
 d = sys.argv[1]
 gates = missing = 0
+# The JOB census (task-50b343c0403f8b06). Arm 15 counted gate STEPS, which is
+# the right unit for the capture half and the wrong one for the question "is
+# this job a breaker job at all" — required-checks-drift's `spec-gate` had
+# three unarmed gate steps and no Decide step, so it contributed ZERO to the
+# step count and its absence was invisible here. A job that carries the marker
+# but no Decide step is the exact shape that reds a PR author for main's defect
+# with no verdict line, so it is now a MISSING, and the job tally is printed so
+# a job entering or leaving the breaker set is visible in one line.
+jobs = []           # (fn, jobkey, gate_steps, decide_steps) for jobs with either
+def flush(fn, key, g, dec):
+    if key is not None and (g or dec):
+        jobs.append((fn, key, g, dec))
 for fn in sorted(os.listdir(d)):
     if not fn.endswith((".yml", ".yaml")):
         continue
     lines = open(os.path.join(d, fn), errors="replace").read().split("\n")
-    if not any("main-red-breaker.sh" in l and "run:" in l for l in lines):
+    # A breaker workflow is one carrying EITHER half. Keying this filter on the
+    # Decide step alone made the job clause below unreachable in the one case it
+    # exists for: delete the last Decide step from a file and the whole file
+    # stopped being audited, so its now-orphaned gate steps left the tally
+    # SILENTLY (measured 53 -> 50 steps, 9 -> 8 jobs, rc 0). The marker is the
+    # opt-in; a file that carries it is audited whether or not anyone owns the
+    # verdict.
+    if not any(MARK in l or ("main-red-breaker.sh" in l and "run:" in l) for l in lines):
         continue  # not one of the breaker workflows
+    injobs = False; key = None; g = dec = 0
+    for l in lines:
+        if re.match(r"^jobs:\s*$", l):
+            injobs = True; continue
+        if injobs and re.match(r"^  [A-Za-z0-9_.-]+:\s*$", l):
+            flush(fn, key, g, dec); key = l.strip()[:-1]; g = dec = 0; continue
+        if key is not None and MARK in l:
+            g += 1
+        if key is not None and DECIDE in l and "run:" in l:
+            dec += 1
+    flush(fn, key, g, dec)
     for i, l in enumerate(lines):
         if MARK not in l:
             continue
@@ -159,7 +190,16 @@ for fn in sorted(os.listdir(d)):
         if not any(ARM in b for b in body):
             name = next((lines[x].split("- name:")[1].strip() for x in range(i, max(i - 6, -1), -1) if "- name:" in lines[x]), "?")
             print("MISSING %s:%d - gate step %r does not arm %s" % (fn, j + 1, name, ARM)); missing += 1
-print("OK %d gate step(s) arm the capture" % gates if not missing else "%d of %d gate step(s) UNWIRED" % (missing, gates))
+armed_jobs = 0
+for fn, key, g, dec in jobs:
+    if g and not dec:
+        print("MISSING %s job %r - %d gate step(s) marked but NO Decide step: main's own red lands on the PR author with no verdict line" % (fn, key, g)); missing += 1
+    elif dec and not g:
+        print("MISSING %s job %r - a Decide step with no gate step: it can only ever judge steps that never opted in" % (fn, key)); missing += 1
+    elif g and dec:
+        armed_jobs += 1
+print(("OK %d gate step(s) arm the capture across %d breaker job(s)" % (gates, armed_jobs))
+      if not missing else "%d of %d gate step(s) UNWIRED (%d breaker job(s) intact)" % (missing, gates, armed_jobs))
 sys.exit(1 if missing or gates == 0 else 0)
 AUDIT
 }
@@ -183,6 +223,41 @@ MUTATE
   has "$mout" "UNWIRED" "15b) and it names how many"
 else
   bad "15b) could not build the mutation (no wired gate step found in $victim)"
+fi
+# 15c. MUTATION on the JOB half (task-50b343c0403f8b06). 15b proves a gate step
+#      that stops arming the capture is caught. This proves the other direction:
+#      a job whose Decide step is DELETED — the exact state `spec-gate` shipped
+#      in, gate steps present, nobody owning the verdict — must red too. Without
+#      this the job clause is a derivation that cannot fail.
+mut2="$TMP/wf-mut-decide"; rm -rf "$mut2"; mkdir -p "$mut2"; cp "$ROOT"/.github/workflows/*.yml "$mut2/" 2>/dev/null
+dvictim="$mut2/required-checks-drift.yml"
+if [ -f "$dvictim" ]; then
+  python3 - "$dvictim" > "$TMP/decide-mut.count" <<'MUTATE'
+import re, sys
+p = sys.argv[1]; lines = open(p).read().split("\n")
+# Drop the LAST Decide step's run line (and its `- name:` header) — enough to
+# make the job that owns it carry gate steps with no verdict owner.
+hits = [i for i, l in enumerate(lines) if "main-red-breaker.sh" in l and "run:" in l]
+if not hits:
+    print("0"); raise SystemExit
+i = hits[-1]
+j = i
+while j >= 0 and "- name: Decide" not in lines[j]:
+    j -= 1
+del lines[(j if j >= 0 else i):i + 1]
+open(p, "w").write("\n".join(lines))
+print(str(len(hits)))
+MUTATE
+  dcount="$(cat "$TMP/decide-mut.count" 2>/dev/null || echo 0)"
+  if [ "$dcount" != "0" ]; then
+    dout="$(gate_capture_audit "$mut2" 2>&1)"; drc=$?
+    if [ "$drc" -ne 0 ]; then ok "15c) MUTATION: deleting a job's Decide step reds the audit"; else bad "15c) MUTATION SURVIVED: a job kept its gate steps with no Decide step and the audit stayed green — $dout"; fi
+    has "$dout" "NO Decide step" "15c) and it says which job lost its verdict owner"
+  else
+    bad "15c) could not build the mutation (no Decide step found in $dvictim)"
+  fi
+else
+  bad "15c) could not build the mutation (required-checks-drift.yml absent from the copy)"
 fi
 # 16. THE EXIT-CODE INVARIANT. A capture wrapper that swallows a red is worse
 #     than no capture, so breaker-capture.sh re-raises the step's status
