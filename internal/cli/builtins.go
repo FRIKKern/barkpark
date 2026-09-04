@@ -359,6 +359,25 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 			"team":          cloudTeam,
 		},
 	}
+	// STRUCTURED PARITY with the human scope block. `workspace`/`project` alone
+	// carry the same lie the print used to: they say what was SET, not what a
+	// request will USE. The two keys below appear ONLY when a scope is stated,
+	// so every floor-scope receipt (the onboarding spine included) keeps its
+	// exact shape, and a consumer that reads workspace= has the fate beside it
+	// the moment the value stops being ambient.
+	if stated := manifest.StatedScope(ctx); len(stated) > 0 {
+		payload["scope_stated"] = stated
+		if loadedManifest != nil {
+			t := manifest.ScopeFateTally(loadedManifest.Commands)
+			payload["scope_fate_tally"] = map[string]int{
+				"commands":                              len(loadedManifest.Commands),
+				manifest.ScopeCarried.String():          t[manifest.ScopeCarried],
+				manifest.ScopeMirrored.String():         t[manifest.ScopeMirrored],
+				manifest.ScopeUnscopedByDesign.String(): t[manifest.ScopeUnscopedByDesign],
+				manifest.ScopeRefused.String():          t[manifest.ScopeRefused],
+			}
+		}
+	}
 	// The warning goes to STDERR in every render — `-o json` included, where
 	// stdout must stay a clean document. whoami still exits 0: it reports your
 	// configuration, and a shadowed credential is a finding, not a failure.
@@ -405,7 +424,12 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	} else {
 		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
 	}
-	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
+	// The scope block is no longer an unconditional echo of ctx — see
+	// whoamiScopeLines. Floor scope prints exactly one byte-identical line;
+	// a stated scope is marked and carries its per-command fate tally.
+	for _, l := range whoamiScopeLines(ctx, loadedManifest) {
+		out.outf("%s", l)
+	}
 	if tokenPresent {
 		out.outf("token:     set (%s)", prov.describe())
 	} else {
@@ -793,4 +817,69 @@ complete -c bp -f
 complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
 complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
 ` + verbLines.String() + flagLines.String()
+}
+
+// whoamiScopeLines renders whoami's scope block.
+//
+// THE DEFECT IT CLOSES. The line used to be one unconditional echo of the
+// context — `scope:     w=%s p=%s d=%s` — which reported what the operator SET
+// and never what a request would USE. After the scope-honesty contract
+// (internal/manifest/scope.go, PR #16010) those are different facts: a stated
+// -w reaches the wire on the commands whose path carries it, re-routes the URL
+// through the advertised mirror on the commands with a scoped_prefix, and is
+// REFUSED before any I/O on the rest. Printing `w=beta` and stopping told an
+// operator their session was pointed at beta when most verbs would have
+// answered about the floor.
+//
+// Two arms, and the split is the same one StatedScope draws:
+//
+//	floor scope (nothing stated) — the ambient case, which is CORRECT today.
+//	  The single line is byte-identical to what it has always been. This is
+//	  load-bearing: every operator without a -w sees no change at all.
+//	stated scope — each stated value is marked "(stated)" so it cannot be read
+//	  as ambient, and a second line gives the per-fate tally DERIVED from the
+//	  live manifest. Never hard-coded: the numbers move the moment the server
+//	  advertises one more scoped_prefix, and a stale count in an honesty line
+//	  is worse than no line.
+//
+// An unreachable manifest is a MISSING MEASUREMENT, not a fate. It says so
+// rather than guessing a tally in either direction.
+func whoamiScopeLines(ctx manifest.Context, m *manifest.Manifest) []string {
+	stated := manifest.StatedScope(ctx)
+	if len(stated) == 0 {
+		return []string{fmt.Sprintf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)}
+	}
+
+	w, p := ctx.Workspace, ctx.Project
+	var named []string
+	for _, f := range stated {
+		switch f {
+		case "-w":
+			w += " (stated)"
+			named = append(named, fmt.Sprintf("-w %s", ctx.Workspace))
+		case "-p":
+			p += " (stated)"
+			named = append(named, fmt.Sprintf("-p %s", ctx.Project))
+		}
+	}
+	lines := []string{fmt.Sprintf("scope:     w=%s p=%s d=%s", w, p, ctx.Dataset)}
+
+	subject := strings.Join(named, " / ")
+	if m == nil {
+		lines = append(lines, fmt.Sprintf(
+			"           %s is NOT ambient — which commands can carry it is UNKNOWN "+
+				"here (the server manifest was unreachable), so this line cannot "+
+				"promise any request will use it.", subject))
+		return lines
+	}
+
+	t := manifest.ScopeFateTally(m.Commands)
+	lines = append(lines, fmt.Sprintf(
+		"           %s is NOT ambient — of %d commands: %d carry it in their own path, "+
+			"%d route to the workspace mirror, %d ignore it by design, %d are REFUSED "+
+			"before any request is sent (`bp capabilities` marks them).",
+		subject, len(m.Commands),
+		t[manifest.ScopeCarried], t[manifest.ScopeMirrored],
+		t[manifest.ScopeUnscopedByDesign], t[manifest.ScopeRefused]))
+	return lines
 }

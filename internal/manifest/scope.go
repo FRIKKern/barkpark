@@ -230,3 +230,21 @@ func DeclaredScopeNouns() []string {
 	sort.Strings(out)
 	return out
 }
+
+// ScopeFateTally counts, over a whole command roster, how many commands fall to
+// each fate for an operator-stated -w/-p. It is the only honest way to describe
+// a stated scope OUTSIDE the context of one command: after this file, "-w beta"
+// has no single meaning — it reaches the wire on some verbs, re-routes the URL
+// on others, and is refused before I/O on the rest. A diagnostic that prints
+// `w=beta` and stops is reporting a scope most requests will not use.
+//
+// The counts are DERIVED from the live manifest every time. Hard-coding them
+// would go stale the moment the server advertises one more scoped_prefix, and a
+// stale count in a line whose whole job is honesty is worse than no line.
+func ScopeFateTally(cmds []Command) map[ScopeFate]int {
+	tally := map[ScopeFate]int{}
+	for _, c := range cmds {
+		tally[ScopeFateFor(c)]++
+	}
+	return tally
+}
