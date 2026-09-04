@@ -262,8 +262,33 @@ jobs:
       # (the #8093 specimen) asserted against a COPY of the real workflow tree
       # with one poison planted, the deadlock detector, the superset floor, and
       # verify's own 16 mutation clauses via §9. No network, no token.
+      #
+      # THE rc==4 ARM, AND WHY IT IS NOT A BARE `run:` ANY MORE. Until this
+      # step was rewritten it was one line, so EVERY non-zero reddened it with
+      # the same faceless X — and the suite's exit 1 covered both "your PR
+      # drifted the required set" and "our generator refused and wrote no spec
+      # for the suite to read". #14371 is the measured cost of that conflation:
+      # this gate sat red from 2026-08-24T21:59Z to 2026-08-31 on a generator
+      # refusal, and the fleet learned to ignore the red because nothing in it
+      # said which of the two it was. The suite now exits 4 for the second
+      # case, and this step SAYS SO.
+      #
+      # It still exits 1 — HOLD renders as a named red, never as a pass. The
+      # gate is not required (see the header), so its whole value is a human
+      # reading it; swallowing a rc-4 into green would delete the signal this
+      # arm exists to sharpen. Same shape, same reason, as the rc==3 DEADLOCK
+      # arm in the advisory job's third step, which is the precedent this
+      # copies rather than a second convention.
       - name: Prove the toolchain by mutation (hermetic)
-        run: bash scripts/required-checks.test.sh --hermetic
+        run: |
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks.test.sh --hermetic || rc=$?
+          if [ "$rc" -eq 4 ]; then
+            echo "::error::HOLD (not drift) — the mutation suite could not READ an input: a producer refused and wrote no spec, so the suite never reached a verdict about the required set. Its tally line above names every BLOCKED site with the producer's own refusal text. Fix the producer; do NOT read this as a claim about this PR's spec."
+            exit 1
+          fi
+          exit "$rc"
 
       # THE COMMIT PATH. apply.sh floors the WRITE path — it runs the floor
       # before the protection PUT and is fail-closed on every rc — but nothing
@@ -382,10 +407,25 @@ jobs:
       # NAME the phantom rather than merely exit non-zero. (The bare run is the
       # hermetic suite PLUS these; there is no third home for --selftest, which
       # §9 runs internally.)
+      #
+      # Same rc==4 arm as the hermetic job's step, and it matters MORE here:
+      # this job runs the API stage on a credential that rotates out from under
+      # CI, so "an input could not be read" is its likeliest non-zero. The job
+      # carries continue-on-error, so the exit code is swallowed either way —
+      # the ::error:: annotation is the entire deliverable, and a reader who
+      # sees it must not go looking for spec drift that was never measured.
       - name: Prove the toolchain against the live API (§10, §11)
         env:
           GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
-        run: bash scripts/required-checks.test.sh
+        run: |
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks.test.sh || rc=$?
+          if [ "$rc" -eq 4 ]; then
+            echo "::error::HOLD (not drift) — the mutation suite could not READ an input: a producer refused and wrote no spec, so the suite never reached a verdict about the required set. Its tally line above names every BLOCKED site with the producer's own refusal text. Fix the producer; do NOT read this as a claim about the committed spec."
+            exit 1
+          fi
+          exit "$rc"
 
       - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
         env:
