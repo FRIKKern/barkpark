@@ -112,7 +112,7 @@ func registerChatTools(srv *mcp.Server, ctx manifest.Context) {
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
 		}
-		s, err := chatClientFor(ctx).CreateChatSessionWithOptions(apiclient.ChatSessionCreateOptions{
+		s, status, raw, err := chatClientFor(ctx).CreateChatSessionWithOptionsRaw(apiclient.ChatSessionCreateOptions{
 			Provider: in.Provider,
 			Mode:     in.Mode,
 			Model:    in.Model,
@@ -120,6 +120,9 @@ func registerChatTools(srv *mcp.Server, ctx manifest.Context) {
 		})
 		if err != nil {
 			return mcpTextError(fmt.Sprintf("chat_spawn_session: %v", err)), nil
+		}
+		if res := chatSpawnReceiptRefusal(status, raw, s.ID); res != nil {
+			return res, nil
 		}
 		return mcpChatResult(s), nil
 	})
@@ -161,8 +164,16 @@ func registerChatTools(srv *mcp.Server, ctx manifest.Context) {
 		if strings.TrimSpace(in.Content) == "" {
 			return mcpArgError(fmt.Errorf("content is required (the message to send)")), nil
 		}
-		if err := chatClientFor(ctx).SendChatMessage(in.SessionID, in.Content); err != nil {
+		status, raw, err := chatClientFor(ctx).SendChatMessageRaw(in.SessionID, in.Content)
+		if err != nil {
 			return mcpTextError(fmt.Sprintf("chat_send: %v", err)), nil
+		}
+		// The `accepted:true` below is SYNTHESISED by this handler, so it must not
+		// outrun the server: a 2xx that said nothing would otherwise become a
+		// confident local accept. chat_controller answers 202 `{accepted:true}`,
+		// a receipt the fence passes; anything emptier is refused here.
+		if reason, hint := mcpPoisonedReceipt(status, raw, true); reason != "" {
+			return mcpUnreadableResult("chat_send write receipt", status, raw, reason, hint), nil
 		}
 		// 202 semantics made explicit: accepted, not answered.
 		return mcpChatResult(map[string]any{"accepted": true, "session_id": in.SessionID}), nil
@@ -387,4 +398,34 @@ func mcpChatResult(v any) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 	}
+}
+
+// chatSpawnReceiptRefusal screens a chat_spawn_session 2xx receipt and returns
+// the refusal result, or nil when the spawn is worth reporting as a success.
+//
+// TWO GATES, ONE FENCE. The first is the SHARED write fence itself — the same
+// mcpPoisonedReceipt / writeReceiptVerdict / unreadableWriteReceipt chain every
+// manifest-dispatched MCP write crosses via mcpRunFor
+// (pds-bl-mcp-exec-bypasses-write-fence, PR #15900). chat_spawn_session is a
+// hardcoded BUILT-IN (D74h), so it never reaches mcpRunFor; it calls the fence
+// directly rather than growing a second copy of the "did the server say
+// anything" discriminator.
+//
+// The second gate is the one thing the fence structurally CANNOT see: the fence
+// is key-agnostic on purpose ("every object regardless of its keys passes"), so
+// a receipt like {"ok":true} is honest to it and still carries no session id.
+// This surface hands the model a SPAWNED AGENT it is told to address by id, and
+// an empty id is a poisoned receipt for that promise specifically — so the
+// field check lives here, next to the caller that acts on it, and names its own
+// reason instead of pretending the shared discriminator produced it.
+func chatSpawnReceiptRefusal(status int, raw []byte, sessionID string) *mcp.CallToolResult {
+	if reason, hint := mcpPoisonedReceipt(status, raw, true); reason != "" {
+		return mcpUnreadableResult("chat_spawn_session write receipt", status, raw, reason, hint)
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return mcpUnreadableResult("chat_spawn_session write receipt", status, raw,
+			"carried a receipt with no session id — nothing addressable was spawned",
+			unreadableWriteReceiptHint)
+	}
+	return nil
 }
