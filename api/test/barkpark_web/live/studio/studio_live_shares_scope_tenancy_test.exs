@@ -64,6 +64,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
 
   @dataset "production"
 
+  # `Handlers.Shares.@not_workspace_admin_error` as it reaches the DOM, apostrophe
+  # already HTML-escaped. Pinned here so the oracle test proves the denial is
+  # PRESENT before it proves the two denials are equal.
+  @denial_sentence "You are not an admin of that scope&#39;s workspace. " <>
+                     "POST/DELETE /v1/shares refuses the same request."
+
   setup %{conn: conn} do
     ws_a = create_workspace!("arpss-shares-a-#{System.unique_integer([:positive])}")
     proj_a = create_project!(ws_a, "arpss-shares-pa-#{System.unique_integer([:positive])}")
@@ -662,7 +668,32 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
     # refused with a DIFFERENT sentence than a foreign one, this surface would
     # be an existence oracle: an admin of A could walk slugs and learn which
     # workspaces are taken without administering any of them. The two denials
-    # must be indistinguishable, so they are compared byte for byte.
+    # must be indistinguishable.
+    #
+    # THE COMPARISON IS THE PANEL, NOT THE PAGE (task-f0ad13818246990c). This
+    # test used to read `assert render(view) == ghost_render` — a whole-page
+    # byte compare of two renders taken at different moments. `render(view)`
+    # carries the Studio footer's nested `BarkparkWeb.ServerVitalsLive`, a
+    # sticky child LiveView showing live HOST vitals fed by the singleton
+    # `Barkpark.HostVitals.Sampler` (CPU %, RAM used/total, disk %, load1,
+    # uptime). Those bytes move with the MACHINE and its sampler tick, not with
+    # this socket or this sandbox, so the byte compare was a coin flip: main run
+    # 33797695867 lost it, and `gh run rerun --failed` on the same sha won.
+    # A probe that re-rendered the SAME unchanged state 40x over ~4s captured
+    # the moving bytes with `String.myers_difference/2`:
+    #
+    #     [del: "—", ins: "41%",            # · CPU
+    #      del: "—", ins: "13.5/16.0 GB",   # · RAM
+    #      del: "—", ins: "31%",            # · disk
+    #      del: "—", ins: "16.47"]          # · load
+    #
+    # Nothing inside the shares panel moved. So the invariant is asserted over
+    # `div.shares-modal` — the whole panel, still byte for byte, which keeps
+    # every part of the old assertion that could ever have been an oracle (the
+    # sentence, the scope field, the active-share list) and drops only the
+    # unrelated chrome. The two `refute`s below pin the point of the ruling
+    # directly, so the test still fails loudly if the panel selector ever stops
+    # matching and the comparison would otherwise go vacuous.
     test "NO EXISTENCE ORACLE: nonexistent and foreign-but-real deny identically", %{
       view: view,
       ws_b: ws_b
@@ -674,16 +705,41 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
         "surfaces" => ["docs"]
       })
 
-      ghost_render = render(view)
+      ghost_panel = shares_panel(view)
+      ghost_denial = denial_line(view)
+
+      # NON-VACUITY. `element/2 |> render/1` raises when the selector matches
+      # nothing, so a markup rename reds this test instead of silently comparing
+      # two empty strings; the sentence itself is pinned as well.
+      assert ghost_panel =~ "Network shares"
+      assert ghost_denial =~ @denial_sentence
 
       render_hook(view, "shares-add", %{
         "scope" => "#{ws_b.slug}/default/#{@dataset}",
         "surfaces" => ["docs"]
       })
 
-      assert render(view) == ghost_render,
+      foreign_panel = shares_panel(view)
+
+      assert foreign_panel == ghost_panel,
              "the panel distinguishes a nonexistent workspace from a foreign one — " <>
                "that difference is an existence oracle"
+
+      # The oracle this test guards, stated as itself: neither denial may name
+      # the slug it was handed.
+      refute ghost_denial =~ ghost
+      refute denial_line(view) =~ ws_b.slug
     end
   end
+
+  # ── denial extraction (task-f0ad13818246990c) ─────────────────────────────
+  #
+  # `div.shares-modal` is the panel `Modals.shares_modal/1` renders and
+  # `p.shares-error` is the single denial line inside it. `element/2 |> render/1`
+  # renders ONLY that node — no Studio shell, so no host-vitals bytes — and
+  # raises `ArgumentError` when the selector matches nothing.
+
+  defp shares_panel(view), do: view |> element("div.shares-modal") |> render()
+
+  defp denial_line(view), do: view |> element("p.shares-error") |> render()
 end

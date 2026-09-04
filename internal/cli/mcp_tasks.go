@@ -987,17 +987,31 @@ func mcpRunFor(status int, body []byte, err error, writes bool) *mcp.CallToolRes
 			if writes {
 				kind = "write receipt"
 			}
-			msg := fmt.Sprintf(
-				"unreadable %s: HTTP %d %s (%d bytes): %s\n  remedy: %s",
-				kind, status, reason, len(body), bodyPreview(body), hint,
-			)
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: clampMCPToolResult(msg)}},
-				IsError: true,
-			}
+			return mcpUnreadableResult(kind, status, body, reason, hint)
 		}
 	}
 	return mcpRun(status, body, err)
+}
+
+// mcpUnreadableResult renders ONE refusal sentence for a stated-success answer
+// that carries no honest statement: what kind of answer it was, the status, the
+// reason the discriminator named, the byte count, a preview, and the remedy.
+//
+// It is a RENDERER, never a verdict — every caller has already asked
+// mcpPoisonedReceipt (or, for a field the fence cannot see, named its own
+// reason). It is shared so a second refusing surface (mcp_chat.go's built-in
+// chat tools, which do not ride execManifestCommand and so never reach
+// mcpRunFor) prints the same sentence shape as the manifest dispatch instead of
+// growing a lookalike.
+func mcpUnreadableResult(kind string, status int, body []byte, reason, hint string) *mcp.CallToolResult {
+	msg := fmt.Sprintf(
+		"unreadable %s: HTTP %d %s (%d bytes): %s\n  remedy: %s",
+		kind, status, reason, len(body), bodyPreview(body), hint,
+	)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: clampMCPToolResult(msg)}},
+		IsError: true,
+	}
 }
 
 // mcpPoisonedReceipt names WHY a stated-success (< 400) body carries no honest

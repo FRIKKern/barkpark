@@ -221,9 +221,31 @@ const EXPECT = [
   { f: "showAuthInviteBanner", p: '"/v1/invitations/" + encodeURIComponent(token)', v: "guarded",
     proof: [/r\.status === 404 \|\| r\.ok/, /We couldn't check your invitation just now/],
     why: "cch-w67-s4: only a determinate dead answer consumes the parked token; a transient failure keeps it and says so" },
-  { f: "mountLaunchCatalog", p: '"/v1/providers/" + encodeURIComponent(kind) + "/catalog"', v: "guarded",
+  // cch-w45-bl: the fetch half of mountLaunchCatalog, split out when the
+  // capability gate landed in front of it. Same read, same verdict, same proof.
+  { f: "mountLaunchCatalogFetch", p: '"/v1/providers/" + encodeURIComponent(kind) + "/catalog"', v: "guarded",
     proof: [/catalogViewState\(r\)/],
     why: "catalogViewState's error state renders the couldn't-load card + Retry" },
+  // cch-w45-bl: the conduit read the two catalog mounts now consult BEFORE
+  // fetching. `sanctioned` and not `guarded`: a failure caches `null`, which
+  // catalogCapability reads as "unknown", and "unknown" is not a refusal — every
+  // mount then proceeds on exactly the path it walks today, error arms included.
+  // Nothing is blanked and nothing is claimed; the read NARROWS (it can skip a
+  // request that cannot succeed) and is silent when it does not land.
+  { f: "withProviderCapabilities", p: '"/v1/providers/capabilities"', v: "sanctioned",
+    proof: [/providerCapsCache\.payload = r && r\.ok && r\.data \? r\.data : null/],
+    fileProof: [/if \(caps\.catalog !== false\) return \{ state: "unknown", reason: "" \};/],
+    why: "a failed read caches null → catalogCapability answers 'unknown' → the mount fetches exactly as it does today" },
+  // cch-w48-bl: the site screen's one-shot GitHub-readiness read. `sanctioned`:
+  // a failure changes NOTHING the console had already decided — the band starts
+  // at "unknown" and stays there, and githubReadinessFrom refuses to turn any
+  // non-200 (or a 200 without the boolean) into a configuration claim. What the
+  // unknown band then does — withhold the button, keep the repo chip — is the
+  // module's fail-closed policy, not an error surface this read owes a Retry.
+  { f: "ensureGithubReadiness", p: '"/v1/github/installation"', v: "sanctioned",
+    proof: [/var next = githubReadinessFrom\(r\);/],
+    fileProof: [/if \(!r \|\| !r\.ok \|\| !r\.data \|\| typeof r\.data !== "object"\) return "unknown";/],
+    why: "only a 200 carrying the boolean moves the band; every failure class stays 'unknown', which withholds rather than claims" },
   { f: "loadMe", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
     why: "cch-w36-s3: the failed arm records the fault so meState() reads 'failed', and re-enters every dependent view fail-closed" },

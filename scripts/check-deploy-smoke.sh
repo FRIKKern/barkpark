@@ -21,9 +21,18 @@
 # own comment names the incident: the '/' gate "stayed green through a 16h
 # outage where every DB-backed route 500'd", so the inner script requires a
 # bad-creds POST /v1/auth/login to answer 401 before it flips slots. The INNER
-# script was backstopped; the OUTER workflow smoke was not. (deploy.yml's
-# INSTANCE job is the counterexample proving that asymmetry is a defect, not a
-# design: it is a hard `test "$code" = "200"` on the DB-touching /api/schemas.)
+# script was backstopped; the OUTER workflow smoke was not.
+#
+# THE INSTANCE JOB IS NOT THE COUNTEREXAMPLE (charter D369 NARROWS D344 here; it
+# does not retract it). Its hard `test "$code" = "200"` on the DB-touching
+# /api/schemas genuinely covers the DEAD-POOL class, and has FIRED on it: run
+# 30686555528 logged `guerrilla /api/schemas = 500` and failed the step. It
+# covers that class AND NOTHING ELSE. Mutation-proved: the bare 200 predicate
+# PASSES against a server answering 200 with body `[]`, and the route is
+# deliberately not token-gated, so the whole authenticated stack can be dead
+# under a green. So the instance smoke is held to the SAME two-oracle bar as the
+# control plane — a non-empty catalog AND an independent bad-creds 401 — instead
+# of being cited as the standard the control plane should aspire to.
 #
 # THE ASSERTIONS, against the real deploy.yml
 #
@@ -32,6 +41,11 @@
 #      EXACTLY 401 — so 5xx (500 storm) and 000 (dead box / dead pool) fail.
 #   3. That probe uses an invalid address on the reserved .example TLD, so no
 #      credential and no authentication is introduced by the gate itself.
+#   3b. The INSTANCE smoke carries the same two oracles: /api/schemas asserted
+#      NON-EMPTY (a bare 200 passes on `[]`), plus its own bad-creds 401 probe on
+#      a different pipeline. And it declares no `env:` it never reads — a
+#      GUERRILLA_HOST secret repointed at one box must not certify another,
+#      which a step that hardcodes the URL while declaring the secret invites.
 #   4. BOTH deploy jobs assert the SERVED COMMIT — that what the box answers with
 #      is the merged commit or a descendant of it. Every probe above proves the
 #      box is ALIVE; none proves it MOVED. Measured offline against a fake box
@@ -182,6 +196,94 @@ extract_cp_smoke() {
     job == "control-plane" && /^      - / { instep = ($0 ~ /^      - name: .*Smoke test/) ? 1 : 0 }
     job == "control-plane" && instep { print }
   ' "$1"
+}
+
+# The INSTANCE job's `Smoke test` step, verbatim. A deliberate near-copy of
+# extract_cp_smoke rather than a shared parameterised helper: the job-boundary
+# awk is shared prose with scripts/check-deployyml-filters.sh, and unifying the
+# three is its own held task (dr-w25-followup-yaml-job-scope-helper). Copying
+# eight lines is cheaper than a refactor nobody asked for, and the step-boundary
+# rule ('      - ', not '      - name: ') is copied WITH it — that rule is what
+# stops an unnamed trailing step from answering for the smoke, the disarm shape
+# selftest 4 encodes.
+extract_instance_smoke() {
+  awk '
+    /^  [a-zA-Z0-9_-]+:/ {
+      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
+      instep = 0
+    }
+    job == "instance" && /^      - / { instep = ($0 ~ /^      - name: .*Smoke test/) ? 1 : 0 }
+    job == "instance" && instep { print }
+  ' "$1"
+}
+
+# The instance smoke's own invariants. Until this existed the instance job had
+# ZERO tripwire by construction: every arm above is scoped `job == "control-plane"`,
+# so the weakest oracle in the workflow was also the only unguarded one.
+check_instance_smoke() {
+  local yml="$1" label="$2"
+  local step failures=0
+
+  step="$(extract_instance_smoke "$yml" || true)"
+  if [ -z "$step" ]; then
+    echo "FAIL[$label]: no 'Smoke test' step found in the instance job — the extractor is broken, or the step was renamed" >&2
+    echo "  Same four causes as the control-plane message above; the boundary rules are identical." >&2
+    return 1
+  fi
+
+  local logic
+  logic="$(printf '%s\n' "$step" | grep -v '^[[:space:]]*#' | logic_view)"
+
+  # i1. THE EMPTY-CATALOG ARM. `test "$code" = "200"` alone is green on a server
+  #     answering 200 with body `[]` — measured, against a local stub. The chain
+  #     /api/schemas -> Content.list_schemas/2 -> Repo.all() -> Enum.map has no
+  #     emptiness check, so a wiped or wrong-database box reads as a live one.
+  #     Keyed on the ASSERTION, not on the word jq: reading a length and never
+  #     comparing it is the shape this whole file refuses.
+  if ! grep -qE 'test[[:space:]]+"\$count"[[:space:]]+-gt[[:space:]]+0' <<<"$logic"; then
+    echo "  DRIFT    instance: the smoke never asserts a NON-EMPTY catalog — a 200 with body '[]' passes" >&2
+    echo "           (expected a literal 'test \"\$count\" -gt 0' over the parsed /api/schemas body)" >&2
+    failures=$((failures + 1))
+  elif ! grep -q 'jq' <<<"$logic"; then
+    echo "  DRIFT    instance: the count is not parsed out of the body with jq — a substring match is not a catalog" >&2
+    failures=$((failures + 1))
+  else
+    echo "  ok       instance smoke asserts a NON-EMPTY catalog (a 200 on '[]' fails)"
+  fi
+
+  # i2. THE SECOND ORACLE. /api/schemas is deliberately NOT token-gated, so it
+  #     answers 200 over a completely dead auth stack. The bad-creds login probe
+  #     is a different pipeline with a different failure mode, pinned to EXACTLY
+  #     401 so 5xx and 000 fail — the same predicate the control plane runs.
+  if ! grep -q '/v1/auth/login' <<<"$logic"; then
+    echo "  DRIFT    instance: no /v1/auth/login probe — the smoke rests on ONE predicate over a route that is not token-gated" >&2
+    failures=$((failures + 1))
+  elif ! grep -qE '=[[:space:]]*"?401"?[[:space:]]*$' <<<"$logic"; then
+    echo "  DRIFT    instance: the login probe does not assert EXACTLY 401 — 5xx/000 could pass" >&2
+    failures=$((failures + 1))
+  elif ! grep -q '@invalid\.example' <<<"$step"; then
+    echo "  DRIFT    instance: the login probe does not use an invalid .example address — a deploy gate must introduce no credential" >&2
+    failures=$((failures + 1))
+  else
+    echo "  ok       instance smoke has a SECOND oracle: bad-creds login pinned to 401"
+  fi
+
+  # i3. NO UNREAD SECRET ON THE STEP. GUERRILLA_HOST is the SSH target; the URLs
+  #     here are the public origin. A step that declares the secret and never
+  #     reads it looks host-parameterised and is not: repoint the secret and this
+  #     step still certifies the OLD box while the deploy moved a different one.
+  # The COMMENT-STRIPPED view, deliberately: this step's prose explains WHY the
+  # secret is absent, and a gate that reds on its own rationale teaches people to
+  # delete the rationale.
+  if grep -q 'GUERRILLA_HOST' <<<"$logic" && ! grep -q '\${GUERRILLA_HOST}' <<<"$logic"; then
+    echo "  DRIFT    instance: the smoke declares GUERRILLA_HOST as env: and never reads it — wire it into the URL or drop it" >&2
+    echo "           (a secret pointing elsewhere would move one box and certify another)" >&2
+    failures=$((failures + 1))
+  else
+    echo "  ok       instance smoke declares no env it does not read"
+  fi
+
+  return "$failures"
 }
 
 # Every line of one job. Job boundaries are the 2-space keys under `jobs:` — the
@@ -364,6 +466,12 @@ check_file() {
     failures=$((failures + 1))
   fi
 
+  # 3b. the instance smoke's own two oracles — until these existed the instance
+  #     job had no tripwire at all (every arm above is control-plane-scoped).
+  local inst_rc=0
+  check_instance_smoke "$yml" "$label" || inst_rc=$?
+  failures=$((failures + inst_rc))
+
   # 4. BOTH jobs assert the SERVED COMMIT. Everything above proves the box is
   #    alive; only this proves it moved.
   local served_rc=0
@@ -385,7 +493,7 @@ check_file() {
     return 1
   fi
 
-  echo "OK[$label]: the control-plane smoke can fail on a DB-dead box, and neither target can exit 0 over a box that did not move."
+  echo "OK[$label]: both smokes carry two oracles (a DB-dead box and an empty catalog both fail), and neither target can exit 0 over a box that did not move."
   return 0
 }
 
@@ -401,14 +509,14 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/10: the real workflow passes"
+  echo "selftest 1/12: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/10: re-adding 404 to the accept-list must FAIL (the original bug)"
+  echo "selftest 2/12: re-adding 404 to the accept-list must FAIL (the original bug)"
   sed "s/\^(200|301|302)\\\$/^(200|301|302|404)\$/" "$real" > "$tmp/mutated404.yml"
   if cmp -s "$real" "$tmp/mutated404.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the accept-list no longer looks as expected" >&2
@@ -421,7 +529,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/10: deleting the DB (login) probe must FAIL"
+  echo "selftest 3/12: deleting the DB (login) probe must FAIL"
   awk '
     /dbcode="\$\(curl/ { drop = 1 }
     !drop { print }
@@ -438,7 +546,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/10: an UNNAMED trailing step must not be absorbed into the smoke"
+  echo "selftest 4/12: an UNNAMED trailing step must not be absorbed into the smoke"
   # The disarm shape, verbatim: the probe is deleted from the smoke and its
   # strings reappear in a later, unnamed `- run:` step of the same job — where
   # they assert nothing. Before the step boundary became `- ` this read
@@ -466,7 +574,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 5/10: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/12: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -505,7 +613,7 @@ YML
   # carrying a complete, correct served-sha step, because the step had a new name.
 
   echo
-  echo "selftest 6/10: DELETING both served-commit assertions must FAIL"
+  echo "selftest 6/12: DELETING both served-commit assertions must FAIL"
   awk '
     /^      - name: Assert the (control plane|content instance) serves this commit/ { drop = 1; next }
     drop && (/^      - / || /^  [a-zA-Z0-9_-]+:/) { drop = 0 }
@@ -522,7 +630,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/10: WEAKENING the null arm (jq -er '.k // empty' -> jq -r '.k') must FAIL"
+  echo "selftest 7/12: WEAKENING the null arm (jq -er '.k // empty' -> jq -r '.k') must FAIL"
   # `jq -r '.git_sha'` prints the literal four-character string `null` for a null
   # value, and that string would be handed to the compare API as if it were a
   # commit. D343's six boxes read `update_state: current` at 4/227/592/886/2,468
@@ -539,7 +647,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/10: re-introducing an EQUALITY comparison must FAIL"
+  echo "selftest 8/12: re-introducing an EQUALITY comparison must FAIL"
   # Equality was refuted by run (charter D359): both deploy scripts pull
   # origin/main's TIP, so a run fired for one commit routinely delivers a
   # DESCENDANT. compare 7f5f10b8d...572d51e13 = ahead, ahead_by 10, behind_by 0.
@@ -562,7 +670,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/10: MOVING the assertion OUT of the job it guards must FAIL"
+  echo "selftest 9/12: MOVING the assertion OUT of the job it guards must FAIL"
   # The step is lifted out of control-plane, renamed, and re-planted in `changes`
   # — where it runs BEFORE the deploy and answers for nothing. A gate scoped to
   # the job it guards must red on this; a gate scoped to a step NAME cannot see
@@ -595,7 +703,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/10: RENAMING the assertion step IN PLACE must still PASS"
+  echo "selftest 10/12: RENAMING the assertion step IN PLACE must still PASS"
   # The positive control, and the reason the served-commit arms read the whole
   # job instead of a step name. This exact shape — a correct assertion under a
   # name the extractor did not know — is what scored OK at rc 0 before the arms
@@ -609,6 +717,47 @@ YML
   else
     echo "SELFTEST FAIL: renaming the step reds the gate — the served-commit arms went name-pinned again" >&2
     rc=1
+  fi
+
+  echo
+  echo "selftest 11/12: STRIPPING the instance non-empty-catalog assertion must FAIL"
+  # The defect this task closes, planted back. Without the arm the mutated file
+  # is a workflow whose instance smoke is exactly `test "$code" = "200"` — and
+  # that predicate is green against a server answering 200 with body `[]`,
+  # measured against a local stub before this arm was written.
+  grep -v 'test "$count" -gt 0' "$real" > "$tmp/emptyok.yml"
+  if cmp -s "$real" "$tmp/emptyok.yml"; then
+    echo "SELFTEST FAIL: the strip changed nothing — the non-empty assertion no longer looks as expected" >&2
+    rc=1
+  elif check_file "$tmp/emptyok.yml" "emptyok" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: an instance smoke that cannot fail on an EMPTY catalog read GREEN" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when the instance smoke stops asserting a non-empty catalog"
+  fi
+
+  echo
+  echo "selftest 12/12: DELETING the instance login probe must FAIL"
+  # The second oracle removed. /api/schemas is deliberately not token-gated, so
+  # without this probe the whole authenticated stack can be dead under a green.
+  awk '
+    /^  instance:/ { injob = 1 }
+    /^  [a-zA-Z0-9_-]+:/ && !/^  instance:/ { injob = 0 }
+    injob && /dbcode="\$\(curl/ { drop = 1 }
+    !drop { print }
+    drop && /test "\$dbcode" = "401"/ { drop = 0 }
+  ' "$real" > "$tmp/noinstprobe.yml"
+  if cmp -s "$real" "$tmp/noinstprobe.yml"; then
+    echo "SELFTEST FAIL: the instance-probe deletion changed nothing" >&2
+    rc=1
+  elif ! grep -q 'barkpark.cloud/v1/auth/login' "$tmp/noinstprobe.yml"; then
+    echo "SELFTEST FAIL: the deletion removed the CONTROL-PLANE probe too — this would red for the wrong reason" >&2
+    rc=1
+  elif check_file "$tmp/noinstprobe.yml" "noinstprobe" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: an instance smoke with a single oracle read GREEN" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when the instance smoke loses its second oracle"
   fi
 
   rm -rf "$tmp"

@@ -238,6 +238,29 @@ jobs_json() { # <name> <run-id:legresult>...
   echo "$out"
 }
 
+# jobs_json fixes BOTH legs to the same conclusion, so it cannot express the one
+# shape the live crown-reconcile red is made of: a deploy whose INSTANCE leg
+# concluded success while its CONTROL-PLANE leg failed (the owner's CP box). That
+# run's overall conclusion is `failure`, and it DELIVERED. This states each leg
+# separately so a probe can move one of them alone.
+jobs_legs() { # <name> <run-id:control-plane-conclusion:instance-conclusion>...
+  local out="$TMP/$1.json"; shift
+  local first=1
+  {
+    printf '{'
+    for spec in "$@"; do
+      [ "$first" = 1 ] || printf ','
+      first=0
+      local id="${spec%%:*}" rest="${spec#*:}"
+      printf '"%s":[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"%s"},{"name":"instance","conclusion":"%s"}]' \
+        "$id" "${rest%%:*}" "${rest#*:}"
+    done
+    printf '}'
+  } > "$out"
+  fixture_ok "$out"
+  echo "$out"
+}
+
 row() { # <sha> <target> <carried:true|false|omit> <first_seen> <run:id|omit>
   # Either field can be OMITTED, because both absences are real shapes the crown
   # can hand back: a row written before `carried` was measured, and a row written
@@ -1109,7 +1132,7 @@ not_saw "RECONCILED:" "and a deferral is still not a green"
 # still asks for conclusion == success, so every count downstream is unmoved.
 run_cr 4 "the in-flight run is not counted as a successful run" \
   --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
-saw "POPULATION: 2 successful deploy.yml run(s)" "the success population is unchanged by construction — the in-flight row is fetched, never counted"
+saw "POPULATION: 2 completed deploy.yml run(s)" "the population is bounded by construction — the in-flight row is fetched, never counted, because it is not COMPLETED"
 
 # (r6) THE CAP: an in-flight run is an alibi WITH AN EXPIRY. Unbounded, the arm
 # re-deferred for as long as GitHub reported the run in_progress, so a HUNG run
@@ -1163,7 +1186,7 @@ CROWN_DOCS="$(crown_json crown-docs \
   "$(row "$SHA_A" instance false "$IN1" 1)")"
 run_cr 0 "run 2 skipped both legs and has no row — correctly" \
   --runs-fixture "$RUNS_DOCS" --jobs-fixture "$JOBS_DOCS" --crown-fixture "$CROWN_DOCS" --health-fixture "$HEALTH_BASE"
-saw "1 delivered nothing (both legs skipped" "it says how many runs delivered nothing, beside the population"
+saw "1 delivered nothing (no leg concluded success" "it says how many runs delivered nothing, beside the population"
 not_saw "BEHIND:" "a docs-only merge never manufactures a BEHIND"
 
 section "(i) a CARRIED row rides another run and is not WRONG"
@@ -1185,6 +1208,47 @@ CROWN_UNMEASURED="$(crown_json crown-unmeasured \
 run_cr 2 "$SHA_C's carried flag is absent — unclassifiable, never assumed correct" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_UNMEASURED" --health-fixture "$HEALTH_BASE"
 saw "never measured" "it says which row it could not classify"
+
+section "(v) A PARTIALLY-FAILED RUN THAT DELIVERED THROUGH ONE LEG IS DELIVERING"
+# THE LIVE RED, IN THREE ARMS. crown-reconcile was NOT reconciled on every main
+# push from 08:34Z 2026-09-03 with `wrong=7/100` — seven honest rows accused.
+# Every one of them was written by a deploy.yml run whose `instance` leg concluded
+# SUCCESS and whose `control-plane` leg FAILED (the owner's CP box), so the RUN's
+# overall conclusion is `failure`. The population filtered on the RUN's conclusion
+# before it ever looked at the legs, so that run was absent from the alibi set and
+# the recorder's own true row was called a ghost (run 33816988316 / row b11be4f43,
+# 2026-09-04). The population is now keyed on the LEGS, and these three arms hold
+# both directions of that down.
+RUNS_PARTIAL="$(runs_add runs-partial "$(runs_json runs-partial-a "$SHA_A:$IN1")" 2 "$SHA_B" completed failure "$IN2")"
+
+# (v-a) the delivering direction: one leg succeeded, so the row naming that run is
+# CORRECT and the window reconciles.
+JOBS_PARTIAL="$(jobs_legs jobs-partial "1:success:success" "2:failure:success")"
+run_cr 0 "run 2 concluded FAILURE but its instance leg delivered — its row is not a ghost" \
+  --runs-fixture "$RUNS_PARTIAL" --jobs-fixture "$JOBS_PARTIAL" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+not_saw "WRONG:" "a row written by a run that delivered through one leg is NOT WRONG"
+saw "WHATEVER the run's overall conclusion" "the POPULATION line states the leg rule in words"
+saw "2 of them DELIVERED" "the partially-failed run is counted in the delivering population"
+saw "1 of those delivered with the OTHER leg FAILED" "the population prints how many delivering runs had a failed other leg"
+
+# (v-b) THE NON-VACUITY HALF: the same run, the same row, both legs failed. Nothing
+# delivered, so the row IS a ghost and the axis can still lose.
+JOBS_BOTH_FAILED="$(jobs_legs jobs-both-failed "1:success:success" "2:failure:failure")"
+run_cr 1 "the same row when BOTH legs failed — nothing delivered, so it is still WRONG" \
+  --runs-fixture "$RUNS_PARTIAL" --jobs-fixture "$JOBS_BOTH_FAILED" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "WRONG:" "a run with no succeeding leg delivers nothing, and its row is a ghost"
+saw "1 of them DELIVERED" "the both-failed run is NOT in the delivering population"
+
+# (v-c) THE BEHIND DIRECTION: the partially-failed run really delivered $SHA_B, so a
+# crown with no row for it is BEHIND. A run promoted into the population must be
+# judged by it, not merely excused by it.
+CROWN_PARTIAL_NOROW="$(crown_json crown-partial-norow \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)")"
+run_cr 1 "run 2 delivered $SHA_B through its instance leg and the crown has no row" \
+  --runs-fixture "$RUNS_PARTIAL" --jobs-fixture "$JOBS_PARTIAL" --crown-fixture "$CROWN_PARTIAL_NOROW" --health-fixture "$HEALTH_BASE"
+saw "BEHIND: 1 of 2 delivering run(s)" "the promoted run is in the BEHIND denominator, not just in the alibi set"
+saw "$SHA_B" "it names the sha the partially-failed run delivered and nothing recorded"
 
 section "(m) PREDATES-WRITER: a run older than the recorder is not BEHIND"
 if [ -n "$BIRTH" ]; then

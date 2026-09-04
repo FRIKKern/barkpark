@@ -19,11 +19,13 @@
 # THIS SCRIPT IS THE FIRST THING IN THE REPO THAT READS THE ACTIONS API AND THE
 # CROWN TOGETHER. It asks three questions and each one can lose:
 #
-#   BEHIND    a successful DELIVERING deploy.yml run in the window delivered a
-#             head sha the crown has no row for. The run happened; the record
-#             does not exist.
-#   WRONG     a crown row inside the window was written by no successful
-#             delivering run. The record exists; the run does not.
+#   BEHIND    a DELIVERING deploy.yml run in the window — one whose control-plane
+#             or instance leg concluded success, WHATEVER the run's overall
+#             conclusion — delivered a head sha the crown has no row for. The run
+#             happened; the record does not exist.
+#   WRONG     a crown row inside the window was written by no DELIVERING run —
+#             no run in the window put code on a box through either leg for it.
+#             The record exists; the delivery does not.
 #   SERVING   the sha barkpark.cloud reports it is SERVING has no `cp` row. This
 #             is the a95bc7ca9 case, and it is the sharpest of the three: the
 #             box is running code the platform's own record has never heard of.
@@ -44,6 +46,16 @@
 # would manufacture a BEHIND on every docs merge and drown the real ones. A run is
 # a DELIVERING run here only when its `control-plane` or `instance` job concluded
 # `success`; that is read per run from the jobs API, never assumed.
+#
+# AND THE LEGS OWN THE POPULATION, NOT THE RUN'S CONCLUSION. This filtered the run
+# page to `.conclusion == "success"` BEFORE it ever looked at a leg, so a deploy
+# whose instance leg succeeded and whose control-plane leg failed — overall
+# conclusion `failure`, and it PUT CODE ON A BOX — was absent from the delivering
+# set, and the recorder's own true row was called WRONG. Measured live: run
+# 33816988316 (jobs: instance success, control-plane failure, `record-delivery`
+# success) wrote row b11be4f43, and crown-reconcile answered `wrong=7/100` on every
+# main push from 08:34Z 2026-09-03. The population is now every COMPLETED run on
+# the page, judged by its legs; the run's own conclusion is not consulted.
 #
 # CARRIED ROWS ARE NOT WRONG. ~36% of merged shas have no run of their own and
 # ride a later sha's range; the recorder marks those `carried: true`. A carried
@@ -341,8 +353,8 @@
 #
 # A row written between T0 and T1 names a `delivering_run_id` that was NOT YET
 # TERMINAL when the run list was taken — the run was mid-flight, or had not been
-# created at all — so it structurally CANNOT be in a delivering set built from
-# `.conclusion == "success"`. The row is fine, the run is fine, and the verdict
+# created at all — so it structurally CANNOT be in a delivering set built from the
+# page's COMPLETED runs. The row is fine, the run is fine, and the verdict
 # called it WRONG. The reconciler was accusing its own concurrent writers.
 #
 # MEASURED TWICE, ON TWO DIFFERENT AXES:
@@ -904,12 +916,11 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   # NO `&status=success` HERE, DELIBERATELY. A deploy that is STILL RUNNING is
   # the single most useful thing to know before accusing the sha it is putting
   # on the box, and `status=success` meant those bytes were never fetched at
-  # all. The success POPULATION is unchanged by construction: the jq that builds
-  # .examined/.wide still filters `.conclusion == "success"` itself, so every
-  # count downstream sees exactly what it saw before. The only other reader of
-  # this file is PAGE_ROWS/PAGE_OLDEST, which counts the raw page and already
-  # discloses truncation as `N+`; run_delivers() is called for examined success
-  # runs only, so an in_progress run never reaches a jobs lookup.
+  # all. The POPULATION is still bounded by construction: the jq that builds
+  # .examined/.wide filters `.status == "completed"` itself, so a run that has not
+  # finished is never examined and never reaches a jobs lookup. The only other
+  # reader of this file is PAGE_ROWS/PAGE_OLDEST, which counts the raw page and
+  # already discloses truncation as `N+`.
   if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100" \
     > "$WORK/runs-raw.json" 2>"$WORK/runs-err.txt"; then
     warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
@@ -934,9 +945,15 @@ serving_run_in_flight() { # <sha> -> prints the run id, 0 in flight / 1 not
   return 0
 }
 
-# A run DELIVERS only when control-plane or instance concluded success.
+# A run DELIVERS only when control-plane or instance concluded success — and the
+# run's OWN conclusion is never consulted, because a run whose only failing job is
+# the other leg still put code on a box. RUN_LEG_MIXED is set to 1 when this run
+# delivered through one leg while the other FAILED: that is the shape that used to
+# be filtered out of the population entirely, so it is counted and printed.
+RUN_LEG_MIXED=0
 run_delivers() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
   local id="$1" out="$WORK/jobs-$id.json"
+  RUN_LEG_MIXED=0
   if [ "$FIXTURE_MODE" = "1" ]; then
     [ -f "$JOBS_FIXTURE" ] || return 2
     jq --arg id "$id" '.[$id] // empty' "$JOBS_FIXTURE" > "$out" 2>/dev/null
@@ -946,10 +963,15 @@ run_delivers() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
       return 2
     fi
   fi
-  local hits
+  local hits fails
   hits="$(jq '[.[] | select((.name == "control-plane" or .name == "instance") and .conclusion == "success")] | length' "$out" 2>/dev/null)"
+  fails="$(jq '[.[] | select((.name == "control-plane" or .name == "instance") and .conclusion == "failure")] | length' "$out" 2>/dev/null)"
   [ -n "$hits" ] || return 2
-  [ "$hits" -gt 0 ] && return 0
+  case "${fails:-}" in ''|*[!0-9]*) fails=0 ;; esac
+  if [ "$hits" -gt 0 ]; then
+    [ "$fails" -gt 0 ] && RUN_LEG_MIXED=1
+    return 0
+  fi
   return 1
 }
 
@@ -999,7 +1021,7 @@ fi
 # the boundary is not mis-called WRONG.
 jq --argjson cut "$CUTOFF_EPOCH" --argjson wide "$WIDE_EPOCH" \
   '[.workflow_runs[]
-    | select(.conclusion == "success")
+    | select(.status == "completed")
     | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601)}]
    | {examined: [.[] | select(.at >= $cut)], wide: [.[] | select(.at >= $wide)]}' \
   "$WORK/runs-raw.json" > "$WORK/runs.json" 2>/dev/null
@@ -1010,7 +1032,7 @@ if [ ! -s "$WORK/runs.json" ]; then
   exit 2
 fi
 
-SUCCESS_COUNT="$(jq '.examined | length' "$WORK/runs.json")"
+COMPLETED_COUNT="$(jq '.examined | length' "$WORK/runs.json")"
 # One page of 100 is the bound. The population is a FLOOR only when that page
 # BOTH filled AND failed to reach back past the cutoff — a filled page whose
 # oldest run predates the window has seen the whole window and is exact. Printed
@@ -1042,11 +1064,13 @@ NONTERMINAL_RUNS="$(awk 'NF' "$WORK/nonterminal-runs.txt" | wc -l | tr -d ' ')"
 : > "$WORK/delivering.txt"
 JOBS_UNREADABLE=0
 NONDELIVERING=0
+MIXED_LEG=0
 while IFS=' ' read -r id sha at; do
   [ -n "$id" ] || continue
   run_delivers "$id"
   case $? in
-    0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt" ;;
+    0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt"
+       [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1)) ;;
     1) NONDELIVERING=$((NONDELIVERING + 1)) ;;
     *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1))
        reason "run $id: its job list could not be read — it is NOT counted as reconciled" ;;
@@ -1070,7 +1094,7 @@ while IFS=' ' read -r id sha; do
 done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
 
 say ""
-say "POPULATION: ${SUCCESS_COUNT}${FLOOR} successful deploy.yml run(s) on main in the window; ${DELIVERING} of them DELIVERED (a control-plane or instance leg concluded success), ${NONDELIVERING} delivered nothing (both legs skipped — docs-only merges), ${JOBS_UNREADABLE} unreadable."
+say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
 say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
 if [ "$FLOOR" = "+" ]; then
   say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the 100-run page did not reach the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
@@ -1610,7 +1634,7 @@ if [ "$DELIVERING" -eq 0 ]; then
   QUIET_OTHER_REASONS="$(grep -vxF "$NOALIBI_REASON" "$REASONS_FILE" 2>/dev/null | awk 'NF' | wc -l | tr -d ' ')"
   if [ "$SERVING_VERIFIED" = "1" ] && [ "$STATE_STATE" = "PRESENT-EMPTY" ] && [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -eq 0 ] && [ "${QUIET_OTHER_REASONS:-1}" -eq 0 ] && [ "$QUIET_TRIGGER_DEAD" -eq 0 ]; then
     say ""
-    say "QUIET WINDOW: ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered — and the crown is VERIFIED as far as an empty window allows: the serving sha ${SERVING_SHA} has its cp row, the re-ask list was PRESENT-EMPTY (nothing graced is still owed a row), ZERO crown row(s) sit inside the window (nothing was delivered and nothing claims to have been), and the push trigger is NOT suspect (no deploy-path file change on main sits in the window without a deploy.yml run). This is a NAMED DEFERRAL, not a reconciliation: the verdict over a real population is deferred to the next run whose window holds one."
+    say "QUIET WINDOW: ${COMPLETED_COUNT}${FLOOR} completed run(s) in the window and none of them delivered — and the crown is VERIFIED as far as an empty window allows: the serving sha ${SERVING_SHA} has its cp row, the re-ask list was PRESENT-EMPTY (nothing graced is still owed a row), ZERO crown row(s) sit inside the window (nothing was delivered and nothing claims to have been), and the push trigger is NOT suspect (no deploy-path file change on main sits in the window without a deploy.yml run). This is a NAMED DEFERRAL, not a reconciliation: the verdict over a real population is deferred to the next run whose window holds one."
     say "  the reverse direction has no alibi source on an empty window and was NOT checked — quiescence-green does not imply the reverse direction was checked."
     say "::warning::QUIET WINDOW — zero delivering deploy.yml runs in the last ${WINDOW_HOURS}h on a verified crown (serving sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows, push trigger not suspect). A deferral, not a silence: paging here is what mutes the alarm for the one case that is not."
     exit 0
@@ -1625,7 +1649,7 @@ if [ "$DELIVERING" -eq 0 ]; then
     # alibi population.
     say "ROWS WITHOUT RUNS: ${QUIET_ROWS} crown row(s) sit inside the window while NO delivering run does — a row with no run is an accusation source, not quiescence, so this stays a warning."
   fi
-  say "COULD NOT VERIFY: the population was EMPTY — ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered. A rate with no denominator is refused, so this is a warning, not a green."
+  say "COULD NOT VERIFY: the population was EMPTY — ${COMPLETED_COUNT}${FLOOR} completed run(s) in the window and none of them delivered. A rate with no denominator is refused, so this is a warning, not a green."
   exit 2
 fi
 

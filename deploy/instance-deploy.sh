@@ -1099,7 +1099,14 @@ systemctl disable --now barkpark >/dev/null 2>&1 || true
 # live on the new slot at this point.
 if [ -f /etc/barkpark/agent.token ]; then
   log "refreshing barkpark-agent (monitoring beat)"
-  if command -v go >/dev/null 2>&1 && go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent; then
+  # Build to a tmpdir and `install` (not `go build -o` straight onto the live
+  # path): install(1) unlinks first, so a RUNNING barkpark-agent never
+  # ETXTBSY-blocks its own refresh — the same idiom the barkpark-mcp block below
+  # already uses and explains (dr-w4-bl-agent-build-in-place-can-etxtbsy).
+  AGENT_TMPD="$(mktemp -d)"
+  if command -v go >/dev/null 2>&1 && go build -o "$AGENT_TMPD/barkpark-agent" ./cmd/barkpark-agent \
+     && install -m 0755 "$AGENT_TMPD/barkpark-agent" /usr/local/bin/barkpark-agent; then
+    rm -rf "$AGENT_TMPD"
     install -m 0644 "$APP/deploy/systemd/barkpark-agent.service" /etc/systemd/system/barkpark-agent.service
     systemctl daemon-reload
     # restart (not just enable --now): `--now` is `start`, a NO-OP on an
@@ -1124,6 +1131,7 @@ if [ -f /etc/barkpark/agent.token ]; then
       log "WARN: no /etc/barkpark/agent.health.token — req/s, p95 and 5xx stay UNMETERED on this box (written at provision time; see deploy/systemd/README.md to backfill)"
     fi
   else
+    rm -rf "$AGENT_TMPD"
     log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
   fi
 fi
