@@ -213,4 +213,31 @@ defmodule BarkparkWeb.MutateTaskPublishedFirstTest do
     [result2] = Jason.decode!(resp2.resp_body)["results"]
     assert result2["operation"] == "noop"
   end
+
+  # The documented patch-then-publish idiom (`bp doc patch` + `bp doc publish`,
+  # and the cmux hook's met-flip republish) still works end to end: the patch
+  # LANDS, and the trailing publish — which now has no draft left to consume —
+  # answers a noop rather than the 404 that would read as "the patch was lost".
+  test "the trailing publish of patch-then-publish is a NOOP, not a 404", %{scope: scope} do
+    id = mk_published_task!(scope, %{"note" => "before"})
+    rev = get_task(id)["rev"]
+
+    assert post_patch(id, %{"note" => "after"}, rev).status == 200
+
+    resp =
+      post(
+        authed(),
+        "/v1/data/mutate/#{@dataset}",
+        Jason.encode!(%{"mutations" => [%{"publish" => %{"id" => id, "type" => "task"}}]})
+      )
+
+    assert resp.status == 200,
+           "a publish whose effect already landed must not 404: #{resp.resp_body}"
+
+    [result] = Jason.decode!(resp.resp_body)["results"]
+    assert result["operation"] == "noop"
+    assert result["id"] == id
+
+    assert get_task(id)["content"]["note"] == "after"
+  end
 end

@@ -251,8 +251,33 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- Content.publish_document(id, type, dataset, opts),
-         do: {:ok, doc, "publish"}
+    case Content.publish_document(id, type, dataset, opts) do
+      {:ok, doc} ->
+        {:ok, doc, "publish"}
+
+      {:error, :not_found} = err ->
+        # ALREADY LANDED, not missing (task-b9c618482e688500). `patch` on a
+        # published-first type now publishes what it wrote (`land_patch/5`), and
+        # publishing DELETES the draft — so the trailing `publish` of the
+        # documented patch-then-publish idiom (`bp doc patch` + `bp doc publish`,
+        # the cmux hook's met-flip republish) would find no draft and 404, which
+        # reads to its caller as "the patch did not land" precisely when it did.
+        # A publish whose whole effect is already on the published row is a NOOP,
+        # not a failure. Deliberately NOT widened to every type: for an ordinary
+        # content type a publish with no draft is still a genuine 404, because
+        # nothing on that path lands a patch for it.
+        if published_first_patch?(DraftId.published_id(id), type) do
+          case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+            {:ok, doc} -> {:ok, doc, "noop"}
+            _ -> err
+          end
+        else
+          err
+        end
+
+      other ->
+        other
+    end
   end
 
   defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset, opts) do
