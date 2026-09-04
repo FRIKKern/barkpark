@@ -1769,25 +1769,25 @@ gate_names() {
 
 # (a) the happy path: a full api/** PR, everything ran and passed
 gate "full run, all green" 0 \
-  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, expensive jobs legitimately skipped" 0 \
-  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=skipped \
   O_COMPILE=false O_TEST=false
 gate_says "legitimately not dispatched" "…and says so, rather than claiming the suite passed"
 
 # (c) an upstream FAILURE reds it
 gate "mix-test failed" 1 \
-  R_CHANGES=success R_TEST=failure R_PROD=skipped R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=failure R_PROD=skipped R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 gate_names "mix-test" "validation-perf"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: prod-compile `skipped` only
 #     because its dependency died, while the dispatcher said it WAS needed.
 gate "prod-compile skipped behind a live gate (upstream died)" 1 \
-  R_CHANGES=success R_TEST=success R_PROD=skipped R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=success R_PROD=skipped R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
 # …and the SKIP arm accumulates too, not just the failure arm: this red never
@@ -1795,36 +1795,54 @@ gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is 
 # annotation contentless on exactly the bypass this shape exists to close.
 gate_names "mix-prod-compile" "mix-test"
 
+# (d2) THE DIFF-SCOPED FORMAT ARM (task-e31b816b4b416db6). `format` stopped
+#      being continue-on-error and joined `needs`, so a red here is a red on the
+#      required context — but ONLY a diff-scoped one: the job fails just when a
+#      file the PR TOUCHES is unformatted, and inherited main drift leaves it
+#      green (case (a) above is that green, since a format job that merely
+#      PRINTED inherited drift still exits success). Both poles, so this is not
+#      a guard that would pass on a gate reddening for everything.
+gate "format failed on a file THIS diff touches" 1 \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=failure \
+  O_COMPILE=true O_TEST=true
+gate_names "format (diff-scoped)" "mix-test"
+# …and a skip against a live gate is a skip that never ran, exactly as for the
+# other path-gated jobs.
+gate "format skipped behind a live gate" 1 \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=skipped \
+  O_COMPILE=true O_TEST=true
+gate_names "format (diff-scoped)" "mix-prod-compile"
+
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, outputs empty" 1 \
-  R_CHANGES=failure R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=success \
   O_COMPILE= O_TEST=
 
 # (f) the unfiltered ratchet may never skip
 gate "path-escape skipped" 1 \
-  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=skipped \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=skipped R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 
 # (g) cancelled is not success
 gate "a cancelled upstream" 1 \
-  R_CHANGES=success R_TEST=cancelled R_PROD=skipped R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=cancelled R_PROD=skipped R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 gate_says "CANCELLED — this job did not fail" "…and the step log names CANCELLATION (the D57 arm), not a generic failure"
 gate_names "mix-test (cancelled, not failed)" "validation-perf"
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
-  R_CHANGES=success R_TEST=neutral R_PROD=success R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST=neutral R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 
 # (i) an EMPTY result (a job silently dropped from `needs`) is red
 gate "an empty result string" 1 \
-  R_CHANGES=success R_TEST= R_PROD=success R_PERF=success R_ESCAPE=success \
+  R_CHANGES=success R_TEST= R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
 
 # (j) a garbage gate value must not license a skip
 gate "skip against a garbage gate value" 1 \
-  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
+  R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=maybe O_TEST=maybe
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
