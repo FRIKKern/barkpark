@@ -96,10 +96,12 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           "token:#{token_id}:#{class}:#{scope}"
       end
 
-    case conn.private[:barkpark_rate_limit_scope] do
-      test_scope when is_binary(test_scope) -> key <> ":test:" <> test_scope
-      _ -> key
-    end
+    # The per-test scope suffix used to be inlined here, and this plug was the
+    # ONLY metered surface that honoured it. It now lives in
+    # `RateLimiter.scoped_key/2` so the six other `check/2` call sites share one
+    # definition; the suffix this plug appends is byte-identical to what the
+    # inline clause produced.
+    RateLimiter.scoped_key(conn, key)
   end
 
   # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL — AND EVERY

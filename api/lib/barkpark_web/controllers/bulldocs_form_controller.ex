@@ -92,7 +92,9 @@ defmodule BarkparkWeb.BulldocsFormController do
     # trusted front, so a direct caller cannot mint itself a fresh budget.
     ip = Barkpark.RateLimiter.client_ip(conn)
 
-    case Barkpark.RateLimiter.check({:bulldocs_form, ip},
+    key = Barkpark.RateLimiter.scoped_key(conn, {:bulldocs_form, ip})
+
+    case Barkpark.RateLimiter.check(key,
            capacity: @rate_capacity,
            refill_per_sec: @rate_refill_per_sec
          ) do
