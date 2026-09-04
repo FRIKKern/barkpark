@@ -252,8 +252,7 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
       {[plan: "trial", status: "active", current_period_end_days: -30], "an EXPIRED trial"},
       {[plan: "trial", status: "active"], "a trial with no window"},
       {[plan: "supporter", status: "past_due", grace_ends_at_days: 3], "past_due in grace"},
-      {[plan: "supporter", status: "past_due", grace_ends_at_days: -5],
-       "past_due past grace"},
+      {[plan: "supporter", status: "past_due", grace_ends_at_days: -5], "past_due past grace"},
       {[plan: "supporter", status: "past_due"], "past_due with no window"},
       {[plan: "supporter", status: "canceled"], "a canceled subscription"}
     ]

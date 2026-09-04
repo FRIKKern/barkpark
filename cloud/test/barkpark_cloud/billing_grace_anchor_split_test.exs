@@ -73,7 +73,8 @@ defmodule BarkparkCloud.BillingGraceAnchorSplitTest do
   defp reload(%Subscription{id: id}), do: Repo.get!(Subscription, id)
   defp reload_bp(%Barkpark{id: id}), do: Repo.get!(Barkpark, id)
 
-  defp days_out(n), do: DateTime.utc_now() |> DateTime.add(n, :day) |> DateTime.truncate(:microsecond)
+  defp days_out(n),
+    do: DateTime.utc_now() |> DateTime.add(n, :day) |> DateTime.truncate(:microsecond)
 
   # Write columns straight onto the row — the stand-in for the sync this tree
   # refuses to have.
@@ -108,7 +109,9 @@ defmodule BarkparkCloud.BillingGraceAnchorSplitTest do
 
       # And the enforcement half agrees: re-running the dunning write with the
       # SAME elapsed anchor still suspends, renewal date notwithstanding.
-      {:ok, :already_past_due} = Billing.mark_past_due(reload(sub), %{grace_ends_at: days_out(-1)})
+      {:ok, :already_past_due} =
+        Billing.mark_past_due(reload(sub), %{grace_ends_at: days_out(-1)})
+
       assert reload_bp(bp).suspended
     end
 
@@ -134,6 +137,7 @@ defmodule BarkparkCloud.BillingGraceAnchorSplitTest do
       sub = reload(sub)
 
       assert %DateTime{} = sub.grace_ends_at
+
       assert DateTime.compare(sub.current_period_end, trial_expiry) == :eq,
              "mark_past_due/2 overwrote current_period_end — the dunning anchor is back on the " <>
                "trial-expiry column"
