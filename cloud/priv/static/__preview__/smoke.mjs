@@ -2699,6 +2699,90 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── cch-w50-s4: the two billing ACTORS the corpus had never held ────────────
+  // THE UNSUBSCRIBED OWNER — the actor renderPlanState routes to its UPSELL arm.
+  // Before this fixture, `plan-continue`, "Recommended", "Optimized for shipping
+  // to production" and "See more plan options" had ZERO hits in a rendered-DOM
+  // dump of the entire corpus: five of the committed scenarios rendered the plan
+  // card and every one of them was paid-or-member, so a render-layer guard over
+  // the upsell card could not lose. The envelope is the server's own —
+  // `subscription: null`, which is what web/router.ex answers for a team with no
+  // live subscription — never a synthesized {plan:"free"} the plane never mints.
+  "billing-free-owner": {
+    what: "the unsubscribed owner — the upsell plan card: Recommended badge, the tagline, the POST-s1 two-bullet set, the Continue CTA and the collapsed plan grid",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The four markers that had no fixture at all until this one.
+      for (const needle of [
+        'id="plan-continue"',
+        '<span class="plan-rec">Recommended</span>',
+        "Optimized for shipping to production.",
+        'id="plan-more"',
+        "See more plan options",
+      ]) {
+        assert.ok(box.includes(needle), "the upsell card must render " + JSON.stringify(needle));
+      }
+      // The card is the RECOMMENDED tier by name, not the tier the actor is on
+      // (they are on none) — planFromSub would say "free"; this arm is
+      // catalogPlan(RECOMMENDED).
+      assert.ok(box.includes('<span class="plan-name">Supporter</span>'),
+        "the upsell card names the RECOMMENDED tier");
+      // cch-w50-s1's FINAL bullet set, positively: two bullets, and the two it
+      // deleted must not return. This is the whole reason this row is AFTER s1 —
+      // the fixture asserts the post-s1 manifest, never the pre-s1 four.
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "bullet 1 must render");
+      assert.ok(box.includes("Custom domains with automatic TLS"), "bullet 2 must render");
+      assert.ok(!/Daily backups/i.test(box), "the deleted backup bullet must not return on the upsell card");
+      assert.ok(!/(Priority|Standard) support/i.test(box), "the deleted support bullet must not return on the upsell card");
+      assert.equal((box.match(/<li><span class="ck">/g) || []).length, 2,
+        "the post-s1 manifest is exactly TWO bullets — a third would be an unbacked promise");
+      // The grid starts COLLAPSED under the CTA (renderPlanState hides it); the
+      // trial actor is the one that opens it. Two states of one element, and
+      // until now only the open one had a fixture.
+      assert.equal(reg.get("billing-tiers").hidden, true, "the upsell collapses the plan grid behind #plan-more");
+      // No subscription → nothing to manage and nothing to cancel; both owner
+      // sections stay retired even though this actor IS the owner. That is the
+      // discrimination the fixture buys: the sections are gated on a PAID PLAN,
+      // not on the role, and no scenario could show that before.
+      assert.equal(reg.get("billing-manage-section").hidden, true, "no paid plan → no Manage-billing section, owner or not");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no paid plan → nothing to cancel");
+      // GR20: the topbar chip is trial XOR past-due; an unsubscribed team is
+      // neither, so it mounts none.
+      assert.equal(reg.get("billing-chip").hidden, true, "an unsubscribed team mounts no topbar billing chip");
+    },
+  },
+  // THE SUPPORT++ OWNER — the third catalog tier rendering as a CURRENT plan.
+  // `grep support_plus` over scenarios.mjs returned NOTHING before this fixture:
+  // Support++ had only ever appeared as a tier CARD in the grid, never as the
+  // plan a team is actually on, so planName("support_plus") and the manage/cancel
+  // sections had never been driven through it.
+  "billing-support-plus": {
+    what: "the Support++ owner — the third tier as the CURRENT plan, with the active badge and both owner action sections live",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      assert.ok(box.includes(">Support++<"), "the current-plan card must name the Support++ tier");
+      assert.ok(!box.includes(">Supporter<"), "Support++ is not Supporter — planName must not fall back a tier");
+      // Not the upsell: an active paid plan takes renderCurrentPlan, so the
+      // upsell's own markers must be ABSENT here. This is the inverse pin that
+      // keeps the pair honest — one fixture per arm, each refusing the other's.
+      assert.ok(!box.includes('id="plan-continue"'), "an active paid plan must never render the upsell CTA");
+      assert.ok(!box.includes("Optimized for shipping to production"), "nor the upsell tagline");
+      // cch-w49-s1: the card states the tier and its features and NO ceiling —
+      // PLAN_CATALOG carries instances:10 for this tier and it must reach no DOM.
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
+      assert.ok(!/\b10\b/.test(box), "the Support++ instance ceiling (10) is data, not copy — it must reach no DOM");
+      // The owner action sections a paid plan unlocks.
+      assert.equal(reg.get("billing-manage-section").hidden, false, "a paid plan shows the Manage-billing section");
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "an owner may cancel a paid plan");
+      assert.ok((reg.get("billing-cancel").innerHTML || "").includes("Cancel plan"), "the Cancel-plan danger action renders");
+      // A healthy active sub shows NO topbar billing chip (trial XOR past-due).
+      assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
   "new-launch": {
     what: "/new signed-in — the template card + the one-field Launch step",

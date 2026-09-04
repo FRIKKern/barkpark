@@ -829,13 +829,27 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // `scenarioReport({scenarios: SCENARIOS})` against the merged tree and reading
   // what it printed — main had moved the census to 121/27/26/95 while this
   // branch was in flight, so the pre-rebase 117/25/24/93 was stale arithmetic.
-  assert.equal(r.total, 118);
+  // cch-w50-s4 moved it by TWO in ONE commit: `billing-free-owner` (the
+  // UNSUBSCRIBED owner — the first fixture ever to reach renderPlanState's
+  // upsell arm) and `billing-support-plus` (the first `support_plus` fixture the
+  // corpus has held at all). Total 118 -> 120, residue 94 -> 96. CELLS (25),
+  // distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: both land
+  // in the residue, not a cell, so no cell is added and no scenario changes
+  // which cell renders it; and `hash:#billing` already had five members, so two
+  // more cannot create a 14th family — a family is created only by a residue
+  // scenario whose `familyOf` is new, and both of these are `hash:#billing`.
+  // Every integer here was RE-DERIVED at THIS branch's merge base by running
+  // `scenarioReport({scenarios: SCENARIOS})` and reading the `>> scenarios`
+  // line, never carried from the filing — whose 110->112 / 85->87 / 26 cells /
+  // 25 distinct were all stale against a base that already measured
+  // 118/25/24/94.
+  assert.equal(r.total, 120);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 94, "94 is the RESIDUE, not the census");
+  assert.equal(r.residue, 96, "96 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 94, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 96, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

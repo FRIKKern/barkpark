@@ -47,6 +47,39 @@ defmodule Barkpark.Media.Delivery.Urls do
     end
   end
 
+  @doc """
+  Absolute (scheme + host) form of an already-built delivery URL.
+
+  The relative fields (`url`, `originalUrl`, `renditions.*`, `cdnUrls.*`) are
+  documented delivery PATHS and persisted webhook/SDK payloads, so they never
+  move. But a client that receives one has nothing in the response telling it
+  which origin serves it, and a bare `/media/files/...` pasted anywhere
+  cross-origin silently 404s (jf-backlog-media-absolute-url).
+
+  Resolution order, and it is exactly two steps:
+
+    * the URL is ALREADY absolute — `Cdn.public_url/1` prefixed it because
+      `:media_cdn, :base_url` is configured, or the caller handed us one —
+      return it untouched, so a configured CDN keeps owning the origin;
+    * otherwise prefix the app's own public origin, `BarkparkWeb.Endpoint.url/0`
+      (PHX_HOST / PHX_SCHEME in prod — the same source `saml.ex`,
+      `share_meta.ex` and the social/OIDC callback URIs already use).
+
+  The input is whatever `original_url/2` and friends produced, so the request's
+  `:scope_prefix` is already baked in: a scoped request gets
+  `https://host/w/:ws/p/:proj/media/...`, not a flat path that 404s under it.
+  """
+  @spec absolutize(String.t() | nil) :: String.t() | nil
+  def absolutize(nil), do: nil
+
+  def absolutize(url) when is_binary(url) do
+    if String.starts_with?(url, "http://") or String.starts_with?(url, "https://") do
+      url
+    else
+      BarkparkWeb.Endpoint.url() <> url
+    end
+  end
+
   @doc "Map of preset → public URL for image assets."
   @spec rendition_urls(%MediaFile{}, keyword()) :: map()
   def rendition_urls(%MediaFile{} = file, opts \\ []) do

@@ -196,7 +196,12 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   SECTION): this mints a direct, stable `/s/<token>` link to the single open
   item, with Copy + Revoke. Admin-only (the handlers re-check server-side).
 
-  `@links` is a pre-flattened list of `%{id, access, url}`.
+  `@links` is a pre-flattened list of `%{id, access, url}`, where `url` is nil
+  for every link this socket did not JUST mint: the raw token is no longer
+  stored (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02), so a
+  listed link cannot be re-copied. Those rows render the sentence in place of
+  the input + Copy button and keep their Revoke affordance — the honest read is
+  "the link works, we cannot show it to you again; revoke and mint a new one".
   """
   attr :show, :boolean, default: false
   attr :admin?, :boolean, default: false
@@ -238,22 +243,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 <span class={"item-share-access item-share-access-#{link.access}"}>
                   <%= String.capitalize(link.access) %>
                 </span>
-                <input
-                  type="text"
-                  readonly
-                  value={link.url}
-                  class="form-input item-share-url"
-                  onclick="this.select()"
-                />
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-sm"
-                  data-url={link.url}
-                  onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
-                  title="Copy link"
-                >
-                  Copy
-                </button>
+                <%= if link.url do %>
+                  <input
+                    type="text"
+                    readonly
+                    value={link.url}
+                    class="form-input item-share-url"
+                    onclick="this.select()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    data-url={link.url}
+                    onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
+                    title="Copy link"
+                  >
+                    Copy
+                  </button>
+                <% else %>
+                  <span class="item-share-url item-share-url-hidden">
+                    Link is active. Regenerate to copy a new URL.
+                  </span>
+                <% end %>
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm item-share-revoke"

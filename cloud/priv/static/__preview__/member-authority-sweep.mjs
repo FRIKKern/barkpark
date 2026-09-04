@@ -403,7 +403,17 @@ const PIN_MEMBER_SCENARIOS = 9;
 // reading what it PRINTED (9 member actor(s), 118 committed), never by
 // subtracting — main had moved the corpus to 121 while this branch was in
 // flight, so the pre-rebase 117 was a stale arithmetic.
-const PIN_TOTAL_SCENARIOS = 118;
+// 118 -> 120, and the member slice STAYS at 9 (cch-w50-s4): `billing-free-owner`
+// and `billing-support-plus` are the two billing ACTORS the corpus had never
+// held — the unsubscribed OWNER renderPlanState routes to the upsell card, and
+// the first `support_plus` fixture in the file. Both are OWNERS, so the member
+// slice is unmoved and PIN_MEMBER_SCENARIOS stays at 9 — the case the note above
+// forbids bumping. This pin is the SIXTH census integer the pair moves, and the
+// filing named only five: it names no file this row was scoped to, and this
+// sweep refused by name (`the committed corpus grew to 120 scenario(s), pinned
+// at 118`) before it was written. 120 was RE-DERIVED by RUNNING this sweep and
+// reading what it PRINTED, never by adding 2 to a number in a brief.
+const PIN_TOTAL_SCENARIOS = 120;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

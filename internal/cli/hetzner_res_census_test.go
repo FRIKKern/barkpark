@@ -547,6 +547,78 @@ func hzResParamIndex(decl *ast.FuncDecl, name string) int {
 	return -1
 }
 
+// hzResCalleeName resolves the callee of a call expression to the NAME the
+// census keys on, and says whether that name is BOUND — i.e. whether the
+// spelling is one the scan can key with confidence.
+//
+// WHY THIS EXISTS (pds-w33-bl-census-blind-to-generic-instantiation). Every
+// pass used to write `fn, ok := call.Fun.(*ast.Ident); if !ok { return true }`.
+// An EXPLICIT GENERIC INSTANTIATION — `hzResDone[T](…)` — parses as
+// *ast.IndexExpr (or *ast.IndexListExpr for two type arguments), never
+// *ast.Ident, so the site left the population with NOTHING said about it and
+// the census stayed green. Measured on the pre-fix tree: a `hzResDone[int]`
+// receipt for the unregistered key "demokind/demo-generic" gave TOTAL=50 and
+// `ok`, while the identical call spelled `hzResDone(` gave TOTAL=51 and a red
+// naming the site.
+//
+// The unwrap is only half the fix. The other half is that a spelling this
+// function CANNOT bind must never be dropped in silence when its textual name
+// is an emitter — see hzResRefuseUnboundEmitterSpelling. Together they mean no
+// FUTURE call shape can vanish: it is either keyed or refused BY NAME.
+//
+// bound is false for a shape whose name is still readable (a selector, a type
+// conversion around an ident); name is "" when nothing readable is there at all
+// (a call of a call, an anonymous func literal). Both are handed to the refusal
+// helper, which only speaks when the name is an emitter's.
+func hzResCalleeName(fun ast.Expr) (name string, bound bool) {
+	switch fn := fun.(type) {
+	case *ast.Ident:
+		return fn.Name, true
+	case *ast.IndexExpr:
+		// hzResDone[T](…) — one type argument.
+		if id, ok := fn.X.(*ast.Ident); ok {
+			return id.Name, true
+		}
+		n, _ := hzResCalleeName(fn.X)
+		return n, false
+	case *ast.IndexListExpr:
+		// hzResDone[T, U](…) — two or more type arguments.
+		if id, ok := fn.X.(*ast.Ident); ok {
+			return id.Name, true
+		}
+		n, _ := hzResCalleeName(fn.X)
+		return n, false
+	case *ast.ParenExpr:
+		n, _ := hzResCalleeName(fn.X)
+		return n, false
+	case *ast.SelectorExpr:
+		// pkg.hzResDone(…), recv.hzResDone(…), or a struct field holding a
+		// func value. The census cannot key it, but it CAN name it — which is
+		// the func-value blind spot pds-bl-census-ast-scan-blind-to-func-values
+		// demonstrates. That row is NOT closed by this one: the refusal below
+		// is the shared fix, its demonstration and its mutation are its own.
+		return fn.Sel.Name, false
+	}
+	return "", false
+}
+
+// hzResRefuseUnboundEmitterSpelling reds when a call the scan could not key
+// nevertheless carries an emitter's NAME. A silent `return true` on such a call
+// is exactly how a receipt leaves the population with the gate still green, so
+// the census REFUSES the spelling instead of dropping it. It reports whether it
+// refused, so callers can `return true` on the same statement.
+func hzResRefuseUnboundEmitterSpelling(t *testing.T, where, name string, bound bool, isTarget func(string) bool) bool {
+	t.Helper()
+	if bound || name == "" || !isTarget(name) {
+		return false
+	}
+	t.Errorf("REFUSED-CALL-SPELLING: %s calls something named %q — an emitter this census must key — through a "+
+		"call shape it cannot bind to a declaration (%s). The census will not drop a receipt in silence: either "+
+		"teach hzResCalleeName this spelling in the same commit, or call the emitter directly by name.",
+		where, name, "not an *ast.Ident, nor a generic instantiation of one")
+	return true
+}
+
 // hzResSitesFromSource DERIVES every non-server receipt call in the globbed
 // sources, keyed on argument position.
 func hzResSitesFromSource(t *testing.T) []hzResSite {
@@ -569,18 +641,21 @@ func hzResSitesFromSource(t *testing.T) []hzResSite {
 				if !ok {
 					return true
 				}
-				fn, ok := call.Fun.(*ast.Ident)
-				if !ok {
+				name, bound := hzResCalleeName(call.Fun)
+				if !bound {
+					hzResRefuseUnboundEmitterSpelling(t,
+						fmt.Sprintf("%s:%d", path, fset.Position(call.Pos()).Line), name, bound,
+						func(n string) bool { _, isEmitter := hzResEmitters[n]; return isEmitter })
 					return true
 				}
-				pos, ok := hzResEmitters[fn.Name]
+				pos, ok := hzResEmitters[name]
 				if !ok || len(call.Args) <= pos.kindArg {
 					return true
 				}
 				site := hzResSite{
 					file:        path,
 					line:        fset.Position(call.Pos()).Line,
-					emitter:     fn.Name,
+					emitter:     name,
 					enclosing:   decl.Name.Name,
 					actionParam: -1,
 				}
@@ -627,8 +702,14 @@ func hzResCallersOf(t *testing.T, fnName string, paramIdx int) []hzResCaller {
 			if !ok {
 				return true
 			}
-			fn, ok := call.Fun.(*ast.Ident)
-			if !ok || fn.Name != fnName || len(call.Args) <= paramIdx {
+			name, bound := hzResCalleeName(call.Fun)
+			if !bound {
+				hzResRefuseUnboundEmitterSpelling(t,
+					fmt.Sprintf("%s:%d", path, fset.Position(call.Pos()).Line), name, bound,
+					func(n string) bool { return n == fnName })
+				return true
+			}
+			if name != fnName || len(call.Args) <= paramIdx {
 				return true
 			}
 			c := hzResCaller{file: path, line: fset.Position(call.Pos()).Line, callee: fnName}
@@ -1093,11 +1174,14 @@ func TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob(t *testing.T) {
 			if !ok {
 				return true
 			}
-			fn, ok := call.Fun.(*ast.Ident)
-			if !ok {
+			name, bound := hzResCalleeName(call.Fun)
+			if !bound {
+				hzResRefuseUnboundEmitterSpelling(t,
+					fmt.Sprintf("%s:%d", path, fset.Position(call.Pos()).Line), name, bound,
+					func(n string) bool { _, isEmitter := hzResEmitters[n]; return isEmitter })
 				return true
 			}
-			if _, emitter := hzResEmitters[fn.Name]; !emitter {
+			if _, emitter := hzResEmitters[name]; !emitter {
 				return true
 			}
 			orphans++
@@ -1105,7 +1189,7 @@ func TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob(t *testing.T) {
 				"This receipt is emitted where the census cannot see it, so its (kind, action) carries no "+
 				"disposition and no per-kind arm speaks for it. Either move it back under hetzner_*.go or widen "+
 				"hzResSourceFiles in the same commit.",
-				path, fset.Position(call.Pos()).Line, fn.Name, path, hzResSourceFiles(t))
+				path, fset.Position(call.Pos()).Line, name, path, hzResSourceFiles(t))
 			return true
 		})
 	}
@@ -1673,6 +1757,129 @@ func TestHetznerResourceBasisEveryConstantIsBoundToARead(t *testing.T) {
 				"but no row in hzResBasisReads says which read it names. It will print on a receipt while nothing "+
 				"in this package can tell whether that read happened. Add a row (nil if the emitter performs no "+
 				"read at all, as hzResObservedResponse does).", name, consts[name])
+		}
+	}
+}
+
+// ============================================================================
+// PDS wave 33 — THE CENSUS CANNOT DROP A CALL SPELLING IN SILENCE
+// ============================================================================
+
+// TestHetznerResourceCensusBindsAGenericInstantiation is the DURABLE half of
+// pds-w33-bl-census-blind-to-generic-instantiation. The demonstration that
+// motivated it was empirical and is recorded on hzResCalleeName: on the pre-fix
+// tree a receipt emitted as `hzResDone[int](…)` for the unregistered key
+// "demokind/demo-generic" left the population (TOTAL=50, `ok`), while the same
+// call spelled `hzResDone(…)` was seen (TOTAL=51, red naming the site). That
+// experiment mutates a production file, so it cannot live in the suite; this
+// arm pins the RESOLVER every pass now shares, over a fixture source, so the
+// blind spot cannot return by anyone re-inlining a type assertion.
+//
+// THE FIXTURE IS PARSED, NOT COMPILED. go/parser is what the census runs, and
+// the spellings below are exactly the ones that used to fall through.
+func TestHetznerResourceCensusBindsAGenericInstantiation(t *testing.T) {
+	const fixture = `package p
+
+func generic(out *writer) int    { return hzResDone[int](out, "a", "k", 1, "n", nil) }
+func genericTwo(out *writer) int { return hzResDone[int, string](out, "a", "k", 1, "n", nil) }
+func plain(out *writer) int      { return hzResDone(out, "a", "k", 1, "n", nil) }
+func selector(out *writer) int   { return emitters.hzResDone(out, "a", "k", 1, "n", nil) }
+func paren(out *writer) int      { return (hzResDone)(out, "a", "k", 1, "n", nil) }
+func anon(out *writer) int       { return pick()(out, "a", "k", 1, "n", nil) }
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "fixture.go", fixture, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+
+	got := map[string][2]string{} // enclosing func → {name, bound}
+	for _, d := range f.Decls {
+		decl, ok := d.(*ast.FuncDecl)
+		if !ok || decl.Body == nil {
+			continue
+		}
+		ast.Inspect(decl.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name, bound := hzResCalleeName(call.Fun)
+			if name != "hzResDone" && name != "" {
+				return true // pick() in the anon case
+			}
+			if _, seen := got[decl.Name.Name]; seen {
+				return true
+			}
+			got[decl.Name.Name] = [2]string{name, fmt.Sprintf("%t", bound)}
+			return true
+		})
+	}
+
+	want := map[string][2]string{
+		// The whole point of the row: an explicit instantiation is BOUND, so
+		// the site stays in the population instead of vanishing.
+		"generic":    {"hzResDone", "true"},
+		"genericTwo": {"hzResDone", "true"},
+		"plain":      {"hzResDone", "true"},
+		// Not keyable — but NAMED, so the refusal below can speak for it.
+		"selector": {"hzResDone", "false"},
+		"paren":    {"hzResDone", "false"},
+		// Nothing readable at all; the refusal stays silent by design.
+		"anon": {"", "false"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("resolved %d of %d fixture calls (%v) — the fixture scan is measuring less than it looks",
+			len(got), len(want), got)
+	}
+	for fn, w := range want {
+		if got[fn] != w {
+			t.Errorf("hzResCalleeName on %s(): name=%q bound=%s, want name=%q bound=%s",
+				fn, got[fn][0], got[fn][1], w[0], w[1])
+		}
+	}
+	t.Logf("CALL-SPELLINGS %v", got)
+}
+
+// TestHetznerResourceCensusRefusesAnUnbindableEmitterSpelling proves the OTHER
+// half of criterion 2: a spelling the resolver cannot bind is refused BY NAME
+// rather than dropped. Without this arm, teaching the scan *ast.IndexExpr would
+// only move the silence one shape along.
+//
+// This arm is deliberately NOT the func-value row
+// (pds-bl-census-ast-scan-blind-to-func-values): the refusal is the fix both
+// rows share, and a selector is the shape that row demonstrates, but its own
+// demonstration and mutation are a receipt actually reached through a func
+// value in production code. Neither row closes the other.
+func TestHetznerResourceCensusRefusesAnUnbindableEmitterSpelling(t *testing.T) {
+	isEmitter := func(n string) bool { _, ok := hzResEmitters[n]; return ok }
+
+	// A sub-test whose t is the one that reds, so the refusal can be OBSERVED
+	// instead of being taken on trust.
+	cases := []struct {
+		what          string
+		name          string
+		bound         bool
+		isTarget      func(string) bool
+		wantRefusal   bool
+		wantSubstring string
+	}{
+		{"a selector named as an emitter", "hzResDone", false, isEmitter, true, "REFUSED-CALL-SPELLING"},
+		{"a bound ident", "hzResDone", true, isEmitter, false, ""},
+		{"an unbindable call with no readable name", "", false, isEmitter, false, ""},
+		{"an unbindable call named as a non-emitter", "fmt", false, isEmitter, false, ""},
+		{"the caller pass, target by exact name", "runHetznerNet", false,
+			func(n string) bool { return n == "runHetznerNet" }, true, "REFUSED-CALL-SPELLING"},
+	}
+	for _, c := range cases {
+		var probe testing.T
+		refused := hzResRefuseUnboundEmitterSpelling(&probe, "fixture.go:1", c.name, c.bound, c.isTarget)
+		if refused != c.wantRefusal {
+			t.Errorf("%s: refused=%t, want %t", c.what, refused, c.wantRefusal)
+		}
+		if probe.Failed() != c.wantRefusal {
+			t.Errorf("%s: the probe t.Failed()=%t, want %t — a refusal that returns true without redding "+
+				"its own testing.T would let the census pass while naming the problem", c.what, probe.Failed(), c.wantRefusal)
 		}
 	}
 }

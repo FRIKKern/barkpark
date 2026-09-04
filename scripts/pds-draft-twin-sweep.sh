@@ -150,8 +150,13 @@ classify() {
     # THE WORK FIELDS (the byte-equality set main ruled). Absent and null are the same
     # absence; an absent list is an empty list. Nothing else is normalised —
     # a met flag, a tag strength, a trailing space: each counts as a difference.
+    # acceptance_criteria compares by criterion TEXT and count only (main, DECISIONS
+    # 2026-09-04 05:55Z): met/evidence are the close path STAMPS on the published
+    # side and carry nothing; a draft that merely lacks them is the snapshot.
+    def crit_text: ((.acceptance_criteria // []) | map(.criterion // null));
+    def met_set: ((.acceptance_criteria // []) | to_entries | map(select(.value.met == true) | .key));
     def work: {title: (.title // null), description: (.description // null),
-               brief: (.brief // null), acceptance_criteria: (.acceptance_criteria // []),
+               brief: (.brief // null), acceptance_criteria: crit_text,
                tags: (.tags // [])};
     def differing: . as [$a,$b] | [ ($a|keys[]) | select($a[.] != $b[.]) ];
 
@@ -171,7 +176,10 @@ classify() {
         | ($closed_at != null and ($closed_at|tostring) != "") as $has_close_ts
         | ($has_close_ts and (($d._updatedAt|tostring) < ($closed_at|tostring))) as $pre_close
         | ([($p|work), ($d|work)] | differing) as $diff
-        | (($diff|length) == 0) as $equal
+        # THE EXTRA GUARD: a draft holding a met flag the published row LACKS is a
+        # live edit (someone stamped on the draft) -> LIST, never DISCARD.
+        | (($d|met_set) - ($p|met_set)) as $extra_met
+        | ((($diff|length) == 0) and (($extra_met|length) == 0)) as $equal
         # ONE decision, read out twice. The verdict and the reason are both
         # derived from $code, so each clause of guard 1 has exactly ONE place it
         # can be deleted from — measured the hard way: when verdict and why were
@@ -181,7 +189,8 @@ classify() {
         # a mutation cannot find.
         | (if   ($BH | index($id))  then "BY-HAND"
            elif ($sealed | not)     then "NOT-SEALED"
-           elif ($equal | not)      then "WORK-DIFFERS"
+           elif (($diff|length) > 0)     then "WORK-DIFFERS"
+           elif (($extra_met|length) > 0) then "DRAFT-EXTRA-MET"
            else "WORK-EQUAL" end) as $code
         | {
             id: $id,
@@ -202,6 +211,7 @@ classify() {
               if   $code == "BY-HAND"     then "named by main; never in the bulk write"
               elif $code == "NOT-SEALED"  then "published twin is NOT sealed (\($ps)) — a live row"
               elif $code == "WORK-DIFFERS" then "draft work fields DIFFER from the published (\($diff|join(","))) — a live edit or the only copy of something"
+              elif $code == "DRAFT-EXTRA-MET" then "draft carries met flag(s) the published row lacks (criteria \($extra_met|map(tostring)|join(","))) — a live stamp on the draft"
               else "sealed twin; work fields byte-equal — the draft says nothing the published row does not\(if $pre_close then "" else " (draft touched after the close: \($d._updatedAt) vs \($closed_at))" end)" end)
           })
     | .[] | select(.diverging)
@@ -308,6 +318,23 @@ guard2() {
   return 0
 }
 
+# ONE discard, stdin CLOSED, stderr KEPT. The first live write run (2026-09-04
+# 06:09Z, --expect 425) discarded ONE row and printed FAILED for 424: the loop
+# fed bp its own id list on inherited stdin, and bp refuses a piped stdin it
+# does not use ("piped stdin is unused and doc discard-draft does not accept
+# --file", exit 2). The refusal was invisible because stderr went to /dev/null.
+# So: `< /dev/null` on every ledger write inside a loop, and the reason is
+# printed beside the FAILED id, never swallowed.
+discard_one() {
+  local id="$1" err
+  if err="$(env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes 2>&1 >/dev/null < /dev/null)"; then
+    printf 'discarded %s\n' "$id"
+    return 0
+  fi
+  printf 'FAILED    %s :: %s\n' "$id" "$(printf '%s' "$err" | head -1 | cut -c1-160)" >&2
+  return 1
+}
+
 run_write() {
   local raw="$1" table="$2" docs twins tol measured rc=0
   [ -n "$EXPECT" ] || die "write mode needs --expect <N> as well as --yes" 2
@@ -326,11 +353,9 @@ run_write() {
   : > "$DISCARDED"
   local id
   while IFS=$'\t' read -r id _; do
-    if env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes >/dev/null 2>&1; then
+    if discard_one "$id"; then
       printf '%s\n' "$id" >> "$DISCARDED"
-      printf 'discarded %s\n' "$id"
     else
-      printf 'FAILED    %s\n' "$id" >&2
       rc=4
     fi
   done < <(awk -F'\t' '$12=="DISCARD"{print $1}' "$table")
@@ -407,6 +432,12 @@ selftest() {
  {"_id":"drafts.met-differs-pair","_rev":"d3","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open","title":"t",
   "claim":null,"acceptance_criteria":[{"met":false}]},
 
+ {"_id":"draft-extra-met-pair","_rev":"p9","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done","title":"t",
+  "close_reason":"shipped","claim":{"epoch":2,"closed_at":"2026-08-30T09:00:00Z"},
+  "acceptance_criteria":[{"criterion":"a","met":true},{"criterion":"b","met":false}]},
+ {"_id":"drafts.draft-extra-met-pair","_rev":"d9","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open","title":"t",
+  "claim":null,"acceptance_criteria":[{"criterion":"a","met":true},{"criterion":"b","met":true}]},
+
  {"_id":"not-sealed-pair","_rev":"p4","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"open",
   "claim":null,"acceptance_criteria":[{"met":false},{"met":false},{"met":false}]},
  {"_id":"drafts.not-sealed-pair","_rev":"d4","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"cancelled",
@@ -452,7 +483,8 @@ JSON
   printf 'GUARD 1 — the discard rule\n'
   expect_verdict equal-pair       DISCARD
   expect_verdict differs-pair     LIST
-  expect_verdict met-differs-pair LIST
+  expect_verdict met-differs-pair DISCARD
+  expect_verdict draft-extra-met-pair LIST
   expect_verdict not-sealed-pair  LIST
 
   # THE VERDICT ALONE DOES NOT REACH CLAUSE (b). Both (b) and (c) answer LIST
@@ -475,7 +507,8 @@ JSON
     esac
   }
   expect_reason differs-pair     "DIFFER from the published (description)"         "differs-pair is listed BY CLAUSE (b) and names the field"
-  expect_reason met-differs-pair "DIFFER from the published (acceptance_criteria)" "a met-flag difference is a work-field difference (byte-equality, not a heuristic)"
+  expect_reason met-differs-pair "work fields byte-equal" "a draft that only LACKS the close's met stamps is the snapshot — criterion text and count are what compare"
+  expect_reason draft-extra-met-pair "met flag(s) the published row lacks (criteria 1)" "a met flag on the draft that the published lacks is a live stamp -> LIST, naming the criterion"
   expect_reason equal-pair       "draft touched after the close"                   "equal-pair is DISCARDED despite the post-close touch — the timestamp gates nothing"
   expect_reason not-sealed-pair  "NOT sealed"                  "not-sealed-pair is listed BY CLAUSE (a)"
   printf 'THE TWO BY-HAND ROWS\n'
@@ -485,16 +518,16 @@ JSON
   printf 'THE POPULATION ITSELF\n'
   # NON-VACUITY: if the table were empty every expect_verdict above would still
   # have to have failed, but these two arms pin the population's shape directly.
-  if [ "$(grep -c '' "$tmp/table.tsv")" = "6" ]; then ok "exactly 6 diverging twins in the fixture"
-  else bad "population" "expected 6 diverging rows, got $(grep -c '' "$tmp/table.tsv")"; fi
+  if [ "$(grep -c '' "$tmp/table.tsv")" = "7" ]; then ok "exactly 7 diverging twins in the fixture"
+  else bad "population" "expected 7 diverging rows, got $(grep -c '' "$tmp/table.tsv")"; fi
   if [ -z "$(verdict_of agreeing-twin)" ]; then ok "a twin whose two sides AGREE is not in the population"
   else bad "agreeing-twin" "a non-diverging twin leaked into the table"; fi
   if [ -z "$(verdict_of lonely-published)" ] && [ -z "$(verdict_of lonely-draft)" ]; then
     ok "an unpaired published row and an unpaired draft are both out of scope"
   else bad "lonely" "an unpaired document entered the table — discard-draft on one of those DELETES it"; fi
-  if [ "$(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')" = "1" ]; then
-    ok "exactly 1 DISCARD — the guards are not waving the fixture through"
-  else bad "discard-count" "expected 1 DISCARD, got $(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')"; fi
+  if [ "$(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')" = "2" ]; then
+    ok "exactly 2 DISCARD (equal-pair, met-differs-pair) — the guards are not waving the fixture through"
+  else bad "discard-count" "expected 2 DISCARD, got $(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')"; fi
 
   printf 'GUARD 2 — the count fence\n'
   if out="$(guard2 10 10 0 2>&1)"; then ok "exact match passes (10 vs 10, tolerance 0)"
@@ -523,6 +556,27 @@ JSON
   else bad "diagnostic" "expected 3, got: $diag"; fi
   if printf '%s' "$diag" | grep -q 'NEVER gated'; then ok "labelled as never gated"
   else bad "diagnostic-label" "the diagnostic must say out loud that it gates nothing: $diag"; fi
+
+  printf 'THE WRITE LOOP CLOSES STDIN\n'
+  # A stub bp that does what the real one does: refuse a piped stdin it does
+  # not use (exit 2, the sentence quoted from bp). Driven through a pipe the way
+  # run_write drives discard_one — from inside a `while read` over the id list.
+  cat > "$tmp/stub-bp" <<'STUB'
+#!/bin/bash
+if IFS= read -r -t 1 _ 2>/dev/null; then
+  echo 'bp: piped stdin is unused and doc discard-draft does not accept --file' >&2; exit 2
+fi
+echo '{"results":[]}'
+STUB
+  chmod +x "$tmp/stub-bp"
+  local wl
+  wl="$(printf 'id-a\nid-b\nid-c\n' | { BP="$tmp/stub-bp"; while IFS= read -r id; do discard_one "$id"; done; } 2>&1)"
+  if [ "$(printf '%s\n' "$wl" | grep -c '^discarded ')" = "3" ] && ! printf '%s' "$wl" | grep -q FAILED; then
+    ok "three discards from inside a piped while-read all land (stdin closed per write)"
+  else bad "write-loop-stdin" "expected 3 discarded / 0 FAILED, got: $wl"; fi
+  case "$wl" in *"::"*) bad "write-loop-reason" "a reason was printed on a green run: $wl" ;; *) ok "no FAILED reason on a green run" ;; esac
+  wl="$(printf 'x\n' | { BP="$tmp/stub-bp"; DOC_TYPE=task; env -u BARKPARK_TOKEN "$tmp/stub-bp" doc discard-draft task x --yes 2>&1 >/dev/null; true; })"
+  case "$wl" in *"piped stdin is unused"*) ok "the stub refuses a piped stdin the way bp does (the arm is not vacuous)" ;; *) bad "stub-refuses" "the stub did not refuse: $wl" ;; esac
 
   printf 'TOLERANCE MEASUREMENT\n'
   # Five published rows carry claim.closed_at 2026-09-01T09:00:00Z; the cutoff
