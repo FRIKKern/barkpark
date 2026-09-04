@@ -255,6 +255,11 @@ import { transactionVetoesLock } from "./locks.js";
 // LIVE off the host's data-constraints (twin of data-locked-tail). DOM-free so it
 // unit-tests in plain Node like locks.js.
 import { transactionVetoesConstraints, parseConstraints } from "./constraints.js";
+import {
+  parseVocabulary,
+  transactionVetoesVocabulary,
+  slashItemsForVocabulary,
+} from "./vocabulary.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -550,6 +555,17 @@ class BpPaperCanvas extends HTMLElement {
                     tr,
                     state,
                     parseConstraints(host.getAttribute("data-constraints")),
+                  ) &&
+                  // Gyldendal parity E1: a FIELD canvas carries the field's declared
+                  // vocabulary on data-vocabulary (twin of data-constraints). A user
+                  // edit that would introduce an out-of-vocabulary node / heading
+                  // level / list kind / mark is a calm no-op; the server refuses the
+                  // same by name. Absent attribute → nothing vetoed (paper canvas
+                  // byte-unchanged).
+                  !transactionVetoesVocabulary(
+                    tr,
+                    state,
+                    parseVocabulary(host.getAttribute("data-vocabulary")),
                   )),
             }),
           ],
@@ -1519,7 +1535,13 @@ class BpPaperCanvas extends HTMLElement {
         // per-block menu's SLASH_ITEMS is imported INTACT; the allowlist narrows
         // here, never edits it). SlashMenu still prepends EXPECTED-group items it
         // reads fresh from the DOM on each open.
-        items: CANVAS_SLASH_ITEMS,
+        // Gyldendal parity E1: a FIELD canvas offers only its declared
+        // vocabulary (data-vocabulary); a paper canvas (no attribute) keeps the
+        // full insertable set.
+        items: slashItemsForVocabulary(
+          CANVAS_SLASH_ITEMS,
+          parseVocabulary(this.getAttribute("data-vocabulary")),
+        ),
         onChoose: (item) => this._chooseSlash(item),
         onDismiss: () => this._dismissSlash(),
       });
