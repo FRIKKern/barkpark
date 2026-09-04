@@ -388,6 +388,13 @@ defmodule Barkpark.Content do
   def get_schema(name, dataset, opts \\ []), do: Schema.get_schema(name, dataset, opts)
 
   @doc """
+  Tenant-scoped schema resolution WITH the shared-global fallback — the lookup a
+  request-driven surface (Studio pane walk, secondary pane) must use. See
+  `Barkpark.Content.Schema.resolve_schema/3` for the #34 history.
+  """
+  def resolve_schema(name, dataset, opts \\ []), do: Schema.resolve_schema(name, dataset, opts)
+
+  @doc """
   Whether `type` in `dataset` is an OWNER-SCOPED type (row/ownership ACL,
   Phase 4 core-auth).
 

@@ -222,7 +222,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
           {doc, is_draft, has_pub} when not is_nil(doc) ->
             schema =
-              case Content.get_schema(type, dataset) do
+              case Content.resolve_schema(type, dataset, scope(opts)) do
                 {:ok, s} -> s
                 _ -> nil
               end
@@ -271,7 +271,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       # bypasses `Structure.parse_filter/1`.
       %{type: :plugin_document_list, type_name: type_name} = node ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end
@@ -318,7 +318,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       %{type: :document_type_list, type_name: type_name} = node ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end
@@ -366,7 +366,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       %{type: :document, type_name: type_name} ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end

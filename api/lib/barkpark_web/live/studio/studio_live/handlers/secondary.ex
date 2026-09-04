@@ -132,7 +132,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
 
       {doc, _, _} ->
         schema =
-          case Content.get_schema(type, dataset) do
+          case Content.resolve_schema(type, dataset, ScopeHelpers.scope_opts(socket)) do
             {:ok, s} -> s
             _ -> nil
           end
