@@ -6994,7 +6994,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
         do: m[:parent_tool_use_id]
   end
 
-
   # SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa). While a turn RUNS, its consecutive
   # tool rows collapse to the ACTIVE row plus one "+N previous" control, so a
   # long turn can no longer push the live row off the screen. A SETTLED turn is
