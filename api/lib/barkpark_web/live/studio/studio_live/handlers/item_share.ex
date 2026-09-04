@@ -28,12 +28,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
         title: params["title"] || ref_id
       }
 
+      # The fresh-token map is per-ITEM and is CLEARED on open: a raw token
+      # minted for a different item (or for this one in an earlier popover
+      # session) must not be re-shown. Only what this socket mints from here on
+      # has a URL — the row itself no longer carries one.
       {:noreply,
        assign(socket,
          item_share_open: true,
          item_share: item,
          item_share_error: nil,
-         item_share_links: Shared.load_item_links(socket, item)
+         item_share_fresh: %{},
+         item_share_links: Shared.load_item_links(socket, item, %{})
        )}
     else
       {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
@@ -72,10 +77,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
       true ->
         case Barkpark.Sharing.Links.create(Shared.item_link_attrs(socket, item, access)) do
-          {:ok, _} ->
+          # `create/1`'s `{raw, link}` is the ONE place the plaintext token
+          # exists — it is not persisted. Hold it in socket assigns so THIS
+          # popover can show and copy the link it just minted; every other row
+          # renders without a URL.
+          {:ok, {raw, link}} ->
+            fresh = Map.put(socket.assigns[:item_share_fresh] || %{}, link.id, raw)
+
             {:noreply,
              assign(socket,
-               item_share_links: Shared.load_item_links(socket, item),
+               item_share_fresh: fresh,
+               item_share_links: Shared.load_item_links(socket, item, fresh),
                item_share_error: nil
              )}
 
@@ -95,7 +107,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
       {:noreply,
        assign(socket,
-         item_share_links: Shared.load_item_links(socket, socket.assigns[:item_share]),
+         item_share_links:
+           Shared.load_item_links(
+             socket,
+             socket.assigns[:item_share],
+             socket.assigns[:item_share_fresh] || %{}
+           ),
          item_share_error: error
        )}
     else

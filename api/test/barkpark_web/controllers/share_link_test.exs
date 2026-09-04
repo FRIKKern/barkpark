@@ -463,14 +463,28 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert length(list["links"]) == 1
     refute Map.has_key?(hd(list["links"]), "token_hash")
     refute Map.has_key?(hd(list["links"]), "token")
+
+    # ...and no `url` either. `link_json/1` used to derive one from the stored
+    # plaintext token, so the two refutes above passed while the SECRET rode in
+    # `url`. The column is retired (arpss-w8-bl-share-link-raw-token-at-rest,
+    # RULED 2026-09-02), so the listing has no URL to give.
+    refute Map.has_key?(hd(list["links"]), "url")
+
+    # NON-VACUITY: the row IS serialized, so the three refutes are about what
+    # the serializer omits, not about an empty body.
+    assert hd(list["links"])["ref_id"] == "post1"
   end
 
   # ── arpss-w8: cross-tenant confinement ────────────────────────────────────
   #
-  # The test just above ("no token/hash") refutes two absent MAP KEYS and passes
-  # on the LEAKING controller, because the secret rides in `url`. It is left in
-  # place as this wave's own resident failure mode, and it is why everything
-  # below asserts on the SERIALIZED BODY (`resp_body =~`) instead.
+  # HISTORY, kept because it explains the shape below. The test just above
+  # ("no token/hash") refuted two absent MAP KEYS and passed on the LEAKING
+  # controller, because the secret rode in `url` — which is why everything
+  # below asserts on the SERIALIZED BODY (`resp_body =~`) instead. That is
+  # still the right instrument for the confinement question, but the raw token
+  # is no longer IN any listing body, so `refute body =~ raw` would now be
+  # vacuously green on a fully-leaking controller. Each test below therefore
+  # confines on the LINK ID — the tenant fact the listing still carries.
   describe "tenancy confinement on /v1/shares/links" do
     # The attacker is the shape the predicate choice turns on: an admin of its
     # OWN workspace A, built the way a real install builds one
@@ -498,9 +512,9 @@ defmodule BarkparkWeb.ShareLinkTest do
       %{attacker_raw: raw, attacker: actor}
     end
 
-    test "POSITIVE CONTROL: the legitimate own-workspace 200 body DOES carry the raw token",
+    test "POSITIVE CONTROL: the legitimate own-workspace 200 body carries the link ROW — and never the raw token",
          %{conn: conn, scope_str: scope} do
-      %{"token" => raw} =
+      %{"token" => raw, "link" => %{"id" => link_id}} =
         mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
       resp =
@@ -508,11 +522,17 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> admin()
         |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
 
-      # Without this control, `refute body =~ raw` is green on ANY denial body
-      # and proves nothing about serialization.
+      # Without this control, `refute body =~ link_id` is green on ANY denial
+      # body and proves nothing about serialization. The id is the tenant fact
+      # the listing legitimately carries, so it is the right non-vacuity anchor.
       assert resp.status == 200
-      assert resp.resp_body =~ raw
-      assert resp.resp_body =~ "/s/#{raw}"
+      assert resp.resp_body =~ link_id
+
+      # THE RETIREMENT, asserted on the AUTHORISED body — the one place a leak
+      # would still be legal under the old design. Not even its own admin gets
+      # the plaintext back: the mint 201 was the only place it ever appeared.
+      refute resp.resp_body =~ raw
+      refute resp.resp_body =~ "/s/"
     end
 
     test "LEAK CLOSED — list: a foreign admin never sees B's raw token in the body", %{
@@ -520,7 +540,7 @@ defmodule BarkparkWeb.ShareLinkTest do
       scope_str: scope,
       attacker_raw: raw_actor
     } do
-      %{"token" => raw} =
+      %{"token" => raw, "link" => %{"id" => link_id}} =
         mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
       resp =
@@ -529,9 +549,15 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
 
       # ORDER IS LOAD-BEARING: with the status assert first, deleting the
-      # confinement reds on the STATUS and never demonstrates the credential
-      # leak. Assert only on the raw token and the bare "/s/" — never a host
-      # prefix (`Sharing.share_link_base/0` is a LAN IP locally, nil in CI).
+      # confinement reds on the STATUS and never demonstrates the leak.
+      #
+      # `link_id` is the LOAD-BEARING refute now. `raw` and "/s/" are kept
+      # underneath it, but they are no longer sufficient on their own: the raw
+      # token is not in ANY listing body since the column was retired, so those
+      # two would stay green on a controller with the tenancy gate deleted.
+      # The id is what a foreign admin must not receive, and its positive
+      # control is the sibling test above.
+      refute resp.resp_body =~ link_id
       refute resp.resp_body =~ raw
       refute resp.resp_body =~ "/s/"
       assert resp.status == 403
@@ -625,8 +651,14 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> json_response(200)
 
       assert Enum.any?(listed["links"], &(&1["id"] == link_id))
-      assert Enum.any?(listed["links"], &(&1["url"] =~ "/s/#{raw}"))
 
+      # The listing carries the link, NOT a URL for it — the raw token is not
+      # stored. Regression control for `arpss-w8-bl-share-link-raw-token-at-rest`.
+      refute Enum.any?(listed["links"], &Map.has_key?(&1, "url"))
+      refute listed |> Jason.encode!() |> String.contains?(raw)
+
+      # POSITIVE CONTROL for the drop: the token minted BEFORE the column went
+      # away still resolves. Lookups were always by `token_hash`.
       served = get(build_conn(), "/s/#{raw}")
       assert served.status in [200, 302]
 
@@ -704,9 +736,16 @@ defmodule BarkparkWeb.ShareLinkTest do
       # POSITIVE CONTROL: the listing is non-empty and DOES carry this
       # project's own link, so the refutes below are not vacuously green.
       assert own_id in ids
-      assert resp.resp_body =~ own_raw
+      assert resp.resp_body =~ own_id
 
       refute sib_id in ids
+      refute resp.resp_body =~ sib_id
+
+      # Neither raw token is anywhere in the body — not the sibling's, and not
+      # even this scope's own. Since the column was retired the listing has no
+      # plaintext to carry, which is why the confinement above is asserted on
+      # the ID and not on the token.
+      refute resp.resp_body =~ own_raw
       refute resp.resp_body =~ sib_raw
 
       # and the confinement is symmetric: the sibling's own scope sees ITS link

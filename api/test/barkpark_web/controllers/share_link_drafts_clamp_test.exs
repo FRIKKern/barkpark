@@ -221,7 +221,9 @@ defmodule BarkparkWeb.ShareLinkDraftsClampTest do
           ref_type: "paper",
           ref_id: "drafts.clamp-paper",
           access: "read",
-          token: raw,
+          # Only the digest — the plaintext column was retired
+          # (arpss-w8-bl-share-link-raw-token-at-rest). `resolve/1` has always
+          # matched on the hash, so `raw` still reaches this row.
           token_hash: Links.hash_token(raw)
         })
 
