@@ -192,4 +192,50 @@ defmodule Barkpark.Content.FieldBlockOpsTest do
     assert %{"blocks" => [%{"id" => "p1"}], "html" => _} = form["description"]
     assert form["notes"] == "<p>n</p>"
   end
+
+  # task-c46967eb3dc49e77 — site (4), block_ops.ex `apply_field_block_ops/6`.
+  # The projected field body is read on a SCREEN, so the caller names
+  # `:article`; before this row it handed style-less opts and
+  # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default stamped
+  # mail typography into a persisted field. Siblings: #15973, #16037.
+  test "the projected field html names the ARTICLE surface, not the :email default", %{
+    scope: scope
+  } do
+    doc = create!(scope, %{})
+    blocks = [para("p1", "field body copy that must not carry mail type")]
+
+    {:ok, %{written_doc_id: written}} =
+      Content.apply_field_block_ops(
+        doc.doc_id,
+        "publication",
+        "description",
+        [
+          %{
+            "op" => "append-block",
+            "block" => para("p1", "field body copy that must not carry mail type")
+          }
+        ],
+        @dataset,
+        scope
+      )
+
+    {:ok, saved} = Content.get_document(written, "publication", @dataset, scope)
+    stored = saved.content["description"]["html"]
+
+    article_html = Barkpark.PortableDoc.Render.render_blocks(blocks, %{style: :article})
+    email_html = Barkpark.PortableDoc.Render.render_blocks(blocks, %{style: :email})
+
+    # Not one byte of the `:email` paragraph stamp is persisted.
+    refute stored =~ "font-family:"
+    refute stored =~ "font-size:"
+    refute stored =~ "line-height:"
+
+    assert stored == article_html
+
+    # ANTI-VACUITY: the two surfaces really do differ for this very block, so
+    # the equality above is a CHOICE of surface, not two renders coincidentally
+    # agreeing (pre-stamp they were the same bytes, which is why this hid).
+    refute stored == email_html
+    assert email_html =~ "font-size:17px"
+  end
 end
