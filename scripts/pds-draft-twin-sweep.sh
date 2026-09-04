@@ -37,6 +37,19 @@
 #         the close is a live edit someone made to a sealed row -> LIST.
 #   LIST is not a soft DISCARD. Nothing on the LIST is ever written.
 #
+# WHAT THE FIRST DRY RUN MEASURED, AND WHY IT IS NOT A BUG IN THIS SCRIPT.
+# On the live population (2026-09-04 02:27Z, 9077 docs, 598 twins, 452
+# diverging) clause (c) yields **DISCARD=1, LIST=449, BY-HAND=2** — not the ~436
+# main's ruling expected. The reason is mechanical: the fork is minted by a
+# mutate-patch that lands AFTER the close, so the draft's `_updatedAt` is later
+# than `claim.closed_at` on 425 of the 452, while its CONTENT is still the
+# pre-close snapshot. Clause (c) reads the TOUCH; the finding is about the
+# CONTENT. Guard 2 therefore refuses a `--expect 436` write (drift 435), which
+# is the fence working, not failing. The content-shaped population is printed as
+# a DIAGNOSTIC (see diagnostic_line) — 377 rows today. Which rule gates the
+# write is main's ruling to make; this script implements the one main wrote and
+# reports the number the other one would give.
+#
 # GUARD 2 (the count fence, in code at run_write):
 #   Write mode needs BOTH `--yes` AND `--expect <N>`, and the MEASURED DISCARD
 #   count must land within `--tolerance` of N. Out of tolerance REFUSES, prints
@@ -151,6 +164,18 @@ classify() {
         | (($ps == "done") or ($ps == "cancelled")) as $sealed
         | ($closed_at != null and ($closed_at|tostring) != "") as $has_close_ts
         | ($has_close_ts and (($d._updatedAt|tostring) < ($closed_at|tostring))) as $pre_close
+        # ONE decision, read out twice. The verdict and the reason are both
+        # derived from $code, so each clause of guard 1 has exactly ONE place it
+        # can be deleted from — measured the hard way: when verdict and why were
+        # two parallel if-chains, deleting clause (b) from the verdict chain
+        # left the selftest fully GREEN, because the why chain still named it
+        # and (c) happened to answer LIST too. A guard with two homes is a guard
+        # a mutation cannot find.
+        | (if   ($BH | index($id))  then "BY-HAND"
+           elif ($sealed | not)     then "NOT-SEALED"
+           elif ($has_close_ts|not) then "NO-CLOSE-TS"
+           elif ($pre_close | not)  then "POST-CLOSE"
+           else "PRE-CLOSE" end) as $code
         | {
             id: $id,
             diverging: ($ps != $ds),
@@ -163,16 +188,14 @@ classify() {
             pub_close_reason: (if ($p.close_reason // null) != null then "yes" else "no" end),
             draft_close_reason: (if ($d.close_reason // null) != null then "yes" else "no" end),
             verdict: (
-              if ($BH | index($id)) then "BY-HAND"
-              elif ($sealed | not) then "LIST"
-              elif ($has_close_ts | not) then "LIST"
-              elif ($pre_close | not) then "LIST"
-              else "DISCARD" end),
+              if   $code == "BY-HAND"   then "BY-HAND"
+              elif $code == "PRE-CLOSE" then "DISCARD"
+              else "LIST" end),
             why: (
-              if ($BH | index($id)) then "named by main; never in the bulk write"
-              elif ($sealed | not) then "published twin is NOT sealed (\($ps)) — a live row"
-              elif ($has_close_ts | not) then "published twin is sealed but carries NO readable close timestamp — guard 1 fails closed"
-              elif ($pre_close | not) then "draft _updatedAt (\($d._updatedAt)) is NOT before the close (\($closed_at)) — a live edit"
+              if   $code == "BY-HAND"     then "named by main; never in the bulk write"
+              elif $code == "NOT-SEALED"  then "published twin is NOT sealed (\($ps)) — a live row"
+              elif $code == "NO-CLOSE-TS" then "published twin is sealed but carries NO readable close timestamp — guard 1 fails closed"
+              elif $code == "POST-CLOSE"  then "draft _updatedAt (\($d._updatedAt)) is NOT before the close (\($closed_at)) — a live edit"
               else "pre-close snapshot of a sealed row" end)
           })
     | .[] | select(.diverging)
@@ -212,6 +235,33 @@ summary_line() {
     "$total_docs" "$twins" "$n" "$d" "$l" "$b" "$tol" "$CENSUS_AT"
 }
 
+# THE DIAGNOSTIC MAIN WILL NEED, AND WHY IT IS NOT A VERDICT.
+#
+# Guard 1 clause (c) rules by TIMESTAMP, and on the live population that clause
+# LISTS almost everything: the fork is minted by a mutate-patch that happens
+# AFTER the close, so the draft's `_updatedAt` is later than `claim.closed_at`
+# on 425 of the 452 diverging twins — even though its CONTENT is the pre-close
+# snapshot. The census said this in the other direction ("the draft is touched
+# later, its content is older") and clause (c) reads the touch, not the content.
+# The literal rule therefore yields ~1 DISCARD, not ~436, and guard 2 correctly
+# refuses the write.
+#
+# This function measures the CONTENT-shaped rule instead — sealed published twin
+# that carries a close_reason the draft lacks, with the draft holding no more
+# met criteria than the published row — i.e. "the draft is strictly poorer".
+# It is PRINTED and never acted on. Changing which rule gates the write is
+# main's ruling, not this script's, and a diagnostic that quietly became a
+# verdict is exactly the failure this file is built to avoid.
+diagnostic_line() {
+  awk -F'\t' '
+    ($2=="done"||$2=="cancelled") && $10=="yes" && $11=="no" {
+      split($8,p,"/"); split($9,d,"/");
+      if (d[1]+0 <= p[1]+0) n++
+    }
+    END { printf "DIAGNOSTIC (recorded, NEVER gated) content-poorer drafts on sealed twins = %d\n", n+0 }
+  ' "$1"
+}
+
 print_table() {
   printf 'id\tpub\tdraft\tclosed_at\tdraft_updated\tpub_rev\tdraft_rev\tpub_met\tdraft_met\tpub_cr\tdraft_cr\tverdict\twhy\n'
   cat "$1"
@@ -232,6 +282,7 @@ run_dry() {
   else
     printf 'tolerance=%s (explicit --tolerance)\n' "$tol"
   fi
+  diagnostic_line "$table"
   summary_line "$table" "$docs" "$twins" "$tol"
 }
 
@@ -261,6 +312,7 @@ run_write() {
   classify "$raw" | sort > "$table"
   print_table "$table"
   printf '\n'
+  diagnostic_line "$table"
   summary_line "$table" "$docs" "$twins" "$tol"
   measured=$(awk -F'\t' '$12=="DISCARD"' "$table" | grep -c '')
   guard2 "$measured" "$EXPECT" "$tol" || exit 3
@@ -382,6 +434,29 @@ JSON
   expect_verdict post-close-pair LIST
   expect_verdict no-close-ts-pair LIST
   expect_verdict not-sealed-pair LIST
+
+  # THE VERDICT ALONE DOES NOT REACH CLAUSE (b). Both (b) and (c) answer LIST
+  # for the missing-timestamp row, so an arm that only checks the verdict stays
+  # GREEN when (b) is deleted — measured: deleting the `$has_close_ts` elif left
+  # the whole selftest green, because `$pre_close` is false anyway. Pin the
+  # REASON, so the arm fails when the row is listed for the wrong cause. (And
+  # note why (b) is load-bearing at all: with a null `closed_at`, the string
+  # compare in (c) reads `"2026-…" < "null"` as TRUE — lexicographic, digits
+  # before letters — so without (b) the row would be DISCARDED.)
+  # `case`, never `printf | grep -q`: grep -q exits on its first match, printf
+  # takes SIGPIPE, and with `set -o pipefail` the pipeline reports 141. That
+  # makes an arm fail at random under load — it did, once, in this very file.
+  why_of() { awk -F'\t' -v id="$1" '$1==id{print $13}' "$tmp/table.tsv"; }
+  expect_reason() {
+    local id="$1" needle="$2" label="$3" got; got="$(why_of "$id")"
+    case "$got" in
+      *"$needle"*) ok "$label" ;;
+      *) bad "$label" "expected a reason containing '$needle', got: ${got:-<empty>}" ;;
+    esac
+  }
+  expect_reason no-close-ts-pair "NO readable close timestamp" "no-close-ts-pair is listed BY CLAUSE (b), not by accident"
+  expect_reason post-close-pair  "NOT before the close"        "post-close-pair is listed BY CLAUSE (c)"
+  expect_reason not-sealed-pair  "NOT sealed"                  "not-sealed-pair is listed BY CLAUSE (a)"
   printf 'THE TWO BY-HAND ROWS\n'
   expect_verdict task-2b7cbaf8265f6b4e BY-HAND
   expect_verdict cch-w37-bl-primary-team-gate-twins-are-one-gate BY-HAND
@@ -407,12 +482,26 @@ JSON
   else bad "guard2-inside" "$out"; fi
   if out="$(guard2 25 10 5 2>&1)"; then bad "guard2-refuse-high" "25 vs 10 tolerance 5 was ACCEPTED"
   else
-    if printf '%s' "$out" | grep -q 'GUARD 2 REFUSED' && printf '%s' "$out" | grep -q '25' && printf '%s' "$out" | grep -q '10'; then
-      ok "outside tolerance REFUSES and prints both numbers (25 vs 10)"
-    else bad "guard2-refuse-high" "refused, but did not print both numbers: $out"; fi
+    case "$out" in
+      *"GUARD 2 REFUSED"*25*10*) ok "outside tolerance REFUSES and prints both numbers (25 vs 10)" ;;
+      *) bad "guard2-refuse-high" "refused, but did not print both numbers: $out" ;;
+    esac
   fi
   if out="$(guard2 2 436 5 2>&1)"; then bad "guard2-refuse-low" "2 vs 436 was ACCEPTED"
   else ok "a collapsed measurement REFUSES too (2 vs 436) — the fence is two-sided"; fi
+
+  printf 'THE DIAGNOSTIC IS A DIAGNOSTIC\n'
+  local diag
+  diag="$(diagnostic_line "$tmp/table.tsv")"
+  # THREE fixture twins are content-poorer sealed twins — pre-close-pair
+  # (DISCARD), post-close-pair (LIST) and no-close-ts-pair (LIST). The
+  # diagnostic must count all three while the verdict column DISCARDs one: a
+  # diagnostic that agreed with the verdict would be measuring nothing new.
+  if printf "%s" "$diag" | grep -q "content-poorer drafts on sealed twins = 3"; then
+    ok "counts 3 content-poorer sealed twins while only 1 is DISCARD"
+  else bad "diagnostic" "expected 3, got: $diag"; fi
+  if printf '%s' "$diag" | grep -q 'NEVER gated'; then ok "labelled as never gated"
+  else bad "diagnostic-label" "the diagnostic must say out loud that it gates nothing: $diag"; fi
 
   printf 'TOLERANCE MEASUREMENT\n'
   # Five published rows carry claim.closed_at 2026-09-01T09:00:00Z; the cutoff
