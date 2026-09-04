@@ -759,8 +759,8 @@ if [ "$MODE" = selftest ]; then
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
   # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
   # ADD rows -> raise the literal in the SAME commit.
-  SELFTEST_FLOOR_MIN=326
-  SELFTEST_FLOOR_FULL=343
+  SELFTEST_FLOOR_MIN=342
+  SELFTEST_FLOOR_FULL=359
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -2050,6 +2050,82 @@ FAKEMV
     sh -c "! grep -q '^BPSTAGE name=ROUTE status=ok build_id=sf1' '$TD/sf.out'"
   check "…and RETIRE never ran (the run stopped AT the failed switch)" \
     sh -c "! grep -q '^BPSTAGE name=RETIRE' '$TD/sf.out'"
+
+  # =========================================================================
+  # THE OTHER exit 16: A REJECTED **RE-DEPLOY** FLIP (the second arm).
+  #
+  # `grep -n 'exit 16' deploy/site-deploy-node.sh` finds TWO sites, and they are
+  # NOT the same experiment. The block above drives the FIRST — `arm_caddy_node_
+  # route` on a site with no route yet, reached only when $CUR_SLOT is empty. The
+  # `else` branch — `flip_caddy_node_port` on a site that IS already live — is
+  # the one every ordinary deploy after the first one takes, and no fixture had
+  # ever driven a REJECTING caddy through it. The arm fixture structurally
+  # cannot reach it: with no CUR_SLOT the engine never enters the else.
+  #
+  # And the two arms have DIFFERENT things to lose. A rejected ARM leaves
+  # nothing live, so "did the revert work" is a question about a file. A rejected
+  # FLIP happens while a slot is SERVING TRAFFIC, so the property is stronger:
+  # the run must stop only the slot it just booted, leave the Caddyfile
+  # byte-identical, and leave the PREVIOUS slot still routed and still up. A
+  # flip that half-applied — marker rewritten to the new port, new slot then
+  # stopped — points production's upstream at a dead port while every stage
+  # reports a clean refusal. So the fixture arms with an ACCEPTING caddy first,
+  # snapshots the Caddyfile it produced, and re-deploys the SAME slug against a
+  # REJECTING one.
+  #
+  # Own slug, own Caddyfile, own ports, own lock — it cannot disturb the site
+  # above or the selftest site.
+  # =========================================================================
+  echo "[selftest] e2e: a REJECTED RE-DEPLOY flip fails CLOSED with exit 16 and leaves the LIVE slot routed"
+  FLCF="$TD/Caddyfile.flipfail"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$FLCF"
+  FL_PORT_A="$(free_port)"; FL_PORT_B="$(free_port)"
+  fl_deploy() { # <build_id> <extra-PATH-prefix> -> exit code, logs $TD/fl.<id>.out
+    env PATH="${2}$FAKEBIN:$PATH" \
+      SITE_SLUG=flipfail BUILD_ID="$1" CONTENT_REV="fl-$1" SITE_SRC="$SRC" \
+      SITE_PORT_A="$FL_PORT_A" SITE_PORT_B="$FL_PORT_B" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$FLCF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/flipfail.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/fl.$1.out" 2> "$TD/fl.$1.err"
+    echo $?
+  }
+  # ---- 1. ARM, with the ACCEPTING caddy: this is the state under test --------
+  fl1_rc="$(fl_deploy fl1 '')"
+  check "the arm deploy landed (accepting caddy) — the fixture really is live" [ "$fl1_rc" = 0 ]
+  check "…and it armed the route (this is a FLIP fixture, not a second arm)" \
+    grep -q "BARKPARK_SITE_ROUTE:flipfail" "$FLCF"
+  fl_port() { awk 'index($0,"BARKPARK_SITE_ROUTE:flipfail"){i=1} i&&match($0,/localhost:[0-9]+/){print substr($0,RSTART+10,RLENGTH-10); exit}' "$FLCF"; }
+  check "…serving slot a :$FL_PORT_A"                 [ "$(fl_port)" = "$FL_PORT_A" ]
+  cp "$FLCF" "$FLCF.armed"
+  # ---- 2. RE-DEPLOY the same slug, now against the REJECTING caddy -----------
+  # $SFB holds the `validate) exit 1` stub built for the arm block above.
+  fl2_rc="$(fl_deploy fl2 "$SFB:")"
+  check "rejected FLIP fails the re-deploy CLOSED with the typed 16"  [ "$fl2_rc" = 16 ]
+  check "…and HEALTH had already passed on the new slot (SWITCH's refusal, not the gate's)" \
+    grep -q '^BPSTAGE name=HEALTH status=ok build_id=fl2' "$TD/fl.fl2.out"
+  check "…SWITCH failed on the machine channel"  grep -q '^BPSTAGE name=SWITCH status=failed build_id=fl2' "$TD/fl.fl2.out"
+  check "…and the detail names the LIVE slot as still serving (the flip wording, not the arm's)" \
+    grep -q 'live slot a still serving' "$TD/fl.fl2.out"
+  check "…caddy validate's refusal is on the record (the revert really ran)" \
+    grep -q 'caddy validate rejected the /sites/flipfail change — reverting' "$TD/fl.fl2.out"
+  check "…the Caddyfile is BYTE-IDENTICAL to the armed one (the flip reverted its write)" \
+    cmp -s "$FLCF" "$FLCF.armed"
+  check "…and the PREVIOUS slot is still the routed upstream (:A, never the dead :B)" \
+    [ "$(fl_port)" = "$FL_PORT_A" ]
+  check "…the new port never reached the marker block" \
+    sh -c "! grep -q 'localhost:$FL_PORT_B' '$FLCF'"
+  check "…the live slot a is still UP (a fail-closed flip must not stop the server)" \
+    env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet barkpark-site@flipfail__a
+  check "…and the slot it just booted was stopped (nothing is left half-live)" \
+    sh -c "! env PATH='$FAKEBIN:$PATH' systemctl is-active --quiet barkpark-site@flipfail__b"
+  check "…and NO ROUTE ok claims a flip the Caddyfile does not carry" \
+    sh -c "! grep -q '^BPSTAGE name=ROUTE status=ok build_id=fl2' '$TD/fl.fl2.out'"
+  check "…and RETIRE never ran (the run stopped AT the failed flip)" \
+    sh -c "! grep -q '^BPSTAGE name=RETIRE' '$TD/fl.fl2.out'"
+  check "…and .previous was NOT rewritten to a build that never went live" \
+    sh -c "! grep -q 'fl2' '$TD/sites/flipfail/.previous' 2>/dev/null"
 
   check "FIXED: --rollback refuses on the HEALTH MARKER (the target exists)" \
     sh -c "[ \"\$(cat '$RBF/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is marked health-failed\" '$RBF/rb.log'"
