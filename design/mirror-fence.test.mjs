@@ -50,6 +50,8 @@ const MIRROR_KEY = `${BUNDLE_PATH}#${MIRROR_NAME}`;
 const SHELL = "scripts/paper-editor-mirror-check.sh";
 // The shell wrapper's part 1/2 also reads the Studio inline <style>.
 const HEEX = "api/lib/barkpark_web/layouts/root.html.heex";
+// The editor rules the mirror check reads moved out of root.html.heex (edit-on-the-link slice 2).
+const SHELL_CSS = "api/priv/static/assets/bp-paper-editor-shell.css";
 
 const tempRoots = [];
 process.on("exit", () => {
@@ -70,7 +72,7 @@ function makeTree() {
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
   const files = new Set([
     ...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH,
-    SHELL, HEEX,
+    SHELL, HEEX, SHELL_CSS,
   ]);
   for (const rel of files) {
     const dst = join(root, rel);

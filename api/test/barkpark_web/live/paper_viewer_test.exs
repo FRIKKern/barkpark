@@ -75,7 +75,14 @@ defmodule BarkparkWeb.PaperViewerTest do
 
       assert html =~ "Viewer probe"
       assert html =~ ~s(id="paper-sentinel")
-      refute html =~ "can_edit"
+      # The verdict never leaks into the anonymous page. Asserted on what the
+      # reader would actually EMIT for a writable viewer (slice 2's edit bar and
+      # its toggle event) rather than on the substring "can_edit": the shared
+      # bulldocs layout now carries an inline-script COMMENT naming `@can_edit?`
+      # beside the editor-asset tags it gates, so the bare substring is no longer
+      # evidence of a leak.
+      refute html =~ ~s(id="paper-edit-bar")
+      refute html =~ "paper-toggle-edit"
 
       assigns = assigns_of(view)
       assert assigns.viewer == PaperViewer.anonymous()
@@ -89,6 +96,8 @@ defmodule BarkparkWeb.PaperViewerTest do
 
       assert assigns_of(view).viewer == PaperViewer.anonymous()
       assert assigns_of(view).can_edit? == false
+      # An unverifiable string is never echoed back as the raw credential.
+      assert assigns_of(view).api_token_raw == ""
     end
   end
 
@@ -103,6 +112,9 @@ defmodule BarkparkWeb.PaperViewerTest do
       assert %{kind: :token, id: id} = assigns.viewer
       assert id == token.id
       assert assigns.api_token.id == token.id
+      # Slice 2 needs the RAW credential the browser presented (the editor's
+      # `data-token=` bridges); only ever set for a token that VERIFIED.
+      assert assigns.api_token_raw == raw
       assert assigns.can_edit? == true
     end
 

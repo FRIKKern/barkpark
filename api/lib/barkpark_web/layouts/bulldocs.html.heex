@@ -1992,6 +1992,14 @@
       .bp-paper-article .bp-chart { break-inside: avoid; }
     }
   </style>
+  <%!-- EDIT-ON-THE-LINK: the Beta block editor's SHELL stylesheet — the same
+        /assets/bp-paper-editor-shell.css root.html.heex links, so Studio and the
+        reader paint the editor from ONE copy. Loaded LAST in <head>, after the
+        paper-surface embed + reader skin above, mirroring root.html.heex, where
+        it also sits after `paper_stylesheet()`. Gated on `@can_edit?` (nil/false
+        for an anonymous visitor, so a public read fetches nothing new); a
+        stylesheet is not a script, so Golden Rule #4 does not apply. --%>
+  <link :if={assigns[:can_edit?]} rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />
 </head>
 <body>
   {@inner_content}
@@ -2586,6 +2594,23 @@
         <head> and NOT blocking (Golden Rule #4) — the engine itself
         (mermaid.min.js) still loads `defer` above. --%>
   <script src="/assets/bp-paper-mermaid.js"></script>
+  <%!-- EDIT-ON-THE-LINK: the Beta block editor's browser half, loaded ONLY when
+        the viewer may edit (`@can_edit?` — nil/false for anonymous, so a public
+        read fetches none of it). Every file below is the SAME asset Studio's
+        root.html.heex loads; nothing is duplicated for the reader.
+
+        Order matters and is the same as Studio's: NO_INJECT first (the bundle
+        reads it in connectedCallback and skips self-injecting its standalone
+        bp-paper-editor.css — we ship the shell stylesheet in <head> instead),
+        then the custom-element bundles, then the hooks. Bottom of <body>, so
+        Golden Rule #4 holds; the hooks file is non-defer because
+        `window.BarkparkPaperEditorHooks` must exist before the inline boot
+        below folds it into PaperHooks and connects the LiveSocket. --%>
+  <script :if={assigns[:can_edit?]} nonce={assigns[:csp_nonce]}>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-paper-editor.bundle.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-media-picker.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-reference-picker.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-paper-editor-hooks.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     // PaperMermaid: the reader's per-<article> hook. Registered on the streamed
     // <article>, so mounted() fires once and updated() fires on every stream
@@ -2820,6 +2845,14 @@
     // hook itself (window.BarkparkGraph, the same object Studio registers as
     // GraphPane); guarded so a missing asset never breaks the reader's hooks.
     if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
+
+    // EDIT-ON-THE-LINK: the Beta block editor's hooks — BarkparkPaperEditor,
+    // BarkparkPaperCanvas, BarkparkFieldBlockBridge, BarkparkPaperSortable and
+    // BarkparkPaperContextMenu. THE SAME objects Studio registers, defined once
+    // in /assets/bp-paper-editor-hooks.js (loaded above only when @can_edit?).
+    // Guarded like FinderGraph: on an anonymous read the asset is not on the
+    // page at all, and a missing global must never break the reader's own hooks.
+    Object.assign(PaperHooks, window.BarkparkPaperEditorHooks || {});
 
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
