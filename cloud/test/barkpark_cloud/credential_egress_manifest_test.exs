@@ -68,10 +68,12 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
 
     1. It knows which sites SEND a secret and where the destination comes from.
        It does not audit what the box does with the secret afterwards.
-    2. `non_admin_reachable?` is a DECLARED column read off the route's auth
-       plug, not a driven one — except for the console proxy row, which is driven
-       through the real router. Do not quote it as a proved authorization matrix;
-       `web/router_ability_matrix_test.exs` owns that axis.
+    2. `non_admin_reachable` is a DECLARED column for EVERY row — read off the
+       route's auth plug (`Auth.require_user` vs
+       `Auth.require_current_team_admin`) and never driven. The console-proxy row
+       IS driven through the real router, but as an OWNER, so even there the
+       reachability bit is unproved. Do not quote this column as an authorization
+       matrix; `web/router_ability_matrix_test.exs` owns that axis.
     3. The refusal column is driven: each shipped refusal is a POSITIVE CONTROL
        with its own test asserting ZERO requests reached the wire.
   """
