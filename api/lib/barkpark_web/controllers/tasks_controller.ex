@@ -1440,16 +1440,58 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── GET /v1/graph/orphans ──────────────────────────────────────────────
 
+  # Both derived corpus reads run through `graph_derived_opts/1`, which adds the
+  # SAME schema-visibility clamp `/v1/graph` applies (`visible_schemas/2`, the
+  # canonical owner) — these endpoints emit a document's `type` and `title`, so
+  # they answer the corpus question and must answer it under the corpus clamp.
+  # Both also report their BOUND now (`limit` + `truncated`): the 5,000-row scan
+  # ceiling was already enforced inside `Content.Graph`, but a bare list that
+  # stops at the ceiling is indistinguishable from a complete answer — the same
+  # dishonesty `/v1/graph`'s `truncated` flag already fixed for the corpus.
   def graph_orphans(conn, _params) do
-    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
-    json(conn, %{ok: true, orphans: Graph.orphans(opts)})
+    %{orphans: orphans, count: count, limit: limit, truncated: truncated} =
+      Graph.orphans_bounded(graph_derived_opts(conn))
+
+    json(conn, %{
+      ok: true,
+      orphans: orphans,
+      count: count,
+      limit: limit,
+      truncated: truncated
+    })
   end
 
   # ─── GET /v1/graph/dangling ─────────────────────────────────────────────
 
   def graph_dangling(conn, _params) do
-    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
-    json(conn, %{ok: true, dangling: Graph.dangling(opts)})
+    %{dangling: dangling, count: count, limit: limit, truncated: truncated} =
+      Graph.dangling_bounded(graph_derived_opts(conn))
+
+    json(conn, %{
+      ok: true,
+      dangling: dangling,
+      count: count,
+      limit: limit,
+      truncated: truncated
+    })
+  end
+
+  # Scope + dataset + the schema-visibility TYPE allowlist for the two derived
+  # corpus reads. The allowlist is derived at READ TIME off the schema rows this
+  # caller may see, so a schema flipped to private drops out of orphans/dangling
+  # on the very next read — and an empty allowlist fails CLOSED (no types → no
+  # rows), never open.
+  defp graph_derived_opts(conn) do
+    dataset = request_dataset(conn)
+    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset)
+
+    types =
+      dataset
+      |> Content.list_schemas(opts)
+      |> visible_schemas(conn)
+      |> Enum.map(& &1.name)
+
+    Keyword.put(opts, :types, types)
   end
 
   # ─── GET /v1/graph (whole-dataset corpus graph) ─────────────────────────

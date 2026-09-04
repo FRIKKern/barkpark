@@ -86,6 +86,17 @@ defmodule Barkpark.Content.Graph do
   # of exhausting the node.
   @corpus_scan_limit 5_000
 
+  @doc """
+  The derived-corpus scan bound (`orphans_bounded/1` / `dangling_bounded/1`).
+
+  Config-overridable (`:barkpark, :graph_corpus_scan_limit`) for TESTS ONLY —
+  the same escape hatch `/v1/graph`'s node budget has, and for the same reason:
+  a bound whose only proof needs 5,001 fixture rows is a bound nobody tests.
+  """
+  @spec corpus_scan_limit() :: pos_integer()
+  def corpus_scan_limit,
+    do: Application.get_env(:barkpark, :graph_corpus_scan_limit, @corpus_scan_limit)
+
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
@@ -914,7 +925,27 @@ defmodule Barkpark.Content.Graph do
   `:dataset`). Returns hydrated node maps.
   """
   @spec orphans(keyword()) :: [map()]
-  def orphans(opts \\ []) do
+  def orphans(opts \\ []), do: orphans_bounded(opts).orphans
+
+  @doc """
+  `orphans/1` with the BOUND REPORTED — `%{orphans: rows, count: n, limit: l,
+  truncated: bool}`.
+
+  The scan bound (`@corpus_scan_limit`) has always been there; what was missing
+  was any way for a caller to know it FIRED. A bare list that stops at 5,000 is
+  indistinguishable from a corpus that happens to hold exactly 5,000 orphans,
+  and `/v1/graph/orphans` shipped that ambiguity to clients as if it were the
+  whole answer. This reads `limit + 1` rows and drops the probe row, so
+  `truncated` is a MEASUREMENT, not a guess — the same honesty contract
+  `/v1/graph` already holds for its node budget.
+  """
+  @spec orphans_bounded(keyword()) :: %{
+          orphans: [map()],
+          count: non_neg_integer(),
+          limit: pos_integer(),
+          truncated: boolean()
+        }
+  def orphans_bounded(opts \\ []) do
     # The connected-set is a correlated NOT EXISTS against the SCOPED document
     # subquery, not a UNION of every `content_edges` endpoint in the instance.
     #
@@ -932,16 +963,25 @@ defmodule Barkpark.Content.Graph do
         select: 1
       )
 
-    from(d in subquery(scoped_docs_query(opts)),
-      as: :doc,
-      where: not exists(connected),
-      order_by: [asc: d.inserted_at, asc: d.id],
-      limit: ^@corpus_scan_limit
-    )
-    |> Repo.all()
-    |> Enum.map(fn d ->
-      %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
-    end)
+    rows =
+      from(d in subquery(scoped_docs_query(opts)),
+        as: :doc,
+        where: not exists(connected),
+        order_by: [asc: d.inserted_at, asc: d.id],
+        # +1 PROBE ROW: read one past the bound so a full page can be told
+        # apart from an exactly-full corpus. The probe is dropped below.
+        limit: ^(corpus_scan_limit() + 1)
+      )
+      |> Repo.all()
+      |> Enum.map(fn d ->
+        %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
+      end)
+
+    limit = corpus_scan_limit()
+    truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
+
+    %{orphans: rows, count: length(rows), limit: limit, truncated: truncated}
   end
 
   @doc """
@@ -954,26 +994,59 @@ defmodule Barkpark.Content.Graph do
   Returns `[%{from_id, to_id, via_field, refType}]`.
   """
   @spec dangling(keyword()) :: [map()]
-  def dangling(opts \\ []) do
-    docs =
+  def dangling(opts \\ []), do: dangling_bounded(opts).dangling
+
+  @doc """
+  `dangling/1` with the BOUND REPORTED — `%{dangling: rows, count: n, limit: l,
+  truncated: bool}`. See `orphans_bounded/1` for why the bare list was dishonest.
+
+  TWO ceilings here, and `truncated` goes true when EITHER fires: the document
+  SCAN bound (the corpus walk stops at `limit` docs — the pre-existing one) and
+  the ROW bound (one document can emit many broken references, so the folded
+  output was unbounded even though its input was not).
+  """
+  @spec dangling_bounded(keyword()) :: %{
+          dangling: [map()],
+          count: non_neg_integer(),
+          limit: pos_integer(),
+          truncated: boolean()
+        }
+  def dangling_bounded(opts \\ []) do
+    scanned =
       scoped_docs_query(opts)
       |> order_by([d], asc: d.inserted_at, asc: d.id)
-      |> limit(^@corpus_scan_limit)
+      # +1 probe row, exactly as in `orphans_bounded/1`.
+      |> limit(^(corpus_scan_limit() + 1))
       |> Repo.all()
+
+    limit = corpus_scan_limit()
+    scan_truncated = length(scanned) > limit
+    docs = Enum.take(scanned, limit)
 
     # ONE schema read for the whole fold (per distinct dataset) instead of one
     # per document — see `schema_prefetch_fun/2` and the `edges.ex` `:schemas`
     # contract it restores.
     edge_opts_for = schema_prefetch_fun(docs, opts)
 
-    Enum.flat_map(docs, fn doc ->
-      doc
-      |> Content.extract_edges(edge_opts_for.(doc))
-      |> Enum.filter(& &1.dangling)
-      |> Enum.map(fn e ->
-        %{from_id: e.from_id, to_id: e.to_id, via_field: e.field, refType: e.refType}
+    rows =
+      Enum.flat_map(docs, fn doc ->
+        doc
+        |> Content.extract_edges(edge_opts_for.(doc))
+        |> Enum.filter(& &1.dangling)
+        |> Enum.map(fn e ->
+          %{from_id: e.from_id, to_id: e.to_id, via_field: e.field, refType: e.refType}
+        end)
       end)
-    end)
+
+    row_truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
+
+    %{
+      dangling: rows,
+      count: length(rows),
+      limit: limit,
+      truncated: scan_truncated or row_truncated
+    }
   end
 
   # ── Internal scope helpers ──────────────────────────────────────────────────
@@ -996,6 +1069,7 @@ defmodule Barkpark.Content.Graph do
       |> where([d], not like(d.doc_id, ^prefix))
       |> Barkpark.Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
       |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+      |> maybe_scope_to_types(Keyword.get(opts, :types))
 
     query =
       if is_binary(dataset) and dataset != "" do
@@ -1012,6 +1086,36 @@ defmodule Barkpark.Content.Graph do
     # for every current caller (flag absent; no-op inside the wrapper).
     Scope.maybe_scope_to_grants(query, opts)
   end
+
+  # SCHEMA-VISIBILITY narrowing for the derived corpus reads (orphans/dangling).
+  #
+  # These two endpoints emit a document's `type` and `title`, so they answer the
+  # same question `/v1/graph` answers — "what lives in this corpus?" — and must
+  # honour the same clamp. `/v1/graph` runs it as
+  # `Content.list_schemas/2 |> Schema.visible_schemas/2`; the caller passes the
+  # surviving type NAMES down here as `:types` rather than this module reaching
+  # for the schema table itself (`Content.Graph` is kernel-side and has no
+  # principal). The clamp's canonical owner stays
+  # `Content.Schema.visible_schemas/2` — one predicate, not a hand-copy.
+  #
+  # `nil` means "no clamp requested" (every direct caller inside the kernel and
+  # the test suite), NOT "no types" — the narrowing is opt-in at the seam that
+  # knows the principal. An EMPTY list is a real clamp and fails CLOSED: a
+  # caller that may see no schemas sees no orphans.
+  #
+  # OBSERVABLE DELTA TODAY: ~zero, and deliberately so. `/v1/graph/orphans` and
+  # `/v1/graph/dangling` are `:require_token`, and `PublicRead.allowed_route?/1`
+  # admits only the EXACT two-segment `/v1/graph` — so the one tier the clamp
+  # narrows (public-read) is already 403 at the route. This is the same
+  # defense-in-depth posture `graph_perspective/2` documents: the route gate is
+  # load-bearing today, and this makes the derived reads safe the moment the
+  # route gate widens.
+  defp maybe_scope_to_types(query, nil), do: query
+
+  defp maybe_scope_to_types(query, types) when is_list(types),
+    do: where(query, [d], d.type in ^types)
+
+  defp maybe_scope_to_types(query, _), do: query
 
   # Resolve a slug/UUID to its documents.id, published-preferred (CASE-ordered,
   # mirroring reference_title/4), scoped by workspace/project (+ optional

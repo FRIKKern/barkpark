@@ -157,6 +157,66 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
       refute resp.resp_body =~ secret_title
     end
 
+    # The `?drafts=true|1` ALIAS (`Params.parse_perspective/1`) is the SECOND
+    # spelling of the drafts perspective and the one a leaked read credential
+    # would actually reach for — it is what `internal/apiclient/client.go` sends.
+    # The seal is in `resolve_graph_root/2`, which is perspective-keyed, not
+    # spelling-keyed, so the alias resolves nothing at a published root either.
+    # These arms exist because a gate that reads one spelling while the
+    # controller honours two is the bypass class this task was filed for.
+    for {label, query} <- [{"?drafts=true", "?drafts=true"}, {"?drafts=1", "?drafts=1"}] do
+      test "#{label} for a draft-only id does NOT resolve a published root (alias, not just the literal)",
+           %{conn: conn, scope: scope} do
+        doc_id = uniq("leak-alias")
+        secret_title = "DRAFT-SECRET-#{doc_id}"
+        mk_draft_only!(doc_id, secret_title, scope)
+
+        resp = conn |> bearer(@read_token) |> get("/v1/graph/#{doc_id}#{unquote(query)}")
+
+        # A plain read token is INSIDE :require_token and is not anon-pinned, so
+        # the alias legitimately selects the drafts perspective for this tier —
+        # exactly like ?perspective=drafts does today. What must hold is that
+        # the two spellings agree: whatever ?perspective=drafts answers here,
+        # the alias answers too. A DIVERGENCE is the defect.
+        literal =
+          conn |> bearer(@read_token) |> get("/v1/graph/#{doc_id}?perspective=drafts")
+
+        assert resp.status == literal.status,
+               "the #{unquote(label)} alias and ?perspective=drafts disagree " <>
+                 "(#{resp.status} vs #{literal.status}) — one spelling of the drafts " <>
+                 "perspective is reaching a different code path than the other"
+      end
+    end
+
+    test "?drafts=true is NOT honoured for an anon-pinned (public-read) caller",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("leak-alias-public")
+      mk_draft_only!(doc_id, "DRAFT-SECRET-#{doc_id}", scope)
+
+      resp = conn |> bearer(@public_read_token) |> get("/v1/graph/#{doc_id}?drafts=true")
+
+      assert resp.status == 403,
+             "the ?drafts alias reached the graph root resolver for a public-read " <>
+               "caller (got #{resp.status}) — the route gate must refuse it"
+    end
+
+    test "a NON-truthy ?drafts value leaves the default (published) perspective in force",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("leak-alias-false")
+      secret_title = "DRAFT-SECRET-#{doc_id}"
+      mk_draft_only!(doc_id, secret_title, scope)
+
+      for value <- ["false", "0", "yes"] do
+        resp = conn |> bearer(@read_token) |> get("/v1/graph/#{doc_id}?drafts=#{value}")
+
+        assert resp.status == 404,
+               "?drafts=#{value} selected the drafts perspective (got #{resp.status}) — " <>
+                 "the alias must honour ONLY the truthy values parse_perspective/1 lists"
+
+        refute resp.resp_body =~ secret_title
+      end
+    end
+
     test "an EXPLICIT ?perspective=published request for a draft-only id is also 404",
          %{conn: conn, scope: scope} do
       doc_id = uniq("leak-explicit")
