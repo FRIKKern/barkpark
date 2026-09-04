@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  118 scenarios, 24 rendered, 94 in a COMMITTED residue literal.
+//   SCENARIO  120 scenarios, 24 rendered, 96 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -418,8 +418,8 @@ export function familyOf(scen) {
 }
 
 // The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 85
-// name-keyed entries below, which is what makes a 112th scenario refusable.
+// render it. These are REASONS, not an allowlist: the allowlist is the 96
+// name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
@@ -429,27 +429,27 @@ export const RESIDUE_FAMILY_REASONS = {
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 5 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers` inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 7 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, and cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 15 widths, one .plan-rec badge and one full-width button wider than nothing.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 85 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 96 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
 // grows with the artifact and can never refuse anything: it looks itemised, it
-// is even "artifact-derived", and it is 100% vacuous. Typed out, a 112th
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 121st
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 120 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 96 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -553,13 +553,33 @@ export const RESIDUE_FAMILY_REASONS = {
 // RE-READ from `scenarioReport`, and the family stays at 13 because
 // `no-deeplink` already had five members.
 //
+// cch-w50-s4 moved it by TWO, in ONE commit (the strict:false hazard the
+// 104->105 precedent names): `billing-free-owner` and `billing-support-plus` —
+// the two billing ACTORS the corpus had never held — are the 119th and 120th
+// scenarios and the 95th and 96th residue entries. `billing-free-owner` is the
+// UNSUBSCRIBED owner, the actor renderPlanState routes to the upsell card, whose
+// four unique markers (`plan-continue`, "Optimized for shipping to production",
+// "See more plan options", "Recommended") had ZERO hits in a rendered-DOM dump
+// of the whole corpus — so any render-layer guard aimed at that card was green
+// BY CONSTRUCTION. `billing-support-plus` is the first `support_plus` fixture
+// this file has ever carried at all. RESIDUE, not cells: the upsell card and the
+// current-plan card are both the .card.plan-card the `billing-trial` cell walks
+// at all 18 widths, differing by one .plan-rec badge and one .btn-block — no
+// geometry those cells do not already sample. The sweep exited 2 with `UNLISTED
+// scenario "billing-free-owner" (family hash:#billing)` and the twin, and smoke
+// on `CENSUS: 2 committed scenario(s) have NO expectation`, until the entries
+// below and their EXPECTATIONS were written; the numbers here were RE-READ from
+// `scenarioReport`, never carried from the brief — which said 110->112/85->87
+// against a merge base that already measured 118/94. The family stays at 13
+// because `hash:#billing` already had five members.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
 // "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
 // spanning SEVEN lines, and three of the numbers under it were owned by
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 118 / 25 / 24 / 94 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 120 / 25 / 24 / 96 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -690,12 +710,14 @@ export const SCENARIO_RESIDUE = {
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
   "theater-ready": "path:/new",
-  // hash:#billing — 5
+  // hash:#billing — 7
   "billing-portal-return": "hash:#billing",
   "billing-member": "hash:#billing",
   "billing-me-unreadable": "hash:#billing",
   "billing-me-recovers": "hash:#billing",
   "billing-cancelling": "hash:#billing",
+  "billing-free-owner": "hash:#billing",
+  "billing-support-plus": "hash:#billing",
   // hash:#operator — 5
   "operator-zero-staging": "hash:#operator",
   "operator-denied": "hash:#operator",

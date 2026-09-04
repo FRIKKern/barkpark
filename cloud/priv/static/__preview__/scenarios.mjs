@@ -5021,6 +5021,77 @@ export const SCENARIOS = {
       instanceVerify: { status: 404, body: { error: "no_admin_token" } },
     },
   },
+
+  // ── cch-w50-s4: THE TWO BILLING ACTORS THE CORPUS HAS NEVER HELD ────────────
+  // The plan card's bullets rendered in five of the committed scenarios before
+  // this pair, ALL of them paid-or-member. Two arms of renderPlanState had ZERO
+  // fixtures, so every render-layer guard aimed at them was green BY
+  // CONSTRUCTION — a guard over a state no fixture can produce cannot lose.
+  //
+  // 1. THE UNSUBSCRIBED OWNER — the actor renderPlanState routes to the UPSELL
+  //    card. Its four unique markers (`plan-continue`, "Optimized for shipping
+  //    to production", "See more plan options", "Recommended") had zero hits in
+  //    a rendered-DOM dump of the whole corpus.
+  // 2. THE SUPPORT++ OWNER — `grep support_plus scenarios.mjs` returned nothing.
+  //    The third catalog tier had never rendered as a CURRENT plan anywhere.
+  //
+  // THE ENVELOPE IS THE SERVER'S, NOT A SYNTHESIS (charter D573, cch-w43-s1:
+  // "the corpus mints the envelope the server mints"). `subscription: null` is
+  // what GET /v1/subscription actually answers for a team with no live
+  // subscription — web/router.ex:2088/2095 both `json(conn, 200, %{subscription:
+  // nil, billing_capability: billing_capability_json()})`, under the comment "A
+  // team with no active subscription gets {subscription: nil}". A synthesized
+  // `{plan: "free"}` subscription reaches the SAME upsell arm (planFromSub's
+  // `sub.plan !== "free"` guard rejects it, so renderPlanState falls through
+  // identically) — but /v1/subscription never mints that shape for an
+  // unsubscribed team, so the corpus would be asserting against an envelope the
+  // plane cannot produce. loadSubscription sets `subLoaded = true` on r.ok with
+  // `subCache = null`, so renderPlanState skips the trial arm, skips the
+  // active|past_due arm, and reaches the upsell.
+  "billing-free-owner": {
+    label: "Billing — the UNSUBSCRIBED owner: subscription null, so the plan card is the upsell (Recommended badge, Continue, See more plan options)",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      // The server's own arm, verbatim: no live subscription → null, never a
+      // synthesized {plan:"free"}.
+      subscription: null,
+      sites: [],
+      audit: [],
+    },
+  },
+  // The SUPPORT++ owner. `support_plus` is a first-class server plan, not a
+  // console invention: Billing.Subscription's `@plans ~w(free trial supporter
+  // support_plus forever)` validate_inclusion admits it, Billing.limits/0 carries
+  // its ceiling (10), and config keys it to a Stripe price id
+  // (STRIPE_PRICE_SUPPORT_PLUS). The one thing this fixture cannot prove from a
+  // checkout is that the LIVE plane has that price id populated — see the PR's
+  // written exception. What it renders is the tier's card as a CURRENT plan,
+  // which no scenario had ever produced.
+  "billing-support-plus": {
+    label: "Billing — the Support++ owner: the third catalog tier renders as the CURRENT plan, with the manage/cancel owner sections",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "support_plus",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 24 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(60 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
