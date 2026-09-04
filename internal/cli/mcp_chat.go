@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -118,11 +119,17 @@ func registerChatTools(srv *mcp.Server, ctx manifest.Context) {
 			Model:    in.Model,
 			Effort:   in.Effort,
 		})
+		// The fence runs BEFORE err, deliberately: on an accepted status the raw
+		// bytes ARE the receipt, and the only errors reachable there are decode
+		// failures over that same body — "unexpected end of JSON input" is a
+		// worse account of a proxy page than the fence's named reason.
+		if status == http.StatusOK || status == http.StatusCreated {
+			if res := chatSpawnReceiptRefusal(status, raw, s.ID); res != nil {
+				return res, nil
+			}
+		}
 		if err != nil {
 			return mcpTextError(fmt.Sprintf("chat_spawn_session: %v", err)), nil
-		}
-		if res := chatSpawnReceiptRefusal(status, raw, s.ID); res != nil {
-			return res, nil
 		}
 		return mcpChatResult(s), nil
 	})
