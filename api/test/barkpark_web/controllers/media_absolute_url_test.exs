@@ -47,7 +47,9 @@ defmodule BarkparkWeb.Controllers.MediaAbsoluteUrlTest do
 
       origin = BarkparkWeb.Endpoint.url()
 
-      assert absolute = result["absoluteUrl"],
+      absolute = result["absoluteUrl"]
+
+      assert is_binary(absolute),
              "the upload 201 carries no absoluteUrl — every url in the receipt is a " <>
                "relative path and nothing names the origin that serves it"
 
@@ -88,7 +90,9 @@ defmodule BarkparkWeb.Controllers.MediaAbsoluteUrlTest do
 
       origin = BarkparkWeb.Endpoint.url()
 
-      assert absolute = result["absoluteUrl"],
+      absolute = result["absoluteUrl"]
+
+      assert is_binary(absolute),
              "GET /v1/media/production/:id carries no absoluteUrl"
 
       assert String.starts_with?(absolute, origin)
