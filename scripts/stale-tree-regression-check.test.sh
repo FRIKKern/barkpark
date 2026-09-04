@@ -113,7 +113,6 @@ build_fixture() {
   commit_all "feat: Z"
   gf reset -q --soft "$C1"
   commit_all "feat: Z (squashed onto newer main)"
-  STALE="$(gf rev-parse HEAD)"
 
   # ── main keeps moving after the squash parent, as it did in #15930.
   gf checkout -q main
