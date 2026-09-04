@@ -163,8 +163,15 @@ if [ -f /etc/barkpark/agent.token ]; then
   # active unit, so systemd never re-execs and the running agent keeps serving
   # the DELETED inode of the binary we just replaced (measured 29h stale on
   # guerrilla — the bug #9823 fixed for the slot path).
+  # Build to a tmpdir and `install` (not `go build -o` straight onto the live
+  # path): install(1) unlinks first, so a RUNNING barkpark-agent never
+  # ETXTBSY-blocks its own refresh — the idiom instance-deploy.sh's barkpark-mcp
+  # block established (dr-w4-bl-agent-build-in-place-can-etxtbsy).
+  AGENT_TMPD="$(mktemp -d)"
   if command -v go > /dev/null 2>&1 &&
-    go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent &&
+    go build -o "$AGENT_TMPD/barkpark-agent" ./cmd/barkpark-agent &&
+    install -m 0755 "$AGENT_TMPD/barkpark-agent" /usr/local/bin/barkpark-agent &&
+    rm -rf "$AGENT_TMPD" &&
     install -m 0644 deploy/systemd/barkpark-agent.service /etc/systemd/system/barkpark-agent.service &&
     systemctl daemon-reload &&
     systemctl enable barkpark-agent > /dev/null 2>&1 &&
