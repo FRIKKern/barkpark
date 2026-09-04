@@ -17467,7 +17467,8 @@ test("cch-w50: the two cards read ONE tagline model, so the clamp cannot land on
 test("G-04: the notification builders + routing helpers are exported", () => {
   for (const name of ["notifMatrixColumns", "notifChannelState", "notifCellState",
     "notifEventChannels", "notifTransportLabel", "notifDeliveryTone", "notifDeliveryStatusLabel",
-    "notifDeliveryRowHtml", "notifDeliveriesHtml", "notifDeliveriesErrorHtml",
+    "notifDeliveryRowHtml", "notifDeliveryCarrierLabel", "notifDeliveriesHtml",
+    "notifDeliveriesErrorHtml",
     "notifEmailSectionHtml", "notifChannelsSectionHtml", "notifChannelRowHtml",
     "notifMatrixSectionHtml", "notifMatrixCellHtml", "notifDeliveriesShellHtml",
     "notifMemberAdminNoticeHtml", "notifPageHtml"]) {
@@ -17626,6 +17627,89 @@ test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error"
   assert.match(chat, /204 OK/);
   assert.match(chat, /wh-del-status--ok/);
   assert.doesNotMatch(chat, /wh-del-err/);
+});
+
+// ── cch-w52-s3: THE CARRIER SEGMENT ──────────────────────────────────────────
+//
+// THIS SLICE AUTHORS ITS OWN PIN, DELIBERATELY. The Console gate was measured
+// BLIND to this change: a plain-text meta segment breaks ZERO of the nine node
+// instruments the gate runs (`__css_check` only fires on a NEW class emitted with
+// no rule in app.css, and this segment introduces none). A green Console gate
+// after this change proves that app.js still parses — nothing about what the row
+// says. Every assertion below therefore states the CLAIM, not the compile.
+//
+// Note also what does NOT cover this: the only `doesNotMatch(/wh-del-meta/)` in
+// this suite guards `deliveryRowHtml`, the WEBHOOK row built by a different
+// function. It is untouched here and must not be read as coverage.
+
+test("cch-w52-s3 a delivery row NAMES ITS CARRIER — channel is the egress family, not the mechanism", () => {
+  // A team's OWN relay carried it. Before this field, this row and the one below
+  // it were byte-identical, which is the defect: the fallback was invisible.
+  const carried = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "team_smtp", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(carried, /own SMTP relay/,
+    "a send the team's own relay carried must SAY so — otherwise the log cannot answer 'sent by what'");
+  assert.doesNotMatch(carried, /Barkpark platform mailer/);
+
+  // The SILENT FALLBACK: same team, same transport selection, but the override
+  // could not be built, so the platform carried it. Same channel ("email"), same
+  // status ("sent") — the carrier is the ONLY thing that distinguishes them.
+  const fellBack = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "platform", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(fellBack, /Barkpark platform mailer/);
+  assert.doesNotMatch(fellBack, /own SMTP relay/);
+
+  // NON-VACUITY: the two rows differ ONLY in `carrier`, so if the segment were
+  // dropped from the meta join these would be identical strings and every
+  // assertion above would still need this one to notice.
+  assert.notEqual(carried, fellBack,
+    "two rows differing only in carrier rendered IDENTICALLY — the carrier segment is not on the row at all");
+
+  // The segment rides the EXISTING meta span; no new class was minted.
+  assert.match(carried, /wh-del-meta/);
+  assert.doesNotMatch(carried, /wh-del-carrier/);
+});
+
+test("cch-w52-s3 UNKNOWN is a SENTENCE, never a blank and never an omitted segment", () => {
+  // A row written before the column existed cannot prove its carrier. The house
+  // style of this epic is that unknown is a STATE — so it gets words, not a gap.
+  const unknown = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "unknown", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(unknown, /carrier not recorded/);
+
+  // A MISSING carrier is the same epistemic state as an explicit "unknown" and
+  // must read the same way — a null on the wire is not licence to render a blank.
+  const absent = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: null, status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(absent, /carrier not recorded/);
+  assert.equal(hooks.notifDeliveryCarrierLabel({}), "carrier not recorded",
+    "an object with no carrier key at all still gets the sentence");
+
+  // A DANGLING SEPARATOR is the failure mode a blank produces — the meta join
+  // would read "email &middot;  &middot; 1 attempt". Pin that it cannot happen.
+  assert.doesNotMatch(absent, /&middot;\s*&middot;/);
+
+  // A legacy chat row backfilled to its own channel is KNOWN, not unknown, and is
+  // rendered verbatim rather than flattened into the unknown sentence.
+  assert.equal(hooks.notifDeliveryCarrierLabel({ carrier: "discord" }), "via discord");
+
+  // NO `api` MEMBER anywhere in this vocabulary. cch-w52-s1 deleted that
+  // transport because nothing carried it; the fix that makes carriers legible
+  // must not re-mint the word.
+  const labels = ["platform", "team_smtp", "unknown", null].map(function (c) {
+    return hooks.notifDeliveryCarrierLabel({ carrier: c });
+  });
+  labels.forEach(function (l) {
+    assert.doesNotMatch(l, /\bAPI\b/i, "the console re-introduced an 'api' carrier: " + l);
+  });
 });
 
 test("G-04 notifDeliveriesHtml: populated card vs honest empty; error degrade is distinct", () => {
