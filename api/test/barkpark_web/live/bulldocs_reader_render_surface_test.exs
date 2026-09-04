@@ -14,7 +14,7 @@ defmodule BarkparkWeb.BulldocsReaderRenderSurfaceTest do
   cache was stamp-free while the LIVE reader still stamped, so the two
   disagreed byte-for-byte for exactly the non-article rows.
 
-  `bulldocs_email_controller.ex:39` — the one caller that genuinely wants
+  `BulldocsEmailController.show/2` (bulldocs_email_controller.ex) — the one caller that genuinely wants
   `:email` — names it itself, re-renders from blocks, and is untouched by this
   row; `api/lib/barkpark/portable_doc/render.ex` is not in this diff either.
 

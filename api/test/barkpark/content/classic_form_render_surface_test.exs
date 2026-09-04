@@ -16,7 +16,7 @@ defmodule Barkpark.Content.ClassicFormRenderSurfaceTest do
 
   Two mutations pin that, both pasted in PR #16047:
 
-    * revert forms.ex:202 alone, this test stays **GREEN** (`1 test, 0
+    * revert the `forms.ex` hunk alone, this test stays **GREEN** (`1 test, 0
       failures`) — the site is not the last writer;
     * keep forms.ex fixed and revert *writer.ex*'s `Map.put(:style, :article)`
       instead, and this test **REDS** on `refute stored_html =~ "font-family:"`
@@ -35,7 +35,7 @@ defmodule Barkpark.Content.ClassicFormRenderSurfaceTest do
   `:article` render. It reds if EITHER layer regresses (mutation two above),
   which is the guard that matters to a reader.
 
-  `bulldocs_email_controller.ex:39` — the one caller that genuinely wants
+  `BulldocsEmailController.show/2` (bulldocs_email_controller.ex) — the one caller that genuinely wants
   `:email` — names it itself and re-renders from blocks; it is untouched by
   this row, as is `api/lib/barkpark/portable_doc/render.ex`.
 
