@@ -90,7 +90,7 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.{Content, Tasks, TenancyFixtures}
+  alias Barkpark.{Content, QueryCounter, Tasks, TenancyFixtures}
 
   @dataset "production"
 
@@ -144,69 +144,14 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
   # ── the counter ─────────────────────────────────────────────────────────────
   #
-  # Copied from graph_controller_test.exs `count_repo_queries` — the
-  # pid-filter-FREE shape (attach, send from ANY process, detach, drain),
-  # extended with the per-source split (`meta[:source]` from Ecto telemetry).
-
-  # `fun` runs the leg and returns the EXTRA pids that belong to this request
-  # (the LiveView process for `live/2`; none for the dead leg). Ownership is
-  # resolved after the leg, never inside the handler — see @moduledoc.
-  defp count_repo_queries(fun) do
-    ref = make_ref()
-    test_pid = self()
-    handler_id = {:reader_query_counter, ref}
-
-    :telemetry.attach(
-      handler_id,
-      [:barkpark, :repo, :query],
-      # NO pid filter here — see @moduledoc. The handler executes in the
-      # query-issuing process (test pid on the dead leg, the LiveView process
-      # on the connected leg) and reports unconditionally, tagging the event
-      # with that process and its spawn lineage so ownership can be decided
-      # once the leg has named its LiveView process.
-      fn _event, _measurements, meta, _cfg ->
-        send(test_pid, {ref, :query, meta[:source], self(), process_lineage()})
-      end,
-      nil
-    )
-
-    extra_pids =
-      try do
-        fun.()
-      after
-        :telemetry.detach(handler_id)
-      end
-
-    drain_counts(ref, MapSet.new([test_pid | extra_pids]), {0, %{}})
-  end
-
-  # The chain a spawned worker records about who started it. `$callers` is set
-  # by `Task`/`Task.Supervisor`, `$ancestors` by `proc_lib` (GenServer et al).
-  # A process started by the application supervisor at boot — every background
-  # sweeper — carries neither the test pid nor the LiveView pid here.
-  defp process_lineage do
-    case Process.info(self(), :dictionary) do
-      {:dictionary, dict} ->
-        Keyword.get(dict, :"$callers", []) ++ Keyword.get(dict, :"$ancestors", [])
-
-      _ ->
-        []
-    end
-  end
-
-  defp drain_counts(ref, owners, {count, per_source}) do
-    receive do
-      {^ref, :query, source, pid, lineage} ->
-        if MapSet.member?(owners, pid) or Enum.any?(lineage, &MapSet.member?(owners, &1)) do
-          key = source || "(no source)"
-          drain_counts(ref, owners, {count + 1, Map.update(per_source, key, 1, &(&1 + 1))})
-        else
-          drain_counts(ref, owners, {count, per_source})
-        end
-    after
-      0 -> {count, per_source}
-    end
-  end
+  # `Barkpark.QueryCounter` (test/support/query_counter.ex) — the shared
+  # lineage-scoped counter this file's own copy was lifted into. Same
+  # semantics, unchanged: the handler reports from ANY process, tags each event
+  # with the issuing pid and its `$callers`/`$ancestors`, and ownership is
+  # resolved after the leg has named its LiveView process with `own/1`. See
+  # that module's @moduledoc for why neither "count everything" nor a `self()`
+  # filter is correct here; its permanent leak trap lives in
+  # `Barkpark.QueryCounterTest`.
 
   # The VACUOUS-GREEN TWIN — deliberately wrong, kept only for the trap test
   # below. Counts a query ONLY when the issuing process is the test process,
@@ -231,8 +176,15 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
       :telemetry.detach(handler_id)
     end
 
-    {count, _} = drain_counts(ref, MapSet.new([test_pid]), {0, %{}})
-    count
+    drain_filtered(ref, 0)
+  end
+
+  defp drain_filtered(ref, acc) do
+    receive do
+      {^ref, :query, nil} -> drain_filtered(ref, acc + 1)
+    after
+      0 -> acc
+    end
   end
 
   # ── the pinned fixture ──────────────────────────────────────────────────────
@@ -388,19 +340,24 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # `Phoenix.ConnTest.get/2` runs the endpoint in the test process, so the dead
   # leg owns no extra pid.
   defp dead_leg(conn, slug) do
-    count_repo_queries(fn ->
-      conn |> get("/papers/#{slug}") |> html_response(200)
-      []
-    end)
+    {_, census} =
+      QueryCounter.census(fn ->
+        conn |> get("/papers/#{slug}") |> html_response(200)
+      end)
+
+    census
   end
 
   # `live/2`'s disconnected mount runs in the test process; the connected mount
   # runs in `view.pid`, which is why the counter cannot filter on `self()`.
   defp both_legs(conn, slug) do
-    count_repo_queries(fn ->
-      {:ok, view, _html} = live(conn, "/papers/#{slug}")
-      [view.pid]
-    end)
+    {_, census} =
+      QueryCounter.census(fn ->
+        {:ok, view, _html} = live(conn, "/papers/#{slug}")
+        QueryCounter.own(view.pid)
+      end)
+
+    census
   end
 
   defp print_census(label, count, per_source) do
@@ -512,11 +469,10 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
       {clean, clean_sources} = dead_leg(conn, slug)
 
-      {noisy, noisy_sources} =
-        count_repo_queries(fn ->
+      {_, {noisy, noisy_sources}} =
+        QueryCounter.census(fn ->
           conn |> get("/papers/#{slug}") |> html_response(200)
           foreign_chat_messages_statement!()
-          []
         end)
 
       refute Map.has_key?(clean_sources, "chat_messages"),
