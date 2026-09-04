@@ -1217,7 +1217,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       content =
         (doc.content || %{})
-        |> Map.put(field, Projection.project_body(new_blocks, Labels.render_opts(dataset, scope)))
+        |> Map.put(
+          field,
+          # task-c46967eb3dc49e77: this field body is read on a SCREEN — the
+          # Studio field editor and the paper/document readers — so it names
+          # `:article` instead of letting `Render.render_block/2`'s
+          # `Map.get(opts, :style, :email)` default stamp mail typography into
+          # a persisted field. Siblings: #15973 (document `content[body][html]`),
+          # #16037 (papers `body_html`).
+          Projection.project_body(
+            new_blocks,
+            Map.put(Labels.render_opts(dataset, scope), :style, :article)
+          )
+        )
 
       attrs = %{
         "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
@@ -2988,12 +3000,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
   defp maybe_project(content, blocks, type, dataset, slug, scope) when is_list(blocks) do
+    # task-c46967eb3dc49e77 — A FIFTH style-less site, found by this row's
+    # census and NOT in its filing. `write_encrypted_blocks_doc/8` renders
+    # `content["body_html"]` through `Labels.paper_render_opts/3` (`:article`
+    # since #16037) and then projects `content["body"]["html"]` through THESE
+    # opts, which carried no `:style` — so `Render.render_block/2`'s
+    # `Map.get(opts, :style, :email)` default decided and one paper row stored
+    # its body twice, on TWO DIFFERENT SURFACES. Measured on b2529b02c via
+    # `Content.upsert_paper/1` with a plain paragraph and no `content["style"]`:
+    #
+    #     body_html      => "<p>probe copy</p>"
+    #     body["html"]   => "<p style=\"margin:0 0 16px;font-family:'Iowan Old
+    #                        Style',…;font-size:17px;line-height:1.55;
+    #                        color:#15211d\">probe copy</p>"
+    #
+    # This path persists via direct Repo writes (`persist_blocks_doc/9`), so
+    # unlike the document leg it is NOT rescued downstream by
+    # `Writer.maybe_project_document_content/2` — the email bytes really landed.
     render_opts =
-      Map.put(
-        Labels.render_opts(dataset, scope),
-        :preview,
-        blocks_doc_preview_opts(type, slug, scope)
-      )
+      Labels.render_opts(dataset, scope)
+      |> Map.put(:preview, blocks_doc_preview_opts(type, slug, scope))
+      |> Map.put(:style, :article)
 
     Projection.project(content, blocks, render_opts)
   end
@@ -3035,10 +3062,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
-    Map.put(Labels.render_opts(dataset, scope), :preview, %{
+    # task-c46967eb3dc49e77: names `:article` rather than letting
+    # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default pick.
+    # Defence in depth on THIS leg — `apply_document_block_op/5` finishes
+    # through `Content.upsert_document/4`, whose
+    # `Writer.maybe_project_document_content/2` re-projects the same keys on
+    # the already-`:article` `doc_render_opts/3`, so nothing persisted here was
+    # ever wrong. The paper leg above (`maybe_project/6`) is the one that was.
+    Labels.render_opts(dataset, scope)
+    |> Map.put(:preview, %{
       media_resolver: Preview.media_resolver(scope),
       doc_type: type
     })
+    |> Map.put(:style, :article)
   end
 
   # Tenancy scope for the media resolver: an explicit caller scope wins, else the

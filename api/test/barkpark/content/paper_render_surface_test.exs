@@ -80,6 +80,41 @@ defmodule Barkpark.Content.PaperRenderSurfaceTest do
       assert email_html =~ "font-size:17px"
     end
 
+    # task-c46967eb3dc49e77 — the FIFTH style-less site, found by this row's
+    # census and NOT in its filing. `upsert_paper` renders `body_html` through
+    # `Labels.paper_render_opts/3` (`:article` since the row above) but
+    # projected `content["body"]["html"]` through style-less
+    # `Labels.render_opts/2` in `block_ops.maybe_project/6`, so ONE ROW stored
+    # its body twice on TWO DIFFERENT SURFACES. This path persists via direct
+    # Repo writes, so — unlike the document leg — it is NOT rescued downstream
+    # by `Writer.maybe_project_document_content/2`.
+    test "the projected content[body][html] matches body_html instead of splitting surfaces" do
+      slug = "render-surface-split-#{System.unique_integer([:positive])}"
+      blocks = [para("p1", "one row must not store two surfaces")]
+
+      doc = seed_plain_paper(slug, blocks)
+
+      body_html = doc.content["body_html"]
+      projected = get_in(doc.content, ["body", "html"])
+      article_html = Render.render_blocks(blocks, %{style: :article})
+      email_html = Render.render_blocks(blocks, %{style: :email})
+
+      assert is_binary(projected)
+
+      refute projected =~ "font-family:"
+      refute projected =~ "font-size:"
+      refute projected =~ "line-height:"
+
+      assert projected == article_html
+
+      # The two keys agree — that is the whole point of this row.
+      assert projected == body_html
+
+      # ANTI-VACUITY: the surfaces really do differ for this block.
+      refute article_html == email_html
+      assert email_html =~ "font-size:17px"
+    end
+
     test "the DoctrineBackfill re-projection keeps both the cache and the body off the mail surface" do
       # The two style-less mix backfills (composition_migration.ex,
       # doctrine_backfill.ex) rendered `body_html` through `paper_render_opts/3`

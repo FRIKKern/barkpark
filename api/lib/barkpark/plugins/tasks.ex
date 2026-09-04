@@ -666,7 +666,23 @@ defmodule Barkpark.Plugins.Tasks do
           # complete and say nothing. A wrong number here does not truncate
           # anything; it makes a truncation UNANNOUNCED, which is worse.
           %{name: "limit", type: "int", summary: "Max tasks to return.", default: 100},
-          %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
+          %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0},
+          # bl-api-tasks-stable-cursor. DECLARED here because a paging model a
+          # client cannot discover is a paging model nobody uses: the manifest
+          # IS how `bp` and every generated SDK learn the route's affordances,
+          # and this one exists precisely so a reader can tell a CLOSED task
+          # from one that rotated out of the 1000-row window. Send `?cursor=`
+          # empty for page one; the response's `page.next_cursor` (present only
+          # when you asked) is the token for the next. Not combinable with
+          # `offset` — the server 400s rather than guess which one you meant.
+          %{
+            name: "cursor",
+            type: "string",
+            summary:
+              "Keyset page cursor over (updated_at, id) — pass empty for page 1, " <>
+                "then echo page.next_cursor. Walks past the 1000-row limit cap, " <>
+                "so a missing task means closed/absent, not rotated out. Not with offset."
+          }
         ],
         writes: false,
         batch: false,
