@@ -40,6 +40,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Delete,
     Discard,
     Doc,
+    FieldBlocks,
     Fields,
     History,
     ItemShare,
@@ -502,6 +503,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  # Gyldendal parity E1 — a block-configured richText FIELD's canvas ops.
+  def handle_event("field-block-ops", params, socket),
+    do: FieldBlocks.field_block_ops(params, socket)
 
   # t9: live task-block preview — the canvas hook requests fresh resolved rows on
   # mount and ~500ms-debounced after a query edit; we push them on the parallel

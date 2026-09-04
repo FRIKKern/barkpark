@@ -57,6 +57,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
+  # The open document's id — keys a field canvas wrapper so a doc→doc patch
+  # navigation remounts it instead of transplanting the `phx-update="ignore"`
+  # wrapper across documents (paper_canvas.ex bug #1c).
+  attr :doc_key, :string, default: "doc"
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
@@ -104,6 +108,44 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
   # See docs/studio/web-components.md for the full contract.
+  # richText with `"editor": "blocks"` — Gyldendal parity stage E1. The field
+  # is edited by the SAME <bp-paper-canvas> the paper editor uses, seeded with
+  # the field's own block array and the field's declared vocabulary
+  # (data-canvas-vocabulary, the twin of data-canvas-constraints). There is NO
+  # hidden input and no BarkparkFieldBridge: block edits travel as ops through
+  # the BarkparkFieldCanvas hook → `field-block-ops` → the field-scoped apply
+  # path, and the server echo comes back on `bp:field-canvas-update`. An
+  # unconfigured richText keeps the clause below byte-identically.
+  def input(%{field: %{"type" => "richText", "name" => name, "editor" => "blocks"} = f} = assigns) do
+    blocks = Barkpark.Content.field_blocks(Map.get(assigns.editor_form, name))
+    vocab = Map.get(f, "blocks") || %{}
+
+    assigns =
+      assign(assigns,
+        n: name,
+        blocks_json: Jason.encode!(blocks),
+        vocab_json: Jason.encode!(vocab)
+      )
+
+    ~H"""
+    <div
+      id={"bp-fc-wrap-#{@doc_key}-#{@n}"}
+      phx-update="ignore"
+      phx-hook="BarkparkFieldCanvas"
+      class="bp-paper-edit-canvas bp-field-canvas"
+      data-field={@n}
+      data-doc-key={@doc_key}
+      data-canvas-blocks={@blocks_json}
+      data-canvas-vocabulary={@vocab_json}
+      data-canvas-dataset={@dataset}
+      data-canvas-token={@api_token_raw}
+      data-test-id="field-canvas"
+    >
+      <bp-paper-canvas></bp-paper-canvas>
+    </div>
+    """
+  end
+
   def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)

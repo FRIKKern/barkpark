@@ -41,10 +41,22 @@ defmodule Barkpark.Content.Forms do
       Enum.reduce(schema.fields, base, fn field, acc ->
         key = field["name"]
 
+        raw = get_in(doc.content || %{}, [key])
+
         val =
-          if key in ["title", "status"],
-            do: Map.get(acc, key),
-            else: classic_form_value(get_in(doc.content || %{}, [key]))
+          cond do
+            key in ["title", "status"] ->
+              Map.get(acc, key)
+
+            # A `richText` field that opted into the block editor is read by
+            # the field canvas as its block array, not as flattened HTML — it
+            # has no form input, so this map never reaches a form param.
+            Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field) ->
+              raw
+
+            true ->
+              classic_form_value(raw)
+          end
 
         Map.put(acc, key, val)
       end)
