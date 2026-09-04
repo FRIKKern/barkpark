@@ -587,12 +587,98 @@ list_escapes() {
   local concats cj clit crest suppress sup skip
   local chains ch subname sublit subdir cjoins
   local sigil orow omatch el xlits xl
+  local prescan_file p_tab pla pla_eof prest pf ppay ptag
   # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
   # .exs on disk is code the suite will run, so it is code this ratchet must see.
   sources="$(cd -- "$REPO_ROOT" && find api/lib api/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
+
+  # ---- THE BATCHED PRE-SCAN ----------------------------------------------
+  # Three of this function's greps are PER FILE and unconditional — the anchor
+  # scan, the opener scan (shapes 6 + 2 share one grep) and the literal/sigil
+  # scan. At 2,227 files on this tree that is ~6,700 grep processes per census,
+  # and the `path-escape` job runs six censuses (five harness cases plus
+  # `--check`). MEASURED on the last 8 green main pushes, that job took
+  # 170/169/162/161/145/139/135/125 s wall.
+  #
+  # Fork cost is not scan cost: the same three EREs over the same 2,227 files
+  # are THREE grep invocations when the file list is handed to grep in bulk.
+  # So they run here, once each, tagged `A`/`O`/`L`, and the loop below reads
+  # each file's rows out of the merged stream instead of shelling out.
+  #
+  # WHY THIS IS THE SAME CENSUS, not an approximation:
+  #   * the EREs are the ones the three sites used, character for character;
+  #   * `-H` restores the filename `-h` used to suppress, and it is the only
+  #     thing stripped back off — the payload handed to each door is byte-for-
+  #     byte what its own `grep -oh` / `grep -no` produced;
+  #   * grep visits files in the order given, so within a tag every file's
+  #     rows stay in file order and every file's own rows stay in line order;
+  #   * `sort -s` (STABLE) on the filename field alone therefore groups by
+  #     file WITHOUT reordering anything inside a group, and the A-then-O-then-L
+  #     concatenation order is preserved per file — which is irrelevant to the
+  #     output anyway, since each tag lands in its own variable;
+  #   * the filename key is sorted `LC_ALL=C`, exactly as `sources` is, so the
+  #     merged stream advances in lockstep with the loop below.
+  # A file with no rows in any of the three streams emitted nothing before
+  # (every door either loops over an empty match set or hits the `[ -n "$lits" ]
+  # guard), and contributes nothing here.
+  #
+  # `xargs -0` rather than one giant argv: the file list is ~130 KB today and
+  # ARG_MAX is not a limit this scanner should acquire silently. xargs preserves
+  # the order of the list across batches, and `-H` is passed explicitly so a
+  # final batch of ONE file still prints its filename.
+  p_tab="$(printf '\t')"
+  prescan_file="${TMPDIR:-/tmp}/elixir-path-escape-prescan.$$.$RANDOM"
+  (
+    cd -- "$REPO_ROOT" || exit 1
+    {
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EoH '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.expand\("[./]*(\#\{[^}]*\})?[./]*",[[:space:]]*__DIR__\)' 2>/dev/null |
+        awk -v t=A '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EonH '^[[:space:]]*Path\.join\([[:space:]]*$|System\.(cmd|shell)\(' 2>/dev/null |
+        awk -v t=O '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EoH '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' 2>/dev/null |
+        awk -v t=L '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+    } | LC_ALL=C sort -s -t"$p_tab" -k2,2
+  ) >"$prescan_file"
+
+  exec 9<"$prescan_file"
+  pla=""
+  pla_eof=0
+  IFS= read -r pla <&9 || pla_eof=1
+
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    d="$(dirname -- "$f")"
+    # `dirname` was a fork per file; every path here is under api/lib or
+    # api/test, so it always has a slash. The `*` arm keeps the fallback
+    # `dirname` gave a bare filename.
+    case "$f" in
+      */*) d="${f%/*}" ;;
+      *) d="." ;;
+    esac
+
+    # Drain this file's pre-scan rows. The stream is grouped and ordered like
+    # `sources`, so a file with no rows simply does not advance the reader.
+    anchors=""
+    openers=""
+    lits=""
+    while [ "$pla_eof" -eq 0 ]; do
+      prest="${pla#*$p_tab}"
+      pf="${prest%%$p_tab*}"
+      [ "$pf" = "$f" ] || break
+      ptag="${pla%%$p_tab*}"
+      ppay="${prest#*$p_tab}"
+      case "$ptag" in
+        A) anchors="$anchors$ppay
+" ;;
+        O) openers="$openers$ppay
+" ;;
+        L) lits="$lits$ppay
+" ;;
+      esac
+      IFS= read -r pla <&9 || pla_eof=1
+    done
     # The SOURCE-TREE half of the tag. `other` is deliberately absent from
     # ELIXIR_ESCAPE_IDIOM_MIN: the `find` above walks exactly api/lib and
     # api/test, so a row tagged `other-*` means somebody widened the find
@@ -638,7 +724,6 @@ list_escapes() {
     # (most are a finished read, not something later joined onto) and, at 89
     # extra anchors, the difference between this check finishing in ~1 minute
     # and not finishing inside a CI timeout.
-    anchors="$(grep -Eoh '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.expand\("[./]*(\#\{[^}]*\})?[./]*",[[:space:]]*__DIR__\)' "$REPO_ROOT/$f" || true)"
     anchor_pairs=""
     while IFS= read -r a; do
       [ -n "$a" ] || continue
@@ -921,7 +1006,6 @@ EOF
     # a separate grep per shape took the real-tree run 73s -> 117s; folded
     # into this alternation it is back at ~76s. `-no` keeps `LINE:MATCH`, and
     # the match text is what routes each hit to its own door.
-    openers="$(grep -noE '^[[:space:]]*Path\.join\([[:space:]]*$|System\.(cmd|shell)\(' "$REPO_ROOT/$f" || true)"
     while IFS= read -r orow; do
       [ -n "$orow" ] || continue
       ol="${orow%%:*}"
@@ -1048,7 +1132,6 @@ EOF
     # per-file process cost the note on the opener scan above prices. A hit
     # starting with `~` is a sigil, everything else is a double-quoted
     # literal; the `case` below is what routes it.
-    lits="$(grep -Eoh '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' "$REPO_ROOT/$f" || true)"
     [ -n "$lits" ] || continue
     while IFS= read -r lit; do
       # `~s(../x)` / `~S{…}` / `~c[…]` / `~C<…>` — SHAPE 5. Every supported
@@ -1099,6 +1182,8 @@ EOF
   done <<EOF
 $sources
 EOF
+  exec 9<&-
+  rm -f -- "$prescan_file"
 }
 
 is_exempt() {
