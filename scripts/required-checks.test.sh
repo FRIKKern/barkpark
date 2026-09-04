@@ -35,6 +35,42 @@
 # --live mutates a throwaway branch in the repo (never main; it refuses) and
 # cleans up after itself.
 #
+# THE EXIT-CODE TABLE — AND WHY 4 EXISTS
+#
+#   0   every assertion passed, and the tally line was reached
+#   1   ASSERTION DRIFT: the suite read every input it needed and something it
+#       asserts about the toolchain is no longer true. A verdict AGAINST the
+#       repo — someone must fix the repo.
+#   2   you invoked me wrong (unknown flag, contradictory flags, a non-bash or
+#       POSIX-mode interpreter)
+#   3   no git object database / no shared check-runs lib — a PRECONDITION of
+#       the run is absent, refused before the first assertion
+#   4   INPUT UNREADABLE / PRODUCER REFUSED: the suite could not obtain an input
+#       it needed to make an assertion — the generator refused and wrote no
+#       spec, a fixture could not be read. NOT a verdict about the repo's
+#       required set; the suite never got far enough to have one. A caller
+#       should HOLD, not report drift.
+#   70  the run ended before its tally line while reporting success (a crash is
+#       not a pass; see the EXIT trap below)
+#
+# 4 IS THE MACHINE HALF OF #14371. That fix made the generator's refusal
+# READABLE ("the generator REFUSED (exit N), wrote no <file>, and said: …")
+# after `Required-check spec gate` sat red for the 2026-08-24T21:59Z ->
+# 2026-08-31 bracket and the whole fleet learned to ignore the red. The human
+# half alone leaves a machine reading `exit 1` unable to tell "your PR drifted
+# the spec" from "our generator is down", which is how a red gets ignored in
+# the first place. 4 separates them.
+#
+# PRECEDENCE, AND IT IS DELIBERATE: 4 outranks 1. A run that could not read an
+# input cannot be trusted to have completed the assertions that WOULD have
+# found drift, so a run with both a blocked site and a failed one reports the
+# blocked one — "I could not tell you" beats a partial verdict. The tally line
+# still prints, and it prints the blocked count separately from the failed
+# count so neither is hidden inside the other. No assertion drift ever maps to
+# 4: only `blocked()` raises it, and only `fail_emit` routes to `blocked()`,
+# and only when the producer's own refusal is on record in GEN_EMIT_ERR.
+# Section 25 pins both directions.
+#
 # THE INTERPRETER GUARD, AND THE VACUOUS GREEN IT DELETES (wave 53)
 #
 # The shebang above only decides who runs this file when it is EXECUTED. An
@@ -154,6 +190,12 @@ fi
 
 PASS=0
 FAIL=0
+# BLOCKED is the third tally, and it is NOT a kind of FAIL. A `bad` is a verdict
+# about the repo; a `blocked` is the suite reporting that it could not obtain an
+# input and therefore has no verdict to give. They are counted apart so the
+# tally line cannot hide one inside the other, and `rc_exit_code` maps them to
+# distinct exit codes (see the table in the header).
+BLOCKED=0
 TMP="$(mktemp -d)"
 # A CRASH IS NOT A PASS, AND THIS FILE USED TO REPORT IT AS ONE.
 # `cleanup() { rm -rf "$TMP"; }` ends in a command that succeeds, and an EXIT
@@ -184,6 +226,20 @@ trap cleanup EXIT
 
 ok()   { PASS=$((PASS + 1)); echo "  ok   $*"; }
 bad()  { FAIL=$((FAIL + 1)); echo "  FAIL $*" >&2; }
+# A site that could not READ its input says so in its own word. `BLOCKED` never
+# increments FAIL: the exit code, not the failed count, is what tells the two
+# apart, and a caller that greps `0 failed` must still see the blocked count on
+# the same tally line.
+blocked() { BLOCKED=$((BLOCKED + 1)); echo "  BLOCKED $*" >&2; }
+
+# The exit-code table as a FUNCTION, so the tally line and section 25 read the
+# same rule rather than two copies of it. <failed> <blocked> -> code.
+rc_exit_code() {
+  if   [ "${2:-0}" -gt 0 ]; then printf '4'
+  elif [ "${1:-0}" -gt 0 ]; then printf '1'
+  else                           printf '0'
+  fi
+}
 
 section() { echo; echo "── $* ──"; }
 
@@ -246,6 +302,13 @@ emit_spec() {
 }
 # Prefer the generator's own refusal over the caller's jq-derived text.
 why_emit() { if [ -n "$GEN_EMIT_ERR" ]; then printf '%s' "$GEN_EMIT_ERR"; else printf '%s' "$1"; fi; }
+# …and the MACHINE half of the same distinction. `why_emit` fixes the TEXT a
+# human reads; `fail_emit` fixes the EXIT CODE a caller reads. The condition is
+# identical and deliberately so — the producer's own refusal is on record in
+# GEN_EMIT_ERR or it is not, and nothing else may promote a red to a hold. Every
+# site that consumes a file `emit_spec` was supposed to write goes through this;
+# section 25 reds if one of them goes back to a bare `bad`.
+fail_emit() { if [ -n "$GEN_EMIT_ERR" ]; then blocked "$1"; else bad "$1"; fi; }
 
 # ═══ fixtures ════════════════════════════════════════════════════════════════
 # A miniature repo: four workflows covering every selection stage, plus a
@@ -467,7 +530,7 @@ emit_spec "$TMP/sel-spec.json" bash "$GEN" --workflows "$WF" --fixture-dir "$FIX
 if jq -e '[.protection.required_status_checks.checks[].context] == ["Aggregate gate"]' "$TMP/sel-spec.json" >/dev/null 2>&1; then
   ok "the emitted spec is EXACTLY the aggregator — 'Only on B' (present on one sha only) and every stage's specimen are gone"
 else
-  bad "$(why_emit "the emitted spec is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/sel-spec.json" 2>&1), not [Aggregate gate]")"
+  fail_emit "$(why_emit "the emitted spec is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/sel-spec.json" 2>&1), not [Aggregate gate]")"
 fi
 
 section "3b. the matrix suffix is read from the SOURCE, never by stripping a parenthetical"
@@ -2136,7 +2199,7 @@ if jq -e '[.protection.required_status_checks.checks[].context]
      "$TMP/ack-spec.json" >/dev/null 2>&1; then
   ok "…and per-NAME acknowledgement lets it through, emitting exactly the four contexts"
 else
-  bad "$(why_emit "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the REFUSAL is load-bearing. Neuter its condition — one line —
@@ -2170,7 +2233,7 @@ if jq -e '[.protection.required_status_checks.checks[].context]
      "$TMP/overwrite-spec.json" >/dev/null 2>&1; then
   ok "the OVERWRITE path emits a spec MISSING both committed names — the merge, not the refusal, is what carries them"
 else
-  bad "$(why_emit "the overwrite specimen did not drop the committed names: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/overwrite-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the overwrite specimen did not drop the committed names: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/overwrite-spec.json" 2>&1)")"
 fi
 
 section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the merge CARRIES the row, the refusal NOTICES it"
@@ -2262,7 +2325,7 @@ emit_spec "$TMP/seeded-spec.json" \
 if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and once acknowledged the seeded row SURVIVES the regeneration (the merge carries what the sample cannot see)"
 else
-  bad "$(why_emit "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 # Set inclusion, never a count: a count is satisfied by any 26 rows at all.
 if jq -e --slurpfile base "$SEEDX" \
@@ -2271,7 +2334,7 @@ if jq -e --slurpfile base "$SEEDX" \
      "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (set inclusion over the whole seeded base)"
 else
-  bad "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 # The union must not FREEZE a row's grounds: where this run restated a reason,
 # the DERIVED one wins. `Security gate` is committed as an S7 decision and the
@@ -2282,7 +2345,7 @@ if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
              | any(startswith("S7 EXCLUDED BY DECISION"))' "$SEEDX" >/dev/null 2>&1; then
   ok "…and where BOTH sides carry a row the DERIVED reason wins ('Security gate': S7 committed → S5 emitted)"
 else
-  bad "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the UNION is load-bearing. Drop the base out of it — the exact
@@ -2304,7 +2367,7 @@ if jq -e --arg c "$SEEDNAME" \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
   ok "…and without it the IDENTICAL run drops the seeded row and emits 18 of 26 (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)")"
 fi
 
 # MUTATION (ii): the REFUSAL is separately load-bearing. The union alone buys
@@ -2354,7 +2417,7 @@ if jq -e '([.exclusions[].context] | index("Cloud gate") | not)
      "$TMP/promoted-spec.json" >/dev/null 2>&1; then
   ok "…and --expect-promoted DROPS that row instead of carrying it, so no context is emitted as both required and excluded"
 else
-  bad "$(why_emit "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)")"
 fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
@@ -2402,7 +2465,7 @@ if jq -e '[.protection.required_status_checks.checks[].context] as $c
      "$TMP/nos6-spec.json" >/dev/null 2>&1; then
   ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
 fi
 
 section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
@@ -2728,7 +2791,7 @@ if jq -e '[.protection.required_status_checks.checks[].context] | index("Securit
      "$TMP/nos7-spec.json" >/dev/null 2>&1; then
   ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
 fi
 
 # The committed file must not still be teaching the evaporated ground.
@@ -4655,6 +4718,85 @@ else
 fi
 
 
+section "25. the exit-code contract: a PRODUCER THAT REFUSED is 4, an ASSERTION THAT DRIFTED is 1, and neither can wear the other's code"
+
+# WHY THIS SECTION EXISTS AT ALL. #14371 made a generator refusal READABLE and
+# deliberately left the machine half alone, because promoting unreadable-input
+# to its own exit code is a CONTRACT change and a contract change smuggled
+# inside an outage fix is how a gate acquires two owners and no reviewer. This
+# is that contract change, paid separately — and a contract with no mutation
+# behind it re-conflates the moment someone writes the next `bad`. Both
+# directions are pinned here, because a single-direction proof is worthless:
+# the whole value is that the two are SEPARABLE.
+#
+# The end-to-end shape (chmod the generator unreadable, run the whole suite,
+# watch it exit 4) cannot live inside the suite — it would have to re-invoke
+# itself, and a ~4-minute run per clause is not a test, it is a second CI job.
+# What lives here is the two things that decide the code: the TABLE, and the
+# ROUTER that feeds it. Everything above them is ordinary assertion counting.
+
+# (a) THE TABLE. rc_exit_code is the single copy of the rule the tally line
+# also uses, so this clause is asserting the shipped mapping, not a restatement
+# of it. Blocked outranks failed, and zero/zero is the only 0.
+RC25_TABLE=""
+for RC25_CASE in "0 0 0" "3 0 1" "0 2 4" "5 2 4"; do
+  # shellcheck disable=SC2086
+  set -- $RC25_CASE
+  RC25_TABLE="$RC25_TABLE f=$1,b=$2->$(rc_exit_code "$1" "$2") expected $3;"
+done
+if [ "$RC25_TABLE" = " f=0,b=0->0 expected 0; f=3,b=0->1 expected 1; f=0,b=2->4 expected 4; f=5,b=2->4 expected 4;" ]; then
+  ok "the exit-code table holds: clean=0, drift-only=1, blocked-only=4, and BOTH=4 (a run that could not read an input has no verdict to report, so the hold outranks the partial red)"
+else
+  bad "rc_exit_code does not implement the header's table: $RC25_TABLE"
+fi
+
+# (b) THE ROUTER, BOTH DIRECTIONS, against the REAL fail_emit — not a copy of
+# its condition. The counters are saved and restored around the specimens so
+# this section costs the tally exactly the assertions it declares.
+RC25_P0=$PASS; RC25_F0=$FAIL; RC25_B0=$BLOCKED; RC25_ERR0="$GEN_EMIT_ERR"
+
+GEN_EMIT_ERR="SELFTEST SPECIMEN: the generator REFUSED (exit 9), wrote no spec.json"
+fail_emit "SELFTEST SPECIMEN — not a real failure, section 25 is proving the router" 2>/dev/null
+RC25_REFUSAL_B=$((BLOCKED - RC25_B0)); RC25_REFUSAL_F=$((FAIL - RC25_F0))
+
+GEN_EMIT_ERR=""
+fail_emit "SELFTEST SPECIMEN — not a real failure, section 25 is proving the router" 2>/dev/null
+RC25_DRIFT_B=$((BLOCKED - RC25_B0 - RC25_REFUSAL_B)); RC25_DRIFT_F=$((FAIL - RC25_F0 - RC25_REFUSAL_F))
+
+PASS=$RC25_P0; FAIL=$RC25_F0; BLOCKED=$RC25_B0; GEN_EMIT_ERR="$RC25_ERR0"
+
+if [ "$RC25_REFUSAL_B" -eq 1 ] && [ "$RC25_REFUSAL_F" -eq 0 ]; then
+  ok "(a) with the producer's own refusal on record, a consuming site counts BLOCKED and not failed — the code the tally maps to 4"
+else
+  bad "a producer refusal did not route to BLOCKED (blocked +$RC25_REFUSAL_B, failed +$RC25_REFUSAL_F) — every generator outage would report as spec drift again, which is exactly what #14371 left unpaid"
+fi
+if [ "$RC25_DRIFT_F" -eq 1 ] && [ "$RC25_DRIFT_B" -eq 0 ]; then
+  ok "(b) …and with NO refusal on record the identical call counts FAILED and not blocked — genuine drift still maps to 1, so 4 can never absorb a real verdict"
+else
+  bad "an ordinary assertion failure routed to BLOCKED (blocked +$RC25_DRIFT_B, failed +$RC25_DRIFT_F) — drift would be reported as a hold and nobody would fix the repo"
+fi
+
+# (c) THE RATCHET. The two clauses above prove the router; this one proves the
+# router is still WIRED. A future site written as a bare `bad` over a file the
+# generator never wrote re-conflates the contract silently — the suite would
+# stay green and exit 1 on an outage again. The needles are SPLIT so this
+# clause cannot match its own source lines (the trap that makes a self-grep
+# report a phantom hit).
+RC25_OLD_NEEDLE='bad "$('"why_emit"
+RC25_NEW_NEEDLE='fail_emit "$('"why_emit"
+RC25_OLD_N="$(grep -cF "$RC25_OLD_NEEDLE" "$0" || true)"
+RC25_NEW_N="$(grep -cF "$RC25_NEW_NEEDLE" "$0" || true)"
+if [ "$RC25_NEW_N" -gt 0 ]; then
+  ok "the ratchet is non-vacuous: $RC25_NEW_N site(s) consume a generator-written spec through the router"
+else
+  bad "no site routes a generator-written spec through fail_emit — the two clauses above are proving a function nothing calls"
+fi
+if [ "$RC25_OLD_N" -eq 0 ]; then
+  ok "…and NO site still reds a generator-written spec with a bare failure — the exit-4 contract cannot be silently re-conflated one call site at a time"
+else
+  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(grep -nF "$RC25_OLD_NEEDLE" "$0" | head -3 | tr '\n' '⏎')"
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
@@ -4666,8 +4808,11 @@ fi
 
 echo
 echo "════════════════════════════════════════════════════════════"
-echo "required-checks: $PASS passed, $FAIL failed$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
+echo "required-checks: $PASS passed, $FAIL failed, $BLOCKED blocked$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
+if [ "$BLOCKED" -gt 0 ]; then
+  echo "required-checks: $BLOCKED site(s) BLOCKED — an input could not be read or a producer refused, so this run has NO verdict about the required set. Exit 4 means HOLD, not drift."
+fi
 # The run reached its own end. Anything that exits 0 without passing through
 # this line is a crash, and the EXIT trap turns it into a 70.
 RC_TALLY_REACHED=1
-[ "$FAIL" -eq 0 ] || exit 1
+exit "$(rc_exit_code "$FAIL" "$BLOCKED")"
