@@ -254,9 +254,9 @@ is harmless:
   of any of them cannot stop a merge. `format` **left this class on 2026-09-04**
   (#15971): it dropped `continue-on-error` FIRST, precisely so the laundering
   above could not happen, and only then joined `elixir-gate`'s `needs:`, where it
-  is now SUBSUMED like every other upstream (see the `elixir-gate` job's `needs:`
-  comment block, which now records that `format` IS in `needs`, and item 2 above
-  for the diff scope). `plugin-node` is a third case again: blocking
+  is now SUBSUMED like every other upstream (see
+  the `elixir-gate` job's `needs:` comment block, which now records that
+  `format` IS in `needs`, and item 2 above for the diff scope). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
