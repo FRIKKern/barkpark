@@ -1217,7 +1217,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       content =
         (doc.content || %{})
-        |> Map.put(field, Projection.project_body(new_blocks, Labels.render_opts(dataset, scope)))
+        |> Map.put(
+          field,
+          # task-c46967eb3dc49e77: this field body is read on a SCREEN — the
+          # Studio field editor and the paper/document readers — so it names
+          # `:article` instead of letting `Render.render_block/2`'s
+          # `Map.get(opts, :style, :email)` default stamp mail typography into
+          # a persisted field. Siblings: #15973 (document `content[body][html]`),
+          # #16037 (papers `body_html`).
+          Projection.project_body(
+            new_blocks,
+            Map.put(Labels.render_opts(dataset, scope), :style, :article)
+          )
+        )
 
       attrs = %{
         "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
