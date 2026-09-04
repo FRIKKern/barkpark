@@ -973,7 +973,11 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # The D78 annotation markers with their evergreen token colors. The glyph is
   # the semantic carrier; color is never load-bearing (the legend row
   # disambiguates locally).
-  @filetree_markers [{" ● ", "var(--ok)"}, {" ○ ", "var(--paper-ink-soft)"}, {" ✕ ", "var(--danger)"}]
+  @filetree_markers [
+    {" ● ", "var(--ok)"},
+    {" ○ ", "var(--paper-ink-soft)"},
+    {" ✕ ", "var(--danger)"}
+  ]
 
   defp filetree_row_html(line) do
     case split_filetree_note(line) do
