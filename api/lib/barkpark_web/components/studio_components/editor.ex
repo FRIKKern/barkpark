@@ -138,6 +138,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :required, :boolean, default: false
   attr :errors, :list, default: []
   attr :onix_element, :string, default: nil
+  # Gyldendal parity E1.5 — the schema field's `description`, rendered as
+  # Sanity does: muted helper text directly under the title, above the input.
+  attr :description, :string, default: nil
   slot :inner_block, required: true
 
   def editor_field(assigns) do
@@ -148,6 +151,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label>
+      <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
           ONIX: <code><%= @onix_element %></code>
@@ -390,12 +394,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <% end %>
       </div>
     <% else %>
+      <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
+           label any more ("Kort-layout select" read as a label leak); Sanity
+           never surfaces a field's type to the author. --%>
       <.editor_field
         label={@field["title"] || field_name}
-        type={type}
         required={required?}
         errors={errors}
         onix_element={onix_element(@field)}
+        description={field_description(@field)}
       >
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
@@ -543,7 +550,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || "Untitled"}
+          title={@editor_doc.title || singleton_title(@editor_schema) || "Untitled"}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -625,13 +632,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
-                  ><span class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span></button>
+                  ><span :if={tab_icon(grp) != "circle"} class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span><span class="bp-tab-label"><%= grp["title"] || grp["name"] %></span></button>
                 <% end %>
               </div>
             <% end %>
 
             <form phx-submit="save" phx-change="autosave" id="editor-form">
+              <%!-- The synthetic Title input backs the `title` column every
+                    list row shows. A SINGLETON that declares no `title`
+                    field (the twin's Forside — Sanity's `preview.prepare`
+                    gives it a fixed name) has nothing for an author to type
+                    there, so it renders no Title input and the header falls
+                    back to the schema title instead (Gyldendal parity E1.5). --%>
               <.editor_field
+                :if={title_input?(@editor_schema)}
                 label="Title"
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
@@ -1005,6 +1019,22 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <% end %>
     """
   end
+
+  # Gyldendal parity E1.5 — see the Title input comment in the shell.
+  defp title_input?(nil), do: true
+
+  defp title_input?(schema) do
+    not (singleton?(schema) and is_nil(Enum.find(schema.fields, &(&1["name"] == "title"))))
+  end
+
+  defp singleton_title(schema) do
+    if schema && singleton?(schema) && title_input?(schema) == false, do: schema.title, else: nil
+  end
+
+  defp singleton?(schema), do: Map.get(schema, :singleton) == true
+
+  defp field_description(%{"description" => d}) when is_binary(d) and d != "", do: d
+  defp field_description(_), do: nil
 
   defp get_title_validation(nil), do: nil
 
