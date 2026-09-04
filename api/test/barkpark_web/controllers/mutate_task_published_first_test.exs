@@ -151,4 +151,66 @@ defmodule BarkparkWeb.MutateTaskPublishedFirstTest do
 
     assert get_task(id)["content"]["note"] == "published", "a refused patch writes nothing"
   end
+
+  # ── C2: the pr-task-gate hotfix-override record ────────────────────────────
+  #
+  # `.github/workflows/pr-task-gate.yml` step `hotfix_record` files the durable
+  # bypass record with a `createIfNotExists` through this same door, and the
+  # workflow never reads it back — the record's ONLY consumer is a human (or an
+  # agent) running `bp task get hotfix-pr-<N>` / `bp task ready` / the board
+  # afterwards, so "does it land where the gate reads it" is really "does it
+  # land where those readers look". No prod access is needed to answer that: the
+  # payload below is the gate's `jq -n` body verbatim (flat siblings, no
+  # `content` map, ids and labels identical), replayed against a fixture, and
+  # read back through the real `GET /v1/tasks/:id`.
+  #
+  # This path is DELIBERATELY NOT changed by this slice: `createIfNotExists`
+  # keeps its draft-first lookup and its draft write, and the record resolves
+  # because `find_task_by_doc_id/2`'s `drafts.` fallback finds an UNPAIRED
+  # twin — which is also why `Tasks.Query.collapse_twins/1` admits it to the
+  # ready queue AS ITSELF. The fix in this PR is scoped to `patch`.
+  test "the pr-task-gate hotfix-override createIfNotExists lands where its readers look" do
+    pr = System.unique_integer([:positive])
+    id = "hotfix-pr-#{pr}"
+
+    body =
+      Jason.encode!(%{
+        "mutations" => [
+          %{
+            "createIfNotExists" => %{
+              "_id" => id,
+              "_type" => "task",
+              "title" => "hotfix override: a fixture PR",
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "labels" => ["hotfix-override", "merge-gate-override", "proj:task-obsession"],
+              "description" =>
+                "Auto-filed by pr-task-gate for PR ##{pr} which merged under the hotfix! lane."
+            }
+          }
+        ]
+      })
+
+    resp = post(authed(), "/v1/data/mutate/#{@dataset}", body)
+    assert resp.status == 200, resp.resp_body
+
+    [result] = Jason.decode!(resp.resp_body)["results"]
+
+    assert result["id"] == "drafts.#{id}",
+           "the record is written to the draft twin — the fact the read-back below is measuring"
+
+    # THE READ-BACK. The gate's own consumers address the BARE id.
+    doc = get_task(id)
+    assert doc["content"]["kind"] == "task"
+    assert doc["content"]["lifecycle_status"] == "open"
+    assert doc["content"]["description"] =~ "pr-task-gate"
+    assert "hotfix-override" in doc["content"]["labels"]
+
+    # Idempotent re-run (the gate re-runs on every push): a second identical
+    # call is a noop, not a duplicate.
+    resp2 = post(authed(), "/v1/data/mutate/#{@dataset}", body)
+    assert resp2.status == 200, resp2.resp_body
+    [result2] = Jason.decode!(resp2.resp_body)["results"]
+    assert result2["operation"] == "noop"
+  end
 end
