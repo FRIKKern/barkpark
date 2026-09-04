@@ -748,15 +748,19 @@ if [ "$MODE" = selftest ]; then
   # LITERALS, never derived from the run. Measured 2026-09-03 at origin/main
   # 0cb244bfb:
   #
-  #   MIN  = 317  no flock and no api/ in the tree (the two optional blocks skip)
-  #   FULL = 334  all blocks run — this is what CI gets
+  #   MIN  = 326  no flock and no api/ in the tree (the two optional blocks skip)
+  #   FULL = 343  all blocks run — this is what CI gets
+  #
+  # 2026-09-04: +9 (317->326, 334->343) for the rejecting-caddy-through-SWITCH
+  # block — the exit-16 fail-closed arm that no fixture had ever driven. It sits
+  # outside both optional blocks, so BOTH floors move by the same 9.
   #
   # FULL applies under BARKPARK_SELFTEST_REQUIRE_E2E=1, the venue
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
   # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
   # ADD rows -> raise the literal in the SAME commit.
-  SELFTEST_FLOOR_MIN=317
-  SELFTEST_FLOOR_FULL=334
+  SELFTEST_FLOOR_MIN=326
+  SELFTEST_FLOOR_FULL=343
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -1997,6 +2001,55 @@ FAKEMV
     [ "$rb_norecover_rc" = 13 ]
   # Put the fixture back the way the rest of this block expects it.
   mv "$RBF/sites/rbfix/releases/rb1.aside" "$RBF/sites/rbfix/releases/rb1"
+
+  # =========================================================================
+  # SWITCH IS FAIL-CLOSED WHEN CADDY REJECTS THE ARM (exit 16).
+  #
+  # Every deploy in this suite runs against a fake caddy whose `validate` ALWAYS
+  # exits 0, so the two `exit 16` arms of SWITCH — `could not arm …` and
+  # `could not flip …` — were asserted by nobody: no fixture had ever driven a
+  # REJECTING caddy through SWITCH in this engine. That is the arm whose whole
+  # job is to refuse: on a rejected arm the run must stop the slot it just
+  # booted, leave NOTHING live, and exit 16 — the static engine deliberately
+  # stays exit 0 here (charter-D327) because its bytes go live on a symlink flip
+  # that Caddy plays no part in, while a NODE site is served ONLY through the
+  # Caddy upstream, so an unarmed route means the deploy did not happen.
+  #
+  # Own slug, own Caddyfile, own ports, so it cannot disturb the selftest site.
+  # =========================================================================
+  echo "[selftest] e2e: a REJECTING caddy through SWITCH fails CLOSED with exit 16 (the arm nobody drove)"
+  SFB="$TD/switchfail-bin"; mkdir -p "$SFB"
+  # shellcheck disable=SC2016  # $1 is the fake script's own arg — must NOT expand here
+  printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$SFB/caddy"
+  chmod +x "$SFB/caddy"
+  SFCF="$TD/Caddyfile.switchfail"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$SFCF"
+  cp "$SFCF" "$SFCF.orig"
+  SF_PORT_A="$(free_port)"; SF_PORT_B="$(free_port)"
+  sf_rc="$(env PATH="$SFB:$FAKEBIN:$PATH" \
+    SITE_SLUG=switchfail BUILD_ID=sf1 CONTENT_REV=sf-rev SITE_SRC="$SRC" \
+    SITE_PORT_A="$SF_PORT_A" SITE_PORT_B="$SF_PORT_B" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$SFCF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/switchfail.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/sf.out" 2> "$TD/sf.err"; echo $?)"
+  check "rejected arm fails the deploy CLOSED with the typed 16"  [ "$sf_rc" = 16 ]
+  check "…and HEALTH had already passed (the refusal is SWITCH's, not the gate's)" \
+    grep -q '^BPSTAGE name=HEALTH status=ok build_id=sf1' "$TD/sf.out"
+  check "…SWITCH failed on the machine channel"  grep -q '^BPSTAGE name=SWITCH status=failed build_id=sf1' "$TD/sf.out"
+  check "…and the detail says the new slot was stopped and nothing is live" \
+    grep -q 'new slot stopped, nothing live' "$TD/sf.out"
+  check "…caddy validate's refusal is on the record (the revert really ran)" \
+    grep -q 'caddy validate rejected the /sites/switchfail change — reverting' "$TD/sf.out"
+  check "…the Caddyfile is byte-identical (the arm reverted its write)" \
+    cmp -s "$SFCF" "$SFCF.orig"
+  check "…no route marker was left behind" \
+    sh -c "! grep -q 'BARKPARK_SITE_ROUTE:switchfail' '$SFCF'"
+  check "…and NO ROUTE ok claims an armed route the box does not have" \
+    sh -c "! grep -q '^BPSTAGE name=ROUTE status=ok build_id=sf1' '$TD/sf.out'"
+  check "…and RETIRE never ran (the run stopped AT the failed switch)" \
+    sh -c "! grep -q '^BPSTAGE name=RETIRE' '$TD/sf.out'"
 
   check "FIXED: --rollback refuses on the HEALTH MARKER (the target exists)" \
     sh -c "[ \"\$(cat '$RBF/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is marked health-failed\" '$RBF/rb.log'"
