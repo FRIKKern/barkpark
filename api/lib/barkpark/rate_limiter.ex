@@ -292,7 +292,8 @@ defmodule Barkpark.RateLimiter do
   defp binary_scope(_), do: nil
 
   defp append_scope(key, scope) when is_binary(key), do: key <> ":test:" <> scope
-  defp append_scope(key, scope) when is_tuple(key), do: Tuple.append(key, {:test, scope})
+  defp append_scope(key, scope) when is_tuple(key),
+    do: Tuple.insert_at(key, tuple_size(key), {:test, scope})
   defp append_scope(key, scope), do: {key, {:test, scope}}
 
   @doc """
