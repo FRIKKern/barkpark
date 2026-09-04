@@ -66,7 +66,7 @@ defmodule BarkparkWeb.MemberControllerTest do
   end
 
   defp req(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end
@@ -96,7 +96,7 @@ defmodule BarkparkWeb.MemberControllerTest do
       ws: ws,
       project: project
     } do
-      body = build_conn() |> get("#{base(ws, project)}/members") |> json_response(403)
+      body = scoped_conn() |> get("#{base(ws, project)}/members") |> json_response(403)
       assert body["error"]["code"] == "forbidden"
     end
 

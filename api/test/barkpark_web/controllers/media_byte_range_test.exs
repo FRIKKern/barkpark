@@ -58,7 +58,7 @@ defmodule BarkparkWeb.MediaByteRangeTest do
 
   defp fetch(ctx, range) do
     conn =
-      build_conn()
+      scoped_conn()
       |> Plug.Conn.put_req_header("authorization", "Bearer " <> ctx.token)
 
     conn = if range, do: Plug.Conn.put_req_header(conn, "range", range), else: conn

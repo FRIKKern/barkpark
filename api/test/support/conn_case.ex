@@ -77,6 +77,60 @@ defmodule BarkparkWeb.ConnCase do
   end
 
   @doc """
+  RAISE, NAMING THE LIMITER, IF A RESPONSE IS A 429.
+
+  Call this immediately BEFORE an auth-verdict assertion. A throttled request
+  never reached the code the assertion is about, so without this the 429 arrives
+  dressed as whatever the assertion was looking for:
+
+      assert conn.status == 200, "OVER-REACH: a VALID bearer must not be refused"
+      assert conn.status == 401, "TENANT SWAP BY CREDENTIAL DECAY on GET /media"
+
+  Both of those sentences are FALSE about a 429, and both name a security
+  regression that did not happen. The failure they actually describe is a test
+  process that shared `Barkpark.RateLimiter`'s whole-node bucket with a parallel
+  case — a suite construction problem, one `scoped_conn/0` away from fixed, and
+  nothing to do with credentials at all. That misreading is what makes this class
+  expensive: it sends the reader hunting a tenancy bug in `lib/`.
+
+  Status AND `error.code` are both reported, because a 429 that is NOT
+  `rate_limited` is a different animal and the message should not pretend
+  otherwise.
+  """
+  def refute_rate_limited!(%Plug.Conn{status: 429} = conn) do
+    code =
+      case Jason.decode(conn.resp_body) do
+        {:ok, %{"error" => %{"code" => code}}} -> code
+        _ -> "<unparseable body>"
+      end
+
+    raise """
+    THROTTLED, NOT REFUSED — this response never reached the code under test.
+
+      status:     429
+      error.code: #{code}
+      retry-after: #{inspect(Plug.Conn.get_resp_header(conn, "retry-after"))}
+
+    The limiter is `BarkparkWeb.Plugs.RateLimit` over `Barkpark.RateLimiter`,
+    whose buckets live in the `:barkpark_rate_limiter` :named_table — WHOLE-NODE
+    state shared by every test process in the run. An anonymous or
+    optional-credential caller keys on `ip:127.0.0.1`, so under `--max-cases 8`
+    parallel cases bill ONE budget and the suite throttles itself.
+
+    This is NOT a tenant swap, an over-reach, or any auth verdict. Fix the conn,
+    not the limit: build it with `BarkparkWeb.ConnCase.scoped_conn/0`, which
+    suffixes the bucket key with a per-test-process scope.
+    `BarkparkWeb.Plugs.RateLimitTestConnScopeTest` is the tripwire that should
+    have caught this file before you did.
+
+    Do NOT raise a limit, widen a bucket, disable a meter in test config, or add
+    a sleep. Every one of those removes the control the call site exists to be.
+    """
+  end
+
+  def refute_rate_limited!(%Plug.Conn{} = conn), do: conn
+
+  @doc """
   This test process's rate-limit scope, minted once and memoised. ExUnit runs
   `setup` and the test body in the SAME process, so every `scoped_conn/0` in one
   test agrees, and no two tests ever do.

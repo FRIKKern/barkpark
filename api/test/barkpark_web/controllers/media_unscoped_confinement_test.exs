@@ -59,7 +59,7 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
 
   describe "an absent Default scope must not widen into an all-tenants read" do
     test "serve/2 does not serve another tenant's blob", %{owned: owned} do
-      conn = get(build_conn(), "/media/files/#{owned.path}")
+      conn = get(scoped_conn(), "/media/files/#{owned.path}")
 
       refute conn.status == 200,
              "serve/2 leaked a workspace-owned blob to an unscoped caller: #{inspect(conn.resp_body)}"
@@ -68,14 +68,14 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
     end
 
     test "show/2 does not expose another tenant's metadata", %{owned: owned} do
-      conn = get(build_conn(), "/media/#{owned.id}/meta")
+      conn = get(scoped_conn(), "/media/#{owned.id}/meta")
 
       refute conn.status == 200,
              "show/2 leaked a workspace-owned row to an unscoped caller: #{inspect(conn.resp_body)}"
     end
 
     test "index/2 does not list another tenant's files", %{owned: owned} do
-      body = build_conn() |> get("/media") |> json_response(200)
+      body = scoped_conn() |> get("/media") |> json_response(200)
       ids = Enum.map(body["files"], & &1["id"])
 
       refute owned.id in ids,
@@ -91,7 +91,7 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
     #   scope refused the row  -> Media.get_file/2 {:error, :not_found} -> "file not found"
     #   row resolved, encode failed ->            {:error, _}           -> "rendition unavailable"
     test "serve_rendition/2 does not resolve another tenant's file", %{owned: owned} do
-      body = build_conn() |> get("/media/renditions/#{owned.id}/thumb") |> response(404)
+      body = scoped_conn() |> get("/media/renditions/#{owned.id}/thumb") |> response(404)
 
       refute body =~ "rendition unavailable",
              "serve_rendition/2 RESOLVED a workspace-owned row for an unscoped caller — " <>
@@ -104,7 +104,7 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
 
   describe "NEGATIVE ARM — the shared/global layer stays readable" do
     test "serve/2 still serves a pre-tenancy (workspace_id IS NULL) blob", %{shared: shared} do
-      conn = get(build_conn(), "/media/files/#{shared.path}")
+      conn = get(scoped_conn(), "/media/files/#{shared.path}")
 
       assert conn.status == 200,
              "the fix over-reached: an unscoped row must stay readable or every " <>
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
     end
 
     test "index/2 still lists a pre-tenancy row", %{shared: shared} do
-      body = build_conn() |> get("/media") |> json_response(200)
+      body = scoped_conn() |> get("/media") |> json_response(200)
       ids = Enum.map(body["files"], & &1["id"])
 
       assert shared.id in ids, "the fix over-reached: unscoped rows must stay listed"

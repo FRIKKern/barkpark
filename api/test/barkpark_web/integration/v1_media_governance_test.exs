@@ -90,9 +90,9 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
 
       url = created["result"]["originalUrl"]
 
-      assert build_conn() |> get(url) |> Map.get(:status) == 403
+      assert scoped_conn() |> get(url) |> Map.get(:status) == 403
 
-      assert build_conn() |> authed() |> get(url) |> Map.get(:status) == 200
+      assert scoped_conn() |> authed() |> get(url) |> Map.get(:status) == 200
 
       cleanup(created)
     end
@@ -107,11 +107,11 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       |> json_response(200)
 
       url = created["result"]["originalUrl"]
-      assert build_conn() |> get(url) |> Map.get(:status) == 403
+      assert scoped_conn() |> get(url) |> Map.get(:status) == 403
 
       signed = SignedUrl.sign(url, id)
 
-      assert build_conn() |> get(signed) |> Map.get(:status) == 200
+      assert scoped_conn() |> get(signed) |> Map.get(:status) == 200
 
       cleanup(created)
     end
@@ -121,7 +121,7 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
   #
   # This block used to hold a SINGLE test, "returns signed delivery URLs for
   # token assets", whose request went out WITHOUT `authed()` — the only request
-  # in this file that did. `conn_case.ex` hands out a bare `build_conn()`, so it
+  # in this file that did. `conn_case.ex` hands out a bare `scoped_conn()`, so it
   # carried no Authorization header at all: the test asserted, and kept GREEN,
   # that an ANONYMOUS caller is minted a valid `SignedUrl` for a `token` asset.
   # It was the repro, standing in the suite as a specification.
@@ -152,7 +152,7 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       assert resp["result"]["visibility"] == "token"
 
       # The signature is not decorative: it is what makes the bytes reachable.
-      assert build_conn() |> get(resp["result"]["originalUrl"]) |> Map.get(:status) == 200
+      assert scoped_conn() |> get(resp["result"]["originalUrl"]) |> Map.get(:status) == 200
 
       cleanup(created)
     end
@@ -166,7 +166,7 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       |> patch(~p"/v1/media/production/#{id}", %{"bp_visibility" => "token"})
       |> json_response(200)
 
-      resp = build_conn() |> get(~p"/v1/media/production/#{id}?appendRequestSecret=true")
+      resp = scoped_conn() |> get(~p"/v1/media/production/#{id}?appendRequestSecret=true")
 
       assert resp.status == 403,
              "an anonymous caller read a token asset: #{resp.status} #{resp.resp_body}"

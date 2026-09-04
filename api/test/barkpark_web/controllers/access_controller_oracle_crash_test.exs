@@ -120,8 +120,8 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
 
       missing_id = Ecto.UUID.generate()
 
-      foreign_conn = build_conn() |> bearer(probe_raw) |> get("/v1/access/#{foreign.id}")
-      missing_conn = build_conn() |> bearer(probe_raw) |> get("/v1/access/#{missing_id}")
+      foreign_conn = scoped_conn() |> bearer(probe_raw) |> get("/v1/access/#{foreign.id}")
+      missing_conn = scoped_conn() |> bearer(probe_raw) |> get("/v1/access/#{missing_id}")
 
       assert foreign_conn.status == 404
       assert missing_conn.status == 404
@@ -136,8 +136,8 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       grant = mint_grant(ws, "g@example.com")
       stranger = stranger_token()
 
-      real = build_conn() |> bearer(stranger) |> get("/v1/access/#{grant.id}")
-      missing = build_conn() |> bearer(stranger) |> get("/v1/access/#{Ecto.UUID.generate()}")
+      real = scoped_conn() |> bearer(stranger) |> get("/v1/access/#{grant.id}")
+      missing = scoped_conn() |> bearer(stranger) |> get("/v1/access/#{Ecto.UUID.generate()}")
 
       assert real.status == 404
       assert real.resp_body == missing.resp_body
@@ -177,10 +177,10 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       foreign = mint_grant(ws_b, "b@example.com")
       {probe_raw, _} = token_principal(ws_a, ["read", "write", "admin"])
 
-      foreign_conn = build_conn() |> bearer(probe_raw) |> delete("/v1/access/#{foreign.id}")
+      foreign_conn = scoped_conn() |> bearer(probe_raw) |> delete("/v1/access/#{foreign.id}")
 
       missing_conn =
-        build_conn() |> bearer(probe_raw) |> delete("/v1/access/#{Ecto.UUID.generate()}")
+        scoped_conn() |> bearer(probe_raw) |> delete("/v1/access/#{Ecto.UUID.generate()}")
 
       assert foreign_conn.status == 404
       assert missing_conn.status == 404
@@ -237,10 +237,10 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       {member_raw, _} = token_principal(ws, ["read", "write", "admin"])
 
       malformed =
-        build_conn() |> bearer(member_raw) |> get("/v1/access", %{"workspace_id" => "zzz"})
+        scoped_conn() |> bearer(member_raw) |> get("/v1/access", %{"workspace_id" => "zzz"})
 
       nonexistent =
-        build_conn()
+        scoped_conn()
         |> bearer(member_raw)
         |> get("/v1/access", %{"workspace_id" => Ecto.UUID.generate()})
 
@@ -293,11 +293,11 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       ws = create_workspace!()
       {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
 
-      list = build_conn() |> bearer(grantor_raw) |> get("/v1/access")
+      list = scoped_conn() |> bearer(grantor_raw) |> get("/v1/access")
       assert json_response(list, 422)["error"]["message"] == "workspace_id is required"
 
       mint =
-        build_conn()
+        scoped_conn()
         |> bearer(grantor_raw)
         |> post("/v1/access", %{
           "grantee_email" => "g@example.com",
@@ -323,10 +323,10 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
     stranger = stranger_token()
 
     unauthorized =
-      build_conn() |> bearer(stranger) |> get("/v1/access", %{"workspace_id" => ws_real.id})
+      scoped_conn() |> bearer(stranger) |> get("/v1/access", %{"workspace_id" => ws_real.id})
 
     nonexistent =
-      build_conn()
+      scoped_conn()
       |> bearer(stranger)
       |> get("/v1/access", %{"workspace_id" => Ecto.UUID.generate()})
 

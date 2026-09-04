@@ -96,7 +96,7 @@ defmodule BarkparkWeb.GrantSearchDenyTest do
 
   test "an unowned service token sees BOTH matching docs (positive control)", %{} do
     {raw, _} = insert_token!(%{})
-    titles = titles(search(build_conn(), raw, @term))
+    titles = titles(search(scoped_conn(), raw, @term))
     assert "#{@term} in-scope post" in titles
     assert "#{@term} out-of-scope note" in titles
   end
@@ -110,7 +110,7 @@ defmodule BarkparkWeb.GrantSearchDenyTest do
     {raw, _} = insert_token!(%{owner_user_id: user.id})
     bind_grant!(ws, user, %{project_id: project.id, dataset: @ds, type: "post"})
 
-    result = search(build_conn(), raw, @term)
+    result = search(scoped_conn(), raw, @term)
     titles = titles(result)
 
     # positive control: the in-grant document IS found

@@ -1148,7 +1148,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
       {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, user.id, "admin", "user")
 
-      conn = Plug.Test.init_test_session(build_conn(), %{"user_session" => raw})
+      conn = Plug.Test.init_test_session(scoped_conn(), %{"user_session" => raw})
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
       before = victim_row()
 
@@ -1246,7 +1246,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # audit increment are all producible on this page from this row — so the
       # refutations above fail when the guard is disarmed, and criterion 2
       # (installation-admin behaviour unchanged) holds on the same fixture.
-      conn = init_test_session(build_conn(), %{"api_token" => @admin_token})
+      conn = init_test_session(scoped_conn(), %{"api_token" => @admin_token})
       {:ok, view, _html} = live(conn, @settings_path)
 
       html =

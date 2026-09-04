@@ -1359,7 +1359,7 @@ defmodule BarkparkWeb.TasksControllerTest do
              }
 
       epoch_invalid =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/absent/release",
@@ -1371,7 +1371,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert epoch_invalid["message"] == "observed_epoch is required"
 
       missing =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/absent/release",
@@ -1402,7 +1402,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert_release_unchanged(claimed, before)
 
       stale_epoch =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/#{task.doc_id}/release",
@@ -1422,7 +1422,7 @@ defmodule BarkparkWeb.TasksControllerTest do
         before = release_snapshot(task)
 
         payload =
-          build_conn()
+          scoped_conn()
           |> authed()
           |> post(
             "/v1/tasks/#{task.doc_id}/release",

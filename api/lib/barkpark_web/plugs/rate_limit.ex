@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     bucket_opts = bucket_opts(per_minute)
     key = bucket_key(conn, class, dataset)
 
-    case RateLimiter.check(key, bucket_opts) do
+    case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts) do
       :ok ->
         conn
 
@@ -96,10 +96,13 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           "token:#{token_id}:#{class}:#{scope}"
       end
 
-    case conn.private[:barkpark_rate_limit_scope] do
-      test_scope when is_binary(test_scope) -> key <> ":test:" <> test_scope
-      _ -> key
-    end
+    # The per-test scope suffix used to be appended HERE, and this plug was the
+    # ONLY metered surface that honoured it. It now lives in
+    # `RateLimiter.scoped_key/2`, applied at the `check/2` call site above
+    # exactly as the other seven sites apply it — so `bucket_key/3` returns the
+    # production key and one helper owns the seam. The suffix is byte-identical
+    # to what the clause removed from here produced.
+    key
   end
 
   # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL — AND EVERY

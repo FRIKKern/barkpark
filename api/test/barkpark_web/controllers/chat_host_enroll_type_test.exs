@@ -23,7 +23,7 @@ defmodule BarkparkWeb.ChatHostEnrollTypeTest do
   alias Barkpark.Tenancy
 
   # No token, no session — exactly what an unauthenticated caller sends.
-  defp anon, do: build_conn()
+  defp anon, do: scoped_conn()
 
   defp assert_invalid_enrollment(conn) do
     assert conn.status == 401

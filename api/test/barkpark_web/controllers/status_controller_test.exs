@@ -31,7 +31,7 @@ defmodule BarkparkWeb.StatusControllerTest do
 
   test "GET /status.json publishes the running commit sha to an ANONYMOUS caller", %{conn: conn} do
     # No bearer, no session — this is the unattended owner's uptime monitor.
-    body = build_conn() |> get("/status.json") |> json_response(200)
+    body = scoped_conn() |> get("/status.json") |> json_response(200)
 
     assert Map.has_key?(body, "commit"), "commit must be SURFACED, never omitted"
     assert body["commit"] == Barkpark.BuildInfo.commit()
@@ -55,7 +55,7 @@ defmodule BarkparkWeb.StatusControllerTest do
     assert Barkpark.Status.commit(fn -> "deadbee" end) == "deadbee"
 
     # And the key is always present in the payload, whatever the value.
-    body = build_conn() |> get("/status.json") |> json_response(200)
+    body = scoped_conn() |> get("/status.json") |> json_response(200)
     assert is_binary(body["commit"]) and body["commit"] != ""
   end
 
@@ -69,7 +69,7 @@ defmodule BarkparkWeb.StatusControllerTest do
 
   test "an open incident degrades overall status and shows on the page", %{admin: raw} do
     created =
-      admin(build_conn(), raw)
+      admin(scoped_conn(), raw)
       |> post(
         "/v1/status/incidents",
         Jason.encode!(%{
@@ -84,26 +84,26 @@ defmodule BarkparkWeb.StatusControllerTest do
     id = created["incident"]["id"]
 
     # Overall now reflects the open major incident.
-    body = build_conn() |> get("/status.json") |> json_response(200)
+    body = scoped_conn() |> get("/status.json") |> json_response(200)
     assert body["status"] == "partial_outage"
     assert Enum.any?(body["incidents"], &(&1["title"] == "DB latency"))
 
     # The public page surfaces it.
-    html = build_conn() |> get("/status") |> response(200)
+    html = scoped_conn() |> get("/status") |> response(200)
     assert html =~ "DB latency"
 
     # Resolving it returns to operational.
-    assert admin(build_conn(), raw)
+    assert admin(scoped_conn(), raw)
            |> post("/v1/status/incidents/#{id}/resolve", "{}")
            |> json_response(200)
 
-    assert build_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("status") ==
+    assert scoped_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("status") ==
              "operational"
   end
 
   test "incident management requires admin", %{} do
     # Anonymous → RequireToken rejects.
-    assert build_conn()
+    assert scoped_conn()
            |> put_req_header("content-type", "application/json")
            |> post("/v1/status/incidents", Jason.encode!(%{title: "x", impact: "minor"}))
            |> json_response(401)

@@ -134,7 +134,7 @@ defmodule BarkparkWeb.ChatControllerTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
 
   # ── wave-session-card wire fixtures (wsc charter D3/D6/D9) ────────────────
 
@@ -218,7 +218,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       for {method, path} <- routes do
         conn =
           dispatch(
-            build_conn() |> put_req_header("content-type", "application/json"),
+            scoped_conn() |> put_req_header("content-type", "application/json"),
             method,
             path
           )
@@ -396,7 +396,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "unauthenticated stays 401 for BOTH malformed and absent ids (auth first)",
          %{} do
-      base = build_conn() |> put_req_header("content-type", "application/json")
+      base = scoped_conn() |> put_req_header("content-type", "application/json")
       assert dispatch(base, :get, "/v1/chat/sessions/not-a-uuid") |> json_response(401)
 
       assert dispatch(base, :get, "/v1/chat/sessions/#{Ecto.UUID.generate()}")
@@ -1513,7 +1513,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   # The classification seam (ChatController.send_failure_response/2 — public
   # per the exit-reason-mapping convention): one assertion per allowlist leg.
   defp split(reason) do
-    conn = ChatController.send_failure_response(build_conn(), reason)
+    conn = ChatController.send_failure_response(scoped_conn(), reason)
 
     {conn.status, Jason.decode!(conn.resp_body)["error"],
      Plug.Conn.get_resp_header(conn, "retry-after")}
@@ -2662,7 +2662,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   describe "GET /v1/chat/rollup" do
     test "auth runs first: missing bearer 401, non-admin reader 403", %{reader: reader} do
-      assert build_conn() |> get("/v1/chat/rollup") |> json_response(401)
+      assert scoped_conn() |> get("/v1/chat/rollup") |> json_response(401)
       assert json_conn(reader) |> get("/v1/chat/rollup") |> json_response(403)
     end
 

@@ -55,14 +55,14 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
   # Mint through the REAL endpoint — the revoke path must kill exactly what the
   # exchange mints, so no fixture shortcut.
   defp mint_app_token(admin, email, ws) do
-    as(build_conn(), admin)
+    as(scoped_conn(), admin)
     |> post("/v1/auth/app-tokens", Jason.encode!(%{email: email, workspace: ws.slug}))
     |> json_response(201)
     |> Map.fetch!("token")
   end
 
   defp revoke(bearer, body) do
-    as(build_conn(), bearer) |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+    as(scoped_conn(), bearer) |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
   # FIXTURE REPAIR (task-ea8cae3258ea4bd3). Revoke-by-email now confines to
@@ -93,7 +93,7 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
   # the shape every cloud-proxied revoke has now that the control plane relays
   # X-Forwarded-For (Registry.revoke_app_token/3).
   defp revoke_from(bearer, ip, body) do
-    as(build_conn(), bearer)
+    as(scoped_conn(), bearer)
     |> put_req_header("x-forwarded-for", ip)
     |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
@@ -101,7 +101,7 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
   # The same revoke arriving DIRECTLY from a public peer that forges the header —
   # the shape the trust boundary exists for (Barkpark.RateLimiter.client_ip/1).
   defp revoke_direct(bearer, peer, forged_ip, body) do
-    as(build_conn(), bearer)
+    as(scoped_conn(), bearer)
     |> Map.put(:remote_ip, peer)
     |> put_req_header("x-forwarded-for", forged_ip)
     |> delete("/v1/auth/app-tokens", Jason.encode!(body))
@@ -110,13 +110,13 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
   # A chain as our own front actually produces it: the control plane relayed the
   # phone's address, Caddy appended the control plane's egress on the right.
   defp revoke_relayed(bearer, phone_ip, relay_ip, body) do
-    as(build_conn(), bearer)
+    as(scoped_conn(), bearer)
     |> put_req_header("x-forwarded-for", "#{phone_ip}, #{relay_ip}")
     |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
   defp self_revoke(bearer) do
-    as(build_conn(), bearer) |> delete("/v1/auth/app-tokens/current")
+    as(scoped_conn(), bearer) |> delete("/v1/auth/app-tokens/current")
   end
 
   describe "DELETE /v1/auth/app-tokens/current (self-revoke)" do
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
     test "no bearer → 401" do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("content-type", "application/json")
         |> delete("/v1/auth/app-tokens/current")
 

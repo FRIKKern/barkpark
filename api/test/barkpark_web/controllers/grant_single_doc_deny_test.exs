@@ -111,10 +111,10 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
     test "in-scope id is served; out-of-scope id (uncovered dataset) 404s", ctx do
       raw = grantee(ctx)
 
-      in_resp = build_conn() |> auth(raw) |> get("/v1/data/doc/#{@granted_ds}/post/target-in")
+      in_resp = scoped_conn() |> auth(raw) |> get("/v1/data/doc/#{@granted_ds}/post/target-in")
       assert json_response(in_resp, 200)["result"]["_id"] == "target-in"
 
-      out_resp = build_conn() |> auth(raw) |> get("/v1/data/doc/#{@other_ds}/post/target-out")
+      out_resp = scoped_conn() |> auth(raw) |> get("/v1/data/doc/#{@other_ds}/post/target-out")
       assert out_resp.status == 404
     end
 
@@ -132,14 +132,14 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
 
       {:ok, _} = Content.publish_document("n1", "note", @granted_ds)
 
-      resp = build_conn() |> auth(raw) |> get("/v1/data/doc/#{@granted_ds}/note/n1")
+      resp = scoped_conn() |> auth(raw) |> get("/v1/data/doc/#{@granted_ds}/note/n1")
       assert resp.status == 404
     end
 
     test "positive control: an unowned token DOES see the out-of-scope doc", ctx do
       _ = ctx
       {raw, _} = insert_token!(%{})
-      resp = build_conn() |> auth(raw) |> get("/v1/data/doc/#{@other_ds}/post/target-out")
+      resp = scoped_conn() |> auth(raw) |> get("/v1/data/doc/#{@other_ds}/post/target-out")
       assert json_response(resp, 200)["result"]["_id"] == "target-out"
     end
   end
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
 
     test "in-scope target returns its referencer (positive control)", ctx do
       raw = grantee(ctx)
-      resp = build_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@granted_ds}/target-in")
+      resp = scoped_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@granted_ds}/target-in")
       assert "in-scope referencer" in backlink_titles(resp)
     end
 
@@ -163,14 +163,14 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
     # the executable reproduction; unskipped + fixed in this PR.)
     test "out-of-scope target (uncovered dataset) returns empty backlinks", ctx do
       raw = grantee(ctx)
-      resp = build_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")
+      resp = scoped_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")
       assert backlink_titles(resp) == []
     end
 
     test "positive control: an unowned token DOES see the out-of-scope backlinks", ctx do
       _ = ctx
       {raw, _} = insert_token!(%{})
-      resp = build_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")
+      resp = scoped_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")
       assert "out-of-scope referencer" in backlink_titles(resp)
     end
   end

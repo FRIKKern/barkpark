@@ -51,6 +51,65 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
 
   # ── router-derived: which pipelines meter a caller they cannot identify ──
 
+  # THE REGISTRY, and it is the half this guard got wrong for months.
+  #
+  # The original derivation asked "does this pipeline contain a plug whose NAME
+  # looks like a credential?" and excluded it if so. That is the wrong question
+  # twice over, and BOTH errors let a real offender through:
+  #
+  #   * `OptionalToken` / `OptionalSessionToken` NEVER halt. Their own moduledocs
+  #     say so ("anonymous is a supported surface on EVERY mount, strict arm
+  #     included"). A pipeline whose only credential plug is optional still
+  #     reaches `Plugs.RateLimit`'s `ip:` fallback for an anonymous caller — the
+  #     exact shared bucket this file exists to keep out of the suite. That is
+  #     how `pipeline :api`, the single largest metered surface in the tree,
+  #     scored as "identified" and 16 bare `build_conn()` calls in
+  #     `media_flat_decayed_bearer_test.exs` escaped.
+  #   * `DeriveWorkspaceFromToken` is not a credential gate AT ALL. It is a
+  #     tenancy derivation that returns the conn untouched when there is no
+  #     token. It matched the vocabulary purely on the substring "Token" and
+  #     excluded `:api` and `:session_token_root` a SECOND time, so removing the
+  #     Optional* error alone would not have fixed either pipeline.
+  #
+  # The right question is "does a caller presenting NO credential get halted
+  # before this pipeline ends?", and no regex over a plug name answers it. So it
+  # is a registry, keyed on the plug, each entry grounded in that plug's `call/2`
+  # — the same shape `Plugs.RateLimit`'s own `@principal_resolvers` uses, and
+  # `every credential plug in a metered pipeline is classified` below reds until
+  # a newly-mounted one is added here.
+  @dispositions %{
+    # :required — halts a caller who presents nothing. Identity is resolved or
+    # the request is refused, so the IP bucket is unreachable on this pipeline.
+    "RequireToken" => {:required, "deny(conn, {:error, :unauthorized}) on a missing bearer"},
+    "RequireScimToken" => {:required, "401 + halt() on a missing/unresolvable SCIM bearer"},
+    "RequireBearerOrSessionToken" =>
+      {:required, "unauthorized/1 -> halt_with/2 when neither bearer nor session resolves"},
+    "PreviewToken" => {:required, "deny(conn, :unauthorized) when no Preview JWT extracts"},
+    "RequireChatHost" => {:required, "unauthorized/1 when the Host credential does not resolve"},
+
+    # :optional — returns the conn unchanged for an anonymous caller, which then
+    # reaches the shared `ip:` bucket. These do NOT protect a pipeline.
+    "OptionalToken" =>
+      {:optional,
+       "no bearer (or a non-Bearer scheme) falls straight through, strict arm included"},
+    "OptionalSessionToken" => {:optional, "moduledoc: \"Never halts\"; anon passes through"},
+    "RequireShareEditToken" =>
+      {:optional,
+       "despite the name: no grant simply returns the conn — the HALT on that " <>
+         "pipeline comes from a later Require* plug, which has its own entry"},
+    "scoped_api_optional_credential" =>
+      {:optional, "router-local soft credential resolution for :scoped_api; anon passes through"},
+
+    # :not_a_credential_gate — matched the name vocabulary, resolves no
+    # credential and halts nobody.
+    "DeriveWorkspaceFromToken" =>
+      {:not_a_credential_gate, "tenancy derivation; `else -> conn` when there is no api_token"}
+  }
+
+  # Same vocabulary the original used, plus `Key`, and case-insensitive so a
+  # router-local function plug (`:scoped_api_optional_credential`) is seen too.
+  @credential_vocabulary ~r/plug\((?:BarkparkWeb\.Plugs\.)?:?(\w*(?:token|credential|host|auth|key)\w*)[\),]/i
+
   defp metered_pipelines do
     src = File.read!(@router_source)
 
@@ -59,15 +118,17 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
     |> Enum.filter(fn {_name, body} -> String.contains?(body, "Plugs.RateLimit)") end)
   end
 
-  # A metered pipeline with NO credential plug in it meters callers whose
-  # identity nothing has resolved yet — the IP-fallback surface. Same credential
-  # vocabulary as RateLimitPrincipalCoverageTest, deliberately.
+  defp credential_plugs(body) do
+    @credential_vocabulary |> Regex.scan(body) |> Enum.map(&Enum.at(&1, 1)) |> Enum.uniq()
+  end
+
+  # A metered pipeline with no :required credential plug meters callers whose
+  # identity nothing has resolved — the IP-fallback surface.
   defp unidentified_metered_pipelines do
     for {name, body} <- metered_pipelines(),
-        not Regex.match?(
-          ~r/plug\((?:BarkparkWeb\.Plugs\.)?:?\w*(?:Token|Credential|Host|Auth)\w*[\),]/,
-          body
-        ),
+        not Enum.any?(credential_plugs(body), fn plug ->
+          match?({:required, _}, Map.get(@dispositions, plug))
+        end),
         do: String.trim_leading(name, ":") |> String.to_atom()
   end
 
@@ -85,8 +146,26 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
     |> walk_routes("", [])
     |> Enum.filter(fn {_path, pipes} -> Enum.any?(pipes, &(&1 in pipelines)) end)
     |> Enum.map(&elem(&1, 0))
-    |> Enum.reject(&String.contains?(&1, ":"))
+    # THE SECOND BLINDNESS. This used to DROP every parameterised route
+    # (`Enum.reject(&String.contains?(&1, ":"))`), and the scan below then
+    # required the path to appear as a whole quoted string. A test writes
+    # `get("/v1/media/\#{@dataset}")`, so BOTH halves missed it: the route is
+    # parameterised, and the literal in the source ends at the interpolation.
+    # `media_flat_decayed_bearer_test.exs` requests nothing but interpolated
+    # paths and was invisible to this guard with 16 bare `build_conn()` calls.
+    #
+    # Keep the LITERAL PREFIX instead — `/v1/media/:dataset` -> `/v1/media` —
+    # and let `requests_metered_path?/2` match whatever follows.
+    |> Enum.map(&(&1 |> String.split("/:") |> hd()))
+    |> Enum.reject(&(&1 in ["", "/"]))
     |> Enum.uniq()
+  end
+
+  # The prefix is only a hit at a SEGMENT boundary: `"/v1/media"` matches
+  # `"/v1/media"`, `"/v1/media/..."`, `"/v1/media?..."` and
+  # `"/v1/media/\#{...}"`, and does NOT match `"/v1/mediafoo"`.
+  defp requests_metered_path?(src, path) do
+    Regex.match?(Regex.compile!("\"" <> Regex.escape(path) <> "([\"/?]|\#\{)"), src)
   end
 
   defp walk_routes({:defmodule, _, [_, [do: body]]}, prefix, pipes),
@@ -130,7 +209,7 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
   def scan(sources, paths) do
     for {path, src} <- sources,
         not Map.has_key?(@exempt, path),
-        Enum.any?(paths, &String.contains?(src, "\"" <> &1 <> "\"")),
+        Enum.any?(paths, &requests_metered_path?(src, &1)),
         bare = length(Regex.scan(~r/(?<![\w.])build_conn\(\)/, src)),
         bare > 0,
         do: {path, bare}
@@ -145,8 +224,47 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
 
   # ── positive controls: prove every stage can SEE what it is looking for ──
 
+  test "every credential plug in a metered pipeline is classified" do
+    unclassified =
+      for {name, body} <- metered_pipelines(),
+          plug <- credential_plugs(body),
+          not Map.has_key?(@dispositions, plug),
+          do: "#{name}: #{plug}"
+
+    assert unclassified == [],
+           """
+           These plugs are mounted in a RATE-LIMITED pipeline and match the credential
+           vocabulary, but @dispositions does not say whether they halt an anonymous
+           caller:
+
+             #{Enum.join(unclassified, "\n  ")}
+
+           Read the plug's `call/2` and answer the only question that matters: does a
+           caller presenting NO credential get halted before the pipeline ends?
+
+             * it halts         -> {:required, "<the clause that halts>"}
+             * it falls through -> {:optional, "<why>"}. The pipeline is then an
+               IP-bucket surface and every test hitting it needs `scoped_conn/0`.
+             * it resolves no credential at all -> {:not_a_credential_gate, "<why>"}
+
+           Guessing from the NAME is what shipped the hole this file exists to close:
+           `DeriveWorkspaceFromToken` reads required and halts nobody, and
+           `RequireShareEditToken` reads required and returns the conn unchanged.
+           """
+  end
+
   test "the router parse finds the unidentified-metered pipelines and their paths" do
     pipelines = unidentified_metered_pipelines()
+
+    assert :api in pipelines,
+           "pipeline :api mounts RateLimit and then OptionalToken, which NEVER halts — " <>
+             "so an anonymous caller on the whole flat /v1 surface lands in the shared " <>
+             "`ip:127.0.0.1` bucket. It scored as identified before this fix and is the " <>
+             "largest metered surface in the tree. Parsed: #{inspect(pipelines)}"
+
+    assert :session_token_root in pipelines,
+           "OptionalSessionToken never halts either, so this pipeline was excluded " <>
+             "TWICE — once for it, once for DeriveWorkspaceFromToken"
 
     assert :user_auth in pipelines,
            "pipeline :user_auth mounts RateLimit ahead of :fetch_session and is THE " <>
@@ -162,7 +280,12 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
            "POST /v1/access/claim is one of the two routes that reddened main; " <>
              "if it is not in the derived set the scan below cannot see its callers"
 
-    assert length(paths) >= 10, "only #{length(paths)} paths derived — the parse has drifted"
+    assert "/v1/media" in paths,
+           "the flat media read is metered by :api and every request to it in the suite " <>
+             "is interpolated; without the literal PREFIX in the derived set the scan " <>
+             "cannot see those callers"
+
+    assert length(paths) >= 40, "only #{length(paths)} paths derived — the parse has drifted"
   end
 
   test "the suite walk reaches the files this guard exists for" do
@@ -171,14 +294,19 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
 
     in_scope =
       for {p, src} <- sources,
-          Enum.any?(paths, &String.contains?(src, "\"" <> &1 <> "\"")),
+          Enum.any?(paths, &requests_metered_path?(src, &1)),
           do: p
 
     # An empty or tiny walk would make the real assertion vacuously green.
     assert "test/barkpark_web/controllers/webauthn_controller_test.exs" in in_scope
     assert "test/barkpark_web/controllers/access_controller_test.exs" in in_scope
 
-    assert length(in_scope) >= 20,
+    assert "test/barkpark_web/media_flat_decayed_bearer_test.exs" in in_scope,
+           "the file this widening exists for: 16 bare build_conn/0 on interpolated " <>
+             ":api paths, invisible to BOTH the old pipeline filter and the old " <>
+             "whole-string path match"
+
+    assert length(in_scope) >= 90,
            "only #{length(in_scope)} in-scope test files found — the wildcard or the " <>
              "path match has drifted and the scan is measuring almost nothing"
   end
@@ -208,8 +336,15 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
            "the scanner flags scoped_conn/0, which would make the rule unsatisfiable"
 
     # And it must not fire on a file that never touches a metered anonymous route.
-    unrelated = String.replace(offender, "/v1/auth/login", "/v1/data/query/production/post")
-    assert scan([{"fixture/unrelated_test.exs", unrelated}], paths) == []
+    # `/v1/preview/*` is `pipeline :api_preview`, whose `PreviewToken` DENIES a
+    # caller carrying no Preview JWT — so nothing anonymous ever reaches the
+    # shared IP bucket there. (The old control here used `/v1/data/query/...`,
+    # which is `:api` — genuinely metered-anonymous, and only passed because the
+    # pipeline filter was wrong.)
+    unrelated = String.replace(offender, "/v1/auth/login", "/v1/preview/query/production/post")
+
+    assert scan([{"fixture/unrelated_test.exs", unrelated}], paths) == [],
+           "the control path is metered-anonymous after all, so this arm proves nothing"
   end
 
   # ── the assertion ──

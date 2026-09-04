@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
       id = created["result"]["id"]
 
       resp =
-        build_conn()
+        scoped_conn()
         |> callback()
         |> post(~p"/v1/media/production/processing/#{id}/callback", %{
           "status" => "ready",
@@ -181,7 +181,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
       id = created["result"]["id"]
 
       resp =
-        build_conn()
+        scoped_conn()
         |> post(~p"/v1/media/production/processing/#{id}/callback", %{"status" => "ready"})
 
       assert resp.status == 401

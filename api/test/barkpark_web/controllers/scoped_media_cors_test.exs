@@ -168,7 +168,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
     end
 
     test "GET /w/:ws/p/:project/media (index)", %{ws: ws, project: project} do
-      conn = build_conn() |> cross_origin() |> get(media_root(ws, project))
+      conn = scoped_conn() |> cross_origin() |> get(media_root(ws, project))
 
       assert conn.status == 200
       assert_no_wildcard(conn)
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
 
     test "GET /w/:ws/p/:project/media/:id/meta", %{ws: ws, project: project, media_file: file} do
       conn =
-        build_conn() |> cross_origin() |> get("#{media_root(ws, project)}/#{file.id}/meta")
+        scoped_conn() |> cross_origin() |> get("#{media_root(ws, project)}/#{file.id}/meta")
 
       assert conn.status == 200
       assert_no_wildcard(conn)
@@ -188,7 +188,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
     test "GET /w/:ws/p/:project/media/files/*path serves the bytes with no grant",
          %{ws: ws, project: project, media_file: file} do
       conn =
-        build_conn() |> cross_origin() |> get("#{media_root(ws, project)}/files/#{file.path}")
+        scoped_conn() |> cross_origin() |> get("#{media_root(ws, project)}/files/#{file.path}")
 
       assert conn.status == 200
       assert conn.resp_body == "SCOPED-BYTES"
@@ -206,7 +206,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
 
     test "a serve path matching no row", %{ws: ws, project: project} do
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> get("#{media_root(ws, project)}/files/uploads/nope/absent.png")
 
@@ -216,7 +216,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
 
     test "a meta id matching no row", %{ws: ws, project: project} do
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> get("#{media_root(ws, project)}/#{Ecto.UUID.generate()}/meta")
 
@@ -226,7 +226,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
 
     test "a rendition id matching no row", %{ws: ws, project: project} do
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> get("#{media_root(ws, project)}/renditions/#{Ecto.UUID.generate()}/thumb")
 
@@ -241,7 +241,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
       with_shares(media_share(ws, project))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> post("/w/#{ws.slug}/p/#{project.slug}/v1/media/#{@dataset}/upload", %{})
 
@@ -258,7 +258,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
       with_shares(media_share(ws, project))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> delete("/w/#{ws.slug}/p/#{project.slug}/v1/media/#{@dataset}/#{file.id}")
 
@@ -285,10 +285,10 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
       {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "admin", "user")
       {:ok, session_raw} = Accounts.create_user_session_token(user)
 
-      bare = build_conn() |> cross_origin() |> get(media_root(ws, project))
+      bare = scoped_conn() |> cross_origin() |> get(media_root(ws, project))
 
       with_cookie =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{"user_session" => session_raw})
         |> cross_origin()
         |> get(media_root(ws, project))
@@ -313,7 +313,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
       with_shares(media_share(ws, project))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("origin", @allowlisted_origin)
         |> get("#{media_root(ws, project)}/files/#{file.path}")
 
@@ -330,7 +330,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
       with_shares(media_share(ws, project))
 
       conn =
-        build_conn() |> cross_origin() |> get("#{media_root(ws, project)}/files/#{file.path}")
+        scoped_conn() |> cross_origin() |> get("#{media_root(ws, project)}/files/#{file.path}")
 
       assert conn.status == 200
       assert acao(conn) == []

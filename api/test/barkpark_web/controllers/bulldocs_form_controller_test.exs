@@ -168,7 +168,7 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
       |> post(path(slug), %{"answers" => %{"q-fit" => "Yes"}})
       |> json_response(201)
 
-    anon = build_conn()
+    anon = scoped_conn()
     resp = anon |> get("/v1/data/doc/production/form_response/#{id}")
     assert resp.status in [401, 403, 404]
   end

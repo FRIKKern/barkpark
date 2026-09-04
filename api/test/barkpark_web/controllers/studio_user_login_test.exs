@@ -116,7 +116,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
       assert html_response(conn, 200) =~ "didn&#39;t work"
 
       # no pending marker at all → back to /login
-      fresh = build_conn() |> post("/login/mfa", %{"code" => "123456"})
+      fresh = scoped_conn() |> post("/login/mfa", %{"code" => "123456"})
       assert redirected_to(fresh) == "/login"
     end
 

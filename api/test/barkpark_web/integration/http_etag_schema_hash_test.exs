@@ -101,7 +101,7 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
 
   describe "the list route — GET /v1/data/query/:dataset/:type" do
     test "a field newly marked private must not be served out of a pre-edit 304" do
-      first = get(build_conn(), list_path())
+      first = get(scoped_conn(), list_path())
       assert first.status == 200, "request never arrived (status #{first.status})"
       body = json_response(first, 200)
 
@@ -113,12 +113,12 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
 
       # The same ETag replayed with the schema UNCHANGED still 304s — otherwise
       # the pin below could pass because 304 never happens on this route.
-      unchanged = get(put_req_header(build_conn(), "if-none-match", etag), list_path())
+      unchanged = get(put_req_header(scoped_conn(), "if-none-match", etag), list_path())
       assert unchanged.status == 304
 
       upsert_type!(private_salary_field())
 
-      replay = get(put_req_header(build_conn(), "if-none-match", etag), list_path())
+      replay = get(put_req_header(scoped_conn(), "if-none-match", etag), list_path())
 
       assert replay.status == 200,
              "a schema visibility edit answered #{replay.status} from a pre-edit validator"
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
     # the validator in the body) and this reds — which is exactly the 412 a
     # documented `DocResult.etag` -> `ifMatch` round-trip would hit.
     test "the doc route's BODY etag is still the bare document _rev" do
-      resp = get(build_conn(), doc_path())
+      resp = get(scoped_conn(), doc_path())
       assert resp.status == 200, "request never arrived (status #{resp.status})"
       body = json_response(resp, 200)
 
@@ -154,7 +154,7 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
     end
 
     test "the list route's BODY etag is still main's ids/revs fold, not the validator" do
-      resp = get(build_conn(), list_path())
+      resp = get(scoped_conn(), list_path())
       assert resp.status == 200, "request never arrived (status #{resp.status})"
       body = json_response(resp, 200)
 
@@ -166,7 +166,7 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
 
   describe "the doc route — GET /v1/data/doc/:dataset/:type/:id" do
     test "a field newly marked private must not be served out of a pre-edit 304" do
-      first = get(build_conn(), doc_path())
+      first = get(scoped_conn(), doc_path())
       assert first.status == 200, "request never arrived (status #{first.status})"
       body = json_response(first, 200)
 
@@ -176,12 +176,12 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
       hash_before = body["schemaHash"]
       assert is_binary(hash_before)
 
-      unchanged = get(put_req_header(build_conn(), "if-none-match", etag), doc_path())
+      unchanged = get(put_req_header(scoped_conn(), "if-none-match", etag), doc_path())
       assert unchanged.status == 304
 
       upsert_type!(private_salary_field())
 
-      replay = get(put_req_header(build_conn(), "if-none-match", etag), doc_path())
+      replay = get(put_req_header(scoped_conn(), "if-none-match", etag), doc_path())
 
       assert replay.status == 200,
              "a schema visibility edit answered #{replay.status} from a pre-edit validator"

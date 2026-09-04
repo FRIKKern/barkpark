@@ -122,7 +122,7 @@ defmodule BarkparkWeb.GrantControllerTest do
       conn |> log_in(intruder) |> get("/grant/#{real_raw}")
 
     nonexistent =
-      build_conn() |> log_in(intruder) |> get("/grant/this-token-does-not-exist")
+      scoped_conn() |> log_in(intruder) |> get("/grant/this-token-does-not-exist")
 
     # Same status, same redirect, same flash, same bytes — nothing distinguishes
     # a wrong-account claim from a token that never existed.
@@ -152,7 +152,7 @@ defmodule BarkparkWeb.GrantControllerTest do
     failing = conn |> log_in(user) |> get("/grant/#{raw}")
 
     reference =
-      build_conn() |> log_in(user) |> get("/grant/no-such-token")
+      scoped_conn() |> log_in(user) |> get("/grant/no-such-token")
 
     assert redirected_to(failing) == redirected_to(reference)
 
@@ -179,10 +179,10 @@ defmodule BarkparkWeb.GrantControllerTest do
     assert Phoenix.Flash.get(first.assigns.flash, :info) =~ "Access granted"
 
     # Second claim of the now-spent token collapses to the no-oracle failure.
-    second = build_conn() |> log_in(user) |> get("/grant/#{raw}")
+    second = scoped_conn() |> log_in(user) |> get("/grant/#{raw}")
 
     reference =
-      build_conn() |> log_in(user) |> get("/grant/no-such-token")
+      scoped_conn() |> log_in(user) |> get("/grant/no-such-token")
 
     assert redirected_to(second) == redirected_to(reference)
 
@@ -226,7 +226,7 @@ defmodule BarkparkWeb.GrantControllerTest do
 
     # Collapses to the single no-oracle failure — byte-identical to a token that
     # never existed (same redirect, same flash, same body). No account-state leak.
-    reference = build_conn() |> log_in(user) |> get("/grant/no-such-token")
+    reference = scoped_conn() |> log_in(user) |> get("/grant/no-such-token")
 
     assert redirected_to(failing) == redirected_to(reference)
 

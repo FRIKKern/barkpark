@@ -229,7 +229,7 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
       raw = member_bearer!(ws)
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("accept", "*/*")
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get("#{base(ws, proj)}/media/#{unshared.id}/meta")
@@ -244,7 +244,7 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
       raw = member_bearer!(ws)
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("accept", "*/*")
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get("#{base(ws, proj)}/media/files/#{unshared.path}")
