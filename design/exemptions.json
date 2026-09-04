@@ -14,8 +14,13 @@
  "entries": [
   {
    "path": "api/lib/barkpark_web/layouts/root.html.heex",
-   "count": 165,
-   "note": "Studio root layout, outside the single GENERATED block: 126 hex + 39 literal rgb/rgba. Ratcheted 219 \u2192 165 by ssp-w1-theme-root-sweep: all generic Studio-chrome elevation shadows / modal scrims / neutral hovers moved onto single-source HSL-triplet tokens (--bp-shadow-hsl / --bp-scrim-hsl / --bp-neutral-hsl, consumed as hsl(var(--\u2026) / a)), the stale --primary-muted blue selection tints repointed to the emitted --primary-soft, and every dead `var(--ring|--accent, #3b82f6)` hex fallback dropped (the shared token is always emitted). The REMAINING 165 are the paper-surface + Sheets-grid + --st- status families (the --sheet-ref-* categorical palette, --paper-* value defs, sheet selection/find/notice/err hues, --st- status dupes ~L976-986 + attr-selector couplings): they live under their own token systems inside the studio-literal-check.sh skip-begin/end region (L2598-4631) and are genuinely exempt this wave. This ledger freezes the raw count so none can grow silently."
+   "count": 67,
+   "note": "Studio root layout, outside the single GENERATED block: 126 hex + 39 literal rgb/rgba. Ratcheted 219 \u2192 165 by ssp-w1-theme-root-sweep: all generic Studio-chrome elevation shadows / modal scrims / neutral hovers moved onto single-source HSL-triplet tokens (--bp-shadow-hsl / --bp-scrim-hsl / --bp-neutral-hsl, consumed as hsl(var(--\u2026) / a)), the stale --primary-muted blue selection tints repointed to the emitted --primary-soft, and every dead `var(--ring|--accent, #3b82f6)` hex fallback dropped (the shared token is always emitted). The REMAINING 165 are the paper-surface + Sheets-grid + --st- status families (the --sheet-ref-* categorical palette, --paper-* value defs, sheet selection/find/notice/err hues, --st- status dupes ~L976-986 + attr-selector couplings): they live under their own token systems inside the studio-literal-check.sh skip-begin/end region (L2598-4631) and are genuinely exempt this wave. This ledger freezes the raw count so none can grow silently. edit-on-the-link slice 2 moved the Beta paper-editor rule run (old lines 4035-5543) out of this file into api/priv/static/assets/bp-paper-editor-shell.css, taking 98 of these colour literals with it byte-for-byte; ratcheted 165 -> 67 here and the shell stylesheet enters the ledger at 98 (nothing tokenized, nothing added)."
+  },
+  {
+   "path": "api/priv/static/assets/bp-paper-editor-shell.css",
+   "count": 98,
+   "note": "The Beta paper-editor rule run, extracted byte-for-byte from root.html.heex by edit-on-the-link slice 2 so the public paper reader can load the same editor stylesheet (gated on can_edit?). Its 98 colour literals are root.html.heex's former residue, moved not minted; they carry the same tokenization debt and sweep on the same schedule."
   },
   {
    "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
@@ -59,8 +64,13 @@
   "entries": [
    {
     "path": "api/lib/barkpark_web/layouts/root.html.heex",
-    "count": 30,
-    "note": "Studio root layout. spd-b21 swept 100 -> 30 (-70): every on-ladder literal moved onto the emitted rungs \u2014 0.15s x36 and 0.1s x30 -> var(--dur-1), 0.2s x2 -> var(--dur-2), 0.3s + 0.30s -> var(--dur-3) \u2014 including the 0.15s spd-s5 hardcoded on .pane-column / .pane-column--collapsed, whose comment said in so many words that a var() there would resolve to nothing. The remaining 30 are OFF-LADDER and left deliberately: 0.12s x12 + 120ms x6 (the canvas/slash-menu chrome tier, one value written two ways), 0.08s x5 (the near-instant press feedback), 0.16s x2 and 0.14s x2 (the paper-editor toolbar + press chrome), and three periods that are not chrome timings at all (2.4s bp-update-pulse, 1.2s bp-ae-pulse, 0.5s sheet-ants). Snapping 0.08-0.12s onto the 0.15s rung would be a visible retune nobody asked for; the honest close is a FOURTH rung (a ~0.1s instant tier) in tokens.json, which is a token decision, not a sweep."
+    "count": 10,
+    "note": "Studio root layout. spd-b21 swept 100 -> 30 (-70): every on-ladder literal moved onto the emitted rungs \u2014 0.15s x36 and 0.1s x30 -> var(--dur-1), 0.2s x2 -> var(--dur-2), 0.3s + 0.30s -> var(--dur-3) \u2014 including the 0.15s spd-s5 hardcoded on .pane-column / .pane-column--collapsed, whose comment said in so many words that a var() there would resolve to nothing. The remaining 30 are OFF-LADDER and left deliberately: 0.12s x12 + 120ms x6 (the canvas/slash-menu chrome tier, one value written two ways), 0.08s x5 (the near-instant press feedback), 0.16s x2 and 0.14s x2 (the paper-editor toolbar + press chrome), and three periods that are not chrome timings at all (2.4s bp-update-pulse, 1.2s bp-ae-pulse, 0.5s sheet-ants). Snapping 0.08-0.12s onto the 0.15s rung would be a visible retune nobody asked for; the honest close is a FOURTH rung (a ~0.1s instant tier) in tokens.json, which is a token decision, not a sweep. edit-on-the-link slice 2 moved the Beta paper-editor rule run (old lines 4035-5543) out of this file into api/priv/static/assets/bp-paper-editor-shell.css, taking 20 of these hand-typed durations with it byte-for-byte; ratcheted 30 -> 10 here and the shell stylesheet enters the ledger at 20 (nothing tokenized, nothing added)."
+   },
+   {
+    "path": "api/priv/static/assets/bp-paper-editor-shell.css",
+    "count": 20,
+    "note": "The Beta paper-editor rule run, extracted byte-for-byte from root.html.heex by edit-on-the-link slice 2 so the public paper reader can load the same editor stylesheet (gated on can_edit?). Its 20 hand-typed durations are root.html.heex's former residue, moved not minted; they carry the same tokenization debt and sweep on the same schedule."
    },
    {
     "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
