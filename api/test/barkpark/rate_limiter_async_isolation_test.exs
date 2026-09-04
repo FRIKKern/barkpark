@@ -36,7 +36,12 @@ defmodule Barkpark.RateLimiterAsyncIsolationTest do
     # A grep over `lib/` for unscoped `check/2` call sites. It never opens a
     # bucket, so it needs no reset and is safe to run concurrently.
     "test/barkpark/rate_limiter_scoped_key_coverage_test.exs",
-    "test/support/rate_limiter_sandbox.ex"
+    "test/support/rate_limiter_sandbox.ex",
+    # `scoped_conn/0` and `refute_rate_limited!/1` DESCRIBE the limiter (the
+    # bucket-key scope, and the message a throttled auth verdict should raise).
+    # It is a CaseTemplate, not a test: it opens no bucket, so it needs no reset
+    # and pins no async setting of its own.
+    "test/support/conn_case.ex"
   ]
 
   describe "the contamination is real, and the reset removes it" do
