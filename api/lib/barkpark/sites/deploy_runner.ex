@@ -117,6 +117,21 @@ defmodule Barkpark.Sites.DeployRunner do
   total bytes, count, and age, each configurable — whichever bites first, and
   `retention_sweep/0` REPORTS which cap was effective.
 
+  ## The run-state dir census (dr-w23)
+
+  Retention here is SUFFIX-keyed: `.manifest.json`, `.log` and `.terminal.json`
+  each have a sweep that can name their records from the directory listing
+  alone. Everything else a run leaves behind — `<slug>-<tag>.status`,
+  `<slug>-<tag>.env`, `<slug>.prebuilt/` and a crashed extraction's
+  `<slug>.prebuilt.staging-N/` — is named ONLY inside a manifest, and the
+  manifest is slug-keyed while those files are tag-keyed, so the next deploy of
+  the same slug overwrote the only pointer to them and nothing could ever
+  delete them again. `prune_orphan_run_files/1` bounds exactly that set (no
+  manifest names it, and it has sat longer than `orphan_grace_ms`), and the
+  full record-by-record census with each record's stated bound sits above that
+  function. `serving-memory.json` is the one record ruled intentionally
+  unswept: it has a FIXED name, so it is bounded at one by construction.
+
   This slice keeps the record on the BOX. No raw log bytes are exposed over
   HTTP here: the build env file carries `BARKPARK_TOKEN=` in plaintext and the
   display scrubber does not yet know that shape, so the read path ships after
@@ -245,6 +260,13 @@ defmodule Barkpark.Sites.DeployRunner do
   # the whole point of a tombstone — so they are bounded far more loosely, by
   # count only.
   @default_max_terminal_records 10_000
+
+  # How long an UNREFERENCED run-state entry must sit before the orphan sweep
+  # takes it. The window exists because a launch writes its files BEFORE it
+  # writes the manifest that names them (`launch_unit/2`): a sweep racing that
+  # gap must not delete the run it is about to be told about. An hour is ~14,000
+  # times that gap and still bounds a 1,000-builds/day dir.
+  @default_orphan_grace_ms 3_600_000
 
   @typedoc """
   Why a build's raw log can (or cannot) be read — four DIFFERENT answers where
@@ -462,9 +484,18 @@ defmodule Barkpark.Sites.DeployRunner do
   one, so an evicted deployment can never read back as "never recorded".
   Called on every launch and on re-attach; public so ops (and the eviction
   tests, which must drive PAST each cap) can fire it deliberately.
+
+  Also runs the ORPHAN sweep and reports it under `:orphans` — see the run-state
+  census on `prune_orphan_run_files/1`. The three suffix sweeps
+  (`.manifest.json` / `.log` / `.terminal.json`) each bound a record they can
+  NAME; the orphan sweep is what bounds the per-run files whose only name lived
+  in a manifest that has since been overwritten.
   """
   @spec retention_sweep() :: map()
-  def retention_sweep, do: prune_build_logs(run_state_dir())
+  def retention_sweep do
+    dir = run_state_dir()
+    dir |> prune_build_logs() |> Map.put(:orphans, prune_orphan_run_files(dir))
+  end
 
   @doc "The three configured build-log retention caps."
   @spec retention_caps() :: map()
@@ -474,7 +505,8 @@ defmodule Barkpark.Sites.DeployRunner do
       max_logs: Keyword.get(config(), :max_build_logs, @default_max_build_logs),
       max_age_ms: Keyword.get(config(), :max_build_log_age_ms, @default_max_build_log_age_ms),
       max_terminal_records:
-        Keyword.get(config(), :max_terminal_records, @default_max_terminal_records)
+        Keyword.get(config(), :max_terminal_records, @default_max_terminal_records),
+      orphan_grace_ms: Keyword.get(config(), :orphan_grace_ms, @default_orphan_grace_ms)
     }
   end
 
@@ -2465,25 +2497,169 @@ defmodule Barkpark.Sites.DeployRunner do
 
       for m <- manifests, not MapSet.member?(keep_slugs, m.slug) do
         _ = File.rm(manifest_path(dir, m.slug))
-        _ = m.status_file && File.rm(m.status_file)
+        _ = sweep_path(dir, m.status_file, &File.rm/1)
         # Through evict_build_log/2, never a bare File.rm: a removed log MUST
         # leave a tombstone, or the deployment reads back as never-recorded.
-        _ = m.log_file && evict_build_log(m.log_file, :count)
+        _ = sweep_path(dir, m.log_file, &evict_build_log(&1, :count))
         # The staged prebuilt tree is the BIGGEST thing a run leaves behind (up
         # to the 64 MiB extraction cap, against a 3.8 GB box), so it is swept
         # with the rest of the quartet rather than living forever after a
         # one-shot slug.
-        _ = m.prebuilt_dir && File.rm_rf(m.prebuilt_dir)
-        _ = unlink_env(m)
+        _ = sweep_path(dir, m.prebuilt_dir, &File.rm_rf/1)
+        _ = sweep_path(dir, m.build_env_file, &File.rm/1)
       end
     end
 
     # The manifest cap above counts SLUGS and has never fired on this box. The
     # caps that actually bound a 1,000-builds/day dir count DEPLOYMENTS.
     _ = prune_build_logs(dir)
+    _ = prune_orphan_run_files(dir)
     :ok
   rescue
     _ -> :ok
+  end
+
+  # Reachability: `dir` is `run_state_dir()`; `path` came back OUT of a manifest
+  # on disk, which is exactly why it is checked before it is followed.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sweep_path(dir, path, fun) when is_binary(path) do
+    if inside_run_state_dir?(dir, path) do
+      fun.(path)
+    else
+      # A manifest naming a path outside the dir it lives in is corrupt or
+      # planted; either way the sweep REFUSES rather than follows. The sweep is
+      # the one path in this module that deletes at scale, and `status_file` /
+      # `log_file` / `build_env_file` / `prebuilt_dir` are JSON strings read back
+      # from disk — containment is what keeps a bounded dir from becoming an
+      # arbitrary `rm`.
+      Logger.warning(
+        "[site-deploy] retention refused to follow #{inspect(path)} — a manifest in " <>
+          "#{dir} named a path outside it"
+      )
+
+      :refused
+    end
+  end
+
+  defp sweep_path(_dir, _path, _fun), do: :noop
+
+  defp inside_run_state_dir?(dir, path) do
+    root = Path.expand(dir)
+    String.starts_with?(Path.expand(path), root <> "/")
+  end
+
+  @orphan_staging_rx ~r/\.staging-\d+\z/
+
+  # An entry the ORPHAN sweep may consider. The three suffix sweeps each own a
+  # record they can name from the directory alone; these are the ones whose only
+  # name lives inside a manifest — so once that manifest is overwritten (it is
+  # slug-keyed, the files are tag-keyed) nothing can name them again.
+  defp orphan_candidate?(name) do
+    String.ends_with?(name, ".status") or String.ends_with?(name, ".env") or
+      String.ends_with?(name, ".prebuilt") or Regex.match?(@orphan_staging_rx, name)
+  end
+
+  # ── the run-state dir census (dr-w23) ─────────────────────────────────────
+  #
+  # Every durable thing this module (and ServingMemory) sites in the run-state
+  # dir, and the bound that holds it. A record with no bound is a leak, and this
+  # list is the place a later auditor checks that claim against the writers.
+  #
+  #   <slug>.manifest.json      1 per SLUG (overwritten)  @max_tracked_runs = 32
+  #   <slug>-<tag>.log          1 per DEPLOYMENT          prune_build_logs/1:
+  #                                                       age 7d / count 2,000 /
+  #                                                       bytes 256 MiB
+  #   <slug>-<tag>.terminal.json 1 per DEPLOYMENT         prune_terminal_records/2
+  #                                                       count 10,000
+  #   <slug>-<tag>.status       1 per DEPLOYMENT          THIS SWEEP (was: only
+  #                                                       via the manifest that
+  #                                                       names it, which the
+  #                                                       next deploy of the same
+  #                                                       slug overwrites)
+  #   <slug>-<tag>.env          1 per DEPLOYMENT          unlinked at finalize;
+  #                                                       THIS SWEEP catches the
+  #                                                       ones a crash stranded
+  #                                                       (they carry
+  #                                                       BARKPARK_TOKEN= in
+  #                                                       plaintext at 0600)
+  #   <slug>.prebuilt/          1 per SLUG (replaced)     quartet sweep on
+  #                                                       eviction + THIS SWEEP
+  #                                                       once no manifest names
+  #                                                       it
+  #   <slug>.prebuilt.staging-N transient                 removed by
+  #                                                       PrebuiltArtifact on
+  #                                                       both exits; THIS SWEEP
+  #                                                       catches a crash's
+  #                                                       remains
+  #   serving-memory.json(.tmp) 1, FIXED NAME             bounded at 1 by the
+  #                                                       name: every write
+  #                                                       replaces it. RULED
+  #                                                       intentionally unswept —
+  #                                                       it is the record whose
+  #                                                       whole value is
+  #                                                       surviving.
+  #
+  # Growth rate the sweep is sized against (ESTIMATED — no prod access; from
+  # `@default_max_build_logs = 2_000` and the module's own 1,000-builds/day
+  # note): ~1,000 `.status` files/day at a few hundred bytes each, i.e. the
+  # unswept case was ~0.4 M files and ~0.1 GB/year against a 3.8 GB box.
+  #
+  # Sweeps every candidate the dir holds that NO manifest names and that has sat
+  # longer than `orphan_grace_ms`. Returns how many it took.
+  # Reachability: every path is `run_state_dir()` + an entry of its own listing.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp prune_orphan_run_files(dir) do
+    referenced =
+      for m <- list_manifests(dir),
+          path <- [m.status_file, m.log_file, m.build_env_file, m.prebuilt_dir],
+          is_binary(path),
+          into: MapSet.new(),
+          do: path
+
+    grace = retention_caps().orphan_grace_ms
+    now = DateTime.utc_now()
+
+    entries =
+      case File.ls(dir) do
+        {:ok, names} -> for name <- names, orphan_candidate?(name), do: Path.join(dir, name)
+        {:error, _} -> []
+      end
+
+    swept =
+      for path <- entries,
+          not MapSet.member?(referenced, path),
+          mtime = entry_mtime(path),
+          mtime != nil,
+          DateTime.diff(now, mtime, :millisecond) > grace,
+          reduce: 0 do
+        taken ->
+          _ = File.rm_rf(path)
+          taken + 1
+      end
+
+    if swept > 0 do
+      Logger.info(
+        "[site-deploy] run-state orphan sweep removed #{swept} unreferenced entr(ies) " <>
+          "older than #{grace}ms"
+      )
+    end
+
+    swept
+  rescue
+    error ->
+      Logger.warning("[site-deploy] run-state orphan sweep skipped: #{inspect(error)}")
+      0
+  end
+
+  # `log_stat/1`'s twin for entries that are NOT regular files: a stranded
+  # staging tree is a directory, and a sweep that only stats regular files would
+  # report the biggest orphan as absent.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp entry_mtime(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} -> DateTime.from_unix!(mtime)
+      _ -> nil
+    end
   end
 
   # ── durable per-build record (the tombstone) ──────────────────────────────
