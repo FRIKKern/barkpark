@@ -495,7 +495,13 @@ REPO_ROOT="${ELIXIR_PATH_ESCAPE_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")
 
 # normalize a slash path: resolve `.` and `..` lexically, drop empty segments.
 # String-only (no arrays) so it behaves identically on bash 3.2 (macOS) and 5.x.
-norm_path() {
+# Two entry points, ONE implementation. `norm_path_v` writes its answer to the
+# global `NP`; `norm_path` prints it. The census resolves one path per matched
+# literal — 562 calls on this tree — and `resolved="$(norm_path …)"` is a FORK
+# apiece for a function that never leaves bash. Every call site inside
+# `list_escapes` uses the `_v` form; `norm_path` stays for readers and for any
+# caller that wants a value in a pipeline.
+norm_path_v() {
   local rest="$1" seg out=""
   while [ -n "$rest" ]; do
     seg="${rest%%/*}"
@@ -506,7 +512,12 @@ norm_path() {
       *) out="$out/$seg" ;;
     esac
   done
-  printf '%s' "${out#/}"
+  NP="${out#/}"
+}
+
+norm_path() {
+  norm_path_v "$1"
+  printf '%s' "$NP"
 }
 
 # glob (dir/** or an exact path) -> anchored ERE
@@ -748,7 +759,8 @@ list_escapes() {
       anchor_interp=0
       case "$alit" in *'#{'*) anchor_interp=1 ;; esac
       alit="${alit%%\#\{*}"
-      adir="$(norm_path "$d/$alit")"
+      norm_path_v "$d/$alit"
+      adir="$NP"
       # SHAPE 6 (after this whole anchor loop) needs every anchor's
       # (name, resolved-directory) pair, regardless of which join form — if
       # any — matched it here, so collect them as they're computed.
@@ -811,7 +823,8 @@ EOF
         [ -n "$sublit" ] || continue
         # only a binding something is actually JOINED OFF is an anchor
         grep -Eq '(Path\.join\(\[?[[:space:]]*@?'"$subname"',)|(@?'"$subname"'[[:space:]]*\|>[[:space:]]*Path\.join\()' "$REPO_ROOT/$f" || continue
-        subdir="$(norm_path "$adir/$sublit")"
+        norm_path_v "$adir/$sublit"
+        subdir="$NP"
         [ -n "$subdir" ] || continue
         suppress="$suppress$sublit
 "
@@ -834,7 +847,8 @@ $(grep -Eoh 'Path\.join\(\[[[:space:]]*@?'"$subname"',[[:space:]]*"[^"]*"' "$REP
               ;;
           esac
           [ -n "$jlit" ] || continue
-          resolved="$(norm_path "$subdir/$jlit")"
+          norm_path_v "$subdir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -907,7 +921,8 @@ $suppress
 EOF
             [ "$skip" -eq 0 ] || continue
           fi
-          resolved="$(norm_path "$adir/$jlit")"
+          norm_path_v "$adir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           # inside api/ is not an escape
           case "$resolved" in api | api/*) continue ;; esac
@@ -940,7 +955,8 @@ EOF
             ;;
         esac
         [ -n "$clit" ] || continue
-        resolved="$(norm_path "$adir/$clit")"
+        norm_path_v "$adir/$clit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         case "$resolved" in api | api/*) continue ;; esac
         [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -970,7 +986,8 @@ EOF
             ;;
         esac
         [ -n "$blit" ] || continue
-        resolved="$(norm_path "$adir/$blit")"
+        norm_path_v "$adir/$blit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         case "$resolved" in api | api/*) continue ;; esac
         [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -1035,7 +1052,8 @@ EOF
               ;;
           esac
           [ -n "$jlit" ] || continue
-          resolved="$(norm_path "$aadir/$jlit")"
+          norm_path_v "$aadir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -1102,7 +1120,8 @@ EOF
           [ -n "$xl" ] || continue
           # an absolute argument is not resolved against the cwd at all
           case "$xl" in /*) continue ;; esac
-          resolved="$(norm_path "$aadir/$xl")"
+          norm_path_v "$aadir/$xl"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -1167,7 +1186,8 @@ EOF
         else
           if [ "$sigil" -eq 1 ]; then idiom="$tree-sigildir"; else idiom="$tree-dir"; fi
         fi
-        resolved="$(norm_path "$base/$lit")"
+        norm_path_v "$base/$lit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         # inside api/ is not an escape
         case "$resolved" in api | api/*) continue ;; esac
