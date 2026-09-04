@@ -405,18 +405,13 @@ check_file() {
   if [ -z "$step" ]; then
     echo "FAIL[$label]: no 'Smoke test' step found in the control-plane job — the extractor is broken, not the workflow" >&2
     echo "Cause, in order of likelihood:" >&2
-    echo "  1. A line indented EXACTLY two spaces and ending in ':' appeared inside the control-plane job" >&2
-    echo "     — typically a heredoc body written at that indent inside a 'run: |' block. extract_cp_smoke" >&2
-    echo "     reads that line as the next JOB key, so everything after it is attributed to a job named" >&2
-    echo "     after your heredoc line and the smoke step is never seen. Re-indent the heredoc body." >&2
-    echo "  2. The step was renamed: the boundary matches '      - name: ' containing 'Smoke test'." >&2
-    echo "  3. The job was renamed from 'control-plane'." >&2
-    echo "  4. A line inside the Smoke test step's own 'run: |' body is indented EXACTLY six spaces and" >&2
-    echo "     starts with '- ' (a bullet inside an echo, say). The step boundary is every 6-space '- '" >&2
-    echo "     list item — that is what stops an UNNAMED trailing step from being absorbed into the smoke —" >&2
-    echo "     so such a line closes the step early and the invariants after it go unseen. This direction" >&2
-    echo "     fails CLOSED (you are reading this message, not an OK), but the fix is to re-indent the body," >&2
-    echo "     never to loosen the boundary back to '- name: '." >&2
+    echo "  1. The step was renamed: the boundary matches a step whose 'name' CONTAINS 'Smoke test'." >&2
+    echo "  2. The job was renamed from 'control-plane', or it declares no 'steps:'." >&2
+    echo "  3. NOT the indentation. The boundary is a real YAML parse (scripts/lib/deploy-yaml-scope.sh)," >&2
+    echo "     so a heredoc body, a block scalar, or any string content can no longer truncate the scan" >&2
+    echo "     — nor can it ANSWER for the step, which is the direction that used to certify a deleted probe." >&2
+    echo "  4. NOT a '- ' bullet inside the step's own run: body either — a sequence item is now a PARSED" >&2
+    echo "     node, so only the next real step closes this one." >&2
     return 1
   fi
 
