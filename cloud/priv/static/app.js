@@ -10414,7 +10414,7 @@
     if (acts.policy) {
       // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
       // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
-      // Auth.require_primary_team_admin — and they were appended with no
+      // Auth.require_current_team_admin — and they were appended with no
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
@@ -10429,7 +10429,7 @@
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
     // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
-    // /v1/barkparks/:id/rollback is require_primary_team_admin, and this button
+    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
