@@ -21979,6 +21979,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     // that would break its relay.
     deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
     no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures, pinned with the same byte-exactness as every other registered slug.
+    // repo_not_in_installation shipped in #12128 and was never pinned here; it
+    // joins now, with the two this diff registers.
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.",
+    github_error: "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.",
+    invalid_name: "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -22017,6 +22024,10 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     // exists for it (the fence's shadow law), so listing it here would red the
     // registered-slug assertion by design.
     "deploy_not_started", "no_content_binding",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures join the ban sweep; repo_not_in_installation is a backfill (#12128
+    // registered it without adding it here).
+    "repo_not_in_installation", "github_error", "invalid_name",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -27140,6 +27151,7 @@ const CCHW65_MUST_ANSWER = [
   "invalid", "invalid_code", "invalid_credentials", "limit_reached", "live_twin",
   "malformed_body", "malformed_request", "name_required", "network_error",
   "no_active_subscription", "no_admin_token", "no_content_binding", "no_subscription",
+  "github_error", "invalid_name",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
   "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
   "server_error", "suspended", "unsupported_media_type", "validation_failed",
@@ -27211,4 +27223,124 @@ test("cch-w65-bl G2 CONTROL: registering a fence slug reds the shadow-law guard"
   assert.equal(mutantHooks.friendly({ error: "instance_not_live", detail: "wait for provisioning" }, CCHW65_FB),
     "The instance has no URL yet.",
     "the curated rung swallows the relay — which is why the guard above must red");
+});
+
+// ---------------------------------------------------------------------------
+// cch-w72-bl — THE GITHUB ARM SPEAKS: three curated truths, two honest silences.
+//
+// Charter D875 (github_error claims no specific cause), D878 (invalid_name is a
+// measured lie today), D881 (the seal). Every slug below is minted BARE —
+// `json(conn, S, %{error: "<slug>"})` with no `detail` and no `reason` — so none
+// of these entries is a relay and the 5xx detail-relay fence does not bind them.
+//
+// REACHABILITY LIMITS, recorded here and in the census file header (the two
+// durable venues this merge carries) — stated because none of the three has a
+// live capture, and a guess dressed as a measurement is the fault this wave
+// exists to kill:
+//
+//   github_error       — the three emit sites (router.ex GET /v1/github/repos;
+//                        the create_repo_from_template 502 arm of POST
+//                        /v1/github/repos; connect_site_github) each match the
+//                        cause AWAY before minting (`{:error, _reason}`,
+//                        `{:error, {:github_error, _reason}}`). Outage,
+//                        rate-limit and token-death are indistinguishable at the
+//                        wire. LIMIT: reachability is by construction (any GitHub
+//                        API fault), never captured live — which is precisely why
+//                        the sentence may name NO cause.
+//   invalid_name       — minted by the router's OWN `valid_repo_name?/1`
+//                        pre-check (router.ex:12708), not by GitHub. Human-typed
+//                        and human-reachable by construction: #new-gh-name is
+//                        free text and newCreateRepo POSTs it verbatim. LIMIT: no
+//                        live capture; the reachability proof is the free-text
+//                        input plus a deterministic server-side rule, and the
+//                        rule's location is why the copy does NOT say "GitHub
+//                        refused" (see below).
+//   repo_not_in_installation — human-reachable by construction via a TOCTOU
+//                        window: the repo picker's GET /v1/github/repos lists a
+//                        repo, the operator revokes it from the GitHub App
+//                        installation, and the connect POST then refuses. LIMIT:
+//                        that race has no live capture and cannot be driven from
+//                        a test — the D870 precedent for accepting a constructed
+//                        reachability proof. (Shipped in #12128; asserted here
+//                        for the first time alongside its two siblings.)
+
+test("cch-w72-bl D875: github_error names NO cause — it locates the fault and nothing more", () => {
+  // ONE entry, THREE emit sites: openSiteGithub's fallback and the
+  // newCreateRepo / submitSiteGithub fallback both lose to the curated rung.
+  for (const fb of ["Couldn't load your repositories.", "Please try again."]) {
+    const copy = hooks.friendly({ error: "github_error" }, fb);
+    assert.notEqual(copy, fb, "github_error still renders the caller's generic");
+    assert.equal(copy,
+      "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.");
+  }
+  const copy = hooks.friendly({ error: "github_error" }, "Please try again.");
+  // D875 — the emit DISCARDS the cause, so naming one would be an invention.
+  for (const cause of [/token/i, /expired/i, /revoked/i, /rate.?limit/i, /outage/i,
+                       /permission/i, /credential/i, /unauthori[sz]ed/i]) {
+    assert.ok(!cause.test(copy), "github_error claims a cause the emit discarded: " + cause);
+  }
+  // …and it does not blame the reader's input, which is the one thing the three
+  // emit sites do prove it is not.
+  assert.ok(/not your input/.test(copy), "github_error must locate the fault away from the reader");
+});
+
+test("cch-w72-bl D878: invalid_name names the refused NAME and the rule it broke — NO transience verb", () => {
+  const copy = hooks.friendly({ error: "invalid_name" }, "Please try again.");
+  assert.notEqual(copy, "Please try again.", "invalid_name still renders the caller's generic");
+  assert.equal(copy,
+    "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.");
+  // It names the refused thing.
+  assert.ok(/repository name/i.test(copy), "the sentence must name what was refused");
+  // WHAT THE FILING GOT WRONG: the wave's ruled copy was "GitHub refused that
+  // repository name — pick a different name." Re-derived on origin/main, the
+  // slug is minted by `valid_repo_name?/1` BEFORE any GitHub call, so GitHub
+  // never saw the name. Attributing the refusal to GitHub is the same class of
+  // measured lie D878 was opened to remove, so this guard bans it BY NAME.
+  assert.ok(!/GitHub (refused|rejected|said|declined)/i.test(copy),
+    "invalid_name must not attribute a local pre-check refusal to GitHub: " + copy);
+  // The rule is deterministic and permanent for that name — no transience verb.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i,
+                      /temporar/i, /keeps happening/i]) {
+    assert.ok(!verb.test(copy), "invalid_name paints a permanent refusal as transient: " + verb);
+  }
+});
+
+test("cch-w75-s1 D883: repo_not_in_installation still renders the permanent truth — the pin now covers it", () => {
+  const copy = hooks.friendly({ error: "repo_not_in_installation" }, "Please try again.");
+  assert.equal(copy,
+    "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.");
+  // States only the lost-visibility fact + the one remedy. No transience verb:
+  // the state is permanent until access is re-granted, so retrying cannot work.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i, /temporar/i]) {
+    assert.ok(!verb.test(copy), "repo_not_in_installation paints a permanent state as transient: " + verb);
+  }
+});
+
+test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
+  // These are NOT paid, on purpose, and their census rows STAY:
+  //
+  //   installation_not_found  — POST /v1/github/installations has zero callers in
+  //                             app.js, internal/ or js/: no GitHub App
+  //                             setup_action callback consumer was ever built, so
+  //                             no person can reach the emit.
+  //   repo_full_name_required — guard-shielded: the connect select is built only
+  //                             when repos.length is nonzero and always submits a
+  //                             member of it; only a hand-built request omits it.
+  //
+  // A curated sentence for either would be copy for a reader that does not
+  // exist. This control reds if a future diff registers one WITHOUT retiring its
+  // census row — the mirror of the rot arm, on the JS side.
+  for (const slug of ["installation_not_found", "repo_full_name_required"]) {
+    for (const fb of ["Please try again.", "Couldn't load your repositories."]) {
+      assert.equal(hooks.friendly({ error: slug }, fb), fb,
+        slug + " gained an ERRORS entry — pay it in the census too, or drop the entry");
+    }
+  }
+  // Non-vacuity: the same call shape DOES resolve for the three slugs this arm
+  // did pay, so an equal-to-fallback green above is a real absence, not a broken
+  // rig.
+  for (const slug of ["github_error", "invalid_name", "repo_not_in_installation"]) {
+    assert.notEqual(hooks.friendly({ error: slug }, "Please try again."), "Please try again.",
+      slug + ": the control's rig is broken — every slug would look unregistered");
+  }
 });
