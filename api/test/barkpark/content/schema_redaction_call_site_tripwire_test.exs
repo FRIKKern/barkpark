@@ -96,9 +96,6 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/content/writer.ex:validate_document" => "unscoped 2-arity, write validation",
     "barkpark/content/writer.ex:apply_initial_values" => "unscoped 2-arity, write scaffold",
     "barkpark/content/writer.ex:scaffold_or_initial_values" => "unscoped 2-arity, write scaffold",
-    "barkpark_web/studio/pane_builder.ex:walk_path" => "unscoped 2-arity, Studio pane layout",
-    "barkpark_web/live/studio/studio_live/handlers/secondary.ex:select_secondary" =>
-      "unscoped 2-arity, Studio pane selection",
 
     # -- scoped, but the result never reaches an Envelope redaction function.
     "barkpark/content/expand.ex:load_schemas" =>

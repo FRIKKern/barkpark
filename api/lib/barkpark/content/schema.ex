@@ -172,6 +172,56 @@ defmodule Barkpark.Content.Schema do
   end
 
   @doc """
+  Resolve a type's `%SchemaDefinition{}` the way every tenant-facing SURFACE
+  must — a three-rung ladder, first hit wins:
+
+    1. the caller's exact scope (workspace + project, when a project is given);
+    2. the caller's WORKSPACE, any project — the desk catalogue's own rule
+       (`Scope.scope_to_workspace_including_global/3` deliberately does not
+       narrow by project: a workspace's content types span its projects);
+    3. the shared global layer (`workspace_id IS NULL`).
+
+  Returns `{:ok, schema}` or `:error`. Rows owned by OTHER workspaces are never
+  reached — that is the leak the old unscoped read carried.
+
+  `get_schema_for_redaction/3` deliberately keeps its own two-step (exact scope,
+  then global) and does NOT ride this ladder: redaction is a security
+  chokepoint, and widening it to a workspace-wide rung changed which schema
+  redacted an expanded reference in the content suite. Studio NAVIGATION may
+  widen to the workspace; a REDACTION boundary may not.
+
+  Gyldendal field report #34, the TOKEN arm (2026-09-04): the Studio pane walk
+  read the DOCUMENT with the socket's scope but looked the SCHEMA up with
+  `get_schema/2` — no scope at all. Without a workspace, the dataset string
+  `"production"` resolves to the seeded Default workspace's dataset id, so a
+  schema registered in any OTHER workspace's `production` answered
+  `{:error, :not_found}`, the editor branch (`doc && schema`) produced nil, and
+  the shell reported a document that demonstrably exists as "does not exist".
+  Every unscoped `get_schema/2` on a request-driven path is that bug waiting
+  to happen; this is the resolver those paths call instead.
+  """
+  @spec resolve_schema(String.t(), String.t(), keyword()) :: {:ok, SchemaDefinition.t()} | :error
+  def resolve_schema(name, dataset, opts \\ []) do
+    workspace_only = Keyword.delete(opts, :project_id)
+    global = Keyword.drop(opts, [:workspace_id, :project_id])
+
+    rungs =
+      [opts, workspace_only, global]
+      |> Enum.uniq()
+
+    Enum.reduce_while(rungs, :error, fn rung, acc ->
+      case get_schema(name, dataset, rung) do
+        # A shared row is admissible from any rung.
+        {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> {:halt, {:ok, schema}}
+        # A tenant-owned row is admissible only from a tenant-scoped rung — the
+        # global rung must never hand back another workspace's schema.
+        {:ok, schema} when rung != global -> {:halt, {:ok, schema}}
+        _ -> {:cont, acc}
+      end
+    end)
+  end
+
+  @doc """
   Resolve the full Expectation for a schema definition.
 
   An Expectation is the schema PLUS its SOFT `layout` (ordered field-refs +
