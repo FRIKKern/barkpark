@@ -54,6 +54,11 @@ defmodule Barkpark.Content.Forms do
             Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field) ->
               raw
 
+            # An `image` value decoded into a map at the save boundary rides
+            # back to the picker as its JSON wire string (Gyldendal parity E1).
+            field["type"] == "image" and is_map(raw) ->
+              Jason.encode!(raw)
+
             true ->
               classic_form_value(raw)
           end
@@ -136,6 +141,25 @@ defmodule Barkpark.Content.Forms do
   # validator rejects it loudly rather than this path guessing.
   defp coerce_field_value(%{"type" => "boolean"}, "true"), do: true
   defp coerce_field_value(%{"type" => "boolean"}, "false"), do: false
+
+  # Schema `"image"` fields arrive from the picker as a STRING: a bare URL, or
+  # a JSON object {url, assetId, alt?, focalX?, focalY?} (Gyldendal parity E1
+  # added the last three). Storing the JSON as a string-in-a-string made every
+  # consumer re-parse it ad hoc; decode it here so `content.cover.focalX` is a
+  # number. A bare URL stays a string (it never was an object), and a string
+  # that only LOOKS like JSON but does not parse is kept as-is.
+  defp coerce_field_value(%{"type" => "image"}, val) when is_binary(val) do
+    trimmed = String.trim(val)
+
+    if String.starts_with?(trimmed, "{") do
+      case Jason.decode(trimmed) do
+        {:ok, %{} = map} -> map
+        _ -> val
+      end
+    else
+      val
+    end
+  end
 
   defp coerce_field_value(_field, val), do: val
 

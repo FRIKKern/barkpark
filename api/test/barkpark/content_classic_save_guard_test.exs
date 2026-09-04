@@ -208,7 +208,13 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       {:ok, saved, _errs} = Content.upsert_draft(base_doc, "post", schema_for(), form, @dataset)
 
       # The unbound field landed as a plain content key; blocks survive intact.
-      assert saved.content["featuredImage"] == image_value
+      # Gyldendal parity E1: the picker's JSON wire string is DECODED at the save
+      # boundary (Forms.coerce_field_value), so the key holds the object itself.
+      assert saved.content["featuredImage"] == %{
+               "url" => "/media/files/x.png",
+               "assetId" => "asset-1"
+             }
+
       assert Enum.map(saved.content["blocks"], & &1["id"]) == ["b-title", "free-p1"]
 
       # And a follow-up save with the field EMPTIED clears the key (the same

@@ -291,9 +291,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # session via LiveAuth.:fetch_api_token (empty string disables uploads).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
   # See docs/studio/web-components.md for the full contract.
-  def input(%{field: %{"type" => "image", "name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+  def input(%{field: %{"type" => "image", "name" => name} = f} = assigns) do
+    val = image_form_value(Map.get(assigns.editor_form, name, ""))
+
+    assigns =
+      assign(assigns,
+        n: name,
+        v: val,
+        hotspot: image_option?(f, "hotspot"),
+        alt: image_option?(f, "alt")
+      )
 
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
@@ -304,6 +311,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-mp-hidden-#{@n}"}
         data-token={@api_token_raw}
+        hotspot={@hotspot}
+        alt={@alt}
       ></bp-media-picker>
     </div>
     """
@@ -423,4 +432,21 @@ defmodule BarkparkWeb.Components.FieldInputs do
       {:error, _} -> inspect(value)
     end
   end
+
+  # Gyldendal parity E1 — an image field opts into the focal point and the
+  # alt-text input the way Sanity does (`options.hotspot`), or flat:
+  # {"type":"image","hotspot":true,"alt":true}. Absent → the picker renders
+  # byte-identically (the attribute is omitted, not set to "false").
+  defp image_option?(field, key) do
+    flat = Map.get(field, key)
+    nested = get_in(field, ["options", key])
+    if flat == true or nested == true, do: true, else: nil
+  end
+
+  # The picker's wire value is a STRING (a bare URL or a JSON object). A value
+  # that was decoded into a map at the save boundary (Forms.coerce_field_value)
+  # is re-encoded here so the same picker reads both.
+  defp image_form_value(%{} = map), do: Jason.encode!(map)
+  defp image_form_value(v) when is_binary(v), do: v
+  defp image_form_value(_), do: ""
 end

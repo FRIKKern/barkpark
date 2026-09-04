@@ -2559,6 +2559,16 @@
        under the field — Browse library opens the bp-asset-browser modal. */
     bp-media-picker { display: block; }
     .bp-mp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    /* Gyldendal parity E1 — image focal point (hotspot) + alt text on the field picker. */
+    .bp-mp-hotspot { position: relative; display: inline-block; cursor: crosshair; }
+    .bp-mp-focal {
+      position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+      border: 2px solid var(--bg); background: var(--primary); box-shadow: 0 0 0 2px var(--primary);
+      pointer-events: none;
+    }
+    .bp-mp-alt-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .bp-mp-alt-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-dim); }
+    .bp-mp-alt { width: 100%; }
     .bp-mp-preview-img {
       display: block; max-width: 100%; max-height: 240px;
       border-radius: var(--radius-sm); border: 1px solid var(--border);
