@@ -66,6 +66,8 @@ const VERDICT_SCHEMA = {
 // so the workflow runs on any checkout, any machine. No machine-local prefixes here — ever.
 const RENDER_EX = 'api/lib/barkpark/portable_doc/render.ex';
 const ROOT_HEEX = 'api/lib/barkpark_web/layouts/root.html.heex';
+// The Beta editor's rules moved out of root.html.heex (edit-on-the-link slice 2); both files are the Edit side.
+const SHELL_CSS = 'api/priv/static/assets/bp-paper-editor-shell.css';
 
 // Workflow scripts cannot call Date (it breaks resume): the run date arrives via args.run_date.
 const RUN_DATE = (typeof args === 'object' && args && args.run_date) || 'undated';
@@ -91,7 +93,7 @@ For each block, list its variants. Examples:
   • paragraph, pullquote, eyebrow, byline, code, divider — ["default"]
 
 Skip blocks that don't render visible HTML. Skip inline marks. Return via schema.`,
-  { schema: ENUM_SCHEMA, agentType: 'paper-researcher', phase: 'Enumerate', label: 'enumerate' }
+  { schema: ENUM_SCHEMA, agentType: 'general-purpose', phase: 'Enumerate', label: 'enumerate' }
 );
 
 const blocks = enumeration.blocks;
@@ -124,10 +126,10 @@ outer tag and any nested span styles. Use actual values as emitted
 (e.g. \`margin:0\` not \`margin:1.6rem 0 0.8rem\` after the recent zeroing).
 
 Return ONLY the structured text reference, no preamble.`,
-    { agentType: 'paper-researcher', phase: 'Sources', label: 'render.ex emitters' }
+    { agentType: 'general-purpose', phase: 'Sources', label: 'render.ex emitters' }
   ),
   () => agent(
-    `Read ${ROOT_HEEX} and produce a stable text reference of every CSS rule
+    `Read ${ROOT_HEEX} AND ${SHELL_CSS} (the editor rules live in the second file) and produce a stable text reference of every CSS rule
 under \`.bp-paper-surface\` AND \`.bp-paper-editor-body\` that targets block
 content (h1-h6, p, ul, ol, li, blockquote, code, pre, a, table, th, td,
 figure, figcaption, hr, .bp-paper-callout, .bp-paper-pullquote,
@@ -149,7 +151,7 @@ Also include the \`--paper-*\` CSS variable definitions on both surfaces
 (light + dark + fallback) since some inline emitters resolve to those vars.
 
 Return ONLY the structured text reference, no preamble.`,
-    { agentType: 'paper-researcher', phase: 'Sources', label: 'root.html.heex rules' }
+    { agentType: 'general-purpose', phase: 'Sources', label: 'root.html.heex rules' }
   ),
 ]);
 
@@ -239,7 +241,7 @@ claim:
   editSource: ${f.editSource || '?'}
   notes: ${f.notes || '(none)'}
 
-READ ${RENDER_EX} and ${ROOT_HEEX} at the cited lines (and a few lines
+READ ${RENDER_EX}, ${ROOT_HEEX} and ${SHELL_CSS} at the cited lines (and a few lines
 around). Verify values are accurately quoted AND a user toggling View↔Edit
 would visually notice.
 
@@ -250,7 +252,7 @@ Reject when:
   • Property is intentionally surface-specific.
 
 Return isReal=true only when values are accurate AND visible.`,
-      { schema: VERDICT_SCHEMA, agentType: 'paper-researcher', label: `refute:${f.block}/${f.property}`, phase: 'Verify' }
+      { schema: VERDICT_SCHEMA, agentType: 'general-purpose', label: `refute:${f.block}/${f.property}`, phase: 'Verify' }
     ),
     () => agent(
       `Independent second-vote refute. Different verifier; same claim; default
@@ -265,10 +267,10 @@ claim:
   editSource: ${f.editSource || '?'}
   notes: ${f.notes || '(none)'}
 
-Look at ${RENDER_EX} and ${ROOT_HEEX}. Designer-with-pixel-ruler question:
+Look at ${RENDER_EX}, ${ROOT_HEEX} and ${SHELL_CSS}. Designer-with-pixel-ruler question:
 would this show as visible drift side-by-side, or noise? Half of CSS diffs
 are noise — be skeptical.`,
-      { schema: VERDICT_SCHEMA, agentType: 'paper-researcher', label: `refute2:${f.block}/${f.property}`, phase: 'Verify' }
+      { schema: VERDICT_SCHEMA, agentType: 'general-purpose', label: `refute2:${f.block}/${f.property}`, phase: 'Verify' }
     ),
   ]).then(votes => {
     const valid = votes.filter(Boolean);
@@ -335,7 +337,7 @@ Strict paper-article conventions:
 - No inline <style> block.
 
 Return the repo-relative path of the file you wrote.`,
-  { agentType: 'paper-doc-writer', phase: 'Report', label: 'parity matrix report' }
+  { agentType: 'general-purpose', phase: 'Report', label: 'parity matrix report' }
 );
 
 return {
