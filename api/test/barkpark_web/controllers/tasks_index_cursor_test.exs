@@ -215,6 +215,7 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
       for i <- 1..@corpus, do: mk_task!("cursor-terminal-noise-#{i}", scope, %{})
 
       {200, one_page} = get_json(conn, "/v1/tasks?limit=1000")
+
       refute done.id in Enum.map(one_page["docs"], & &1["id"]),
              "fixture is wrong: the terminal row is inside the window, so this " <>
                "test would pass without a cursor"
