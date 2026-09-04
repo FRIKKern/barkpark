@@ -67,7 +67,8 @@ const VERDICT_SCHEMA = {
 const RENDER_EX = 'api/lib/barkpark/portable_doc/render.ex';
 const ROOT_HEEX = 'api/lib/barkpark_web/layouts/root.html.heex';
 
-const RUN_DATE = new Date().toISOString().slice(0, 10);
+// Workflow scripts cannot call Date (it breaks resume): the run date arrives via args.run_date.
+const RUN_DATE = (typeof args === 'object' && args && args.run_date) || 'undated';
 const REPORT_PATH = `docs/specs/${RUN_DATE}-view-edit-parity-matrix.html`;
 
 phase('Enumerate');
