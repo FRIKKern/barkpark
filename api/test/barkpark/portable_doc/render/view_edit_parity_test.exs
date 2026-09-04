@@ -97,6 +97,16 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
                __DIR__
              )
 
+  # The Studio editor's SHELL stylesheet. It used to sit inline in
+  # root.html.heex's <style>; edit-on-the-link lifted it into a static asset so
+  # the public paper reader can link the same bytes. Studio still loads exactly
+  # these rules (root.html.heex links it between its two <style> halves), so the
+  # Edit side of every §2/§5 comparison is root.html.heex PLUS this file.
+  @shell_css Path.expand(
+               "../../../../priv/static/assets/bp-paper-editor-shell.css",
+               __DIR__
+             )
+
   # The bundle's standalone stylesheet — the THIRD copy of the editor
   # typography. Studio never loads it (`BP_PAPER_EDITOR_NO_INJECT`); embedders
   # load ONLY it. Its `.bp-paper-editor-body` element rules are a hand-kept
@@ -153,7 +163,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   defp normalize_ws(s), do: String.replace(s, ~r/\s+/, " ")
 
   defp view_css, do: strip_comments(Stylesheet.css())
-  defp edit_css, do: strip_comments(File.read!(@root_heex))
+  # Studio's Edit surface is now two files: the layout's remaining inline rules
+  # plus the shell stylesheet it links. Concatenated in load order (the <link>
+  # sits between the halves, and no rule in the second half restyles the editor).
+  defp edit_css, do: strip_comments(File.read!(@root_heex) <> "\n" <> File.read!(@shell_css))
   defp bundle_css, do: strip_comments(File.read!(@bundle_css))
 
   # Drop `/* … */` comments so a comment's prose (which contains commas and the
