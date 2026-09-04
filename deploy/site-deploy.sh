@@ -2093,9 +2093,14 @@ FAKECP
     cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$RF/lockbin/"
     printf '#!/usr/bin/env bash\ncase "$1" in -w) exit 1;; *) exit 0;; esac\n' > "$RF/lockbin/flock"
     chmod +x "$RF/lockbin/"*
-    rf_caddyfile "$RF/Caddyfile.lock"
-    cp "$RF/Caddyfile.lock" "$RF/Caddyfile.lock.orig"
-    rc="$(rf_deploy "$RF/lockbin" rf3 "$RF/Caddyfile.lock" "$RF/lock.out")"
+    # NB: NOT `Caddyfile.lock` — rf_deploy pins BARKPARK_CADDYFILE_LOCK to
+    # "$RF/caddyfile.lock", and on a case-INSENSITIVE filesystem (macOS APFS by
+    # default) that is the SAME inode: `exec 8>"$CADDY_LOCK"` would truncate the
+    # fixture Caddyfile, and this block would red on a platform difference
+    # instead of on the branch it exists to pin.
+    rf_caddyfile "$RF/Caddyfile.locked"
+    cp "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
+    rc="$(rf_deploy "$RF/lockbin" rf3 "$RF/Caddyfile.locked" "$RF/lock.out")"
     check "lock-starved arm STILL exits 0 (a lock we could not take must not fail a healthy build)" \
       [ "$rc" = 0 ]
     check "lock-starved arm speaks a ROUTE failure on the machine channel" \
@@ -2105,9 +2110,9 @@ FAKECP
     check "lock-starved arm does NOT claim it tried and was rejected (it never read the file)" \
       absent 'this run tried to add it' "$RF/lock.out"
     check "lock-starved arm left the Caddyfile byte-identical (never opened)" \
-      cmp -s "$RF/Caddyfile.lock" "$RF/Caddyfile.lock.orig"
+      cmp -s "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
     check "lock-starved arm wrote NO route marker" \
-      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.lock"
+      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.locked"
     check "lock-starved arm STOPS advertising the public URL in the sign-off" \
       absent "live at build rf3 (https://" "$RF/lock.out"
     check "lock-starved arm still switched the release live on disk" \
