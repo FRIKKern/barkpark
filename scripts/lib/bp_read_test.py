@@ -198,5 +198,77 @@ class TheShellHalf(unittest.TestCase):
         self.assertIn("ERROR envelope", r.stderr)
 
 
+class TheAppliedSites(unittest.TestCase):
+    """The rule is applied WHERE IT IS USED, not merely written down.
+
+    Each case extracts the real function out of the real file in the tree,
+    puts a `bp` on PATH that replays the captured refusal, and asserts the
+    function REFUSES instead of printing a plausible empty answer. Extracting
+    from the file (rather than restating the snippet) is what keeps these from
+    going vacuous if someone reverts the call site.
+    """
+
+    def _extract(self, path, name):
+        text = (REPO / path).read_text()
+        start = text.index(f"{name}(){{")
+        end = text.index("\n}\n", start) + len("\n}\n")
+        body = text[start:end]
+        self.assertIn("bp_json", body,
+                      f"{path}:{name}() no longer goes through bp_json — the fix was reverted")
+        return body
+
+    def _drive(self, path, name, snippet, stdout, exit_code):
+        func = self._extract(path, name)
+        with tempfile.TemporaryDirectory() as tmp:
+            env = fake_bp(tmp, stdout, exit_code)
+            script = (
+                'set -u\n'
+                f'cd {REPO}\n'
+                '. scripts/lib/bp-read.sh\n'
+                + func + "\n" + snippet
+            )
+            return subprocess.run(["bash", "-c", script], env=env,
+                                  capture_output=True, text=True, cwd=str(REPO))
+
+    def test_fleet_run_field_refuses_instead_of_printing_an_empty_field(self):
+        ref = REFUSALS["usage"]
+        r = self._drive(
+            "tooling/fleet/fleet-run.sh", "field",
+            'out="$(field task-3f1fe755ed53738e holder)"; rc=$?; '
+            'echo "OUT=[$out] RC=$rc"',
+            ref["stdout"], ref["exit_code"])
+        self.assertIn("RC=2", r.stdout, r.stderr)
+        self.assertIn("usage", r.stderr)
+        self.assertIn("NOT an empty field", r.stderr)
+
+    def test_fleet_run_field_still_reads_a_real_row(self):
+        # The negative arm at the APPLIED site: a healthy read still answers.
+        ok = json.dumps({"ok": True, "doc": {
+            "lifecycle_status": "open",
+            "claim": {"worker": "w25", "epoch": 3},
+            "content": {"acceptance_criteria": [], "brief": {"blocks": []}},
+        }}) + "\n"
+        r = self._drive(
+            "tooling/fleet/fleet-run.sh", "field",
+            'out="$(field task-x holder)"; rc=$?; echo "OUT=[$out] RC=$rc"',
+            ok, 0)
+        self.assertIn("OUT=[w25] RC=0", r.stdout, r.stderr)
+
+    def test_the_naked_pipe_pattern_is_gone_from_the_files_we_fixed(self):
+        # The invocation pattern, named: `bp ... | parser` with stderr binned.
+        import re
+        pattern = re.compile(r"^\s*bp\s+[^\n|]*2>/dev/null\s*\\?\s*\|", re.M)
+        for path in ("tooling/fleet/fleet-run.sh",
+                     "scripts/merge-gate-autostamp-liveness.sh"):
+            text = (REPO / path).read_text()
+            self.assertEqual(pattern.findall(text), [],
+                             f"{path} still pipes bp straight into a parser")
+
+    def test_merge_gate_liveness_sources_the_helper(self):
+        text = (REPO / "scripts/merge-gate-autostamp-liveness.sh").read_text()
+        self.assertIn("lib/bp-read.sh", text)
+        self.assertIn("NOT counted as un-autostamped", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
