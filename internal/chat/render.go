@@ -925,6 +925,12 @@ func formatTokens(n int) string {
 // strip and gives the transcript its rows back; plain chats never had it, so
 // idle frames are byte-identical to the pre-panel geometry.
 func (m Model) workflowStripVisible() bool {
+	// A malformed Barkpark-owned rail envelope always wins over a compact live
+	// summary. Otherwise a stale terminal summary can hide the only warning that
+	// explains why the raw workflow rail vanished.
+	if m.st.Workflow != nil && m.st.Workflow.ContractError != "" {
+		return true
+	}
 	// The live SSE summary (wsc-bl-workflow-sse) is the freshest signal: present +
 	// not Terminal ⇒ the strip stays up and refreshes mid-turn. It supersedes the
 	// rail fold because a summary can arrive before the first turn-boundary refetch
@@ -942,6 +948,10 @@ func (m Model) workflowStripVisible() bool {
 func (m Model) workflowPanelLines() []string {
 	if !m.workflowStripVisible() {
 		return nil
+	}
+	if m.st.Workflow != nil && m.st.Workflow.ContractError != "" {
+		msg := "⚠ workflow data unavailable · rail contract " + m.st.Workflow.ContractError
+		return []string{noticeStyle.Render(truncate(msg, clamp(m.width, 8, 100)))}
 	}
 	focused := m.focus == focusWorkflow
 	needsYou := m.needsYou()

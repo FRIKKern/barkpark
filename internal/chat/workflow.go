@@ -108,11 +108,12 @@ func agentHasDetail(n WorkflowNode) bool {
 // `workflow` list (the D3 pick rule). Label is the entry's row.description
 // treated as ONE opaque string (D3 — never em-dash-split).
 type Workflow struct {
-	TaskID  string
-	Status  string // rail entry status: running | completed | interrupted
-	Label   string
-	EndTime *int64 // entry-level end_time (charter D5), epoch ms; nil until stamped
-	Nodes   []WorkflowNode
+	TaskID        string
+	Status        string // rail entry status: running | completed | interrupted
+	Label         string
+	EndTime       *int64 // entry-level end_time (charter D5), epoch ms; nil until stamped
+	Nodes         []WorkflowNode
+	ContractError string // owned rail-envelope drift; telemetry node contents stay passthrough
 }
 
 // railWireEntry is the raw wire shape of ONE rail_snapshot cell — the single
@@ -131,6 +132,8 @@ type railWireEntry struct {
 		TotalTokens *int `json:"total_tokens"`
 	} `json:"usage"`
 	Workflow []WorkflowNode `json:"workflow"`
+
+	contractError string
 }
 
 // decodeRailWire parses the rail_snapshot map into its wire entries. Malformed
@@ -150,6 +153,25 @@ func decodeRailWire(raw json.RawMessage) map[string]railWireEntry {
 		if err := json.Unmarshal(er, &e); err != nil {
 			continue
 		}
+		// Barkpark owns the rail ENTRY envelope, while WorkflowNode is Claude Code
+		// telemetry forwarded verbatim. A local_workflow entry (or any entry that
+		// already carries workflow nodes) must therefore retain our three envelope
+		// keys. Without this presence check, a producer rename decodes as zero values
+		// and the whole workflow panel silently disappears.
+		if e.Row.TaskType == "local_workflow" || len(e.Workflow) > 0 {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(er, &fields); err == nil {
+				missing := make([]string, 0, 3)
+				for _, key := range []string{"workflow", "status", "usage"} {
+					if _, ok := fields[key]; !ok {
+						missing = append(missing, key)
+					}
+				}
+				if len(missing) > 0 {
+					e.contractError = "missing " + strings.Join(missing, ", ")
+				}
+			}
+		}
 		out[tid] = e
 	}
 	return out
@@ -164,7 +186,7 @@ func decodeWorkflow(raw json.RawMessage) *Workflow {
 	bestID := ""
 	var best railWireEntry
 	for tid, e := range entries {
-		if len(e.Workflow) == 0 {
+		if len(e.Workflow) == 0 && e.contractError == "" {
 			continue
 		}
 		if bestID == "" || e.Seq > best.Seq || (e.Seq == best.Seq && tid > bestID) {
@@ -182,11 +204,12 @@ func decodeWorkflow(raw json.RawMessage) *Workflow {
 		label = "workflow"
 	}
 	return &Workflow{
-		TaskID:  bestID,
-		Status:  best.Status,
-		Label:   label,
-		EndTime: best.EndTime,
-		Nodes:   best.Workflow,
+		TaskID:        bestID,
+		Status:        best.Status,
+		Label:         label,
+		EndTime:       best.EndTime,
+		Nodes:         best.Workflow,
+		ContractError: best.contractError,
 	}
 }
 
