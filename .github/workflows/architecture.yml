@@ -29,18 +29,12 @@ name: architecture
 # an allowlist, and the durable fix is a SHORTER list — never a longer one.
 
 on:
-  # THE push:main ARM. Without it this workflow never produces a main-scoped
-  # result and never writes a main-scoped Actions cache — which is exactly what
-  # the devbuild cache block below records ("this workflow has no `push:` arm,
-  # so no main-scoped entry is ever written and a branch can only ever restore
-  # its own"). A blocking gate needs both: a verdict for main that is not
-  # anybody's PR, and a warm cache every branch can restore from.
-  #
-  # NO paths: FILTER ON THE push ARM, deliberately. The PR arm filters because a
-  # PR that touches nothing architectural need not pay for the graph; main wants
-  # the cache warmed and the verdict recorded on every commit that lands.
-  push:
-    branches: [main]
+  # NO push: ARM HERE, and that is a KNOWN GAP, not an oversight. This workflow
+  # produces no main-scoped result and writes no main-scoped Actions cache (the
+  # devbuild cache block below records exactly that consequence: "no main-scoped
+  # entry is ever written and a branch can only ever restore its own"). Adding
+  # the arm is DEFERRED to task-33742276cf0a35b1, which owns CI trigger policy;
+  # this PR deliberately touches no trigger block.
   pull_request:
     paths:
       - "api/**"
