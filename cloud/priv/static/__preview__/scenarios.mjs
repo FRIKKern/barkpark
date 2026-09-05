@@ -2226,18 +2226,22 @@ const siteStatesDomains = {
 // the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
 //
-// SEVEN AS OF cch-w29-bl, and it was SIX, NOT NINE before that (wave 30 S1).
+// EIGHT AS OF cch-w30-bl. It was SEVEN as of cch-w29-bl, and SIX, NOT NINE
+// before that (wave 30 S1).
 // `deployment_refused` is the auto-deploy PREBUILT refusal: column, producer and
 // console row all landed together, so the fixture seeds it too.
-// `deployment_succeeded`, `member_invited` and
-// `token_expiring` were dropped from `EmailSettings` end to end — no column, no
-// producer, no toggle. A fixture that still seeded them was claiming to be
-// backend-true while describing a backend that no longer exists, which is the
-// exact shape this wave exists to remove; `__app.test.mjs`'s bidirectional
-// census guards app.js but has no reach into this file, so it stayed green.
+// `deployment_succeeded` came BACK the same way — `Registry`'s
+// `dispatch_deployment_terminal/2` fires it from both writers that can land the
+// `live` terminal, so the column, the render arms and the console row returned
+// with it. `member_invited` and `token_expiring` are still dropped from
+// `EmailSettings` end to end — no column, no producer, no toggle. A fixture that
+// still seeded them was claiming to be backend-true while describing a backend
+// that no longer exists, which is the exact shape wave 30 exists to remove;
+// `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
+// this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
-  "deployment_refused",
+  "deployment_succeeded", "deployment_refused",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);

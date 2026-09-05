@@ -110,6 +110,18 @@ defmodule BarkparkCloud.Notifications.EventEmail do
       {"Your Barkpark failed to provision",
        "#{name(payload)} failed to provision.#{cause_then_capture(payload)}"}
 
+  # cch-w30-bl — the success terminal reaches the inbox.
+  #
+  # `identity(payload)` and NOTHING ELSE below the sentence: the producer
+  # (`Registry.dispatch_deployment_succeeded/1`) sends the deployment identity
+  # and no `:detail`, deliberately — the row's `detail` column is only written
+  # as "live at <url>" by `Sites.Deploy.settle_live/2`, so on the agent route it
+  # still holds the PUSHING stage's note and would read as a stale sentence
+  # under a success headline. `detail/1` would render "" for the absent key
+  # anyway; the arm states the absence rather than implying a gap.
+  defp render(:deployment_succeeded, payload, _owner?),
+    do: {"Deployment live", "A deployment for #{name(payload)} is live.#{identity(payload)}"}
+
   # wave 28 S6: `deployment_failed` renders through `cause_then_capture/1`, NOT
   # `detail/1`. Its `:detail` is the deployment's `failure_reason` — reaper prose
   # like "exceeded max deploy claim attempts (stale builder lease)" — which
