@@ -92,8 +92,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → show one instance webhook
       PUT     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → update one instance webhook
       DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → delete one instance webhook
-      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
-      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate admin proxy → rotate a webhook signing secret (team-admin: a credential verb)
+      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries admin proxy → a webhook's delivery log (team-admin: payload bodies)
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
@@ -5179,12 +5179,23 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.delete")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): rotating a signing secret is a CREDENTIAL
+  # verb, so it gates at team admin like /credentials and POST /v1/providers do —
+  # the plane spends the decrypted instance admin token on the caller's behalf,
+  # a token /credentials refuses to hand a plain member. The other seven proxy
+  # verbs stay member-tier beside site CRUD (rbac-roles). Cross-team stays 404
+  # inside proxy_instance_webhook; this only adds the role bar in front of it.
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/rotate" do
-    proxy_instance_webhook(conn, :"webhook.rotate")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.rotate")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): delivery PAYLOAD BODIES are customer data
+  # the instance's own /v1/webhooks door withholds from non-admins, so the read
+  # gates at team admin too. Same shape as rotate above.
   get "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries" do
-    proxy_instance_webhook(conn, :"webhook.deliveries")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.deliveries")
   end
 
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
@@ -12450,7 +12461,11 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id is the SAME 404 as a teamless caller (no existence leak). A
   # resolved instance dispatches through the catalog capability.
   defp proxy_instance_webhook(conn, capability) do
-    conn = Auth.require_user(conn, [])
+    # The two admin-gated verbs (rotate, deliveries) arrive with the principal
+    # already resolved by Auth.require_team_admin; do not verify the session a
+    # second time. Same skip gate_role/4 applies. Every other verb resolves here.
+    conn =
+      if conn.assigns[:current_user], do: conn, else: Auth.require_user(conn, [])
 
     cond do
       conn.halted ->
