@@ -28,7 +28,9 @@ defmodule Mix.Tasks.Codelists.Staleness do
   ## Exit codes
 
     * `0` — success
-    * `1` — bad arguments / book not found
+    * `1` — bad arguments / book not found, or a BLIND report (books were
+      scanned and zero codelist refs were recognized, so the run measured
+      nothing and must not be read as "no drift")
   """
   @shortdoc "Report or revalidate stale codelist refs"
 
@@ -81,10 +83,11 @@ defmodule Mix.Tasks.Codelists.Staleness do
     Mix.shell().info("codelist staleness report — current registry issue: #{current_issue}")
     Mix.shell().info(String.duplicate("=", 72))
 
-    {with_drift, all_current} =
-      Enum.reduce(books, {0, 0}, fn doc, {drift, current} ->
-        refs = StalenessChecker.detect_stale(doc, current_issue)
+    scanned =
+      Enum.map(books, fn doc -> {doc, StalenessChecker.detect_stale(doc, current_issue)} end)
 
+    {with_drift, all_current} =
+      Enum.reduce(scanned, {0, 0}, fn {doc, refs}, {drift, current} ->
         non_current = Enum.reject(refs, fn r -> r.status == :current end)
 
         if non_current == [] do
@@ -97,9 +100,28 @@ defmodule Mix.Tasks.Codelists.Staleness do
 
     Mix.shell().info(String.duplicate("-", 72))
 
+    coverage = StalenessChecker.corpus_coverage(Enum.map(scanned, fn {_doc, refs} -> refs end))
+    ref_total = scanned |> Enum.map(fn {_doc, refs} -> length(refs) end) |> Enum.sum()
+
     Mix.shell().info(
-      "books with drift: #{with_drift} | books all-current: #{all_current} | total: #{length(books)}"
+      "books with drift: #{with_drift} | books all-current: #{all_current} | " <>
+        "total: #{length(books)} | codelist refs recognized: #{ref_total}"
     )
+
+    # NON-VACUITY GATE. Without this, a corpus in which the analyzer recognizes
+    # nothing prints "books with drift: 0" and exits 0 — byte-identical to a
+    # genuinely clean corpus. `detect_stale/2` only counts a ref when one map
+    # carries BOTH "codelistId" and "issue_version", and nothing writes that
+    # shape, so this report is silent for the wrong reason. Refuse loudly rather
+    # than hand back a green that means "I looked in the wrong place".
+    if coverage == :blind do
+      Mix.raise(
+        "staleness report is BLIND: scanned #{length(books)} book(s) and recognized 0 " <>
+          "codelist refs. Drift is UNMEASURED, not absent — detect_stale/2 requires both " <>
+          "\"codelistId\" and \"issue_version\" on one map and no writer produces that " <>
+          "shape. Do not read this run as a clean report."
+      )
+    end
 
     :ok
   end
