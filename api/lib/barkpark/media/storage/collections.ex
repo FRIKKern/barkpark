@@ -72,14 +72,42 @@ defmodule Barkpark.Media.Storage.Collections do
     limit = Keyword.get(opts, :limit, 200) |> min(1000)
     offset = Keyword.get(opts, :offset, 0) |> max(0)
 
-    Document
-    |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
-    |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
-    |> restrict_public_read_tier(dataset, opts)
+    dataset
+    |> list_query(opts)
     |> order_by([d], asc: d.title)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
+  end
+
+  @doc """
+  Grand total of collections matching `list/2`'s predicates, ignoring paging.
+
+  The sibling `list/2` returns a bare list, so `/v1/media/:ds/collections` could
+  only report `count: length(collections)` — the PAGE ROWS — while its
+  `/v1/media/:ds` sibling reports `count: total`, the GRAND TOTAL. One noun, two
+  opposite meanings, and both readings produce a plausible non-negative integer,
+  so a client pages wrong with no error (task-3d7a770cf4ea11cd). This exists so
+  the collections envelope can carry an unambiguous `total`/`hasMore` pair
+  additively, WITHOUT re-pointing the shipped `count` key on either route.
+
+  It shares `list_query/2` with `list/2` on purpose: a count derived from a
+  hand-copied set of predicates is exactly how a total drifts away from the rows
+  it is supposed to be counting — including the public-read tier clamp, which
+  must narrow the total the same way it narrows the page.
+  """
+  @spec count(String.t(), keyword()) :: non_neg_integer()
+  def count(dataset, opts \\ []) when is_binary(dataset) do
+    dataset
+    |> list_query(opts)
+    |> Repo.aggregate(:count, :id)
+  end
+
+  defp list_query(dataset, opts) do
+    Document
+    |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
+    |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
+    |> restrict_public_read_tier(dataset, opts)
   end
 
   @doc """
