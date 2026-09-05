@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Contract.PDSRequestEchoDifferentialTest do
   zero callee widening was needed here either):
 
     * v1/media_controller.ex:401             DELETE /v1/media/:dataset/:id
-    * v1/media_collections_controller.ex:94  DELETE /v1/media/:ds/collections/:id/share
+    * v1/media_collections_controller.ex revoke_share/2  DELETE /v1/media/:ds/collections/:id/share
     * app_token_controller.ex:141            DELETE /v1/auth/app-tokens/current
     * app_token_controller.ex:164            DELETE /v1/auth/app-tokens  {"token": raw}
     * token_controller.ex:45                 POST   /w/:ws/p/:proj/v1/tokens
