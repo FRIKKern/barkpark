@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# dispatch proof (task-3a3e1182fadeef11): a change to THIS file must fire seal-run-guard and only the harnesses whose path set names it.
 # seal-run.sh — the only sanctioned way to TAKE a seal reading.
 #
 # It runs `cloud/priv/static/__preview__/seal-predicate.mjs` and then adjudicates
