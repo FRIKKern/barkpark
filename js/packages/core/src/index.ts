@@ -260,6 +260,7 @@ export type {
   BarkparkAuth,
   MfaEnrollResult,
   MfaVerifyResult,
+  PasswordResetReceipt,
   BarkparkSchema,
   BarkparkFieldType,
   DocFieldName,
