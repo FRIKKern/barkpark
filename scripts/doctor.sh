@@ -113,7 +113,7 @@ if command -v psql >/dev/null 2>&1; then
       -tAc "select setting from pg_settings where name='max_connections';" 2>/dev/null)"
   if [ -n "$TEST_DBS" ]; then
     if [ "$TEST_DBS" -gt "$TEST_DB_WARN" ] 2>/dev/null; then
-      bad "$TEST_DBS orphaned barkpark_test* databases (disk only — connections ${CONN_USED:-?}/${CONN_MAX:-?}, see below). Preview: make reap-test-dbs, or make test to stop leaking at the source"
+      bad "$TEST_DBS barkpark_test* databases (orphan status not established; connections ${CONN_USED:-?}/${CONN_MAX:-?}, see below). Inspect age and active connections: make reap-test-dbs (dry run); use make test to clean up each lane's own partition"
     else
       ok "$TEST_DBS barkpark_test* databases (connections ${CONN_USED:-?}/${CONN_MAX:-?})"
     fi
@@ -221,7 +221,9 @@ if command -v psql >/dev/null 2>&1 \
   PENDING=""
   for f in api/priv/repo/migrations/*.exs; do
     v="$(basename "$f" | cut -d_ -f1)"
-    printf '%s\n' "$APPLIED" | grep -q "^$v$" || PENDING="$PENDING $(basename "$f")"
+    # No upstream writer: grep -q may close early, which makes printf fail
+    # with SIGPIPE under pipefail and falsely reports an applied version.
+    grep -qxF "$v" <<<"$APPLIED" || PENDING="$PENDING $(basename "$f")"
   done
   if [ -n "$PENDING" ]; then
     bad "pending migrations:$PENDING — run: cd api && mix ecto.migrate"
