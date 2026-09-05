@@ -43,6 +43,23 @@ defmodule BarkparkWeb.Studio.StudioPreviewLinkActionTest do
     Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
   end
 
+  # `Content.get_document/3` answers `{:ok, doc} | {:error, :not_found}` —
+  # unwrapped here so a missing fixture raises rather than quietly handing the
+  # assertions a `nil` that every "renders nothing" check would accept.
+  defp fetch!(doc_id, type) do
+    # A freshly created document lives under the `drafts.` prefix, so the
+    # published id alone misses it. Both are tried and a miss RAISES — a `nil`
+    # doc would make every "renders nothing" assertion pass vacuously.
+    case Content.get_document(doc_id, type, @dataset) do
+      {:ok, doc} ->
+        doc
+
+      _ ->
+        {:ok, doc} = Content.get_document("drafts." <> doc_id, type, @dataset)
+        doc
+    end
+  end
+
   defp seed_type(name, desk) do
     {:ok, schema} =
       Content.upsert_schema(
@@ -115,7 +132,7 @@ defmodule BarkparkWeb.Studio.StudioPreviewLinkActionTest do
     test "the resolved action is a link kind carrying the raw template, no secret", %{
       previewable: schema
     } do
-      doc = Content.get_document("previewable", "pv1", @dataset)
+      doc = fetch!("pv1", "previewable")
 
       action = DocActions.preview_doc_action(schema, doc)
 
@@ -150,7 +167,7 @@ defmodule BarkparkWeb.Studio.StudioPreviewLinkActionTest do
     end
 
     test "preview_doc_action/2 returns nil for a schema with no template", %{plain: schema} do
-      doc = Content.get_document("plain", "pl1", @dataset)
+      doc = fetch!("pl1", "plain")
 
       absent? = is_nil(DocActions.preview_doc_action(schema, doc))
       assert absent?, "expected nil for a type declaring no desk.preview"
@@ -166,7 +183,13 @@ defmodule BarkparkWeb.Studio.StudioPreviewLinkActionTest do
           @dataset
         )
 
-      doc = Content.get_document("previewable", "pv-noslug", @dataset)
+      doc = fetch!("pv-noslug", "previewable")
+
+      # Non-vacuity: a nil doc would make preview_doc_action/2 return nil for
+      # the wrong reason and this assertion would pass without touching the
+      # slug gate at all.
+      doc_loaded? = is_map(doc)
+      assert doc_loaded?, "fixture did not load — the assertion below would be vacuous"
 
       absent? = is_nil(DocActions.preview_doc_action(schema, doc))
 
