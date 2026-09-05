@@ -222,6 +222,7 @@ const DEFECTS = [
   "W14-site-detail-phone-band",
   "W29-deploy-rail-live-url-wrap",
   "W34-deploy-detail-render-bound",
+  "W50-site-row-three-hosts-cruel-by-fixture",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -6810,6 +6811,269 @@ async function main() {
           `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
           `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
           `desktop that is still dragging`,
+        );
+      }
+    }
+
+
+    // ── cch-w50 (task-696a2fcf95e9c4da): THE SITE ROW'S THREE TEXT HOSTS, AND
+    //    THE PROOF STOPS BEING A STOPWATCH ────────────────────────────────────
+    //    W22-S2 shipped the wrap on `.site-name`, `.site-host` and
+    //    `.site-meta .mono` and proved it BY MEASUREMENT with cruel strings a
+    //    scratchpad probe injected into the live DOM — `scenarios.mjs` was
+    //    outside that slice's file fence. cch-w24-s7 then landed the cruel
+    //    NAME and DOMAIN as committed fixture and pinned the array shape, but
+    //    asserted no height, drove no phone width (breakpoint-sweep floors at
+    //    619), never iterated the rows, and never reached the other two shapes.
+    //    This leg closes the remainder, and it is deliberately the ONLY leg in
+    //    this file that asserts the CELLS of these three hosts:
+    //
+    //    WHY THIS IS A CELL ASSERTION WHERE W26-instance-track-min-content IS A
+    //    PAGE ONE, which is the trap that made a `sw > cw` leg look green by
+    //    construction: that leg drives 900/1000/1280, where the instance grid
+    //    is TWO tracks and `1fr` floors at min-content — the box grows, so the
+    //    cell reads sw == cw while the page drags. THIS leg drives 320/390/430/
+    //    620/900, where `.site-main` is `flex: 1; min-width: 0` inside a row
+    //    that CANNOT grow, so the same content spills the CELL. Both halves are
+    //    asserted here anyway (cell AND documentElement), because either one
+    //    alone is a green somebody has already been fooled by.
+    //
+    //    BOTH ROW BUILDERS, AND THE COMPACT ONE IS THE SCREEN THAT SHREDDED:
+    //    `sites` (#sites) renders `globalSiteRow` — `.site-name` = the 255-char
+    //    NAME, `.site-host` = the domain, NO `.mono`. `sites-on-instance`
+    //    (#instance/<id>) renders the compact `siteRow` — `.site-name` = the
+    //    DOMAIN, no `.site-host`, and `.site-meta .mono` = the 511-char
+    //    `repo@branch` span that exists on no other screen. A leg driving only
+    //    the list measures two of the three hosts and the wrong one of them.
+    //
+    //    EVERY `.site-row` IS ITERATED (querySelectorAll, the GR109 lesson) and
+    //    the population is PRINTED per cell, so "8 rows" is a number a reader
+    //    can check rather than a promise. Zero rows is a REFUSAL, not a pass.
+    //
+    //    THE KIND CORPUS IS SCORED IN THE SAME RUN, under the same assertion,
+    //    and its numbers are printed beside the cruel ones. Seven kind rows
+    //    reading clean while the cruel two also read clean is the only thing
+    //    that separates "the remedy works" from "the fixture went kind".
+    //
+    //    THE ANTI-SHRED HALF, AND WHY IT IS A REACHABILITY CLAIM AND NOT A
+    //    PIXEL PIN (a bare height pin was deleted from this epic once already,
+    //    cch-w15-s1, and cch-w24-s7 declined to assert one at all and wrote
+    //    down why): `overflow-wrap` inside a box whose resolved width is 0px
+    //    breaks EVERY character, so a clip-only scorer reads sw == cw == 0 and
+    //    calls it GREEN while the row paints one glyph per line — measured
+    //    during W22-S2 at "acme-web" 168px tall for an EIGHT-character name.
+    //    The ceiling asserted here is ROW_HEIGHT_CEILING = HEIGHT, the viewport
+    //    height every cell in this file is driven at. The claim it makes is
+    //    reachability, not aesthetics: a single row in a list must be readable
+    //    inside one screen, and a person scrolling a site list past a row
+    //    taller than their whole viewport has lost the list. It is not a
+    //    hairline either — the shred mode overshoots it by roughly 5x (255
+    //    characters at the 18px line-height `.site-name` inherits is ~4590px,
+    //    and the 511-char mono span is ~7000px), so the ceiling discriminates
+    //    the failure without pinning a number that a legitimate re-style moves.
+    if (requested.includes("W50-site-row-three-hosts-cruel-by-fixture")) {
+      const D = "W50-site-row-three-hosts-cruel-by-fixture";
+      // BLOCK-SCOPED, the `const D` precedent above. 320/390/430 are the phone
+      // band NOTHING measures these rows at today (breakpoint-sweep's narrowest
+      // width is 619); 620 straddles app.css's `max-width: 620px` block; 900 is
+      // the width at which the compact track goes two-column and the failure
+      // changes character. All five are DRIVEN — every one of them measured
+      // spilling with the wrap deleted (see the mutation lines below).
+      const ROW_WIDTHS = [320, 390, 430, 620, 900];
+      // The reachability ceiling. Stated as the viewport height rather than a
+      // literal so the two can never drift apart.
+      const ROW_HEIGHT_CEILING = HEIGHT;
+      const HOST_SELECTORS = [".site-name", ".site-host", ".site-meta .mono"];
+      const S = await import("./scenarios.mjs");
+      const { SCENARIOS, CRUEL_SITE_STRINGS, CRUEL_SITE_ROW_ID, ONE_LABEL_HOST_ROW_ID } = S;
+      // DERIVED, never transcribed: if a constant in scenarios.mjs is retuned,
+      // this leg's expectations move with it. Its own `atLength` guard is what
+      // stops them from moving somewhere comfortable.
+      const CRUEL_IDS = [CRUEL_SITE_ROW_ID, ONE_LABEL_HOST_ROW_ID];
+      const TRACKS = [
+        {
+          scen: "sites",
+          hash: "#sites",
+          view: "view-sites",
+          ready: "#sites-body .site-row",
+          builder: "globalSiteRow",
+          hosts: ".site-name (the 255-char NAME) + .site-host (the 253-char domain / the 66-char one-label host)",
+        },
+        {
+          scen: "sites-on-instance",
+          hash: (SCENARIOS["sites-on-instance"] || {}).deepLink,
+          view: "view-instance",
+          ready: "#instance-sites .site-row",
+          builder: "siteRow (compact — THE SCREEN THAT SHREDDED)",
+          hosts: ".site-name (the 253-char DOMAIN / the 66-char one-label host) + .site-meta .mono (the 511-char repo@branch span)",
+        },
+      ];
+      for (const t of TRACKS) {
+        if (!t.hash) {
+          return die(`${D}: SCENARIOS["${t.scen}"] no longer carries a deepLink — the ${t.builder} screen cannot be reached, so nothing was measured`);
+        }
+      }
+      // The fixture is the assertion's other half. If it goes kind, every cell
+      // below reads clean for the wrong reason — so refuse BEFORE the browser.
+      const expect = [
+        ["name", 255], ["domain", 253], ["oneLabelHost", 66],
+        ["repo", 255], ["branch", 255], ["repoSpanLen", 511],
+      ];
+      for (const [k, n] of expect) {
+        const v = CRUEL_SITE_STRINGS[k];
+        const len = typeof v === "number" ? v : String(v).length;
+        if (len !== n) {
+          return die(`${D}: CRUEL_SITE_STRINGS.${k} measures ${len}, the derived cap is ${n} — the cruel fixture has GONE KIND and every cell below would read clean for the wrong reason`);
+        }
+      }
+      process.stdout.write(
+        `\n${D} — the site row's three text hosts, cruel BY COMMITTED FIXTURE, on BOTH row builders ` +
+        `x ${ROW_WIDTHS.length} widths x 2 themes (${TRACKS.length * ROW_WIDTHS.length * 2} cells). Every ` +
+        `.site-row is iterated and the population printed; kind rows are scored under the SAME assertion as ` +
+        `the cruel ones; documentElement and a ${ROW_HEIGHT_CEILING}px reachability ceiling are asserted too, ` +
+        `because a clip-only scorer reads a shredded 0px box as clean\n`,
+      );
+      let cells = 0, hostCells = 0, hostSpill = 0, pageOver = 0, tall = 0, cruelSeen = 0, maxRowH = 0;
+      for (const t of TRACKS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the WIDEST driven width and walk down, so a screen that
+          // only renders on a phone cannot pass as a screen that renders.
+          await setViewport(ROW_WIDTHS[ROW_WIDTHS.length - 1]);
+          await nav(
+            `${BASE}/?scen=${t.scen}&theme=${theme}${t.hash}`,
+            `document.querySelector('${t.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${t.view}';})()`,
+          );
+          const line = [];
+          for (const width of ROW_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var sels=${JSON.stringify(HOST_SELECTORS)};` +
+              // EVERY row, never row 0 (GR109). The row's own data-id is what
+              // separates cruel from kind — a text-length heuristic would call
+              // the fixture kind the moment the fixture went kind.
+              `var rows=[].slice.call(document.querySelectorAll('.site-row')).map(function(row){` +
+              `  var hosts=[];` +
+              `  sels.forEach(function(sel){` +
+              `    [].slice.call(row.querySelectorAll(sel)).forEach(function(el){` +
+              `      hosts.push({sel:sel,tag:el.tagName.toLowerCase(),sw:el.scrollWidth,cw:el.clientWidth,` +
+              `        h:Math.round(el.getBoundingClientRect().height),len:(el.textContent||'').length});});});` +
+              `  return {id:row.getAttribute('data-id'),h:Math.round(row.getBoundingClientRect().height),hosts:hosts};});` +
+              `return {psw:d.scrollWidth,pcw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows};})()`,
+            );
+            cells++;
+            if (m.view !== t.view) {
+              fail(D, `${t.scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "${t.view}" — the hash did not route, so nothing below this line is about the site list`);
+              line.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${t.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // (0) THE POPULATION. Zero rows is a REFUSAL: a perfect table about
+            // an empty card is exactly the shape of green this leg exists to
+            // deny. The cruel rows must be ON the page by id, not by hope.
+            if (m.rows.length === 0) {
+              fail(D, `${t.scen}/${theme}@${width}: zero .site-row elements — the list is empty, so no cruel string reached the page and nothing was measured`);
+              line.push(`${width}:0rows`);
+              continue;
+            }
+            const ids = m.rows.map((r) => r.id);
+            const missing = CRUEL_IDS.filter((id) => !ids.includes(id));
+            if (missing.length) {
+              fail(D, `${t.scen}/${theme}@${width}: ${m.rows.length} rows rendered but the cruel row(s) ${missing.join(", ")} are not among them — the assertion below would be about the kind corpus only`);
+              line.push(`${width}:${m.rows.length}rows cruel!`);
+              continue;
+            }
+            cruelSeen++;
+            // (1) THE CELLS — every host of every row, cruel AND kind, under
+            // one assertion. This is the half W26 cannot make.
+            const cruel = m.rows.filter((r) => CRUEL_IDS.includes(r.id));
+            const kind = m.rows.filter((r) => !CRUEL_IDS.includes(r.id));
+            for (const r of m.rows) {
+              const which = CRUEL_IDS.includes(r.id) ? "CRUEL" : "kind";
+              for (const h of r.hosts) {
+                hostCells++;
+                if (h.sw > h.cw) {
+                  hostSpill++;
+                  fail(D, `${t.scen}/${theme}@${width}: ${h.tag}${h.sel.replace(/^.*\s/, "")} on the ${which} row ${r.id} — scrollWidth ${h.sw} > clientWidth ${h.cw} (${h.sw - h.cw}px of a ${h.len}-character server string painted outside its own box, on ${t.builder})`);
+                }
+              }
+              // (2) THE ANTI-SHRED HALF. Not optional: `break-word` in a 0px
+              // box scores a perfect sw == cw while the row is a column of
+              // single glyphs.
+              if (r.h > maxRowH) maxRowH = r.h;
+              if (r.h > ROW_HEIGHT_CEILING) {
+                tall++;
+                const worst = r.hosts.reduce((a, b) => (!a || b.h > a.h ? b : a), null);
+                fail(D, `${t.scen}/${theme}@${width}: the ${which} .site-row ${r.id} is ${r.h}px tall against a ${ROW_HEIGHT_CEILING}px viewport — one list row no longer fits one screen, which is the SHRED failure (its tallest host is ${worst ? worst.sel + " at " + worst.h + "px for " + worst.len + " characters" : "unknown"}). A clip-only scorer reads this cell as clean`);
+              }
+            }
+            // (3) THE PAGE. The cell half and the page half fail on different
+            // trees; a leg carrying only one of them has been green on a
+            // broken screen before (W26-instance-track-min-content's header).
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${t.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the site list is off-screen sideways at rest`);
+            }
+            // (4) THE SIDE-BY-SIDE LINE — cruel and kind in the same cell, so
+            // "the remedy works" and "the fixture went kind" stop looking alike.
+            const worstOf = (set) => set.reduce((acc, r) => {
+              for (const h of r.hosts) {
+                if (!acc.host || h.sw - h.cw > acc.host.sw - acc.host.cw) acc.host = h;
+                if (h.len > acc.len) acc.len = h.len;
+              }
+              if (r.h > acc.h) acc.h = r.h;
+              return acc;
+            }, { host: null, h: 0, len: 0 });
+            const c = worstOf(cruel), k = worstOf(kind);
+            line.push(
+              `${width}:${m.rows.length}r pg${m.psw}/${m.pcw} ` +
+              `CRUEL[${cruel.length}r ${c.len}ch ${c.host ? c.host.sw + "/" + c.host.cw : "-"} h${c.h}] ` +
+              `kind[${kind.length}r ${k.len}ch ${k.host ? k.host.sw + "/" + k.host.cw : "-"} h${k.h}]`,
+            );
+          }
+          process.stdout.write(`   ${t.scen}/${theme}  ${line.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${ROW_WIDTHS.join("/")} in both themes on BOTH row builders — ` +
+          `${hostCells} .site-name / .site-host / .site-meta .mono cells measured by querySelectorAll over EVERY ` +
+          `.site-row (never row 0, the GR109 lesson), ${hostSpill} with scrollWidth > clientWidth, ${pageOver} ` +
+          `pages scrolling sideways, ${tall} rows over the ${ROW_HEIGHT_CEILING}px ceiling. The population is ` +
+          `printed per cell above, so the row count is checkable rather than promised`,
+        );
+        okLine(
+          `THE CRUELTY IS COMMITTED FIXTURE, not a probe injection — ${cruelSeen} cell(s) confirmed both cruel rows ` +
+          `present BY data-id before scoring: a ${CRUEL_SITE_STRINGS.name.length}-char one-token name ` +
+          `(validate_length(:name, max: 255)), a ${CRUEL_SITE_STRINGS.domain.length}-char four-label domain ` +
+          `(validate_domains/1's validate_change, invisible to a length census), a ` +
+          `${CRUEL_SITE_STRINGS.oneLabelHost.length}-char host whose FIRST break opportunity is at character 63, ` +
+          `and a ${CRUEL_SITE_STRINGS.repoSpanLen}-char github_repo@github_branch span (varchar(255) on the column ` +
+          `+ validate_length(:github_branch, max: 255) — only the branch half is a changeset rule, which is what a ` +
+          `length census over site.ex misses). scenarios.mjs's atLength() refuses on load if any of them goes kind`,
+        );
+        okLine(
+          `THE KIND CORPUS IS SCORED IN THE SAME RUN under the same assertion and reads identically — the ` +
+          `CRUEL[…] and kind[…] halves of every line above are one measurement in two populations. Seven kind ` +
+          `rows clean while the two cruel rows are also clean is what separates a working remedy from a fixture ` +
+          `that quietly stopped being cruel`,
+        );
+        okLine(
+          `THE ANTI-SHRED CEILING IS A REACHABILITY CLAIM, not a pixel pin (cch-w15-s1's bare height pin was ` +
+          `deleted from this epic, and cch-w24-s7 asserted no height at all): a single list row must fit inside ` +
+          `the ${ROW_HEIGHT_CEILING}px viewport this whole file drives, because a row taller than the screen is a ` +
+          `row nobody can read as a row. The failure it discriminates overshoots it ~5x — break-word inside a 0px ` +
+          `box paints one glyph per line, measured at "acme-web" 168px for EIGHT characters during W22-S2. The ` +
+          `tallest row measured on this run is ${maxRowH}px, so the headroom is ${ROW_HEIGHT_CEILING - maxRowH}px — ` +
+          `stated so the ceiling's discrimination is a number rather than an assurance`,
+        );
+        okLine(
+          `320/390/430 ARE DRIVEN BY NO OTHER INSTRUMENT IN THIS REPO for these rows: breakpoint-sweep's narrowest ` +
+          `width is 619, and no --render cell at 320 is wired into CI (Q3 BELOW THE FOLD at 320 is a SHELL ` +
+          `property and would red main on shipped bytes). This leg reaches that band through overflow-guard, ` +
+          `whose CI invocation carries no --defect flag and therefore runs it`,
         );
       }
     }
