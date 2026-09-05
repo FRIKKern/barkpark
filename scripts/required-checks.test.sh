@@ -2336,7 +2336,10 @@ if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-
 else
   fail_emit "$(why_emit "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
-# Set inclusion, never a count: a count is satisfied by any 26 rows at all.
+# Set inclusion, never a count: a count is satisfied by any N rows at all.
+# The narration below is DERIVED for the same reason the assertion is a set
+# predicate — a typed 26 inside a green line is a number nobody re-earns, and
+# the committed spec has since moved off it.
 if jq -e --slurpfile base "$SEEDX" \
      '[.exclusions[].context] as $out
       | ($base[0].exclusions | map(.context) | map(. as $c | $out | index($c) != null) | all)' \
@@ -2374,7 +2377,7 @@ emit_spec "$TMP/nounion-spec.json" \
 if jq -e --arg c "$SEEDNAME" \
      '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
-  ok "…and without it the IDENTICAL run drops the seeded row and emits 18 of 26 (mutation-proven able to fail)"
+  ok "…and without it the IDENTICAL run drops the seeded row and emits $(jq '.exclusions | length' "$TMP/nounion-spec.json") of $(jq '.exclusions | length' "$SEEDX") (mutation-proven able to fail)"
 else
   fail_emit "$(why_emit "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)")"
 fi
@@ -2427,6 +2430,72 @@ if jq -e '([.exclusions[].context] | index("Cloud gate") | not)
   ok "…and --expect-promoted DROPS that row instead of carrying it, so no context is emitted as both required and excluded"
 else
   fail_emit "$(why_emit "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)")"
+fi
+
+# ── THE INTERSECTION, IN BOTH DIRECTIONS (cgsiw-s4 c6) ──────────────────────
+#
+# The clause above proves ONE direction, and only for ONE name: a committed
+# EXCLUSION (`Cloud gate`) that this run derives as REQUIRED is refused, and its
+# acknowledgement drops the row. That leaves the mirror unasserted. A spec can
+# also go incoherent the other way round — a context the COMMITTED spec requires
+# arriving in the emitted `.exclusions` — and nothing here would have noticed,
+# because every predicate above is keyed on `Cloud gate` by name.
+#
+# So state the invariant as a SET operation over the whole emitted document,
+# spelled out in both directions rather than once (a jq `index` on one list is
+# not a symmetric read of two: it asks whether THIS name is on THAT list, and
+# the answer depends on which list you iterate). Applied to every spec this
+# section had the generator write.
+rc_intersect_empty() { # <spec.json> -> prints the offending contexts, if any
+  jq -r '([.protection.required_status_checks.checks[]?.context] // []) as $req
+         | ([.exclusions[]?.context] // []) as $exc
+         | (($req | map(. as $c | $exc | index($c) != null) | indices(true) | map($req[.])) +
+            ($exc | map(. as $c | $req | index($c) != null) | indices(true) | map($exc[.])))
+         | unique | .[]' "$1" 2>/dev/null
+}
+RC_INT_BAD=""
+for rc_int_f in "$TMP/seeded-spec.json" "$TMP/promoted-spec.json"; do
+  [ -s "$rc_int_f" ] || { RC_INT_BAD="$RC_INT_BAD $(basename "$rc_int_f"):unwritten"; continue; }
+  rc_int_hits="$(rc_intersect_empty "$rc_int_f" | tr '\n' ',')"
+  [ -z "$rc_int_hits" ] || RC_INT_BAD="$RC_INT_BAD $(basename "$rc_int_f"):$rc_int_hits"
+done
+# Non-vacuity FIRST: a predicate that reads zero names from both lists reports an
+# empty intersection for the same reason an empty file does.
+RC_INT_REQ_N="$(jq '[.protection.required_status_checks.checks[]?.context] | length' "$TMP/promoted-spec.json" 2>/dev/null || echo 0)"
+RC_INT_EXC_N="$(jq '[.exclusions[]?.context] | length' "$TMP/promoted-spec.json" 2>/dev/null || echo 0)"
+if [ "$RC_INT_REQ_N" -ge 1 ] && [ "$RC_INT_EXC_N" -ge 1 ] && [ -z "$RC_INT_BAD" ]; then
+  ok "the emitted spec's required×excluded intersection is EMPTY in BOTH directions ($RC_INT_REQ_N required × $RC_INT_EXC_N excluded, read as a set operation over the whole document rather than an \`index\` on one name)"
+elif [ "$RC_INT_REQ_N" -lt 1 ] || [ "$RC_INT_EXC_N" -lt 1 ]; then
+  bad "the intersection clause read $RC_INT_REQ_N required and $RC_INT_EXC_N excluded context(s) — one empty list makes the predicate vacuous"
+else
+  bad "a context is emitted as BOTH required and excluded:$RC_INT_BAD"
+fi
+# …and the committed side of the mirror: no context the COMMITTED spec REQUIRES
+# may arrive in an emitted `.exclusions`. This is the direction the clause above
+# does not cover at all.
+RC_INT_CROSS="$(jq -r --slurpfile b "$SPEC" \
+  '[.exclusions[]?.context] as $exc
+   | [$b[0].protection.required_status_checks.checks[]?.context]
+   | map(. as $c | select($exc | index($c) != null)) | .[]' \
+  "$TMP/promoted-spec.json" 2>/dev/null | tr '\n' ',')"
+if [ -z "$RC_INT_CROSS" ]; then
+  ok "…and no context the COMMITTED spec REQUIRES appears in the emitted exclusions (committed-REQUIRED × derived-EXCLUDED — the direction the \`Cloud gate\` clause above never reads)"
+else
+  bad "a committed REQUIRED context was emitted as an exclusion: $RC_INT_CROSS"
+fi
+# MUTATION PROOF of the predicate itself. Both clauses above are ASSERTIONS over
+# a document, not a guard with a call site to remove — so what has to be shown is
+# that the predicate can SEE the state it forbids. Plant the contradiction in a
+# scratch copy and it must name the planted context, in both directions.
+RC_INT_MUT="$TMP/int-contradiction.json"
+RC_INT_PLANT="$(jq -r '.protection.required_status_checks.checks[0].context' "$TMP/promoted-spec.json" 2>/dev/null)"
+jq --arg c "$RC_INT_PLANT" '.exclusions += [{context: $c, reason: "PLANTED BY THE TEST SUITE"}]' \
+  "$TMP/promoted-spec.json" > "$RC_INT_MUT" 2>/dev/null || : > "$RC_INT_MUT"
+RC_INT_MUT_HITS="$(rc_intersect_empty "$RC_INT_MUT" | tr '\n' ',')"
+if [ -n "$RC_INT_PLANT" ] && [ "$RC_INT_MUT_HITS" = "$RC_INT_PLANT," ]; then
+  ok "…and the predicate is mutation-proven able to fail: planting \`$RC_INT_PLANT\` on the exclusion list of an otherwise-coherent spec makes it name exactly that context (mutation-proven able to fail)"
+else
+  bad "the planted both-lists contradiction was not reported (planted '$RC_INT_PLANT', predicate said '${RC_INT_MUT_HITS:-nothing}') — the intersection clauses above are vacuous"
 fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
