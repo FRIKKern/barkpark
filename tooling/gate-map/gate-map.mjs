@@ -154,6 +154,15 @@ export function scanSites(rel, src) {
     for (const m of L.matchAll(/from\s+["'](\.\.?\/[\w./-]+)["']/g)) {
       add("file", path.posix.normalize(path.posix.join(dirOf, m[1])), at(i));
     }
+    for (const m of L.matchAll(/\bimport\(\s*["'](\.\.?\/[\w./-]+)["']\s*\)/g)) {
+      add("file", path.posix.normalize(path.posix.join(dirOf, m[1])), at(i));
+    }
+    if (/new\s+URL\(/.test(L)) {
+      const near = lines.slice(i, i + 4).join("\n");
+      for (const m of near.matchAll(/new\s+URL\(\s*["'](\.\.?\/[\w./-]+)["']\s*,\s*import\.meta\.url\s*,?\s*\)/g)) {
+        add("file", path.posix.normalize(path.posix.join(dirOf, m[1])), at(i));
+      }
+    }
     for (const m of L.matchAll(/(?:bash|sh|source|\.)\s+(\.\/[\w./-]+\.sh)/g)) {
       add("file", path.posix.normalize(path.posix.join(dirOf, m[1])), at(i));
     }

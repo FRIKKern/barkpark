@@ -43,6 +43,33 @@ test("THE WAVE-16 EDGE: __css_check's directory readdir is derived, not imported
   assert.ok(!/breakpoint-sweep/.test(src), "__css_check never names breakpoint-sweep — only the directory scan links them");
 });
 
+test("relative dynamic imports and new URL reads are derived as file scan sites", () => {
+  const rel = "api/assets/paper-editor/src/canvas/__mounted.test.mjs";
+  const sites = scanSites(
+    rel,
+    `
+      await import("./index.js");
+      readFileSync(new URL(
+        "../../../../priv/static/assets/bp-paper-editor-hooks.js",
+        import.meta.url,
+      ));
+    `
+  );
+
+  assert.ok(
+    sites.some((s) => s.kind === "file" && s.p === "api/assets/paper-editor/src/canvas/index.js"),
+    "the module driven by a dynamic import is mapped"
+  );
+  assert.ok(
+    sites.some(
+      (s) =>
+        s.kind === "file" &&
+        s.p === "api/priv/static/assets/bp-paper-editor-hooks.js"
+    ),
+    "the asset read through new URL(..., import.meta.url) is mapped"
+  );
+});
+
 test("THE COMPOSITION: a slice touching only breakpoint-sweep.mjs REQUIRES __css_check", () => {
   const req = requiredFor([SWEEP], loadMap());
   const paths = req.map((r) => r.path);

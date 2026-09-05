@@ -1,21 +1,9 @@
 {
-  "population": 369,
-  "mapped": 358,
+  "population": 384,
+  "mapped": 376,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
-      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
-    },
-    {
-      "path": "api/assets/paper-editor/src/__format_bubble_focus.test.mjs",
-      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
-    },
-    {
-      "path": "api/assets/paper-editor/src/__keyboard_reach.test.mjs",
-      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
-    },
-    {
-      "path": "api/assets/paper-editor/src/__locked_mounted.test.mjs",
       "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
     },
     {
@@ -205,13 +193,45 @@
       ]
     },
     {
+      "path": "api/assets/paper-editor/src/__fallback_rich_body.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__fallback_rich_body.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/index.js",
+          "evidence": "api/assets/paper-editor/src/__fallback_rich_body.test.mjs:43"
+        }
+      ]
+    },
+    {
       "path": "api/assets/paper-editor/src/__featured_placeholder.test.mjs",
       "run": "node --test api/assets/paper-editor/src/__featured_placeholder.test.mjs",
       "scans": [
         {
           "kind": "file",
           "p": "api/assets/paper-editor/src/canvas/field-node.js",
-          "evidence": "api/assets/paper-editor/src/__featured_placeholder.test.mjs:22"
+          "evidence": "api/assets/paper-editor/src/__featured_placeholder.test.mjs:23"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__field_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__field_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__field_flush.test.mjs:7"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__field_flush.test.mjs:7"
+        },
+        {
+          "kind": "file",
+          "p": "test/final.jpg",
+          "evidence": "api/assets/paper-editor/src/__field_flush.test.mjs:139"
         }
       ]
     },
@@ -253,6 +273,44 @@
       ]
     },
     {
+      "path": "api/assets/paper-editor/src/__format_bubble_focus.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__format_bubble_focus.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/__format_bubble_focus.test.mjs:65"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__generic_field_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__generic_field_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__generic_field_flush.test.mjs:6"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__generic_field_flush.test.mjs:6"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__keyboard_reach.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__keyboard_reach.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/__keyboard_reach.test.mjs:69"
+        }
+      ]
+    },
+    {
       "path": "api/assets/paper-editor/src/__locked.test.mjs",
       "run": "node --test api/assets/paper-editor/src/__locked.test.mjs",
       "scans": [
@@ -265,6 +323,33 @@
           "kind": "file",
           "p": "api/assets/paper-editor/src/canvas/locks.js",
           "evidence": "api/assets/paper-editor/src/__locked.test.mjs:22"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__locked_mounted.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__locked_mounted.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/__locked_mounted.test.mjs:44"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__mutation_concurrency.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__mutation_concurrency.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__mutation_concurrency.test.mjs:37"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__mutation_concurrency.test.mjs:37"
         }
       ]
     },
@@ -368,6 +453,22 @@
           "kind": "file",
           "p": "priv/static/assets/bp-media-picker.js",
           "evidence": "api/assets/paper-editor/src/__picker_focal.test.mjs:21"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__reader_hooks.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__reader_hooks.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__reader_hooks.test.mjs:18"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__reader_hooks.test.mjs:18"
         }
       ]
     },
@@ -491,6 +592,39 @@
       ]
     },
     {
+      "path": "api/assets/paper-editor/src/canvas/__autocomplete_selection.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__autocomplete_selection.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__autocomplete_selection.test.mjs:30"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__control_matrix.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__control_matrix.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__control_matrix.test.mjs:19"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__diagram_preview.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__diagram_preview.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/diagram-node.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__diagram_preview.test.mjs:27"
+        }
+      ]
+    },
+    {
       "path": "api/assets/paper-editor/src/canvas/__enter_tail.test.mjs",
       "run": "node --test api/assets/paper-editor/src/canvas/__enter_tail.test.mjs",
       "scans": [
@@ -498,6 +632,127 @@
           "kind": "file",
           "p": ".github/workflows/paper-editor.yml",
           "evidence": "api/assets/paper-editor/src/canvas/__enter_tail.test.mjs:28"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__enter_tail.test.mjs:61"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/run-convert.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__enter_tail.test.mjs:62"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__flush_pending.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__flush_pending.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__flush_pending.test.mjs:31"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__flush_pending.test.mjs:32"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__node_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__node_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__node_flush.test.mjs:30"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__node_view_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__node_view_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__node_view_flush.test.mjs:31"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__paste_undo_redo.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__paste_undo_redo.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/test/support/fixtures/paper-editor/paste-redo-ops.json",
+          "evidence": "api/assets/paper-editor/src/canvas/__paste_undo_redo.test.mjs:8"
+        },
+        {
+          "kind": "file",
+          "p": "test/support/fixtures/paper-editor/paste-redo-ops.json",
+          "evidence": "api/assets/paper-editor/src/canvas/__paste_undo_redo.test.mjs:9"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__paste_undo_redo.test.mjs:36"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-search-intel.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs:61"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-search-intel.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs:61"
+        },
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-reference-picker.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs:63"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-reference-picker.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs:63"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__reference_picker_mounted.test.mjs:64"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs:53"
+        },
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs:57"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs:57"
         }
       ]
     },
@@ -581,7 +836,17 @@
         },
         {
           "kind": "file",
+          "p": "api/priv/static/assets/bp-sheet-formula.js",
+          "evidence": "api/assets/sheet-grid/__hook.test.mjs:53"
+        },
+        {
+          "kind": "file",
           "p": "priv/static/assets/bp-sheet-pointing.js",
+          "evidence": "api/assets/sheet-grid/__hook.test.mjs:57"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-sheet-pointing.js",
           "evidence": "api/assets/sheet-grid/__hook.test.mjs:57"
         },
         {
@@ -607,12 +872,27 @@
         },
         {
           "kind": "file",
+          "p": "api/lib/barkpark_web/layouts/root.html.heex",
+          "evidence": "api/assets/sheet-grid/__palette.test.mjs:26"
+        },
+        {
+          "kind": "file",
           "p": "lib/barkpark_web/studio/presence_state.ex",
           "evidence": "api/assets/sheet-grid/__palette.test.mjs:277"
         },
         {
           "kind": "file",
+          "p": "api/lib/barkpark_web/studio/presence_state.ex",
+          "evidence": "api/assets/sheet-grid/__palette.test.mjs:277"
+        },
+        {
+          "kind": "file",
           "p": "lib/barkpark_web/studio/tokens_gen.ex",
+          "evidence": "api/assets/sheet-grid/__palette.test.mjs:287"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark_web/studio/tokens_gen.ex",
           "evidence": "api/assets/sheet-grid/__palette.test.mjs:287"
         }
       ]
@@ -689,6 +969,56 @@
           "evidence": "cloud/priv/static/__app.test.mjs:4"
         },
         {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__app.test.mjs:80"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/scenarios.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:850"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/mock.js",
+          "evidence": "cloud/priv/static/__app.test.mjs:851"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/index.html",
+          "evidence": "cloud/priv/static/__app.test.mjs:1526"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__qr_fixture.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:1740"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.css",
+          "evidence": "cloud/priv/static/__app.test.mjs:2063"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__css_check.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:2417"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__css_check.fixture.css",
+          "evidence": "cloud/priv/static/__app.test.mjs:2424"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__css_check.orphan.fixture.css",
+          "evidence": "cloud/priv/static/__app.test.mjs:2437"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__css_check.wrapparity.fixture.css",
+          "evidence": "cloud/priv/static/__app.test.mjs:2488"
+        },
+        {
           "kind": "dir",
           "p": "cloud/priv/static",
           "evidence": "cloud/priv/static/__app.test.mjs:2752"
@@ -705,183 +1035,238 @@
         },
         {
           "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/event_types.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:3929"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/attention_order.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:4365"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/verify_probes.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:7367"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/coherence.html",
+          "evidence": "cloud/priv/static/__app.test.mjs:8595"
+        },
+        {
+          "kind": "file",
           "p": "internal/taskboard/testdata/styleguide_lifecycle.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8542"
+          "evidence": "cloud/priv/static/__app.test.mjs:8597"
         },
         {
           "kind": "file",
           "p": "internal/pdrender/testdata/styleguide_tokens.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8543"
+          "evidence": "cloud/priv/static/__app.test.mjs:8598"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/usage_meters.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:8806"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:9187"
+          "evidence": "cloud/priv/static/__app.test.mjs:9242"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/provider_catalog.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:9731"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/providers_capabilities.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:10073"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__fixtures__/domain-status.json",
+          "evidence": "cloud/priv/static/__app.test.mjs:10834"
         },
         {
           "kind": "file",
           "p": "lib/containerd/io.containerd.runtime.v2.task",
-          "evidence": "cloud/priv/static/__app.test.mjs:11620"
+          "evidence": "cloud/priv/static/__app.test.mjs:11675"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_instance_top_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11656"
+          "evidence": "cloud/priv/static/__app.test.mjs:11711"
         },
         {
           "kind": "file",
           "p": "internal/cloudclient/client.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11709"
+          "evidence": "cloud/priv/static/__app.test.mjs:11764"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_status_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11844"
+          "evidence": "cloud/priv/static/__app.test.mjs:11899"
         },
         {
           "kind": "file",
           "p": "web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:13332"
+          "evidence": "cloud/priv/static/__app.test.mjs:13387"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14476"
+          "evidence": "cloud/priv/static/__app.test.mjs:14531"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14477"
+          "evidence": "cloud/priv/static/__app.test.mjs:14532"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:14490"
+          "evidence": "cloud/priv/static/__app.test.mjs:14545"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:14517"
+          "evidence": "cloud/priv/static/__app.test.mjs:14572"
         },
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__app.test.mjs:14907"
+          "evidence": "cloud/priv/static/__app.test.mjs:14962"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/sold_capability_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15197"
+          "evidence": "cloud/priv/static/__app.test.mjs:15252"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15443"
+          "evidence": "cloud/priv/static/__app.test.mjs:15498"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:17274"
+          "evidence": "cloud/priv/static/__app.test.mjs:17329"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/transport_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17659"
+          "evidence": "cloud/priv/static/__app.test.mjs:17714"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/withhold_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17773"
+          "evidence": "cloud/priv/static/__app.test.mjs:17828"
         },
         {
           "kind": "file",
           "p": "cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18150"
+          "evidence": "cloud/priv/static/__app.test.mjs:18216"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18156"
+          "evidence": "cloud/priv/static/__app.test.mjs:18222"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/render.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18192"
+          "evidence": "cloud/priv/static/__app.test.mjs:18258"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/email_settings.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18193"
+          "evidence": "cloud/priv/static/__app.test.mjs:18259"
         },
         {
           "kind": "file",
           "p": "cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18194"
+          "evidence": "cloud/priv/static/__app.test.mjs:18260"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18202"
+          "evidence": "cloud/priv/static/__app.test.mjs:18268"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/overflow-guard.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:19739"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/defect-selection.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:19766"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:19802"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__app.test.mjs:19972"
+          "evidence": "cloud/priv/static/__app.test.mjs:19948"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:21320"
+          "evidence": "cloud/priv/static/__app.test.mjs:19948"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__unknown_census.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:20696"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/auth.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:22334"
+          "evidence": "cloud/priv/static/__app.test.mjs:22480"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:22550"
+          "evidence": "cloud/priv/static/__app.test.mjs:22696"
         },
         {
           "kind": "file",
           "p": "internal/agent/report.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:23973"
+          "evidence": "cloud/priv/static/__app.test.mjs:24119"
         },
         {
           "kind": "dir",
           "p": "internal/agent",
-          "evidence": "cloud/priv/static/__app.test.mjs:23979"
+          "evidence": "cloud/priv/static/__app.test.mjs:24125"
         },
         {
           "kind": "file",
           "p": "scripts/console-path-escape-check.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:23980"
+          "evidence": "cloud/priv/static/__app.test.mjs:24126"
         },
         {
           "kind": "file",
           "p": "cloud/priv/audit-actions.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:25463"
+          "evidence": "cloud/priv/static/__app.test.mjs:25609"
         },
         {
           "kind": "file",
           "p": "test/barkpark_cloud/accounts/role_agreement_census_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:26769"
+          "evidence": "cloud/priv/static/__app.test.mjs:26915"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26779"
+          "evidence": "cloud/priv/static/__app.test.mjs:26925"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26801"
+          "evidence": "cloud/priv/static/__app.test.mjs:26947"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/smoke.mjs",
+          "evidence": "cloud/priv/static/__app.test.mjs:28811"
         }
       ]
     },
@@ -1006,6 +1391,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__future_act_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__future_act_dump.mjs:74"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__future_act_dump.mjs:454"
         }
       ]
     },
@@ -1027,6 +1417,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__lifecycle_state_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__lifecycle_state_dump.mjs:71"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__lifecycle_state_dump.mjs:125"
         }
       ]
     },
@@ -1048,6 +1443,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__plan_catalog_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__plan_catalog_dump.mjs:25"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__plan_catalog_dump.mjs:79"
         }
       ]
     },
@@ -1069,6 +1469,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__plan_features_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__plan_features_dump.mjs:46"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__plan_features_dump.mjs:100"
         }
       ]
     },
@@ -1090,6 +1495,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__terminal_verb_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__terminal_verb_dump.mjs:80"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__terminal_verb_dump.mjs:134"
         }
       ]
     },
@@ -1106,6 +1516,11 @@
           "kind": "file",
           "p": "cloud/test/web/static_allowlist_test.exs",
           "evidence": "cloud/priv/static/__preview__/__tier_card_dump.mjs:33"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__tier_card_dump.mjs:87"
         }
       ]
     },
@@ -1127,6 +1542,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/__trial_reminder_dump.mjs",
           "evidence": "cloud/priv/static/__preview__/__trial_reminder_dump.mjs:32"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.js",
+          "evidence": "cloud/priv/static/__preview__/__trial_reminder_dump.mjs:86"
         }
       ]
     },
@@ -1229,6 +1649,11 @@
         },
         {
           "kind": "file",
+          "p": "cloud/priv/static/__preview__/cloud/priv/static/__preview__/cssom-parity.mjs",
+          "evidence": "cloud/priv/static/__preview__/cssom-parity.mjs:785"
+        },
+        {
+          "kind": "file",
           "p": "cloud/priv/static/__css_check.mjs",
           "evidence": "cloud/priv/static/__preview__/cssom-parity.mjs:1332"
         }
@@ -1269,6 +1694,11 @@
           "kind": "file",
           "p": "cloud/priv/static/__preview__/defect-selection.mjs",
           "evidence": "cloud/priv/static/__preview__/defect-selection.test.mjs:43"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/overflow-guard.mjs",
+          "evidence": "cloud/priv/static/__preview__/defect-selection.test.mjs:51"
         }
       ]
     },
@@ -1353,33 +1783,28 @@
       "scans": [
         {
           "kind": "file",
-          "p": "scripts/studio-desk-measure.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:16"
+          "p": ".github/workflows/console-harness.yml",
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:17"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/modal-oracle.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:72"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:85"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:121"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:134"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/font-pin.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:122"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:135"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/bringup-retry.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:123"
-        },
-        {
-          "kind": "file",
-          "p": ".github/workflows/console-harness.yml",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:318"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:136"
         }
       ]
     },
@@ -1425,42 +1850,42 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:503"
-        },
-        {
-          "kind": "dir",
-          "p": "cloud/priv/static/__preview__",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2505"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2768"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3157"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3839"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/config/runtime.exs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4887"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/priv/static/app.css",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6343"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:504"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6387"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:1866"
+        },
+        {
+          "kind": "dir",
+          "p": "cloud/priv/static/__preview__",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2506"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/registry.ex",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2769"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3158"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3840"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/config/runtime.exs",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4888"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/app.css",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6344"
         }
       ]
     },
@@ -1527,87 +1952,92 @@
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry/site.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:745"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:675"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-9c1f2ab.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:846"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:971"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-4e7d0c9.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:874"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:999"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:939"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1064"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:944"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1069"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:956"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1081"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/cloud/priv/static/__preview__/scenarios.mjs",
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1081"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:986"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1111"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:995"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1120"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1134"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1259"
         },
         {
           "kind": "file",
           "p": "internal/builder/console.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1142"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1267"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1145"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1270"
         },
         {
           "kind": "file",
           "p": "lib/tokens/resolve.ts",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1170"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1295"
         },
         {
           "kind": "file",
           "p": "web/releases/20260802T094118Z-9c1f2ab/.next",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1174"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1299"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/deploy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1941"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2066"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-8c00e1b.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2030"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2155"
         },
         {
           "kind": "file",
           "p": "cloud/priv/repo/migrations/20260702130000_provision_job_error_to_text.exs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2536"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2661"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2609"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2734"
         }
       ]
     },
@@ -1785,6 +2215,11 @@
         },
         {
           "kind": "file",
+          "p": "cloud/priv/static/__preview__/smoke.mjs",
+          "evidence": "cloud/priv/static/__preview__/smoke.mjs:996"
+        },
+        {
+          "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
           "evidence": "cloud/priv/static/__preview__/smoke.mjs:1719"
         },
@@ -1796,7 +2231,7 @@
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3817"
+          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3819"
         }
       ]
     },
@@ -1859,7 +2294,7 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__unknown_census.mjs:74"
+          "evidence": "cloud/priv/static/__unknown_census.mjs:73"
         }
       ]
     },
@@ -1878,8 +2313,18 @@
           "evidence": "design/derive.test.mjs:34"
         },
         {
+          "kind": "file",
+          "p": "design/themes/evergreen.json",
+          "evidence": "design/derive.test.mjs:406"
+        },
+        {
           "kind": "dir",
           "p": "design",
+          "evidence": "design/derive.test.mjs:545"
+        },
+        {
+          "kind": "file",
+          "p": "design/themes",
           "evidence": "design/derive.test.mjs:545"
         }
       ]
@@ -3179,7 +3624,7 @@
         {
           "kind": "file",
           "p": "web/lib/find.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:89"
+          "evidence": "scripts/check-web-fork-drift.sh:90"
         },
         {
           "kind": "file",
@@ -3194,102 +3639,102 @@
         {
           "kind": "file",
           "p": "web/lib/config.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:102"
+          "evidence": "scripts/check-web-fork-drift.sh:106"
         },
         {
           "kind": "file",
           "p": "lib/config.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:103"
-        },
-        {
-          "kind": "file",
-          "p": "web/lib/tokens.gen.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:104"
-        },
-        {
-          "kind": "file",
-          "p": "lib/tokens.gen.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:105"
-        },
-        {
-          "kind": "file",
-          "p": "web/lib/find-search.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:106"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/preview-parity-check.sh",
-          "evidence": "scripts/check-web-fork-drift.sh:106"
-        },
-        {
-          "kind": "file",
-          "p": "lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:107"
         },
         {
           "kind": "file",
-          "p": "web/lib/use-live-search.ts",
+          "p": "web/lib/tokens.gen.ts",
           "evidence": "scripts/check-web-fork-drift.sh:108"
         },
         {
           "kind": "file",
-          "p": "lib/use-live-search.ts",
+          "p": "lib/tokens.gen.ts",
           "evidence": "scripts/check-web-fork-drift.sh:109"
         },
         {
           "kind": "file",
-          "p": "web/lib/listings.ts",
+          "p": "web/lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:110"
         },
         {
           "kind": "file",
-          "p": "lib/listings.ts",
+          "p": "scripts/preview-parity-check.sh",
+          "evidence": "scripts/check-web-fork-drift.sh:110"
+        },
+        {
+          "kind": "file",
+          "p": "lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:111"
         },
         {
           "kind": "file",
-          "p": "web/lib/bp-env.ts",
+          "p": "web/lib/use-live-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:112"
         },
         {
           "kind": "file",
-          "p": "lib/bp-env.ts",
+          "p": "lib/use-live-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:113"
         },
         {
           "kind": "file",
-          "p": "lib/base-path.ts",
+          "p": "web/lib/listings.ts",
           "evidence": "scripts/check-web-fork-drift.sh:114"
         },
         {
           "kind": "file",
-          "p": "lib/markers.ts",
+          "p": "lib/listings.ts",
           "evidence": "scripts/check-web-fork-drift.sh:115"
         },
         {
           "kind": "file",
-          "p": "lib/provenance.ts",
+          "p": "web/lib/bp-env.ts",
           "evidence": "scripts/check-web-fork-drift.sh:116"
         },
         {
           "kind": "file",
-          "p": "web/lib/graph-truncation.ts",
+          "p": "lib/bp-env.ts",
           "evidence": "scripts/check-web-fork-drift.sh:117"
         },
         {
           "kind": "file",
-          "p": "web/lib/graph.ts",
+          "p": "lib/base-path.ts",
           "evidence": "scripts/check-web-fork-drift.sh:118"
         },
         {
           "kind": "file",
+          "p": "lib/markers.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:119"
+        },
+        {
+          "kind": "file",
+          "p": "lib/provenance.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:120"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/graph-truncation.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:121"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/graph.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:122"
+        },
+        {
+          "kind": "file",
           "p": "lib/get-document.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:263"
+          "evidence": "scripts/check-web-fork-drift.sh:267"
         },
         {
           "kind": "file",
           "p": "lib/graph.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:274"
+          "evidence": "scripts/check-web-fork-drift.sh:278"
         }
       ]
     },
@@ -4760,32 +5205,32 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/moved.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1544"
+          "evidence": "scripts/console-path-escape-check.test.sh:1564"
         },
         {
           "kind": "file",
           "p": "docs/guide.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1545"
+          "evidence": "scripts/console-path-escape-check.test.sh:1565"
         },
         {
           "kind": "file",
           "p": "docs/another.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1581"
+          "evidence": "scripts/console-path-escape-check.test.sh:1601"
         },
         {
           "kind": "file",
           "p": "docs/moved.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1624"
+          "evidence": "scripts/console-path-escape-check.test.sh:1644"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/guide.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1631"
+          "evidence": "scripts/console-path-escape-check.test.sh:1651"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/orphan.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1656"
+          "evidence": "scripts/console-path-escape-check.test.sh:1676"
         }
       ]
     },
@@ -4796,17 +5241,17 @@
         {
           "kind": "file",
           "p": ".github/workflows/console-harness.yml",
-          "evidence": "scripts/console-runtime-pin-check.sh:37"
+          "evidence": "scripts/console-runtime-pin-check.sh:43"
         },
         {
           "kind": "file",
           "p": "scripts/console-tdz-order-check.mjs",
-          "evidence": "scripts/console-runtime-pin-check.sh:44"
+          "evidence": "scripts/console-runtime-pin-check.sh:50"
         },
         {
           "kind": "file",
           "p": "scripts/console-runtime-pin-check.sh",
-          "evidence": "scripts/console-runtime-pin-check.sh:48"
+          "evidence": "scripts/console-runtime-pin-check.sh:54"
         }
       ]
     },
@@ -5333,17 +5778,17 @@
         {
           "kind": "file",
           "p": "scripts/foo.sh",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:496"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:514"
         },
         {
           "kind": "dir",
           "p": "web",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:505"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:523"
         },
         {
           "kind": "dir",
           "p": "docs",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:529"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:547"
         }
       ]
     },
@@ -8089,277 +8534,277 @@
         {
           "kind": "file",
           "p": "scripts/pds-live-bp-write-receipt.sh",
-          "evidence": "scripts/pds-door-census.sh:328"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-ledger-census.sh",
           "evidence": "scripts/pds-door-census.sh:329"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-pull-proof.sh",
+          "p": "scripts/pds-ledger-census.sh",
           "evidence": "scripts/pds-door-census.sh:330"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-secret-scan.sh",
+          "p": "scripts/pds-pull-proof.sh",
           "evidence": "scripts/pds-door-census.sh:331"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-scratch-target.sh",
+          "p": "scripts/pds-secret-scan.sh",
           "evidence": "scripts/pds-door-census.sh:332"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-crown-stamp.sh",
+          "p": "scripts/pds-scratch-target.sh",
           "evidence": "scripts/pds-door-census.sh:333"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-crown-launch.sh",
+          "p": "scripts/pds-crown-stamp.sh",
           "evidence": "scripts/pds-door-census.sh:334"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-climb-preflight.sh",
+          "p": "scripts/pds-crown-launch.sh",
           "evidence": "scripts/pds-door-census.sh:335"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-export-peak-measure.sh",
+          "p": "scripts/pds-climb-preflight.sh",
           "evidence": "scripts/pds-door-census.sh:336"
         },
         {
           "kind": "file",
+          "p": "scripts/pds-export-peak-measure.sh",
+          "evidence": "scripts/pds-door-census.sh:337"
+        },
+        {
+          "kind": "file",
           "p": "scripts/pds-blind-spot.sh",
-          "evidence": "scripts/pds-door-census.sh:338"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-blind-spot-check.sh",
-          "evidence": "scripts/pds-door-census.sh:338"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-idle-sampler.sh",
           "evidence": "scripts/pds-door-census.sh:339"
         },
         {
           "kind": "file",
-          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "p": "scripts/pds-blind-spot-check.sh",
+          "evidence": "scripts/pds-door-census.sh:339"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-idle-sampler.sh",
           "evidence": "scripts/pds-door-census.sh:340"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "evidence": "scripts/pds-door-census.sh:341"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fixtures/live-corpus-2026-07-31.json",
-          "evidence": "scripts/pds-door-census.sh:340"
+          "evidence": "scripts/pds-door-census.sh:341"
         },
         {
           "kind": "file",
           "p": "tooling/pds/rerun-adjudicate.test.mjs",
-          "evidence": "scripts/pds-door-census.sh:341"
+          "evidence": "scripts/pds-door-census.sh:342"
         },
         {
           "kind": "file",
           "p": ".github/workflows/research-coverage-suite.yml",
-          "evidence": "scripts/pds-door-census.sh:341"
+          "evidence": "scripts/pds-door-census.sh:342"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:381"
+          "evidence": "scripts/pds-door-census.sh:382"
         },
         {
           "kind": "file",
           "p": "test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:381"
+          "evidence": "scripts/pds-door-census.sh:382"
         },
         {
           "kind": "dir",
           "p": "tooling/pds",
-          "evidence": "scripts/pds-door-census.sh:428"
+          "evidence": "scripts/pds-door-census.sh:429"
         },
         {
           "kind": "file",
           "p": "scripts/pds-elixir-receipt-census.exs",
-          "evidence": "scripts/pds-door-census.sh:943"
+          "evidence": "scripts/pds-door-census.sh:944"
         },
         {
           "kind": "file",
           "p": "scripts/pds-door-census.sh",
-          "evidence": "scripts/pds-door-census.sh:1492"
+          "evidence": "scripts/pds-door-census.sh:1493"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-inbeam.exs",
-          "evidence": "scripts/pds-door-census.sh:1843"
+          "evidence": "scripts/pds-door-census.sh:1844"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/three_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1846"
+          "evidence": "scripts/pds-door-census.sh:1847"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-three.sh",
-          "evidence": "scripts/pds-door-census.sh:1849"
+          "evidence": "scripts/pds-door-census.sh:1850"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark_web/studio/four_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1862"
+          "evidence": "scripts/pds-door-census.sh:1863"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-four.sh",
-          "evidence": "scripts/pds-door-census.sh:1865"
+          "evidence": "scripts/pds-door-census.sh:1866"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/inline_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1878"
+          "evidence": "scripts/pds-door-census.sh:1879"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-inline.sh",
-          "evidence": "scripts/pds-door-census.sh:1882"
+          "evidence": "scripts/pds-door-census.sh:1883"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/inbeam_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1890"
+          "evidence": "scripts/pds-door-census.sh:1891"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/fraud_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1901"
+          "evidence": "scripts/pds-door-census.sh:1902"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-fraud.sh",
-          "evidence": "scripts/pds-door-census.sh:1904"
+          "evidence": "scripts/pds-door-census.sh:1905"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/orphan_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1913"
+          "evidence": "scripts/pds-door-census.sh:1914"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-orphan.sh",
-          "evidence": "scripts/pds-door-census.sh:1916"
+          "evidence": "scripts/pds-door-census.sh:1917"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearcomment_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1932"
+          "evidence": "scripts/pds-door-census.sh:1933"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearcomment.sh",
-          "evidence": "scripts/pds-door-census.sh:1935"
+          "evidence": "scripts/pds-door-census.sh:1936"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearread_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1947"
+          "evidence": "scripts/pds-door-census.sh:1948"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearread.sh",
-          "evidence": "scripts/pds-door-census.sh:1950"
+          "evidence": "scripts/pds-door-census.sh:1951"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/trailing_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1962"
+          "evidence": "scripts/pds-door-census.sh:1963"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-trailing.sh",
-          "evidence": "scripts/pds-door-census.sh:1965"
+          "evidence": "scripts/pds-door-census.sh:1966"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/port_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1979"
+          "evidence": "scripts/pds-door-census.sh:1980"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-port.sh",
-          "evidence": "scripts/pds-door-census.sh:1982"
+          "evidence": "scripts/pds-door-census.sh:1983"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/tail_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2003"
+          "evidence": "scripts/pds-door-census.sh:2004"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-tail.sh",
-          "evidence": "scripts/pds-door-census.sh:2006"
+          "evidence": "scripts/pds-door-census.sh:2007"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/sigil_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2021"
+          "evidence": "scripts/pds-door-census.sh:2022"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-sigil.sh",
-          "evidence": "scripts/pds-door-census.sh:2024"
+          "evidence": "scripts/pds-door-census.sh:2025"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-long.sh",
-          "evidence": "scripts/pds-door-census.sh:2039"
+          "evidence": "scripts/pds-door-census.sh:2040"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/long_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2047"
+          "evidence": "scripts/pds-door-census.sh:2048"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-shonly.sh",
-          "evidence": "scripts/pds-door-census.sh:2122"
+          "evidence": "scripts/pds-door-census.sh:2123"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-through.sh",
-          "evidence": "scripts/pds-door-census.sh:2150"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-fx-shut.sh",
           "evidence": "scripts/pds-door-census.sh:2151"
         },
         {
           "kind": "file",
-          "p": "api/test/barkpark/census_door_test.exs",
+          "p": "scripts/pds-fx-shut.sh",
           "evidence": "scripts/pds-door-census.sh:2152"
         },
         {
           "kind": "file",
-          "p": "tooling/pds/fx-lib.mjs",
-          "evidence": "scripts/pds-door-census.sh:2454"
+          "p": "api/test/barkpark/census_door_test.exs",
+          "evidence": "scripts/pds-door-census.sh:2153"
         },
         {
           "kind": "file",
-          "p": "scripts/fx-lib.mjs",
+          "p": "tooling/pds/fx-lib.mjs",
           "evidence": "scripts/pds-door-census.sh:2455"
         },
         {
           "kind": "file",
-          "p": "tooling/pds/fx-main.mjs",
+          "p": "scripts/fx-lib.mjs",
           "evidence": "scripts/pds-door-census.sh:2456"
         },
         {
           "kind": "file",
+          "p": "tooling/pds/fx-main.mjs",
+          "evidence": "scripts/pds-door-census.sh:2457"
+        },
+        {
+          "kind": "file",
           "p": "tooling/pds/fx-orphan.mjs",
-          "evidence": "scripts/pds-door-census.sh:2485"
+          "evidence": "scripts/pds-door-census.sh:2486"
         }
       ]
     },
@@ -8865,6 +9310,32 @@
       ]
     },
     {
+      "path": "scripts/pds-stranded-draft-cause.sh",
+      "run": "bash scripts/pds-stranded-draft-cause.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/pds-draft-only-task-census.sh",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:22"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/content/authoring_wall.ex",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:27"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/content/label_spine.ex",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:43"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-stranded-draft-cause.sh",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:85"
+        }
+      ]
+    },
+    {
       "path": "scripts/pds-window-sentinel.sh",
       "run": "bash scripts/pds-window-sentinel.sh",
       "scans": [
@@ -9108,17 +9579,72 @@
         {
           "kind": "file",
           "p": "scripts/preview-parity-check.sh",
-          "evidence": "scripts/preview-parity-check.sh:27"
+          "evidence": "scripts/preview-parity-check.sh:30"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/a.js",
+          "evidence": "scripts/preview-parity-check.sh:53"
+        },
+        {
+          "kind": "file",
+          "p": "js/.mjs/.json",
+          "evidence": "scripts/preview-parity-check.sh:55"
+        },
+        {
+          "kind": "file",
+          "p": "docs/ops/merge-gates.md",
+          "evidence": "scripts/preview-parity-check.sh:61"
+        },
+        {
+          "kind": "file",
+          "p": ".github/workflows/doc-gates.yml",
+          "evidence": "scripts/preview-parity-check.sh:61"
         },
         {
           "kind": "file",
           "p": "scripts/docs-anchors-check.sh",
-          "evidence": "scripts/preview-parity-check.sh:54"
+          "evidence": "scripts/preview-parity-check.sh:78"
         },
         {
           "kind": "file",
           "p": "web/lib/get-document.ts",
-          "evidence": "scripts/preview-parity-check.sh:74"
+          "evidence": "scripts/preview-parity-check.sh:109"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/getDocument.ts",
+          "evidence": "scripts/preview-parity-check.sh:291"
+        },
+        {
+          "kind": "file",
+          "p": "js/.mjs/.css/.json",
+          "evidence": "scripts/preview-parity-check.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "web/src/leak.ts",
+          "evidence": "scripts/preview-parity-check.sh:352"
+        },
+        {
+          "kind": "file",
+          "p": "web/node_modules/vendor/dep.ts",
+          "evidence": "scripts/preview-parity-check.sh:371"
+        },
+        {
+          "kind": "file",
+          "p": "web/src/notes.md",
+          "evidence": "scripts/preview-parity-check.sh:378"
+        },
+        {
+          "kind": "file",
+          "p": "docs/merge-gates.ts",
+          "evidence": "scripts/preview-parity-check.sh:389"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/some-check.py",
+          "evidence": "scripts/preview-parity-check.sh:390"
         }
       ]
     },
@@ -10482,6 +11008,46 @@
           "kind": "file",
           "p": "scripts/sync-starter-templates.mjs",
           "evidence": "scripts/sync-starter-templates.mjs:2"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/test/barkpark_cloud/templates/app_files_drift_test.exs",
+          "evidence": "scripts/sync-starter-templates.mjs:31"
+        },
+        {
+          "kind": "file",
+          "p": ".github/required-checks.json",
+          "evidence": "scripts/sync-starter-templates.mjs:35"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/cloud-path-escape-check.sh",
+          "evidence": "scripts/sync-starter-templates.mjs:36"
+        },
+        {
+          "kind": "dir",
+          "p": "cloud",
+          "evidence": "scripts/sync-starter-templates.mjs:37"
+        },
+        {
+          "kind": "dir",
+          "p": "js/packages/create-barkpark-app/templates",
+          "evidence": "scripts/sync-starter-templates.mjs:37"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/templates/blog-starter/lib/csp.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:45"
+        },
+        {
+          "kind": "file",
+          "p": "lib/csp.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:46"
+        },
+        {
+          "kind": "file",
+          "p": "js/packages/create-barkpark-app/src/constants.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:67"
         }
       ]
     },
@@ -11124,6 +11690,16 @@
           "kind": "file",
           "p": "lib/bp-env.ts",
           "evidence": "templates/search-starter/token-guard.test.mjs:9"
+        },
+        {
+          "kind": "file",
+          "p": "templates/search-starter/next.config.mjs",
+          "evidence": "templates/search-starter/token-guard.test.mjs:76"
+        },
+        {
+          "kind": "file",
+          "p": "templates/astro-search-starter/astro.config.mjs",
+          "evidence": "templates/search-starter/token-guard.test.mjs:85"
         }
       ]
     },
@@ -11531,58 +12107,83 @@
         },
         {
           "kind": "file",
-          "p": "cloud/priv/static/__preview__/breakpoint-sweep.test.mjs",
+          "p": "api/assets/paper-editor/src/canvas/__mounted.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:47"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/gate-map/index.js",
           "evidence": "tooling/gate-map/gate-map.test.mjs:51"
+        },
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:53"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:60"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:67"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/breakpoint-sweep.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:78"
         },
         {
           "kind": "dir",
           "p": "cloud/priv/static",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:57"
+          "evidence": "tooling/gate-map/gate-map.test.mjs:84"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__app.test.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:61"
+          "evidence": "tooling/gate-map/gate-map.test.mjs:88"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/cssom-parity.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:62"
+          "evidence": "tooling/gate-map/gate-map.test.mjs:89"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/cssom-parity.test.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:63"
+          "evidence": "tooling/gate-map/gate-map.test.mjs:90"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/overflow-guard.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:64"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/priv/static/__preview__/smoke.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:65"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/priv/static/__preview__/seal-predicate.test.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:68"
-        },
-        {
-          "kind": "file",
-          "p": "docs/cards/cli.md",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:83"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/priv/static/__preview__/does-not-exist.mjs",
           "evidence": "tooling/gate-map/gate-map.test.mjs:91"
         },
         {
           "kind": "file",
+          "p": "cloud/priv/static/__preview__/smoke.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:92"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/seal-predicate.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:95"
+        },
+        {
+          "kind": "file",
+          "p": "docs/cards/cli.md",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:110"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/does-not-exist.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:118"
+        },
+        {
+          "kind": "file",
           "p": "scripts/preview-census-gate-check.mjs",
-          "evidence": "tooling/gate-map/gate-map.test.mjs:155"
+          "evidence": "tooling/gate-map/gate-map.test.mjs:182"
         }
       ]
     },
@@ -11691,6 +12292,11 @@
           "kind": "file",
           "p": "tooling/grip/ledger.mjs",
           "evidence": "tooling/grip/test/backfill.test.mjs:50"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/fixtures/evidence-corpus.json",
+          "evidence": "tooling/grip/test/backfill.test.mjs:52"
         },
         {
           "kind": "file",
@@ -11808,6 +12414,11 @@
           "kind": "file",
           "p": "tooling/grip/binding.mjs",
           "evidence": "tooling/grip/test/census.test.mjs:48"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/ledger",
+          "evidence": "tooling/grip/test/census.test.mjs:50"
         },
         {
           "kind": "file",
@@ -12180,6 +12791,11 @@
           "kind": "file",
           "p": "api/lib/x.ex",
           "evidence": "tooling/grip/test/ledger.test.mjs:374"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/record.mjs",
+          "evidence": "tooling/grip/test/ledger.test.mjs:473"
         },
         {
           "kind": "file",
@@ -12761,6 +13377,11 @@
         },
         {
           "kind": "file",
+          "p": "tooling/grip/ledger",
+          "evidence": "tooling/grip/test/mint.test.mjs:660"
+        },
+        {
+          "kind": "file",
           "p": "internal/cli/tasks_next_cmd.go",
           "evidence": "tooling/grip/test/mint.test.mjs:768"
         }
@@ -12788,6 +13409,11 @@
         {
           "kind": "file",
           "p": "tooling/grip/cli.mjs",
+          "evidence": "tooling/grip/test/provenance.test.mjs:575"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/test/tooling/grip/cli.mjs",
           "evidence": "tooling/grip/test/provenance.test.mjs:575"
         }
       ]
@@ -12847,6 +13473,11 @@
           "kind": "file",
           "p": "tooling/grip/test/rerun.test.mjs",
           "evidence": "tooling/grip/test/rerun.test.mjs:4"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/adjudicate.mjs",
+          "evidence": "tooling/grip/test/rerun.test.mjs:216"
         },
         {
           "kind": "file",
@@ -12926,6 +13557,11 @@
         },
         {
           "kind": "file",
+          "p": "tooling/grip/fixtures/evidence-corpus.json",
+          "evidence": "tooling/grip/test/screen.test.mjs:44"
+        },
+        {
+          "kind": "file",
           "p": "js/backfill.mjs/acceptance.mjs/cli.mjs",
           "evidence": "tooling/grip/test/screen.test.mjs:65"
         },
@@ -12961,8 +13597,18 @@
         },
         {
           "kind": "file",
+          "p": "tooling/grip/rerun.mjs",
+          "evidence": "tooling/grip/test/screen.test.mjs:362"
+        },
+        {
+          "kind": "file",
           "p": "test/barkpark/sites/deploy_runner_test.exs",
           "evidence": "tooling/grip/test/screen.test.mjs:450"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/harvest.mjs",
+          "evidence": "tooling/grip/test/screen.test.mjs:593"
         },
         {
           "kind": "file",
@@ -13111,6 +13757,11 @@
           "kind": "file",
           "p": "tooling/grip/trial-leads-vs-grep.mjs",
           "evidence": "tooling/grip/test/trial-leads-vs-grep.test.mjs:43"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/grip/ledger",
+          "evidence": "tooling/grip/test/trial-leads-vs-grep.test.mjs:56"
         },
         {
           "kind": "file",
