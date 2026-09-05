@@ -284,8 +284,10 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
             },
             %{"tags" => [%{"tag" => "ok", "strength" => 9, "rationale" => "short"}]}
           ] do
-        assert {:error, {:label_spine, _}} = LabelSpine.validate_shape(bad),
-               "expected validate_shape to refuse #{inspect(bad)}"
+        result = LabelSpine.validate_shape(bad)
+
+        assert match?({:error, {:label_spine, _}}, result),
+               "expected validate_shape to refuse #{inspect(bad)}, got #{inspect(result)}"
       end
     end
 
