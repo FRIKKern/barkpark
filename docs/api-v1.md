@@ -25,7 +25,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (dataset schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, sent with 304 only on anonymous reads with no `?fields=`/`?expand=` · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, sent/304 only on anonymous unshaped reads (no `?fields=`/`?expand=`/`?resolve=`/`?count=`) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
