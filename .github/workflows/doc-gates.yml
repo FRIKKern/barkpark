@@ -695,37 +695,28 @@ jobs:
       # api/lib/barkpark_web outside Paths + the reviewed whitelist reds this —
       # that literal is how the deep-vs-shallow path drift (different breadcrumbs
       # / back-nav / scope per arrival) crept in. See scripts/studio-link-lint.sh.
+      #
+      # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8). The tripwire used to
+      # be a SEPARATE, LATER step: GitHub Actions skips a job's remaining steps
+      # once one fails, so the self-test never ran on exactly the runs where the
+      # gate reddened — the repo only ever learned the guard COULD fail on runs
+      # where it did not. It mirrors the Go literal self-test: it asserts the
+      # scanner exits non-zero naming the file:line on a planted hand-built href,
+      # then asserts a clean file (static singleton + ~p verified route) passes.
+      # Plants nothing in the tree.
+      # ADVISORY, stated where the merge carries it: this job publishes the
+      # "Doc budgets + anchors" check, which is NOT one of main's four required
+      # contexts (.github/required-checks.json). Every tripwire wired here
+      # re-earns its verdict on every run, and none of them can block a merge.
+      # Promotion to a required context is a separate, human-gated item.
       - name: Studio link/path gate (fails this job)
         id: s14
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/studio-link-lint.sh
-
-      # Tripwire (mirrors the Go literal self-test): prove the link gate actually
-      # REDs on a planted hand-built href — a temp-dir self-test that asserts the
-      # scanner exits non-zero naming the file:line, then asserts a clean file
-      # (static singleton + ~p verified route) passes. Plants nothing in the tree.
-      - name: Studio link/path gate self-test (tripwire)
-        id: s15
-        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        if: ${{ !cancelled() }}
-        run: |
-          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/studio-link-lint.sh --selftest
-
-      # --selftest FIRST (distrust vacuous green): the studio and go literal gates
-      # below each run their bundled tripwire before the real scan; the web gate
-      # ran only the scan, so an edit that blinded its detector would have kept
-      # reporting a clean web/ tree. Plants nothing in the tree.
-      - name: Web literal-color gate self-test (tripwire)
-        id: s16
-        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        if: ${{ !cancelled() }}
-        run: |
-          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/web-literal-check.sh --selftest
+          bash scripts/studio-link-lint.sh
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
@@ -734,12 +725,24 @@ jobs:
       # on any NEW inline color literal outside the lead-approved allowlist (the
       # GENERATED block, rgb()/rgba() overlay tints, and annotated per-line
       # resisters). See scripts/web-literal-check.sh for the full list.
+      #
+      # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8): the studio and go
+      # literal gates each run their bundled tripwire before the real scan; the
+      # web tripwire lived in its own earlier step, so a red anywhere between the
+      # two skipped it. Without it, an edit that blinded the detector would keep
+      # reporting a clean web/ tree. Plants nothing in the tree.
+      # ADVISORY, stated where the merge carries it: this job publishes the
+      # "Doc budgets + anchors" check, which is NOT one of main's four required
+      # contexts (.github/required-checks.json). Every tripwire wired here
+      # re-earns its verdict on every run, and none of them can block a merge.
+      # Promotion to a required context is a separate, human-gated item.
       - name: Web literal-color gate (fails this job)
         id: s17
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/web-literal-check.sh --selftest
           bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
@@ -845,24 +848,25 @@ jobs:
       # (scripts/tenant-scope-baseline.txt) and REDs on a NEW one unless it carries
       # a reviewed `# global-read:` justification. Defense-in-depth against the next
       # w9dg. See scripts/tenant-scope-check.sh.
+      #
+      # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8). The durable tripwire
+      # used to be a SEPARATE, LATER step, so a red bare run skipped it — the one
+      # run where "can this guard still fail?" matters most. It proves the gate
+      # REDs on a planted fail-open + by-PK read, planting nothing in the tree,
+      # and guards the scanner against a future edit that weakens it.
+      # ADVISORY, stated where the merge carries it: this job publishes the
+      # "Doc budgets + anchors" check, which is NOT one of main's four required
+      # contexts (.github/required-checks.json). Every tripwire wired here
+      # re-earns its verdict on every run, and none of them can block a merge.
+      # Promotion to a required context is a separate, human-gated item.
       - name: Tenant fail-open read baseline gate (fails this job)
         id: s22
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/tenant-scope-check.sh
-
-      # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
-      # planted fail-open + by-PK read — a temp-dir self-test that plants nothing in
-      # the tree. Guards the gate against a future edit that weakens the scanner.
-      - name: Tenant fail-open read gate self-test (tripwire)
-        id: s23
-        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        if: ${{ !cancelled() }}
-        run: |
-          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/tenant-scope-check.sh --selftest
+          bash scripts/tenant-scope-check.sh
 
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal is the MOST RESTRICTIVE anonymous one — never a full-content
@@ -998,7 +1002,7 @@ jobs:
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s15\": \"Studio link/path gate self-test (tripwire)\", \"s16\": \"Web literal-color gate self-test (tripwire)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s23\": \"Tenant fail-open read gate self-test (tripwire)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
