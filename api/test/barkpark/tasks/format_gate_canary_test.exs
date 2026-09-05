@@ -17,7 +17,7 @@ defmodule Barkpark.Tasks.FormatGateCanaryTest do
   use ExUnit.Case, async: true
 
   test "the canary compiles and passes — the gate is what is under test" do
-        assert    1 + 1 ==
-      2
+    assert 1 + 1 ==
+             2
   end
 end
