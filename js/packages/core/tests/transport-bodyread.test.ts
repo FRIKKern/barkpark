@@ -27,10 +27,17 @@ function bodyResetResponse(rejectWith: unknown): Response {
 describe('transport — mid-body reset on response.text()', () => {
   // A `response.text()` that rejects with a raw TypeError (mid-body TCP reset)
   // sits outside the fetch try/catch and after the timeout timer is cleared, so
-  // before the fix it escaped the error taxonomy: defaultShouldRetry returns
-  // false for a non-Barkpark error, so even an idempotent GET was never retried.
-  // After the fix it is a retryable BarkparkNetworkError.
-  it('wraps a mid-body TypeError as a retryable BarkparkNetworkError', async () => {
+  // before the fix it escaped the error taxonomy entirely. After the fix it is a
+  // classified BarkparkNetworkError.
+  //
+  // WHAT CHANGED, and this test moved with it: the classification is the durable
+  // half of that fix and it still holds. The automatic re-attempt is gone — a
+  // mid-body reset is a TRANSPORT fault, and the default (read) policy no longer
+  // repeats one, matching the Go client's refusal to conflate a dropped
+  // connection with a served fault. The taxonomy already said so
+  // ("Retried only for idempotent writes", errors.ts); the wide default
+  // contradicted it. See the contract at the top of src/retry.ts.
+  it('wraps a mid-body TypeError as a classified BarkparkNetworkError', async () => {
     const fetchSpy = vi.fn(() => Promise.resolve(bodyResetResponse(new TypeError('terminated'))))
 
     let caught: unknown
@@ -41,17 +48,20 @@ describe('transport — mid-body reset on response.text()', () => {
       caught = e
     })
 
-    // After-fix: a Barkpark network error the retry layer WILL re-attempt.
+    // After-fix: a Barkpark network error, inside the taxonomy.
     expect(caught).toBeInstanceOf(BarkparkNetworkError)
-    expect(defaultShouldRetry(caught)).toBe(true)
+    // ...and NOT retried under the default read policy: it is a transport fault,
+    // not a served one.
+    expect(defaultShouldRetry(caught)).toBe(false)
     // Regression guard against the before-fix shape: a raw TypeError that is NOT
     // a BarkparkError and that defaultShouldRetry would refuse to retry.
     expect(caught).not.toBeInstanceOf(TypeError)
     expect(caught instanceof BarkparkError).toBe(true)
     expect((caught as BarkparkNetworkError).message).toBe('terminated')
     expect((caught as BarkparkNetworkError).cause).toBeInstanceOf(TypeError)
-    // read policy = 3 attempts, so the retryable wrap is actually re-attempted.
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    // read policy allows 3 attempts, but a transport fault is not one of the
+    // faults it repeats — one request, one honest error.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   // A caller aborting mid-body (React unmount, navigation) is a cancellation,
