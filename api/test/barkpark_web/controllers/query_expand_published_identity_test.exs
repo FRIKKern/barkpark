@@ -111,7 +111,9 @@ defmodule BarkparkWeb.QueryExpandPublishedIdentityTest do
     body =
       conn
       |> authed(raw)
-      |> get("/v1/data/query/#{@dataset}/post?expand=author&perspective=published&filter[title]=Alpha")
+      |> get(
+        "/v1/data/query/#{@dataset}/post?expand=author&perspective=published&filter[title]=Alpha"
+      )
       |> json_response(200)
 
     [doc] = body["result"]["documents"]
@@ -146,7 +148,9 @@ defmodule BarkparkWeb.QueryExpandPublishedIdentityTest do
     body =
       conn
       |> authed(raw)
-      |> get("/v1/data/query/#{@dataset}/post?expand=author&perspective=published&filter[title]=Gamma")
+      |> get(
+        "/v1/data/query/#{@dataset}/post?expand=author&perspective=published&filter[title]=Gamma"
+      )
       |> json_response(200)
 
     author = body["result"]["documents"] |> hd() |> Map.get("author")
@@ -167,7 +171,9 @@ defmodule BarkparkWeb.QueryExpandPublishedIdentityTest do
     body =
       conn
       |> authed(raw)
-      |> get("/v1/data/query/#{@dataset}/post?expand=author&perspective=drafts&filter[title]=Beta")
+      |> get(
+        "/v1/data/query/#{@dataset}/post?expand=author&perspective=drafts&filter[title]=Beta"
+      )
       |> json_response(200)
 
     author = body["result"]["documents"] |> hd() |> Map.get("author")
