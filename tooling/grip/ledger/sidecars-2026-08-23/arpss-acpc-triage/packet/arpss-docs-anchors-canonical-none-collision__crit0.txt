@@ -1,0 +1,1 @@
+bash scripts/docs-anchors-check.sh exits 0 on origin/main, with the fix naming which of the two headers changed or which check arm gained the none exemption.

@@ -1,0 +1,1 @@
+classes/0, deferred_classes/0 and min_sample/0 each get a decision: routed to an operator surface (with the call site named) or deleted. No row stays allowlisted

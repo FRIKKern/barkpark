@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   # must serialize with that sync group rather than race it.
   use BarkparkWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Auth
+  alias Barkpark.Plugins.Capabilities
+  alias Barkpark.Plugins.Registry
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   import Barkpark.TenancyFixtures
@@ -1215,7 +1219,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # request gets — the chat gate must not perturb the ungated pipeline.
       # etag is content-addressed off the final map (generated_at excluded), so
       # etag equality IS body identity minus the per-request timestamp.
-      twin = caps_conn(build_conn())
+      twin = caps_conn(scoped_conn())
       twin_body = json_response(twin, 200)
 
       assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
@@ -1258,7 +1262,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
          %{conn: conn} do
       plain = caps_conn(conn)
-      with_chat = caps_conn(build_conn(), "?chat=1")
+      with_chat = caps_conn(scoped_conn(), "?chat=1")
 
       plain_etag = plain |> get_resp_header("etag") |> List.first()
       chat_etag = with_chat |> get_resp_header("etag") |> List.first()
@@ -1274,7 +1278,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # Presenting the plain etag against the chat request must re-render (200).
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", plain_etag)
         |> get("/v1/capabilities?chat=1")
@@ -1302,19 +1306,60 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       chat.approve chat.archive chat.unarchive
     )
 
-    test "every core command whose HTTP method is not GET carries writes == true",
+    # WIDENED IN PLACE (was `source == "core"`). The core filter was correct
+    # when the 16 mislabelled commands were all core, but it left the PLUGIN
+    # half of the manifest guarded by nothing: plugin commands never touch the
+    # core builder's `Keyword.fetch!(opts, :writes)` — they arrive as plain maps
+    # from `cli_commands/0`, and `normalize_command/1` only stringified keys.
+    # An omitted key reached the wire ABSENT, which Go decodes as the zero value
+    # false, which `bridgeAnnotations` turns into `ReadOnlyHint: true`.
+    #
+    # The server now fails CLOSED (`Capabilities.declare_writes_fail_closed/2`
+    # → `writes: true` + a Logger.warning), so the absent-key case cannot reach
+    # the wire at all. These three assertions pin the resulting invariant over
+    # EVERY served command, core and plugin alike. The fixture-plugin test in
+    # the describe block below is the one that actually exercises the omission —
+    # these are vacuous against it, because the served manifest has no
+    # writes-less command to catch.
+    test "every served command declares a BOOLEAN writes bit", %{conn: conn} do
+      cmds = capabilities(conn)["commands"]
+
+      # Non-vacuity floor. An admin caller sees the whole superset; if the
+      # manifest ever shrinks to a handful the assertions below stop meaning
+      # anything, and a `source` key that stopped being emitted would silently
+      # empty the plugin split reported in the failure message.
+      assert length(cmds) >= 100,
+             "expected the admin superset to carry >= 100 commands, got #{length(cmds)}"
+
+      undeclared =
+        cmds
+        |> Enum.reject(&is_boolean(&1["writes"]))
+        |> Enum.map(&{&1["id"], &1["source"], &1["writes"]})
+        |> Enum.sort()
+
+      assert undeclared == [],
+             """
+             These commands reach the wire without a boolean `writes`. An ABSENT
+             key decodes in Go as the zero value false, and bridgeAnnotations
+             (internal/cli/mcp_bridge.go) turns false into ReadOnlyHint: true —
+             a mutator advertised to every MCP client as a safe read:
+
+                 #{inspect(undeclared, pretty: true)}
+             """
+    end
+
+    test "every command whose HTTP method is not GET carries writes == true",
          %{conn: conn} do
       liars =
         capabilities(conn)["commands"]
-        |> Enum.filter(&(&1["source"] == "core"))
         |> Enum.filter(&(&1["http"]["method"] != "GET"))
         |> Enum.reject(&(&1["writes"] == true))
-        |> Enum.map(&{&1["id"], &1["http"]["method"], &1["writes"]})
+        |> Enum.map(&{&1["id"], &1["source"], &1["http"]["method"], &1["writes"]})
         |> Enum.sort()
 
       assert liars == [],
              """
-             These core commands mutate over a non-GET method but are advertised
+             These commands mutate over a non-GET method but are advertised
              read-only — an MCP client reads `writes` as ReadOnlyHint and will call
              them without confirmation:
 
@@ -1342,6 +1387,138 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert cmd["http"]["method"] == "GET"
       assert cmd["writes"] == false
+    end
+  end
+
+  # ── Fixture plugin for the fail-closed `writes` proof ────────────────────
+  #
+  # Every BUNDLED plugin declares the bit today, so the manifest-wide assertions
+  # above are VACUOUS against the defect they describe: there is no writes-less
+  # command in the served manifest for them to catch. This fixture manufactures
+  # the case the guard exists for — an out-of-tree plugin whose author forgot
+  # `writes:` on a mutating verb — and is the ONLY test in this file that goes
+  # red without `Capabilities.declare_writes_fail_closed/2`.
+  #
+  # A bare module is enough: the resolver chain dispatches on
+  # `function_exported?(mod, :cli_commands, 0)`, not on the behaviour.
+  defmodule WritesFixturePlugin do
+    @moduledoc false
+
+    # `POST` + no `:writes` key at all. This is the shape the typespec's
+    # `required(:writes) => boolean()` claims to forbid and (being a typespec)
+    # does not.
+    def cli_commands do
+      [
+        %{
+          id: "writesfixture.wipe",
+          noun: "writesfixture",
+          verb: "wipe",
+          summary: "Fixture mutator that FORGOT to declare :writes.",
+          http: %{method: "POST", path_template: "/v1/plugins/writesfixture/wipe"},
+          auth_tier: "admin",
+          args: [],
+          flags: [],
+          batch: false,
+          paginated: false,
+          dry_run: false,
+          default_output: "json"
+        },
+        # Control: a sibling that DOES declare the bit, non-writing. It proves
+        # the fix is a default for the ABSENT case and not a blanket stamp —
+        # if `writes` were forced true unconditionally this stays red.
+        %{
+          id: "writesfixture.peek",
+          noun: "writesfixture",
+          verb: "peek",
+          summary: "Fixture read that declares the bit honestly.",
+          http: %{method: "GET", path_template: "/v1/plugins/writesfixture/peek"},
+          auth_tier: "admin",
+          args: [],
+          flags: [],
+          writes: false,
+          batch: false,
+          paginated: false,
+          dry_run: false,
+          default_output: "json"
+        }
+      ]
+    end
+  end
+
+  describe "`writes` fails CLOSED for a plugin command that omits the bit" do
+    setup do
+      :ok =
+        Registry.register(WritesFixturePlugin, %{
+          "plugin_name" => "writesfixture",
+          "nouns" => ["writesfixture"]
+        })
+
+      # The Registry has no production unregister/1 and its state only grows
+      # (plus a :persistent_term read cache), so a leaked fixture poisons every
+      # later test in the run. reset/0 restores the boot baseline.
+      on_exit(fn -> Registry.reset() end)
+
+      :ok
+    end
+
+    defp fixture_cmd(id) do
+      Capabilities.manifest("admin", project: false)["commands"]
+      |> Enum.find(&(&1["id"] == id))
+    end
+
+    test "the writes-less plugin mutator reaches the wire as writes: true" do
+      cmd = fixture_cmd("writesfixture.wipe")
+
+      # Non-vacuity: if the fixture never folded in, the assertion below would
+      # be comparing nil to nil in a differently-shaped world.
+      assert cmd != nil,
+             "the fixture plugin's command is absent from the manifest — the " <>
+               "registration did not take, so this test proves nothing"
+
+      assert String.starts_with?(cmd["source"], "plugin")
+      assert cmd["http"]["method"] == "POST"
+
+      assert cmd["writes"] == true,
+             """
+             A plugin mutator that omits `:writes` reached the wire as
+             #{inspect(cmd["writes"])}. Go decodes an absent key as the zero
+             value false, and bridgeAnnotations (internal/cli/mcp_bridge.go)
+             maps false to ReadOnlyHint: true — this command would be
+             advertised to every MCP client as a safe read.
+             """
+    end
+
+    test "the omission is logged, naming the plugin, noun and verb" do
+      log = capture_log(fn -> assert fixture_cmd("writesfixture.wipe")["writes"] == true end)
+
+      assert log =~ "writesfixture.wipe" or (log =~ "writesfixture" and log =~ "wipe"),
+             "expected a warning naming the offending plugin/noun/verb, got: #{log}"
+
+      assert log =~ "writes"
+    end
+
+    test "a sibling that DECLARES writes: false keeps it (no blanket stamp)" do
+      cmd = fixture_cmd("writesfixture.peek")
+
+      assert cmd != nil, "the fixture plugin's GET command is absent from the manifest"
+      assert cmd["http"]["method"] == "GET"
+
+      assert cmd["writes"] == false,
+             "the fail-closed default overwrote an EXPLICIT writes: false — the " <>
+               "bit stopped being a signal"
+    end
+
+    test "the manifest still assembles: no plugin command is dropped or raised on" do
+      ids =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Enum.map(& &1["id"])
+
+      # Repo doctrine: one malformed out-of-tree command must not brick the
+      # manifest for everyone else. Both fixture verbs survive, and so does a
+      # core command.
+      assert "writesfixture.wipe" in ids
+      assert "writesfixture.peek" in ids
+      assert "doc.get" in ids
     end
   end
 
@@ -1771,6 +1948,72 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         json_response(resolved, 200)
 
       assert resolved_at != nil
+    end
+  end
+
+  describe "If-None-Match is the shared RFC 9110 §13.1.2 matcher (D11)" do
+    # This route emits a WEAK validator (`W/"caps-…"`, Capabilities.etag_for/1)
+    # and used to compare it BYTE-EXACTLY. RFC 9110 §13.1.2 says If-None-Match
+    # uses the WEAK comparison function, so the strong form of our own tag must
+    # select it. PIN: reds on the pre-delegation matcher (exact compare → 200).
+    test "the STRONG form of our weak validator 304s", %{conn: conn} do
+      weak = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+      assert String.starts_with?(weak, ~s(W/")), "fixture is vacuous: etag #{inspect(weak)}"
+      "W/" <> strong = weak
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", strong)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
+      assert resp.resp_body == ""
+    end
+
+    test "the exact validator we emitted still 304s (positive control)", %{conn: conn} do
+      etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", etag)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
+    end
+
+    # NEGATIVE CONTROL — a 304 may only be granted on a validator we emitted.
+    test "a validator we never emitted gets the body (200)", %{conn: conn} do
+      _ = conn
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", ~s(W/"caps-deadbeefdeadbeef"))
+        |> get("/v1/capabilities")
+
+      assert resp.status == 200
+    end
+
+    # Multi-line folding: green before AND after (this site already flat_mapped
+    # every header line) — kept as a delegation regression guard.
+    test "a match on the SECOND If-None-Match line 304s", %{conn: conn} do
+      etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> then(fn c ->
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
+        end)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
     end
   end
 end

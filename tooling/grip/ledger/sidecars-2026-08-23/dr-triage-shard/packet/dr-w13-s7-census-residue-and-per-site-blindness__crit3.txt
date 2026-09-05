@@ -1,0 +1,1 @@
+internal/cloudclient declares json tags for both new keys and the Go reader stops deriving the deferred total by summing class rows; the census UNREAD arm is shown green with the tags and shown RED without them (paste both)

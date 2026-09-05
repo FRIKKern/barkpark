@@ -160,4 +160,74 @@ defmodule Barkpark.Tenancy.ListWorkspacesForTotalityTest do
       refute ws_token.id in ids
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # SHAPE — the enumeration is ONE INNER JOIN, not a scan-and-filter.
+  #
+  # Every behavioural row above is ALSO satisfied by the shape the moved
+  # function's doc forbids:
+  #
+  #     list_workspaces() |> Enum.filter(&Auth.member?(principal, &1.id))
+  #
+  # It returns the same list, so no assertion on the RESULT can see it. What
+  # separates them is the number of queries: the INNER JOIN starts from the
+  # membership rows and issues exactly ONE; the filter starts from EVERY
+  # workspace and issues 1 + N (the fail-open shape — the tenant boundary
+  # becomes the filter's correctness rather than the join's reachability).
+  # Run-measured under the mutation: 1 -> 1 + (workspace count), and because
+  # this suite's DB is shared, N is every workspace any agent has seeded.
+  # ---------------------------------------------------------------------------
+
+  describe "shape: the enumeration is a single INNER JOIN, not a workspace scan" do
+    test "one repo query regardless of how many workspaces the principal is NOT in" do
+      ws = workspace("shape-member")
+      u = user("shape")
+      {:ok, _} = Auth.create_membership(ws.id, u.id, "member", "user")
+
+      # Non-member workspaces: the filter shape would read each one back and
+      # ask member?/2 about it; the join never sees them at all.
+      for i <- 1..3, do: workspace("shape-other-#{i}")
+
+      {result, queries} = count_queries(fn -> Tenancy.list_workspaces_for(u) end)
+
+      assert Enum.map(result, & &1.id) == [ws.id]
+
+      assert queries == 1,
+             "the enumeration issued #{queries} queries — it must be ONE INNER JOIN. " <>
+               "More than one means it was rewritten as list_workspaces() |> " <>
+               "Enum.filter(&member?/2): N+1, and FAIL-OPEN in shape."
+    end
+  end
+
+  # Count [:barkpark, :repo, :query] emissions raised BY THIS PROCESS while
+  # `fun` runs. Returns {result, query_count}. Self-pid filtered because this
+  # suite is async and other tests share the repo.
+  defp count_queries(fun) do
+    test_pid = self()
+    handler_id = {:lwf_query_counter, System.unique_integer([:positive])}
+
+    :telemetry.attach(
+      handler_id,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, _meta, _config ->
+        if self() == test_pid, do: send(test_pid, :repo_query)
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, drain_query_count(0)}
+    after
+      :telemetry.detach(handler_id)
+    end
+  end
+
+  defp drain_query_count(n) do
+    receive do
+      :repo_query -> drain_query_count(n + 1)
+    after
+      0 -> n
+    end
+  end
 end

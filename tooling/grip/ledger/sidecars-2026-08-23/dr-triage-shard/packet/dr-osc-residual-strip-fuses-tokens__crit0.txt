@@ -1,0 +1,1 @@
+strip_ansi/1 (or raw/1) no longer fuses the bytes either side of a stripped escape: FailureCopy.raw("\e]0;t\ainapi_key=Ab3xQ9zK1mP7vT") does not contain the secret, proved by a run pasted in the PR body.

@@ -1,0 +1,1 @@
+/papers/mechanical-spacing-doctrine renders with identical row rhythm on web reader, editor, and bp paper view — the paper is the fixture; evidence = side-by-side captures

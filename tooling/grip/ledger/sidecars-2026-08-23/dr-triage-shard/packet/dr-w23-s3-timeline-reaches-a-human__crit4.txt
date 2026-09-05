@@ -1,0 +1,1 @@
+The renderer's leg A is split into three named buckets (our own `deploy-production` group, GitHub pickup, platform stall) and a test pins that a 19,486 s wait lands in the stall bucket, not in GitHub pickup.

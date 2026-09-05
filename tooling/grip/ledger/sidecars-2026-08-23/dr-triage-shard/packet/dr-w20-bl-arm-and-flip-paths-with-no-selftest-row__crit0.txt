@@ -1,0 +1,1 @@
+The arm's lock-never-taken branch, the arm's awk-revert arm and the disarm's awk-revert arm each gain a self-test row that REDS when the branch's behaviour is removed; fail-before pasted for each.

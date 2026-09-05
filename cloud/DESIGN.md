@@ -162,7 +162,7 @@ the IA so a later panel can't rearrange today's coherence work.
 |---|---|---|
 | Rollback / redeploy | Instance workspace → *Deployments* tab (D49) | parked (roadmap 11) |
 | Custom domains UI | Instance workspace → *Domains* tab | parked (roadmap 12) |
-| Env-vars UI | Instance workspace → *Env vars* tab | parked (roadmap 12) |
+| Env-vars UI | — | RULED OUT 2026-09-02 (cch-w53-bl) |
 | Usage meters | Instance workspace → *Overview* tab (usage endpoint exists) | parked (roadmap 13) |
 | Team members / roles | Settings → *Team* (cluster gains the entry) | parked (roadmap 13) |
 | Account settings | Settings → *Account* (cluster gains the entry) | parked |

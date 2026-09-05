@@ -38,7 +38,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { assertShapeEqual, diffShape, parseShape } from './support/dom-shape'
+import {
+  assertShapeEqual,
+  diffShape,
+  parseShape,
+  parseGoldenShape,
+  type GoldenShapeNode,
+} from './support/dom-shape'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SURFACE = 'bp-paper-surface' // wrapper both sides may (or may not) carry — unwrapped for per-block compare
@@ -208,6 +214,37 @@ describe('dom-shape comparator', () => {
     // without unwrap, they legitimately differ (div wrapper vs bare p).
     expect(() => assertShapeEqual(wrapped, bare)).toThrow()
   })
+
+  // parseGoldenShape — the Elixir-schema projection Part 2 compares golden.shape
+  // against. Guarded HERE too so it never rides on Part 2's self-arming skip.
+  it('parseGoldenShape emits text nodes as ORDERED SIBLINGS, not a parent field', () => {
+    expect(parseGoldenShape('<p class="b a">x <em>y</em> z</p>')).toEqual([
+      {
+        tag: 'p',
+        classes: ['a', 'b'], // sorted set, same normalization project() uses
+        data: {},
+        children: [{ text: 'x ' }, { tag: 'em', classes: [], data: {}, children: [{ text: 'y' }] }, { text: ' z' }],
+      },
+    ])
+  })
+
+  it('parseGoldenShape drops whitespace-only text and comments, keeps text VERBATIM', () => {
+    expect(parseGoldenShape('<div>\n  <span>  spaced  </span>\n  <!-- c -->\n</div>')).toEqual([
+      {
+        tag: 'div',
+        classes: [],
+        data: {},
+        children: [{ tag: 'span', classes: [], data: {}, children: [{ text: '  spaced  ' }] }],
+      },
+    ])
+  })
+
+  it('parseGoldenShape DISCRIMINATES — a corrupted node must not compare equal', () => {
+    const good = parseGoldenShape('<div class="a" data-k="1">hi</div>')
+    expect(good).not.toEqual(parseGoldenShape('<div class="a" data-k="2">hi</div>'))
+    expect(good).not.toEqual(parseGoldenShape('<div class="a" data-k="1">HI</div>'))
+    expect(good).not.toEqual(parseGoldenShape('<span class="a" data-k="1">hi</span>'))
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,7 +280,16 @@ interface GoldenFixture {
   type: string
   input: unknown
   expectedHtml: string
-  shape?: unknown
+  /**
+   * The DOM shape the ELIXIR projector (`Mix.Tasks.Barkpark.PortableDoc.GenPdParity.shape/1`,
+   * via LazyHTML) computed from `expectedHtml`. Required, and typed — it used to be
+   * `shape?: unknown` and NOTHING dereferenced it, which made it dead weight: both
+   * parity suites re-derived shape from `expectedHtml` with the JS parser, so a
+   * systematic bug in tests/support/dom-shape.ts cancelled on both sides of every
+   * comparison and all 64 fixtures went vacuously green. The per-fixture assertion
+   * below is the only one that can catch such a symmetric bug.
+   */
+  shape: GoldenShapeNode[]
 }
 
 const armed = fixtureFiles.length > 0 && typeof PortableDoc === 'function'
@@ -273,6 +319,17 @@ describe('PortableDoc × Elixir golden parity (46 non-plugin types)', () => {
       // compare against the per-block Elixir golden.
       const actualHtml = renderToStaticMarkup(createElement(Renderer, { value: [golden.input] }))
       assertShapeEqual(actualHtml, golden.expectedHtml, { unwrapClass: SURFACE })
+    })
+
+    // The CROSS-PROJECTOR leg. The assertion above compares two HTML strings both
+    // parsed by tests/support/dom-shape.ts, so a systematic bug in that parser
+    // cancels out and the comparison stays green while being wrong. `golden.shape`
+    // is a SECOND, independently-written projection of the same `expectedHtml`
+    // (Elixir + LazyHTML). Asserting the JS parser reproduces it is the only thing
+    // in this harness that can red on a symmetric parser bug.
+    it(`${golden.type} — JS parser reproduces the Elixir-computed golden shape`, () => {
+      expect(Array.isArray(golden.shape)).toBe(true)
+      expect(parseGoldenShape(golden.expectedHtml)).toEqual(golden.shape)
     })
   }
 

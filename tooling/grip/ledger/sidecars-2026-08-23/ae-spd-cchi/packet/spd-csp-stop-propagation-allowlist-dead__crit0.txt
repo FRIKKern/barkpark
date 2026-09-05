@@ -1,0 +1,1 @@
+grep -rn "stopPropagation" api/lib returns no inline onclick attribute, and @handler_stop_propagation is gone from csp.ex @inline_handlers with its comment block updated.

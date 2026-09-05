@@ -1,0 +1,1 @@
+dont-merge-before-elixir-test.md's inverted premise is corrected. Evidence: the diff.

@@ -1,0 +1,1 @@
+registry/deployment.ex:184-185's stale 'NULL on every other row' comment is corrected in the same change.

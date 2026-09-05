@@ -33,7 +33,7 @@ defmodule BarkparkWeb.SchemaDatasetHashTenancyTest do
   On origin/main both hash tests RED with the assertions exactly INVERTED: the
   hash ignores B's schemas and tracks Default's.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures,
     only: [create_workspace!: 0, create_project!: 1, ensure_default_scope!: 0]

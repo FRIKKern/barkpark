@@ -1,0 +1,1 @@
+The PR body states the D550 counter-example out loud: enrolling agency as :has_reader would have passed on four PROSE hits in cloud/priv/static, so the reader-less census would have blessed a reader-less key either way.

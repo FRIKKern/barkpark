@@ -1,0 +1,1 @@
+The document is read back FROM THE API after the edit and the verdict states whether the removed block's content survived - DOM evidence inside the canvas does not count.

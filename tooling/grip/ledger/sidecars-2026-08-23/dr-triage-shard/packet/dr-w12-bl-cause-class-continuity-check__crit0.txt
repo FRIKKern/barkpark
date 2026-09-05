@@ -1,0 +1,1 @@
+A check fires when a cause class's count goes to zero across a window while its cohort total holds, and stays silent when the cohort itself drains

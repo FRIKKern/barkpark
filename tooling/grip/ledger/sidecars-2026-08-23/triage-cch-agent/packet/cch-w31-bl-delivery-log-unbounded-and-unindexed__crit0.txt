@@ -1,0 +1,1 @@
+The read cost is MEASURED against a seeded table, not argued: EXPLAIN ANALYZE for a filtered keyset page at realistic row counts. Evidence: the plan output.

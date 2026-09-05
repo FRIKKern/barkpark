@@ -1,0 +1,1 @@
+In a real authenticated browser at a width where the strip renders, Tab to the strip and press Enter, then read document.activeElement — it is the expanded .pane-column (id pane-*), never BODY, with the reading pasted

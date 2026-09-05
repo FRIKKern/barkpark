@@ -1,0 +1,1 @@
+Whether the primary checkout is still full-history is re-derived rather than assumed: `git rev-parse --is-shallow-repository` is run and its answer recorded. Evidence: the command and output.

@@ -1,0 +1,1 @@
+The pair is RE-DRIVEN with .new-step-detail neutralised in the probe only (a mutation, never shipped), at 320/390/900 in both themes on scenario site-deploy-rail-failed, and both runs are pasted — the isolated footer either reproduces D298's page 1011 under break-word or it does not. An UNREPRODUCED result is the finding; do not stop at 'probably fine'.

@@ -1,0 +1,1 @@
+The drop-direction misdiagnosis is fixed: a population BELOW the floor prints a message that admits a deletion is a possible cause, not only a broken scanner

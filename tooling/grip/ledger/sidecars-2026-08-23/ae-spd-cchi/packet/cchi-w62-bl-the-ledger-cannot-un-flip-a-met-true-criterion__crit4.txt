@@ -1,0 +1,1 @@
+A guard makes the class unable to return silently: a met:true criterion whose evidence announces its own withdrawal is surfaced by an instrument, not by a human reading prose.

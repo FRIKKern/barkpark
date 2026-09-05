@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green, and the lead confirms whether the remaining boxes need a one-shot `bp cloud deploy <slug>` (which streams the LOCAL `deploy/instance-deploy.sh` and hard-resets the box to origin/main) or will converge on the next self-update.

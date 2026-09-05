@@ -4776,6 +4776,165 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   end
 
   # ─────────────────────────────────────────────────────────────────────────
+  # SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa), Studio half. While a turn RUNS its
+  # transcript keeps the ACTIVE tool row and folds the rows BEFORE it behind one
+  # "+N previous" control, which expands on click and re-collapses on a second
+  # click. A SETTLED turn is NOT ours — it belongs to U1's fold-on-settle above,
+  # and the gate that says so is `turn_fold_key/1` read the other way round.
+  #
+  # The mutation reds by NAME:
+  #
+  #   RUNNING gate — "a SETTLED turn keeps its Worked-for header". Drop the gate
+  #                  from `running_run_key/1` and a settled turn collapses to its
+  #                  active row, losing U1's header entirely.
+  #   COUNT        — "the control counts the rows it hides". Hard-code N and this
+  #                  reds on the wrong "+N previous".
+  #
+  # The count and the wording are byte-locked to `bp chat` by the shared fixture's
+  # running_cases (chat_show_active_only_test.exs + internal/chat/running_fold_test.go).
+  # ─────────────────────────────────────────────────────────────────────────
+  describe "show-active-only while a turn runs (task-b66928b2958c8cfa)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    # One tool row of the RUNNING turn, followed by its result — which is what
+    # makes it a FINISHED row of a still-running turn, i.e. foldable.
+    defp active_only_step(sid, id, command, opts \\ []) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => id,
+                 "name" => "Bash",
+                 "input" => %{"command" => command}
+               }
+             ]
+           }
+         }}
+      )
+
+      if Keyword.get(opts, :finished, true) do
+        send_frame(
+          sid,
+          {:claude_chat_event,
+           %{
+             "type" => "user",
+             "message" => %{
+               "content" => [
+                 %{"type" => "tool_result", "tool_use_id" => id, "content" => "done"}
+               ]
+             }
+           }}
+        )
+      end
+    end
+
+    test "a RUNNING turn keeps only the active row, behind a +N previous control",
+         %{view: view, sid: sid} do
+      active_only_step(sid, "toolu_ao_1", "ACTIVE_ONLY_ONE")
+      active_only_step(sid, "toolu_ao_2", "ACTIVE_ONLY_TWO")
+      active_only_step(sid, "toolu_ao_3", "ACTIVE_ONLY_THREE")
+      active_only_step(sid, "toolu_ao_4", "ACTIVE_ONLY_LIVE", finished: false)
+
+      html = render(view)
+
+      assert html =~ ~s(data-role="running-fold")
+      # The control counts the rows it hides — three finished, one in flight.
+      assert html =~ "+3 previous"
+      # The ACTIVE row is exactly what stays on screen.
+      assert html =~ "ACTIVE_ONLY_LIVE"
+
+      for gone <- ["ACTIVE_ONLY_ONE", "ACTIVE_ONLY_TWO", "ACTIVE_ONLY_THREE"] do
+        refute html =~ gone
+      end
+
+      # The turn is running, so it wears NO settled header.
+      refute html =~ "Worked for"
+      refute html =~ ~s(data-role="turn-fold")
+    end
+
+    test "the control expands every row of the turn, and re-collapses",
+         %{view: view, sid: sid} do
+      active_only_step(sid, "toolu_ao_x1", "EXPAND_ROW_ONE")
+      active_only_step(sid, "toolu_ao_x2", "EXPAND_ROW_TWO")
+      active_only_step(sid, "toolu_ao_x3", "EXPAND_ROW_LIVE", finished: false)
+
+      collapsed = render(view)
+      assert collapsed =~ "+2 previous"
+      assert collapsed =~ ~s(aria-expanded="false")
+      refute collapsed =~ "EXPAND_ROW_ONE"
+
+      opened = view |> element("[data-running-fold-toggle]") |> render_click()
+      assert opened =~ "EXPAND_ROW_ONE"
+      assert opened =~ "EXPAND_ROW_TWO"
+      assert opened =~ "EXPAND_ROW_LIVE"
+      # The control stays — an expanded fold is still a fold, and it is the
+      # reader's way back.
+      assert opened =~ "+2 previous"
+      assert opened =~ ~s(aria-expanded="true")
+
+      closed = view |> element("[data-running-fold-toggle]") |> render_click()
+      refute closed =~ "EXPAND_ROW_ONE"
+      refute closed =~ "EXPAND_ROW_TWO"
+      assert closed =~ "EXPAND_ROW_LIVE"
+      assert closed =~ ~s(aria-expanded="false")
+    end
+
+    test "a turn whose ACTIVE row is its FIRST row draws no control at all",
+         %{view: view, sid: sid} do
+      # Parallel tool calls: three rows, no result landed yet, so the FIRST row
+      # is the one in flight and there is nothing before it to hide.
+      active_only_step(sid, "toolu_ao_p1", "PARALLEL_ROW_ONE", finished: false)
+      active_only_step(sid, "toolu_ao_p2", "PARALLEL_ROW_TWO", finished: false)
+      active_only_step(sid, "toolu_ao_p3", "PARALLEL_ROW_THREE", finished: false)
+
+      html = render(view)
+
+      refute html =~ ~s(data-role="running-fold")
+      refute html =~ "previous"
+      assert html =~ "PARALLEL_ROW_ONE"
+      assert html =~ "PARALLEL_ROW_TWO"
+      assert html =~ "PARALLEL_ROW_THREE"
+    end
+
+    test "a SETTLED turn keeps its Worked-for header — the running fold never claims it",
+         %{view: view, sid: sid} do
+      active_only_step(sid, "toolu_ao_s1", "SETTLED_ROW_ONE")
+      active_only_step(sid, "toolu_ao_s2", "SETTLED_ROW_TWO")
+      active_only_step(sid, "toolu_ao_s3", "SETTLED_ROW_THREE")
+      assert render(view) =~ "+2 previous"
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{"type" => "result", "subtype" => "success", "duration_ms" => 192_000}}
+      )
+
+      html = render(view)
+
+      # U1 owns a settled turn, whole: ONE header for all three rows, and the
+      # running control is gone with the turn it belonged to.
+      assert html =~ ~s(data-role="turn-fold")
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "3 steps"
+      refute html =~ ~s(data-role="running-fold")
+      refute html =~ "previous"
+      refute html =~ "SETTLED_ROW_ONE"
+      refute html =~ "SETTLED_ROW_THREE"
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────
   # MCP result chips (charter D64). Chip dispatch is a DELIBERATE narrow
   # exception to D38: it keys on OUR tool NAME (mcp__barkpark__ prefix) plus a
   # Jason.decode of the single text block. The classifier is consumed identically

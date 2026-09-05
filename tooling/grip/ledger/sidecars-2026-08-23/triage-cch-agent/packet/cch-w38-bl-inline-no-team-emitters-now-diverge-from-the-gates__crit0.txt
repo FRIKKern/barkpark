@@ -1,0 +1,1 @@
+A Go test drives the REAL post-flip 403 no_team shape (not the stub fiction) through bp cloud rollback and bp cloud support add, and REDS before any router change. Evidence: the failing run.

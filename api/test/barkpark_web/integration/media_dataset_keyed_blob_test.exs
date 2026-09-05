@@ -129,7 +129,7 @@ defmodule BarkparkWeb.Integration.MediaDatasetKeyedBlobTest do
 
   # The REAL scoped GET route — the one the exposure was proved on.
   defp scoped_get(tenant, path) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> tenant.token)
     |> get("/w/#{tenant.ws.slug}/p/#{tenant.project.slug}/media/files/#{path}")
   end

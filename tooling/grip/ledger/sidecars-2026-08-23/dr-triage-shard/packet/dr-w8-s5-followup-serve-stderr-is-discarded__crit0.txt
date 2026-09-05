@@ -1,0 +1,1 @@
+All three preview-server spawns stop discarding their own stderr. Still `stdio: "ignore"` on origin/main dad66869e at cloud/priv/static/__preview__/overflow-guard.mjs:549, breakpoint-sweep.mjs:1222 and modal-oracle.mjs:477 — each pipes and captures via captureStderr from cloud/priv/static/__preview__/bringup-retry.mjs (reuse it, do not write a second one).

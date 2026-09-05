@@ -1,0 +1,1 @@
+Every control enumeration asserts a POSITIVE count, so an empty node list can never read as a clean pass.

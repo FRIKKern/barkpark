@@ -1,0 +1,1 @@
+A mutation case stamps a real-but-wrong run id and REDS before the fix, passes after. Evidence: fail-before output.

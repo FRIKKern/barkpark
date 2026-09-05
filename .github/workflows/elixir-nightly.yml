@@ -1,0 +1,146 @@
+# Nightly FULL Elixir run on main.
+#
+# WHY THIS EXISTS. api/test/test_helper.exs excludes eleven tags from the
+# default `mix test` (flaky, boot_test, plugin_routes, requires_vips,
+# requires_node, bokbasen_integration, idp_interop, real_binary, ...), so the
+# ~17k tests a PR and a main push run are NOT the suite's coverage; `:flaky`
+# alone hides the migration tests entirely. Nothing ran the excluded set on a
+# schedule, so a regression inside it was invisible until someone typed
+# `--include` by hand. This runs the full set once a day and prints the 100
+# slowest tests so the stall list (task-18f209f185f5b3f1) has a daily instrument.
+#
+# WHAT IT INCLUDES. `--include flaky --include requires_node`: node 20 is set up
+# below exactly as elixir.yml does, so requires_node is honest here. NOT
+# included: requires_vips (no libvips on this runner; prod-compile installs it
+# separately and a false red here would be noise), bokbasen_integration and
+# idp_interop (need live services), boot_test and plugin_routes (each has its
+# own dedicated step/harness in elixir.yml).
+#
+# NOT a PR check, NOT required, NOT in any aggregator. Its red is main state and
+# reaches the main watcher by workflow name (elixir-nightly.yml). One run per
+# sha; a manual dispatch never cancels a scheduled run.
+name: elixir-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # 03:17 UTC — after chronicle-paper (00:17), before required-checks-drift (04:17)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elixir-nightly-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  full-suite:
+    name: Full suite (--include flaky --include requires_node --slowest 100)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: barkpark_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+      DATABASE_URL: ecto://postgres:postgres@localhost:5432/barkpark_test
+      SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
+      BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
+      PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.4"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth: 0 — REQUIRED, do not drop it, and the same shape elixir.yml's
+        # mix-test job uses (no `filter:`, because that job does not use one either).
+        # The default depth-1 checkout is what made run 33717527961 red:
+        # PdsPublishedArtifactDoorTest shells scripts/pds-published-artifact-door.sh,
+        # which derives R by walking package.json history and comparing each commit to
+        # its PARENT. On a truncated history no parent resolves, R collapses onto HEAD,
+        # exports(R) == exports(HEAD) for every package, and the door printed
+        # VERDICT: PASS on a tree that REFUSES with real history — the R column read
+        # a94db512a (= HEAD) for every row and "0 commit(s) ... since a94db512a". The
+        # door now exits 2 on shallow history rather than passing vacuously, so without
+        # this line the nightly would be red on the venue instead of silently green.
+        # Barkpark.BuildInfo's `git describe --tags` needs the tags for the same reason
+        # mix-test does.
+        with:
+          fetch-depth: 0
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - name: Setup Node (requires_node tests shell tsc / node)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          # Same key family as elixir.yml's mix-test job so the nightly reads
+          # the cache the PR path already warmed; a miss falls back to the prefix.
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+      - name: Fetch deps
+        run: mix deps.get
+      - name: Install libxml2-utils for ONIX XSD validation
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+      - name: Compile (dev, --warnings-as-errors)
+        run: mix compile --warnings-as-errors
+      - name: DB setup
+        run: |
+          mix ecto.create
+          mix ecto.migrate
+      - name: Count what the default run excludes (so the delta is on the record)
+        run: |
+          set -o pipefail
+          echo "## Nightly full-suite delta" >> "$GITHUB_STEP_SUMMARY"
+          for tag in flaky requires_node; do
+            n=$(grep -rlE "@(module)?tag[[:space:]]+:?$tag\b|@(module)?tag[[:space:]]+$tag:" test | wc -l | tr -d ' ')
+            echo "- files tagged :$tag: $n" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Full suite
+        run: |
+          set -o pipefail
+          mix test --include flaky --include requires_node --slowest 100 2>&1 | tee nightly-test.log
+      - name: Slowest 100 + totals into the step summary
+        if: always()
+        run: |
+          {
+            echo '### Totals'
+            grep -E '^[0-9]+ tests?, [0-9]+ failures?' nightly-test.log || echo '(no totals line — the run aborted before ExUnit printed one)'
+            echo
+            echo '### Slowest 100'
+            echo '```'
+            awk '/^Top 100 slowest/,0' nightly-test.log | head -120
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elixir-nightly-log-${{ github.sha }}
+          path: api/nightly-test.log
+          retention-days: 14

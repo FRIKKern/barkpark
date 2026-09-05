@@ -416,6 +416,13 @@ func vercelEnsureWorkspace(out *writer, base, token, site string) error {
 	}
 	switch {
 	case status >= 200 && status < 300:
+		// Every ✓ in this deploy flow used to be printed off the STATUS alone —
+		// respBody was read only on failure — so a proxy page interposed in
+		// front of the target answered 200 and the operator watched six green
+		// checkmarks over a deploy that wrote nothing.
+		if serr := builtinWriteReceiptErr("workspace create", status, respBody); serr != nil {
+			return serr
+		}
 		out.progressf("  ✓ workspace '%s' created", site)
 		return nil
 	case status == 409 || status == 422:
@@ -443,6 +450,9 @@ func vercelApplySchema(out *writer, scopedBase, dataset, token, schemaFile strin
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("schema apply: status %d: %s", status, ae.errorMessage())
 	}
+	if serr := builtinWriteReceiptErr("schema apply", status, respBody); serr != nil {
+		return serr
+	}
 	out.progressf("  ✓ schema applied (%s)", filepath.Base(schemaFile))
 	return nil
 }
@@ -464,6 +474,9 @@ func vercelSeed(out *writer, scopedBase, dataset, token, seedFile, publishType s
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("seed mutate: status %d: %s", status, ae.errorMessage())
 	}
+	if serr := builtinWriteReceiptErr("seed mutate", status, respBody); serr != nil {
+		return serr
+	}
 	out.progressf("  ✓ seeded (createOrReplace lands as drafts)")
 
 	if publishType == "" {
@@ -483,6 +496,11 @@ func vercelSeed(out *writer, scopedBase, dataset, token, seedFile, publishType s
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("publish: status %d: %s", status, ae.errorMessage())
+	}
+	// len(ids) comes off the LOCAL seed file, not the response — the count is
+	// not a measurement, so the receipt it appears in has to be.
+	if serr := builtinWriteReceiptErr("publish", status, respBody); serr != nil {
+		return serr
 	}
 	out.progressf("  ✓ published %d document(s) of type '%s'", len(ids), publishType)
 	return nil
@@ -545,6 +563,11 @@ func vercelPublishPayload(ids []string, publishType string) map[string]any {
 // admin-gated POST /w/<site>/p/default/v1/tokens endpoint (Part A). This is the
 // step that removes the only prod-ssh dependency from the old flow.
 func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site string) (string, error) {
+	// public-read is CORRECT here and stays: this token is baked into a PUBLICLY
+	// deployed Next.js site, so it is a published-only credential by design —
+	// `read` would let anyone who views source pull the workspace's PRIVATE
+	// schemas. A desk operator who needs the read tier mints it deliberately with
+	// `bp token create <label> --permissions read` (token_create_cmd.go).
 	body, _ := json.Marshal(map[string]any{
 		"label":       "public-read-" + site,
 		"permissions": []string{"public-read"},
@@ -565,6 +588,9 @@ func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site stri
 	if jerr := json.Unmarshal(respBody, &resp); jerr != nil {
 		return "", fmt.Errorf("parse mint response: %w", jerr)
 	}
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): this step's
+	// whole product is the server's token string, so a body that said nothing
+	// cannot produce a success.
 	if resp.Token == "" {
 		return "", fmt.Errorf("mint token: server returned no token")
 	}

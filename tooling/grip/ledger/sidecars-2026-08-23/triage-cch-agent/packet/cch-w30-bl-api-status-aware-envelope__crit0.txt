@@ -1,0 +1,1 @@
+api() preserves a non-JSON response body instead of substituting {} — a 5xx carrying an upstream proxy HTML page reaches the caller with something inspectable, and the shape change is pinned by a node test.

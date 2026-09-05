@@ -141,20 +141,26 @@ defmodule Rig.Render do
   # Drift tripwire: the wrapper string we hand-add must be exactly the class
   # set the reader LiveView renders. The LiveView writes it as a HEEx list
   # (`class={["bp-paper-shell", @article? && "bp-paper-surface", …]}`), so we
-  # match the `<main class={[...]}>` line and compare the quoted tokens.
+  # match the `<main class={[...]}>` CONSTRUCT and compare the quoted tokens.
+  #
+  # ACROSS NEWLINES, and that is the whole point of this shape. The finder used
+  # to require `<main class={[` and `bp-paper-` on the SAME source line. #14141
+  # reformatted the list onto four lines and the finder stopped matching — so
+  # every rig run since has died with `no <main class={[…bp-paper-…]}> line …
+  # LiveView drift`, a tripwire firing on its own blind spot rather than on any
+  # drift. A formatting change must never be able to speak as a class-set
+  # change: the construct is read whole, from `<main class={[` to its first
+  # closing `]}`, and only the quoted `bp-paper-*` tokens inside it are compared.
   defp assert_wrapper_matches_live_view!() do
     src = File.read!(@live_view_path)
 
-    line =
-      src
-      |> String.split("\n")
-      |> Enum.find(&(String.contains?(&1, "<main class={[") and String.contains?(&1, "bp-paper-")))
-      |> case do
-        nil -> die("no `<main class={[…bp-paper-…]}>` line in #{@live_view_path} — LiveView drift")
-        l -> l
+    construct =
+      case Regex.run(~r/<main class=\{\[(.*?)\]\}/s, src, capture: :all_but_first) do
+        [body] -> body
+        _ -> die("no `<main class={[…]}>` construct in #{@live_view_path} — LiveView drift")
       end
 
-    found = Regex.scan(~r/"(bp-paper-[a-z-]+)"/, line) |> Enum.map(&List.last/1)
+    found = Regex.scan(~r/"(bp-paper-[a-z-]+)"/, construct) |> Enum.map(&List.last/1)
 
     if found != @wrapper_classes do
       die("""

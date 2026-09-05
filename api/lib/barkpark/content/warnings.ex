@@ -56,6 +56,15 @@ defmodule Barkpark.Content.Warnings do
     end
   end
 
+  @doc """
+  Whether a collector opened the queue with `reset/0`. Emitters that must pay
+  for a DB read to decide whether they have anything to say check this first —
+  `put/3` already drops silently when nobody listens, but it cannot refund the
+  read that computed the message.
+  """
+  @spec listening?() :: boolean()
+  def listening?, do: is_list(Process.get(@key))
+
   @doc "Drain the queued entries in emission order and clear the accumulator."
   @spec drain() :: [entry()]
   def drain do

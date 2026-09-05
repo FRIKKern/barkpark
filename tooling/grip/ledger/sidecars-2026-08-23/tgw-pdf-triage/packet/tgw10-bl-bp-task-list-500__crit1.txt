@@ -1,0 +1,1 @@
+A regression test covers the alias path under --all. Evidence: paste the test name and `go test ./internal/cli/...` output.

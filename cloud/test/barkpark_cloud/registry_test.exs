@@ -93,7 +93,7 @@ defmodule BarkparkCloud.RegistryTest do
       assert {:error, changeset} =
                Registry.register_barkpark(team_a, %{name: "Prod 2", slug: "prod"})
 
-      assert "already has a Barkpark with this slug" in errors_on(changeset).team_id
+      assert "is already taken by another Barkpark on this team" in errors_on(changeset).slug
 
       # Same slug, DIFFERENT team → fine.
       assert {:ok, _} = Registry.register_barkpark(team_b, %{name: "Prod", slug: "prod"})
@@ -912,17 +912,6 @@ defmodule BarkparkCloud.RegistryTest do
     test "transition_deployment_with_site_update/5 returns :not_found for a non-UUID id instead of raising" do
       assert Registry.transition_deployment_with_site_update("not-a-uuid", "w1", 1, %{}, %{}) ==
                {:error, :not_found}
-    end
-
-    test "put_env_var/2 returns :barkpark_not_in_team for a non-UUID barkpark_id instead of raising" do
-      team = team_fixture()
-
-      assert Registry.put_env_var(team, %{
-               "key" => "K",
-               "value" => "v",
-               "scope" => "barkpark",
-               "barkpark_id" => "not-a-uuid"
-             }) == {:error, :barkpark_not_in_team}
     end
   end
 

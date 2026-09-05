@@ -9,7 +9,7 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
     * 404 after DELETE
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Settings

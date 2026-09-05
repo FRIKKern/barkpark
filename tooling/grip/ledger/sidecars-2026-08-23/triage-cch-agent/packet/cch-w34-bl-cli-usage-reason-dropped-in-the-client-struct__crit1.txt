@@ -1,0 +1,1 @@
+UsageMeter carries unavailable_reason with its json tag, so the value survives unmarshal. Evidence: the struct diff and a decode test.

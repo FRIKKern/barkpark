@@ -45,10 +45,15 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
       barkpark-23yi/fsko cell ADMITTING (a global-admin token holding a plain
       `member` row in workspace B is a Studio admin of B). Tracking it would be
       a fix that does not fix. Cell `token/foreign-member+perms[admin]`.
-    * `workspace_admin?/2` is a literal `~w(owner admin)` NAME list, which
-      DENIES a custom role carrying `action: "admin"` whom `authorize/3` admits
-      — tracking it would revoke Studio admin from a real operator. Cells
-      `user/custom-role-admin` and `token/custom-role-admin+perms[admin]`.
+    * `workspace_admin?/2` WAS a literal `~w(owner admin)` NAME list, which
+      DENIED a custom role carrying `action: "admin"` whom `authorize/3`
+      admits. RULED (team-lead 2026-09-02) and FIXED in
+      `arpss-w10-bl-workspace-admin-denies-custom-role-admin`: the predicate now
+      also honours a WORKSPACE-SCOPED custom role whose stored permission rows
+      carry `admin`, resolved through the same `granted_actions/3`. Cells
+      `user/custom-role-admin` and `token/custom-role-admin+perms[admin]` moved
+      `:real_divergent` -> `:equivalent`; they are the CONVERGENCE witnesses now,
+      and they red if that fix is reverted.
     * And `workspace_admin?/2` ADMITS where the other two deny, on a read-only
       -perms token holding an `admin` ROLE row. Cell `token/admin-role+perms[read]`.
 
@@ -101,6 +106,17 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
       `:equivalent` demands the two oracles reach the SAME outcome, where
       `:benign_divergent` accepted two DIFFERENT refusals. None of them relaxes
       a refusal into an admit, and no cell moved off `:real_divergent`.
+
+  Two cells DID later move off `:real_divergent`, and not from #12616:
+  `user/custom-role-admin` and `token/custom-role-admin+perms[admin]` are
+  `:equivalent` since
+  `arpss-w10-bl-workspace-admin-denies-custom-role-admin` made
+  `workspace_admin?/2` honour a workspace-scoped custom role's `admin` action.
+  That IS a refusal relaxed into an admit — a deliberate, RULED widening of the
+  admin seat to a role the tenant defined, recorded here rather than absorbed
+  silently. The two D9 divergences it must not touch stay `:real_divergent`:
+  `token/foreign-member+perms[admin]` (global perms, plain `member` row) and
+  `token/admin-role+perms[read]`.
 
   Exception modules, where any are named: `Ecto.Query.CastError` for a
   non-castable BINARY id and `FunctionClauseError` for a nil / non-binary one.
@@ -233,25 +249,28 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     %{
       id: "user/custom-role-admin",
       summary:
-        "PAIRING 2 — a custom role carrying action=admin: caps and authorize/3 ADMIT, " <>
-          "workspace_admin?/2's literal name list DENIES",
+        "PAIRING 2 — a custom role carrying action=admin: caps, authorize/3 AND " <>
+          "workspace_admin?/2 all ADMIT (converged)",
       build: :user_custom_admin,
       authorize: %{read: :admit, write: :deny, admin: :admit},
       caps: %{read: :admit, write: :deny, admin: :admit},
       admin_fn: :admit,
-      workspace_admin: :deny,
+      workspace_admin: :admit,
       verdicts: %{
         read: :equivalent,
         write: :equivalent,
         admin_vs_authorize: :equivalent,
-        admin_vs_ws_admin: :real_divergent
+        admin_vs_ws_admin: :equivalent
       },
       note:
         "PRECONDITION: a Tenancy.Role `superviewer` + RolePermission rows read/admin exist " <>
           "for this workspace, or create_membership/4 rejects the role. " <>
-          "workspace_admin?/2 hardcodes ~w(owner admin) and cannot see a data-driven admin " <>
-          "action — filed as arpss-w10-bl-workspace-admin-denies-custom-role-admin. " <>
-          "UNCHANGED by arpss-w10: the user arm was not touched."
+          "WAS :real_divergent — workspace_admin?/2 hardcoded ~w(owner admin) and could not " <>
+          "see a data-driven admin action. CONVERGED by " <>
+          "arpss-w10-bl-workspace-admin-denies-custom-role-admin (RULED 2026-09-02): the " <>
+          "predicate now ORs the built-in name list with a WORKSPACE-SCOPED custom role's " <>
+          "stored admin action, via the same granted_actions/3 the chokepoint uses. Revert " <>
+          "that and this cell reds."
     },
 
     # ── TOKEN axis. This is the arm arpss-w10 moved.
@@ -393,25 +412,26 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
       id: "token/custom-role-admin+perms[admin]",
       summary:
         "PAIRING 2, token side — an admin-perms token holding a CUSTOM role carrying " <>
-          "action=admin: caps and authorize/3 ADMIT, workspace_admin?/2 DENIES",
+          "action=admin: caps, authorize/3 AND workspace_admin?/2 all ADMIT (converged)",
       build: :token_custom_admin,
       authorize: %{read: :admit, write: :admit, admin: :admit},
       caps: %{read: :admit, write: :admit, admin: :admit},
       admin_fn: :admit,
-      workspace_admin: :deny,
+      workspace_admin: :admit,
       verdicts: %{
         read: :equivalent,
         write: :equivalent,
         admin_vs_authorize: :equivalent,
-        admin_vs_ws_admin: :real_divergent
+        admin_vs_ws_admin: :equivalent
       },
       note:
         "PRECONDITION: a Tenancy.Role `tokadmin` + RolePermission rows read/write/admin " <>
-          "exist for this workspace. THIS is why the arpss-w10 fix spells the seat rule as " <>
-          "role_permits?/3 and not as workspace_admin?/2's name list: tracking the name list " <>
-          "would revoke Studio admin from this legitimate custom-role operator. " <>
-          "Same disposition as user/custom-role-admin: " <>
-          "arpss-w10-bl-workspace-admin-denies-custom-role-admin."
+          "exist for this workspace. THIS is why the arpss-w10 fix spelled the seat rule as " <>
+          "role_permits?/3 and not as workspace_admin?/2's name list. The name list is no " <>
+          "longer the whole rule: converged by " <>
+          "arpss-w10-bl-workspace-admin-denies-custom-role-admin. NOTE the admit here is the " <>
+          "custom ROLE's admin action, NOT the token's global permissions[] — charter D9 " <>
+          "still denies that shape (cell token/foreign-member+perms[admin], untouched)."
     },
 
     # ── PRINCIPAL-SHAPE axis.

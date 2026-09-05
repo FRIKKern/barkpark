@@ -1,0 +1,1 @@
+`GONE KIND` CATCHES A SILENTLY-SHORTENED FIXTURE AND A COLUMN OVERFLOW: shortening a cruel string reds it, AND a string whose grapheme count is within the cap but whose code-point count exceeds the column width reds it. Evidence: both mutations with `rc=$?`.

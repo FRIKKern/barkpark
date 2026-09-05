@@ -1,0 +1,1 @@
+SORT ORDER: UNMETERED rows sort to the TOP of the freshness ordering, not the bottom. A test asserts a NULL-distance row outranks a distance-0 row. The PR body states why: a default NULLS LAST would bury exactly the boxes the leg exists to surface.

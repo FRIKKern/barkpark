@@ -93,9 +93,29 @@ defmodule BarkparkCloud.Notifications.Render do
       "provision_succeeded" ->
         {"Provisioning succeeded", "#{site} finished provisioning and is live.", :info}
 
+      # cch-w30-bl — the success terminal. `:info` is correct here and is the one
+      # place in this table where Discord's green is the honest colour: the build
+      # IS live. It carries `identity/1` for the same reason the failure does —
+      # a team that deploys on every publish needs to know WHICH deployment went
+      # live — and no `cause/1`, because there is no cause to state.
+      "deployment_succeeded" ->
+        {"Deployment live", "A deployment for #{site} is live.#{identity(payload)}", :info}
+
       "deployment_failed" ->
         {"Deployment failed",
          "A deployment for #{site} failed.#{identity(payload)}#{cause(payload)}", :error}
+
+      # cch-w29-bl: the auto-deploy PREBUILT refusal. `cause/1`, not a re-typed
+      # sentence: the remedy the console shows is
+      # `Sites.AutoDeployWorker.refusal_detail/0`, it rides the payload as
+      # `:detail`, and this arm renders THAT — so the chat channel, the inbox and
+      # the deployment row can never disagree about what the person should do.
+      # `:warning`, never `:info`: `channels/discord.ex` paints `:info` GREEN, and
+      # a publish that did not deploy is not good news.
+      "deployment_refused" ->
+        {"Deployment refused",
+         "A content publish for #{site} did not deploy — it was refused." <>
+           "#{identity(payload)}#{cause(payload)}", :warning}
 
       "agent_unreachable" ->
         {"Site unreachable", "#{site} stopped responding to health checks.", :warning}

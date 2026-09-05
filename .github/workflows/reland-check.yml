@@ -86,7 +86,20 @@ jobs:
             echo "::error::reland-check: no merge base between BASE_SHA ${BASE_SHA} and HEAD — refusing the two-dot fallback, which scores every file main gained since the branch point. This advisory cannot compute THIS PR's own file set."
             exit 1
           fi
-          git diff --name-only "${BASE_SHA}...HEAD" > /tmp/changed.txt || {
+          # THREE false-greens in one producer line, all of them SILENT:
+          #   • `--name-only` QUOTES a path containing `"` (octal-escapes it too
+          #     without core.quotepath=false), so `docs/we"ird.md` reaches the
+          #     scanner as a quoted literal that matches no real file and the
+          #     re-land scan simply never considers it;
+          #   • rename detection prints only the DESTINATION, so a file renamed
+          #     OUT of a watched tree vanishes from the changed set entirely;
+          #   • a newline in a path splits one entry into two.
+          # -z + --no-renames + core.quotepath=false close all three. Same
+          # producer elixir.yml, cloud.yml, console-harness.yml, security.yml and
+          # go-tests.yml carry — ONE shape, not six dialects. pipefail is set
+          # above, so a failure in EITHER half still reaches the refusal below.
+          git -c core.quotepath=false diff -z --name-only --no-renames "${BASE_SHA}...HEAD" \
+            | tr '\0' '\n' > /tmp/changed.txt || {
             echo "::error::reland-check: three-dot diff against ${BASE_SHA} failed despite a resolvable merge base — refusing to score an empty or partial file set."
             exit 1
           }

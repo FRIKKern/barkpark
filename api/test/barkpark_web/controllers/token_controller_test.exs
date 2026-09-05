@@ -14,7 +14,7 @@ defmodule BarkparkWeb.TokenControllerTest do
       workspace but 403s on mutate; requesting write/admin permissions → 422
       with NO token issued.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth

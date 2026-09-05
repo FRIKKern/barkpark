@@ -9,7 +9,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
   token-paste and ticket flows are regression-pinned by session_controller
   tests; here we assert they still coexist.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).
@@ -116,7 +116,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
       assert html_response(conn, 200) =~ "didn&#39;t work"
 
       # no pending marker at all → back to /login
-      fresh = build_conn() |> post("/login/mfa", %{"code" => "123456"})
+      fresh = scoped_conn() |> post("/login/mfa", %{"code" => "123456"})
       assert redirected_to(fresh) == "/login"
     end
 

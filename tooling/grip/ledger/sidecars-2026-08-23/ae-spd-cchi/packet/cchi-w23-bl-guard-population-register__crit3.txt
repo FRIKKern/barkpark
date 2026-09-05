@@ -1,0 +1,1 @@
+THE `section.view:not([hidden])` CARDINALITY ASSERTION IS EITHER SHIPPED (querySelectorAll + length === 1, with the count printed) OR REFUSED IN WRITING with its reason. Quote whichever landed.

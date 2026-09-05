@@ -1,0 +1,1 @@
+The 'no server answered on :PORT within 8000ms' refusal PRINTS the captured stderr tail. Reproduce a real cause — hold the port with a second listener — and quote the refusal showing EADDRINUSE, so the exit names a cause and not only a symptom.

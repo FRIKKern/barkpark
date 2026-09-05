@@ -1,0 +1,1 @@
+It reproduces today's five-row result (publish_clock, build_slots, runner_queue_len, coalesced_attempts, commit_distance) and shows the three discharged violators as discharged.

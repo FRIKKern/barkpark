@@ -1,0 +1,1 @@
+cloud/test/barkpark_cloud/push/fanout_result_test.exs:19 is async: false, with a one-line moduledoc reason naming ExUnit.CaptureLog's global capture, mirroring accounts_email_change_billing_sync_test.exs:8. Evidence: the diff.

@@ -1,0 +1,1 @@
+The two drafts.* draft twins stop being counted as open tasks — fixed in whatever builds the children list, not by cancelling the drafts.

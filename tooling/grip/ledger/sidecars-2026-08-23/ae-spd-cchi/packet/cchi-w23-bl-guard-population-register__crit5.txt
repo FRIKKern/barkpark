@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this criterion, never the builder): the PR is merged to `main` and its squash SHA is recorded here and confirmed an ancestor of origin/main.

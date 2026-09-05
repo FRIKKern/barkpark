@@ -1,0 +1,1 @@
+The four stranded wave charters (#10173, #10407, #10496, #10522) have their D256-D336 decisions SALVAGED into the charter BEFORE any of them is closed. Evidence: the salvage commit or PR.

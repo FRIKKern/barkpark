@@ -1,0 +1,824 @@
+spd-bl-publish-affordance-triple
+  crit0  sha256=1bb2550619caac370f881615b01ff580144bebadc09b20683651805d74d125c5  bytes=159
+  crit1  sha256=32f3e47636d0325e8e3166c649bb3e610592f687186f7261299cf47434d3e794  bytes=145
+  crit2  sha256=aa24247ae8b8d23e43fe63f2aac888fbd9e2e8c325ca9f2bf1ae53be0a8f67ff  bytes=148
+  crit3  sha256=e91ef87ae8f0e3e7854cb157c30b299620867ac9460891dc9bc1c376307e33b8  bytes=207
+  crit4  sha256=7195e73ce0bdba455534e923e7cd9b79cebe210f03e59e018ff76e5520ef56c7  bytes=153
+  crit5  sha256=14a52aca56ace5ea99e1752175e91f49b2e4d2ba1832dd8eb7ef8c0c838be63e  bytes=80
+  crit6  sha256=0370821bd4c84018cd3fa844f3175b88b4850c5477dba6ccd9da8635a08f7ef5  bytes=128
+  crit7  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-w18-share-access-btn-names
+  crit0  sha256=71f9e0cadd743861a890d98f46b78c1d35ebb164ecbd46357fb8b335033385aa  bytes=145
+  crit1  sha256=98dd6ac41b2e34e606f5ad516cd3e886e2b1609d0e75acbe4ee14f66af01a783  bytes=152
+
+spd-bl-bp-search-exits-zero-while-failing
+  crit0  sha256=3bcb0349a67c1ec194e3912057986fea6e881178c7ac759005e3c7ba45c9362f  bytes=457
+  crit1  sha256=44ddc8f09a728904dc9088ec4d5d0e7682b8514c32cb1c8e83dd30f887aea990  bytes=478
+  crit2  sha256=5d5ce927bd5c681c3d538f5cbe0704d578d17b329499961dde76b737821660f6  bytes=300
+  crit3  sha256=e2bd7cc245eaa8997073367475e29806705af448100169a86eb131332a9d1f66  bytes=187
+  crit4  sha256=96cc25c6f81ea05ca4ca4971ee0b415c661275d0cadbd1c6af79ea43ec65f82e  bytes=210
+  crit5  sha256=648a3511bd34cc00d54e71dcd357965fff9fc19697c535e583e4ee75675e5e59  bytes=330
+  crit6  sha256=0ed7c516058e47176cbaa6cb4c8f4cf218f8da6d2aea63339914b8939aac70b4  bytes=397
+
+spd-plugins-render-assert-weak
+  crit0  sha256=e80991c27bb55013b7b0132847ed794c52a5eab4e472d0dcb2cb4bd19de01a2a  bytes=237
+
+spd-bl-claude-chat-stderr-leak
+  crit0  sha256=00bf75d27461407c6d4ea507ed40d5e91ed6198efcfd5b3f8121bf8579f4dce3  bytes=168
+  crit1  sha256=090fb55fcf02fe832addfdaaa410f42b2941dc3a91cf1fcedfaed66c6dff0dc5  bytes=98
+  crit2  sha256=2807e347562e89caf05318a740f1696e31fc4072eea87a90f77d3c2d748a4911  bytes=145
+  crit3  sha256=2854bc6751cce1283874533ba8f2182b4ceb1905bb42ea27bf06ae76576be8db  bytes=107
+  crit4  sha256=fb37f5b57eeef8ba05886d1c552df86adb7d93a4c1172090d00d35ad6c56b9d5  bytes=122
+  crit5  sha256=8614ef86b1d2d280122d8084fc7c385f2f9df7073889f76a5d4ad8a0ddab0b6e  bytes=85
+  crit6  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-w19r-literal-gate-floor-siblings
+  crit0  sha256=347707399be9733b17a38ece1ca797a6333f5e711b675db4a5845f444bc064b0  bytes=168
+  crit1  sha256=6c97eb2b8323478d04a611f6b761dcbd6bc47c3d591da35ff576fb675886859d  bytes=88
+  crit2  sha256=2e37bc648cfc2436012f446633d6788a635d27fd46fd70c0cd885c7b056a64d0  bytes=187
+  crit3  sha256=90647f5eb602a09e5923ee5b81356f68845115c0181dabdd9c239f303db38010  bytes=115
+
+spd-w19r-live-studio-suite-flake
+  crit0  sha256=1f2a69ea9393f1a6b6450125ce7d3d0a257047d138bf95fe06c9bb8cba742b68  bytes=124
+  crit1  sha256=c0525ce01813c4b1f4016968cf6b037ce466cddbf5cdb894f3074b57e7deafe9  bytes=148
+  crit2  sha256=951e14ad1300626682c757b28adb0fb1990f013bd6804a559bb07214fd66ef6f  bytes=102
+  crit3  sha256=a906bc996ad1af2cf3715e579ed9d52612bf0a83b10cf51dc8f9e7a8883c4e39  bytes=201
+
+spd-w19-press-answer-outside-panes
+  crit0  sha256=3cd54e9668967dfc16448ef4b7979b3bea5d0e1d0455eadb3ec41b7329c6a3a0  bytes=205
+  crit1  sha256=63b041d05d16100a4b2e4386a0db5010ddfd46a1bc72ac999104ca5649161bdb  bytes=119
+  crit2  sha256=1360746f16204fe88438ca05945d58daf85d460da32a32db897bd78cdcaf7b7f  bytes=144
+
+spd-w19-click-loading-falls-through
+  crit0  sha256=5f3ca077c5261446adcd59aeeb1d86dad45855421953dabb458433920ccdfb45  bytes=200
+  crit1  sha256=5892fe6a3a9b3a579f3b7f9128e1b5e7d3c48f24a28cb90156a08f4441217569  bytes=207
+
+spd-w19-tenant-baseline-shrank
+  crit0  sha256=b1ad50c56105d3e9d465ae29e960f05e421e6d42c09863bcc93b0b3eb8a4bcfa  bytes=126
+  crit1  sha256=3107a1be32150067a111532475a72d269aeeae63e66c0460798e32908de0271c  bytes=129
+  crit2  sha256=836e42e04f89e90797134674d2966cd299d16b5d00211e08d79708e37f00086b  bytes=99
+
+spd-w19-go-literal-selftest-sigpipe
+  crit0  sha256=c1cef1a676578e50e91f198c4f97528047d31054b487c49c77485f07e4b911af  bytes=131
+  crit1  sha256=469fcd1d8b4f52cd34e3f3a74b5c510f81e39745cfaa9673d9a99199507c6636  bytes=180
+  crit2  sha256=94528b26c6c01648419e60283a52fbfd6f6805ac2ed638d4ab3d2e1879d7cab5  bytes=90
+
+spd-b19-clean-main-red-baseline
+  crit0  sha256=95db7a7fbed1e9d4dd8261130a53b251c02140e00bc578793eb86c544fa4ba0a  bytes=194
+  crit1  sha256=9efe3763962b0eb4fb7df2430bd911776d0237973dbbf173afd8950ec09cdd40  bytes=147
+  crit2  sha256=855985d2b11373a1912e5f9edcf5effbddea89ad4cf29f74d72cf03b83c78523  bytes=165
+  crit3  sha256=30620f9103e127ace87a414ce5fa79cd119c38a3ebe6e8c0d7ecd5a1abc11ca9  bytes=128
+  crit4  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-b19-anchor-report-hygiene
+  crit0  sha256=a62d6a4f5fe0803465abc845f3d174bdded69a3d19e105d9f9e3a0b4bdf0eb4f  bytes=152
+  crit1  sha256=9c07a6c8a1162a48465176042945ffd631ab32e81e89202c9be365e86b40b805  bytes=167
+  crit2  sha256=b49dc629069f8e9e81326a3eba46f420483f60852f09f6266cb0be2dac8a29b2  bytes=251
+  crit3  sha256=d9365e4138064855c779c414b86878b1b05a44d92e146c0cbc0f5feda248093f  bytes=142
+  crit4  sha256=1fc51ca02c21ee8a414d43b9496537413d7c845e629512db97170afd3579ea22  bytes=234
+  crit5  sha256=41e798f50d45192f44966e4634f089a8fa3e20cedfdd2e8d78ba10f3bafd48ae  bytes=208
+  crit6  sha256=cd0246593aae0aa69bda2e4a2c3c158a7f33ef89e34e5ebdb594bbe1bcfc42ae  bytes=120
+
+spd-b19-canvas-off-nonempty-guard
+  crit0  sha256=55e7318e714114ee1b3069e865f5355eba76cf8884b8fa51761605d2000fa924  bytes=256
+  crit1  sha256=aec0875348903ae54ea6bc81c3af5fded28a2a0687ce6bace521e431a7b4fe17  bytes=194
+  crit2  sha256=a648ac2a0e3c2543ea60af3df52f305bbee9b7ff2b7d5b97925bce009d4f5b7b  bytes=132
+  crit3  sha256=3c7162981ce4034befa3c8d0da4a3837574528b66268a45646e6542e1c46fdb5  bytes=161
+  crit4  sha256=aa97f5ab1f539bae7ac819db328152484b82839c223511a57447d42d1b01674c  bytes=186
+  crit5  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-b19-lane4-quiet-host-floor
+  crit0  sha256=f542e09b6e9ef67368d71ecfed61ea80ffc18fb7da8dd53373954ffc663d6a1b  bytes=152
+  crit1  sha256=4308333ae0e73fe2e19e3316963931a88cb97f44d5178ec06668a2288798f4f9  bytes=198
+  crit2  sha256=434882b910bd0f38be1ea5debce8002920458c7a186d1e238ecc1e477db38294  bytes=221
+  crit3  sha256=6195b8bfbb99b030c7cfcc150354c99bd5ba34a680061e964186bde7a8dc88e4  bytes=103
+  crit4  sha256=7e99ec10bad769e376e40fd200cc83af98da81fab3a2b9815573a4a1446e6d62  bytes=105
+  crit5  sha256=d84a874dd8c1b2d3658e73b9bdc13a073c63cae9a3eae161c54db3741e2711aa  bytes=156
+  crit6  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-w19-desk-row-census-run
+  crit0  sha256=6b0ba10a1d5aec4a79da0c59f3036ffbe99f77107326733be2fc4a96ef3013d3  bytes=202
+  crit1  sha256=c2487140f29145406716fd8a80d96da57d814b02efbbbe116ef83ae3fc9c4dd0  bytes=161
+  crit2  sha256=11ec828ced603d009b3accadf7fb6a3efec94eb801abb48fc542f66e4a9fed9e  bytes=200
+  crit3  sha256=8d004e28a72bdb3d0af9efb445455904d0a80d78899ee8de514f136fd18aaa8a  bytes=155
+  crit4  sha256=76a46375ebb0999ada106396f60a2f9b240b1e38f73aa907527f891224e8bf36  bytes=198
+  crit5  sha256=74b985228f769977232d3aa22fef397f5ec379930e7f2ec87f3fbdbb2acdb5f9  bytes=206
+  crit6  sha256=63da7a3aeb634d3e07edef44bb21c12ffea746ee33a4d1bd585157f1a49e737c  bytes=169
+  crit7  sha256=32b1a02a1ac7a94e86e9e92d1ee20ff4db0b9eaa478cca1110a8bb48fc6882fc  bytes=268
+  crit8  sha256=2f2effbd35a1fd53b8f7175eb4f8cd12fb5fa7ee5df028604aa5b515daf0be2b  bytes=152
+  crit9  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-w18-bl-chat-render-golden-flake
+  crit0  sha256=1e58cb32030aa2cd07cdeaa348ab4eeeb45fa13b128de7502adf0c191477889d  bytes=119
+  crit1  sha256=f29e3480d018f7fb79be51976bf65050ea921e06c8d1ab778e619c114adf3ed5  bytes=144
+
+spd-w18-bl-select-detects-dead-destination
+  crit0  sha256=efcdfadf9c90716e5317f878c3cfb353552adff146d2a838db3ff84c87ff2d1d  bytes=155
+  crit1  sha256=04f211e0085f888c4148fed8d54a9057b2f0d611046ca1317e9139530ea89e20  bytes=132
+  crit2  sha256=a948e5a66afbded799981c54c75d4fa284060e7211218cd02bbe2934d844eae4  bytes=61
+
+spd-w18-bl-repair-button-endtoend
+  crit0  sha256=377580fbc722d50b58264475fb64d680f164358a684ac54ed5f5db099d5cb468  bytes=185
+  crit1  sha256=584b2ef25abc830c56d2da25ff6c23208294032d07d79a351af84a5bd087c599  bytes=147
+  crit2  sha256=6c17d8c69a14846a599cfa6b9f2495257d57ce79829b71cac23af65d9b2a6d17  bytes=81
+
+spd-w18-plus-creates-without-navigating
+  crit0  sha256=ad55eca69f2041b0b279bac615969136f405c5e8e42b08bd74bd49f19f7df61f  bytes=146
+  crit1  sha256=02e48cb5f34dd4878ab6c3fcdcedf40263b5679da86a99bb8b694e5276f3d074  bytes=182
+  crit2  sha256=f618ba1c3185895c0b443eb48d13183409f0f8eb393ff23036008144729d89cd  bytes=161
+  crit3  sha256=ec9fa238431539b20bbac773706381cfb3883e0260efcbbf0159f773c2831658  bytes=107
+
+spd-w18-chrome-env-guard-leak
+  crit0  sha256=ea479e529473bb05fccbac586dfa8c619a57e38c282c66d8f09faf49ad9ab614  bytes=160
+  crit1  sha256=d8c1dfc856a3ddc63023fa5f3ee29d94a770ea5108bc8138ee050b373f9bd483  bytes=130
+
+spd-w18-desk-click-latency
+  crit0  sha256=c868b7ca47ea67ca1e5412e2f43e6ebb1a0ee8dd2e0e1e09059040fb40551e61  bytes=115
+  crit1  sha256=ddedf98ce1b6a1eb912216c5357431bd2b96c7d8c98ea63f6c643ce928881224  bytes=141
+  crit2  sha256=f81e6ea3e69a6e4ee1647d505198a3d960543ced0f74d373b3a7e40792b952dd  bytes=149
+
+spd-w18-bl-failing-save-browser-proof
+  crit0  sha256=4cb7c744aa5d026140a29935a36049198e1372f54d35e6c7f03c8234ea97167f  bytes=161
+  crit1  sha256=a8d6cdce507b739d7df9748fbd0dca56c2358c36c00e14f799556cd22ff9526e  bytes=134
+
+spd-w17-pending-honest
+  crit0  sha256=f0bc1190c9104f1f8ef6332939cf23032bb6a9fb2f9d6745fbccf0320015d7c9  bytes=165
+  crit1  sha256=4b4830af54fd1fa13c05cab25e302b452a46aff40ba6c6a825a063552b0a9867  bytes=129
+  crit2  sha256=521b3969cb1c1fe897533a7ff5bc751ec232b69d00b74bb6ee27b1f9e02de9b1  bytes=120
+  crit3  sha256=6900951ada03439851f623e31e7dde72b54a5d84f6a61e5ba9e1364fb8c04825  bytes=143
+  crit4  sha256=33af9bd89430bd42c8831becf23990a9d2bfc75ff603037be7cbed82a0f4ff76  bytes=90
+  crit5  sha256=bc493766471fafe6553945f0d8643dae24dd706188df0aaff032110e29cf0e76  bytes=137
+  crit6  sha256=646a54057af34a1d4551b8dbb6577c2e32f2299a4a3caeae1e24ad74f05ef9f3  bytes=157
+  crit7  sha256=e6b80189f91f4686de5b6a51495b74168fcae5f1ad00a915eb09838d18649560  bytes=31
+
+spd-bl-enter-at-tail-block-drop
+  crit0  sha256=b6af2d823f55d8fd46b2d33e5049646305b8254b19bbb75d30a8a7fe3368d38f  bytes=174
+  crit1  sha256=f0dd5bd65eb0ea5fcdcf6f3e50534efd5c606f8da67caf497d7b79d29b6764ec  bytes=170
+  crit2  sha256=d2432c69e616b8a460be6b90015efdfc5af03ee6f0b45e2ed495ee1c8c489253  bytes=159
+  crit3  sha256=9f2c2171098fa384d9f8054c3228ca6ca7aff6e5b5efce57bc82c5e86ed3b8bd  bytes=144
+
+spd-w18-empty-state-seam
+  crit0  sha256=4700f4d0f88e4bdbf7db88130c06f575e4f949c6e4738d801719ce0edc35b479  bytes=145
+  crit1  sha256=4dbfb869fd299e551bcb8fcdeee0e1f23705ae2b864ecbdcec3f2976ed5423f0  bytes=205
+  crit2  sha256=d2227b962319814accd22bfb73fe1543647a06e83134cc08b0d48fbf2023ee50  bytes=195
+  crit3  sha256=4ff2398098b07638a825934ce6ef9e58670eb0ae943a714b5fc13bcfd5ec5cfc  bytes=109
+  crit4  sha256=430ddc17f7fbcd79047afbfe88dc9e3b7a0bff97490099e9088af905cd5457a0  bytes=189
+  crit5  sha256=85d8279917f3040634d3627a9ff4602ee8b4e90f9474eae7bf7a82c18ffacddd  bytes=206
+  crit6  sha256=f5daa1b3b1ec72f9de4849dccd85a7fe342c1a270f2083874a880f8225363d48  bytes=207
+  crit7  sha256=4300bbf30455254cb7800a9dd7c5f94ab53ed570df70b97a5a8d377c47092fba  bytes=110
+  crit8  sha256=d4b1d97d4b176336c381508e512a769d2f4a0fae2c6c48a074f324dff6021103  bytes=132
+  crit9  sha256=3bf1542dba4287e349be15e3f2213092237fded4d77b6f52a2d1c9ce0daa60f6  bytes=127
+  crit10  sha256=e0a86d94459bb26f54f4a7a2b5bc43ac2a92884aa86b15a9a942dd81865aee71  bytes=133
+  crit11  sha256=cee310a317d00ae51f0ac15d8aeeae15ed956e7a118f3e7ef04052d78cafeaa1  bytes=47
+
+spd-bl-publish-wall-self-rescue
+
+spd-bl-desk-chips-claim-tab-semantics-they-lack
+
+spd-b21-emit-motion-duration-tokens
+  crit0  sha256=f69012a1ee17c3c20cd8e04f33674797ee91cab209457a7af1c62c1659c92f03  bytes=203
+  crit1  sha256=384084ae303b5dae420e5b937ce26e943c08c845fc74fb953440f5009ee0b536  bytes=143
+  crit2  sha256=bf8e3f879bca31ed408d64bfd0e7612565ee0a91527e73d9b125fca90e947eab  bytes=159
+
+spd-b41-inspector-paint-rule-vs-announcement-uncoupled
+  crit0  sha256=00d5ce7f7c71adf9819afaf7e7d5e4bca176a1c4f77bf821e1edd5a006f56ba0  bytes=169
+  crit1  sha256=68a9e502c61e6d415356f54035d122be37f2acb2041db4514db09c58d8aaee4c  bytes=148
+  crit2  sha256=7da61214f002d2a937027b8e96cc404b1be69afdc804ee566ba52d4febed0323  bytes=132
+
+spd-b6-sub500-phone-proof
+  crit0  sha256=659023beb6adbfd83f0a68b99f30350e79ce3b1d985d1f022fd18d8114b3b7f5  bytes=132
+  crit1  sha256=90c6317c9f57d6a014ce7e36c2564ccb563eec97e464c9aa7827f7553abc6745  bytes=170
+  crit2  sha256=ef868f3a0427d884075d75dd5186484597eacf87425d35a26804a45713712730  bytes=150
+
+spd-w6-instrument-default-doc-ages-off
+  crit0  sha256=085f6aabfb0012e73fc9ab760825ec845fc33b43e46a5bf078f40ccf1455531c  bytes=154
+  crit1  sha256=f9692ab31e1b47faf0a1a36044f6f5971fbdccd6dbf88cd3d8b0a4ce97c953df  bytes=133
+  crit2  sha256=76c07574122e62c7062879fee3bcc884b83a0b87b349f805f0e1ffbbb8774832  bytes=104
+
+spd-b12-merge-gates-byte-cap
+  crit0  sha256=f24b66595fe99007e15e79e7dd09c891833ac4b64367aa1ef92502cfa3f98467  bytes=172
+  crit1  sha256=cfba0895ba9b6a5b1e9b2472ee4945e9756827914f847da5438fc360b7b6e069  bytes=114
+  crit2  sha256=2c61b29b11a81e60b4df10b53cafc6af537211c97c47c952a0e176d05bf63ee2  bytes=142
+
+spd-csp-stop-propagation-allowlist-dead
+  crit0  sha256=d37cd7990ab516d5ba4712e7b0b9110de861226c328b313d2afad7b32cf2c2cc  bytes=170
+  crit1  sha256=1f57d4618abc2866612c56cd72dd339cd5a2ef73ece96aa8c14600a27d5df45a  bytes=141
+  crit2  sha256=7fe75d883d6059bcfbd4ff1b15a9c9adeda5fd9bd8f09c72fe585201fa725e1a  bytes=138
+
+spd-b33-sheets-engine-superlinear
+  crit0  sha256=a29d090ed85a2b3fa9cb072e77fccda354d1e7d7753f0e446747204ed4d98eaf  bytes=143
+  crit1  sha256=72644edfe15b320dd3376aacd1dfd849871beb67d28453c780d0eb20fd3cda21  bytes=69
+  crit2  sha256=5a4ef72232114de966ecdfccb3ac39a48ea35ca4e4c24e87e50606d707b03b49  bytes=171
+
+spd-b22-text-xs-density-blast-radius
+  crit0  sha256=f2666449f8005780208c862173110e9219826b3e4adff736090cd7fd6fe0c6c2  bytes=129
+  crit1  sha256=52d4c95745b0519d33ca8e18a99b220dc29d9a8b31eab5fde980a30be1f0b5a2  bytes=149
+  crit2  sha256=6592a6b790d9f7d6ea848fc4fad445b7c61d829208793ffe037490cb749d89b7  bytes=168
+
+spd-b37-serif-stack-disagreement-root-vs-editor
+  crit0  sha256=8568148c53ee0fe310dc4b901ccf02e6d8cea13f43fd4f1660b91a0123212cce  bytes=183
+  crit1  sha256=60a8bede2f5b5058ea63890a8cb009b86d977b8679042ae03d46c60f3bd0fed1  bytes=159
+  crit2  sha256=2315deebaff89804316b7ceeb3bee7a89ae533467fb96f58d5bd1fa9d80403f2  bytes=174
+
+spd-b35-presence-dot-intercepts-action-bar
+  crit0  sha256=f54ca86c4293410534023934ed0bc3e81ae04f9df363baf00eb08cb9cc6d58ab  bytes=164
+  crit1  sha256=b25d4e738ece4531b25a3be1411b29930a4407d11de97d36924215930106daff  bytes=129
+  crit2  sha256=b2c30c99296ec22323fa5cd1656b44b646cd2457b2af361862ab1043566372b8  bytes=181
+
+spd-b14-measure-floor-font-audit
+  crit0  sha256=1dab026b597fd61b2082aef38ce93f399246e7bd877bb18e8cc0ff551b3c8952  bytes=109
+  crit1  sha256=b53ee03c01bd060e5d7776c20fca0fa7209693390a278125a504ec146df99369  bytes=151
+  crit2  sha256=39d1fccb4ce17fc3165e867fa83bf309a2f7a7f3a745c05b12c8a4ba93ccc80b  bytes=138
+
+spd-b23-harness-ref-replay
+  crit0  sha256=237848a50a505b4180a4e3bcb02dc03475fe34fd24509480fb7c8c1dc3dc85c7  bytes=194
+  crit1  sha256=17ffddeec75a9e12e3f19e470371b14d705463a1eba31914a676d0dd2d3f2ab2  bytes=140
+  crit2  sha256=58d0a815d8b6644bbbfe9d7b60eb3c6e3f213f8df99d9a956cdf632f8a7d3f12  bytes=91
+
+spd-b45-deleted-task-orphans-github-mirror
+  crit0  sha256=2f45b663d0fc6db72dd90be7096d2560fbe6551a9a02c36e263a57633069d8d1  bytes=191
+  crit1  sha256=dd29f3f4d6690918f84b9b90c9181fc5e938976061ff16056adade0f899ac193  bytes=104
+  crit2  sha256=8075d60aff213eadb6fb1030f401ba6e59958b6ec4be3a4515104ca8ac7a7e68  bytes=157
+
+spd-b1-pane-state-persistence
+  crit0  sha256=eeddca12468d671d34673deaec9f3d418bff7de7f46bd0f04a46c102944cef48  bytes=90
+  crit1  sha256=e188056e53c4acb13c66b2388d5db921b78326012833a33228904c507629c235  bytes=107
+  crit2  sha256=e85a24ce36f1d6a0269e5f47e307ae249d06d4266ec704509bc3dea4436e4b4d  bytes=91
+
+spd-b3-dead-admin-shell-css
+  crit0  sha256=0c67e5e42898ab95366f535357b91c589d9eab3a0929479c8cae3daed2252e6e  bytes=122
+  crit1  sha256=cf635b53594a05b280db3f903d5f5c41532722a70a6d526fc21a9a25f9a03c5f  bytes=107
+  crit2  sha256=e85a24ce36f1d6a0269e5f47e307ae249d06d4266ec704509bc3dea4436e4b4d  bytes=91
+
+spd-b11-subxs-type-scale
+  crit0  sha256=5976f456a818ec5b1ffd53fa64d333b401ec37929e863a350d5def68fca9cae5  bytes=188
+  crit1  sha256=ee529bf1d0dd87ab2658ff22883cbbb181447fde0e63dc53b4d8f9a4b3e58b65  bytes=164
+  crit2  sha256=ec94c5155bc1a171b66927bcc6422c1d0594e6c3e7fc96a7e542e1eec929e675  bytes=141
+
+spd-b18-btn-focus-visible-desk-wide
+  crit0  sha256=a7ab66189f95f63715b9886bf5764f373d2a62e8341f259d54a22b271413ece3  bytes=198
+  crit1  sha256=ef1375d7814fcf0965ede74d8f3a46469a84d7969e8fabcf24da32b067828dbc  bytes=225
+  crit2  sha256=b85b5cde21013690d50fb69b1f6a83dcd0bff0411f3320d47f14316ae8271787  bytes=143
+
+spd-b18-census-built-paper-editor-css
+  crit0  sha256=0ed08af06d5e6490262606ebfea767e8ab29a00a429339054651afa9b8bf737b  bytes=186
+  crit1  sha256=14ee480fb5a10f479f2430bce071c68005303f0139df1a19c17306e8a262e075  bytes=105
+  crit2  sha256=2bc4505dbde6b7902ff7e30ec4117ae8db9fc41b985e14fbf68b543f312b53ff  bytes=226
+
+spd-b8-editor-panel-blast-radius
+  crit0  sha256=4651d80cd9ae8053377f17f1568b0e780495b7838a6c6312663d3086800b7365  bytes=166
+  crit1  sha256=a67db3b405dbefeaf47315a59c79293c27f776cb3e3ac8db4cb604831fedc6a6  bytes=151
+  crit2  sha256=72f18021dfe6fcb2a62b94fba1faab706c116a76ebe0e2ec7846877b31f6037e  bytes=106
+
+spd-scrim-guard-real-but-wrong-selector-untested
+  crit0  sha256=c5d8813b74d945a67aee773677f5ec34f931badd8edeec0b3b9f3ab4ca56bbed  bytes=191
+  crit1  sha256=48ec1b296e9c443f7d96b56ad3d2637efd2edb7878f943e89fb14042075a0df3  bytes=151
+  crit2  sha256=6c2bb66e4a72a62dc5ffca301ca9416f2d2ea65dd3ee19c6ae2d152e602c8220  bytes=157
+  crit3  sha256=9f8a3746904d789635dca4b7de8d93ab547bd3f62496be87e3ea2c0436aaa80d  bytes=145
+  crit4  sha256=8c59eb6dddedfade0cb8ae4aa8371997e2e0ed44a2e50431206edd6f08d806b6  bytes=140
+  crit5  sha256=31fab752d3368496a558e92e45d82e2293780307646abef970bde45121b57cf1  bytes=61
+
+spd-b17-containment-extractor-escape-holes
+  crit0  sha256=48448b7f47cd15e511a80755be3f6de675a613b97f7c1bd6d8ab57c72004489b  bytes=131
+  crit1  sha256=02a27fd0ef5a4bf48b8c37dea08da412caf53119d9cd85b53dd8ff56db9a9673  bytes=152
+  crit2  sha256=15f2fd51a6cf1ed3eb12b33f4df45a15019ee94b5e5122def0e069e1405d97ba  bytes=204
+
+spd-b46-entrypoint-guard-untested
+  crit0  sha256=2bd260c1bf08dff40bf91bc624e2f01a70b5fa0f4b9c79713b4ac30bc2a31d50  bytes=253
+  crit1  sha256=a4413ea03e5d339afa7e98f199162e62d8baa72d0b4fadb4350a3020d9a58dd7  bytes=219
+  crit2  sha256=f7583d17cc0358743177c88de215d7a368dcca08e0040638b05f5b3226482f2e  bytes=177
+
+spd-w5f-confirm-modal-inline-scrim
+  crit0  sha256=7725812dd35ab5b06e917f143f547ee16856b68475233e6e43f7b94097d80101  bytes=132
+  crit1  sha256=b74ac873e85a11d176bb2645271bcfa2dfb1e985eaa8e7482ca707b5c730eaac  bytes=114
+  crit2  sha256=417f64cac394569d3197e44e50a0c62492ce19621898eaff0f7be69fef9567c5  bytes=98
+  crit3  sha256=58d0a815d8b6644bbbfe9d7b60eb3c6e3f213f8df99d9a956cdf632f8a7d3f12  bytes=91
+
+spd-b47-doc-create-500-large-payload
+  crit0  sha256=28b1f6e642e211d0d40ce4519f23ae4559e4043541433591bdf301063b76abcf  bytes=218
+  crit1  sha256=407b3a8c0bbb356689f53acf9d3d3d470ae934a151bd806389c2e09f9790e2cc  bytes=124
+  crit2  sha256=b0cc7abe199a5e3909288c6353b18312b238b371839a462572bca1822cb5b7ac  bytes=180
+
+spd-doc-mutate-rev-reads-as-success
+  crit0  sha256=333d07aeaa4c6df76fcc53a3903bce75a67e25dfd3a797ceb522a6f51ea521e4  bytes=157
+  crit1  sha256=e11ae1542b040e895d8be6e4d5200c88e13be38f61c2b3f7c88b81c52125ea13  bytes=136
+  crit2  sha256=9b249cddf5a185446f922344a1995c8b995a03817b3eaec75ceb9e1ccb22374e  bytes=105
+
+spd-slug-migration-forces-delete-before-publish
+  crit0  sha256=8787683ff2077711e98b4b912435cc774645e9fff4020b5aa9381106797af2da  bytes=97
+  crit1  sha256=926f5c073e02b4aa753bf74c9275c46aadfb74ffc4f9bec51431fa3e10a36e33  bytes=99
+  crit2  sha256=a8dbe0608b3f03bd651f3da6787c31837e5c79fc5a7c688524e3cefb0d077cbe  bytes=149
+
+spd-w13-open-leg-wide-bucket-flake
+  crit0  sha256=df409a551bc7bfca7e860985220a7a52fc65177ee2978d3dd154738b70253b38  bytes=202
+  crit1  sha256=e869a4d1506b77832a94cd002645882def1651aa4d31966cf6e75cf275560a1e  bytes=155
+  crit2  sha256=605ecc29b4663bf95b118778cfc8c8d95bdecfd1cdf495aba7cf10dba5e7225d  bytes=146
+  crit3  sha256=616ad51d3cabddb51aedbf8f5f457148cca99bd77193d2c4f32825db616a1952  bytes=68
+
+spd-w13-1280-prior-observations-stale
+  crit0  sha256=c858af95f08f92ec95cf434205fcf929f4a71ac88b31da6369bcd01681546e72  bytes=142
+  crit1  sha256=98b299d0cdf1656b820755d5c2abb19c62e7339e1e9252ee63dd57ae067e9dad  bytes=215
+  crit2  sha256=cf39a110f4dd10e755d7d660a57c069d2d6936225828a9eee7ac6c79ce8d9f82  bytes=104
+
+spd-palatino-linotype-unmeasured
+  crit0  sha256=329748521f2083de2957fbfb8dc5cf15ba93eb9fb0a43de7cfd80211322a5a51  bytes=184
+  crit1  sha256=577207e450907cce394cdfd59d7d3a1fb2c8b39ca7f3e93e58d87724dcf847df  bytes=172
+  crit2  sha256=dacb0f1f108e8921a42497a757d5c572db05b153551891099ed101ee8e583006  bytes=171
+  crit3  sha256=e32e0c445b4e8bc452c6066cf87dee943cf43d0143b0fbbe484a221e35d2ece4  bytes=154
+  crit4  sha256=31fab752d3368496a558e92e45d82e2293780307646abef970bde45121b57cf1  bytes=61
+
+spd-w9-b29-noflash-frame-sample
+  crit0  sha256=1d7370c22ca4bc42ff96185cc3065f293cb4462820e19bd3abab7c4117591e20  bytes=201
+  crit1  sha256=9f82f3957447fb4c1cd1d89928317fb77cff7129e90eb3bdbcc78ba9c61c7d85  bytes=227
+  crit2  sha256=e8afc26642e5f763466f3497b45898cbcad0388de811fef15cf183672bf77ec6  bytes=226
+
+spd-b42-georgia-default-shortfall-inflow-width
+  crit0  sha256=3465f4ee9a3aadab2a758c7694413fd2d3f39e08e010663ff99f6108cb5edb4a  bytes=213
+  crit1  sha256=f15d0992a05d38f53723b4bcd013d22801a269395364c51e75704346096c8d46  bytes=157
+  crit2  sha256=c51208c2b389a9c23b0b70f6b4c3c13afdf3afd3bfe3a8ce01191396abbeb89c  bytes=233
+  crit3  sha256=5f8173eed67b18b5536d06e35ccea2e0e682c49b19d568130e33b84702d388c4  bytes=169
+
+spd-b34-paper-editor-no-doc-actions
+  crit0  sha256=75bca5a91914fe2ed5400014c2b8d36d81d0f5f4e1b4058b4d561921da6a398d  bytes=161
+  crit1  sha256=941bc00c30e19161324321ec1fc230cdae1157c0c49baf734a2ff6a66526abc6  bytes=160
+  crit2  sha256=1d17b127e385f7fc75d466d7c5e7ae910b98ef8633eb90881f8c223f339fcd22  bytes=91
+
+spd-instrument-nondeterminism-characterised
+  crit0  sha256=7a337a49dd3a780ce7140e8d80ca74db7b9353a493e323f7b1f04fb84ab05979  bytes=126
+  crit1  sha256=5f39980f030cc24a91c49bf3bce37fd20ea5166efd733d0e829f25df5183cdd7  bytes=169
+  crit2  sha256=8f58d303331f0c37c2b439a2e02d98e7504ea37c05939bd58cefdec6e814f132  bytes=149
+  crit3  sha256=0514ea66f19ce102feae68b387961d12e35c946b849d5f720ab3313782ceac5b  bytes=175
+  crit4  sha256=fbae9a297f8a6b45f69c399f906d2b4db25ebe3d44ac7f2412a1a9ecda7940bb  bytes=157
+  crit5  sha256=31fab752d3368496a558e92e45d82e2293780307646abef970bde45121b57cf1  bytes=61
+
+spd-bl-primary-checkout-diverged
+  crit0  sha256=3bde4cbb7b9208a3829a0f0c5eceea73d9a5fc1c88ee4a86c3072dde3194f669  bytes=123
+  crit1  sha256=12d44144503094b18ca0aa6e27e0f52c9fececd7cda9e3f455b7fdc4b2fa5670  bytes=137
+  crit2  sha256=faeb284a0b352b235052bcfc3b6cd41bd290f4546fccf549c5435adb533b33c5  bytes=83
+
+spd-check-prediction-fixtures-committed
+  crit0  sha256=8cb33db33b3737e85ee452ba7966f67067e5c2c507ac34d4e40b0d243b829615  bytes=120
+  crit1  sha256=6579f5c496cbf3ff616d267c6a805395cc3b3d20f9611677585b3e9459ff86a3  bytes=97
+  crit2  sha256=d7a8b9793a5dffa3ae35be77f23e4825faa1f2fa1e45edfaafd3adb17f810be6  bytes=128
+
+spd-w13-positive-control-strike-permanent
+  crit0  sha256=d7ac9c2f11a52ac53414f712f7f4358da18596e5eea773592610bcc009f70266  bytes=170
+  crit1  sha256=0cc60362fd206ad3f649337fcc4312662081895169c80fa893d8f0c610c6f204  bytes=181
+  crit2  sha256=5c608390f81ee6d542c1446d272c7cde45d02f92beb91af5229d80935c410256  bytes=164
+  crit3  sha256=5102699b899e003413d29af6c38abb0bcb7bef68d705aa8db82cd6ef392d20d0  bytes=85
+  crit4  sha256=616ad51d3cabddb51aedbf8f5f457148cca99bd77193d2c4f32825db616a1952  bytes=68
+
+spd-b42-provenance-cites-superseded-run
+  crit0  sha256=7f50afadd196a547bff383ae813237709838d1c63ee224eb3cdca207bf3ec078  bytes=172
+  crit1  sha256=a7cfabc9efa6da3a0485e5129bc9a663e94f2d21966e1e4106ad608bf6012379  bytes=122
+  crit2  sha256=724354fa65c20d42a9d5c38cb81d72b1af074b10d1807d42638081edae897307  bytes=174
+
+spd-b21-strip-focus-browser-proof
+  crit0  sha256=c65e15796f0782dcf60824e62ea511cfce83d79d79885d476f80710ed133a14e  bytes=219
+  crit1  sha256=5a667a742cb235327a4508544ca19a59de1c9107b5bd0c63db634c1eec315bb8  bytes=150
+  crit2  sha256=e2459b8a1f76b3851a84bab1d5d808df2243e276ecf3906597454db5bf494a7d  bytes=189
+
+spd-w5-bulldocs-gutter-desync
+  crit0  sha256=98891be9d52e7d393e2f8b5686239085220a57d0995b3ced275167c7ee272c25  bytes=299
+  crit1  sha256=fbeec4c2137b642376a22bc5b97688626f162c37ed91ecd5b226038a81b6973b  bytes=110
+  crit2  sha256=114f84488f039be5cd2cb427ab78316200ce91fdd689f81449c9ae504f7c9af5  bytes=127
+
+spd-w8-followup-in-floor-formula-assumption
+  crit0  sha256=54a4fe4c7666b33ed56e5358cc3ade28cc09b12f6c73a4c53620ca966989e9b3  bytes=234
+  crit1  sha256=62115b0075778e5a73f875381749070f1eb6a160df2baf2c65d422395f7dc2fb  bytes=151
+  crit2  sha256=1e2d33a151193c3ddca01d6ce06e826f13ace92fb741e7364dadb84d10205b01  bytes=136
+
+spd-b30-instrument-coverage-one-document-one-path
+  crit0  sha256=383ab91f79467994f224eaebdafe8575dd8b68ec299d10f45261c853510241c3  bytes=173
+  crit1  sha256=7f3d1980445bb024cc4fa10fd7d1de5a8423d50709a344b7431815e7d88daf25  bytes=225
+  crit2  sha256=678991bf49f7fa2c532ee841d86eb76341b5e529cc10a3e416f74d96fc272f98  bytes=152
+  crit3  sha256=0cdf43d55157c7c5a565661a7b3d544cab6abc8d5940a71de37ef81d1504db2e  bytes=200
+  crit4  sha256=393a55a605dc37d67d80736dd4a530a6c73539b7a8870ac1ab7d030d8df43bac  bytes=158
+
+spd-b7-protected-measure-clamp
+  crit0  sha256=3767ca2331000376f3059994da7411e1dab7c236caf988447df4eb811f604889  bytes=155
+  crit1  sha256=67b994e336ec101f898179b8f9a78d5a2edf4755ab85283ebb19267c2bba8608  bytes=114
+  crit2  sha256=1dc41969ef00a423ae2463d18cb416e1bff37ec48be2874e52bcab1ce849a183  bytes=125
+  crit3  sha256=688e30abcd08ed66da160d4652f0c7bdcf07cef1a866a69e24d1de6a9471add3  bytes=119
+
+spd-b38-studio-suite-intermittent-red
+  crit0  sha256=97f230bb8bdc89cc1bb111e102926d29f3ac535399188eb8c6b44e7350e80b23  bytes=193
+  crit1  sha256=4d9aa4784f83b74341976593bf7b8ecfa90e856bc3ea49fa3368898740f9adb5  bytes=240
+  crit2  sha256=a8619a6699fda5d2eb1df0b87380840f6a5b614136b0725a994a2458ff0992a1  bytes=197
+
+spd-b42-brief-cites-a-14-entry-census
+  crit0  sha256=caeddc0585b4684d61df337080dab520c06531d534a5ee26c9a1832eeb30b7bf  bytes=81
+  crit1  sha256=82a7e039fb5d814778cb923d39ac73463b9f216259a013d8274c47ee49c8eb50  bytes=154
+  crit2  sha256=b48a9424dc2fab8bc6e67ef91c0a8bb7a918dceedcfce6a73fe5be7cf381c91e  bytes=137
+
+spd-b44-slug-allocator-assigns-not-guesses
+  crit0  sha256=2767ddfee366150ea7f76d2dc5494a8c7dc15c1be49513054cad035561f19c86  bytes=137
+  crit1  sha256=b58153e8df29a809088a0838954be7e5a9ea7420d7b34993a1bf5e664e10b993  bytes=142
+  crit2  sha256=67415808d0c34ee3a9149192eeeb6f152496f98e41fbff1738bf9b99c04ec935  bytes=98
+
+spd-b31-studio-live-strict-selector-audit
+  crit0  sha256=e9105bbc69e9bc6c5ec98f2ae272d2b22591fe374a862ad5011568caa8a33766  bytes=156
+  crit1  sha256=6cba6daf697fce8cebacd1f6aaa370163afb9196c8f322a0535bd760e0c5eec4  bytes=138
+  crit2  sha256=cb215a2bbf0f24ebc2da6eabcd3051da3b81784458a70b16e70e6a8dae3ac4c1  bytes=175
+
+spd-b5-navshell-wave2-triage
+  crit0  sha256=9f69d808eff050f15d3fb1b3b77907dbe419e0d6cf4a6ee1aa25f30705c872ef  bytes=163
+  crit1  sha256=4ff757ef8f4ec06850040e28e435e9317b68c8b72507fdd7e68e0fb8ccd5115a  bytes=133
+  crit2  sha256=d1824f4c12b223631091325c606c4939adf8f5ce7c4703ebef55e22391d636b6  bytes=130
+
+cchi-w61-main-gate-watch-runstatus-is-per-tip-not-per-context
+  crit0  sha256=b695b47937bb0c93abd490a93c6c7287908dc118bd31ba9a241d90f87515cfc4  bytes=198
+
+cchi-w69-bl-crown-harness-cannot-be-fired-by-its-own-input
+  crit0  sha256=87cd7956117607cc650b4a658fcb5879bf92e8e72a470939962076f75f8f3d4e  bytes=261
+  crit1  sha256=35d3f9d4acc1fb205e2b7384645de7e6449752c5d26ca9a60417dfdfbaa7f449  bytes=46
+
+cchi-w68-bl-stale-verdict-watch-is-a-red-that-cannot-warn
+  crit0  sha256=42ea4e8991f50adfa3f2f587b586eaaf274de8bc7159e87f87922ef43a84a571  bytes=283
+  crit1  sha256=ae462244d8245b316e7e4d354793b9368a8931a62e8a9548b31521091c57d19f  bytes=271
+
+cchi-w68-bl-merge-gate-autostamp-has-no-product-reader
+  crit0  sha256=d4c4d05e3ac44998048d9262b7aafec37e1de00faa08346bd847603c7d4fde29  bytes=270
+  crit1  sha256=ae462244d8245b316e7e4d354793b9368a8931a62e8a9548b31521091c57d19f  bytes=271
+
+cchi-w67-bl-bp-task-ls-has-no-status-filter-so-foreign-claims-cannot-be-scanned
+  crit0  sha256=1ceeab2711a20d17515fe950eff50a3d290d8c4f0315e01177d7e50cc32cf9b8  bytes=167
+  crit1  sha256=072b8def2c3e07626d8646577087fcc1b24f8d48643608d1ab420a92038c8f02  bytes=163
+  crit2  sha256=3afd1ccdcefd1539e39f79c21939a01ea8b9d41d719ef2e181dd852f7acef9f0  bytes=141
+
+cchi-w67-bl-the-epic-paper-floor-forbids-the-spacing-doctrine
+  crit0  sha256=20f12d1e36bdd74cd84cda3ccb3d33933fe66894f74da101a1f99116988f2a3a  bytes=275
+  crit1  sha256=cf03c14416bfd817e18980b3f23054a704634cc498cccf6bd74927c763eeef2b  bytes=144
+  crit2  sha256=245924f529adf32cc4d7b35dbcdc4ad02d4178110858c957e202df4730d2275e  bytes=86
+
+cchi-w64-elixir-cloud-security-instruments-have-no-exit-2-vocabulary
+  crit0  sha256=8fc831ac2e1d1f47b5ee17079341d2045692c490c6cd9cbde44f9043bc7e5f98  bytes=250
+  crit1  sha256=dc9562459421f026be234c49aab36872c1e92cf0fd6d005a210b907fa3387938  bytes=180
+  crit2  sha256=877240a1851e2bf92faf0cbed98d0cfc7a446250ea8ae1f47ed36cc30477cb2f  bytes=112
+
+cchi-w63-law0-target-is-set-against-a-snapshot-the-wave-itself-invalidates
+  crit0  sha256=4e08d35732c794252fbcec3a6f231d0a156115aa5bfcafd263a1432a1cc092e3  bytes=299
+  crit1  sha256=dfcc28e2f3e85d706352cae267755a3cad6e3c258247b1e2747bda754bb026eb  bytes=193
+  crit2  sha256=a9c3d031d34ee34db6ae0bc50cb15be3a91416b01a889fa321ef09514c335d3c  bytes=244
+  crit3  sha256=6df1ec7676bfa3fb4a14cece1d0bbd740ffdb60b70783e6d7e6921262cc09048  bytes=146
+
+cchi-w62-reveal-admin-token-doc-claims-a-single-caller
+  crit0  sha256=90a7d2af7c9c5c8f14d762b9bc98b865c5b1353bf1dd9f3fa889622a0cb3ef6d  bytes=165
+  crit1  sha256=be7a1fb33cb00acf8b05a8f69d3b8897e4c7540254287a9725762b4b7aecd63f  bytes=91
+
+cchi-w62-bl-the-ledger-cannot-un-flip-a-met-true-criterion
+  crit0  sha256=9b2dd78708a9d1cc5d959fdf41c20577a03f152ba56e6010a3ddf4031e8dbbce  bytes=202
+  crit1  sha256=e23ea5a8a224e05165c30211611fd3b4679eb9168902c9cd2dcc6d3db6921bd6  bytes=181
+  crit2  sha256=51c7fd98b3043ce50dd8c7b3b04eb2bfe4da64ffdda4afe8aa2b060d70a701be  bytes=172
+  crit3  sha256=70b92c2fe75a158b295bd0728a67e0dc16ba4f0c05fefc5913a1c3e9568abfac  bytes=225
+  crit4  sha256=5c61d48c0f8ee7e89d0a9623d33a1493797fbf0fd352cf4ebec2908e20c708fe  bytes=175
+  crit5  sha256=f108a1e0b6bda4e3521d48e68f061dd346cab3c2066fb28d7ce1df14f0545b2f  bytes=109
+
+cchi-w62-bl-the-seal-predicate-cannot-produce-a-law-0-number
+  crit0  sha256=7b9c3e9f9f8dce47cdf86ac941f08d930b6abdb20a80bcc64f2cf17c9878240b  bytes=210
+  crit1  sha256=a9e59c3163e80aac859583e34b28eeea0ab2d08098e61320bd210bd4a2a1cb6d  bytes=194
+  crit2  sha256=ef049dd9b37427d91872adb49fabd6ee14725119230bcbfbf90e63b8d382a6e7  bytes=180
+  crit3  sha256=368b9bbf3a23b3ffe5d45003a0804b8fe7b0959bd1b6ff310f605e3399f4a8ff  bytes=198
+  crit4  sha256=e09b9571c823a09ab6dafefcb5fa1d0da3a459e4438cf1487cad02f567e78946  bytes=205
+  crit5  sha256=f108a1e0b6bda4e3521d48e68f061dd346cab3c2066fb28d7ce1df14f0545b2f  bytes=109
+
+cchi-w62-bl-the-tdz-guard-was-never-audited-for-a-first-match-hole
+  crit0  sha256=9cbbf45b569983d518a70dd3e8f9d7898ec98478b6306abcde2d9cb5924d169f  bytes=258
+  crit1  sha256=8d0faa3d1a5171d11b7e7d6ce8fb506c1c46cfb37b953a57ed1021fd4940d4ac  bytes=264
+  crit2  sha256=1bb935489faa22e0dc061b93141c711d55278b736906714e221ba64e09537716  bytes=298
+  crit3  sha256=393425a1d6d5138ff9d34526bb5eed86da489c014fee405d1620ee565efa1051  bytes=232
+  crit4  sha256=b5feffb4d958c51a903640abd59fd283de26a337348590dc698f4df429221eb9  bytes=151
+  crit5  sha256=f108a1e0b6bda4e3521d48e68f061dd346cab3c2066fb28d7ce1df14f0545b2f  bytes=109
+
+cchi-w61-scaffy-console-tests-anchor-position-is-only-prose
+  crit0  sha256=912f6213be74fce18ef7ae9f58fc31a92c8ade2d35377258355fdba68e7e3215  bytes=249
+  crit1  sha256=623f0da58887ded36f0f9f78fc18fc344cdc3fe18931b8a90fc1df1c03572fbb  bytes=270
+  crit2  sha256=fb535397fe698922037ff1c8ecbd185206cb66178de1deda7cc8efd62ededd05  bytes=172
+  crit3  sha256=757383d9ae2cd3cfbb21fd52f0e92575b81510d6dc75fe2fb62d29a1883d0a47  bytes=189
+
+cchi-w61-bl-criteria-census-over-future-published-rows
+  crit0  sha256=7457db2bbbb2f715aee24123cf88e98ca57a248f26e83a3c7bff2a0d811e5ba2  bytes=305
+  crit1  sha256=e52241bf728a383c10da52ce844e3c6ca0b0668ee50dca3c9bdcda20870b6cbe  bytes=292
+  crit2  sha256=581792927eb64cb3d3216c9b25aa8d60d23f09aa15b5a227a4dfc31c87239705  bytes=102
+  crit3  sha256=566f3200256ba28d5f4b375c48882500c7f17e5c45e303fd6571818ecb520a4b  bytes=189
+
+cchi-w55-s2-app-test-blind-to-gap-copy
+  crit0  sha256=5643a4646812d26a85bf2a4f563d60c16e5320c6a6cffaee97fb15beed1bc30f  bytes=312
+  crit1  sha256=4d855b677348ba8df274bc34ddbcf0dd8635cd4214d00b630960e1bb8ff6929a  bytes=368
+  crit2  sha256=6e477ecb20a9a0c960ed03d1e309cde6879a75691286b04142db1a0ff887551d  bytes=240
+
+cchi-w40-bl-router-tier-census-blind-to-cause-only-refusals
+  crit0  sha256=dccc9253c4c44ce050fb29cbc364a79e0a8898131c5e44e6b4eb012ac59439bf  bytes=302
+  crit1  sha256=d977929b69567374631263ade74a54b0f8ca639a4d4e3e7d8b6bb6111570521b  bytes=233
+  crit2  sha256=ccbdb4afd7918da4f40f25887734f3f2aa46649bcee0a7dc63d752df6951de39  bytes=243
+
+cchi-w51-bl-run-ci-still-declines-to-look-on-enforced-false
+  crit0  sha256=9c249d8d899d43edc6a108086721084f470e889dad2d1c6b5ac5ab9bebb5c24b  bytes=279
+  crit1  sha256=2a03f9d11fb0380e9c4a577b85addb21f12cde58d819e1970ee378a07c239bed  bytes=367
+  crit2  sha256=a7cfadb30c9a8a3fd165adb3c8e1298efca44290b6342f6ebb3d17b100026f9a  bytes=352
+
+cchi-w46-bl-rebase-10256-and-rescue-10054-ledger-rows
+  crit0  sha256=0f9858c0eb870ff3746c3163e89638b26a634225f9fa248560b6c781fe767515  bytes=496
+  crit1  sha256=340822bced5da0c3898c7c632cbc13d0d073fa25257aa49eb6f75fdfa3836420  bytes=411
+  crit2  sha256=3acb6a1802796f7798cd50c933b4efc4d07821658a17e84d5484f728e2a73f74  bytes=266
+
+cchi-w46-bl-lapsed-claim-arrears-close-path
+  crit0  sha256=dd65231aa807c1615c49c2e1e9ba0446fed6f420cae270af4d241c2ceccf7651  bytes=406
+  crit1  sha256=d039f73baba26921bc90c6344fab94c4605fa1441158d256de7f3e10982737fb  bytes=457
+  crit2  sha256=0a53fcad37149a8578402f546662ad7a83c0c660a82e116e8394aa932b7fb4e1  bytes=378
+
+cchi-w51-bl-verify-never-checks-its-own-spec-freshness
+  crit0  sha256=b5ce7541b6482eb406837cf90534b0c3f00f6f4deef095fe92af874bd391f2f6  bytes=506
+  crit1  sha256=0f65286d3edf3061463e6da82c9c43300c52fab0b44b9da18a456616482268bd  bytes=389
+  crit2  sha256=6062ddde1d64cffe69cbd36ce27a51e7b1ffab4a694408a0ed959d3c34323a6a  bytes=310
+
+cchi-w47-bl-inline-cond-overlay-pairs-route-to-line-by-source-order
+  crit0  sha256=329a391e79c3e28e1bd8abd2c6eec70b6d9f48096a38eef9aed092abcb3cf67d  bytes=327
+  crit1  sha256=7a1df9a9ab65fbf61644f4fd3607440c052fad59b0cbf4fd1346854e3bcf041c  bytes=344
+  crit2  sha256=db15091ae86c183284b116a3f02b8db03128be6b6e2226bcf74399807a7859f7  bytes=205
+
+cchi-w46-bl-breakpoint-sweep-title-is-a-five-integer-claim-that-cannot-lose
+  crit0  sha256=ae891e4e4a16112e593f3d3c7d839c11b074eca1337621cbffb9e662d018ec35  bytes=434
+  crit1  sha256=0cf675e269e5c2c56f464a656bc194e18995ecc5e6d3b7b85a585d91c2652d99  bytes=522
+  crit2  sha256=49c8657be3c0910f487b2a1ba43088210c0416285af96646e6d55a6408c52434  bytes=337
+
+cchi-w40-bl-refusal-copy-census-verdict-drift-arm
+  crit0  sha256=891e239fd1d163af97ec03ab1ca7653e6aef201dc1701ba0dff0d6d73cdbcc21  bytes=490
+  crit1  sha256=1d79e594a95fb479f94ca496a2a94fb29a834043d5783aff8d48289dbb67264f  bytes=287
+  crit2  sha256=545abacc49639b36677979615acbe3d8e9369d2d410559027d68cdb7c3fd65eb  bytes=193
+
+cchi-w40-bl-required-checks-apply-still-unaudited
+  crit0  sha256=3fd9a23390b8c99181072920168ee1a5bedf09d348e466bdcd1d11380f9cce3a  bytes=249
+  crit1  sha256=9826894e11526190c5a5901969e305fea79f5284a5b732ec880715e72f91aa96  bytes=276
+  crit2  sha256=ca2b542a8b62931e50379815458831aa22e537a08edda46dbea030e88cefffc8  bytes=310
+
+cchi-w46-bl-elevated-writes-column-conflates-three-populations
+  crit0  sha256=18828cc2a070af4146747a2fa7dd0c48263709ab43f61cade0af53c2fe956ae4  bytes=265
+  crit1  sha256=4e723442fb6ff2625c25886ecf862b6e69e6bd7c8a6982e10a9027cbaa758c90  bytes=498
+  crit2  sha256=0f330c0b4ad626f9956de53203d81b054ff647633cb7b7b36489ceb3ea0c5573  bytes=390
+
+cchi-w46-bl-binding-census-null-pin-decay-arm
+  crit0  sha256=8b503ce58b2777cccd0cca7ae30866d8f53b3fc8474297aeef63b24700f75dc8  bytes=369
+  crit1  sha256=ab63d1a5487d5a032f2fa6fdaa4dc8985a659bc0aeec2d3ac701449850ed79f0  bytes=320
+  crit2  sha256=1e79e8824e89aee9c22934ebf0cb9a1176701cb288bf5ccdbda9747b3bf4757e  bytes=301
+  crit3  sha256=7b118156403900f24396b54c0cba31781f6470721e35c949d9f177795fcebf0b  bytes=430
+
+cchi-w40-bl-newlaunch-plan-limit-row-is-two-thirds-paid
+  crit0  sha256=01b45abc8a8636175a78c962c86c10ee824f63073d5b0d0c3590bbb1794dcd85  bytes=385
+  crit1  sha256=b5623f575e7f45813450c607131faf37a5c86163c5817b7e2ae98e67614af15b  bytes=389
+  crit2  sha256=8f501f7e53755aae2a61d6e452fe2ed0f0fbc93c42418afca020df51c14f7a73  bytes=402
+
+cchi-w39-bl-mefault-must-be-exhaustible
+  crit0  sha256=a664058617a06f90720e0dabc59fb89006f2f49e982ee1ad905313764decd19e  bytes=354
+  crit1  sha256=0d28711d98ec0f28350ee6b469d07729e50a07c56566f2f1adbc2e2d102a9d33  bytes=379
+  crit2  sha256=a8cbce3646460b18fda40b721e4372af091e4d773cde507c993e55a6b53884da  bytes=250
+
+cchi-w39-bl-audit-the-remaining-packet-instruments-for-vacuous-exits
+  crit0  sha256=21b67ea76eec69b1be4a63557ae607c9c106920838c21f6e29889e06f06161eb  bytes=441
+  crit1  sha256=453c14978328e0048e4028148ba0d9b05fa999edac062582a72ef0a80cdd89e9  bytes=288
+  crit2  sha256=9cf52e0f18103b950824fa7e897bcef5c381019debe8892bc92934761f9d8044  bytes=352
+
+cchi-bl-protection-claim-paraphrase-escape
+  crit0  sha256=c19cd75215a0cb239d32a51f56226748516adf9b52e250c0236554728362798f  bytes=285
+  crit1  sha256=6791e909d8e63950dd0de3f3b1396063b1e4244c673b9f6bb0c4728719df99da  bytes=357
+  crit2  sha256=8ff8b0b2596d653798066ae39baeb7b8d9efae2261947acd906d9c81ed33ab67  bytes=335
+
+cchi-w61-bl-the-census-derives-its-admission-after-11169
+  crit0  sha256=584c0b7bcb15cefbc28b3d6aa35950535de1fce12e3a47c67e86f821f19a2ce9  bytes=86
+  crit1  sha256=aae8b34f83992d0d02696bde6c52dec96496fff0dfff1838adad365ae94d8442  bytes=226
+  crit2  sha256=f859784f0c516925f69780a5284c0daa7aa2fa4591a36c23d046aa31e0210bc4  bytes=194
+  crit3  sha256=3ac83dbeb030a8b048860e5c2475c1d9a8daeda0ce453e7a680fb64ad3db10dd  bytes=164
+  crit4  sha256=f46b305f14b5dc1cf75de7a27cf4b3a0c74514841a942187eeaf799e97ca6beb  bytes=203
+
+cchi-w61-bl-a-local-harness-green-is-not-the-ci-green
+  crit0  sha256=2c39e5180f3532a203aabb0539717e10c1c2c9f6cda57c4bc5101d0664112951  bytes=163
+  crit1  sha256=eb3096bf3270300f20452d486e686ad2f6adc1ae6e98b7456c7c401634e33acf  bytes=259
+  crit2  sha256=c326037d3f02364f5929738f3db0faeb888a5e81e77a5d5b5172ea375d12a63f  bytes=172
+  crit3  sha256=4c2d60e5fc33339d57a5d3b3ee04fb87d2f1b4ebc9c71c2133ee96f908461839  bytes=201
+
+cchi-ledger-cannot-record-a-review-reversal
+  crit0  sha256=a7a49330a95cd33e79a9bce6c0d85ae38b86084dd3716a1ac0981b5211ca62be  bytes=258
+  crit1  sha256=3a07d493cdfb4bee1c597b73c671d67e0c26ff00577a9dddeab2caf5bd7ebcf8  bytes=202
+
+cchi-w58-credential-egress-register
+  crit0  sha256=3b0edd497b3d376f26a4606b44daa994a24a86d080fa0da43b5b6f2eda1d3e5d  bytes=235
+  crit1  sha256=2e65773827ade9b24ce30c6f52dc0343b2804302b114d2fe3e1d76af45493775  bytes=262
+  crit2  sha256=31c21dc2b8e75d980a6699675cd5f77e8db094f2b14baabd9629417bed229f7f  bytes=303
+  crit3  sha256=34e8bcb093967d8b80b8564da72317dcfeb112e7a1591d16666cfc82f291e9fe  bytes=142
+  crit4  sha256=24b61ee60617db1607b6b99a9150f5e745daead580de840a8fad8b9aef58cc38  bytes=209
+  crit5  sha256=74c91e8daf7fba5a34a7be7a4c9dc045e03b3a494705f3e333919b5f1969d150  bytes=216
+  crit6  sha256=555fbabd57ad8cffd4f705137611b925d15fe36641ec644e225882694c1df87a  bytes=142
+  crit7  sha256=5dfe3938d69a00990573bcb555fa350227190c23c89b09672428e020956feec9  bytes=294
+  crit8  sha256=378ebcbce823d79d06da5bb2bc87b7eab0015ce7098c5fb93afcd4a0f4044a72  bytes=192
+  crit9  sha256=3f786d2ca84699f454e6419676da080e27523df88d23095c653d73943865d741  bytes=113
+
+cchi-w57-blocking-shaped-name-census-guard
+  crit0  sha256=c4ef6fb05978df8f9cab2dc1485cb706651c5a6201e4ffa55abfbc04b886fb2e  bytes=165
+  crit1  sha256=cffdd8f287753010315d51ae84261fa40e2af7c7e720d7ea2ea4ffdd787e8ca4  bytes=143
+  crit2  sha256=538e3382b0de399dcb7f59d98de5edaf085cc8766a88cc8463dc299423beb5fd  bytes=109
+  crit3  sha256=2c96e254bb658e51a5d810637d21a4b515a63fc8f2bc0e4d92afe0cd790cba4a  bytes=171
+
+cchi-w37-bl-slice-gate-omits-the-surface-s-shipped-gates
+
+cchi-w33-security-gate-calls-itself-the-required-context-and-is-not
+  crit0  sha256=35cbe18fedd31262539548a6a145344b0f60a4f1968e069ad3be68020173771c  bytes=219
+  crit1  sha256=eb8e8327a4b45fb5723bb849f0a4273557590658557d590c0d3805198f1180cc  bytes=153
+  crit2  sha256=3a465e87779593bfa80b1795bd4d2a560993d8db771d28ddeda2bb5a4bf12b74  bytes=178
+  crit3  sha256=e7e4d0069805cb36563c50352c02bfe2fa95791849d5b049b9c61c497b1483b7  bytes=162
+  crit4  sha256=ed213fc4b9ef868cb512fff31174a7c50b2f6008af09e8096d9f4c6b3a75a6b5  bytes=81
+
+cchi-w33-fanout-capture-log-async-true-asserts-the-whole-vm
+  crit0  sha256=38773e060776cd29a985c4285ea063431a4638b10fdf5779cbaca05107c8b33b  bytes=226
+  crit1  sha256=1eef7a00f67f4177f4bdbcfe1212088d638e38f10ff6173409be85c2a7430121  bytes=167
+  crit2  sha256=9c6ca87536e41d095bd8c1f14ca1279c52282b3689929dbda947ade757956fab  bytes=245
+  crit3  sha256=0337da07e4bdd5131d2788a231dfc7ddb9f3cb956f0740be1f669d826e6abbfa  bytes=308
+  crit4  sha256=22e309206e0fbb27e894956ac61d42232ea15d542379cf1e1b5f8a28e63a1ebc  bytes=103
+
+cchi-w27-bl-w22s7-residue-derived-caps-and-refusals
+  crit0  sha256=2442842fc315ea37e3e5a1d082a4bfcae99aa7f7677b68e111eed7720a07eb61  bytes=171
+  crit1  sha256=5b811dc569b0432eede245a6e8dbe2957f06070a09d4bbadcc344ea259316aa1  bytes=365
+  crit2  sha256=02728eadc7053ca169b27d50d0aa85eb1b943a28b7f001ee812562efd0d99f56  bytes=314
+  crit3  sha256=2ee604cb9ad669c61d2b868e0500a24b800724aee22e6a5a878cc55d1cde722e  bytes=160
+  crit4  sha256=627908ab83884c1db3ffdbf66a3320a9d93e353e8d824fce125a255653fc1296  bytes=286
+  crit5  sha256=a999650aacacdacaf8c664e4c929edaccb279ee87447eb8146aac0bd8c9b7d6b  bytes=332
+  crit6  sha256=e9ad9f04ebd2b0b9e1c0811d63083d5a036ca7c4cf0d6089d4f514a1fc280ca2  bytes=291
+  crit7  sha256=f1ae75419d6cf273e8e96cbe8a20d09b67c1281bdc1e4fc8321627d5da8f3618  bytes=948
+  crit8  sha256=12cb5dd0344991b327c16662f81cf92ce3ec97c6fd27e93417e0207cbbb3dfab  bytes=76
+
+cchi-w27-bl-preview-detail-caption-unmeasured
+  crit0  sha256=ee5e91032339d9c588059e13085fc0ed2d75cb719424129d236ddcf586bf6db6  bytes=171
+  crit1  sha256=4030e4cb6736c840a58802c8cf718c0455fb93ea68d9b8779622b828c481ebab  bytes=196
+  crit2  sha256=3f8eee6d80db0118680ff9625444621007790f921af12e018bd64fb5635210f1  bytes=97
+  crit3  sha256=12cb5dd0344991b327c16662f81cf92ce3ec97c6fd27e93417e0207cbbb3dfab  bytes=76
+
+cchi-w27-bl-scrub-test-green-by-construction
+  crit0  sha256=55d343157a200b647f6bdb5558a0f7c2c4f1809113e4c8148b3f4088c0ae0f95  bytes=169
+  crit1  sha256=48fefa7361d7634c7fef41800270972da013a9cd4a5981e6061553127c540a1f  bytes=160
+  crit2  sha256=ececbfa27f0cf554b05735efbf0fdee479b9d5daae0a77526e5dc7a959cc9148  bytes=128
+  crit3  sha256=12cb5dd0344991b327c16662f81cf92ce3ec97c6fd27e93417e0207cbbb3dfab  bytes=76
+
+cchi-w27-bl-deploy-fail-clip-misattributes-a-sibling
+  crit0  sha256=74a323035e3332fdacc3c15fdea455d078a209d558b733f978609d055cc0676d  bytes=211
+  crit1  sha256=45f48159c69ac9125078b45fbd97bf9d34f59befd4a627294a609ef70779a9da  bytes=219
+  crit2  sha256=f5337e8cd03d45d49d87a463b881bc6dbe7dca4f8b2ba3007de58b4bac4c7d79  bytes=160
+  crit3  sha256=12cb5dd0344991b327c16662f81cf92ce3ec97c6fd27e93417e0207cbbb3dfab  bytes=76
+
+cchi-w27-bl-d307-create-time-door-guard
+  crit0  sha256=f8f5ad18fb735f9b072eb7d49b6e94fac84f5a367405ca5f82a6ecb20670b50d  bytes=242
+  crit1  sha256=09af79264d066ed55a37e79d40a4a44ba96a0e42588f183c001c5c6fee4f54c9  bytes=166
+  crit2  sha256=7858b8c07f2633cfedcd312fb9a2ecd3afc37eabb97e4c6ae6a5ada1f864b51d  bytes=242
+  crit3  sha256=b732a287d2107bdd81f601c9ae7c713c406d0089ac8805b75ac429c9cebc2073  bytes=369
+  crit4  sha256=12cb5dd0344991b327c16662f81cf92ce3ec97c6fd27e93417e0207cbbb3dfab  bytes=76
+
+cchi-w26-bl-eight-live-rows-can-never-be-stamped
+  crit0  sha256=491c777f20377e438584c34b1f741cba2272ba93d98f17b26fc75d23c9ec00b0  bytes=174
+  crit1  sha256=fd93cdc132391456165f5e999b0ac4e3cd0717d90012d643534c2ea73a47d52b  bytes=199
+  crit2  sha256=d1753d8fac43648c118df5947a241e0f7c2b86bfb4320bead3bb06cf1e86fe89  bytes=215
+  crit3  sha256=577c9d4d2950b26c898eb8d1901f313420a7c7cfabaa6da124ca6bafc3626b2d  bytes=188
+
+cchi-w26-bl-two-unhumanized-failure-tails
+  crit0  sha256=0516e99053eb10e90d8ba9a239250fc946166432deffa3468ff0b16026be6a86  bytes=196
+  crit1  sha256=a6b412dd91da1dcc8cce18cc12f4642f3fda6b643cc447fbb128b2df14ded783  bytes=149
+  crit2  sha256=a40fd93397054676c4d1872f19fe13e34eb34fa9b05fc54ce59911e42ea9dd40  bytes=189
+  crit3  sha256=d299b67d1d7bf9c729789f2e2dffb036ea1f906a6fb325bb2d1d77d7ed76ef1c  bytes=144
+
+cchi-w26-bl-stranded-draft-is-a-silent-plus-one
+  crit0  sha256=e9b7c886c184df55d450336ee581e8dcfab6994ea195005f3d53d5f9f2d6dec2  bytes=155
+  crit1  sha256=2f4d90f471d0952c3087ee997cb40c3cc0ccfd27e3fba79fedee4b083e8e1134  bytes=167
+  crit2  sha256=a038d98720f95a880a26a9ca8fca7ac5f16cbbd237dd885ffbc8a6a2a973e367  bytes=201
+
+cchi-w26-bl-8500-decision-packet-and-the-relabel-trap
+  crit0  sha256=73847aadd6f9d9041400838f2b6fd75fb451159bd18cf16f626227545f1f33e6  bytes=210
+  crit1  sha256=7e9b9b80fde4fdf9a0a695e7902a87a3b64573a6521d1291c33265875b6b9c60  bytes=146
+  crit2  sha256=6340aac1e2362e13ae72517ff7699c7cb95984fe3cb734bb13d108f6473aebe0  bytes=137
+  crit3  sha256=185086de468b2f13af70d739cb1fd05c898f410db167e179a461869957e74c7c  bytes=143
+  crit4  sha256=74c39f81d3d60e27bc1c99b12c0472299aeddebcc90e2e87b6202cb18096db36  bytes=143
+
+cchi-w25-bl-live-protection-requires-two-while-the-spec-declares-four
+
+cchi-w25-bl-w21-bp-tl-fail-cell-is-an-identity-under-anywhere
+
+cchi-w25-bl-label-63-pinned-by-inequality-and-the-trailing-hyphen
+
+cchi-w23-bl-guard-population-register
+  crit0  sha256=b0be259ead106c4a368a58f3572fe7b1197dae6d708c3e580d7252579df9bfce  bytes=1274
+  crit1  sha256=8f0bb4d3da0fb45aad920cb01ad3ff43e7ca69d73f35c64be35498ec5f039ea0  bytes=321
+  crit2  sha256=8d1357309e959488e90aaae240b4604de3b173a553bb0c5e5e5ff5cc2cc4cf85  bytes=199
+  crit3  sha256=a035c561fe3ad3aa953d78342ac662543bd06214f0ba7b608ed1a30250db6db4  bytes=193
+  crit4  sha256=9b5db30c9b10b3fa387b76c926182a5432084ba45a985698920a4591fb2fce90  bytes=220
+  crit5  sha256=b9be49c3fa8d1676ac4250f9e927ce37c19661692eab12e35c8753b23efe72ae  bytes=169
+
+cchi-w23-bl-d253-inert-ellipsis-correction-five-sites
+  crit0  sha256=dce133a558fe82d08569520d7122ea80f91c10552638e8f32033cbed34c901c7  bytes=309
+  crit1  sha256=a3903e03d572c38976927f0079fa5bdf44c90e67e9d3262ed00a8eecc7ed3b5f  bytes=326
+  crit2  sha256=5c0bb9f500205e1d257853f32ce7cca7be34bff15013f21c41f2081df8e11267  bytes=283
+  crit3  sha256=636b297ed500e9857ecf5483f30177170b6401bec31434eda8a4a99d27644524  bytes=207
+  crit4  sha256=f105b8e847c476016bfd4ee2a420320a62e27aeb34d1f561b250e157811d21c5  bytes=253
+  crit5  sha256=025db755672b199a16aa26b750796d40969deeb4e4d97bc7453269d17fb2d73c  bytes=216
+  crit6  sha256=8fcb93f8c6402b7213bfce4f1f992e15ea06094b198fd563c1b10fc93d69e766  bytes=195
+  crit7  sha256=b9be49c3fa8d1676ac4250f9e927ce37c19661692eab12e35c8753b23efe72ae  bytes=169
+
+cchi-w23-bl-plural-layer-second-order-refusals
+  crit0  sha256=d970bc949612378cea98e7b514e7f509d6545996a42346f90213a8467da005f4  bytes=322
+  crit1  sha256=8dce34fa4870bf4973437cf9a5fa14b62d74b3757a30add2545bcfca62e82c50  bytes=255
+  crit2  sha256=1f96e4f025da7b810b7790c25cb9d3d6b4e74dceb0ab44547e7e5f7a35806575  bytes=286
+  crit3  sha256=66d6402d77675b746de8587674cd1cadce2d18085bda197e5a514cf2cb11663d  bytes=261
+  crit4  sha256=5114ede2490e86e2fa9dae9f5d493454bc35347eb9797c985886b3ea97404bf8  bytes=168
+  crit5  sha256=9832700d33d56f95aaf82fb73efe24c3c04a5c0fa2df44f7d35f00899246265e  bytes=121
+  crit6  sha256=b9be49c3fa8d1676ac4250f9e927ce37c19661692eab12e35c8753b23efe72ae  bytes=169
+
+cchi-w22-bl-shared-modal-card-min-content-floor
+  crit0  sha256=d698fa03f8d6c593e29ff60b2f3983873f37819df328c1179c213322dd785392  bytes=222
+  crit1  sha256=160e874add50d261ce092298f57fa628635ed99a01e7a8d2a3b95d6fcef16d37  bytes=274
+  crit2  sha256=3c5bf160541c9b097b807cc03e4cf4522f9ad53b0347187ef0d7ce1e3b4ad7d2  bytes=164
+
+cchi-w22-bl-guard-port-contention-silently-measures-a-foreign-tree
+  crit0  sha256=9dcf1b727384264929ac3656acec1eb3b32453fad83e8181ef9445a70a91d5e3  bytes=248
+  crit1  sha256=8ae97618d4728e3bfc57cdbc58751607c0480ea2dd1650e655f1dff72d176bef  bytes=248
+  crit2  sha256=7889619ca067787a6f749ee6510c293915185425353ab344ce5d0c30b0862430  bytes=192
+  crit3  sha256=c8b7b846c8182e44e7dc2a6f6abb61b395c54f8c7f88e85c3aefc3ce8864fc0f  bytes=125
+
+cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche
+  crit0  sha256=2c8f6f1cd7ef7194a4ea01703c87a069ee3880b31e526e3a43218a9387da2cf6  bytes=245
+  crit1  sha256=21b4ab9fb8feb2c060a3dbb48f6cb01f3d42f80122c6ec9734268f460fd06ca0  bytes=131
+  crit2  sha256=aeb1b8c30eccca0bcfac9d75506889175ce212d192c0d5dd73e063a70086b4cf  bytes=202
+  crit3  sha256=8a59c17df53ac91fb6f3ec3182ddc117398ece79de118f4307b8d2c233371499  bytes=208
+  crit4  sha256=644befce6e98e55d0dbcb9717815a5f964594230bdf615e4e55e75bc7c8e90b6  bytes=177
+
+cchi-w22-bl-seal-predicate-claims-merge-blocking-force
+  crit0  sha256=ef3159eea8d915f29685ba85acff78cb50736e588a0f0b01607e49aea9a126cc  bytes=179
+  crit1  sha256=4abcf82e3a4bcba7ecaff5cc74294e651892d2e82907f392972084c47a8aeddb  bytes=205
+  crit2  sha256=428cc980f86a2eeaecb2b81d95a8a2f3e07380c1e98a2969b1affef59f5f8871  bytes=156
+  crit3  sha256=d425110ab29d297db15dbca28c39c223b494a2fcc21a16562d1816998bb778b2  bytes=111
+  crit4  sha256=c3a8ddb8e19916c6a4f8c64d3390582bb4c70fb25516178496b58e3dc1f940f4  bytes=157
+
+cchi-w22-bl-guard-selector-conversion-instances-grid
+  crit0  sha256=4eb01e0bb65e68c0bf11bb94c348aa4a792aee41ad43e130562fc64232625e52  bytes=257
+  crit1  sha256=b39321b2dd0380641c4cccefbd0f12d17efa447e7eada6e45a3a095e0c8eaf2e  bytes=130
+  crit2  sha256=69862badaf26a779c40c1c1425064431b6c75a329f9b0f7c14122bd6425c6817  bytes=134
+  crit3  sha256=dd3107adfd02cd26dfdd406ee0e9ca513275c7baf3cf29d80b677f856ac34b80  bytes=219
+  crit4  sha256=d228cfd0ac72f0fa0cd97cee1f951937e504a9f7301c0602ab51e149c85a5458  bytes=93
+
+cchi-w22-bl-modal-oracle-never-visits-a-phone-width
+  crit0  sha256=8f5b6a97a1459bc47e3fb53ce9d93dac78fc5ae99a854fcd712897f37c004158  bytes=229
+  crit1  sha256=c46d8b0d2ff8e58a61f123f3fb8964c728becb8b5e670ea37421fd1006435f70  bytes=186
+  crit2  sha256=d6edfd01c31050d364ce1004906b4e10c2cb8151573a6e74d1d1c12bf73ba609  bytes=140
+  crit3  sha256=405498d966b0e1e165ba847c0d3791176466342168b107419b145d315cbdf284  bytes=230
+
+cchi-w21-bl-guard-readiness-poll-nondeterministic
+  crit0  sha256=b8b2087ab447767766d3e32ddaa2ef570e17715dc1800860b697220fa24d4753  bytes=182
+  crit1  sha256=bb49c2c2f4fd74936d958540e23140c224f6a4dc39cf0ed98db08374511abd11  bytes=148
+  crit2  sha256=a035284303cb22846bbf24f37e914444de50019d20be143dc7b41b382fd72cc7  bytes=140
+  crit3  sha256=3feb4aee9f921908cc1f64e24ea9c398309052c22cd6d49c718d719ece24d1e6  bytes=129
+  crit4  sha256=7d076bb944f9550b1bb862f653e7bdf215bc54213e26032a34e00202ed6263b3  bytes=96
+
+cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts
+  crit0  sha256=8ce117b30f8498167557b0ed38f1c8c44c68016ba7ba9423523bedefb953b051  bytes=208
+  crit1  sha256=801c204ad3f2102b268e907ad4b900ed807b85af1383136aa19d29f9bebc401b  bytes=136
+  crit2  sha256=a8dc53ae53ed0dbde0e9c1964b2409ca4e7c9c63c2b531a7da2474e391e66348  bytes=135
+  crit3  sha256=6594f87ceba2f9356f2f2ab51dbe0082756dd77be2b5d35a55239559f3dcc605  bytes=110
+  crit4  sha256=7d076bb944f9550b1bb862f653e7bdf215bc54213e26032a34e00202ed6263b3  bytes=96
+
+cchi-w21-bl-clip-no-cue-exempts-inert-ellipsis
+  crit0  sha256=66fa117ea14be4189d57c6b9e7f90455fa9cd1af066d56f5b1502495d4f4cd2d  bytes=193
+  crit1  sha256=4aad7d53d329f599d598da81bd49f5c041370f21d4639a336ab2fb8ebfce7943  bytes=107
+  crit2  sha256=ff871ab0e4ea68d73a006d9e8497587454686ba4b44ab88253303bed0128bacb  bytes=253
+  crit3  sha256=9201dd4a2aa1d3e85ce409e721331a01cb574aefecd1837ad0ce250a19786916  bytes=141
+  crit4  sha256=7d076bb944f9550b1bb862f653e7bdf215bc54213e26032a34e00202ed6263b3  bytes=96
+
+cchi-w21-s6-ci-renders-a-boundary-cell
+  crit0  sha256=28584e79b36af55b835341592803a24402a78d65af1482b030a21001dacd86aa  bytes=146
+  crit1  sha256=8de602f3a5070e47bdb21b9cac48f8a821249056c5453e7ec47240570a23cfe9  bytes=215
+  crit2  sha256=2b8dc8c22720fb97b2cd8252572cc4903ca3160ca902bdd2ea09e04681bd5a13  bytes=185
+  crit3  sha256=c4dd8618893d41ea33b6c571a6ceb4c4d7807613cc9d668dd0e7b1f4237285b4  bytes=201
+  crit4  sha256=ff29a1d87ad4ea2b847661af64b99d55d1c2b8f9c060ca0e0f0de21b6bf1820a  bytes=244
+  crit5  sha256=42b3c2ea0425ceedd723262661df3d9c04c0ab67959608fe8f88b57f403b0133  bytes=542
+  crit6  sha256=a8a63b497f792adcbf03fe9d10d225d8cfd4ae66e2c85904305d75b1ca316e72  bytes=108
+  crit7  sha256=7d076bb944f9550b1bb862f653e7bdf215bc54213e26032a34e00202ed6263b3  bytes=96
+
+cchi-w20-bl-console-harness-advisory-prose-stale
+  crit0  sha256=a0795ce77a947fb743b615e3ab6739b265648e2e565084930b3d2a8a240289c9  bytes=224
+  crit1  sha256=55adab338cdadd4a502916d7271f2a4a034966ff4f5c2031c21580d4a71502c0  bytes=133
+  crit2  sha256=df9126f6b7eeb85d693adca58ee817f72c15d9830c2aa74abbbced68f68e16bf  bytes=81
+
+cchi-w20-bl-css-check-citation-inventory-mode
+  crit0  sha256=eb479a9d704f4bae866fb7ab0cd85f80aa758851210a6cb3e3016041c43584ee  bytes=265
+  crit1  sha256=b322f2ff81d8325f990efde2d39021f3ec2cf582b105fbc975ac258fb7f74f81  bytes=175
+  crit2  sha256=8c0fe8aeb2bc249f075347dfab969f306c6028f9fdf98b1f2efdbfad3241e1b8  bytes=359
+
+cchi-w20-bl-no-vertical-assertion-phone-topbar
+  crit0  sha256=f15750074c1aa2891480e09af764fe66e205d34575ec44311b2f305c1fedb106  bytes=158
+  crit1  sha256=ef59de317aef2a16b28716aca60085a6ece3bef797457d6760423aac327324ad  bytes=264
+  crit2  sha256=a741aa1e94312315badc5442461ce05ffeb9561cfb509408443bd390bcf73dda  bytes=125
+
+cchi-w18-bl-seal-predicate-header-asserts-absent-wiring
+  crit0  sha256=de2b8ceaba381935922e377de0be86bb6c5c335a707f67bf6af6dac2e9148cc2  bytes=276
+  crit1  sha256=2fc07af0ace95f87dc4b5b0aa505921955879e71f643a13a0574bdda7de2d3d0  bytes=260
+  crit2  sha256=b0c577d9a402286f4ecac56c00839bee89aecb67bfaf0f8625334db5b0b5fc08  bytes=169
+
+cchi-w18-bl-e11-scan-set-third-blind-spot-baseline
+  crit0  sha256=df463bc5b40c3fa4238d6fa53492b9fce9fb1fd345e0da5d936344677b667821  bytes=230
+  crit1  sha256=ae4e5393daa03d7f5980921acca30a0e42d17d599f094982f29dd99483dc71cd  bytes=286
+  crit2  sha256=23f1daa0df9de2194ca3178ec94eed532dca19291b5db6ee79d715f4fefdeee9  bytes=231
+  crit3  sha256=2bd8f810bd324efb6fdc3ad963437e2264e0aac3bc7d913eefc4acd5d3fa4bc3  bytes=201

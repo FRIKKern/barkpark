@@ -1,0 +1,1 @@
+A profile or a measurement NAMES the double scan as a cost before any code changes - if it cannot, this task is closed as wont-fix with that null result as its evidence.

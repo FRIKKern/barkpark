@@ -1,0 +1,1 @@
+The clipper assertion is scoped to the panel it names, so an overflow contributed by a sibling inside .deploys is either attributed correctly or reported as 'a sibling in this card', never as the failure reason.

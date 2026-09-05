@@ -1,0 +1,1 @@
+A row with no box refusal renders as absent, never as "start" — proved by a RUN through the CLI against a fake, not by an assertion alone

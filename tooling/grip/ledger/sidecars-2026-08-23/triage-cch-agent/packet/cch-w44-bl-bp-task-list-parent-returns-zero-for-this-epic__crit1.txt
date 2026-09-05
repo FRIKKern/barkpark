@@ -1,0 +1,1 @@
+bp task list --parent <epic> returns a row count consistent with bp task get <epic>'s published child_count. Evidence: both numbers side by side for two epics.

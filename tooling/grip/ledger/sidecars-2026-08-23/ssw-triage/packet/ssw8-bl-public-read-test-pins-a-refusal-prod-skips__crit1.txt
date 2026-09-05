@@ -1,0 +1,1 @@
+Any test that calls a plug in isolation also asserts the named route is actually piped through that plug, so it cannot pin a wiring it never read.

@@ -1,0 +1,1 @@
+`.instance-card-head` is DRIVEN at 320/360/390/769/800 in both themes on overview-attention and overview-past-due, on origin/main and on the post-#8985 tree, and the two are compared cell for cell. Evidence: both tables, and the verdict 'identical' or the named moving cells.

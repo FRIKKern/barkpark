@@ -1,0 +1,1 @@
+A create that cannot be navigated to does not leave an orphan draft, OR the orphan is reachable and named — proven by pressing "+" and blocking the navigation.

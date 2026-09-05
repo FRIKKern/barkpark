@@ -1,0 +1,1 @@
+Check cch-w28-s6-followup-oban-mail-queue-uncaps-reaper-alerts FIRST: if uncapping the mail leg is landing, this row is superseded and should be closed rather than built. Evidence: that row's state and the decision.

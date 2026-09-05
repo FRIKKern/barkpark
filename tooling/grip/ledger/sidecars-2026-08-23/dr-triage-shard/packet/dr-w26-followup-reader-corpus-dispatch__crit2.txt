@@ -1,0 +1,1 @@
+scripts/cloud-path-escape-check.sh still passes, and the census can anchor its corpus with an ordinary path literal if it wants to

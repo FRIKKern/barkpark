@@ -192,7 +192,13 @@ defmodule Barkpark.StudioChat.StreamTailTest do
       {"four backticks", "````\nlorem\n```\n\nipsum\n````\n\nafter\n"},
       {"crlf", "alpha\r\n\r\n```md\r\nbody\r\n\r\n```\r\n\r\nomega\r\n"},
       {"forming table", "lead in\n\n| a | b |\n| - | - |\n"},
-      {"prose only", "one\n\ntwo\n\nthree\n\n"}
+      {"prose only", "one\n\ntwo\n\nthree\n\n"},
+      # mob-bl-streamtail-blank-line-law: a provider that pads its paragraph
+      # break with spaces/tabs still emits a paragraph break. Under the old
+      # strictly-byte-empty comparison this text had NO boundary at all, so the
+      # invariance held vacuously (every partition agreed on 0).
+      {"whitespace-padded blank lines",
+       "alpha\n   \nbeta\n\t\ngamma\n \t \n```go\nx()\n   \ny()\n```\n \nomega\n"}
     ]
 
     for {label, text} <- @fixtures do
@@ -209,6 +215,32 @@ defmodule Barkpark.StudioChat.StreamTailTest do
                  "partition #{seed} (#{inspect(chunks)}) diverged from the whole-text scan"
         end
       end
+    end
+
+    # ── the blank-line law itself (mob-bl-streamtail-blank-line-law) ──────
+    #
+    # Invariance alone cannot catch this clause: under the old `line == ""` the
+    # whitespace-padded fixture simply had no boundary anywhere, and every
+    # partition agreed on 0. These assert the VALUE, so reverting the fold to
+    # the strict comparison reds them (boundary drops to 0 / to the earlier
+    # byte-empty line) instead of passing vacuously.
+    test "a whitespace-only line commits a boundary, like every other blank line" do
+      # "alpha\n" is bytes 0..5, "   \n" is 6..9 — the boundary is the byte
+      # after that line's newline, exactly where "beta" starts.
+      assert boundary("alpha\n   \nbeta") == 10
+      assert boundary("alpha\n\t\nbeta") == 8
+      assert boundary("alpha\n \t \nbeta") == 10
+
+      # and the byte-empty line still behaves as it always did.
+      assert boundary("alpha\n\nbeta") == 7
+    end
+
+    test "a whitespace-only line inside a fence is still NOT a boundary" do
+      # The fence clause is untouched: only the no-fence clause changed. The
+      # last boundary is the blank line ABOVE the fence, never a padded line
+      # inside its body.
+      text = "intro\n   \n```go\nbody\n   \nmore\n"
+      assert boundary(text) == 10
     end
 
     test "byte-at-a-time streaming is identical to one whole delta" do

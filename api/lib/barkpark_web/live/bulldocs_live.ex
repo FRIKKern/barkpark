@@ -44,11 +44,20 @@ defmodule BarkparkWeb.BulldocsLive do
   # Phoenix.HTML.Form but not the parent module, so import it here.
   import Phoenix.HTML, only: [raw: 1]
 
+  # Edit-on-the-link slice 2 (task-633d25cac4262afc): the reader mounts the
+  # EXISTING Studio Beta block editor over the same paper surface. One editor,
+  # two surfaces — no reader-local fork of the editing UI.
+  import BarkparkWeb.Studio.StudioLive.Components.PaperEditor, only: [paper_block_editor: 1]
+
   alias Barkpark.Content
   alias Barkpark.Content.Labels
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
+  alias BarkparkWeb.BulldocsLive.Edit
+  alias BarkparkWeb.PaperViewer
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandlers
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   defmodule NotFound do
     @moduledoc "Raised when a canonical Paper identity is missing or unpublished."
@@ -89,6 +98,34 @@ defmodule BarkparkWeb.BulldocsLive do
 
     paper ||
       raise NotFound, message: "no published paper #{inspect(slug)}"
+
+    # Edit-on-the-link slice 1 (task-0c242c8dc61f6b13): the viewer was
+    # resolved by `BarkparkWeb.PaperViewer.on_mount/4`; the EDIT verdict needs
+    # the paper's OWN workspace, known only now. Fail-closed: a mount without
+    # the hook (no `:viewer` assign) is anonymous and can never edit.
+    credential_can_edit? = PaperViewer.can_edit?(socket.assigns, paper.workspace_id)
+
+    socket =
+      socket
+      |> assign(:viewer, socket.assigns[:viewer] || PaperViewer.anonymous())
+      |> assign(:scope_prefix, reader_scope_prefix(socket.assigns))
+      # Dataset pickers are a separate HTTP discovery surface. They require
+      # workspace write authority and no active item grant; an item edit link
+      # still edits its one paper but cannot browse the surrounding dataset.
+      |> assign(
+        :picker_browse?,
+        credential_can_edit? and not item_share_grant?(socket.assigns)
+      )
+      # Slice 3 (task-8ac4f3918da1c433) passes the SLUG too: an item share link
+      # grades writable only for the ONE paper it binds, so the workspace alone
+      # is not enough to decide. The credential arm is unchanged.
+      |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id, slug))
+      # Slice 2 (task-633d25cac4262afc): edit-mode state + the event gate. The
+      # gate is attached for EVERY viewer — it is what makes a `paper-*` edit
+      # event unreachable without `:can_edit?`, so it must not be conditional
+      # on the very assign it guards.
+      |> Edit.defaults(paper)
+      |> Edit.attach_gate()
 
     reader_source =
       case Content.Papers.reader_source(paper, dataset, reader_scope) do
@@ -190,6 +227,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # block render path reads it to render each block in `:article` palette.
       # Non-article papers leave it false → email default, chrome unchanged.
       |> assign(:article?, paper_article?(paper))
+      |> assign(:wide?, paper_wide?(paper))
       |> assign(:html, source_html(reader_source))
       # P6.U2 goal-path rail: events for this paper's goal (empty when no
       # goal_id / no events → the rail is not rendered, article unchanged).
@@ -575,12 +613,110 @@ defmodule BarkparkWeb.BulldocsLive do
     {:noreply, record_simplify_decision(socket, "simplify-reject", "Rejected")}
   end
 
+  # ── Edit on the link, slice 2 (task-633d25cac4262afc) ─────────────────────
+  #
+  # The reader editor event set. EVERY clause below is unreachable without
+  # `@can_edit?`: `Edit.attach_gate/1` halts the whole `Edit.edit_events/0`
+  # roster in a `:handle_event` hook before dispatch (and each `Edit` write
+  # re-checks `writable?/1` besides). Each maps to exactly ONE DocPatchOp
+  # through `Content.apply_paper_block_op/4` / `apply_paper_block_ops/4` — the
+  # same primitive the Studio pane writes with, with the socket's tenant scope.
+  # The remaining `paper-*` events are still gated; they read Studio pane
+  # assigns the reader does not carry, so for a permitted socket they fall into
+  # the calm log below.
+  def handle_event("paper-toggle-edit", _params, socket) do
+    socket = Edit.toggle(socket)
+
+    # Leaving Edit re-streams the View. A LiveView stream is CONSUMED by the
+    # render that emits it, so the `<article phx-update="stream">` we swapped
+    # out for the editor holds no items to diff back in — coming back would
+    # paint an empty article. `refetch/1` re-streams with `reset: true` off the
+    # stored document, which is also exactly what the just-saved blocks are.
+    {:noreply, if(socket.assigns.editing?, do: socket, else: refetch(socket))}
+  end
+
+  def handle_event("paper-op", params, socket) do
+    socket = Edit.apply_op(socket, params)
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
+  end
+
+  def handle_event("paper-ops", params, socket) do
+    request_id = if is_map(params), do: Map.get(params, "request_id")
+    ops = if is_map(params), do: Map.get(params, "ops")
+
+    case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
+      {:ok, socket, receipt, outcome} ->
+        {:reply,
+         %{
+           saved: true,
+           request_id: request_id,
+           replayed: outcome == :replayed,
+           rev: receipt.rev
+         }, socket}
+
+      {:error, socket} ->
+        reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
+        {:reply, Map.put_new(reply, :request_id, request_id), socket}
+    end
+  end
+
+  def handle_event("paper-edit-block", params, socket),
+    do: paper_edit_reply(Edit.edit_block(socket, params))
+
+  def handle_event("paper-block-autosave", params, socket) do
+    socket =
+      socket
+      |> assign(last_save_ok?: false, save_status: "Save failed")
+      |> Edit.edit_block(params)
+
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
+  end
+
+  def handle_event("paper-add-block", params, socket),
+    do: paper_edit_reply(Edit.add_block(socket, params))
+
+  def handle_event("paper-delete-block", params, socket),
+    do: paper_edit_reply(Edit.delete_block(socket, params))
+
+  def handle_event("paper-move-block", params, socket),
+    do: paper_edit_reply(Edit.move_block(socket, params))
+
+  def handle_event("paper-move-block-to", params, socket),
+    do: paper_edit_reply(Edit.move_block_to(socket, params))
+
+  def handle_event("task-preview-refresh", _params, socket),
+    do: {:noreply, Edit.refresh_canvas(socket)}
+
+  def handle_event("paper-materialize-slot", params, socket),
+    do: paper_edit_reply(Edit.materialize_slot(socket, params))
+
+  def handle_event("paper-slash-insert", params, socket),
+    do: paper_edit_reply(Edit.slash_insert(socket, params))
+
+  def handle_event("paper-callout-fold", params, socket),
+    do: paper_edit_reply(Edit.callout_fold(socket, params))
+
+  def handle_event("paper-wikilink-search", %{"query" => query}, socket) do
+    if item_share_grant?(socket.assigns),
+      do: {:reply, %{results: []}, socket},
+      else: PaperHandlers.paper_wikilink_search(query, socket)
+  end
+
+  def handle_event("paper-tag-search", %{"query" => query}, socket) do
+    if item_share_grant?(socket.assigns),
+      do: {:reply, %{results: []}, socket},
+      else: PaperHandlers.paper_tag_search(query, socket)
+  end
+
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
   # the session. Keep LAST among handle_event/3 clauses.
   def handle_event(event, _params, socket) do
     Logger.warning("bulldocs: unhandled event #{inspect(event)}")
     {:noreply, socket}
   end
+
+  defp paper_edit_reply(socket),
+    do: {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
 
   # Shared body for accept/reject: record the decision event on the pending
   # branch (skip gracefully if there is no pending branch or no goal_id), ack
@@ -706,17 +842,37 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_goal_id(_), do: nil
 
-  # Legacy `article-wide` documents retain the article palette while sharing
-  # the same measured prose shell as every other article Paper.
+  # `article-wide` documents share the article palette AND open the shell to
+  # the evidence band (`.bp-paper-shell--wide`, bulldocs.html.heex): a
+  # scorecard, matrix or dashboard paper improves with width the way a table
+  # does, and the 660px reading measure was shrinking its tables into
+  # thumbnails. Prose inside a wide paper still keeps its measure (the shell
+  # rule caps p/h/list at 72ch); only the evidence blocks fill the width.
   defp paper_article?(%{content: content}),
     do: Map.get(content || %{}, "style") in ["article", "article-wide"]
 
   defp paper_article?(_), do: false
 
-  # Render opts threaded into every block render. Article papers carry
-  # `style: :article`; the empty map keeps the email default byte-unchanged.
+  defp paper_wide?(%{content: content}),
+    do: Map.get(content || %{}, "style") == "article-wide"
+
+  defp paper_wide?(_), do: false
+
+  # Render opts threaded into every block render. BOTH clauses name
+  # `style: :article`: this is a SCREEN — the public LiveView paper reader —
+  # and nothing rendered here is ever mailed.
+  #
+  # task-c46967eb3dc49e77: the `false` clause used to return `%{}`, so
+  # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default decided
+  # and a NON-article paper read live came out in inline MAIL typography. That
+  # was a second, independent style-less source on the very surface #16037
+  # fixed for the stored `body_html`, so after that PR the live reader and the
+  # cache disagreed byte-for-byte for exactly the non-article population. The
+  # two clauses are kept SEPARATE (not collapsed) because the article /
+  # non-article split is a distinction the reader may re-acquire — today both
+  # map to `:article`, the same way `Labels.paper_render_opts/3` does.
   defp render_opts(true), do: %{style: :article}
-  defp render_opts(false), do: %{}
+  defp render_opts(false), do: %{style: :article}
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
@@ -922,6 +1078,27 @@ defmodule BarkparkWeb.BulldocsLive do
   # ── delta frame (Wave 4) ──────────────────────────────────────────────────
 
   @impl true
+  # Nested PaperFieldBlock LiveComponents send their canonical DocPatchOp to
+  # the parent process instead of emitting a parent LiveView event. The reader
+  # therefore needs the same hook-invisible seam Studio carries. Edit.apply_op/2
+  # re-checks `can_edit?`, so a crafted message cannot bypass the reader gate.
+  def handle_info({:paper_op, %{"op" => _} = op, request_id}, socket)
+      when is_binary(request_id) do
+    socket = Edit.apply_op(socket, Map.put(op, "request_id", request_id))
+
+    result = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
+
+    {:noreply,
+     push_event(
+       socket,
+       "bp:paper-field-save-result",
+       Map.put_new(result, :request_id, request_id)
+     )}
+  end
+
+  def handle_info({:paper_op, %{"op" => _} = op}, socket),
+    do: {:noreply, Edit.apply_op(socket, op)}
+
   def handle_info({:paper_block, frame}, socket) do
     cond do
       # A cached delta fragment cannot carry fresh metadata for `paper-links`.
@@ -1038,9 +1215,17 @@ defmodule BarkparkWeb.BulldocsLive do
     |> assign(:found, true)
   end
 
-  defp refetch(socket) do
+  @doc false
+  def refetch(socket) do
     # Same tenant scoping as mount (Default flat / URL scope on /w/..., P4).
-    case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset]) do
+    paper =
+      fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+
+    # Slice 2: a broadcast-driven reload re-derives the EDIT buffer from the
+    # same document the View re-streams from, so the two can never disagree.
+    socket = socket |> Edit.sync(paper) |> Edit.reconcile_canvas()
+
+    case paper do
       nil ->
         socket
         |> stream(:blocks, [], reset: true)
@@ -1049,6 +1234,7 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:found, false)
         |> assign(:source_error, nil)
         |> assign(:article?, false)
+        |> assign(:wide?, false)
         |> assign(:paper_link_refs, [])
         |> assign_linked_sections(nil, socket.assigns[:dataset])
 
@@ -1080,6 +1266,7 @@ defmodule BarkparkWeb.BulldocsLive do
             )
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, true)
             |> assign(:found, true)
             |> assign(:source_error, nil)
@@ -1092,6 +1279,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:html, html)
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, false)
             |> assign(:found, true)
             |> assign(:source_error, nil)
@@ -1104,6 +1292,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:html, "")
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, false)
             |> assign(:found, false)
             |> assign(:source_error, reason)
@@ -1149,13 +1338,33 @@ defmodule BarkparkWeb.BulldocsLive do
     <main class={[
       "bp-paper-shell",
       @article? && "bp-paper-surface",
-      @article? && "bp-paper-article"
+      @article? && "bp-paper-article",
+      @wide? && "bp-paper-shell--wide"
     ]}>
       <%!-- Sentinel: rendered once at mount, OUTSIDE the streamed/re-assigned
             container. It survives a handle_info DOM diff but would be torn
             down by a remount/navigate — the surviving-sentinel proof of
             no-reload. --%>
       <div id="paper-sentinel" data-slug={@slug} hidden></div>
+
+      <%!-- Edit on the link, slice 2 (task-633d25cac4262afc). Rendered ONLY
+            for a viewer `PaperViewer.can_edit?/2` graded writable on THIS
+            paper's workspace, so the anonymous render is byte-identical to
+            before this slice. The click rides "paper-toggle-edit", which the
+            `Edit` gate refuses server-side for everyone else — the button's
+            absence is the affordance, never the enforcement. --%>
+      <div :if={@can_edit?} id="paper-edit-bar" class="bp-paper-actions">
+        <button
+          type="button"
+          class="bp-paper-action"
+          id="paper-edit-toggle"
+          phx-click="paper-toggle-edit"
+          phx-hook="BarkparkPaperEditToggle"
+          data-editing={to_string(@editing?)}
+        >
+          {if @editing?, do: "View", else: "Edit"}
+        </button>
+      </div>
 
       <%!-- P6.U5 action bar. These are the paper doc action buttons
             (Create plan / Grill / Build / Submit) rendered NATIVELY on the
@@ -1221,6 +1430,27 @@ defmodule BarkparkWeb.BulldocsLive do
       </div>
 
       <%= cond do %>
+        <% @editing? -> %>
+          <%!-- Edit mode: the SAME Studio continuous canvas and block editor,
+                over the same paper surface — one editor, two surfaces. The
+                reader carries the fetched paper as `paper_doc`, then reuses the
+                Studio canvas echo + server-paint protocol after every accepted
+                op. Only reachable when `@can_edit?`; the toggle and every canvas
+                event are gated server-side. --%>
+          <.paper_block_editor
+            slug={@slug}
+            doc_type="paper"
+            blocks={@edit_blocks}
+            paper_rev={@paper_rev}
+            dataset={@dataset}
+            api_token_raw={@api_token_raw || ""}
+            scope_prefix={@scope_prefix}
+            picker_browse={@picker_browse?}
+            canvas_eligible={true}
+            task_previews={@task_previews}
+            save_status={@save_status}
+            paper_halt={@paper_halt}
+          />
         <% @source_error -> %>
           <article id="paper-body" data-rev={@rev} data-source-error={@source_error}>
             <p id="paper-invalid">This paper has no safe, unambiguous reader source.</p>
@@ -1328,13 +1558,32 @@ defmodule BarkparkWeb.BulldocsLive do
     end
   end
 
+  defp reader_scope_prefix(assigns) do
+    with %{slug: ws_slug} when is_binary(ws_slug) <- assigns[:current_workspace],
+         %{slug: proj_slug} when is_binary(proj_slug) <- assigns[:current_project] do
+      Paths.scope_prefix(ws_slug, proj_slug)
+    else
+      _ -> ""
+    end
+  end
+
+  # The viewer remains attributed to a signed-in account when that account
+  # opens an item link, so viewer.kind cannot identify this confinement case.
+  # The independent grant assign is the authoritative capability boundary.
+  defp item_share_grant?(assigns),
+    do: match?(%{grant: :item}, assigns[:paper_share_grant])
+
   # Public (unscoped) reader — flat /papers/:slug and dataset-scoped
   # /d/:dataset/papers/:slug both arrive here (reader_scope == nil). The
   # dataset comes from the path param, defaulting to the production dataset.
-  defp fetch_paper(slug, nil, dataset), do: Content.get_public_paper(slug, dataset)
+  # Public on purpose (slice 2): `BulldocsLive.Edit.sync/1` re-reads the paper
+  # after every accepted op and MUST use the reader's own scoped fetch, not a
+  # second copy of the two-front-doors rule.
+  @doc false
+  def fetch_paper(slug, nil, dataset), do: Content.get_public_paper(slug, dataset)
   # Tenant-scoped reader (/w/:ws/p/:proj/papers/:slug) — dataset stays
   # "production" exactly as before (no dataset segment on that route).
-  defp fetch_paper(slug, scope, _dataset), do: Content.get_paper(slug, "production", scope)
+  def fetch_paper(slug, scope, _dataset), do: Content.get_paper(slug, "production", scope)
 
   # Mount-only sibling of `fetch_paper/3`: `{paper, workspace_row_or_nil}`. On
   # the public surface the resolve pins the Default workspace anyway (am-w1-s3)

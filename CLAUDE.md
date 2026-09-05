@@ -3,7 +3,7 @@
 
 ## Identity
 
-Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 11 today (Bulldocs, Frt, Github, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64.
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 12 today (Bulldocs, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64.
 
 ## Golden Rules
 
@@ -30,10 +30,12 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | API/SDK | HTTP API contract | `docs/api-v1.md` |
 | API/SDK | auth / tokens | `docs/auth.md` |
 | API/SDK | tenancy / workspace / project / dataset scoping | `docs/contracts/tenancy.md` |
+| API/SDK | query filter / sort / projection / expand limits | `docs/contracts/query-surface-limits.md` |
 | API/SDK | webhooks / cache revalidation | `docs/contracts/webhook-realtime.md` |
 | API/SDK | consume from JS / Next.js | `docs/cards/js-sdk.md` |
 | Plugins/ONIX | build or modify a plugin | `docs/cards/plugins.md` |
 | Plugins/ONIX | schema v2 field types | `docs/contracts/schema-v2.md` |
+| Plugins/ONIX | Tickets / Sheets HTTP endpoints | `docs/contracts/plugin-http-api.md` |
 | Plugins/ONIX | Bokbasen / ONIX export | `docs/cards/onix-bokbasen.md` |
 | Plugins/ONIX | Papers / Bulldocs / PortableDoc / pdrender ingest | `api/CLAUDE.md` §Bulldocs |
 | Tasks | task system / task board / claim queue / bp task | `docs/setup/TASK-SYSTEM.md` |

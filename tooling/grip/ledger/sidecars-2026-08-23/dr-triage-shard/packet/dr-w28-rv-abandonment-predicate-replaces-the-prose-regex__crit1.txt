@@ -1,0 +1,1 @@
+The backfill question is DECIDED in writing: either the seven live NULL abandonment rows are backfilled by a data migration, or the charter records that they stay prose-only and why.

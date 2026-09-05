@@ -1,0 +1,1 @@
+The change is shown to MOVE ROWS: the waiting_censored / never_delivered split is recomputed at the old 900s and at the new horizon over the same corpus and the two counts are pasted side by side. If they are identical, say so — that is a real result and it retires the unstated assumption either way.

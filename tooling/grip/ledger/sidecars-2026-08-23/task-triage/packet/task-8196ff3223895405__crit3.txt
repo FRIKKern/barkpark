@@ -1,0 +1,1 @@
+No -z/non-empty assertion that a correct tree could eventually trip.

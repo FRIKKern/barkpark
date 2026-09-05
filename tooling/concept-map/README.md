@@ -44,3 +44,43 @@ Reads `tooling/symbol-graph/symbols.json` (a gitignored built artifact — run
   plans. Recolocation is gated by a lose-no-file never-worse check (the cqv7 pattern).
 - **Learned per-repo** — anatomy is inferred from *this* repo's clean features, so the same
   tools generalize to any Go/TS/Elixir codebase.
+
+## The boundary gate is BLOCKING — and `accepted-until-fixed.json` is why
+
+`ci-boundary.mjs` runs in `.github/workflows/architecture.yml` as the check named
+**Boundary gate**. Since 2026-09-05 it BLOCKS: there is no `continue-on-error`
+on the job or on any step. It is **not** in the required set — the four required
+contexts are Cloud gate, Console gate, Elixir gate and "PR references an active
+task" — so it reds your PR without holding the merge button.
+
+A bare flip was never possible: today's tree carries real regressions, so a
+blocking gate would have reddened every PR for debt nobody on that PR added.
+`tooling/concept-map/accepted-until-fixed.json` is what closes that gap. Each
+entry names ONE identity the gate tolerates **and the bp task row that owes the
+fix**; the loader REFUSES an entry with no row id, because an acceptance with
+nobody on the hook is an allowlist.
+
+It is a **tripwire, not an allowlist** — three arms make the list decay:
+
+| arm | reds when | message |
+|---|---|---|
+| (a) never-worse | any identity NOT in the list appears | the existing `new-edge` / `new-cycle` / count rows |
+| (b) row closed | a listed row is `done`/`cancelled` while its identity is STILL in the graph | names the row |
+| (b′) refusal | the row's lifecycle could not be read from the ledger | `REFUSING: …` — exit 2, never green |
+| (c) healed | a listed identity has DISAPPEARED from the graph | `HEALED: delete entry X` |
+
+Arm (c) is why the file cannot only grow: the PR that pays an edge down deletes
+its entry in the same change. The durable fix is a **shorter** list.
+
+Arm (b) needs `LEDGER_BASE` and `LEDGER_TOKEN` (repo secret `BARKPARK_TASK_TOKEN`,
+the same one `scripts/pr-task-gate.sh` reads). Locally, without a token, the gate
+refuses rather than passing — that refusal is the design, not a bug.
+
+Every arm is pinned in both directions and then MUTATED in
+`ci-boundary.test.mjs`: each is neutered by an exact anchor in a copy of the
+module (anchor asserted to occur exactly once, diff asserted non-empty) and the
+case is proven to stop firing.
+
+```bash
+node --test tooling/concept-map/ci-boundary.test.mjs   # 36 tests, the arms included
+```

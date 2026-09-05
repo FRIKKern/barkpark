@@ -1,0 +1,1 @@
+A NULL history (no recorded samples) renders as a refusal naming the recorder that has not run yet, never as a zero lag.

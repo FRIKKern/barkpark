@@ -1,0 +1,1 @@
+A tripwire asserts that EVERY cause-only refusal in router.ex sits under a guard whose tier matches its row — the two sites the wave-40 lens correctly excludes today are excluded because their guard tier matches, not because the lens cannot see them. State the derived population, not a pinned count.

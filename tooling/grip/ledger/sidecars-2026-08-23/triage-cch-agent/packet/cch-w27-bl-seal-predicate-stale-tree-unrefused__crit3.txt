@@ -1,0 +1,1 @@
+MEASURED SUITE COST stated before merge, in the wave-27 shape: the naive form is priced, the shipped form is priced, and any count above the shipped price means the wrong shape shipped.

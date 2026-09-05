@@ -1,0 +1,1 @@
+THE GO TWIN OF `unreported` SHIPS HERE (cch-w34-bl-go-twin-unreported is folded in, not deferred), so the Go ladder and the LIVE production console stop contradicting each other — today bp cloud status calls muscle-1 'degraded' while the deployed app.js calls it 'Never reported'.

@@ -1,0 +1,1 @@
+The :not_live fallthrough is verified EMPIRICALLY against a post-fix envelope (or the criterion is written so it does not depend on that verdict).

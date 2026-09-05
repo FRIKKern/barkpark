@@ -1,0 +1,1 @@
+The render proves the rows it printed are the sha the caller asked for - the header or a per-row line reads d.SHA, not the positional. Mutation-prove with a fixture whose row sha differs from the query sha.

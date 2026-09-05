@@ -719,19 +719,10 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
 
   describe "a share-read viewer through the component" do
     setup %{ws: ws, proj: proj} do
-      prior = Application.get_env(:barkpark, :shares)
-
-      Application.put_env(
-        :barkpark,
-        :shares,
-        Barkpark.Sharing.parse("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
-      )
-
-      on_exit(fn ->
-        if is_nil(prior),
-          do: Application.delete_env(:barkpark, :shares),
-          else: Application.put_env(:barkpark, :shares, prior)
-      end)
+      # arpss-w8: a STORED row (Barkpark.SharingFixtures), not a bare put_env —
+      # Sharing.refresh/0 rebuilds it instead of erasing it, and :shares_env is
+      # snapshotted too.
+      Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
 
       assert Barkpark.Sharing.shared?(ws.slug, proj.slug, @dataset, :docs)
       :ok

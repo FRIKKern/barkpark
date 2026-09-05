@@ -22,7 +22,7 @@ defmodule BarkparkWeb.TasksFilterRoutesTest do
   is shared, so a whole-queue count would be someone else's measurement.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

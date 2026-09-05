@@ -1,0 +1,1 @@
+All probe tokens named in this task's description are revoked and the revocation is verified by a request that now fails.

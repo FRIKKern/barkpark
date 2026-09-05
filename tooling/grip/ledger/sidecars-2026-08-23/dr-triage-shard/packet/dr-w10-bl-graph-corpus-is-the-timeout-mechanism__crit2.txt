@@ -1,0 +1,1 @@
+The result is written to tooling/grip/ledger/ with a re-derivation recipe, and the charter records it as a decision either way

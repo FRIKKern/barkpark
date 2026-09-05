@@ -1,0 +1,87 @@
+{
+ "dr-w11-bl-10129-ladder-arithmetic": {
+  "disp": "open",
+  "lc": "open",
+  "n": 1
+ },
+ "dr-w13-bl-10129-window-is-pinned-by-nothing": {
+  "disp": "open",
+  "lc": "open",
+  "n": 4
+ },
+ "dr-w14-s5-fleet-deploy-arm-lands-with-a-pinned-window": {
+  "disp": "open",
+  "lc": "open",
+  "n": 12
+ },
+ "dr-w15-bl-10129-ladder-is-a-redo": {
+  "disp": "open",
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w17-bl-close-and-recut-10129": {
+  "disp": "open",
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w20-bl-open-pr-disposition-10129-10086-10400-10019": {
+  "disp": "open",
+  "lc": "open",
+  "n": 5
+ },
+ "dr-w22-bl-epic-ledger-abandonment-269-never-started": {
+  "disp": "open",
+  "lc": "open",
+  "n": 4
+ },
+ "dr-w23-bl-rebase-10129-after-10720": {
+  "disp": "open",
+  "lc": "open",
+  "n": 4
+ },
+ "dr-w24-bl-129-ladder-decision-is-owed": {
+  "disp": "open",
+  "lc": "open",
+  "n": 1
+ },
+ "dr-w26-bl-10129-and-10086-red-mains-census-on-merge": {
+  "disp": null,
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w26-bl-ledger-stale-open-is-not-proof-unstamped": {
+  "disp": null,
+  "lc": "open",
+  "n": 5
+ },
+ "dr-w27-bl-reclaim-26-shipped-but-open-rows": {
+  "disp": null,
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w30-bl-lead-acts-from-waves-28-and-29-still-unexecuted": {
+  "disp": null,
+  "lc": "open",
+  "n": 8
+ },
+ "dr-w31-bl-reclaim-the-open-ledger-in-one-act": {
+  "disp": null,
+  "lc": "open",
+  "n": 5
+ },
+ "dr-w32-bl-close-10400-park-10129-merge-10811": {
+  "disp": null,
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w32-fu-24-landed-rows-need-eyes": {
+  "disp": null,
+  "lc": "open",
+  "n": 3
+ },
+ "dr-w33-bl-10811-reds-mains-census-on-merge": {
+  "disp": null,
+  "lc": "open",
+  "n": 5
+ }
+}

@@ -21,7 +21,11 @@ defmodule Barkpark.Content.FieldVisibility do
         }
       }
 
-  Supported operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`.
+  Supported operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`,
+  and the count family `count_eq`, `count_neq`, `count_gt`, `count_lt` (Gyldendal
+  parity E1.5 — Sanity's `hidden: ({parent}) => parent.banners?.length !== 2`
+  becomes `{"field": "banners", "operator": "count_neq", "value": 2}` read as
+  "visible when …"; a list counts its rows, a map its keys, nil/"" count 0).
   Field references support dotted paths (`"foo.bar.baz"` walks the doc map).
   When the path traverses a list, the walk flat-maps the rest of the path
   across every row — useful for `subjects.subject.subjectCode`-style refs.
@@ -113,6 +117,10 @@ defmodule Barkpark.Content.FieldVisibility do
   defp walk_path(_, _), do: nil
 
   defp apply_op("eq", value, expected), do: value == expected
+  defp apply_op("count_eq", value, n) when is_integer(n), do: count_of(value) == n
+  defp apply_op("count_neq", value, n) when is_integer(n), do: count_of(value) != n
+  defp apply_op("count_gt", value, n) when is_integer(n), do: count_of(value) > n
+  defp apply_op("count_lt", value, n) when is_integer(n), do: count_of(value) < n
   defp apply_op("neq", value, expected), do: value != expected
   defp apply_op("in", value, list) when is_list(list), do: value in list
   defp apply_op("in", _, _), do: false
@@ -145,4 +153,10 @@ defmodule Barkpark.Content.FieldVisibility do
   end
 
   defp safe_atom(_), do: nil
+
+  # Row count for the `count_*` operators. The editor form keeps an arrayOf as a
+  # list; a map-shaped array (index-keyed params) counts its keys; scalars 0.
+  defp count_of(list) when is_list(list), do: length(list)
+  defp count_of(%{} = m), do: map_size(m)
+  defp count_of(_), do: 0
 end

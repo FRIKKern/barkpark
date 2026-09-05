@@ -1,0 +1,1 @@
+The census resolver recognises a post-guard admin/owner cond in the route body and reports the effective tier. Evidence: the resolver diff plus the resolved/unresolved split before and after.

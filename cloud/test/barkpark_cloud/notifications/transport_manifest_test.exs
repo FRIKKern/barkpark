@@ -209,6 +209,101 @@ defmodule BarkparkCloud.Notifications.TransportManifestTest do
              "non-failed row here means the alert fell back to the platform transport"
   end
 
+  ## ── ARM 5 — THE ROW NAMES ITS CARRIER (cch-w52-s3) ─────────────────────
+
+  # ARM 2 above proves an smtp send LEAVES the platform adapter. This arm proves
+  # the delivery ROW says which one it left on — the observability half of the
+  # same seam. It is a separate arm and not an extra assertion inside ARM 2
+  # because it loses to a DIFFERENT defect: ARM 2 reds when the mechanism is
+  # wrong, this reds when the mechanism is right and the RECORD is wrong.
+  #
+  # The two halves are asserted TOGETHER on purpose. A carrier that is a constant
+  # is green against either half alone, and constant-ness is the exact failure
+  # mode a `carrier` column invites (see the MUTATION note below). Only the pair
+  # discriminates.
+  test "ARM 5 CARRIER: a carried smtp send records team_smtp and a platform send records platform" do
+    # CARRIED: the team's own relay took it (and refused it, which is ARM 2's
+    # discriminator — the row is `failed`, and it is still a `team_smtp` row,
+    # because the carrier records WHO CARRIED IT, not whether it arrived).
+    {smtp_team, smtp_recipient} = team_with_member()
+    select_transport(smtp_team, "smtp")
+
+    drain_mailbox()
+    assert :ok = Notifications.dispatch_event(smtp_team, :provision_failed, %{name: "prod"})
+
+    carried = Repo.get_by!(Delivery, team_id: smtp_team.id, recipient: smtp_recipient)
+
+    # PLATFORM: the same event, the same channel, the same builder — only the
+    # transport differs. Before `carrier` these two rows were distinguishable by
+    # NOTHING on the row itself.
+    {platform_team, platform_recipient} = team_with_member()
+    select_transport(platform_team, "instance")
+
+    drain_mailbox()
+    assert :ok = Notifications.dispatch_event(platform_team, :provision_failed, %{name: "prod"})
+
+    platform = Repo.get_by!(Delivery, team_id: platform_team.id, recipient: platform_recipient)
+
+    assert carried.carrier == "team_smtp",
+           "a send the team's OWN relay carried was recorded carrier " <>
+             "#{inspect(carried.carrier)} — the row cannot answer \"sent by what\""
+
+    assert platform.carrier == "platform",
+           "a send the PLATFORM mailer carried was recorded carrier " <>
+             "#{inspect(platform.carrier)}"
+
+    # NON-VACUITY / THE MUTATION THIS ARM EXISTS FOR: hard-coding the carrier to
+    # any single constant satisfies exactly one of the two assertions above and
+    # reds the other. Stating the inequality outright means the arm also loses if
+    # both are somehow rewritten to the same value.
+    refute carried.carrier == platform.carrier,
+           "both sends recorded the SAME carrier — the value is a constant, not a measurement"
+
+    # And the vocabulary is CLOSED, with no `api` member: cch-w52-s1 deleted that
+    # transport, and a carrier column that re-mints the word would repeat the
+    # crown defect one layer down.
+    assert carried.carrier in Delivery.carriers()
+    assert platform.carrier in Delivery.carriers()
+    refute "api" in Delivery.carriers()
+  end
+
+  # The SILENT FALLBACK — the reason `deliver_alert/2` had to start RETURNING its
+  # carrier rather than letting `record_delivery` re-derive one from
+  # `settings.transport`. A team that SELECTED smtp and whose secrets will not
+  # decrypt rides the PLATFORM mailer; a derivation from the settings row would
+  # have written "team_smtp" and told that team its own relay carried mail it
+  # never saw. Twin of the notifications_test case, kept here because this file
+  # is the manifest for offer↔mechanism honesty.
+  test "ARM 5 FALLBACK: an smtp team whose override cannot be built records platform, never team_smtp" do
+    {team, recipient} = team_with_member()
+    settings = select_transport(team, "smtp")
+
+    # Corrupt the ciphertext THROUGH the repo, not through the context: the
+    # context encrypts on write, so this is the only way to reach the state a
+    # rotated/rekeyed Vault produces in production.
+    {:ok, _} =
+      settings
+      |> Ecto.Changeset.change(%{smtp_host_encrypted: "not-a-valid-ciphertext"})
+      |> Repo.update()
+
+    drain_mailbox()
+    assert :ok = Notifications.dispatch_event(team, :provision_failed, %{name: "prod"})
+
+    delivery = Repo.get_by!(Delivery, team_id: team.id, recipient: recipient)
+
+    assert delivery.carrier == "platform",
+           "an smtp team whose override could NOT be built rode the platform mailer but recorded " <>
+             "carrier #{inspect(delivery.carrier)} — the row asserts a relay that never ran"
+
+    # It landed in the PLATFORM mailbox, which is the independent witness that
+    # "platform" is a measurement of what happened rather than a guess.
+    assert platform_mailbox_hit?(),
+           "the fallback send did NOT reach the platform test mailbox — this case is not " <>
+             "exercising the fallback at all, so its carrier assertion proves nothing"
+
+    assert delivery.status == "sent"
+  end
+
   ## ── ARM 3 — REVERSE: every MECHANISM answers to an OFFER ───────────────
 
   # `deliver_alert/2` stays `defp`. Its clause heads are recovered from the

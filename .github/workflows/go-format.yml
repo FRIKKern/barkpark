@@ -4,10 +4,14 @@
 # so gofmt drift accumulated silently (12/117 files were dirty when this landed).
 # Unlike `mix format` (pinned across skewing Elixir versions, hence advisory),
 # gofmt is deterministic. The `gofmt` job below stays ADVISORY as a whole-tree
-# WARNING; the honest counter-ratchet is the `gofmt-ceiling` job — its OWN
-# BLOCKING job (never a step inside the advisory job, or continue-on-error would
+# WARNING; the honest counter-ratchet is the `gofmt-ceiling` job — a job of its
+# OWN (never a step inside the advisory job, or continue-on-error would
 # neutralise it too) that reds by name on any NEW off-roster gofmt drift and
-# fails closed on a vacuous/zero scan. See scripts/go-format-drift-ceiling.sh.
+# fails closed on a vacuous/zero scan. It reds its own check-run and cannot stop
+# a merge: its name is a committed S4 PATHS-FILTERED exclusion in
+# .github/required-checks.json, and the token in that name means blocking
+# WITHIN this workflow — see the annotation on its job key below.
+# See scripts/go-format-drift-ceiling.sh.
 name: Go format
 #
 # TRIGGERS. `pull_request` gates the change; `push: branches: [main]` measures
@@ -40,6 +44,11 @@ on:
       - ".go-format-drift-ceiling"
 permissions:
   contents: read
+concurrency:
+  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
+  group: go-format-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   gofmt:
     name: gofmt -l (advisory)
@@ -51,13 +60,33 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Check gofmt
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           dirty=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
           if [ -n "$dirty" ]; then
             echo "::warning::gofmt drift in:"; echo "$dirty"
             echo "Run: gofmt -w <files>"; exit 1
           fi
           echo "all Go files gofmt-clean"
+
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Check gofmt\"}"
+          JOB_NAME: "gofmt -l (advisory)"
+          WORKFLOW_FILE: go-format.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
   # which IS this job's rendered check-run context and IS a committed exclusion
@@ -83,6 +112,31 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Enforce the gofmt drift ceiling
-        run: bash scripts/go-format-drift-ceiling.sh
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-format-drift-ceiling.sh
       - name: Ceiling self-test (tripwire — prove the gate can fail)
-        run: bash scripts/go-format-drift-ceiling.sh --selftest
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-format-drift-ceiling.sh --selftest
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Enforce the gofmt drift ceiling\", \"s2\": \"Ceiling self-test (tripwire \u2014 prove the gate can fail)\"}"
+          JOB_NAME: "gofmt drift ceiling (blocking)"
+          WORKFLOW_FILE: go-format.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+

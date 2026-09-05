@@ -92,6 +92,7 @@ defmodule Barkpark.Content.Lifecycle do
         # BEFORE the wall and the :before_publish hook fire, so a refusal is
         # side-effect-free (the Writer-seam gate-position precedent).
         with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
+             :ok <- ensure_bound_title_agrees(draft),
              :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
           publish_after_gate(draft, pid, type, dataset, opts)
         end
@@ -155,6 +156,79 @@ defmodule Barkpark.Content.Lifecycle do
   end
 
   defp prepare_paper_render_shapes(draft, _type), do: {:ok, draft}
+
+  # THE PUBLISH-DOOR TITLE-DIVERGENCE REFUSAL.
+  #
+  # `content["blocks"]` is the SOLE source of every projected `content[fieldName]`
+  # on a write that carries a block list: `Writer.maybe_project_document_content/2`
+  # re-derives them through `Projection.project/3`, and its own comment states
+  # that "projection remains the SOLE writer of the projected keys". The row
+  # `title` COLUMN is written OUTSIDE that projection — `Content.Mutations`
+  # builds `attrs["title"]` from the patch's `set` map while DROPPING `"title"`
+  # from the merged content — so `doc patch <type> <id> --set title=X` on a
+  # blocks-bearing document lands the column while the bound title block
+  # overwrites `content["title"]` straight back to its create-time value. The
+  # patch answers 200 with a freshly bumped `_rev`; only a read of the stored row
+  # shows the value was discarded.
+  #
+  # This gate does not repair that write. It stops the divergence being COPIED
+  # ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
+  # `publish_after_gate/5` builds `pub_attrs` with `"title" => draft.title` (the
+  # column) and `"content" => pub_content` (carrying the stale block/preview
+  # title), the generated `search_vector` then indexes BOTH, `doc get` answers
+  # one title, and the Studio editor and every preview card read the other. A
+  # reader of the published row has no way to tell which of the two the author
+  # meant.
+  #
+  # DELIBERATELY NARROW, so it can only fire on the measured shape:
+  #
+  #   * only when `content["blocks"]` is a LIST — the exact discriminator the
+  #     projector itself keys on. A document the projector never touches cannot
+  #     have had a projected key discarded.
+  #   * only the block BOUND to `"title"` (`Projection.bound?/1` plus a
+  #     `fieldName` of `"title"`), never a FREE `role: "title"` block. A paper's
+  #     title block is free, so the paper path is untouched.
+  #   * only when both sides are non-blank strings AND they differ. A nil or
+  #     blank block value is a cleared index entry (`Projection.projected_value/1`
+  #     documents `nil` as exactly that), not two competing titles.
+  #
+  # It never guesses which side wins. Choosing one would invent an authorial
+  # intent the document does not record — the column and the block are equally
+  # plausible, and picking silently is the same class of defect as the discard
+  # that produced them. So it REFUSES and names both values plus the write that
+  # reconciles them.
+  #
+  # It rides `{:halted, reason}` — the publish door's existing veto vocabulary
+  # (`Content.Errors` renders it as a 409 `halted` carrying the reason verbatim:
+  # deterministic, terminal, already in the CLI exit-code table and the served
+  # OpenAPI `Error.code` enum). A new tag would render as a bare 500
+  # `internal_error`, which is the opaque shape this gate exists to end.
+  defp ensure_bound_title_agrees(%Document{title: column, content: content})
+       when is_map(content) do
+    with blocks when is_list(blocks) <- Map.get(content, "blocks"),
+         %{} = block <- Enum.find(blocks, &bound_title_block?/1),
+         block_title <- Projection.projected_value(block),
+         true <- present?(column) and present?(block_title) and column != block_title do
+      {:error,
+       {:halted,
+        "publish refused: this document carries two different titles. The row title column is " <>
+          "#{inspect(column)} while the bound title block (and therefore the projected " <>
+          "content[\"title\"] and content[\"preview\"]) is #{inspect(block_title)}. " <>
+          "Publishing would put both on one row and index both for search, with nothing to say " <>
+          "which was meant. `doc patch --set title=` writes the COLUMN ONLY — the block is what " <>
+          "projection re-derives the content title from — so set the title through the title " <>
+          "block, then publish."}}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp ensure_bound_title_agrees(_draft), do: :ok
+
+  defp bound_title_block?(block),
+    do: is_map(block) and Projection.bound?(block) and Map.get(block, "fieldName") == "title"
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   # The STORED location `Projection.read_blocks/1` would read this content's
   # block list from, in that function's own clause order, or nil when the list
@@ -224,49 +298,65 @@ defmodule Barkpark.Content.Lifecycle do
             }
             |> WriteScope.inherit_scope_attrs(draft)
 
-          txn =
-            Repo.transaction(fn ->
-              {pub_result, prev_pub_rev} =
-                case Content.get_document(pid, type, dataset, opts) do
-                  {:ok, existing} ->
-                    {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+          # [acrc-publish-atomicity-txn-boundary] The published upsert, the
+          # fenced draft delete AND the `mutation_events` row now share ONE
+          # boundary. Before this wrap the `Repo.transaction` below closed and
+          # COMMITTED the publish, and only then did `tap_broadcast` insert the
+          # event — so a fault there left a published document that no webhook,
+          # SSE listener or cache-revalidation consumer ever learned about, with
+          # nothing to retry and no error to see on the next request.
+          #
+          # `write_atomically/1` (not a bare wrap) because `maybe_broadcast/2`
+          # DEFERS once a transaction is open: something has to flush the queue
+          # on commit and drop it on rollback, or publishing would go silent.
+          # The `Repo.transaction` below simply JOINS it; its `Repo.rollback/1`
+          # arms (a changeset error, a `:rev_mismatch` from `fenced_delete`)
+          # surface as the same `{:error, reason}` this code returned before.
+          result =
+            Broadcast.write_atomically(fn ->
+              txn =
+                Repo.transaction(fn ->
+                  {pub_result, prev_pub_rev} =
+                    case Content.get_document(pid, type, dataset, opts) do
+                      {:ok, existing} ->
+                        {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-                  _ ->
-                    {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-                end
+                      _ ->
+                        {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
+                    end
 
-              case pub_result do
-                {:error, cs} ->
-                  Repo.rollback(cs)
+                  case pub_result do
+                    {:error, cs} ->
+                      Repo.rollback(cs)
 
-                {:ok, published} ->
-                  # Rev-fenced: if a concurrent write bumped the draft since
-                  # the read above, delete nothing and surface a rev_mismatch
-                  # (412) instead of destroying the newer edit. A vanished
-                  # draft resolves to {:error, :not_found} (prior semantics).
-                  case fenced_delete(draft) do
-                    :ok -> {published, prev_pub_rev}
-                    {:error, reason} -> Repo.rollback(reason)
+                    {:ok, published} ->
+                      # Rev-fenced: if a concurrent write bumped the draft since
+                      # the read above, delete nothing and surface a rev_mismatch
+                      # (412) instead of destroying the newer edit. A vanished
+                      # draft resolves to {:error, :not_found} (prior semantics).
+                      case fenced_delete(draft) do
+                        :ok -> {published, prev_pub_rev}
+                        {:error, reason} -> Repo.rollback(reason)
+                      end
                   end
+                end)
+
+              case txn do
+                {:ok, {published, prev_pub_rev}} ->
+                  Broadcast.tap_broadcast(
+                    {:ok, published},
+                    dataset,
+                    type,
+                    "publish",
+                    prev_pub_rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+
+                {:error, reason} ->
+                  {:error, reason}
               end
             end)
-
-          result =
-            case txn do
-              {:ok, {published, prev_pub_rev}} ->
-                Broadcast.tap_broadcast(
-                  {:ok, published},
-                  dataset,
-                  type,
-                  "publish",
-                  prev_pub_rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
-
-              {:error, reason} ->
-                {:error, reason}
-            end
 
           # Publishing a SHEET refreshes its PUBLISHED embedders with the
           # now-published content (the draft-save path deliberately skips
@@ -284,14 +374,100 @@ defmodule Barkpark.Content.Lifecycle do
 
           WriteScope.fire_after(result, :after_publish, payload)
       end
+    else
+      # ── THE REFUSAL MUST NOT MANUFACTURE A STRANDED DRAFT ──────────────────
+      #
+      # `duplicate_of` (E4) is the ONE wall code whose refusal is TERMINAL: it
+      # says the content this draft carries is ALREADY PUBLISHED, and it names
+      # the incumbent (`payload.duplicate_of`, rendered into the 409 body as
+      # `details.duplicate_of` by `Content.Errors`). Leaving the draft behind
+      # after that verdict manufactures a `drafts.<id>` row that every
+      # canonical reader — `bp task ready`, the board, the epic roster, all
+      # published-first — is blind to. 409 such rows had accumulated by the
+      # 2026-09-04 census (31 of them carrying a published row's byte-identical
+      # title). So the draft is discarded HERE, in the same operation that
+      # refused it, and the caller is told where the surviving copy is.
+      #
+      # THE OTHER FOUR REFUSALS DELIBERATELY KEEP THE DRAFT:
+      #
+      #   * `label_spine`, `unknown_tag`, `invalid_epic_paper_quality` are
+      #     AUTHOR-FIXABLE — the remedy is to edit this draft's tags/content
+      #     and republish it. Discarding it would delete the exact work the
+      #     refusal is asking the author to correct.
+      #   * `dedup_unavailable` is TRANSIENT by construction (`DedupWall`'s
+      #     bounded scan could not RUN) — the remedy is to resend, which needs
+      #     the draft to still be there.
+      #
+      # Under `Content.Mutations` this delete is inside the batch transaction
+      # and is rolled back with it; `Mutations.compensating_discard/4` re-runs
+      # it after the rollback off `payload.refused_draft_id`, so both doors
+      # (a direct `publish_document/4` and `POST /v1/data/mutate`) end with no
+      # draft. A batch that CREATED the draft in the same transaction needs
+      # neither: the rollback already removed it.
+      {:error, {:duplicate_of, payload}} ->
+        discard_draft_refused_as_duplicate(draft, payload, type, dataset, opts)
 
-      # A wall rejection ({:label_spine,…}/{:unknown_tag,…}/{:duplicate_of,…})
-      # falls straight out of `AuthoringWall.enforce` above — the `with`
-      # returns it UNCHANGED (each shape emits its telemetry at
-      # AuthoringWall's own else seam), and the controllers map it to
-      # 422/422/409.
+      # Every other wall rejection ({:label_spine,…}/{:unknown_tag,…}/
+      # {:invalid_epic_paper_quality,…}/{:dedup_unavailable,…}) falls straight
+      # out of `AuthoringWall.enforce` UNCHANGED (each shape emitted its
+      # telemetry at AuthoringWall's own else seam), and the controllers map it
+      # to 422/422/422/503.
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  # Rev-fenced discard of the draft a `duplicate_of` refusal just rejected.
+  # The refusal tuple is returned UNCHANGED except for two additions, both of
+  # which `Content.Errors.build/1` keeps out of the wire body
+  # (`Map.take(payload, [:duplicate_of, :similar, :advise])`) EXCEPT the
+  # message: `:refused_draft_id` is the compensation key `Mutations` reads
+  # after a batch rollback, and the message gains the sentence that names what
+  # happened to the draft alongside the incumbent that survived.
+  #
+  # A fenced-delete refusal (a concurrent write bumped the draft, or it already
+  # vanished) does NOT become the caller's error: the publish was refused on its
+  # merits and that is the answer the caller must see. The draft simply stays,
+  # and the census's population is the place that shows it.
+  defp discard_draft_refused_as_duplicate(%Document{} = draft, payload, type, dataset, opts) do
+    payload = payload |> Map.put(:refused_draft_id, draft.doc_id) |> annotate_discard(draft)
+
+    case fenced_delete(draft) do
+      :ok ->
+        Broadcast.tap_broadcast(
+          {:ok, draft},
+          dataset,
+          type,
+          "discardDraft",
+          draft.rev,
+          Keyword.get(opts, :source, :api),
+          Keyword.get(opts, :user_id)
+        )
+
+        {:error, {:duplicate_of, payload}}
+
+      {:error, reason} ->
+        Logger.warning(
+          "publish refused as duplicate_of but the draft #{draft.doc_id} could not be " <>
+            "discarded (#{inspect(reason)}) — it survives the refusal"
+        )
+
+        {:error, {:duplicate_of, payload}}
+    end
+  end
+
+  defp annotate_discard(%{message: message} = payload, %Document{} = draft)
+       when is_binary(message) do
+    Map.put(
+      payload,
+      :message,
+      message <>
+        " The refused draft #{draft.doc_id} was discarded, so this publish left nothing behind; " <>
+        "the published document named above is the surviving copy."
+    )
+  end
+
+  defp annotate_discard(payload, _draft), do: payload
 
   # ── Supersession stamp (the DedupWall pairwise exemption's other half) ─────
   #

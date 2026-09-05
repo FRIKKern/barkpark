@@ -319,6 +319,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       membership on the imported workspace INSIDE the import transaction. See
       `grant_operator_admin!/2` for why that is the completion of the import
       rather than a widening. Defaults to `nil` (grant nothing).
+    * `:expected_root_slug` — the slug the CALLER says this bundle is for
+      (task-b8218812cee2e4cc). When given, a bundle whose manifest
+      `workspace_slug` — or whose landed root `workspaces` row — carries a
+      DIFFERENT slug raises `InvalidBundleError` and nothing is written. See
+      `assert_root_slug_matches_expectation!/2` for why the engine cannot
+      derive this itself. Defaults to `nil` (no expectation, every arm
+      unchanged) — which is every non-HTTP caller: mix tasks and round-trip
+      tests have no operator to have named a target.
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
@@ -338,9 +346,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           | {:error, {:workspace_slug_conflict, map()} | {:blob_path_conflict, map()} | term()}
   def import_bundle(bundle, opts \\ []) when is_binary(bundle) do
     mode = import_mode!(opts)
-    grant = grant_admin_to!(opts)
+    ctx = import_ctx!(opts)
     {manifest, dumps} = Archive.unpack(bundle)
-    import_unpacked(manifest, dumps, mode, grant)
+    import_unpacked(manifest, dumps, mode, ctx)
   end
 
   @doc """
@@ -372,7 +380,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # sobelow_skip ["Traversal.FileModule"]
   def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
     mode = import_mode!(opts)
-    grant = grant_admin_to!(opts)
+    ctx = import_ctx!(opts)
     # NAMED WITH THE JANITOR'S PREFIX, and that is a fix, not a formality
     # (pds-w11-janitor-engine-handshake). This directory used to be
     # `members-<int>`, while the janitor's candidate glob is exactly three fixed
@@ -390,7 +398,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     try do
       {manifest, paths} = Archive.unpack_to_dir(bundle_path, dir)
-      import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode, grant)
+      import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode, ctx)
     after
       File.rm_rf(dir)
       Janitor.disown(dir)
@@ -429,7 +437,39 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     mode
   end
 
-  defp import_unpacked(manifest, dumps, mode, grant) do
+  # Everything the import needs from its caller BESIDES the mode, validated at
+  # the door for the same reason `grant_admin_to!/1` is: a fumbled shape is an
+  # ArgumentError before the tar is touched, never a surprise an hour into a
+  # restore. One map rather than two more positional arguments, so `run_import`
+  # keeps its arity (it is named as `run_import/4` in `Barkpark.Repo`'s
+  # statement-timeout docs).
+  defp import_ctx!(opts) do
+    %{grant: grant_admin_to!(opts), expected_root_slug: expected_root_slug!(opts)}
+  end
+
+  # THE CALLER'S STATED TARGET (task-b8218812cee2e4cc). The engine cannot derive
+  # this: `bp cloud support add --ws default` and a hostile merge-import that
+  # evicts the seeded Default are STATE-IDENTICAL by the time they reach
+  # `adopt_or_refuse_root_slug!/1` — an empty-shell "default" seat, a bundle
+  # whose root row wants it. Only the caller's INTENT separates them, and at the
+  # HTTP door that intent is already typed: `POST /api/workspaces/:workspace_slug/import`
+  # carries the operator's named target in the path. Threading it here turns
+  # that path segment from decoration into an EXPECTATION the bundle must meet.
+  defp expected_root_slug!(opts) do
+    case Keyword.get(opts, :expected_root_slug) do
+      nil ->
+        nil
+
+      slug when is_binary(slug) ->
+        slug
+
+      other ->
+        raise ArgumentError,
+              "invalid :expected_root_slug #{inspect(other)} (expected a string or nil)"
+    end
+  end
+
+  defp import_unpacked(manifest, dumps, mode, ctx) do
     # A readable tar whose manifest names a DIFFERENT format is a caller
     # mistake, not an engine fault — InvalidBundleError so the HTTP edge
     # answers 422 invalid_bundle instead of the opaque 500 the old
@@ -439,6 +479,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         code: "invalid_bundle",
         message: "not a #{Archive.format()} bundle: format=#{inspect(manifest["format"])}"
     end
+
+    # BEFORE ANY WRITE — before the transaction is even opened, so no COPY, no
+    # DDL and above all no PDS-D9 empty-shell DELETE can have happened when the
+    # bundle disagrees with what the caller asked for.
+    assert_root_slug_matches_expectation!(manifest, ctx.expected_root_slug)
 
     # PDS-D45: a declared loss is only honest if someone HEARS it. The manifest
     # rides back to the caller inside `stats()` (machine-readable), and the
@@ -453,7 +498,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # mocking the engine. `nil` in every non-test env.
     case Application.get_env(:barkpark, :import_fault) do
       {:error, _term} = fault -> fault
-      nil -> run_import(manifest, dumps, mode, grant)
+      nil -> run_import(manifest, dumps, mode, ctx)
     end
   end
 
@@ -471,7 +516,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   defp warn_declared_loss(_manifest), do: :ok
 
-  defp run_import(manifest, dumps, mode, grant) do
+  defp run_import(manifest, dumps, mode, ctx) do
     Repo.transaction(
       fn ->
         # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs): each
@@ -558,13 +603,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # rows it actually landed, not by what it said about them.
         assert_reserved_seats_still_vacant!(vacant_reserved)
 
+        # The same CLAIM-vs-ROWS asymmetry, for the caller's expectation: the
+        # pre-flight above read `manifest["workspace_slug"]`, which the bundle
+        # merely asserts. This re-reads the root row the COPY actually landed,
+        # so a manifest that under-declares itself is caught by what it did, not
+        # by what it said. Inside the transaction, so the refusal un-creates it.
+        assert_landed_root_slug_matches_expectation!(manifest, ctx.expected_root_slug)
+
         # LAST, and deliberately AFTER restore_member_fks!/1: the grant is the
         # only row this transaction writes through Ecto rather than COPY, and
         # writing it with the member FKs live means Postgres validates it
         # against the workspace the import just landed. Written INSIDE the
         # transaction, so anything that fails after this point takes the grant
         # down with it — a failed import grants nothing.
-        grant_operator_admin!(manifest, grant)
+        grant_operator_admin!(manifest, ctx.grant)
 
         stats
       end,
@@ -1531,6 +1583,62 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             Enum.map_join(claimed, ", ", fn [slug, id] -> "#{inspect(slug)} -> #{id}" end) <>
             " — the manifest's declared workspace_slug did not match the workspaces row it " <>
             "carried."
+    end
+  end
+
+  # ── The caller's expectation (task-b8218812cee2e4cc) ────────────────────────
+  #
+  # WHICH DOOR THIS CLOSES: an HTTP merge-import POSTed to
+  # `/api/workspaces/<some-other-slug>/import` carrying a bundle whose root slug
+  # is `default`. `adopt_or_refuse_root_slug!/1` below would find the
+  # migrate-seeded Default — provably empty, so a legitimate adopt target by
+  # state alone — DELETE it, and let the imported workspace become the instance
+  # default scope (`Tenancy.get_default_workspace/0`, and through it every
+  # unscoped flat read and write). The operator never asked for that: they named
+  # a different workspace in the path.
+  #
+  # WHICH DOOR STAYS OPEN, deliberately: `bp cloud support add --ws default`
+  # names "default" in the path, so its expectation IS "default", the manifest
+  # agrees, and the adopt branch runs exactly as before. An operator who means
+  # to replace the Default shell can still say so — they just have to say it.
+  #
+  # Nil expectation = no expectation. The engine is also driven by mix tasks and
+  # round-trip tests with no operator to have named anything; they are unchanged.
+  defp assert_root_slug_matches_expectation!(_manifest, nil), do: :ok
+
+  defp assert_root_slug_matches_expectation!(manifest, expected) do
+    declared = manifest["workspace_slug"]
+
+    if declared != expected do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "this import was aimed at workspace #{inspect(expected)} but the bundle's root " <>
+            "workspace slug is #{inspect(declared)} — refusing to import a bundle into a " <>
+            "workspace the caller did not name. Re-send it to " <>
+            "/api/workspaces/#{declared}/import if that is the target you meant."
+    end
+  end
+
+  defp assert_landed_root_slug_matches_expectation!(_manifest, nil), do: :ok
+
+  defp assert_landed_root_slug_matches_expectation!(manifest, expected) do
+    case Repo.query!("SELECT slug FROM workspaces WHERE id = $1::text::uuid", [
+           manifest["workspace_id"]
+         ]).rows do
+      [[^expected]] ->
+        :ok
+
+      [[landed]] ->
+        raise InvalidBundleError,
+          code: "invalid_bundle",
+          message:
+            "this import was aimed at workspace #{inspect(expected)} but the root workspaces " <>
+              "ROW the bundle carried claims slug #{inspect(landed)} — the manifest's " <>
+              "declared workspace_slug did not match the row it shipped."
+
+      _ ->
+        :ok
     end
   end
 

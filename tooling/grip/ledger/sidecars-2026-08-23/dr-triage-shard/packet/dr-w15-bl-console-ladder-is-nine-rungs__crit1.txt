@@ -1,0 +1,1 @@
+A JS test reads cloud/priv/static/__fixtures__/attention_order.json and asserts the console ladder against it, so the fixture stops being Go-only and the drift becomes catchable

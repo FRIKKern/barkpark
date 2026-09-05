@@ -135,7 +135,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
          %{conn: conn, paper: paper} do
       socket = paper_socket(conn, paper, "a stale halt from a prior save")
 
-      out = Paper.paper_pane_op(socket, append_op("b-single"))
+      op =
+        append_op("b-single")
+        |> Map.put("request_id", Ecto.UUID.generate())
+        |> Map.put("if_rev", socket.assigns.paper_rev)
+
+      out = Paper.paper_pane_op(socket, op)
 
       assert out.assigns.paper_halt == nil
       assert out.assigns.save_status == "Auto-saved"
@@ -145,7 +150,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
          %{conn: conn, paper: paper} do
       socket = paper_socket(conn, paper, "a stale halt from a prior save")
 
-      out = Paper.paper_ops(socket, [append_op("b-batch")])
+      assert {:ok, out, _receipt, :applied} =
+               Paper.paper_ops(
+                 socket,
+                 [append_op("b-batch")],
+                 Ecto.UUID.generate(),
+                 socket.assigns.paper_rev
+               )
 
       assert out.assigns.paper_halt == nil
     end

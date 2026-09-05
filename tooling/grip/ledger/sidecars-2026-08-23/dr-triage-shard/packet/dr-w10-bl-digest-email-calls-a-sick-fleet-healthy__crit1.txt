@@ -1,0 +1,1 @@
+The unknown bucket is NAMED, not absorbed: subject/1 renders it alongside current/behind/paused, so 'we do not know about N boxes' is visible in the subject line rather than silently subtracted. Quote the rendered subject.

@@ -1,0 +1,1 @@
+THE SPA EDIT IS EXACTLY THE GRANT AND NO MORE (charter D56 amends D31 bilaterally): only ATTENTION_RANK, bucketOf's two thresholds, and __app.test.mjs's KINDS array are touched. `git diff --stat cloud/priv/static/app.js` shows a handful of lines and ZERO render-function changes.

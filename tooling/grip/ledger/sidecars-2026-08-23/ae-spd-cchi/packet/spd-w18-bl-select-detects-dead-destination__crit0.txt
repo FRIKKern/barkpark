@@ -1,0 +1,1 @@
+A test drives a desk row whose destination raises and asserts the user sees a NAMED state, not silence (no URL change AND no message is the failing shape).

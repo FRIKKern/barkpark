@@ -1,0 +1,1 @@
+A re-run of the journal census over a fresh window reports the 500 count and the stack-frame split, so the class can be shown to be shrinking or not.

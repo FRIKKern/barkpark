@@ -47,15 +47,28 @@ defmodule Barkpark.Media.Delivery.Cdn do
     [original | renditions]
   end
 
-  @doc "Public CDN URLs for an asset (for webhook payloads)."
-  @spec url_map(%MediaFile{}) :: map()
-  def url_map(%MediaFile{} = file) do
+  @doc """
+  Public CDN URLs for an asset (for webhook payloads and API receipts).
+
+  `opts` is threaded straight into `Urls.*` — in practice only
+  `:scope_prefix`. THAT ARGUMENT IS WHY THIS FUNCTION HAS AN ARITY-2 CLAUSE
+  (task-57ee9fff4aae9217 #11): with no prefix every entry here is the FLAT
+  `/media/files/...` path, and a flat media path 404s for a caller whose
+  request was resolved under `/w/:ws/p/:proj`. A receipt whose `cdnUrls.original`
+  cannot be fetched by the client that just uploaded the file is not a receipt.
+
+  Callers that have no request scope (the webhook payload in `Events`, the
+  `delivery.ex` delegate) keep calling the arity-1 form and get exactly the flat
+  URLs they got before — persisted webhook consumers are unaffected.
+  """
+  @spec url_map(%MediaFile{}, keyword()) :: map()
+  def url_map(%MediaFile{} = file, opts \\ []) do
     %{
-      original: public_url(Urls.original_url(file)),
-      thumbnail: public_url(Urls.thumbnail_url(file)),
-      preview: public_url(Urls.preview_url(file)),
+      original: public_url(Urls.original_url(file, opts)),
+      thumbnail: public_url(Urls.thumbnail_url(file, opts)),
+      preview: public_url(Urls.preview_url(file, opts)),
       renditions:
-        Map.new(Urls.rendition_urls(file), fn {preset, url} -> {preset, public_url(url)} end)
+        Map.new(Urls.rendition_urls(file, opts), fn {preset, url} -> {preset, public_url(url)} end)
     }
   end
 

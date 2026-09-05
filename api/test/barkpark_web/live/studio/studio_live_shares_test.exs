@@ -46,6 +46,24 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
   defp restore(key, nil), do: Application.delete_env(:barkpark, key)
   defp restore(key, value), do: Application.put_env(:barkpark, key, value)
 
+  # A REAL workspace the @admin token administers, for the declare/revoke happy
+  # paths. These used to name `gyldendal/default/production` — a slug with NO
+  # workspace row — which stopped being declarable when the Shares panel went
+  # fail-closed on an unresolvable workspace (lead-security 2026-09-02: a ghost
+  # share is an authorisation attached to a NAME, and whoever later registers
+  # that slug inherits a public exposure they never made). The happy path is now
+  # spelled on a workspace that EXISTS and that this actor genuinely administers,
+  # which also makes these tests exercise the foreign-but-authorized arm rather
+  # than a slug the clamp could never resolve.
+  defp declarable_scope!(admin_tok) do
+    n = System.unique_integer([:positive])
+    ws = create_workspace!("shares-happy-#{n}")
+    proj = create_project!(ws, "shares-happy-proj-#{n}")
+    {:ok, _} = TenancyAuth.create_membership(ws.id, admin_tok.id, "admin", "api_token")
+    assert TenancyAuth.workspace_admin?(admin_tok, ws.id)
+    {ws.slug, proj.slug, "#{ws.slug}/#{proj.slug}/#{@dataset}"}
+  end
+
   defp admin_view(conn) do
     conn
     |> init_test_session(%{"api_token" => @admin})
@@ -66,7 +84,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       assert html =~ ~s(phx-click="shares-open")
     end
 
-    test "opens the panel, adds a share live, then removes it", %{conn: conn} do
+    test "opens the panel, adds a share live, then removes it", %{
+      conn: conn,
+      admin_tok: admin_tok
+    } do
+      {ws, proj, scope} = declarable_scope!(admin_tok)
       {:ok, view, _html} = admin_view(conn)
 
       # Open via the real top-bar button.
@@ -76,22 +98,19 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       assert panel =~ "Active shares"
 
       # Add — registry was empty, the share goes live immediately.
-      refute Sharing.shared?("gyldendal", "default", "production", :papers)
+      refute Sharing.shared?(ws, proj, "production", :papers)
 
-      render_hook(view, "shares-add", %{
-        "scope" => "gyldendal/default/production",
-        "surfaces" => ["papers", "docs"]
-      })
+      render_hook(view, "shares-add", %{"scope" => scope, "surfaces" => ["papers", "docs"]})
 
-      assert Sharing.shared?("gyldendal", "default", "production", :papers)
-      assert Sharing.shared?("gyldendal", "default", "production", :docs)
+      assert Sharing.shared?(ws, proj, "production", :papers)
+      assert Sharing.shared?(ws, proj, "production", :docs)
       # access is pinned to read until the edit path (P5) lands.
-      assert Sharing.access_for("gyldendal", "default", "production") == :read
-      assert render(view) =~ "gyldendal/default/production"
+      assert Sharing.access_for(ws, proj, "production") == :read
+      assert render(view) =~ scope
 
       # Remove.
-      render_hook(view, "shares-remove", %{"scope" => "gyldendal/default/production"})
-      refute Sharing.shared?("gyldendal", "default", "production", :papers)
+      render_hook(view, "shares-remove", %{"scope" => scope})
+      refute Sharing.shared?(ws, proj, "production", :papers)
     end
 
     test "rejects an invalid scope without crashing the panel", %{conn: conn} do
@@ -142,7 +161,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
     # The surfaces picker is the last naked native control in Studio: it must
     # ride the bp_checkbox kit (label.form-checkbox) while keeping the exact
     # surfaces[] form-param semantics the shares-add handler decodes into a list.
-    test "surfaces picker renders bp_checkbox kit markup with surfaces[] params", %{conn: conn} do
+    test "surfaces picker renders bp_checkbox kit markup with surfaces[] params", %{
+      conn: conn,
+      admin_tok: admin_tok
+    } do
+      {ws, proj, scope} = declarable_scope!(admin_tok)
       {:ok, view, _html} = admin_view(conn)
       view |> element("button[phx-click=shares-open]") |> render_click()
 
@@ -163,14 +186,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
 
       # Param shape is byte-preserved: name="surfaces[]" is what makes Phoenix
       # collect the checked boxes into a list the shares-add handler consumes.
-      render_hook(view, "shares-add", %{
-        "scope" => "gyldendal/default/production",
-        "surfaces" => ["papers", "media"]
-      })
+      render_hook(view, "shares-add", %{"scope" => scope, "surfaces" => ["papers", "media"]})
 
-      assert Sharing.shared?("gyldendal", "default", "production", :papers)
-      assert Sharing.shared?("gyldendal", "default", "production", :media)
-      refute Sharing.shared?("gyldendal", "default", "production", :docs)
+      assert Sharing.shared?(ws, proj, "production", :papers)
+      assert Sharing.shared?(ws, proj, "production", :media)
+      refute Sharing.shared?(ws, proj, "production", :docs)
     end
   end
 
@@ -247,6 +267,31 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
                Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper")
 
       refute is_nil(revoked)
+    end
+
+    # Edit-on-the-link slice 3 (task-8ac4f3918da1c433): the popover gained the
+    # second access level. Both buttons land on the SAME handler and the same
+    # `Links.create/1`; only `phx-value-access` differs.
+    test "the popover offers BOTH access levels and mints an edit link", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref-type" => "paper",
+        "ref-id" => "demo-paper",
+        "title" => "Demo Paper"
+      })
+
+      panel = render(view)
+      assert panel =~ "Create view link"
+      assert panel =~ "Create edit link"
+
+      ws = Barkpark.Tenancy.get_default_workspace()
+
+      render_hook(view, "item-share-create", %{"access" => "edit"})
+
+      assert [%{access: "edit"}] =
+               Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper")
     end
 
     test "the per-paper Share button targets item-share, NOT the section modal", %{conn: conn} do

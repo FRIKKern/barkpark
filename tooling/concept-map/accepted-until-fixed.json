@@ -1,0 +1,12 @@
+{
+  "note": "ACCEPTED-UNTIL-FIXED \u2014 a TRIPWIRE, not an allowlist. Each entry names ONE boundary identity that ci-boundary.mjs would otherwise red, and the bp task row that owes the fix. The entries exist so the gate can be BLOCKING today without pretending the debt is gone. Three arms make the list decay rather than accumulate: (a) any identity NOT listed still reds \u2014 the never-worse arm; (b) a listed row that is done/cancelled while its identity is STILL present reds, naming the row (someone closed the row without paying the debt); (c) a listed identity that has DISAPPEARED reds with 'HEALED: delete entry X' \u2014 the entry must be deleted in the same PR that pays the edge down. An entry without a `row` is REFUSED by the loader: an acceptance with nobody on the hook is an allowlist. Adding an entry is a review decision, and the durable fix is a SHORTER list, never a longer one.",
+  "entries": [
+    {
+      "identity": "portable_doc>papers",
+      "dimension": "wrongDirection",
+      "row": "task-9d06bca37668f76a",
+      "intent": "kernel concept portable_doc reaches feature papers. Accepted while the row untangles the PortableDoc <-> Papers direction; the gate stays blocking meanwhile.",
+      "since": "2026-09-05"
+    }
+  ]
+}

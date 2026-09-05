@@ -1,0 +1,1 @@
+The rendered census DISCLOSES the gap rather than hiding it: the per-cause deferral rows are unchanged and the new term names its own population and the six-row difference. The PR body pastes the rendered `-o table` bytes.

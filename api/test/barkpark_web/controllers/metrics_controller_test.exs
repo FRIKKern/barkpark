@@ -10,7 +10,7 @@ defmodule BarkparkWeb.MetricsControllerTest do
   tenant's write/search/publish/media volume. The tier arms below are what
   would catch a revert.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
 

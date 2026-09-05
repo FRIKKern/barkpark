@@ -1,0 +1,1 @@
+MUTATION PROOF: emitting a census key named `in_flight` with no DeployCensus tag now REDs. Paste the RED — on main today that exact mutation passes at 11/0

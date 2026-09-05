@@ -242,6 +242,21 @@ func tinkerRequest(out *writer, method, u string, headers map[string]string, bod
 		}
 		return
 	}
+	// The REPL's `mutate` is a WRITE, and out.renderRaw over an empty 200
+	// printed NOTHING and dropped straight back to the prompt — which in a REPL
+	// reads as "it worked".
+	//
+	// GATED ON THE METHOD, and that gate is load-bearing: tinkerRequest is
+	// SHARED with `query` and `doc`, and the write verdict refuses an empty JSON
+	// array. An honest query that matches nothing answers exactly `[]`, so
+	// screening the reads here would turn "no rows" into a refusal — the read
+	// arm of the fence is a DIFFERENT predicate (unreadableReadPage) and is not
+	// this task's seam.
+	if method != "GET" && method != "HEAD" {
+		if _, handled := screenBuiltinWriteReceipt(out, "tinker "+strings.ToLower(method), status, respBody); handled {
+			return
+		}
+	}
 	out.renderRaw(respBody)
 }
 

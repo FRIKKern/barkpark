@@ -1,0 +1,1 @@
+A revoke route exists and is reachable by the principal that minted the token, with a test proving a revoked token is refused on a route it previously read.

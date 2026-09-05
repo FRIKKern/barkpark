@@ -424,6 +424,7 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
     view
     |> render()
     |> scope_sidebar()
+    |> sort_attrs()
     |> slice_stamps()
   end
 
@@ -433,6 +434,44 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
     |> Enum.at(1, "")
     |> String.split("</aside>")
     |> List.first()
+  end
+
+  # ── Attribute-ORDER normalisation (the offset-723 flake) ───────────────────
+  #
+  # Phoenix prints a component's `:global` attributes by walking the `@rest`
+  # MAP, and Erlang does not promise a map's iteration order — for a small map
+  # it follows the internal ordering of the keys, which for atoms depends on
+  # the order this VM happened to intern them. A `mix test` invocation that
+  # also COMPILES the app interns its atoms in a different order than one that
+  # runs against a warm `_build`, so the New-chat `<.link>` prints
+  #
+  #     class="btn btn-primary text-xs" style="display: inline-flex; …"
+  #
+  # on one boot and those same two attributes SWAPPED on the next — identical
+  # attribute set, identical values, identical byte COUNT, first difference at
+  # offset 723. Nothing about the render moved; only the order two attributes
+  # were emitted in. That is the whole of this file's historical flake (the
+  # region and the golden were always 6554 bytes).
+  #
+  # So: sort every element's attributes before the compare. The byte-lock keeps
+  # pinning the attribute SET and every attribute VALUE, byte for byte; the one
+  # thing it stops pinning is the intra-tag ORDER, which is not the render's to
+  # promise. Runs BEFORE slice_stamps/1, which matches on a class⊕style pair.
+  defp sort_attrs(html) do
+    Regex.replace(
+      ~r/<([a-zA-Z][-\w]*)((?:\s+[-\w:@.]+(?:="[^"]*")?)+)(\s*\/?)>/,
+      html,
+      fn _full, tag, attrs, tail ->
+        sorted =
+          ~r/[-\w:@.]+(?:="[^"]*")?/
+          |> Regex.scan(attrs)
+          |> Enum.map(&hd/1)
+          |> Enum.sort()
+          |> Enum.join(" ")
+
+        "<" <> tag <> " " <> sorted <> tail <> ">"
+      end
+    )
   end
 
   # Both stamp spans (session row + needs-you strip row) share the exact
@@ -502,7 +541,7 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
       |> String.split(~s(<div class="studio-footer"))
       |> List.first()
 
-    transcript <> "\n<!--rail-->\n" <> rail
+    sort_attrs(transcript <> "\n<!--rail-->\n" <> rail)
   end
 
   defp load_transcript(name) do

@@ -84,7 +84,7 @@ permissions:
   # one.
 
 concurrency:
-  group: breakglass-watch-${{ github.ref }}
+  group: breakglass-watch-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the watch dark.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 

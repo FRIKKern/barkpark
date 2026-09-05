@@ -1,0 +1,1 @@
+Both numbers are derived and reported by the same command: the absolute LIVE count under the epic AND the wave-attributable delta (rows closed by the wave minus rows filed by the wave, keyed on inserted_at against the wave's own start timestamp). Evidence: the command and its output on a real wave.

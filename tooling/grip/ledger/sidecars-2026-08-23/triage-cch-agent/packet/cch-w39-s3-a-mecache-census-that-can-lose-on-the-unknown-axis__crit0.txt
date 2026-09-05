@@ -1,0 +1,1 @@
+The census's SUBJECT is every meCache read cleared only by a meState()/meLoaded/meError branch in the enclosing named function — not a two-valued syntax. Prove it flags the by-ARGUMENT shape by showing a fixture function that folds on a parameter is handled per its written policy row.

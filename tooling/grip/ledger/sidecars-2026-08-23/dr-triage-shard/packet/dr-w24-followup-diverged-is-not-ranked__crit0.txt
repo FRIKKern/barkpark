@@ -1,0 +1,1 @@
+A charter decision states whether commit_ancestry diverged ranks, and where.

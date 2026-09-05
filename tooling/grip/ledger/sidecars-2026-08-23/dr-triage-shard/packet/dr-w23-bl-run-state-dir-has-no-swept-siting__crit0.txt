@@ -1,0 +1,1 @@
+Any durable record sited in the run-state dir is either covered by a sweep with a stated bound, or carries a written ruling that it is intentionally unbounded with its growth rate measured.

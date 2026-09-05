@@ -1,0 +1,1 @@
+Cleanup happens after the child is reaped rather than merely after Port.close - shown by the diff.

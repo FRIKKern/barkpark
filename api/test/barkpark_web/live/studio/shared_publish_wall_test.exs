@@ -179,6 +179,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedPublishWallBulkTest do
   alias Barkpark.Content.DraftId
 
   @dataset "production"
+  @admin_token "publish-wall-admin"
 
   setup do
     {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
@@ -232,8 +233,23 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedPublishWallBulkTest do
     :ok
   end
 
+  # `bulk-publish` is an ADMIN-tier Caps event
+  # (arpss-schema-action-write-tier-ruling) and the :admin tier is enforced on
+  # EVERY Studio socket, including the anonymous public-demo one. This suite is
+  # about the publish wall accounting, not the gate, so it mounts an admin principal.
+  defp admin_conn(conn) do
+    {:ok, _} =
+      Barkpark.Auth.create_token(@admin_token, "publish wall admin", @dataset, [
+        "read",
+        "write",
+        "admin"
+      ])
+
+    Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
+  end
+
   test "a bulk publish counts wall rejections as WALLED, never 'N failed'", %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task"))
+    {:ok, view, _html} = live(admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/task"))
 
     _ = render_click(view, "toggle-doc-checkbox", %{"id" => "wall-bulk-a"})
     _ = render_click(view, "toggle-doc-checkbox", %{"id" => "wall-bulk-b"})

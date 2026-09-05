@@ -1,0 +1,1 @@
+The fixture live_key_set is 15 and every scenario row carries all fifteen; no pending_key_set clause is re-minted.

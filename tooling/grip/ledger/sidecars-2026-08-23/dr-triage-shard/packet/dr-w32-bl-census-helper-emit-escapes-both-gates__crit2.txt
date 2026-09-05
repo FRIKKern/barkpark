@@ -1,0 +1,1 @@
+The deliberate-escape comment at deploy_ledger.ex:1573-1581 is removed or rewritten, since the convenience it describes no longer exists.

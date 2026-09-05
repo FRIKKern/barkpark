@@ -78,14 +78,9 @@ defmodule BarkparkWeb.ShareLinkRouteBindingOneOwnerTest do
   @share_token_key "scoped_share_token"
 
   setup %{conn: conn} do
-    prior_shares = Application.get_env(:barkpark, :shares)
-    Application.delete_env(:barkpark, :shares)
-
-    on_exit(fn ->
-      if is_nil(prior_shares),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior_shares)
-    end)
+    # arpss-w8: refresh-proof Default-OFF baseline — clears the env baseline AND
+    # every STORED row, and restores :shares + :shares_env on exit.
+    Barkpark.SharingFixtures.clear_shares!()
 
     # A NON-default workspace: the seeded Default is an open public demo in
     # test, which would grant every read below for the wrong reason.
@@ -166,8 +161,9 @@ defmodule BarkparkWeb.ShareLinkRouteBindingOneOwnerTest do
 
     link =
       Repo.insert!(%ShareLink{
+        # Only the digest — the plaintext column was retired
+        # (arpss-w8-bl-share-link-raw-token-at-rest); `resolve/1` matches the hash.
         token_hash: Links.hash_token(raw),
-        token: raw,
         workspace_id: ws.id,
         project_id: proj.id,
         dataset: @dataset,

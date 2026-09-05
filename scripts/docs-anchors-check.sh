@@ -127,7 +127,7 @@ st_case() {
     ST_FAIL=1
     return
   fi
-  if ! printf '%s\n' "$out" | grep -qF "$needle"; then
+  if ! printf '%s\n' "$out" | grep -cF "$needle" >/dev/null; then
     echo "SELFTEST FAIL: $name — exit $rc as expected but output lacks: $needle"
     printf '%s\n' "$out" | sed 's/^/    | /'
     ST_FAIL=1
@@ -444,7 +444,7 @@ HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ 
 header_line() {
   local f="$1" first
   first=$(head -n 1 "$f")
-  if printf '%s\n' "$first" | grep -Eq "$HEADER_RE"; then
+  if printf '%s\n' "$first" | grep -Ec "$HEADER_RE" >/dev/null; then
     printf '%s\n' "$first"
     return 0
   fi
@@ -620,7 +620,7 @@ HEADER_FILES=$(
 )
 for f in $HEADER_FILES; do
   h=$(header_line "$f")
-  if printf '%s\n' "$h" | grep -Eq "$HEADER_RE"; then
+  if printf '%s\n' "$h" | grep -Ec "$HEADER_RE" >/dev/null; then
     echo "ok:   header $f"
   else
     fail "$f missing G1 doc-tier header (<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->)"
@@ -658,7 +658,7 @@ fi
 echo "== ARCHIVED banners (_attic/docs-2026-06/) =="
 if [ -d "_attic/docs-2026-06" ]; then
   find _attic/docs-2026-06 -name '*.md' | while IFS= read -r f; do
-    if head -n 1 "$f" | grep -q '^ARCHIVED'; then
+    if head -n 1 "$f" | grep -c '^ARCHIVED' >/dev/null; then
       echo "ok:   banner $f"
     else
       echo "FAIL: $f first line must start with 'ARCHIVED — do not load' (G3)"
@@ -879,7 +879,7 @@ canon_scan() {
       *.js) pubentry_pat='^[[:space:]]*(def |func |export |function )' ;;
       *)    pubentry_pat='^[[:space:]]*(def |func |export )' ;;
     esac
-    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE "$pubentry_pat"; then
+    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -cE "$pubentry_pat" >/dev/null; then
       echo "OK $cf:$cl $slug"
       # WHICH symbol the marker actually landed on — the 8b pin's payload.
       # "a public def within 6 lines" is an EXISTENCE test, and an inserted def
@@ -917,7 +917,7 @@ CANON_N=$(printf '%s\n' "$CANON_OUT" | grep -cE '^(OK|PRIVATE) ' || true)
 { printf '%s\n' "$CANON_OUT" | grep '^DUP ' || true; } | while IFS=' ' read -r _ d; do
   echo "FAIL: @canonical capability:$d claimed by >1 impl (a copy-paste that kept the marker?)"
 done
-if printf '%s\n' "$CANON_OUT" | grep -q '^DUP '; then FAIL=1; else echo "ok:   @canonical capability slugs unique"; fi
+if printf '%s\n' "$CANON_OUT" | grep -c '^DUP ' >/dev/null; then FAIL=1; else echo "ok:   @canonical capability slugs unique"; fi
 
 printf '%s\n' "$CANON_OUT" | grep '^OK ' | sed 's/^OK /ok:   /' | sed 's/ \([A-Za-z0-9._-]*\)$/ capability:\1/' || true
 { printf '%s\n' "$CANON_OUT" | grep '^PRIVATE ' || true; } | while IFS=' ' read -r _ loc slug; do
@@ -926,7 +926,7 @@ done
 { printf '%s\n' "$CANON_OUT" | grep '^DOCMISS ' || true; } | while IFS=' ' read -r _ slug dp; do
   echo "FAIL: @canonical capability:$slug doc: points at a missing doc: $dp"
 done
-if printf '%s\n' "$CANON_OUT" | grep -qE '^(PRIVATE|DOCMISS) '; then FAIL=1; fi
+if printf '%s\n' "$CANON_OUT" | grep -cE '^(PRIVATE|DOCMISS) ' >/dev/null; then FAIL=1; fi
 
 # Stated out loud, every run. Zero is a LEGITIMATE result — CLAUDE.md says
 # markers are demand-driven and get removed as dedup lands — so this reports the
@@ -1085,7 +1085,7 @@ COLD_BAD=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   # Tier lives on line 1 by contract ("First line of every active doc").
-  head -1 "$f" 2>/dev/null | grep -q 'doc-tier: *cold' || continue
+  head -1 "$f" 2>/dev/null | grep -c 'doc-tier: *cold' >/dev/null || continue
   awk -v verbs="$CMD_VERBS" '
     BEGIN { inf = 0; runnable = 0 }
     /^[[:space:]]*```/ {
@@ -1105,7 +1105,7 @@ while IFS= read -r f; do
   COLD_N=$((COLD_N + 1))
   # The banner must be near the top — a reader who opens the file sees it before
   # the first fence. Ten lines covers "marker, blank, H1, blank, banner" with room.
-  if ! head -10 "$f" | grep -q '^> HISTORICAL RECORD ('; then
+  if ! head -10 "$f" | grep -c '^> HISTORICAL RECORD (' >/dev/null; then
     COLD_BAD="$COLD_BAD $f"
   fi
 done <<COLDEOF
@@ -1204,7 +1204,7 @@ else
       FAIL=1
     else
       for auth_p in $AUTH_ADMIN_PIPELINES; do
-        if printf '%s\n' "$AUTH_SECTION" | grep -qF ":$auth_p"; then
+        if printf '%s\n' "$AUTH_SECTION" | grep -cF ":$auth_p" >/dev/null; then
           echo "ok:   §11 admin pipeline :$auth_p is documented"
         else
           echo "FAIL: §11 router pipeline :$auth_p plugs RequireAdmin but '$AUTH_SECTION_HEADING'" \
@@ -1215,7 +1215,7 @@ else
       done
       echo "ok:   §11 derived $AUTH_ADMIN_N RequireAdmin pipeline(s) from $AUTH_ROUTER"
       for auth_d in $(printf '%s\n' "$AUTH_SECTION" | grep -oE ':[a-z][a-z0-9_]*' | sed 's/^://' | sort -u); do
-        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -qx "$auth_d"; then
+        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -cx "$auth_d" >/dev/null; then
           echo "ok:   §11 documented :$auth_d still exists in the router"
         else
           echo "FAIL: §11 $AUTH_DOC documents pipeline :$auth_d, which $AUTH_ROUTER no longer defines." \
@@ -1262,6 +1262,44 @@ else
     echo "ok:   §9 documented rosters match the code"
   else
     echo "FAIL: §9 a documented roster no longer matches the code (rc=$ROSTER_RC, see above)"
+    FAIL=1
+  fi
+fi
+
+echo ""
+echo "== §10 in-place bp copy recipes =="
+# Delegated exactly as §9 above, and for the same reason: the rc is captured
+# BEFORE any formatting, because `cmd | sed` reports sed's exit code unless
+# pipefail happens to be set, and a gate whose red is laundered by its own
+# pretty-printer is worse than no gate.
+#
+# It also needs §9's TWO guards, and shipped with neither. A delegating arm
+# resolves its script through $REPO_ROOT, and under --selftest $REPO_ROOT is the
+# FIXTURE — a four-file tree with no scripts/ directory — so the invocation was
+# "no such file", rc=127, and every selftest case that expects a clean exit 0
+# red. That is not a gate catching anything: it is an arm that CANNOT pass,
+# which reds the job on every PR and teaches the repo to stop reading it.
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO — same precedent as §8b and §9.
+  echo "ok:   §10 in-place bp copy check not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -x "$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" ]; then
+  # The skip above is scoped to a custom root ON PURPOSE. On the real tree a
+  # missing or non-executable delegate is a REAL fault — a tripwire that has
+  # been deleted, or lost its +x, still reads as "no recipe found" if you let
+  # this fall through to ok. Silence is the failure mode this whole arm exists
+  # to prevent, so it is a red, not a skip.
+  echo "FAIL: §10 scripts/no-inplace-bp-copy-check.sh is missing or not executable"
+  FAIL=1
+else
+  set +e
+  BPCP_OUT=$("$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" 2>&1)
+  BPCP_RC=$?
+  set -e
+  printf '%s\n' "$BPCP_OUT" | sed 's/^/      /'
+  if [ "$BPCP_RC" -eq 0 ]; then
+    echo "ok:   §10 no in-place bp copy recipe on this tree"
+  else
+    echo "FAIL: §10 an in-place bp copy recipe is present (rc=$BPCP_RC, see above)"
     FAIL=1
   fi
 fi

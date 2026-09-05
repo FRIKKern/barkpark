@@ -1,0 +1,1 @@
+If built, 'shipped stale' is reported as its own outcome and never folded into 'abandoned'. Evidence: a test over the five known stale-shipping runs.

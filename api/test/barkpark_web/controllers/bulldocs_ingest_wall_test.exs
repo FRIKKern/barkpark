@@ -7,7 +7,7 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
   body_html), so an honest producer can pass the wall it is now held to.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures

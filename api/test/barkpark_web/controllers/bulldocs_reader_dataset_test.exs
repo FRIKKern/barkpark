@@ -1,5 +1,5 @@
 defmodule BarkparkWeb.BulldocsReaderDatasetTest do
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures

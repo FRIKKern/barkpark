@@ -1,0 +1,1 @@
+The verifier carve-out is narrowly worded - write ONE file under tooling/grip/ledger/ via ledger.mjs, no commits, no other path - evidence: the amended prompt text quoted in full

@@ -179,7 +179,10 @@ export const Figure = Node.create({
       // Restore the reader figure margin (figure_html article margin:1.6rem 0),
       // overriding the .bp-canvas-readonly 1em; also set inline so it holds before
       // the stylesheet loads.
-      dom.style.margin = "1.6rem 0";
+      dom.style.margin = "var(--bp-air-figure, 1.6rem) 0 0";
+      dom.style.marginInline = "var(--bp-evidence-pull, 0px)";
+      dom.style.width = "var(--bp-evidence-width, 100%)";
+      dom.style.boxSizing = "border-box";
 
       // The CHILD paint hole: a `.bp-paper-surface` sink (the injected reader HTML is
       // styled by the ONE canonical stylesheet exactly as /papers renders it — D8),
@@ -205,8 +208,11 @@ export const Figure = Node.create({
       // fallback name, and it is invisible while the control is hidden).
       captionInput.setAttribute("aria-label", "figure caption");
       captionInput.setAttribute("contenteditable", "false");
-      // Inline styles mirroring the reader <figcaption> inline styles (compose.ex
-      // figure_html:924) + an input reset. The stylesheet carries the same values via
+      // Inline styles mirroring the reader <figcaption>, which since
+      // papers/captions-floor is styled by ONE class (.bp-figcaption in
+      // paper-surface.css) rather than by inline styles: serif, ROMAN, 0.9rem/1.45,
+      // --paper-ink-soft. An <input> inherits none of that, so the values are copied
+      // here + an input reset. The stylesheet carries the same values via
       // .bp-canvas-figure-caption-input; the inline copy holds before CSS loads.
       captionInput.style.display = "block";
       captionInput.style.width = "100%";
@@ -216,10 +222,10 @@ export const Figure = Node.create({
       captionInput.style.padding = "0";
       captionInput.style.margin = "0";
       captionInput.style.color = "var(--paper-ink-soft, #6a6a6a)";
-      captionInput.style.fontStyle = "italic";
       captionInput.style.fontSize = "0.9rem";
+      captionInput.style.lineHeight = "1.45";
       captionInput.style.fontFamily =
-        "system-ui, -apple-system, 'SF Pro Text', sans-serif";
+        "var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif)";
       figcaption.appendChild(captionInput);
       dom.appendChild(figcaption);
 
@@ -289,34 +295,44 @@ export const Figure = Node.create({
       // ONLY the attr (the node stays the same atom in the same place), so onUpdate →
       // run-convert emits ONE patch-block{caption}. The child is NEVER touched.
       let writeTimer = null;
+      const commitCaptionWrite = () => {
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        // Empty string → null so an absent caption round-trips as ABSENT (the
+        // canonical compare treats ""/null/absent equal → a no-op edit emits nothing).
+        const raw = captionInput.value;
+        const nextCaption = raw === "" ? null : raw;
+        if ((cur.attrs.caption || null) === nextCaption) return;
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, caption: nextCaption });
+            return true;
+          })
+          .run();
+      };
       const scheduleWrite = () => {
         if (!editor.isEditable) return;
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur) return;
-          // Empty string → null so an absent caption round-trips as ABSENT (the
-          // canonical compare treats ""/null/absent equal → a no-op edit emits nothing).
-          const raw = captionInput.value;
-          const nextCaption = raw === "" ? null : raw;
-          if ((cur.attrs.caption || null) === nextCaption) return; // nothing changed
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, { ...cur.attrs, caption: nextCaption });
-              return true;
-            })
-            .run();
+          commitCaptionWrite();
         }, DEBOUNCE_MS);
+      };
+      const flushCaptionWrite = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitCaptionWrite();
       };
 
       captionInput.addEventListener("input", scheduleWrite);
       // Keep the resting-chrome gate in step as the caption is typed / cleared.
       captionInput.addEventListener("input", syncChrome);
+      dom.addEventListener("bp-flush-node", flushCaptionWrite);
 
       return {
         dom,
@@ -343,6 +359,7 @@ export const Figure = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          dom.removeEventListener("bp-flush-node", flushCaptionWrite);
           captionInput.removeEventListener("input", scheduleWrite);
           captionInput.removeEventListener("input", syncChrome);
           dom.removeEventListener("mouseenter", onEnter);

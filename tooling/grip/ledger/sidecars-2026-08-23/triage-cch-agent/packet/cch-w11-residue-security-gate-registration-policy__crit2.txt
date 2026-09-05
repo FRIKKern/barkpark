@@ -1,0 +1,1 @@
+The decision is executed one way or the other: either Security gate is registered (and the S7 entry + required-checks.test.sh section 17 are retired in the same diff, with the section replaced by one asserting it IS required), or the S7 entry's reason is updated to say the policy was written and the answer was still no.

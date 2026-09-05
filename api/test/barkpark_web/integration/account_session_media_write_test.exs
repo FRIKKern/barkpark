@@ -160,7 +160,7 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
       assert is_binary(file_id), "no file id in #{upload.resp_body}"
 
       patched =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{})
         |> then(fn c -> elem(account_session!(c, ws, "member"), 1) end)
         |> put_req_header("x-requested-with", "bp-media-picker")
@@ -239,7 +239,7 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
       assert is_binary(file_id), "no file id in #{upload.resp_body}"
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{})
         |> then(fn c -> elem(account_session!(c, ws, "member"), 1) end)
         |> put_req_header("x-requested-with", "bp-media-picker")

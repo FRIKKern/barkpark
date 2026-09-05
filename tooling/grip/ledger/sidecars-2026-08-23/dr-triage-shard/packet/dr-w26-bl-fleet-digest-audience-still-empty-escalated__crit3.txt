@@ -1,0 +1,1 @@
+The 2026-08-08 outage is written up with its numbers (18 failed rows, 5 sites, 10:00:14Z-14:55:28Z, 3 causes) so the epic stops quoting a frozen numerator.

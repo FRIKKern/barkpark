@@ -1,0 +1,1 @@
+THE CUE TEST IS TIGHTENED so an ellipsis counts only when the element can paint one, and the diff is shown.

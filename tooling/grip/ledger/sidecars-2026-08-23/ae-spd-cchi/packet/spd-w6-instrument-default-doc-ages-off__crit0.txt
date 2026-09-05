@@ -1,0 +1,1 @@
+The instrument reaches its drill target without a hand-edited constant going stale, OR DEFAULT_DOC is refreshed and a run proves it resolves on attempt 1.

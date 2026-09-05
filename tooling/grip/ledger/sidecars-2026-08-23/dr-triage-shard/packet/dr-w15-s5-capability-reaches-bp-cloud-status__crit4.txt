@@ -1,0 +1,1 @@
+Both halves land in ONE PR: payload_key_set_census_test.exs shows barkpark_family_keys and barkpark_family_keys_blind BUMPED (exact equality) and NO floor lowered. Paste the diff of those four lines.

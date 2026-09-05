@@ -1,0 +1,1 @@
+A demand-class discriminator distinguishes a real customer publish from platform churn on the deployment row or on content_publishes, and a fixture proves it can misclassify (it is not a constant)

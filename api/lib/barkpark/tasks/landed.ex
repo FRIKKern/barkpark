@@ -127,9 +127,7 @@ defmodule Barkpark.Tasks.Landed do
         # interleave halfway through the criteria merge.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
 
-        # global-read: by-PK re-read inside the close-family advisory lock.
-        # Tenancy was resolved and authorized at the controller (doc_id →
-        # task.id), the Close/Stamp posture.
+        # global-read: by-PK re-read inside the close-family advisory lock — tenancy was resolved and authorized at the controller (doc_id → task.id), the Close/Stamp posture. (ONE LINE, directly above the read: tenant-scope-check.sh reads only the immediately-preceding line, so a wrapped justification reads as UNJUSTIFIED.)
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}

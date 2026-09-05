@@ -1,0 +1,1 @@
+`cd cloud && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_cloud/` and `CC=/usr/bin/clang go test ./internal/cli/ -count=1` are both green. Paste each total and exit code

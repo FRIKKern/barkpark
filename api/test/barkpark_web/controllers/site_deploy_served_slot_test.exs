@@ -85,7 +85,7 @@ defmodule BarkparkWeb.SiteDeployServedSlotTest do
     deadline = deadline || System.monotonic_time(:millisecond) + 15_000
 
     payload =
-      build_conn()
+      scoped_conn()
       |> admin_conn()
       |> get("/v1/admin/site-deploy", %{"slug" => slug})
       |> json_response(200)

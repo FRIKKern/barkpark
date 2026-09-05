@@ -1,0 +1,1 @@
+IT CAN LOSE: a row whose PR is open, or whose named gate is red on its head, is reported as NOT payable. Evidence: both cases from a real run.

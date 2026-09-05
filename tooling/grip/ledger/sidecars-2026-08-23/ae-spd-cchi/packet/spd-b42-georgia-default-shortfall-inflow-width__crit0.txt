@@ -1,0 +1,1 @@
+A deployed, bracketed instrument run shows the chosen change moves viewport 1280 and viewport 1024 forced Georgia to >=55ch in the DEFAULT state, with each ch figure naming face, font-size and probe-derived px/ch.

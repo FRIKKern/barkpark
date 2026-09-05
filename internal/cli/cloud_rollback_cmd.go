@@ -73,7 +73,7 @@ func runCloudRollback(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to roll an instance back", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to roll an instance back, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	id, rerr := resolveOpenBarkparkID(cfg, ref)

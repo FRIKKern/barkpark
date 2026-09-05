@@ -1,0 +1,1 @@
+Content token mint returns and the Site stores a non-secret token identifier alongside ciphertext, scoped to the exact workspace/project/dataset and never serialized to unauthorized readers.

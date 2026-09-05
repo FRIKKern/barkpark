@@ -1,0 +1,1 @@
+FAIL-BEFORE: a Go test asserting a details-carrying cloud 422 renders a per-field sentence is shown RED against origin/main (it prints the bare slug `invalid`) and GREEN after.

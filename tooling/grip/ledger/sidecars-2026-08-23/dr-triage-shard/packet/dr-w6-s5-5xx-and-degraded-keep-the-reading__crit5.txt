@@ -1,0 +1,1 @@
+`TestRunCloudStatusTableDetailColumn`'s now-false claim is repaired rather than deleted. Evidence: the amended fixture or companion test, with a sentence naming which assertion was kept and why (its original subject — a control-plane failure reason — is still correct).

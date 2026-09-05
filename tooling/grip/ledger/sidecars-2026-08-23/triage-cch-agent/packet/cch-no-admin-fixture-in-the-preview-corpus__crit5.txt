@@ -1,0 +1,1 @@
+Two FIXTURE_SHAPE_PINS are added for the two rosters and mutation-proved: a 4th member into teamMembers reds BY NAME at the top of the run naming the READER, not anonymously as 'got 3'. Evidence: the mutant run output.

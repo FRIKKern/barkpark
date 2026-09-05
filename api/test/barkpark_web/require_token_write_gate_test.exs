@@ -88,6 +88,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
   # string — `{"error": {"code": …}}`. A 403 whose body is a naked message is a
   # different contract and breaks every SDK that switches on `error.code`.
   defp assert_forbidden_envelope!(resp, label) do
+    refute_rate_limited!(resp)
+
     assert resp.status == 403,
            "#{label} answered #{resp.status} for a read-only token: #{resp.resp_body}"
 
@@ -222,6 +224,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
     } do
       resp = conn |> authed(read) |> get("/api/workspaces")
 
+      refute_rate_limited!(resp)
+
       assert resp.status == 200,
              "GET /api/workspaces answered #{resp.status} for a read token — the " <>
                "gate must pass safe methods through untouched"
@@ -239,6 +243,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
         |> authed(write)
         |> post("/api/workspaces", Jason.encode!(%{slug: slug, name: "gate probe ok"}))
 
+      refute_rate_limited!(resp)
+
       assert resp.status == 201, "write token was refused: #{resp.status} #{resp.resp_body}"
       assert Tenancy.get_workspace_by_slug(slug)
     end
@@ -252,6 +258,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
         })
 
       resp = conn |> authed(write) |> post("/v1/access", body)
+
+      refute_rate_limited!(resp)
 
       assert resp.status == 201, "write token was refused: #{resp.status} #{resp.resp_body}"
     end
@@ -284,6 +292,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
           Jason.encode!(%{slug: uniq("nope"), name: "nope"})
         )
 
+      refute_rate_limited!(resp)
+
       assert resp.status == 403,
              "a non-member write token got #{resp.status} — the membership check " <>
                "must still run after the write gate passes it: #{resp.resp_body}"
@@ -301,6 +311,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
           Jason.encode!(%{slug: uniq("nope"), name: "nope"})
         )
 
+      refute_rate_limited!(resp)
+
       assert resp.status == 404, "unknown slug answered #{resp.status}: #{resp.resp_body}"
     end
   end
@@ -314,6 +326,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
   describe "self-service routes stay open to a read-only token" do
     test "DELETE /v1/auth/app-tokens/current still self-revokes", %{conn: conn, read: read} do
       resp = conn |> authed(read) |> delete("/v1/auth/app-tokens/current")
+
+      refute_rate_limited!(resp)
 
       assert resp.status == 200,
              "a read-only token could not self-revoke (#{resp.status}) — possession " <>
@@ -332,6 +346,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
       read: read
     } do
       resp = conn |> authed(read) |> post("/v1/auth/login-tickets", Jason.encode!(%{}))
+
+      refute_rate_limited!(resp)
 
       assert resp.status == 201,
              "a read-only token could not mint its OWN login ticket (#{resp.status}) — " <>
@@ -362,6 +378,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
       for {label, call} <- probes do
         resp = call.(authed(conn, read))
 
+        refute_rate_limited!(resp)
+
         assert resp.status == 401,
                "#{label} answered #{resp.status} for a read-only bearer — the write " <>
                  "gate must defer to the controller's stronger admin check here, or " <>
@@ -376,6 +394,8 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
         conn
         |> authed(read)
         |> post("/v1/auth/login-tickets", Jason.encode!(%{email: "someone@example.test"}))
+
+      refute_rate_limited!(resp)
 
       assert resp.status == 401, "read token minted a USER-shaped ticket: #{resp.resp_body}"
     end

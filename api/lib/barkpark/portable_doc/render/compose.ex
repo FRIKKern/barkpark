@@ -491,7 +491,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # the extractor and Mermaid decodes it at runtime.
   #
   # In article mode: a bordered, parchment, inset figure card (mirrors doc.css
-  # `figure`); the figcaption is muted/italic with a bold "Figure N." run-in.
+  # `figure`); the figcaption carries a bold "Figure N." run-in and is styled by
+  # the ONE `.bp-figcaption` class (paper-surface.css) the diagram/asciicast
+  # emitters in figures.ex share.
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
   # CONTENTLESS DIAGRAM (the empty-chrome invariant — see `blank_field?/2`): a
@@ -2477,7 +2479,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # bold-title PdText, inner children via compose_block, trailing PdHr, wrapped in
   # a flex-column PdBox. BYTE-IDENTICAL to the pre-layout engine.
   defp compose_section_stack(b, style) do
-    leading = [%{"kind" => "PdHr"}]
+    blocks = Map.get(b, "blocks", [])
 
     title =
       case Map.get(b, "title") do
@@ -2485,9 +2487,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
       end
 
-    inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
+    inner = Enum.map(blocks, &compose_block(&1, style))
 
-    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+    # A section that OPENS with a heading (and carries no title of its own) draws
+    # no rule pair in article mode: the heading IS the boundary, and the
+    # section-head device in paper-surface.css (`… > div:not([class]) >
+    # h2:first-child`) gives it the beat + rule. Before this, such a section drew
+    # a hairline, then the heading's own rule, then a trailing hairline the NEXT
+    # heading's rule duplicated — three lines for one boundary. A titled or
+    # heading-less section keeps the pair (the bold title needs the rule above it
+    # to read as a head); email/default mode keeps it unconditionally, having no
+    # stylesheet to carry a head.
+    children =
+      if style == :article and title == [] and opens_with_heading?(blocks) do
+        inner
+      else
+        [%{"kind" => "PdHr"}] ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+      end
+
     box = %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
 
     # Section-frame hook (charter D19): variant=="framed" stamps a top-level
@@ -2531,6 +2548,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # a malformed non-map `layout` value can never raise here.
   defp grid_layout(%{"layout" => %{"mode" => "grid"} = layout}), do: layout
   defp grid_layout(_), do: nil
+
+  # The stack's "the heading carries the boundary" test: true when the section's
+  # FIRST block is a heading of any level (the CSS device fires on h2 only, but a
+  # section opening with an h3 has no business drawing a hairline above it either).
+  defp opens_with_heading?([%{"type" => "heading"} | _]), do: true
+  defp opens_with_heading?(_), do: false
 
   # The grid section render: a `_raw` HTML node the walker passes through
   # verbatim. Shape mirrors the stack reader's chrome (leading rule, optional
@@ -2812,7 +2835,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     eyebrow =
       if ref.eyebrow,
         do:
-          ~s|<span style="display:block;margin-bottom:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(ref.eyebrow)}</span>|,
+          ~s|<span style="display:block;margin-bottom:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(ref.eyebrow)}</span>|,
         else: ""
 
     description = paper_link_description(ref.description)
@@ -2823,7 +2846,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       eyebrow <>
       ~s|<strong style="display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
       description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.7rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+      ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
       ~s(</a>)
   end
 
@@ -2838,10 +2861,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.join(" · ")
 
     ~s|<a data-paper-link-card data-timeline-stop href="#{href}" style="display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
-      ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.7rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
+      ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
       ~s|<strong style="display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
       description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.68rem;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(status)} &nbsp;→</span>| <>
+      ~s|<span style="display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(status)} &nbsp;→</span>| <>
       ~s(</a>)
   end
 
@@ -2901,7 +2924,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         ""
 
       parts ->
-        ~s|<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(Enum.join(parts, " · "))}</span>|
+        ~s|<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(Enum.join(parts, " · "))}</span>|
     end
   end
 
@@ -2967,7 +2990,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
             if caption == "",
               do: "",
               else:
-                ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{Figures.figcaption_inner(caption)}</figcaption>|
+                ~s|<figcaption class="bp-figcaption">#{Figures.figcaption_inner(caption)}</figcaption>|
 
           {~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">|,
            c}

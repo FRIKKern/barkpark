@@ -1,0 +1,1 @@
+GATE: `CC=clang go build ./... && CC=clang go test ./internal/builder/...` — noting that internal/** trips ZERO required contexts (dr-bl-internal-tree-has-no-blocking-gate), so this gate is advisory.

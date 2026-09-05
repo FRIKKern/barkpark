@@ -1,0 +1,1 @@
+__app.test.mjs asserts the console vocabulary against cloud/priv/static/__fixtures__/attention_order.json, so the fixture is once again a CROSS-surface tripwire rather than a Go-only pin. Evidence: the new test, mutation-proven by editing one fixture rank.

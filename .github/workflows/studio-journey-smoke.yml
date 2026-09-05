@@ -81,7 +81,7 @@ on:
         default: "https://guerrilla.barkpark.cloud"
 
 concurrency:
-  group: studio-journey-smoke-${{ github.ref }}
+  group: studio-journey-smoke-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

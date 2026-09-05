@@ -1,0 +1,1 @@
+A human has confirmed no dependency on the search-ember and search-capstone hostnames before anything is retired.

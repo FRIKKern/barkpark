@@ -264,6 +264,7 @@ HUMAN-GATE'
 PDS_DOOR_COMPUTED_BANDS='THROUGH
 IN-BEAM-REQUIRED
 DEAD-DECLARATION
+LIBRARY-MODULE
 UNDISPOSED
 ERROR'
 
@@ -322,6 +323,9 @@ pds-window-sentinel.sh	NOT-YET-BUILT	source declares THREE verbs — `sample`, `
 pds-ledger-census_test.sh	PRICE	CPU=22.96+3.31=26.27s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=7.30 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 26.27s at load1=7.30, 22.73s at load1=9.20, 22.80s at load1=7.32, all cpus=10. The OBSERVED BAND is 22.73-26.27 s CPU across load1 7.30-9.20, a 15.6% spread, and the row deliberately quotes the HIGH end of its own band, because the one direction a price column must not err is making an expensive thing look gate-able. It replaces 33.44+6.89=40.33s at load1=24.26, hand-typed through /usr/bin/time -p on 2026-08-03 and 1.53-1.77x this band. That figure was never re-derived by anything: no required gate runs this instrument, so nothing could contradict it. QUOTED AGAINST ITS OWN STAMP ONLY (PDS-D656) — this band is NOT poolable with the pds-scratch-target_test.sh band below, which was taken at systematically different loads, and it is NOT a quiet-host figure: the host carried 23 users at load averages 5,21 4,00 3,99 when the trials began. NOT VACUOUS: `--measure` discards subject output, so the full arm set was shown by a SEPARATE un-metered run — rc=0, `SELFTEST PASS: 173 checks.`; this harness prints NO failure(s) line on the green path at all (its counter prints only on the red path at :1400-1401), so 173 checks is the arm evidence in its place. Still the SECOND tiering case at ~23-26 s CPU on a 2-4 vCPU runner, which is why the class does not move.
 pds-scratch-target_test.sh	PRICE	CPU=0.24+0.30=0.54s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=9.56 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 0.54s at load1=9.56, 0.51s at load1=7.32, 0.54s at load1=6.76, all cpus=10; observed band 0.51-0.54 s CPU across load1 6.76-9.56, a 5.9% spread, high end quoted. It replaces 4.83+4.08=8.91s at load1=79.23, hand-typed 2026-08-03 and 16.5-17.5x this band — and the USER leg alone read 4.83 s stamped against 0.23-0.24 s measured, ~20x, which contention cannot manufacture: user CPU is work. NOT VACUOUS: a separate un-metered run exits 0 and prints `---- 0 failure(s)` then `SCRATCH TEST PASSED`, with 32 PASS / 0 FAIL arms and zero skips. THE STATED REASON MOVED WITH THE FIGURE, because a repaired number under an unrepaired justification still asserts what no measurement produced: the reason this row used to carry — that hermeticity on a runner WITHOUT local Postgres is unproven here — is REFUTED BY RUN. The harness names no Postgres binary anywhere in its source (zero matches for psql, pg_ctl, initdb or postgres; it drives two fake roots and a stub barkpark it writes itself) and it exits 0 with the same 32 PASS / 0 FAIL under PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no Postgres reachable. WHAT SURVIVES IS THE CLASS, NOT ITS OLD REASON, and the class is now itself in doubt: 0.54 s is not a price that keeps any door shut, so this row is PRICE today only because nothing required runs it. The class move is NOT taken here — price_rows is exactly 2 against a required `assert length(price_rows) >= 2` (api/test/barkpark/pds_door_census_test.exs:344), so re-classing reds a required gate and must land WITH its rider in one commit. Filed as pds-w49-scratch-target-class-vs-its-own-price.
 pds-live-hetzner-placement-group.sh	ENVIRONMENT	by run 2026-08-03: `--selftest` rc=3 "REFUSE — needs one WORKING credential"; needs HCLOUD_TOKEN or HCLOUD_CONFIG (scripts/pds-live-hetzner-placement-group.sh:17-21).
+pds-draft-twin-sweep.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE raw ledger walk (scripts/pds-draft-twin-sweep.sh:123, `bp doc ls task --perspective raw --all`) and, in write mode, for `bp doc discard-draft` (:329); the raw walk is an offset walk over a LIVE collection that refuses with pagination_shifted under load, so no required gate can run it. Its `--selftest` is hermetic (synthetic fixture, no network, no credential) and green, but nothing required runs it — the same holding-pen shape as pds-scratch-target_test.sh; a rider would move the class, not this row.
+pds-draft-only-task-census.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE raw ledger walk (scripts/pds-draft-only-task-census.sh:101, `bp doc ls task --perspective raw --all`) — the same walk and the same class as its sibling pds-draft-twin-sweep.sh. With no server the walk file comes back EMPTY and the run exits 1 CANNOT READ, printing no table and no SUMMARY, so its census arm cannot be measured on a credential-free box at all; the refusal is the design (a failed walk answering "0 draft-only rows" is the exact fraud this instrument exists to refuse). It NEVER writes: read verbs only, and the selftest greps the census path for write verbs and reds if one appears. Its OFFLINE arm IS through the door and green — by run 2026-09-04 at 8c0723b7f: `--selftest` rc=0, 26 of 26 synthetic arms, no ledger and no network.
+pds-stranded-draft-cause.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for TWO reads — the ONE raw ledger walk it shares with scripts/pds-draft-only-task-census.sh (`bp doc ls task --perspective raw --all`, pull_raw) and the tag registry (`bp doc ls tag --all`, pull_tags). SAME WALK, SAME CLASS as that sibling and as pds-draft-twin-sweep.sh: the walk is an offset walk over a LIVE collection that refuses `pagination_shifted` under campaign traffic, so no required gate can run its live arm — MEASURED, not assumed: 5 consecutive census walks were refused before the 6th completed (2026-09-05, 8771 docs, 207 published tags). With no server BOTH reads come back empty and the run exits 1 CANNOT READ with no counts and no SUMMARY, and that refusal is the design — an empty registry would otherwise score EVERY tag UNREGISTERED and hand a lead a table confirming the filing row of this very instrument by construction, so the empty-registry case is its own separate refusal (`ZERO published tag docs`). It NEVER writes: read verbs only, and the selftest greps the live path for write verbs — including `doc create`, because the repair this instrument recommends IS a tag creation — and reds if one appears. Its OFFLINE arm IS through the door and green: by run 2026-09-05, `--selftest` rc=0, 32 of 32 synthetic arms, no ledger and no network, every gate shown REFUSING and PASSING. The load-bearing pair is gate ORDER: one fixture row carries a 19-char rationale AND an unregistered tag and must read SPINE, its twin carries the SAME tag with a clean spine and must read UNKNOWN-TAG, so neither arm can pass on a classifier that ignores the wall order.
 pds-live-bp-write-receipt.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token; refuses exit 3 otherwise (scripts/pds-live-bp-write-receipt.sh:219).
 pds-ledger-census.sh	ENVIRONMENT	needs live ledger credentials (BARKPARK_SERVER, scripts/pds-ledger-census.sh:1325) and python3 (exit 3 at :348-350).
 pds-pull-proof.sh	ENVIRONMENT	needs a pinned BARKPARK_HOME scratch target plus an admin-token curl against a live server (scripts/pds-pull-proof.sh:113,227).
@@ -333,7 +337,9 @@ pds-climb-preflight.sh	ENVIRONMENT	needs `gh` workflow state and an ssh key for 
 pds-export-peak-measure.sh	ENVIRONMENT	samples a live host over ssh (scripts/pds-export-peak-measure.sh:242).
 pds-blind-spot-check.sh	PRICE	CPU=0.22+0.44=0.67s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=12.08 2026-09-02 (--selftest, rc=0; 3 trials gave 0.67/0.59/0.58s CPU, observed band 0.58-0.67 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Its ungated arm is the plain census at CPU=0.40+0.26=0.65s at the same load1=12.08 (3 trials 0.65/0.66/0.65s, a 1.5 percent spread). RE-TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.67 s keeps no door shut. Same shape as pds-scratch-target_test.sh above, whose row already reads "PRICE today only because nothing required runs it" — this instrument is cheap, hermetic (it reads the tree and writes only a mktemp -d it removes; it issues no network call and reads no credential) and green, and the ONLY thing between it and THROUGH is an ExUnit rider under api/test, which is outside the fence of the PR that added it. Filed as the follow-up named in that PR body. NOT VACUOUS: a separate un-metered run exits 0 and prints `SELFTEST: 10 PASS / 0 FAIL of 10 arms`, and the green descends from arms that can fail — arm 4 deletes the sentence from a compliant fixture and demands rc=1, arm 8 is a mutation this check FAILED on its first run (a source COMMENT naming the constant satisfied the emission scan, so deleting every emitter call from the real pds-pull-proof.sh left the tree GREEN) and now reds.
 pds-blind-spot.sh	NOT-YET-BUILT	IT IS NOT A PROGRAM, and the denominator glob cannot tell: `scripts/pds-*.{sh,exs}` keys on the NAME, and this file is a SOURCED CONSTANT — three SYMBOLS, cited by name and not by line so the citation cannot rot on an insertion: `PDS_BLIND_SPOT`, `PDS_BLIND_SPOT_PLACEMENT` and `pds_blind_spot_note()` in scripts/pds-blind-spot.sh, which five instruments read with `.`. It sets no shell options, reads nothing, writes nothing, and executed directly it prints its two constants and exits 0 WHATEVER the tree looks like — so there is no verdict here for a required gate to run, which is the NOT-YET-BUILT clause as pds-window-sentinel.sh states it above. AND IT IS NOT UNCHECKED, which is the part a bare class would hide: its correctness is asserted by scripts/pds-blind-spot-check.sh, which sources it and whose 10 arms red on a one-byte drift of the constant (arm 6, `a one-byte DRIFTED copy of the sentence REDS`, rc=1 by run 2026-09-02). NO PRICE ROW: pricing a file that is never invoked as a program would be a figure for a workload nothing runs, which is precisely the rot the PRICE pen above documents.
-pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (scripts/pds-idle-sampler.sh:7,182).'
+pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (scripts/pds-idle-sampler.sh:7,182).
+rerun-adjudicate.mjs	RED-BY-DESIGN-REPORTER	ITS EXIT CODE IS DECLARED NOT TO BE A VERDICT, IN ITS OWN SOURCE. tooling/pds/rerun-adjudicate.mjs:16-21 reads: EXIT CODES ARE FOR THE SHELL, NEVER FOR A VERDICT -- 0 the run COMPLETED, it does NOT mean the reasons are true, read the line. A required gate consumes exactly one thing, an exit code, and this file refuses to make its exit code mean what a gate would read it as. Run-derived 2026-09-03 at ec8b97a09: `node tooling/pds/rerun-adjudicate.mjs` rc=0, printing `status COMPLETE`, `172 live adjudicated row(s)` and a five-row rerun variance census -- all of it over the DEFAULT corpus, which is the PINNED SNAPSHOT tooling/pds/fixtures/live-corpus-2026-07-31.json (read_at 2026-07-31, declared at :30). So the green is hermetic and reproducible and says nothing whatever about the board today; the one mode that would (--fetch, :12) reads the LIVE ledger and needs a credential. NOT NOT-YET-BUILT: it is built, it runs, and it prints a full verdict. What it does not have is an exit code a gate may read.
+rerun-adjudicate.test.mjs	CONTENT-RED	by run 2026-09-03 at ec8b97a09: `node tooling/pds/rerun-adjudicate.test.mjs` rc=1, `pds/rerun-adjudicate: 117 checks, 7 failed`, naming arms 5.3, 5.4, 6.7, 6.8, 8.8, 8.9 and 9.2 -- a pds/grip polarity drift in which an absence claim comes back REFUSED where the arm expects RE-DERIVED. THE TREE ALREADY KNEW AND SAID SO IN WRITING: .github/workflows/research-coverage-suite.yml:37-42 excludes this file from the tooling node --test job (DELIBERATELY EXCLUDED -- it fails on a pds/grip polarity drift that needs evidence-weighed triage under a hard fence forbidding any tooling/grip edit) and names the follow-up wbt-pds-grip-polarity-drift-2026-08-31; the failure notice at :243 repeats it. IT IS RED, NOT UNRUN, AND THAT DISTINCTION DECIDES THE REMEDY: wiring a red harness into a blocking gate reds main on the first merge for a defect no PR introduced. It flips to THROUGH when the drift is adjudicated and an ExUnit rider executes it, and not before.'
 
 # ---------------------------------------------------------------------------
 # THE PRICE LEDGER — measured prices for rows that ARE through the door.
@@ -367,7 +373,7 @@ pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (sc
 # any other instrument is a price nobody pays and nothing reads —
 # `orphaned_price_error` below is what makes that say so instead of passing in
 # total silence.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.49+0.77=1.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.48 2026-08-05 (--check, rc=0; 3 trials gave 1.26/1.31/1.27s). Its gated arm is --selftest at CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s — a 5.7% spread at one stamp, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.49+0.77=1.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.48 2026-08-05 (--check, rc=0; 3 trials gave 1.26/1.31/1.27s). Its gated arm is --selftest at CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s — a 5.7% spread at one stamp, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once. RE-TAKEN ON THE BUILDER HOST 2026-09-03 (wave 49, the widened denominator), BY --measure, NEVER PASTED, AND ADDED BESIDE THE STAMP ABOVE RATHER THAN OVER IT: --check CPU=3.25+10.01=13.25s at load1=69.60, 3.25+9.75=13.00s at load1=65.29, 3.27+10.14=13.41s at load1=83.63 (band 13.00-13.41 s, a 3.1 percent spread, cpus=10); --selftest CPU=2.03+6.26=8.29s at load1=66.84, 2.11+6.70=8.81s at load1=75.97, 1.96+5.91=7.87s at load1=75.62 (band 7.87-8.81 s, an 11.9 percent spread, cpus=10). THE INSTRUMENT DID CHANGE UNDERNEATH THE ROW AGAIN and that is why it was re-taken: --selftest went 45 arms to 49 and --check went from a population of 25 to 34 as the denominator reached tooling/pds. THE TWO STAMPS ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): 1.26s at load1=6.48 against 13.25s at load1=69.60 is a TENFOLD gap on a host carrying ten times the load, and no part of it is attributable to the four new arms. A ratio taken across those stamps would measure this machine, not this change. The transferable facts here are the arm count, the population and the WITHIN-STAMP spreads; the quotable figure for a CI runner is still the load1=5-7 band above, which this run does not refute and cannot confirm.
 pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (--selftest, 15/15 arms)
 pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (76 checks, 0 failures)
 pds-window-sentinel_test.sh	CPU=0.016+0.023=0.039s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=8.51 2026-08-22 (no arguments, rc=0; 3 trials gave 0.039/0.031/0.031s CPU, observed band 0.031-0.039 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Quoted against its own stamp only (PDS-D656) and NOT poolable with the two bands above, which were taken at different loads. NOT VACUOUS: a separate un-metered run exits 0 and prints `pds-window-sentinel_test: PASS` over 8 arms, and the harness was run against the PRE-CHANGE sentinel where 3 of those 8 arms RED — so the green descends from arms that can fail. It is hermetic by construction: the probe is stubbed, no ssh is issued, no credential is read, and nothing about any live host is measured.
@@ -417,10 +423,35 @@ DENOMINATOR_CONVENTION='WITH-HARNESSES'
 # the repo empty" diagnostic DEAD CODE: `set -e` killed the script before the
 # guard could be reached. A glob that matches nothing must contribute nothing,
 # never kill the census.
+#
+# THE DENOMINATOR IS DIRECTORY-SCOPED NO LONGER (wave 49). Until this change the
+# enumerator cd'd into $SCAN_ROOT/scripts and emitted BASENAMES, so the whole
+# population was `scripts/pds-*` by construction: tooling/pds/*.mjs was not
+# UNDISPOSED, it was UNCLASSIFIED — outside the population entirely, invisible to
+# every count this file prints. A census whose denominator is a directory reports
+# honestly about a set it chose, which is the shape of vacuous green this
+# instrument exists to refuse. The globs below are per-DIRECTORY and the output is
+# REPO-RELATIVE, so a reader can tell scripts/pds-blind-spot.sh from a
+# tooling-side program by looking at the row rather than by knowing the
+# convention.
+#
+# THE KEY DID NOT MOVE WITH THE PATH. Both ledgers are keyed by BASENAME and every
+# committed row still is; run_census derives the basename per row and keys the
+# ledgers on it, so widening the population rewrote NO ledger row. The price of
+# that choice is that two instruments sharing a basename would silently share one
+# ledger answer, so run_census REFUSES a colliding population outright rather than
+# letting the first row decide.
 instruments() {
+  instrument_paths | while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    printf '%s\n' "${p##*/}"
+  done
+}
+
+instrument_paths() {
   (
-    cd -- "$SCAN_ROOT/scripts" 2>/dev/null || exit 0
-    for g in 'pds-*.sh' 'pds-*.exs'; do
+    cd -- "$SCAN_ROOT" 2>/dev/null || exit 0
+    for g in 'scripts/pds-*.sh' 'scripts/pds-*.exs' 'tooling/pds/*.mjs'; do
       # shellcheck disable=SC2086  # $g is a glob PATTERN — expansion is the point
       for f in $g; do
         [ -e "$f" ] || continue
@@ -428,6 +459,58 @@ instruments() {
       done
     done | LC_ALL=C sort -u
   )
+}
+
+# LEG C — IS THIS A PROGRAM AT ALL, OR A LIBRARY THE PROGRAMS IMPORT?
+#
+# Widening the population to tooling/pds/*.mjs brought in nine files of which
+# SEVEN are ES modules with no `#!` line and no CLI entry point: they are imported
+# by their siblings and executed by nothing, ever, by design. Filing those as
+# UNDISPOSED would be false (there is no door to open), and filing them under a
+# ledger class would be disposing a row by widening a class until it matches —
+# refused. So the band is DERIVED FROM THE TREE, exactly like THROUGH is: no
+# shebang on line 1 AND at least one sibling in the same directory importing it by
+# name. Add a shebang to one of them and it LEAVES this band on the next run,
+# which is the mutation that proves the band is read rather than asserted.
+is_library_module() {
+  local rel="$1" abs dir base n
+  abs="$SCAN_ROOT/$rel"
+  [ -f "$abs" ] || return 1
+  case "$(head -n 1 -- "$abs" 2>/dev/null)" in '#!'*) return 1 ;; esac
+  dir="${rel%/*}"
+  base="${rel##*/}"
+  [ "$dir" != "$rel" ] || return 1
+  n="$(
+    cd -- "$SCAN_ROOT/$dir" 2>/dev/null || exit 0
+    # `grep -cv` counts the siblings directly. `|| true` is REQUIRED, not tidy:
+    # grep -c prints its count AND exits 1 when that count is zero, which under
+    # `set -e` would kill the census on the ordinary case of an unimported file.
+    grep -lF -- "./$base" ./*.mjs 2>/dev/null | grep -cvxF -- "./$base" || true
+  )"
+  [ -n "$n" ] && [ "$n" -gt 0 ]
+}
+
+library_module_importers() {
+  local rel="$1" dir base
+  dir="${rel%/*}"
+  base="${rel##*/}"
+  (
+    cd -- "$SCAN_ROOT/$dir" 2>/dev/null || exit 0
+    grep -lF -- "./$base" ./*.mjs 2>/dev/null | grep -vxF "./$base" |
+      sed "s|^\./|$dir/|" | LC_ALL=C sort | tr '\n' ' '
+  )
+}
+
+# THE COLLISION PREDICATE, EXTRACTED SO IT CAN BE FIRED.
+#
+# It is UNREACHABLE under today's two globs -- scripts/pds-*.{sh,exs} and
+# tooling/pds/*.mjs cannot produce the same basename, because the extensions are
+# disjoint -- and that is precisely why it lives in a function with its own arm
+# rather than inline where nothing could ever exercise it. It is a tripwire for
+# the NEXT widening, and an untestable tripwire is the thing this file exists to
+# refuse. The selftest fires it directly on a colliding list.
+basename_collisions() {
+  printf '%s\n' "$1" | LC_ALL=C sort | uniq -d
 }
 
 is_harness() {
@@ -1059,7 +1142,8 @@ EOF
 # the census
 # ---------------------------------------------------------------------------
 run_census() {
-  local list total sh_n exs_n harnesses harness_n peers_n
+  local list paths total sh_n exs_n mjs_n harnesses harness_n peers_n dupes
+  paths="$(instrument_paths)"
   list="$(instruments)"
   if [ -z "$list" ]; then
     echo "::error::$SELF: enumerated ZERO scripts/pds-*.{sh,exs} under $SCAN_ROOT." >&2
@@ -1071,15 +1155,33 @@ run_census() {
   total="$(printf '%s\n' "$list" | wc -l | tr -d ' ')"
   sh_n="$(printf '%s\n' "$list" | grep -c '\.sh$' || true)"
   exs_n="$(printf '%s\n' "$list" | grep -c '\.exs$' || true)"
+  mjs_n="$(printf '%s\n' "$list" | grep -c '\.mjs$' || true)"
+
+  # THE COLLISION REFUSAL. Both ledgers are keyed by basename and the population
+  # is now drawn from two directories, so two same-named programs would silently
+  # share one disposition and one price — the first row deciding for both, with
+  # nothing printed. That is precisely the "first match wins, silently" defect the
+  # duplicate-key checks below already refuse on the ledger side, so it is refused
+  # on the population side too rather than left to luck.
+  dupes="$(basename_collisions "$list")"
+  if [ -n "$dupes" ]; then
+    echo "::error::$SELF: BASENAME COLLISION in the population: $(printf '%s' "$dupes" | tr '\n' ' ')" >&2
+    echo "  Both ledgers are keyed by basename, so a collision makes one row answer for two" >&2
+    echo "  instruments with nothing printed. Rename one, or key the ledgers by path." >&2
+    return 1
+  fi
   harnesses="$(printf '%s\n' "$list" | grep -E '(_test\.sh|\.test\.sh)$' || true)"
   harness_n="$(printf '%s\n' "$harnesses" | sed '/^$/d' | wc -l | tr -d ' ')"
   peers_n=$((total - harness_n))
 
   echo "$SELF: scanning \$SCAN_ROOT=$SCAN_ROOT"
   echo
-  echo "DENOMINATOR — the glob is scripts/pds-*.{sh,exs}, NEVER a bare scripts/pds-*"
-  echo "  enumerated by: ls -1 scripts/pds-*.sh scripts/pds-*.exs"
-  echo "  population    : $total ($sh_n .sh + $exs_n .exs)"
+  echo "DENOMINATOR — the globs are scripts/pds-*.{sh,exs} and tooling/pds/*.mjs,"
+  echo "  NEVER a bare scripts/pds-* and NEVER scripts/ alone (wave 49: a"
+  echo "  directory-scoped denominator left tooling/pds UNCLASSIFIED, not merely"
+  echo "  undisposed — outside the population, invisible to every count below)."
+  echo "  enumerated by: ls -1 scripts/pds-*.sh scripts/pds-*.exs tooling/pds/*.mjs"
+  echo "  population    : $total ($sh_n .sh + $exs_n .exs + $mjs_n .mjs)"
   echo "  harnesses     : $harness_n (derived from the *_test.sh / *.test.sh name, not listed):"
   printf '%s\n' "$harnesses" | sed '/^$/d' | sed 's/^/                  /'
   echo "  peers-only    : $peers_n"
@@ -1103,20 +1205,23 @@ run_census() {
   echo
 
   # ---- the table -----------------------------------------------------------
-  local b kinds legA legB class evidence price row computed shape_err orphan_err
+  local b bpath kinds legA legB class evidence price row computed shape_err orphan_err
   local orphan_price_err
-  local through=0 undisposed=0 errors=0 inbeam=0 dead=0 error_rows=0
+  local through=0 undisposed=0 errors=0 inbeam=0 dead=0 libmod=0 error_rows=0
   local through_names="" undisposed_names="" error_lines="" class_tally=""
 
   echo "THE COLUMN"
-  printf '  %-38s %-6s %-6s %-22s %s\n' INSTRUMENT LEG-A LEG-B DISPOSITION DETAIL
-  while IFS= read -r b; do
-    [ -n "$b" ] || continue
+  printf '  %-40s %-6s %-6s %-22s %s\n' INSTRUMENT LEG-A LEG-B DISPOSITION DETAIL
+  while IFS= read -r bpath; do
+    [ -n "$bpath" ] || continue
+    # THE ROW IS A PATH; THE LEDGER KEY IS ITS BASENAME. Keeping the two apart is
+    # what let the population widen without rewriting a single committed row.
+    b="${bpath##*/}"
     kinds="$(printf '%s\n' "$refs" | awk -F'\t' -v b="$b" '$4 == b { print $3 }' | LC_ALL=C sort -u)"
 
     legA='no'
     case "$kinds" in *LEGA-BOUND-EXEC*) legA='yes' ;; esac
-    legB="$(leg_b "scripts/$b")"
+    legB="$(leg_b "$bpath")"
 
     class=''
     evidence=''
@@ -1173,6 +1278,12 @@ $shape_err"
     elif [ "$legA" = 'no' ] && [ "$legB" = 'true' ]; then
       class='DEAD-DECLARATION'
       evidence='declared in ELIXIR_TEST_ONLY_PATHS but executed by no ExUnit case — leg B without leg A. This is the one class no existing gate can see.'
+    elif is_library_module "$bpath"; then
+      # DERIVED, NOT DECLARED — and ordered AFTER every gated band, so a library
+      # that ever does become gated classifies THROUGH and never hides here.
+      computed='no'
+      class='LIBRARY-MODULE'
+      evidence="no \`#!\` on line 1 and no CLI entry point; imported by $(library_module_importers "$bpath")— a library the programs import, not a door. Re-derived every run: add a shebang and this row LEAVES the band."
     else
       # THE ONE BRANCH THAT READS. A retired row is invisible here, so an
       # instrument whose ONLY row is retired falls to UNDISPOSED and reds — you
@@ -1237,10 +1348,15 @@ $class"
     case "$class" in
       THROUGH)
         through=$((through + 1))
+        # THE SUMMARY NAMES LEDGER KEYS, THE COLUMN NAMES PATHS. Both ledgers
+        # are keyed by basename, so the two summary lists below stay basenames:
+        # a reader who takes a name from here and greps the ledger for it finds
+        # the row, and the table above is where the path lives.
         through_names="$through_names $b"
         ;;
       IN-BEAM-REQUIRED) inbeam=$((inbeam + 1)) ;;
       DEAD-DECLARATION) dead=$((dead + 1)) ;;
+      LIBRARY-MODULE) libmod=$((libmod + 1)) ;;
       UNDISPOSED)
         undisposed=$((undisposed + 1))
         undisposed_names="$undisposed_names $b"
@@ -1254,9 +1370,9 @@ $class"
         ;;
     esac
 
-    printf '  %-38s %-6s %-6s %-22s %s\n' "$b" "$legA" "$legB" "$class" "$evidence"
+    printf '  %-40s %-6s %-6s %-22s %s\n' "$bpath" "$legA" "$legB" "$class" "$evidence"
   done <<EOF
-$list
+$paths
 EOF
 
   # ---- the ledger must not rot -------------------------------------------
@@ -1270,7 +1386,7 @@ EOF
     [ -n "$lb" ] || continue
     if ! has_line "$list" "$lb"; then
       error_lines="$error_lines
-  $lb: STALE LEDGER ROW — disposed/priced here, but no such scripts/pds-*.{sh,exs} program exists."
+  $lb: STALE LEDGER ROW — disposed/priced here, but the population holds no scripts/pds-*.{sh,exs} and no tooling/pds/*.mjs program of that basename."
       errors=$((errors + 1))
     fi
   done <<EOF
@@ -1353,6 +1469,7 @@ EOF
   echo "    ->$through_names"
   echo "  IN-BEAM-REQUIRED        : $inbeam of $total  (gated; not priceable by an OS meter)"
   echo "  DEAD-DECLARATION        : $dead of $total"
+  echo "  LIBRARY-MODULE          : $libmod of $total  (derived: no shebang, imported by a sibling)"
   echo "  UNDISPOSED              : $undisposed of $total"
   echo "  ERROR rows              : $error_rows of $total  (rows the classifier could not classify)"
   echo "  BY LEDGER CLASS — the FULL declared vocabulary, INCLUDING the ones at zero:"
@@ -1365,6 +1482,25 @@ EOF
     echo "  RESIDUAL (in no declared band): none"
   fi
   echo "  ERRORS                  : $errors"
+  echo
+  echo
+  echo "THE INSTRUMENT CANNOT WITNESS ITS OWN REMOVAL — MEASURED, NOT ASSERTED (wave 49)"
+  echo "  Measured on 2026-09-03 at ec8b97a09 by moving api/test/barkpark/pds_door_census_test.exs"
+  echo "  out of the tree and re-running each gate:"
+  echo "    scripts/elixir-path-escape-check.sh --check   rc=0 BOTH ways. Its read count fell"
+  echo "      44 -> 43 distinct repo-root reads and its test-cwd idiom 38 -> 37, silently, against"
+  echo "      a floor of 8. A count that decrements without a verdict is not a gate."
+  echo "    scripts/pds-door-census.sh --check             rc=1, DEAD-DECLARATION 1 of 34, naming"
+  echo "      scripts/pds-door-census.sh itself: declared in ELIXIR_TEST_ONLY_PATHS, executed by"
+  echo "      no ExUnit case. This census is the ONLY instrument that sees the deletion."
+  echo "  AND THAT IS THE HOLE: the sole executor of this census is the very file whose removal it"
+  echo "  detects, so a PR deleting that one file removes the only reader of the only gate that"
+  echo "  could object. Nothing here closes it — an arm asserting that every declared pds path has"
+  echo "  a live reader would still be run BY that reader. It is recorded rather than fixed, because"
+  echo "  a fix belongs in whatever executes the census, which is outside this file. Not closing it"
+  echo "  is a decision on the record, which is the one thing better than silence about it."
+  echo "  NOT MEASURED IN THIS RUN: scripts/pds-elixir-receipt-census.exs was not re-run under the"
+  echo "  mutation (it is a BEAM instrument and the host carried load1 ~70), so its rc is not quoted."
   echo
   echo "WHAT THE DOORS DO AND DO NOT PROVE (PDS-D637): a green door gates the ARM'S OWN LOGIC"
   echo "  against regression. It does not gate the epic's record — record-parity's harness is"
@@ -2306,6 +2442,70 @@ RETIRED-ENVIRONMENT"
     fail=$((fail + 1))
   fi
   rm -f "$witness"
+
+  # ---- THE WIDENED DENOMINATOR (wave 49) ---------------------------------
+  #
+  # Three arms, and the second is the only non-vacuous one: a band that cannot
+  # be LEFT is a label, not a classification. The fixture root is its own tree so
+  # the counts above are untouched by it.
+  local wroot saved_croot
+  wroot="$tmp/widened"
+  mkdir -p "$wroot/scripts" "$wroot/tooling/pds" "$wroot/api/test/barkpark"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$wroot/scripts/pds-fx-shut.sh"
+  printf 'export const K = 1;\n' >"$wroot/tooling/pds/fx-lib.mjs"
+  printf '#!/usr/bin/env node\nimport { K } from "./fx-lib.mjs";\nprocess.exit(K - 1);\n' \
+    >"$wroot/tooling/pds/fx-main.mjs"
+
+  local w_d
+  w_d="$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: needs a credential it will never have.\nfx-main.mjs\tENVIRONMENT\tfixture: reads a live board.')"
+
+  saved_croot="$croot"
+  croot="$wroot"
+
+  census_run "$w_d" ''
+  census_arm "THE DENOMINATOR REACHES tooling/pds: population 3, and the .mjs count is printed" 0 \
+    'tooling/pds/*.mjs' 'population    : 3 (1 .sh + 0 .exs + 2 .mjs)' \
+    'tooling/pds/fx-lib.mjs' 'tooling/pds/fx-main.mjs' \
+    'LIBRARY-MODULE          : 1 of 3' 'UNDISPOSED              : 0 of 3' \
+    'ACCOUNTED FOR           : 3 of 3'
+
+  # THE MUTATION. A shebang on the library makes it a program, and a program with
+  # no ledger row is UNDISPOSED and reds. If this arm cannot go red, LIBRARY-MODULE
+  # is a place rows go to be forgotten rather than a fact re-derived from the tree.
+  printf '#!/usr/bin/env node\nexport const K = 1;\n' >"$wroot/tooling/pds/fx-lib.mjs"
+  census_run "$w_d" ''
+  census_arm "MUTATION: a shebang makes the library a PROGRAM, so it LEAVES the band and reds" 1 \
+    'LIBRARY-MODULE          : 0 of 3' 'UNDISPOSED              : 1 of 3' \
+    'tooling/pds/fx-lib.mjs'
+  printf 'export const K = 1;\n' >"$wroot/tooling/pds/fx-lib.mjs"
+
+  # THE SECOND MUTATION, in the other direction: an UNIMPORTED module with no
+  # shebang is NOT a library -- nothing reads it -- so it must NOT be waved
+  # through. This is the arm that stops the band from becoming "anything without
+  # a shebang".
+  printf 'export const ORPHAN = 1;\n' >"$wroot/tooling/pds/fx-orphan.mjs"
+  census_run "$w_d" ''
+  census_arm "MUTATION: a module NO sibling imports is UNDISPOSED, not a library" 1 \
+    'LIBRARY-MODULE          : 1 of 4' 'UNDISPOSED              : 1 of 4' \
+    'tooling/pds/fx-orphan.mjs'
+  rm -f "$wroot/tooling/pds/fx-orphan.mjs"
+
+  croot="$saved_croot"
+
+  # THE COLLISION TRIPWIRE, fired directly. It is unreachable through today's
+  # globs (disjoint extensions), so an arm through run_census would be vacuous;
+  # this one feeds the predicate the list a future widening would produce.
+  local coll_hit coll_clean
+  coll_hit="$(basename_collisions "$(printf 'pds-a.sh\npds-b.sh\npds-a.sh')")"
+  coll_clean="$(basename_collisions "$(printf 'pds-a.sh\npds-b.sh\ntooling-c.mjs')")"
+  if [ "$coll_hit" = 'pds-a.sh' ] && [ -z "$coll_clean" ]; then
+    echo "  PASS  the basename-collision tripwire names the collision [$coll_hit] and stays silent without one"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the collision tripwire gave [$coll_hit] on a colliding list and [$coll_clean] on a clean one —"
+    echo "        both ledgers are keyed by basename, so a collision it cannot see is one row answering for two"
+    fail=$((fail + 1))
+  fi
 
   # THE SUMMER IS FAIL-CLOSED ON RADIX, and the fabrication is QUOTED beside the
   # refusal so the arm shows what it is refusing. Host-independent: it needs no

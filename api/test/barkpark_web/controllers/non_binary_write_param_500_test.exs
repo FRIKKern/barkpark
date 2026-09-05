@@ -28,6 +28,7 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
   positive controls in the same run pin that a legitimate binary param still
   reaches its real (non-500) outcome, so the guards are not blanket refusals.
   """
+  # sync: calls the named GenServer Barkpark.Plugins.Github.Auth; its sandbox ownership dies under concurrency
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
@@ -196,7 +197,7 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
     # requires BOTH args to be binaries). Driven at the action, since no query
     # string can reach this branch through today's mounts.
     test "a non-binary :id is a clean 400 at the action, not a raise" do
-      conn = BarkparkWeb.GithubAdoptController.adopt(build_conn(), %{"id" => ["gh-1"]})
+      conn = BarkparkWeb.GithubAdoptController.adopt(scoped_conn(), %{"id" => ["gh-1"]})
 
       assert %{"error" => %{"code" => "malformed"}} = json_response(conn, 400)
     end

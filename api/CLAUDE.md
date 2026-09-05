@@ -25,6 +25,7 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 - **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
+- **Reader editing:** `BulldocsLive.Edit` shares Studio’s canvas and echoes, gates with `PaperViewer`, and waits for acknowledged input flushes before View.
 - **Plugin module:** `register_schemas/1` + `register_routes/1` — reader on `:public_root`, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Reused by any plugin wanting a reader or token-gated ingest.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
@@ -69,4 +70,4 @@ After every mutation `Content` broadcasts (content/broadcast.ex — `tap_broadca
 - `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
 - `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)
 
-`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 14 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,engagement_lapsed,lease_expired,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer switching on a stale subset drops kinds silently.
+`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 16 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer switching on a stale subset drops kinds silently.

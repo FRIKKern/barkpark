@@ -1,0 +1,1 @@
+api/lib/barkpark/plugins/tasks.ex:774's sentence states the real contract: unmet criteria BLOCK a done close (merge-gate autostamp and criteria override are the exceptions) and are a soft warning only for cancelled/blocked

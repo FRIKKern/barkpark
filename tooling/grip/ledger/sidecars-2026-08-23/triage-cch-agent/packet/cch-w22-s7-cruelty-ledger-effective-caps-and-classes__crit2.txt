@@ -1,0 +1,1 @@
+THE LEDGER REFUSES AT EXIT 2 IN AT LEAST FIVE DISTINCT WAYS — UNLISTED, GONE KIND, BREAKABLE, INADMISSIBLE, MISCLASSED — and each refusal is MUTATION-PROVEN, not asserted. Evidence: five mutations with `rc=$?` read on its own line and the refusal message from each. A refusal that cannot be made to fire FAILS this criterion.

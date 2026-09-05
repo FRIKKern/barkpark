@@ -1,0 +1,1 @@
+MUTATION PROOF: an insert with an unknown status is rejected by the database, not merely by the changeset. Paste the constraint error

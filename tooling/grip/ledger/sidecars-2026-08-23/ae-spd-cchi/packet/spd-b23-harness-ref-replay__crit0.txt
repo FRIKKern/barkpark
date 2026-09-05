@@ -1,0 +1,1 @@
+scripts/studio-desk-measure.mjs accepts a --ref/--sha argument and REFUSES loudly (non-zero exit, named reason) when the served SHA does not match, rather than measuring the wrong build silently

@@ -135,9 +135,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     # paper LiveView via send(self(), …); render/1 flushes that async
     # handle_info so the patch-block lands before we read the DB. (In the
     # browser the message processes on the next loop tick automatically.)
-    view
-    |> element(~s([data-block-id="c-price"] form))
-    |> render_change(%{"amount" => "299", "currency" => "USD"})
+    flush_form(view, ~s([data-block-id="c-price"] form), %{
+      "amount" => "299",
+      "currency" => "USD"
+    })
 
     render(view)
 
@@ -163,9 +164,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
 
     open_editor(view)
 
-    view
-    |> element(~s([data-block-id="c-blurb"] form))
-    |> render_change(%{"nob" => "Omtale.", "eng" => "New English blurb."})
+    flush_form(view, ~s([data-block-id="c-blurb"] form), %{
+      "nob" => "Omtale.",
+      "eng" => "New English blurb."
+    })
 
     render(view)
 
@@ -187,9 +189,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     # (The codelist registry is empty in test, so the field renders its disabled
     # placeholder <select>; driving the form's phx-change directly still proves
     # the component → :paper_op → persist wiring independent of registry data.)
-    view
-    |> element(~s([data-block-id="c-audience"] form))
-    |> render_change(%{"value" => "02"})
+    flush_form(view, ~s([data-block-id="c-audience"] form), %{"value" => "02"})
 
     render(view)
 
@@ -214,7 +214,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     |> element(
       ~s([data-block-id="c-keywords"] button[phx-value-action="move_up"][phx-value-index="1"])
     )
-    |> render_click()
+    |> render_click(wire_params(view, %{"action" => "move_up", "index" => "1"}))
 
     render(view)
 
@@ -235,7 +235,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
 
     view
     |> element(~s([data-block-id="c-keywords"] button[phx-value-action="add_row"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"action" => "add_row"}))
 
     render(view)
 
@@ -305,9 +305,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     # The composite-element subfield inputs name themselves `[idx].subname`.
     # Edit element 1's `role` (Editor → Maintainer); the merge must set
     # value[1][role] and leave element 0 + element 1's name untouched.
-    view
-    |> element(~s([data-block-id="c-contributors"] form))
-    |> render_change(%{"[1].role" => "Maintainer"})
+    flush_form(view, ~s([data-block-id="c-contributors"] form), %{
+      "[1].role" => "Maintainer"
+    })
 
     render(view)
 
@@ -336,9 +336,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
 
     open_editor(view)
 
-    view
-    |> element(~s([data-block-id="c-contributors"] form))
-    |> render_change(%{"[0].name" => "Augusta Ada", "[0].role" => "Mathematician"})
+    flush_form(view, ~s([data-block-id="c-contributors"] form), %{
+      "[0].name" => "Augusta Ada",
+      "[0].role" => "Mathematician"
+    })
 
     render(view)
 
@@ -370,9 +371,10 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
 
     # One event carrying a hostile key alongside a sane sibling edit. The hostile
     # key must be dropped (no giant alloc), the sane edit must still land.
-    view
-    |> element(~s([data-block-id="c-contributors"] form))
-    |> render_change(%{"[99999999999]" => "x", "[0].role" => "Maintainer"})
+    flush_form(view, ~s([data-block-id="c-contributors"] form), %{
+      "[99999999999]" => "x",
+      "[0].role" => "Maintainer"
+    })
 
     render(view)
 
@@ -408,5 +410,78 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
                %{"leftover" => "true"},
                socket
              )
+  end
+
+  test "a correlated field save keeps its local value until the parent echoes persistence" do
+    block = %{
+      "id" => "c-price",
+      "type" => "composite",
+      "label" => "Price",
+      "fields" => [%{"name" => "amount", "title" => "Amount", "type" => "string"}],
+      "value" => %{"amount" => "299"}
+    }
+
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}}}
+
+    assert {:ok, socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: block},
+               socket
+             )
+
+    request_id = Ecto.UUID.generate()
+
+    assert {:noreply, pending_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.handle_event(
+               "inner-flush",
+               %{"request_id" => request_id, "if_rev" => 1, "values" => %{"amount" => "399"}},
+               socket
+             )
+
+    assert_receive {:paper_op,
+                    %{
+                      "op" => "patch-block",
+                      "id" => "c-price",
+                      "patch" => %{"value" => %{"amount" => "399"}}
+                    }, ^request_id}
+
+    # A refused write causes the parent to render the old persisted block. The
+    # component keeps the draft so the next View attempt can retry it.
+    assert {:ok, refused_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: block},
+               pending_socket
+             )
+
+    assert refused_socket.assigns.value == %{"amount" => "399"}
+    assert refused_socket.assigns.pending_value?
+
+    echoed_block = put_in(block, ["value", "amount"], "399")
+
+    assert {:ok, confirmed_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: echoed_block},
+               refused_socket
+             )
+
+    assert confirmed_socket.assigns.value == %{"amount" => "399"}
+    refute confirmed_socket.assigns.pending_value?
+  end
+
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
+  defp wire_params(view, params) do
+    Map.merge(params, %{"request_id" => Ecto.UUID.generate(), "if_rev" => paper_rev(view)})
+  end
+
+  defp flush_form(view, selector, values) do
+    target = element(view, selector)
+    render_change(target, values)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => values
+    })
   end
 end

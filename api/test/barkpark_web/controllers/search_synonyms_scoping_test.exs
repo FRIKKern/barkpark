@@ -23,7 +23,7 @@ defmodule BarkparkWeb.SearchSynonymsScopingTest do
   ("nil-workspace / global-admin READ is never over-blocked") stays GREEN in both
   states — the repoint neither adds nor removes over-refusal. Restore → all green.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 
@@ -70,7 +70,7 @@ defmodule BarkparkWeb.SearchSynonymsScopingTest do
   end
 
   defp conn_for(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end

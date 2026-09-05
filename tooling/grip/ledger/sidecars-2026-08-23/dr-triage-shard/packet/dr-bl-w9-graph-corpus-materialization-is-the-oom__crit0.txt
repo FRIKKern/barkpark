@@ -1,0 +1,1 @@
+The corpus derivation's peak heap is bounded or streamed so a single /v1/graph call cannot move BEAM RSS by ~0.6 GB. Evidence: a before/after RSS measurement on a drained slot.

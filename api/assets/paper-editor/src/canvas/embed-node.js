@@ -643,14 +643,17 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   }
 
   let textTimer = null;
+  const commitText = (text = area.value) => {
+    const next = toBlock(text);
+    if (next != null) onEdit(next);
+  };
   const onInput = () => {
     if (!isEditable()) return;
     if (textTimer) clearTimeout(textTimer);
     const text = area.value;
     textTimer = setTimeout(() => {
       textTimer = null;
-      const next = toBlock(text);
-      if (next != null) onEdit(next);
+      commitText(text);
     }, DEBOUNCE_MS);
   };
   area.addEventListener("input", onInput);
@@ -672,6 +675,12 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
     // other islands but paint() already protects the active field.
     refresh: (block) => {
       paint(block || {});
+    },
+    flush: () => {
+      if (!textTimer) return;
+      clearTimeout(textTimer);
+      textTimer = null;
+      commitText();
     },
     destroy: () => {
       if (textTimer) clearTimeout(textTimer);
@@ -811,6 +820,10 @@ export const Fleet = Node.create({
         dom.addEventListener("focusout", onFocusOut);
         syncReveal();
       }
+      const flushFleetEditor = () => {
+        if (fleetEditor) fleetEditor.flush();
+      };
+      dom.addEventListener("bp-flush-node", flushFleetEditor);
 
       // pdd-t12c: keyboard + screen-reader parity — a tab stop with the fleet block's
       // human name + locked-state announcement, and Enter/Space → select (→ Backspace
@@ -855,6 +868,7 @@ export const Fleet = Node.create({
         // hook mutates the paint hole's innerHTML directly and PM must ignore it.
         ignoreMutation: () => true,
         destroy: () => {
+          dom.removeEventListener("bp-flush-node", flushFleetEditor);
           if (fleetEditor) {
             fleetEditor.destroy();
             dom.removeEventListener("mouseenter", onEnter);

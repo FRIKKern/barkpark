@@ -1,0 +1,1 @@
+Either a single-instance read serves the pressure block off one prefetched query, or the charter records that pressure is list-only and names /metrics as the single-instance answer.

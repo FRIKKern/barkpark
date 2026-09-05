@@ -15,7 +15,7 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     * user-shaped tickets are single-use like token-shaped ones
     * a body without `email` keeps the legacy token-shaped behavior
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Auth
@@ -52,7 +52,7 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     # no such user yet — the consume JIT-provisions it
     refute Accounts.get_user_by_email(@cloud_email)
 
-    consume = build_conn() |> get("/login/ticket/#{ticket}")
+    consume = scoped_conn() |> get("/login/ticket/#{ticket}")
     assert redirected_to(consume) == "/studio"
 
     # a USER session was minted (not an api_token session)
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     {:ok, _} = TenancyAuth.create_membership(ws_id, user.id, "member", "user")
 
     ticket = json_response(mint!(conn, @admin_token, %{email: @cloud_email}), 201)["ticket"]
-    consume = build_conn() |> get("/login/ticket/#{ticket}")
+    consume = scoped_conn() |> get("/login/ticket/#{ticket}")
     assert redirected_to(consume) == "/studio"
 
     # same user row; the pre-existing member role is left untouched
@@ -97,15 +97,15 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
   test "user-shaped tickets are single-use", %{conn: conn} do
     ticket = json_response(mint!(conn, @admin_token, %{email: @cloud_email}), 201)["ticket"]
 
-    assert redirected_to(build_conn() |> get("/login/ticket/#{ticket}")) == "/studio"
+    assert redirected_to(scoped_conn() |> get("/login/ticket/#{ticket}")) == "/studio"
 
-    replay = build_conn() |> get("/login/ticket/#{ticket}")
+    replay = scoped_conn() |> get("/login/ticket/#{ticket}")
     assert redirected_to(replay) == "/login"
   end
 
   test "no email in the body keeps the legacy token-shaped ticket", %{conn: conn} do
     ticket = json_response(mint!(conn, @admin_token, %{}), 201)["ticket"]
-    consume = build_conn() |> get("/login/ticket/#{ticket}")
+    consume = scoped_conn() |> get("/login/ticket/#{ticket}")
 
     assert redirected_to(consume) == "/studio"
     assert get_session(consume, "api_token") == @admin_token

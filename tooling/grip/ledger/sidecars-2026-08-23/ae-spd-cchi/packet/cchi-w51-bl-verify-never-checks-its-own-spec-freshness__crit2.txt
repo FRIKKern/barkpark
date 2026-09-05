@@ -1,0 +1,1 @@
+A missing origin/main ref reports 'I could not look', NEVER 'they agree': prove it by running with the ref absent and quoting the non-agreeing output. The enforced=true full-mode path stays covered by compare_protection, which already diffs the full object and reds on a context mismatch — show it unchanged.

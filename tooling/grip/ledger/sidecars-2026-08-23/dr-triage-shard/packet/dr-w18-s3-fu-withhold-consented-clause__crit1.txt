@@ -1,0 +1,1 @@
+deliver_fleet_digest/1 calls it and asserts the returned count is 0, alongside the accounting record shipped by dr-w18-s3.

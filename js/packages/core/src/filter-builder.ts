@@ -9,6 +9,7 @@ import type {
   BarkparkDocument,
   QueryPage,
 } from './types'
+import { FILTER_OPS } from './types'
 import { BarkparkValidationError } from './errors'
 
 export interface FilterExpression {
@@ -26,21 +27,19 @@ export interface BuilderState {
   select?: string
 }
 
-const VALID_OPS: readonly FilterOp[] = [
-  'eq',
-  'neq',
-  'in',
-  'nin',
-  'has',
-  'hasStrong',
-  'contains',
-  'startsWith',
-  'endsWith',
-  'gt',
-  'gte',
-  'lt',
-  'lte',
-]
+// NOT a second list. `FILTER_OPS` in types.ts is the one runtime array, and
+// `FilterOp` is derived from it — this alias exists so the guards below read the
+// same as they always did. Re-spelling the ops here is what let the union sit at
+// thirteen while the server validated fourteen: two hand-copies, each green
+// against nothing.
+const VALID_OPS: readonly FilterOp[] = FILTER_OPS
+
+// `is` is the server's IS NULL / IS NOT NULL test and accepts these two literal
+// strings and nothing else — `query.ex` refuses any other value up front
+// (`Map.get(ops, "is") not in ["null", "notnull"] -> {field, "is"}`). Caught
+// here so `.where(f, 'is', true)` is a self-explaining client error instead of
+// an opaque 400 from the door.
+const IS_VALUES: readonly string[] = ['null', 'notnull']
 // Ops whose value is a list of candidates rather than a scalar.
 const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin']
 
@@ -110,6 +109,12 @@ export function makeFilterExpression(
   }
   if (!arrayOp && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
+  }
+  if (op === 'is' && !(typeof value === 'string' && IS_VALUES.includes(value))) {
+    throw new BarkparkValidationError(
+      `op 'is' takes the string 'null' or 'notnull' (got ${JSON.stringify(value)}) — it is the server's IS NULL / IS NOT NULL test, not an equality check`,
+      { field: 'value', issues: [{ op, allowed: IS_VALUES }] },
+    )
   }
   if (
     !arrayOp &&

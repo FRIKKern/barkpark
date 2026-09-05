@@ -1,0 +1,1 @@
+the scream step fires only for the unreadable/empty/ABSENT silences, proven by a harness arm that reds if a graced-only run would page

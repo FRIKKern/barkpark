@@ -32,19 +32,10 @@ defmodule BarkparkWeb.BulldocsSourceContractTest do
         })
       )
 
-    prior = Application.get_env(:barkpark, :shares)
-
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{workspace.slug}/#{project.slug}/#{dataset}:papers:read")
+    # arpss-w8: a STORED row, not a bare put_env — Sharing.refresh/0 rebuilds it.
+    Barkpark.SharingFixtures.plant_shares!(
+      "#{workspace.slug}/#{project.slug}/#{dataset}:papers:read"
     )
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
 
     response =
       conn
@@ -98,29 +89,21 @@ defmodule BarkparkWeb.BulldocsSourceContractTest do
         scope
       )
 
-    prior = Application.get_env(:barkpark, :shares)
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
+    Barkpark.SharingFixtures.snapshot_shares!()
 
     base = "/w/#{workspace.slug}/p/#{project.slug}/d/#{dataset}/papers"
 
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{workspace.slug}/#{project.slug}/#{dataset}:papers:edit")
+    Barkpark.SharingFixtures.plant_shares!(
+      "#{workspace.slug}/#{project.slug}/#{dataset}:papers:edit"
     )
 
     published = conn |> get("#{base}/#{slug}/source?perspective=published") |> json_response(200)
 
     drafts =
-      build_conn() |> get("#{base}/#{slug}/source?perspective=drafts") |> json_response(200)
+      scoped_conn() |> get("#{base}/#{slug}/source?perspective=drafts") |> json_response(200)
 
     raw =
-      build_conn()
+      scoped_conn()
       |> get("#{base}/drafts.#{slug}/source?perspective=raw")
       |> json_response(200)
 
@@ -131,14 +114,12 @@ defmodule BarkparkWeb.BulldocsSourceContractTest do
     assert raw["id"] == "drafts." <> slug
     assert get_in(raw, ["source", "blocks"]) == draft_blocks
 
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{workspace.slug}/#{project.slug}/#{dataset}:papers:read")
+    Barkpark.SharingFixtures.plant_shares!(
+      "#{workspace.slug}/#{project.slug}/#{dataset}:papers:read"
     )
 
     pinned =
-      build_conn()
+      scoped_conn()
       |> get("#{base}/#{slug}/source?perspective=drafts")
       |> json_response(200)
 

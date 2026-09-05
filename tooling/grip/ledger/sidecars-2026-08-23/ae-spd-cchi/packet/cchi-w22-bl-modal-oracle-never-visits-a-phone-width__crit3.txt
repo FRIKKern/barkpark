@@ -1,0 +1,1 @@
+The row states honestly whether any CI job invokes the instrument it widened; if none does, that is recorded in the instrument's own output rather than left implied. Evidence: `grep -rn '<instrument>' .github/workflows/ scripts/`.

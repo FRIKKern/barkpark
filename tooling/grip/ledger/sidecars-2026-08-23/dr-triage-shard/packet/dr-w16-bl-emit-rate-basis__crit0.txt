@@ -1,0 +1,1 @@
+rate/3 carries a basis string and EVERY call site passes it explicitly — no default argument anywhere; paste the grep proving zero default-arg rate clauses

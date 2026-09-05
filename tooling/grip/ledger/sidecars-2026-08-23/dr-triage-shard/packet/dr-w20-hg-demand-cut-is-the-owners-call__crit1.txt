@@ -1,0 +1,1 @@
+The ruling states what is given up: if sites are cut, that the epic's own measurement population shrinks (five sites carry ~99% of all deploys ever); if the cost is accepted, that p50 search latency is 8,631ms for 12.03% of wall time.

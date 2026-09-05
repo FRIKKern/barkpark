@@ -1,0 +1,1 @@
+An AGE OF LAST SUCCESSFUL DEPLOY reading exists per target and is reachable from a command a human runs, with volume beside it and its window pinned.

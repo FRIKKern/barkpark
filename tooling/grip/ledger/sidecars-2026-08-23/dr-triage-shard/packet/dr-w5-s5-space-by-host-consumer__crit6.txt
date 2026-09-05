@@ -1,0 +1,1 @@
+Gate green: `CC=clang go build ./... && CC=clang go vet ./internal/agent/... ./cmd/... && CC=clang go test ./internal/agent/... ./cmd/...` -- full output pasted.

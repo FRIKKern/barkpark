@@ -1,0 +1,1 @@
+Every surface that prints a time-to-web number names which clock it used (publish-keyed vs row-keyed); a run proof shows both numbers side by side for the same window

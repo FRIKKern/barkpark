@@ -1,0 +1,1 @@
+D253's UNDISCHARGED CAVEAT IS DISCHARGED FIRST: the decoded-pixel probe is re-run on the ubuntu GATING machine (not a darwin host) and confirms or refutes that `ellipsis/normal` paints an ellipsis on an unbreakable run. Quote the probe output and the platform it ran on. Do not edit the predicate before this.

@@ -29,7 +29,7 @@ defmodule BarkparkWeb.SearchSynonymsFailClosedTest do
   (`bpb-search-intel-record-insights-pipeline-align`) is merged; the lead
   verifies it at merge.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 
@@ -88,7 +88,7 @@ defmodule BarkparkWeb.SearchSynonymsFailClosedTest do
   end
 
   defp auth(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end

@@ -370,6 +370,17 @@ config :barkpark, Oban,
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
        {"* * * * *", Barkpark.Audit.ExportWorker},
+       # bl-api-task-create-idempotency C4 — GC for the `idempotency_keys`
+       # dedup store. `Idempotency.sweep/1` has existed since the table was
+       # created and, until this entry, was called by NOTHING outside its own
+       # test: the store was append-only in production, each row carrying a
+       # full cached response body. Hourly (not per-minute) because the TTL is
+       # 24h — an hour of lateness on a 24h expiry costs nothing, and the sweep
+       # is an index scan, not a recovery path. Runs on the static `default`
+       # queue alongside the webhook/audit sweepers; the worker bounds one tick
+       # by construction (`Idempotency.sweep_batch/1`), so a cold first pass
+       # over a long-unswept table cannot become one giant transaction.
+       {"17 * * * *", Barkpark.Idempotency.Sweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
@@ -525,6 +536,19 @@ config :barkpark, Barkpark.Sites.Provisioner,
 config :barkpark, Barkpark.Crypto.LocalKek,
   key: Base.encode64(:crypto.hash(:sha256, "barkpark-dev-kek-not-for-prod")),
   version: 1
+
+# MUTATE-PATH SCHEMA VALIDATION (Barkpark.Content.Validation,
+# task-41a740fd6701ec28). Every create-family and update write runs the
+# validator at the Writer chokepoint. The DEFAULT is ADVISE: findings ride the
+# mutate success envelope as `warnings` (code `schema_validation`) and NEVER
+# block — status and stored bytes are unchanged from before the mount.
+#
+# ENFORCE (422 `validation_failed`) is opt-in PER DATASET: list the dataset
+# slugs here, or the atom `:all`. Empty list = nobody enforces. Flipping the
+# default is the owner's call, announced, with its own row — not a config edit.
+# runtime.exs maps BARKPARK_SCHEMA_ENFORCE_DATASETS (comma-separated slugs, or
+# "all") over this, so an operator opts a dataset in without shipping code.
+config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

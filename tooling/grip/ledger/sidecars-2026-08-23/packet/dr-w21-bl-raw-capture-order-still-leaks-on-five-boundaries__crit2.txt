@@ -1,0 +1,1 @@
+The proving fixture uses a NON-PREFIXED, sub-32-char secret whose lookbehind is not pre-satisfied and whose escape run falls before the key. A prefixed sk_live_/bppat_ fixture is explicitly rejected in the PR body, with the false all-clear it produces pasted as the trap.

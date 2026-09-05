@@ -16,38 +16,44 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
   ## Census (reconciled by the wave's verify pass)
 
-  `grep -rn 'put_resp_header("cache-control"' api/lib` finds ELEVEN sites. Two
-  are already pinned elsewhere and are deliberately NOT re-pinned here:
+  `grep -rn 'put_resp_header("cache-control"' api/lib` finds THIRTEEN sites
+  (reconciled again by `het-bl-sharelink-local-cache-policy`, which ADDED one —
+  see section 5b — and found the count had drifted from ELEVEN meanwhile).
+  THREE are already pinned elsewhere and are deliberately NOT re-pinned here:
 
-    * `media/delivery/urls.ex:58` — the immutable rendition policy, pinned by
+    * `media/delivery/urls.ex` — the immutable rendition policy, pinned by
       `BarkparkWeb.Integration.MediaDeliveryTest`. It is ALSO in flight in this
       wave's visibility-aware media-cache slice, which owns it.
-    * `session_controller.ex:436` — pinned by the session-controller suite.
+    * `session_controller.ex` — pinned by the session-controller suite.
+    * `plugs/paper_revision_headers.ex` — the revision-validator policy, pinned
+      by `BarkparkWeb.PaperRevisionHeadersTest` with the same full-list equality
+      on BOTH the 200 and its 304 replay.
 
-  The other NINE are this file's charge. SIX are pinned below. THREE are an
-  HONEST, NAMED GAP — see "Unreachable in ConnCase".
+  The other TEN are this file's charge, and ALL TEN are pinned below.
 
-  ## Unreachable in ConnCase (documented, not skipped)
+  Section headers below carry the line numbers they were written against; those
+  drift and are NOT the index — the describe string names the action, and that
+  is what a reader should match on.
 
-  Three sites sit on Server-Sent-Events actions that call `send_chunked/2` and
-  then never return — the action blocks in a `receive` loop for the life of the
-  connection, so a `get/2` through `Phoenix.ConnTest` never yields a conn to
-  assert against. This is the same limitation `ListenControllerTest` and
-  `ChatFleetEventsTest` document in their own moduledocs ("the long-lived
-  `receive` loop is un-assertable through a blocking `get/2`"), and it is a
-  property of the test adapter, not of the header:
+  ## The three SSE sites go through a real streaming client
 
-    * `chat_controller.ex:413` — `ChatController.events/2` (per-session SSE),
-      `cache-control: no-cache`.
-    * `chat_controller.ex:470` — `ChatController.fleet_events/2` (herd SSE),
-      `cache-control: no-cache`.
-    * `listen_controller.ex:58` — `ListenController.listen/2` (document SSE),
-      `cache-control: no-cache`.
+  Three of the ten sit on Server-Sent-Events actions that call `send_chunked/2`
+  and then never return — the action blocks in a `receive` loop for the life of
+  the connection, so a `get/2` through `Phoenix.ConnTest` never yields a conn to
+  assert against:
 
-  Pinning these needs a streaming-capable client (a real `Bandit`/`Finch` leg
-  against a booted endpoint, or a controller-level chunked-response harness) —
-  out of scope for a test-only slice. Left honestly open rather than covered by
-  a pin that cannot fail.
+    * `chat_controller.ex` — `ChatController.events/2` (per-session SSE)
+    * `chat_controller.ex` — `ChatController.fleet_events/2` (herd SSE)
+    * `listen_controller.ex` — `ListenController.listen/2` (document SSE)
+
+  Nothing about the HEADER is unreachable, only the ConnTest ADAPTER: the
+  headers are on the wire the instant `send_chunked/2` flushes them. So the
+  "SSE cache-control" describe below boots a real `Bandit` leg serving
+  `BarkparkWeb.Endpoint` on an EPHEMERAL port and dials it with a raw
+  `:gen_tcp` client that reads ONLY the response HEAD (Erlang's own
+  `packet: :http_bin` framing) and then closes — it never touches the body, so
+  the blocking `receive` loop can never stall it. No site in the census is
+  left to an honest gap any more.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -68,7 +74,12 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
   alias Barkpark.Repo
 
   @no_store ["no-store"]
+  @no_cache ["no-cache"]
   @redirect_policy ["private, max-age=0, must-revalidate"]
+  # The same literal on a 200 that sends bytes (share-link LOCAL branch,
+  # section 5b) — one policy, two names, so neither assertion reads as a
+  # copy of the other by accident.
+  @private_policy @redirect_policy
 
   # The presigned-redirect branches (`{:redirect, url}` from
   # `Blobstore.serve_strategy/2`) only exist under an object-storage backend.
@@ -121,7 +132,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     test "the one-time airdrop claim is never stored, even on the anonymous bounce" do
       # Anonymous → the /login bounce. `no_store/1` runs BEFORE the branch, so
       # this reaches the header without needing a real grant or a session.
-      conn = get(build_conn(), "/grant/not-a-real-token")
+      conn = get(scoped_conn(), "/grant/not-a-real-token")
 
       assert redirected_to(conn) =~ "/login"
       assert get_resp_header(conn, "cache-control") == @no_store
@@ -177,7 +188,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       file = insert_media_file!(ws, project, "media-ctl")
       use_s3_backend!()
 
-      conn = get(build_conn(), "/media/files/" <> file.path)
+      conn = get(scoped_conn(), "/media/files/" <> file.path)
 
       assert conn.status == 302
       assert [location] = get_resp_header(conn, "location")
@@ -219,10 +230,57 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
       use_s3_backend!()
 
-      conn = get(build_conn(), "/s/#{minted["token"]}")
+      conn = get(scoped_conn(), "/s/#{minted["token"]}")
 
       assert conn.status == 302
       assert get_resp_header(conn, "cache-control") == @redirect_policy
+    end
+  end
+
+  # ── 5b. share_link_controller.ex {:file, full} — private, max-age=0, … ─────
+
+  describe "GET /s/:token for a MEDIA link under the LOCAL (default) backend" do
+    test "the 200 that sends the bytes states the SAME private policy as its redirect sibling",
+         %{conn: conn} do
+      # The sibling pin above (section 5) covers the object-storage `{:redirect,
+      # url}` arm. This one covers the `{:file, full}` arm, which used to send
+      # the bytes with NO `cache-control` at all — the same anonymous capability
+      # URL got a different, unstated storage policy purely because of which
+      # backend was configured. No `use_s3_backend!/0` here: that IS the
+      # difference between the two tests.
+      admin = "cache-policy-sl-local-" <> Integer.to_string(System.unique_integer([:positive]))
+
+      {:ok, admin_tok} =
+        Auth.create_token(admin, "cache-policy-sl-local", "production", ["read", "write", "admin"])
+
+      ws = create_workspace!("cache-policy-ws-#{System.unique_integer([:positive])}")
+      project = create_project!(ws, "cache-policy-proj-#{System.unique_integer([:positive])}")
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+      file = insert_media_file!(ws, project, "share-link-local")
+
+      minted =
+        conn
+        |> bearer(admin)
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/shares/links", %{
+          "scope" => "#{ws.slug}/#{project.slug}/production",
+          "kind" => "media",
+          "ref_id" => file.id
+        })
+        |> json_response(201)
+
+      conn = get(scoped_conn(), "/s/#{minted["token"]}")
+
+      # A 200 with the real bytes — the LOCAL branch actually ran.
+      assert conn.status == 200
+      assert response(conn, 200) == "PNG-BYTES"
+
+      # FULL-LIST equality, the file's convention: a second, weaker
+      # `cache-control` appended downstream must red this, not hide behind hd/1.
+      assert get_resp_header(conn, "cache-control") == @private_policy
+
+      # The stored-XSS seal on this branch is unchanged by the policy addition.
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
     end
   end
 
@@ -264,7 +322,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       # backend's serve decision, not a missing-file fallback.
       asset_id =
         BarkparkWeb.TicketsAttachmentsController.create(
-          assign(build_conn(), :ticket_key, key),
+          assign(scoped_conn(), :ticket_key, key),
           %{"id" => ticket, "file" => png_upload()}
         )
         |> json_response(201)
@@ -273,7 +331,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       use_s3_backend!()
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{"api_token" => operator})
         |> get("/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}")
 
@@ -341,4 +399,215 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     on_exit(fn -> File.rm(tmp) end)
     %Plug.Upload{path: tmp, filename: "pixel.png", content_type: "image/png"}
   end
+
+  # ── The three SSE sites, pinned through a REAL streaming client ───────────
+  #
+  # HARNESS. `BarkparkWeb.Endpoint` is a Plug, so a `Bandit` child serves the
+  # WHOLE real pipeline (router + every plug the route's pipelines run). The
+  # port is EPHEMERAL — bind 0, read the assigned port back, close the probe
+  # socket — because this box runs many suites at once and a fixed port is a
+  # cross-agent collision, not a test.
+  #
+  # WHY IT CANNOT HANG. The client is raw `:gen_tcp` in `packet: :http_bin`
+  # mode: the BEAM itself frames the status line and each header, and we stop
+  # at `:http_eoh` — the blank line that ends the HEAD. The SSE body is never
+  # read, so the action's endless `receive` loop is irrelevant to us, and every
+  # `recv` carries the remaining slice of one absolute deadline, so a stalled
+  # or silent server fails with a NAMED message instead of blocking the suite.
+  #
+  # Header list equality, not `hd/1`: the same discipline as the pins above —
+  # a second, weaker `cache-control` appended by a later plug must red the pin.
+  @sse_head_timeout_ms 15_000
+
+  describe "SSE cache-control (real streaming client, not ConnTest)" do
+    setup do
+      previous = Application.get_env(:barkpark, :public_demo_studio)
+      Application.put_env(:barkpark, :public_demo_studio, false)
+      on_exit(fn -> Application.put_env(:barkpark, :public_demo_studio, previous) end)
+
+      %{port: start_streaming_endpoint!()}
+    end
+
+    test "ListenController.listen/2 (document SSE) pins cache-control: no-cache", %{port: port} do
+      raw = "sse-listen-" <> Integer.to_string(System.unique_integer([:positive]))
+      {:ok, _} = Auth.create_token(raw, "sse-cache-listen", "production", ["read"])
+
+      {status, headers} =
+        stream_head!(
+          port,
+          "/v1/data/listen/production",
+          [{"authorization", "Bearer " <> raw}, {"accept", "text/event-stream"}],
+          "ListenController.listen/2"
+        )
+
+      assert status == 200,
+             "ListenController.listen/2: expected a 200 chunked SSE response, got #{status} " <>
+               "(headers: #{inspect(headers)}) — the pin below would be vacuous"
+
+      assert header_values(headers, "cache-control") == @no_cache,
+             "ListenController.listen/2 must send EXACTLY #{inspect(@no_cache)}; " <>
+               "got #{inspect(header_values(headers, "cache-control"))}"
+    end
+
+    test "ChatController.fleet_events/2 (herd SSE) pins cache-control: no-cache", %{port: port} do
+      raw = "sse-fleet-" <> Integer.to_string(System.unique_integer([:positive]))
+
+      {:ok, _} =
+        Auth.create_token(raw, "sse-cache-fleet", "production", ["read", "write", "admin"])
+
+      {status, headers} =
+        stream_head!(
+          port,
+          "/v1/chat/events",
+          [{"authorization", "Bearer " <> raw}, {"accept", "text/event-stream"}],
+          "ChatController.fleet_events/2"
+        )
+
+      assert status == 200,
+             "ChatController.fleet_events/2: expected a 200 chunked SSE response, got #{status} " <>
+               "(headers: #{inspect(headers)}) — the pin below would be vacuous"
+
+      assert header_values(headers, "cache-control") == @no_cache,
+             "ChatController.fleet_events/2 must send EXACTLY #{inspect(@no_cache)}; " <>
+               "got #{inspect(header_values(headers, "cache-control"))}"
+    end
+
+    test "ChatController.events/2 (per-session SSE) pins cache-control: no-cache", %{port: port} do
+      raw = "sse-session-" <> Integer.to_string(System.unique_integer([:positive]))
+
+      {:ok, _} =
+        Auth.create_token(raw, "sse-cache-session", "production", ["read", "write", "admin"])
+
+      # The action 404s an unknown/foreign id BEFORE send_chunked/2 (Connectors
+      # D18/D19a), so the pin needs a session the `:global` admin scope can see.
+      {:ok, session} =
+        Barkpark.StudioChat.create_session(
+          %{
+            id: Ecto.UUID.generate(),
+            cwd: BarkparkWeb.Studio.ClaudeChat.cwd(),
+            mode: "plan"
+          },
+          :global
+        )
+
+      {status, headers} =
+        stream_head!(
+          port,
+          "/v1/chat/sessions/#{session.id}/events",
+          [{"authorization", "Bearer " <> raw}, {"accept", "text/event-stream"}],
+          "ChatController.events/2"
+        )
+
+      assert status == 200,
+             "ChatController.events/2: expected a 200 chunked SSE response, got #{status} " <>
+               "(headers: #{inspect(headers)}) — a 404 here means the session was not in scope " <>
+               "and the pin below would be vacuous"
+
+      assert header_values(headers, "cache-control") == @no_cache,
+             "ChatController.events/2 must send EXACTLY #{inspect(@no_cache)}; " <>
+               "got #{inspect(header_values(headers, "cache-control"))}"
+    end
+  end
+
+  # Bind :0, read the kernel-assigned port back, release it, then hand it to
+  # Bandit. `start_supervised!` ties the listener's life to this test, so the
+  # long-lived SSE connection processes are torn down with it.
+  defp start_streaming_endpoint! do
+    {:ok, probe} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port_num} = :inet.port(probe)
+    :ok = :gen_tcp.close(probe)
+
+    start_supervised!({
+      Bandit,
+      # The SSE actions block in `receive` for the life of the connection, so at
+      # teardown ThousandIsland waits its default `shutdown_timeout` (15_000 ms)
+      # for each to drain before killing it: 3 tests x 15.0 s of pure wait in the
+      # Elixir Test job (main run 33797686877, ci-log-gap-census.sh). Nothing is
+      # in flight worth draining here — the assertion already passed on the
+      # response HEAD — so give the acceptors a quarter second and move on.
+      plug: BarkparkWeb.Endpoint,
+      scheme: :http,
+      ip: {127, 0, 0, 1},
+      port: port_num,
+      thousand_island_options: [shutdown_timeout: 250]
+    })
+
+    port_num
+  end
+
+  # Read ONLY the response HEAD, then close. Returns `{status, headers}` with
+  # every header kept in wire order and duplicates PRESERVED — that is what
+  # makes the full-list equality above able to see a second `cache-control`.
+  defp stream_head!(port_num, path, req_headers, label) do
+    {:ok, sock} =
+      :gen_tcp.connect(
+        ~c"127.0.0.1",
+        port_num,
+        [:binary, active: false, packet: :http_bin],
+        @sse_head_timeout_ms
+      )
+
+    request = [
+      "GET ",
+      path,
+      " HTTP/1.1\r\nhost: 127.0.0.1:",
+      Integer.to_string(port_num),
+      "\r\n",
+      Enum.map(req_headers, fn {k, v} -> [k, ": ", v, "\r\n"] end),
+      "\r\n"
+    ]
+
+    :ok = :gen_tcp.send(sock, request)
+
+    deadline = System.monotonic_time(:millisecond) + @sse_head_timeout_ms
+
+    try do
+      recv_head(sock, label, nil, [], deadline)
+    after
+      :gen_tcp.close(sock)
+    end
+  end
+
+  defp recv_head(sock, label, status, headers, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      flunk(
+        "#{label}: no complete response HEAD within #{@sse_head_timeout_ms}ms " <>
+          "(status so far: #{inspect(status)}, headers so far: #{inspect(Enum.reverse(headers))})"
+      )
+    end
+
+    case :gen_tcp.recv(sock, 0, remaining) do
+      {:ok, {:http_response, _version, code, _reason}} ->
+        recv_head(sock, label, code, headers, deadline)
+
+      {:ok, {:http_header, _len, name, _reserved, value}} ->
+        recv_head(sock, label, status, [{header_name(name), value} | headers], deadline)
+
+      {:ok, :http_eoh} ->
+        {status, Enum.reverse(headers)}
+
+      {:ok, {:http_error, line}} ->
+        flunk("#{label}: unparsable HTTP in the response HEAD: #{inspect(line)}")
+
+      {:ok, other} ->
+        flunk(
+          "#{label}: unexpected packet before the end of the response HEAD: #{inspect(other)}"
+        )
+
+      {:error, reason} ->
+        flunk(
+          "#{label}: socket error #{inspect(reason)} before the response HEAD completed " <>
+            "(status so far: #{inspect(status)})"
+        )
+    end
+  end
+
+  # `packet: :http_bin` hands back well-known header names as ATOMS
+  # (`:"Cache-Control"`) and everything else as a binary. Normalise both.
+  defp header_name(name) when is_atom(name), do: name |> Atom.to_string() |> String.downcase()
+  defp header_name(name) when is_binary(name), do: String.downcase(name)
+
+  defp header_values(headers, name), do: for({^name, value} <- headers, do: value)
 end

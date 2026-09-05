@@ -67,6 +67,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:target, nil)
       |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
       |> Map.put(:ordered?, !!assigns.field.ordered)
       |> Map.put(:progress, checklist_progress(assigns.field, assigns[:value]))
@@ -79,9 +80,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= @progress.met %>/<%= @progress.total %> met</span>
         <% end %>
       </legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
       <ol class="bp-array-rows">
         <%= for {row_value, idx} <- @rows do %>
-          <li class="bp-array-row" data-row-index={idx}>
+          <li class={"bp-array-row " <> if(composite_rows?(@field), do: "bp-array-row-item", else: "")} data-row-index={idx}>
             <div class="bp-array-row-body">
               <%= render_element(assigns, row_value, idx) %>
             </div>
@@ -193,15 +195,32 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     row_path = "#{assigns.path}[#{idx}]"
 
     case item.type do
+      # Gyldendal parity E1.5 — a composite ROW is Sanity's array item: a
+      # collapsed <details> whose summary is the item's PREVIEW (title,
+      # subtitle, thumbnail — from the element's `preview` spec or the first
+      # string / image subfield), opened only while the row is empty. The
+      # composite itself renders `bare` inside; three feature cards read as
+      # three one-line rows instead of six thousand pixels of raw inputs.
       "composite" ->
-        CompositeField.composite_field(%{
-          field: item,
-          value: row_value || %{},
-          errors: row_subfield_errors(assigns.errors, idx),
-          on_change: assigns.on_change,
-          plugin_name: assigns.plugin_name,
-          path: row_path,
-          readonly: assigns.readonly
+        preview = item_preview(item, row_value)
+
+        item_row(%{
+          item: item,
+          idx: idx,
+          preview: preview,
+          open: row_empty?(row_value),
+          row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
+          body:
+            CompositeField.composite_field(%{
+              field: item,
+              value: row_value || %{},
+              errors: row_subfield_errors(assigns.errors, idx),
+              on_change: assigns.on_change,
+              plugin_name: assigns.plugin_name,
+              path: row_path,
+              readonly: assigns.readonly,
+              bare: true
+            })
         })
 
       "arrayOf" ->
@@ -269,6 +288,124 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         leaf_input(leaf_assigns)
     end
   end
+
+  defp item_row(assigns) do
+    ~H"""
+    <details class="bp-array-item" id={@row_id} open={@open} data-row-index={@idx}>
+      <summary class="bp-array-item-summary">
+        <span :if={@preview.media} class="bp-array-item-media" aria-hidden="true">
+          <img src={@preview.media} alt="" loading="lazy" />
+        </span>
+        <span :if={!@preview.media} class="bp-array-item-media bp-array-item-media-empty" aria-hidden="true"></span>
+        <span class="bp-array-item-text">
+          <span class="bp-array-item-title"><%= @preview.title %></span>
+          <span :if={@preview.subtitle} class="bp-array-item-subtitle"><%= @preview.subtitle %></span>
+        </span>
+        <span class="bp-array-item-chevron" aria-hidden="true">▾</span>
+      </summary>
+      <div class="bp-array-item-body">
+        <%= @body %>
+      </div>
+    </details>
+    """
+  end
+
+  # The item preview. A schema may declare Sanity's `preview.select`-like spec
+  # on the element: `"preview": {"title": "title", "subtitle": "buttonHref",
+  # "media": "backgroundImage"}` — each a subfield NAME (dotted paths walk
+  # nested maps, `image.url` for a picker value). Without a spec: title is the
+  # first non-empty string/text subfield, media the first image subfield's
+  # url, subtitle nil. An empty row reads as the element's title ("Feature-
+  # kort") so a freshly added card is named before it has content.
+  @doc false
+  def item_preview(item, row_value) do
+    row = if is_map(row_value), do: row_value, else: %{}
+    spec = (subfield_attr(item, :raw) || %{}) |> Map.get("preview") || %{}
+    subs = (Map.get(item, :fields) || []) |> Enum.reject(&is_nil/1)
+
+    title =
+      pick(row, spec["title"]) ||
+        first_text(row, subs) ||
+        title_for(item) ||
+        "Item"
+
+    %{
+      title: title,
+      subtitle: pick(row, spec["subtitle"]),
+      media: media_url(pick(row, spec["media"]) || first_image(row, subs))
+    }
+  end
+
+  defp pick(_row, nil), do: nil
+
+  defp pick(row, path) when is_binary(path) do
+    row
+    |> get_in_path(String.split(path, "."))
+    |> case do
+      "" -> nil
+      v when is_binary(v) -> v
+      %{} = m -> m
+      _ -> nil
+    end
+  end
+
+  defp get_in_path(v, []), do: v
+  defp get_in_path(%{} = m, [h | t]), do: get_in_path(Map.get(m, h), t)
+  defp get_in_path(_, _), do: nil
+
+  defp first_text(row, subs) do
+    Enum.find_value(subs, fn sub ->
+      type = subfield_attr(sub, :type)
+      name = subfield_attr(sub, :name)
+
+      if type in ["string", "text"] and is_binary(name) do
+        case Map.get(row, name) do
+          v when is_binary(v) and v != "" -> v
+          _ -> nil
+        end
+      end
+    end)
+  end
+
+  defp first_image(row, subs) do
+    Enum.find_value(subs, fn sub ->
+      if subfield_attr(sub, :type) == "image", do: Map.get(row, subfield_attr(sub, :name))
+    end)
+  end
+
+  # A picker value is a bare URL or a JSON/map {url, assetId, …}.
+  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
+
+  defp media_url(v) when is_binary(v) do
+    cond do
+      v == "" ->
+        nil
+
+      String.starts_with?(v, "{") ->
+        v
+        |> Jason.decode()
+        |> case do
+          {:ok, %{"url" => url}} when is_binary(url) and url != "" -> url
+          _ -> nil
+        end
+
+      true ->
+        v
+    end
+  end
+
+  defp media_url(_), do: nil
+
+  defp row_empty?(nil), do: true
+
+  defp row_empty?(%{} = m),
+    do: Enum.all?(m, fn {_, v} -> v in [nil, "", [], %{}] or v == false end)
+
+  defp row_empty?(_), do: false
+
+  defp composite_rows?(field), do: subfield_attr(element_field(field), :type) == "composite"
+
+  defp sanitize_id(s), do: s |> String.replace(~r/[^A-Za-z0-9_-]+/, "-") |> String.trim("-")
 
   # mediaAsset references browse/select from the media library; everything
   # else gets the generic document typeahead.

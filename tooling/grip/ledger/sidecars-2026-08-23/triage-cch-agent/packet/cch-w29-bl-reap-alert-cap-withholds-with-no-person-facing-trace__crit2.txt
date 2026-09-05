@@ -1,0 +1,1 @@
+The guard drives the cap boundary (cap+2 rows) and asserts the person-facing trace exists, not merely that the log line was written. Evidence: the test and its failure against unpatched bytes.

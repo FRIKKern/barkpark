@@ -6,6 +6,7 @@ defmodule Barkpark.Media do
   alias Barkpark.Content
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
+  alias Barkpark.Media.Probe
   alias Barkpark.Media.Storage.{MediaFile, ObjectKey}
   alias Barkpark.Plugins.Media.Assets
 
@@ -73,14 +74,30 @@ defmodule Barkpark.Media do
 
     # SECURITY — server-derived MIME + validate-before-persist.
     #
-    # PART 1 (behavior-preserving): the stored `mime_type` is derived from the
-    # filename the SAME way the serve path derives it (`MIME.from_path` — see
-    # media_controller serve + media/probe.ex), NOT taken from the client-supplied
-    # multipart `content_type`. A legit upload carries the real extension
-    # (pixel.png, book.xml), so the derived type is byte-identical to what the
-    # client claimed and to what serving already returns — only a header LIE can
-    # no longer set the persisted mime. Size is read from the TEMP file (identical
-    # bytes to the copy) so nothing is written until every check below passes.
+    # PART 1: the stored `mime_type` is SERVER-DERIVED — never taken from the
+    # client-supplied multipart `content_type`. A header LIE cannot set the
+    # persisted mime (stored-XSS defence; default asset visibility is public).
+    # Size is read from the TEMP file (identical bytes to the copy) so nothing
+    # is written until every check below passes.
+    #
+    # PART 1b — CONTENT SNIFFING, task-57ee9fff4aae9217 finding #4. The
+    # derivation used to be `MIME.from_path(original_name)` ALONE, which made
+    # the FILENAME the only evidence. Gyldendal's 816 source assets were all
+    # named `remote.axd` by an old .NET image handler, so real PNGs and JPEGs
+    # were persisted — and therefore served — as `application/octet-stream`,
+    # and 515 uploads were unrenderable in a browser. Note that "serve the
+    # stored mimeType" alone would have fixed NOTHING: the stored value was
+    # already octet-stream. The evidence has to be the BYTES.
+    #
+    # `Probe.sniff_mime/2` reads the leading bytes and falls back to
+    # `MIME.from_path/1` for anything it does not positively recognise, so
+    # every upload whose content is unknown keeps exactly the type it had
+    # before. The client's header is STILL never consulted — sniffing reads
+    # what was actually uploaded — and `neutralize_dangerous_mime/1` still
+    # runs in `MediaFile.changeset/2`, so a sniffed `image/svg+xml` is
+    # collapsed to octet-stream at write just as an honestly-named `.svg` is.
+    # Both defences hold, and the sniff makes the XSS one STRICTER: a hostile
+    # SVG named `pixel.png` used to be persisted as `image/png`.
     #
     # PART 2 (config-gated, OFF by default): `validate_upload/3` reads an optional
     # allowlist + size cap from app config. Unset/empty = allow-all (today's
@@ -94,7 +111,7 @@ defmodule Barkpark.Media do
     # :storage_unavailable} — an enveloped 503 — instead of an uncaught raise
     # → bare 500. On ANY failure after the write we remove the (possibly
     # partial) blob so a rejected upload never orphans bytes.
-    mime_type = MIME.from_path(original_name)
+    mime_type = Probe.sniff_mime(temp_path, MIME.from_path(original_name))
 
     # ORDER IS LOAD-BEARING (task-918106d49c62563e): the scope resolves BEFORE
     # any byte is written, because the blob key is DERIVED from the resolved
@@ -422,6 +439,17 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  The `mediaAsset` fields `patch_asset_metadata/3` will accept.
+
+  Public so an HTTP edge can ask "does this request carry any metadata at all?"
+  WITHOUT keeping a second copy of the allowlist that could drift from this one
+  (the v1 upload receipt, task-57ee9fff4aae9217 #13). It is the allowlist
+  `pick_metadata/1` applies — it does not authorise anything on its own.
+  """
+  @spec metadata_fields() :: [String.t()]
+  def metadata_fields, do: @metadata_fields
+
+  @doc """
   Patch metadata on the linked `mediaAsset` document. Creates the asset
   document if missing. Does not mutate blob fields (`fileInfo`, `mediaFileId`).
   """
@@ -558,31 +586,129 @@ defmodule Barkpark.Media do
   @doc """
   Delete a media file from disk and DB.
 
+  ## `:where_used` is REQUIRED — there is no default, in either direction
+
+  Every call site must state its where-used policy as `where_used: :guard` or
+  `where_used: :cascade`. Omitting it raises `ArgumentError` at the call, so a
+  NEW caller cannot inherit a policy nobody chose for it.
+
+  The reason the option exists at all: papers embed self-hosted media as RAW
+  `/media/files/...` URL STRINGS inside their block JSON, invisible to every
+  reference graph (see `Barkpark.Media.WhereUsed`). This function removes the
+  row, the blob, the renditions and the CDN copy IRREVERSIBLY and answers a
+  clean `{:ok, deleted}`, so an unconsulted delete blanks a live page behind a
+  200 receipt. PR #15557 closed that hole at the TWO HTTP doors — and only
+  there. The next engineer to add a media-delete door (a Studio handler, a
+  bulk-cleanup mix task, a plugin) reaches for THIS function, which is the
+  obvious API, and re-opens the same door.
+
+    * `:guard` — the CALL SITE consults `Media.WhereUsed` before calling and
+      refuses (or takes an explicit operator override) when the blob is
+      referenced. Both HTTP doors are `:guard`.
+    * `:cascade` — the referring content is being torn down in the same
+      operation, so a reference is not a reason to stop. `Tenancy` workspace
+      teardown and `Plugins.Tickets.Attachments` are `:cascade`.
+
+  This option is a DECLARATION, not a second guard: `delete_file/2` behaves
+  identically for both values and deliberately runs no scan of its own, because
+  the cascade callers must keep deleting unconditionally and the doors need the
+  referrer census to build their own 409 envelope. What it buys is that the
+  decision is UNAVOIDABLE and greppable — `git grep "where_used:" api` lists
+  every media-delete policy in the tree.
+
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); the
   about-to-delete read is scoped through `get_file/2` so a delete in workspace B
   returns `{:error, :not_found}` for a blob owned by workspace A (barkpark-af50).
   An unscoped delete keeps the explicit-global behaviour for back-compat.
+
+  ## The `mediaAsset` DOCUMENT goes with the row, in the same transaction
+
+  A blob has a companion `mediaAsset` document (alt text, collection, rights).
+  Removing the row and leaving the document is what left Gyldendal with 517
+  dangling drafts, and the reason the old shape could do that while still
+  answering `{:ok, _}` is worth naming:
+
+    * The document delete was reached ONLY through the `after_media_delete`
+      plugin callback. `Registry.run_after_media_delete/1` walks the ENABLED
+      plugins, so with the media plugin off the document simply survived.
+    * `Barkpark.Plugins.Media.after_media_delete/1` discards
+      `Assets.delete_for_blob/3`'s result and hard-codes `:ok`, and
+      `delete_for_blob/3` used to discard every `Content.delete_document/4`
+      result with `_ =`. A `rev_mismatch` or a halted `before_delete` therefore
+      produced a successful DELETE over a surviving document.
+
+  So the delete runs `delete_asset_doc/1` DIRECTLY, inside one transaction that
+  also carries the row delete and the plugin hook, and a real document-delete
+  failure ROLLS THE ROW BACK. `:not_found` is not a failure — a blob with no
+  companion document deletes exactly as before, and a re-issued DELETE stays
+  idempotent.
+
+  ORDERING IS PRESERVED, deliberately: `asset_doc_for_file/2` still resolves the
+  webhook payload BEFORE anything is deleted. The document delete joins the
+  transaction underneath that read; it does not move above it, because the
+  payload must describe a document that still existed when the delete began.
+
+  ## NO `mode: :savepoint` — that is what 500'd every prod delete (#15827)
+
+  PR #15827 opened this transaction with `Repo.transaction(fun, mode: :savepoint)`.
+  That option is a NO-OP at best and a hard 500 at worst, and NEITHER branch is
+  reachable from `mix test`:
+
+    * NESTED (already inside a transaction) `DBConnection.transaction/3` matches
+      its `%DBConnection{conn_mode: :transaction}` clause, which takes `_opts`
+      and IGNORES them — no savepoint is ever issued. The "the failure is local
+      to this file" claim in #15827's comment was never true.
+    * TOP LEVEL (`:idle` connection — every real HTTP delete) `mode: :savepoint`
+      falls through `Postgrex.Protocol.handle_begin/2`'s last clause, returning
+      the connection status `:idle`. `DBConnection` turns that status into
+      `%DBConnection.TransactionError{message: "transaction is not started"}`,
+      DISCONNECTS the connection, and `rollback_or_raise/1` answers
+      `{:error, :rollback}` — a shape #15827's `case` had no clause for, hence
+      the `CaseClauseError` in `Media.delete_file/2` (the site at the time of #15827) on guerrilla request
+      GNHlOfn4otoBOqYAACoR.
+
+  `Ecto.Adapters.SQL.Sandbox` issues a `BEGIN` on the checked-out connection and
+  never commits it, so under `mix test` the connection is NEVER `:idle`: the
+  savepoint clause matches, a real `SAVEPOINT` is issued, and the call succeeds.
+  That is the whole reason CI was green while every prod delete 500'd. See
+  `media_delete_savepoint_reproduction_test.exs`, which runs the same call
+  through `Sandbox.unboxed_run/2` and reproduces `{:error, :rollback}` — and
+  which also warns that `Repo.in_transaction?/0` is NOT the way to detect this
+  (it reads the process dictionary and answers false under the sandbox).
+
+  A plain nested `Repo.transaction` behaves identically to what `:savepoint`
+  actually delivered (a join), so nothing is lost by dropping it. When an inner
+  `Content` call rolls back, we still learn WHY — `Content.delete_document/4`
+  hands its own `{:error, reason}` back before our `Repo.rollback/1` unwinds —
+  and we re-raise it as a NAMED `{:error, {:asset_doc_delete_failed, reason}}`.
+  The bare `{:error, :rollback}` clause below is the belt-and-braces arm: an
+  in-transaction plugin hook that swallows a nested rollback poisons the
+  connection without telling us, and even THAT may not escape as an unmatched
+  tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
-  def delete_file(id, opts \\ []) do
-    case get_file(id, opts) do
+  def delete_file(id, opts) when is_list(opts) do
+    # FIRST statement in the function, BEFORE the row is even read: a caller
+    # that omitted the decision must learn so on every id, including one that
+    # does not exist, and must NOT get a delete out of the raise.
+    _policy = where_used_policy!(opts)
+
+    case get_file(id, Keyword.delete(opts, :where_used)) do
       {:ok, file} ->
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
         # FIRST side effect: on failure the row survives intact (still
         # pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset)
 
-        # A stale delete means a concurrent DELETE already consumed the row →
-        # {:error, :not_found} (both controllers 404 via FallbackController)
-        # instead of an uncaught Ecto.StaleEntryError (a 500).
-        case Repo.delete(file, stale_error_field: :id) do
+        case delete_row_with_asset_doc(file) do
           {:ok, deleted} ->
             # The FOUR irreversible non-DB effects — CDN edge purge, the
             # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
-            # cache removal — are DEFERRED when we're inside a transaction so a
-            # later rollback cannot strand a surviving row's blob (phantom
-            # media). Outside a transaction they fire IMMEDIATELY (unchanged for
-            # the three non-transaction callers: ticket attachments + the two
-            # media controllers). See `defer_media_effect/1`.
+            # cache removal — are queued AFTER the DB transaction closes, and are
+            # DEFERRED again when an OUTER transaction is still open so a later
+            # rollback cannot strand a surviving row's blob (phantom media).
+            # Outside any transaction they fire IMMEDIATELY (unchanged for the
+            # three non-transaction callers: ticket attachments + the two media
+            # controllers). See `defer_media_effect/1`.
             defer_media_effect(fn ->
               Cdn.invalidate(file)
               Events.dispatch(file.dataset, "media.deleted", file, doc)
@@ -594,26 +720,134 @@ defmodule Barkpark.Media do
               Barkpark.Media.Renditions.delete_for_file(file.id)
             end)
 
-            # `run_after_media_delete` is a DB write and MUST stay inside the
-            # transaction so it rolls back with the row. HOOK CONTRACT: an
-            # `after_media_delete` plugin callback may only touch the DATABASE —
-            # NO file or HTTP I/O — because it runs before commit and would
-            # otherwise re-open exactly the phantom hole this deferral closes.
-            _ =
-              Barkpark.Plugins.Registry.run_after_media_delete(%{
-                media_file_id: file.id,
-                dataset: file.dataset
-              })
-
             {:ok, deleted}
 
-          {:error, cs} ->
+          # A stale delete means a concurrent DELETE already consumed the row →
+          # {:error, :not_found} (both controllers 404 via FallbackController)
+          # instead of an uncaught Ecto.StaleEntryError (a 500).
+          {:error, {:row, cs}} ->
             if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+
+          # The blob row is BACK (rolled back) and its blob was never touched —
+          # the deferred effects are queued only on the committed path. The
+          # caller sees WHY, and a retry after the concurrent edit settles
+          # succeeds. FallbackController unwraps this to the inner reason's own
+          # named status (rev_mismatch → 412, halted → 409).
+          {:error, {:asset_doc, reason}} ->
+            {:error, {:asset_doc_delete_failed, reason}}
+
+          # An in-transaction hook rolled back a nested transaction and swallowed
+          # the reason, so DBConnection aborted the connection under us and our
+          # own `conclude` threw `:rollback`. Nothing half-committed — but it
+          # leaves this function without a reason to report, so it gets a NAMED
+          # one rather than escaping as the unmatched tuple that 500'd prod.
+          {:error, :rollback} ->
+            {:error, {:asset_doc_delete_failed, :rollback}}
         end
 
       error ->
         error
     end
+  end
+
+  # The `:where_used` policy is REQUIRED and has NO default in either direction.
+  #
+  # A default would pick a side for a caller who never thought about it, and
+  # BOTH sides are wrong to default to: `:cascade` re-opens the silent-erasure
+  # door PR #15557 closed at the two HTTP doors, and `:guard` would quietly
+  # promise a scan this function deliberately does not run. So the only honest
+  # default is none — the caller states the policy or the call raises.
+  #
+  # It raises rather than returning `{:error, _}` on purpose: an omitted policy
+  # is a CODING mistake in a new call site, not a runtime condition an operator
+  # can act on, and a `with`-chained door would otherwise swallow it into a
+  # tidy 4xx envelope instead of failing the test that exercises the new site.
+  defp where_used_policy!(opts) do
+    case Keyword.fetch(opts, :where_used) do
+      {:ok, policy} when policy in [:guard, :cascade] ->
+        policy
+
+      {:ok, other} ->
+        raise ArgumentError, """
+        Barkpark.Media.delete_file/2 got where_used: #{inspect(other)}, and \
+        it must be :guard or :cascade.
+
+          * :guard   — the CALL SITE consults Barkpark.Media.WhereUsed before
+                       calling and refuses (or takes an explicit operator
+                       override) when the blob is referenced.
+          * :cascade — the referring content is being torn down in the same
+                       operation, so a reference is not a reason to stop.
+
+        There is no third value and no truthy shorthand: an unrecognised value
+        must not read as \"guarded\" to the next person who greps this tree.
+        """
+
+      :error ->
+        raise ArgumentError, """
+        Barkpark.Media.delete_file/2 requires a :where_used policy and has NO \
+        default, in either direction.
+
+        Papers embed self-hosted media as RAW /media/files/... URL STRINGS
+        inside their block JSON, invisible to every reference graph. This
+        function removes the row, the blob, the renditions and the CDN copy
+        IRREVERSIBLY and answers a clean {:ok, deleted}, so an unconsulted
+        delete blanks a live page behind a 200 receipt.
+
+        Pass where_used: :guard if this is a DOOR — consult
+        Barkpark.Media.WhereUsed.referrers/1 first and refuse a referenced blob
+        unless the operator explicitly overrode it.
+
+        Pass where_used: :cascade if the referring content is being torn down
+        in the same operation (workspace teardown, rolling back a blob this
+        request just created).
+
+        See delete_file/2's @doc for why neither is safe as a default.
+        """
+    end
+  end
+
+  # ONE transaction for the two DB deletes (row + `mediaAsset` document) and the
+  # in-transaction plugin hook. `delete_file/2`'s docs above explain, at length,
+  # why NO transaction-mode option is passed here — a source pin in
+  # media_delete_atomicity_test.exs keeps one from creeping back.
+  defp delete_row_with_asset_doc(%MediaFile{} = file) do
+    Repo.transaction(fn ->
+      case Repo.delete(file, stale_error_field: :id) do
+        {:ok, deleted} ->
+          case delete_asset_doc(file) do
+            :ok ->
+              # `run_after_media_delete` is a DB write and MUST stay inside the
+              # transaction so it rolls back with the row. HOOK CONTRACT: an
+              # `after_media_delete` plugin callback may only touch the DATABASE
+              # — NO file or HTTP I/O — because it runs before commit and would
+              # otherwise re-open exactly the phantom hole the effect deferral
+              # closes. The media plugin's own callback is now a second,
+              # idempotent pass over an already-deleted document; other plugins
+              # still get theirs.
+              _ =
+                Barkpark.Plugins.Registry.run_after_media_delete(%{
+                  media_file_id: file.id,
+                  dataset: file.dataset
+                })
+
+              deleted
+
+            {:error, reason} ->
+              Repo.rollback({:asset_doc, reason})
+          end
+
+        {:error, cs} ->
+          Repo.rollback({:row, cs})
+      end
+    end)
+  end
+
+  # Remove the blob's companion `mediaAsset` document(s) inside the caller's
+  # transaction. Scoped EXACTLY as `asset_doc_for_file/2` resolved the webhook
+  # payload a few lines above (dataset + blob id, no workspace narrowing), so
+  # the delete can never miss a document the resolve just found.
+  defp delete_asset_doc(%MediaFile{} = file) do
+    Assets.delete_for_blob(file.id, file.dataset)
   end
 
   # ── Deferred media-delete effects (felix-phantom-media-atomicity) ──────────

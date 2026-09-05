@@ -1,0 +1,1 @@
+The defect register and the human-gate table are keyed by epic, with the six CCH defect rows and three CCH gate ids preserved byte-identically.

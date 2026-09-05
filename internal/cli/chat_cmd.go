@@ -242,7 +242,25 @@ func runChatUnarchive(out *writer, g globals, ctx manifest.Context, args []strin
 	}
 
 	client := apiclient.New(apiclient.Config{BaseURL: ctx.Server, Token: ctx.Token})
-	session, err := client.UnarchiveChatSession(ids[0])
+	session, status, raw, err := client.UnarchiveChatSessionRaw(ids[0])
+	// THE FENCE RUNS FIRST, before the error check, on the same reasoning
+	// #15917 gave: on an accepted status the RAW BYTES are the receipt, and the
+	// decode error an HTML page or an empty 200 produces
+	// ("decode unarchive response: invalid character '<' …") names the JSON
+	// parser rather than the transport. `{}` / `null` / `{"result":null}` do not
+	// even error — they decode to a ZERO ChatSession and printed
+	// `unarchived   untitled session` at rc=0.
+	//
+	// GATED ON A 2xx: chatSendRaw returns an error for a non-accepted status
+	// too, and status 0 on a transport failure. Screening those would answer a
+	// refused 404 or a dead socket with "unreadable write receipt: HTTP 0",
+	// burying the real cause. The fence's business is a STATED SUCCESS whose
+	// body said nothing.
+	if status >= 200 && status < 300 {
+		if rc, handled := screenBuiltinWriteReceipt(out, "chat unarchive", status, raw); handled {
+			return rc
+		}
+	}
 	if err != nil {
 		out.errf("bp chat unarchive: %v", err)
 		return exitGeneric

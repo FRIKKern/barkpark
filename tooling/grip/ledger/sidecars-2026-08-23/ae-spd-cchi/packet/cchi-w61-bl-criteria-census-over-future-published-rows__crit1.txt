@@ -1,0 +1,1 @@
+It reads `.doc.content.acceptance_criteria` and FAILS LOUDLY on a missing key. A flat `.doc.acceptance_criteria` read returns nothing and renders as '0 criteria, 0 met', indistinguishable from a genuine zero — quote a run over a doc with the key absent showing the loud failure, not a zero.

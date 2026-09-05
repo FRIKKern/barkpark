@@ -1,0 +1,1 @@
+Criterion 9's wording is changed from 'worktree' to 'checkout' on the bp row, and the change is recorded. Evidence: the re-read criterion text.

@@ -1,0 +1,1 @@
+The sites probe's ONE root becomes a SHORT LIST of roots (default `["/opt/barkpark/sites", "/var/lib"]`), reusing `duSitesArgs` and `parseDuTree` UNCHANGED -- the diff must show the parsing/argv helpers were generalized by renaming, not rewritten. Evidence: the diff plus the passing existing probe tests.

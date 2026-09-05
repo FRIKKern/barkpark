@@ -1,0 +1,1 @@
+sites/deploy.ex stage_caption/2 non-failed arm is checked: either already routed through raw/1 by dr-w8-s2 (recorded as such) or fixed here. Evidence: the grep plus the diff or the finding.

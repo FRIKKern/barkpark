@@ -1,0 +1,1 @@
+list_tokens gains a workspace predicate before it ever reaches an HTTP route — proven by a test seeding two workspaces on the SAME dataset (guerrilla really has two on 'production') and asserting each sees only its own.

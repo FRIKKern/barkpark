@@ -1,0 +1,1 @@
+Both registry-derived call sites (bodyRender, CardRow) still covered — proven by mutation

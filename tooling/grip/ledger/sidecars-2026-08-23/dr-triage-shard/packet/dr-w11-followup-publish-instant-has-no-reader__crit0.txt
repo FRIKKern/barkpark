@@ -1,0 +1,1 @@
+A query joins content_publishes forward to deployments per site and reports the TRUE publish->became_live distribution, with publishes that never matched a deployment counted in an explicit named bucket rather than dropped

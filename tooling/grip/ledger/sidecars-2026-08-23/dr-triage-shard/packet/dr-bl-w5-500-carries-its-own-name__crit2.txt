@@ -1,0 +1,1 @@
+The OpenApi enum + `error_code_coverage_test.exs` are updated and `openapi.json` is regenerated FROM THE CI ARTIFACT (it cannot be produced locally). Evidence: the artifact run id.

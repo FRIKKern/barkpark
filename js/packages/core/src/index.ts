@@ -14,6 +14,9 @@ import type {
 
 // --- Client factory + handshake --------------------------------------------
 export { createClient } from './client'
+// The runtime operator array `FilterOp` is derived from — exported so a caller
+// can enumerate the ops (a `<select>`, a validator) instead of re-typing them.
+export { FILTER_OPS } from './types'
 export { scopePrefix } from './scope'
 export { createHandshakeCache } from './handshake'
 
@@ -260,6 +263,7 @@ export type {
   BarkparkAuth,
   MfaEnrollResult,
   MfaVerifyResult,
+  PasswordResetReceipt,
   BarkparkSchema,
   BarkparkFieldType,
   DocFieldName,

@@ -1,0 +1,1 @@
+A test fires a non-UUID and an empty string at authorize/3, workspace_admin?/2 and membership_role/2 in both the workspace-id and principal-id positions, and each returns a denial rather than raising. Evidence quotes the run.

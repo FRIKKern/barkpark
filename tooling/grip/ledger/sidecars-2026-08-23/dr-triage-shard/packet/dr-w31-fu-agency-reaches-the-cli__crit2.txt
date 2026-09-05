@@ -1,0 +1,1 @@
+A Go test pins the agency decode against a fixture payload so a future struct edit that drops the field reds, and the test is proved able to fail by removing the field once.

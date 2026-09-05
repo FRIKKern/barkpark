@@ -114,7 +114,18 @@ defmodule BarkparkWeb.LiveAuth do
         _ -> dev_browser_token_fallback()
       end
 
-    socket = assign(socket, :current_user, user_from_session(session))
+    # Server-only provenance: a failed/revoked effective credential must not be
+    # indistinguishable from a genuinely anonymous Studio mount. This includes
+    # both an explicit session bearer and the configured dev-browser fallback.
+    # Most public Studio remains intentionally open in demo posture, but a
+    # reconnect that still attempts an invalidated bearer may never inherit
+    # that authority.
+    token_credential_present? = is_binary(raw) and raw != ""
+
+    socket =
+      socket
+      |> assign(:current_user, user_from_session(session))
+      |> assign(:api_token_credential_present?, token_credential_present?)
 
     case raw do
       nil ->

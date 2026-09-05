@@ -145,7 +145,7 @@ defmodule BarkparkWeb.Plugs.CacheBodyReaderTest do
     @bogus_sig "sha256=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
     defp deliver(body) do
-      build_conn()
+      scoped_conn()
       |> put_req_header("content-type", "application/json")
       |> put_req_header("x-github-event", "issues")
       |> put_req_header("x-hub-signature-256", @bogus_sig)

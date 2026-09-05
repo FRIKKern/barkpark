@@ -1,0 +1,1 @@
+The five rows named in merged PRs are reconciled — criteria authored and stamped against the merged work, or closed with the PR named

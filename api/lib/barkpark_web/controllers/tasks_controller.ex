@@ -38,6 +38,46 @@ defmodule BarkparkWeb.TasksController do
   `assignee`, `dependencies`, and related task fields. The `bp task` CLI
   consumes this shape. See `render_doc/1`.
 
+  ## Paging past the window: the keyset cursor on `GET /v1/tasks`
+  ## (bl-api-tasks-stable-cursor)
+
+  The index serves a WINDOW, not the corpus: `limit` rows (default 100, capped
+  at `Params.index_limit_cap/0` = 1000) ordered `desc: updated_at, desc: id`.
+  Every write to any task re-stamps `updated_at` and rotates that row to the
+  head, so the window's tail falls off under ordinary traffic. A reader that
+  walked the window and asked "is task X still here?" got ONE answer — absent —
+  for two different facts: X was CLOSED, or X was pushed past row 1000 by a
+  thousand unrelated touches. **Absence was not decidable.** The CLI lane's
+  `internal/taskboard/merge.go` carries a client-side heuristic built on that
+  ambiguity (PR #14251); this is the server-side fix it was standing in for.
+
+  `?cursor=` is an OPT-IN keyset (seek) cursor over the tuple the ordering
+  already uses — `(updated_at, id)`, or `(inserted_at, id)` on the `parent=`
+  rail. Pass `?cursor=` (empty) to start at the head and receive
+  `page.next_cursor`; pass that token back to get the next page. Paging is
+  bounded by a WHERE clause, not by OFFSET, so a caller can walk **past the
+  cap** to the end of the corpus: a row that rotated out of page 1 is reached
+  on a later page, and a row that went terminal is reached and renders
+  `lifecycle_status: "done"`. Absence now means "not in the corpus".
+
+  ADDITIVE. `page.next_cursor` appears only when the caller spelled `?cursor=`
+  at all, so a request that names no cursor gets the pre-change envelope key
+  for key. `cursor` and a non-zero `offset` together are a 400 — they are two
+  different paging models and silently honouring one would page from a place
+  the caller did not ask for. A malformed or wrong-ordering cursor is a 400
+  too, never a silent restart from the head (which reads exactly like a
+  finished walk).
+
+  THE REJECTED ALTERNATIVE was a closed-since delta feed
+  (`?closed_since=<ts>`, terminal transitions only). Cheap, but a SECOND source
+  of truth about task state with its own window and drift, and still blind to a
+  row that rotated out WITHOUT closing (moved, re-parented, relabelled).
+  `GET /v1/tasks/events` already answers "what changed since". Making the ONE
+  list route complete beat adding a second incomplete one.
+
+  Full rationale, including the honest limit of a keyset over a MUTABLE key:
+  `TasksController.Params`, the cursor section.
+
   ## Why the doc_id is a URL segment for close but a body field for claim
 
   Claim's contract is "pick the next ready row" — there is no specific row
@@ -55,7 +95,16 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.Validation
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ReadPerspective
+
+  # The value set `GET /v1/graph/:id` declares in `Barkpark.Plugins.Capabilities`
+  # ("published (default) | drafts (live extract over the drafts corpus)") and
+  # therefore in `docs/openapi.json`. NARROWER than the document reads on
+  # purpose: `raw` is not offered on this surface.
+  @graph_perspectives ["published", "drafts"]
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -137,7 +186,28 @@ defmodule BarkparkWeb.TasksController do
 
     %{ok: true, docs: render_task_list(docs, conn, params)}
     |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
-    |> Map.put(:page, Params.page_meta(docs, page_opts))
+    |> Map.put(:page, page_block(docs, page_opts))
+  end
+
+  # `page` + the OPT-IN `next_cursor`. The key is added only when the caller
+  # spelled `?cursor=` at all, so every pre-cursor caller reads a byte-identical
+  # envelope. It is minted from the SEALED docs this response actually renders
+  # (sealing rewrites `content` only — `id` and the timestamps survive), and it
+  # is `nil` on a short page: `returned < limit` PROVES the walk is finished, so
+  # a token there would invite one more round-trip to learn nothing.
+  defp page_block(docs, page_opts) do
+    meta = Params.page_meta(docs, page_opts)
+
+    if Keyword.get(page_opts, :cursor_requested?, false) do
+      next =
+        if meta.has_more,
+          do: Params.next_cursor(docs, Keyword.fetch!(page_opts, :cursor_axis)),
+          else: nil
+
+      Map.put(meta, :next_cursor, next)
+    else
+      meta
+    end
   end
 
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
@@ -157,7 +227,11 @@ defmodule BarkparkWeb.TasksController do
 
       :full ->
         counts = Params.batch_edge_counts(docs)
-        Enum.map(docs, &Params.render_doc_with_counts(&1, counts))
+        # task-3e0eda896a247776: the SAME batched grouped query the brief card
+        # runs — the full card used to omit `child_count` entirely, so the
+        # DEFAULT view of the ledger answered "no children" for every epic root.
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_doc_with_counts(&1, counts, child_counts))
     end
   end
 
@@ -216,9 +290,11 @@ defmodule BarkparkWeb.TasksController do
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
+            child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_doc_with_counts(&1, counts)),
-             Enum.map(sealed_ready, &Params.render_doc_with_counts(&1, counts))}
+            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+
+            {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
 
       events = if view == :brief, do: Enum.take(events, 5), else: events
@@ -353,7 +429,13 @@ defmodule BarkparkWeb.TasksController do
     # it must be the cheap answer; the cap is what an informed one may ask for
     # and stays 1000. `?limit=` is honoured up to that cap exactly as before —
     # nothing a caller can spell changed, only what silence means.
-    limit = Params.parse_limit(params["limit"], 100, 1000)
+    # The cap is `Params.index_limit_cap/0` (1000) rather than a literal, so a
+    # test can shrink it and prove the ACROSS-THE-BOUNDARY cursor property on a
+    # small corpus instead of seeding 1001 rows. The default is the cheap
+    # answer (100) or the cap, whichever is smaller — a default above the cap
+    # would be clamped anyway and would misreport itself.
+    cap = Params.index_limit_cap()
+    limit = Params.parse_limit(params["limit"], min(100, cap), cap)
 
     # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
     # every page repeated page 0 and `bp task ls --all` self-aborted with
@@ -415,8 +497,33 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_label(filters["label"])
       |> Params.apply_index_order(parent)
 
-    docs = Repo.all(query)
-    json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
+    # bl-api-tasks-stable-cursor: the keyset seek. Parsed AFTER `parent` is
+    # bound because the cursor's axis is the ORDERING's axis, and the ordering
+    # is what `parent` selects. Fail-closed on a bad token (see the moduledoc).
+    case Params.parse_index_cursor(params, parent) do
+      {:ok, cursor} when cursor != nil and offset > 0 ->
+        bad_request(
+          conn,
+          "cursor and offset are two different paging models — drop `offset` " <>
+            "(the cursor already names where the page starts)"
+        )
+
+      {:ok, cursor} ->
+        docs = query |> Params.apply_index_cursor(cursor) |> Repo.all()
+
+        json(
+          conn,
+          task_list_response(docs, conn, params,
+            limit: limit,
+            offset: offset,
+            cursor_axis: Params.cursor_axis(parent),
+            cursor_requested?: Params.cursor_requested?(params)
+          )
+        )
+
+      {:error, reason} ->
+        bad_request(conn, reason)
+    end
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
@@ -501,9 +608,17 @@ defmodule BarkparkWeb.TasksController do
 
         # Field-visibility seal (fail-closed): the doc AND its child summaries
         # are rendered off content-redacted docs under the request's caller.
+        # task-3e0eda896a247776: `child_count` rides INSIDE `doc` as well as at
+        # the top level. `children` is already the authoritative list here, so
+        # the inner field is keyed off the SAME `length(children)` the envelope
+        # reports — one query, one number, and `doc.child_count` now means the
+        # same thing on `bp task get` as it does on a `bp task ls` / `ready`
+        # card. The top-level key is UNCHANGED for the readers already on it.
+        child_counts = %{Params.strip_draft_prefix(doc.doc_id) => length(children)}
+
         json(conn, %{
           ok: true,
-          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts),
+          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
           children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
           child_count: length(children)
         })
@@ -562,11 +677,13 @@ defmodule BarkparkWeb.TasksController do
         # Snapshot the rail BEFORE the claim so rail_changed compares
         # observed_rail_rev against the rail the worker actually saw (not the
         # rev its own claim produces). nil when the row is absent/parentless.
-        baseline_rev =
+        pre_task =
           case find_task_by_doc_id(doc_id, conn) do
-            {:ok, %Document{} = pre} -> pre_write_rail_rev(pre, conn)
+            {:ok, %Document{} = pre} -> pre
             _ -> nil
           end
+
+        baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
 
         case Tasks.claim_by_id(doc_id, worker_id, opts) do
           {:ok, %Document{} = doc} ->
@@ -600,6 +717,24 @@ defmodule BarkparkWeb.TasksController do
           {:error, {:invalid_execution_policy, errors}} ->
             bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
+          # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
+          # collapses three different refusals into one `:not_ready` atom, and
+          # the CLI turns that into one sentence covering all three: "someone
+          # else holds it or it isn't ready". Three different remedies, one
+          # word — the caller cannot tell which applies, and the filing that
+          # produced this fix spent hours chasing a phantom readiness bug on a
+          # row that was simply `human_gated` by its own author.
+          #
+          # The refusal atom is UNCHANGED (so is the wire `reason` token, which
+          # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
+          # arm is DERIVED here from the pre-claim snapshot the rail baseline
+          # already fetched, and rides as additive fields + a `message` the bp
+          # CLI prints in place of the bare token.
+          {:error, :not_ready} ->
+            conn
+            |> put_status(:conflict)
+            |> json(not_ready_arm(pre_task, worker_id))
+
           {:error, reason} ->
             conn
             |> put_status(:conflict)
@@ -608,6 +743,74 @@ defmodule BarkparkWeb.TasksController do
 
       _ ->
         bad_request(conn, "worker_id is required")
+    end
+  end
+
+  # Name WHICH arm of `claim_by_id`'s readiness gate refused, in the same order
+  # `Barkpark.Tasks.Claim` evaluates them: executable-gate first
+  # (`check_executable_for_targeted_claim` → QueueGate), lifecycle second
+  # (`check_ready_for_targeted_claim` → Validation.claimable_statuses/0).
+  #
+  # Every arm keeps `reason: "not_ready"`. `arm` is the machine-readable
+  # discriminator; `message` is the sentence a human acts on.
+  @doc false
+  def not_ready_arm(nil, _worker_id),
+    do: %{ok: false, reason: "not_ready", arm: "unknown"}
+
+  def not_ready_arm(%Document{content: content}, worker_id) do
+    c = content || %{}
+    holder = claim_holder(c)
+    gate = Map.get(c, "queue_gate")
+    status = Map.get(c, "lifecycle_status")
+
+    cond do
+      not is_nil(holder) and holder != worker_id ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "held_by_other",
+          held_by: holder,
+          message:
+            "held by #{holder} — nobody else can claim it. If that worker id is YOURS, " <>
+              "re-claim with it VERBATIM to renew the lease. If the row also reads " <>
+              "lifecycle open, the holder is stranded: free it with " <>
+              "`bp task release <id> <your-worker-id> <claim.epoch> --yes`."
+        }
+
+      not QueueGate.executable?(c, worker_id) ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "queue_gated",
+          execution_class: QueueGate.execution_class(c, worker_id),
+          gate_reason: if(is_map(gate), do: Map.get(gate, "reason")),
+          message:
+            "queue_gate state is #{inspect(QueueGate.execution_class(c, worker_id))} — this row " <>
+              "is gated by its AUTHOR, not by readiness, and no retry will change that. " <>
+              "Read content.queue_gate.reason for what it is waiting on."
+        }
+
+      status not in Validation.claimable_statuses() ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "not_claimable_status",
+          lifecycle_status: status,
+          message:
+            "lifecycle_status is #{inspect(status)}; only " <>
+              "#{inspect(Validation.claimable_statuses())} is claimable. " <>
+              "Reopen it with `bp task stage <id> open` first."
+        }
+
+      true ->
+        %{ok: false, reason: "not_ready", arm: "unknown"}
+    end
+  end
+
+  defp claim_holder(content) do
+    case get_in(content, ["claim", "worker"]) do
+      worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
+      _ -> nil
     end
   end
 
@@ -650,8 +853,24 @@ defmodule BarkparkWeb.TasksController do
       # task) so rail_changed reflects only concurrent actors, not this close.
       baseline_rev = pre_write_rail_rev(task, conn)
 
-      case Tasks.close(task.id, worker_id, opts) do
-        {:ok, %Document{} = doc} ->
+      case Barkpark.Tasks.Close.close_with_receipt(task.id, worker_id, opts) do
+        # THE REPLAY (task-17224f58d3bda3bd). This worker's close already
+        # landed; the response it got for it did not come back. Answer 200 with
+        # the stored row and say so in one field, so a caller can tell "my write
+        # landed earlier" from "my write landed just now" without a re-read —
+        # and, above all, so it stops reading a landed write as a failure.
+        {:ok, %Document{} = doc, :already_closed} ->
+          json(
+            conn,
+            close_response(doc, worker_id, conn)
+            |> Map.put(:already_closed, true)
+            |> Map.put(
+              :message,
+              "already closed by #{worker_id} — this call changed nothing and the stored close_reason is unchanged"
+            )
+          )
+
+        {:ok, %Document{} = doc, :closed} ->
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -681,11 +900,16 @@ defmodule BarkparkWeb.TasksController do
             ok: false,
             reason: "doc_changed_since_claim",
             current_rev: current_rev,
-            changed_fields: changed_fields
+            changed_fields: changed_fields,
+            # pds-bl-close-409-hint-promises-absent-fields: the two VALUES were
+            # always here; the COMMAND that consumes them was not, so a caller
+            # read `current_rev` off the body and still went looking for the
+            # recovery. Naming it here is what makes the body self-sufficient.
+            message: Params.drift_hint(current_rev, changed_fields)
           })
 
         {:error, reason} ->
-          conflict(conn, reason, :close)
+          conflict(conn, reason, :close, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -917,7 +1141,12 @@ defmodule BarkparkWeb.TasksController do
   # Body/query (the bp CLI rides flags as query params): worker_id +
   # observed_epoch (positional in bp), criterion=<index>, then EXACTLY one of
   #   met=true      + evidence=<non-empty> → flip the lock, evidence or nothing
-  #   miss=true     + note=<non-empty>     → honest attempt, met never flips
+  #   miss=true     + note=<non-empty>     → honest attempt, met never flips. On
+  #                                          a DONE/CANCELLED row this is the
+  #                                          ONE accepted verb (plus withdraw),
+  #                                          and it also needs
+  #                                          observed_rev=<the rev you read>;
+  #                                          met=true stays not_in_progress.
   #   withdraw=true + note=<non-empty>     → LOWER the lock (D745): met→false,
   #                                          evidence preserved, a signed
   #                                          withdrawals[] record appended. On a
@@ -957,7 +1186,7 @@ defmodule BarkparkWeb.TasksController do
           # The criteria-grain conflicts ride an actionable `message` (D56): a
           # guard that refuses without saying what to type is a guard agents
           # route around.
-          conflict(conn, reason, :stamp)
+          conflict(conn, reason, :stamp, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -1018,11 +1247,15 @@ defmodule BarkparkWeb.TasksController do
   # 409 envelope: the reason token stays the machine-readable contract; a
   # criteria-grain reason ALSO carries a top-level `message` telling the caller
   # exactly what to pass next (the bp CLI prints it in place of the token).
-  defp conflict(conn, reason, surface) do
-    body = %{ok: false, reason: Params.reason_to_string(reason)}
+  defp conflict(conn, reason, surface, extra \\ %{}) do
+    body = Map.merge(%{ok: false, reason: Params.reason_to_string(reason)}, extra)
+
+    message =
+      Params.criteria_hint(reason, surface) ||
+        Params.fence_hint(reason, surface, Map.get(extra, :current_epoch))
 
     body =
-      case Params.criteria_hint(reason, surface) do
+      case message do
         nil -> body
         message -> Map.put(body, :message, message)
       end
@@ -1031,6 +1264,27 @@ defmodule BarkparkWeb.TasksController do
     |> put_status(:conflict)
     |> json(body)
   end
+
+  # dr-w14-bl-fenced-off-409-is-mute: `fenced_off` is the one close/stamp
+  # refusal whose remedy needs a number the caller CANNOT compute — the epoch
+  # the row carries now (a `bp task pulse` advances it, so the epoch handed out
+  # at claim time is stale after the first heartbeat). Read it back on the
+  # refusal path ONLY, so the 409 body names it (`current_epoch`) alongside the
+  # command that spends it, and the caller recovers without the re-read the bare
+  # token silently demanded. `fenced_off` always implies a live claim
+  # (`Tasks.Close.check_fencing/2` — no claim closes cleanly), so the lookup
+  # normally hits; a miss just degrades to the re-read sentence.
+  defp fence_extras(conn, doc_id, :fenced_off) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, %Document{content: %{"claim" => %{"epoch" => epoch}}}} when is_integer(epoch) ->
+        %{current_epoch: epoch}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp fence_extras(_conn, _doc_id, _reason), do: %{}
 
   # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────
   # Now-line heartbeat + lease renewal in one atomic write (Tasks.Pulse; see
@@ -1092,6 +1346,66 @@ defmodule BarkparkWeb.TasksController do
 
   defp check_now_length(text) when byte_size(text) <= @pulse_now_max_bytes, do: :ok
   defp check_now_length(_), do: {:error, :now_too_long}
+
+  # ─── POST /v1/tasks/:doc_id/renew ───────────────────────────────────────
+  # The NON-HOLDER lease extension (Tasks.Renew — its moduledoc carries the
+  # decision, the rejected alternative, and the blast radius). Body shape:
+  #   { "pr": 15234, "state": "open" | "closed" | "merged", "reason": "open_pr" }
+  # `pr` is REQUIRED: an extension with no named reason is a blank cheque, and
+  # the clear is pr-matched so PR #2 closing cannot cancel PR #1's grace.
+  # NO worker_id and NO observed_epoch — the caller is CI, which can never hold
+  # the claim; that is the whole point of the verb, and it is why the epoch is
+  # not bumped (a bump would stale every lead's stamp/close CAS).
+
+  def renew(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, pr} <- parse_pr(params["pr"]),
+         {:ok, state} <- parse_pr_state(params["state"]),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        [pr: pr, state: state]
+        |> Params.put_opt(:reason, params["reason"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.renew_lease_by_id(task.id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :invalid_pr} ->
+        bad_request(conn, "pr is required and must be a positive integer")
+
+      {:error, :invalid_state} ->
+        bad_request(conn, ~s|state must be one of "open", "closed", "merged"|)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # `pr` arrives as an int (JSON body) or a string (`--pr 15234` through
+  # generic manifest dispatch / the query form). Absent is a 400, not a
+  # default: see the comment above.
+  defp parse_pr(n) when is_integer(n) and n > 0, do: {:ok, n}
+
+  defp parse_pr(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> {:error, :invalid_pr}
+    end
+  end
+
+  defp parse_pr(_), do: {:error, :invalid_pr}
+
+  # Absent state means "open" — the renew is the common call, the clear is the
+  # one a caller has to ask for by name.
+  defp parse_pr_state(nil), do: {:ok, "open"}
+  defp parse_pr_state(s) when s in ["open", "closed", "merged"], do: {:ok, s}
+  defp parse_pr_state(_), do: {:error, :invalid_state}
 
   # `criterion` arrives as an int (JSON body) or a string (`--criterion 2`
   # through generic dispatch / query form). Absent → {:ok, nil} (a plain
@@ -1167,24 +1481,37 @@ defmodule BarkparkWeb.TasksController do
   def graph_show(conn, %{"id" => id} = params) do
     case resolve_graph_root(id, conn) do
       {:ok, %Document{} = root} ->
-        opts = graph_traverse_opts(root, params, conn)
-        result = Graph.traverse(root.id, opts)
-
-        json(conn, %{
-          ok: true,
-          # Published-coalesced so a draft-only root still reports its stable
-          # published id (the graph identity), never the `drafts.` twin.
-          root: Content.published_id(root.doc_id),
-          nodes: result.nodes,
-          edges: result.edges,
-          dependents: result.dependents,
-          truncated: result.truncated,
-          truncation_reason: result.truncation_reason
-        })
+        # AFTER the existence-hiding 404 below, never before. This is the route
+        # with the draft-leak history (graph_draft_leak_test.exs): a refusal
+        # raised ahead of root resolution would answer "that id exists, your
+        # perspective is wrong" to a caller the endpoint is meant to tell
+        # nothing. `raw` is refused here on purpose — the manifest declares this
+        # route as published | drafts only, so it is not a missing branch.
+        case ReadPerspective.unsupported(params, @graph_perspectives) do
+          nil -> graph_traverse(conn, root, params)
+          bad -> ReadPerspective.refuse(conn, bad, @graph_perspectives)
+        end
 
       {:error, :not_found} ->
         not_found(conn, "document not found")
     end
+  end
+
+  defp graph_traverse(conn, %Document{} = root, params) do
+    opts = graph_traverse_opts(root, params, conn)
+    result = Graph.traverse(root.id, opts)
+
+    json(conn, %{
+      ok: true,
+      # Published-coalesced so a draft-only root still reports its stable
+      # published id (the graph identity), never the `drafts.` twin.
+      root: Content.published_id(root.doc_id),
+      nodes: result.nodes,
+      edges: result.edges,
+      dependents: result.dependents,
+      truncated: result.truncated,
+      truncation_reason: result.truncation_reason
+    })
   end
 
   # ─── GET /v1/graph/:id/tasks — the expectation REVERSE VIEW (lvw-t8) ─────
@@ -1225,16 +1552,58 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── GET /v1/graph/orphans ──────────────────────────────────────────────
 
+  # Both derived corpus reads run through `graph_derived_opts/1`, which adds the
+  # SAME schema-visibility clamp `/v1/graph` applies (`visible_schemas/2`, the
+  # canonical owner) — these endpoints emit a document's `type` and `title`, so
+  # they answer the corpus question and must answer it under the corpus clamp.
+  # Both also report their BOUND now (`limit` + `truncated`): the 5,000-row scan
+  # ceiling was already enforced inside `Content.Graph`, but a bare list that
+  # stops at the ceiling is indistinguishable from a complete answer — the same
+  # dishonesty `/v1/graph`'s `truncated` flag already fixed for the corpus.
   def graph_orphans(conn, _params) do
-    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
-    json(conn, %{ok: true, orphans: Graph.orphans(opts)})
+    %{orphans: orphans, count: count, limit: limit, truncated: truncated} =
+      Graph.orphans_bounded(graph_derived_opts(conn))
+
+    json(conn, %{
+      ok: true,
+      orphans: orphans,
+      count: count,
+      limit: limit,
+      truncated: truncated
+    })
   end
 
   # ─── GET /v1/graph/dangling ─────────────────────────────────────────────
 
   def graph_dangling(conn, _params) do
-    opts = scope_opts(conn) |> Keyword.put(:dataset, request_dataset(conn))
-    json(conn, %{ok: true, dangling: Graph.dangling(opts)})
+    %{dangling: dangling, count: count, limit: limit, truncated: truncated} =
+      Graph.dangling_bounded(graph_derived_opts(conn))
+
+    json(conn, %{
+      ok: true,
+      dangling: dangling,
+      count: count,
+      limit: limit,
+      truncated: truncated
+    })
+  end
+
+  # Scope + dataset + the schema-visibility TYPE allowlist for the two derived
+  # corpus reads. The allowlist is derived at READ TIME off the schema rows this
+  # caller may see, so a schema flipped to private drops out of orphans/dangling
+  # on the very next read — and an empty allowlist fails CLOSED (no types → no
+  # rows), never open.
+  defp graph_derived_opts(conn) do
+    dataset = request_dataset(conn)
+    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset)
+
+    types =
+      dataset
+      |> Content.list_schemas(opts)
+      |> visible_schemas(conn)
+      |> Enum.map(& &1.name)
+
+    Keyword.put(opts, :types, types)
   end
 
   # ─── GET /v1/graph (whole-dataset corpus graph) ─────────────────────────
@@ -1551,6 +1920,7 @@ defmodule BarkparkWeb.TasksController do
 
     if :ets.info(@graph_corpus_slots, :size) > graph_corpus_max_concurrency() do
       :ets.delete(@graph_corpus_slots, ref)
+      emit_graph_corpus_refused()
       :busy
     else
       {:ok, ref}
@@ -1562,6 +1932,30 @@ defmodule BarkparkWeb.TasksController do
     # and an UNBOUNDED corpus derivation is the failure this cap was built to
     # prevent — so the safe answer is to shed, exactly as saturation races do.
     ArgumentError -> :busy
+  end
+
+  # The ONLY consumer of the row's `deadline`, and the accepted answer to the
+  # capacity loss recorded on `sweep_graph_corpus_slots/0` below: a slot held by
+  # an alive-but-wedged holder is now VISIBLE rather than bounded. Every refused
+  # acquire says how many slots are held and how long the OLDEST has been held,
+  # so an operator can tell a saturated cap (ages in seconds, ages that move)
+  # from a wedged one (ages in minutes, ages that only grow) without reaching
+  # into the ETS table. Age is derived from the row's deadline, which is stamped
+  # at acquire as `now + @graph_corpus_slot_ttl_ms`.
+  defp emit_graph_corpus_refused do
+    now = System.monotonic_time(:millisecond)
+
+    oldest_age_ms =
+      @graph_corpus_slots
+      |> :ets.tab2list()
+      |> Enum.map(fn {_ref, _pid, deadline} -> now - deadline + @graph_corpus_slot_ttl_ms end)
+      |> Enum.max(fn -> 0 end)
+
+    :telemetry.execute(
+      [:barkpark, :graph_corpus, :slot, :refused],
+      %{slots: :ets.info(@graph_corpus_slots, :size), oldest_holder_age_ms: oldest_age_ms},
+      %{cap: graph_corpus_max_concurrency()}
+    )
   end
 
   defp release_graph_corpus_slot(ref) do
@@ -1596,6 +1990,41 @@ defmodule BarkparkWeb.TasksController do
   # HEALTHY long derivations. Killing a wedged owner is a different mechanism
   # with real blast radius (a broken connection instead of a clean 503) and is
   # deliberately NOT done here (filed: acpc-bl-graph-slot-wedged-live-holder).
+  #
+  # THAT FILING IS NOW RESOLVED, AND THE ANSWER IS: ACCEPT THE CAPACITY LOSS.
+  # The kill-bound is not built, for three reasons, recorded here so the next
+  # reader does not re-open the trade from the symptom alone:
+  #
+  #   1. It is a DIFFERENT MECHANISM, not a tighter version of this one. Every
+  #      other arm of this cap answers a shed client with a clean 503 and a
+  #      `retry-after`; `Process.exit(pid, :kill)` answers an in-flight client
+  #      with a broken connection. And because `after` does not run on a kill,
+  #      the sweep would have to delete the row itself — so the sweep stops
+  #      being a reader of facts about holders and becomes a writer that acts on
+  #      a wall-time GUESS, which is exactly the property that made the deleted
+  #      deadline arm fail open.
+  #
+  #   2. ONLY ONE HALF OF A WEDGE IS EVEN UNBOUNDED, and it has no observed
+  #      instance. A DB-bound derivation is self-limiting: Ecto's per-query
+  #      default raises DBConnection.ConnectionError at 15s and `after` runs on
+  #      a raise, so the slot frees itself with no sweep at all (proven by
+  #      `graph_corpus_slot_wedge_acceptance_test.exs`). What is unbounded is the
+  #      in-memory node/edge dedup — `List.flatten |> Enum.uniq_by` over the
+  #      derived documents — which is pure BEAM work with no timeout in front of
+  #      it, and nothing in api/config bounds handler wall time (`queue_target`
+  #      appears once in the whole api tree, in `config/test.exs`; Bandit's
+  #      `read_timeout` gates reading request BYTES, not handler execution). We
+  #      have no production or CI report of that phase actually wedging — the
+  #      2026-07-28 storm was pool exhaustion, i.e. the DB half. Building a kill
+  #      path against a failure mode nobody has seen buys a real blast radius
+  #      with a hypothetical.
+  #
+  #   3. The honest remedy for capacity loss is OBSERVABILITY, not a guess.
+  #      There was no way to see this cap's occupancy from outside; there is now
+  #      (`emit_graph_corpus_refused/0` above). If a wedge is ever observed —
+  #      `oldest_holder_age_ms` climbing past minutes while `slots` sits at the
+  #      cap — reopen this with the evidence, and set any TTL well clear of the
+  #      32003ms storm request so a healthy slow derivation is never reaped.
   defp sweep_graph_corpus_slots do
     for {ref, pid, _deadline} <- :ets.tab2list(@graph_corpus_slots),
         not Process.alive?(pid) do
@@ -1699,7 +2128,21 @@ defmodule BarkparkWeb.TasksController do
 
           from(d in Document,
             where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-            order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+            # THE THIRD FORK (task-ca05dd6a02a0b55f). This one cannot RAISE —
+            # it reads through `Repo.all() |> List.first()`, not `Repo.one/1` —
+            # but published-vs-draft alone is a PARTIAL order, and `dataset` is
+            # only filtered when the caller names one. With a slug in two
+            # datasets the remaining tie was broken by whatever Postgres
+            # returned first, so the same request could answer with a different
+            # row on a different connection. That is the failure mode the
+            # `limit: 1` fixes in the sibling forks would have INTRODUCED
+            # without a total order, so it is closed here by the same rule
+            # rather than left as the quiet member of the family.
+            order_by: [
+              asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id),
+              asc: d.dataset,
+              asc: d.id
+            ]
           )
       end
       |> Params.maybe_filter_workspace(workspace_id)
@@ -1788,7 +2231,11 @@ defmodule BarkparkWeb.TasksController do
   # visibility (which needs the schema) simply has nothing to act on.
   defp seal_ctx(conn) do
     schema =
-      case Content.get_schema("task", request_dataset(conn), scope_opts(conn)) do
+      case Content.Schema.get_schema_for_redaction(
+             "task",
+             request_dataset(conn),
+             scope_opts(conn)
+           ) do
         {:ok, s} -> s
         _ -> nil
       end
@@ -2025,10 +2472,44 @@ defmodule BarkparkWeb.TasksController do
   # Single-doc fetch by exact doc_id string, scoped to workspace + project.
   # Everything is a task — the single `type == "task"` filter covers root
   # tasks (goals), phases, and leaf work-tasks.
+  #
+  # ── THE DATASET COLLISION (task-0c30e7b99ad87cec) ───────────────────────
+  #
+  # `documents` is unique on `(doc_id, type, dataset_id)` — NOT on
+  # `(doc_id, type)` (migration 20260527134000_flip_uniqueness_to_dataset_id).
+  # One task doc_id may therefore live in TWO datasets inside a single
+  # workspace/project, and this reader carries no dataset discriminator (by
+  # design: `bp task get <id>` names no dataset). Before this change the read
+  # was a bare `Repo.one/1`, so that shape raised `Ecto.MultipleResultsError`
+  # → a 500 on EVERY call, forever, for a row the ready queue happily lists:
+  # a listing that serves ids its own by-id reader cannot resolve. Measured on
+  # guerrilla 2026-09-02: `bp task ready` served `akbr-feedback-2026-08-epic`
+  # TWICE in one page (once per dataset) and three consecutive `bp task get`
+  # calls returned `internal_error`. An agent reads that as transient and
+  # retries blindly forever — the failure this row was filed for.
+  #
+  # The repair is the rule the CANONICAL slug resolver already spells
+  # (`Barkpark.Content.Graph.resolve_doc/3`, `@canonical capability:slug-resolve`):
+  # order deterministically, then `LIMIT 1`. This function is a fork of that
+  # resolver that kept the scoping and dropped the `limit(1)`. The order is
+  # TOTAL — published-first, then `dataset`, then `id` — so the same call
+  # returns the same row on every request and across every pooled connection;
+  # a partial order would trade a 500 for a silently-alternating answer, which
+  # is the worse defect (see queue.ex's `id` tiebreak, same reasoning).
+  #
+  # A `LIMIT 1` here can only ever CHANGE the outcome for a doc_id that has
+  # more than one row in scope — the shape that used to raise. A doc_id with
+  # exactly one row (every ordinary task) reads byte-identically.
   defp fetch_task_exact(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task"
+        where: d.doc_id == ^doc_id and d.type == "task",
+        order_by: [
+          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
+          asc: d.dataset,
+          asc: d.id
+        ],
+        limit: 1
       )
 
     query =

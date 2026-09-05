@@ -1,0 +1,1 @@
+No retry is added to the SERVER bring-up without a measured per-attempt failure rate — unlike Chrome, none has been taken. If a retry ships, quote the measurement; if it does not, state that plainly. A retry with no measurement behind it is theatre.

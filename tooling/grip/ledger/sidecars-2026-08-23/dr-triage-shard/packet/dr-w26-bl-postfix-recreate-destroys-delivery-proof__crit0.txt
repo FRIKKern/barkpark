@@ -1,0 +1,1 @@
+Delivery evidence for an alert survives a control-plane deploy (log driver, volume, or an upstream relay receipt recorded against the delivery row).

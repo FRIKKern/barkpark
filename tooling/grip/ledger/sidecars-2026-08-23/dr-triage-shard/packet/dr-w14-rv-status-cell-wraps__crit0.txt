@@ -1,0 +1,1 @@
+renderKV wraps long values at the terminal width with continuation lines hanging at the value column, proven by a test at a pinned width

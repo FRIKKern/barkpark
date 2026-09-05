@@ -40,6 +40,23 @@ defmodule Barkpark.StudioChat.BlockedSweeper do
   `safe_sweep` that rescues (a DB hiccup logs and waits for the next tick — the
   convergence machinery must never crash-loop the chat supervision tree), and a
   pure `sweep(now)` with an injectable clock so tests drive it directly.
+
+  ## NOT boot-started under MIX_ENV=test — and why
+
+  The 60s tick is a `Repo.all` from THIS process, which under test owns no
+  ExUnit SQL-sandbox connection: every tick raised ownership and logged a
+  warning on an exact 60s period for the whole `mix test` run (CI run
+  33720395852 — 05:51:06.88, 05:52:06.88, 05:53:06.88, 05:58:06.89,
+  06:03:06.90). That is noise in every CI log AND a foreign statement inside
+  the window of every test that counts telemetry/queries. So
+  `config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false` in
+  `config/test.exs` keeps the boot-started singleton out of
+  `StudioChat.Supervisor.children/0` under test only. It defaults to `true`, so
+  dev and prod are unchanged — asserted directly in
+  `Barkpark.StudioChat.SupervisorChildrenTest`. Tests exercise the PURE
+  `sweep(now)`; a test that wants the running GenServer starts its own instance
+  with `start_supervised/1` after `Sandbox.allow/3` (or in `:shared` mode), so
+  the tick runs against the test's own sandbox owner.
   """
 
   use GenServer

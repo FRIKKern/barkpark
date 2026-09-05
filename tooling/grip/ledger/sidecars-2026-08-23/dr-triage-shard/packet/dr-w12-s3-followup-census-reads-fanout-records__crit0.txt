@@ -1,0 +1,1 @@
+A census/query reports selected>0 AND minted<selected separately from selected==0, against real recorded fan-out data (evidence: the run output)
