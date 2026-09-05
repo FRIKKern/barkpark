@@ -217,7 +217,12 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       type = ruled_type!(@advise_dataset)
 
       assert {:error, errors} =
-               Content.validate_document(type, "No slug at all", %{"title" => "x"}, @advise_dataset)
+               Content.validate_document(
+                 type,
+                 "No slug at all",
+                 %{"title" => "x"},
+                 @advise_dataset
+               )
 
       assert Map.has_key?(errors, "slug"),
              "expected the required-field refusal to name `slug`, got #{inspect(errors)}"
