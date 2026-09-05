@@ -52,7 +52,7 @@ defmodule BarkparkWeb.MediaController do
   # `:workspace_id` key at all, so `nil` was the one and only way to say "this
   # caller resolved no tenant". `ScopeHelpers.put_workspace_scope/3` later gave
   # that state a NAME — `workspace_id: :shared_only` (task-3e2a70930c6df723,
-  # plugs/scope_helpers.ex:196) — and every HTTP conn on this controller's flat
+  # its `:sentinel` clause) — and every HTTP conn on this controller's flat
   # routes now carries the atom instead of the omission.
   #
   # `not is_nil(:shared_only)` is TRUE. So the predicate read the sentinel as
