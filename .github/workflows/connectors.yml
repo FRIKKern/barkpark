@@ -223,6 +223,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: connectors/package-lock.json
 
       # npm, NOT pnpm — connectors/ is a standalone service with its own
       # package-lock.json (the js/ monorepo is the pnpm one).

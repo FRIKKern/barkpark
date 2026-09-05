@@ -37,7 +37,7 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.Content
+  alias Barkpark.{Accounts, Content}
   alias Barkpark.Sharing.Links
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.PluginScopeSession
@@ -131,6 +131,41 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
     paper
   end
 
+  defp seed_picker_paper!(ws, proj, slug) do
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "title" => "Picker confinement probe",
+          "blocks" => [
+            %{"id" => "b-head", "type" => "heading", "text" => "Picker probe", "level" => 1},
+            %{
+              "id" => "b-reference",
+              "type" => "field-reference",
+              "label" => "Related paper",
+              "refType" => "paper",
+              "value" => "already-visible-paper"
+            },
+            %{
+              "id" => "b-image",
+              "type" => "image",
+              "src" => "https://example.invalid/already-visible.png",
+              "alt" => "Already visible"
+            },
+            %{
+              "id" => "b-extra",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Spare block"}]
+            }
+          ],
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+        })
+      )
+
+    paper
+  end
+
   defp mint_link!(ws, proj, ref_id, access) do
     {:ok, {raw, link}} =
       Links.create(%{
@@ -144,6 +179,13 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       })
 
     {raw, link}
+  end
+
+  defp as_nonmember(conn) do
+    email = "edit-link-viewer-#{System.unique_integer([:positive])}@example.com"
+    {:ok, user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+    {:ok, raw} = Accounts.create_user_session_token(user)
+    {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
   end
 
   defp paper_path(ws, proj, slug), do: "/w/#{ws.slug}/p/#{proj.slug}/papers/#{slug}"
@@ -219,6 +261,63 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       assert html =~ ~s(id="paper-edit-toggle")
     end
 
+    test "a logged-in nonmember keeps user attribution and may edit through the link", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted
+    } do
+      previous_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        if previous_canvas,
+          do: System.put_env("BARKPARK_PAPER_CANVAS", previous_canvas),
+          else: System.delete_env("BARKPARK_PAPER_CANVAS")
+      end)
+
+      seed_picker_paper!(ws, proj, granted)
+      {raw, link} = mint_link!(ws, proj, granted, "edit")
+      {user, conn} = as_nonmember(conn)
+
+      {:ok, view, html} = live(conn, shared_path(ws, proj, granted, raw))
+      assigns = assigns_of(view)
+
+      assert %{kind: :user, id: user_id} = assigns.viewer
+      assert user_id == user.id
+      assert assigns.current_user.id == user.id
+      assert assigns.paper_share_grant.id == link.id
+      assert assigns.paper_share_grant.access == :edit
+      assert assigns.can_edit? == true
+      assert assigns.picker_browse? == false
+      assert html =~ ~s(id="paper-edit-toggle")
+
+      editing = render_click(view, "paper-toggle-edit", %{})
+      assert editing =~ ~s(data-canvas-picker-browse="false")
+      assert editing =~ ~s(data-canvas-scope-prefix="/w/#{ws.slug}/p/#{proj.slug}")
+      assert editing =~ "already-visible-paper"
+      assert editing =~ "https://example.invalid/already-visible.png"
+      assert editing =~ ~s(data-test-id="paper-picker-current")
+      refute editing =~ "<bp-reference-picker"
+      refute editing =~ "<bp-media-picker"
+
+      socket = :sys.get_state(view.pid).socket
+
+      assert {:reply, %{results: []}, _socket} =
+               BarkparkWeb.BulldocsLive.handle_event(
+                 "paper-wikilink-search",
+                 %{"query" => "another paper"},
+                 socket
+               )
+
+      assert {:reply, %{results: []}, _socket} =
+               BarkparkWeb.BulldocsLive.handle_event(
+                 "paper-tag-search",
+                 %{"query" => "private-tag"},
+                 socket
+               )
+    end
+
     test "a paper-op through the reader's op path persists", %{
       conn: conn,
       ws: ws,
@@ -234,6 +333,8 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       assert assigns_of(view).editing? == true
 
       render_hook(view, "paper-op", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
         "op" => "patch-block",
         "id" => "b-body",
         "patch" => %{"content" => [%{"type" => "text", "value" => "Edited over the link"}]}
@@ -243,6 +344,51 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       assert assigns_of(view).save_status == "Auto-saved"
       assert assigns_of(view).paper_halt == nil
       refute flash_of(view)["error"]
+    end
+
+    test "an edit-link batch replays once and revocation denies every subsequent retry", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted
+    } do
+      {raw, link} = mint_link!(ws, proj, granted, "edit")
+      {:ok, view, _html} = live(conn, shared_path(ws, proj, granted, raw))
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "ops" => [
+          %{
+            "op" => "insert-after",
+            "afterId" => "b-body",
+            "block" => %{"id" => "shared-once", "type" => "paragraph", "text" => "Saved once"}
+          }
+        ]
+      }
+
+      render_hook(view, "paper-ops", params)
+      assert assigns_of(view).last_save_ok? == true
+      before = stored_blocks(granted, ws, proj)
+      assert Enum.count(before, &(&1["id"] == "shared-once")) == 1
+      socket = :sys.get_state(view.pid).socket
+
+      assert {:reply, %{saved: true, request_id: ^request_id, replayed: true}, socket} =
+               BarkparkWeb.BulldocsLive.handle_event("paper-ops", params, socket)
+
+      assert stored_blocks(granted, ws, proj) == before
+      {:ok, _} = Links.revoke(link.id)
+
+      Enum.reduce(1..2, socket, fn _, previous ->
+        assert {:reply, %{saved: false, request_id: ^request_id}, refused} =
+                 BarkparkWeb.BulldocsLive.handle_event("paper-ops", params, previous)
+
+        assert refused.assigns.last_save_ok? == false
+        assert stored_blocks(granted, ws, proj) == before
+        refused
+      end)
     end
 
     test "the reader loads the editor assets for an edit-link viewer", %{
@@ -285,6 +431,24 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       end
     end
 
+    test "a logged-in nonmember remains read-only through a read link", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted
+    } do
+      {raw, _link} = mint_link!(ws, proj, granted, "read")
+      {user, conn} = as_nonmember(conn)
+
+      {:ok, view, html} = live(conn, shared_path(ws, proj, granted, raw))
+
+      assert %{kind: :user, id: user_id} = assigns_of(view).viewer
+      assert user_id == user.id
+      assert assigns_of(view).paper_share_grant.access == :read
+      assert assigns_of(view).can_edit? == false
+      refute html =~ ~s(id="paper-edit-toggle")
+    end
+
     test "every MVP paper-* event is refused server-side and writes nothing", %{
       conn: conn,
       ws: ws,
@@ -298,6 +462,11 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       before = stored_blocks(granted, ws, proj)
 
       for {event, params} <- @denied_probes do
+        params =
+          if event == "paper-ops",
+            do: Map.put(params, "request_id", Ecto.UUID.generate()),
+            else: params
+
         render_hook(view, event, params)
 
         assert flash_of(view)["error"] == Edit.denial(), "#{event} was not refused"
@@ -336,6 +505,26 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
 
       conn = get(conn, shared_path(ws, proj, sibling, raw))
       assert conn.status == 403
+    end
+
+    test "a logged-in nonmember cannot use an edit link on a section-readable sibling", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted,
+      sibling: sibling
+    } do
+      {raw, _link} = mint_link!(ws, proj, granted, "edit")
+      {_user, conn} = as_nonmember(conn)
+      Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:papers:read")
+
+      {:ok, view, html} = live(conn, shared_path(ws, proj, sibling, raw))
+
+      assert html =~ @sibling_body
+      assert assigns_of(view).viewer.kind == :user
+      assert assigns_of(view).paper_share_grant.ref_id == granted
+      assert assigns_of(view).can_edit? == false
+      refute html =~ ~s(id="paper-edit-toggle")
     end
 
     test "the socket re-mount onto the sibling slug is halted", %{
@@ -532,6 +721,53 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       assert flash_of(view2)["error"] == Edit.denial()
       assert stored_blocks(granted, ws, proj) == before
     end
+
+    test "an open section-readable socket downgrades after revoke and refuses further edits", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted
+    } do
+      {raw, link} = mint_link!(ws, proj, granted, "edit")
+      {user, conn} = as_nonmember(conn)
+      Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:papers:read")
+
+      {:ok, view, _html} = live(conn, shared_path(ws, proj, granted, raw))
+      assert assigns_of(view).can_edit? == true
+      assert assigns_of(view).viewer.id == user.id
+
+      assert render_click(view, "paper-toggle-edit", %{}) =~
+               ~s(data-test-id="studio-paper-block-editor")
+
+      assert assigns_of(view).editing? == true
+
+      {:ok, _} = Links.revoke(link.id)
+      send(view.pid, @liveness_msg)
+
+      assigns = assigns_of(view)
+      assert Process.alive?(view.pid)
+      assert %{kind: :user, id: user_id} = assigns.viewer
+      assert user_id == user.id
+      assert assigns.paper_share_grant.grant == :section
+      assert assigns.can_edit? == false
+      assert assigns.editing? == false
+
+      reader_html = render(view)
+      assert reader_html =~ @granted_body
+      refute reader_html =~ ~s(data-test-id="studio-paper-block-editor")
+      refute reader_html =~ ~s(id="paper-edit-toggle")
+
+      before = stored_blocks(granted, ws, proj)
+
+      render_hook(view, "paper-op", %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "stale write"}]}
+      })
+
+      assert flash_of(view)["error"] == Edit.denial()
+      assert stored_blocks(granted, ws, proj) == before
+    end
   end
 
   describe "the session contract carries the access level" do
@@ -565,15 +801,24 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       # The intersection is the point: the session is signed, but the LIVE row
       # is the other half of the AND, so a forged/stale "edit" claim cannot
       # promote a read link.
-      viewer =
-        BarkparkWeb.PaperViewer.viewer(nil, nil, %{
-          "scoped_share_public" => true,
-          "scoped_share_token" => raw,
-          "scoped_share_access" => "edit"
-        })
+      session = %{
+        "scoped_share_public" => true,
+        "scoped_share_token" => raw,
+        "scoped_share_access" => "edit"
+      }
+
+      viewer = BarkparkWeb.PaperViewer.viewer(nil, nil, session)
+      grant = BarkparkWeb.PaperViewer.resolve_share_grant(session)
+
+      assigns = %{
+        viewer: viewer,
+        paper_share_grant: grant,
+        current_project: %{id: proj.id},
+        dataset: @dataset
+      }
 
       assert viewer.access == :read
-      assert BarkparkWeb.PaperViewer.can_edit?(%{viewer: viewer}, ws.id, granted) == false
+      assert BarkparkWeb.PaperViewer.can_edit?(assigns, ws.id, granted) == false
     end
 
     test "an edit link never grades writable for a DIFFERENT slug or workspace", %{
@@ -584,21 +829,43 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
     } do
       {raw, _link} = mint_link!(ws, proj, granted, "edit")
 
-      viewer =
-        BarkparkWeb.PaperViewer.viewer(nil, nil, %{
-          "scoped_share_public" => true,
-          "scoped_share_token" => raw,
-          "scoped_share_access" => "edit"
-        })
+      session = %{
+        "scoped_share_public" => true,
+        "scoped_share_token" => raw,
+        "scoped_share_access" => "edit"
+      }
+
+      viewer = BarkparkWeb.PaperViewer.viewer(nil, nil, session)
+      grant = BarkparkWeb.PaperViewer.resolve_share_grant(session)
+
+      assigns = %{
+        viewer: viewer,
+        paper_share_grant: grant,
+        current_project: %{id: proj.id},
+        dataset: @dataset
+      }
 
       assert viewer.access == :edit
-      assert BarkparkWeb.PaperViewer.can_edit?(%{viewer: viewer}, ws.id, granted) == true
+      assert BarkparkWeb.PaperViewer.can_edit?(assigns, ws.id, granted) == true
 
       # Same workspace, sibling slug.
-      assert BarkparkWeb.PaperViewer.can_edit?(%{viewer: viewer}, ws.id, sibling) == false
+      assert BarkparkWeb.PaperViewer.can_edit?(assigns, ws.id, sibling) == false
       # Bound slug, foreign workspace.
-      assert BarkparkWeb.PaperViewer.can_edit?(%{viewer: viewer}, Ecto.UUID.generate(), granted) ==
+      assert BarkparkWeb.PaperViewer.can_edit?(assigns, Ecto.UUID.generate(), granted) ==
                false
+
+      # Matching workspace/slug but a foreign project or dataset is still out of scope.
+      assert BarkparkWeb.PaperViewer.can_edit?(
+               %{assigns | current_project: %{id: Ecto.UUID.generate()}},
+               ws.id,
+               granted
+             ) == false
+
+      assert BarkparkWeb.PaperViewer.can_edit?(
+               %{assigns | dataset: "staging"},
+               ws.id,
+               granted
+             ) == false
 
       # And the 2-arity — which knows no slug — is false for every share viewer.
       assert BarkparkWeb.PaperViewer.can_edit?(%{viewer: viewer}, ws.id) == false

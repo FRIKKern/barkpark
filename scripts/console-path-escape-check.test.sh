@@ -1341,25 +1341,25 @@ gate_names() {
 
 # (a) the happy path: a console PR, everything ran and passed
 gate "full run, all green" 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, console jobs legitimately skipped" 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
   O_CONSOLE=false
 gate_says "legitimately not dispatched" "…and says so, rather than claiming the harness passed"
 
 # (c) an upstream FAILURE reds it — 720 red harness tests may never merge green
 gate "console-unit failed" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_names "console-unit" "cssom-parity"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: cssom-parity `skipped` only because
 #     its dependency died, while the dispatcher said it WAS needed.
 gate "cssom-parity skipped behind a live gate (upstream died)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
 # …and the SKIP arm accumulates too, not just the failure arm: this red never
@@ -1369,32 +1369,32 @@ gate_names "cssom-parity" "console-unit"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, output empty" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
   O_CONSOLE=
 
 # (f) the unfiltered ratchet may never skip
 gate "path-escape skipped" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=skipped \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=skipped \
   O_CONSOLE=true
 
 # (g) cancelled is not success
 gate "a cancelled upstream" 1 \
-  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
-  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (i) an EMPTY result (a job silently dropped from `needs`) is red
 gate "an empty result string" 1 \
-  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (j) a garbage gate value must not license a skip
 gate "skip against a garbage gate value" 1 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
   O_CONSOLE=maybe
 
 # (k1) THE SILENT OMISSION, MADE LOUD (D209). Adding a job to `needs:` and to
@@ -1404,7 +1404,7 @@ gate "skip against a garbage gate value" 1 \
 #      demands the gate go red AND name it — delete the `decide "overflow-guard"`
 #      line and this test is the thing that notices.
 gate "overflow-guard failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "overflow-guard: failure" "…and names overflow-guard (its decide line is really invoked)"
 #      (The arithmetic half of that invariant — one `decide` per `needs:` entry
@@ -1427,7 +1427,7 @@ gate_says "overflow-guard: failure" "…and names overflow-guard (its decide lin
 
 # (l) A REFUSAL IS NAMED AS A REFUSAL — and names a cause SET, never one cause.
 gate "cssom-parity REFUSED (a verdict is published)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the instrument refused, not that CSS is broken"
 gate_says "ONE code over MANY causes" "…and says exit 2 is one code over many causes"
@@ -1449,7 +1449,7 @@ gate_denies "ENVIRONMENT REFUSAL" "…and no longer labels every refusal an envi
 #     workflow's `env:`, or the 4th argument from its `decide` line, and this
 #     case is what notices.
 gate "console-unit REFUSED (the refusal the gate could not see)" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED
 gate_says "console-unit: failure" "…and names console-unit"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal rather than a bare failure"
@@ -1465,7 +1465,7 @@ gate_says "(exit 2): console-unit" "…and carries it into the refusals tally by
 #      MEASURED an uncovered read. The structural half of this is the
 #      exit2_without_verdict_output fact in case 8; this is the behavioural half.
 gate "path-escape REFUSED (the last unwired refusal)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=failure \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=failure \
   O_CONSOLE=true V_ESCAPE=REFUSED
 gate_says "path-escape ratchet: failure" "…and names the ratchet"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
@@ -1473,7 +1473,7 @@ gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals t
 
 # (n) …and BOTH refusals in one run are both named, in decide order.
 gate "console-unit and cssom-parity both REFUSED" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED V_CSSOM=REFUSED
 gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refusals, not one"
 
@@ -1483,7 +1483,7 @@ gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refu
 #     the un-wrapped steps in console-unit (node --check, the two --test runs,
 #     smoke, the css gate) are precisely that case.
 gate "cssom-parity failed, no verdict published" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "cssom-parity: failure" "…and still names the failing job"
 gate_denies "REFUSED TO MEASURE" "…and does NOT manufacture a refusal out of an absent verdict"
@@ -1492,23 +1492,43 @@ gate_says "not in the allow-set" "…and reaches the plain red conclusion"
 # (p) a MEASURED defect is the opposite claim, and must not borrow the
 #     refusal's words.
 gate "tier-floor-render MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_TIER=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured defect a refusal"
 
 # (q) a verdict outside the published vocabulary is "cannot tell", not a pass.
 gate "overflow-guard publishes an unknown verdict" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_OVERFLOW=BANANA
 gate_says "outside the published vocabulary" "…and refuses to interpret it"
 
 # (r) verdict=OK on a FAILED job — the instrument said clean and the job died
 #     anyway. Still red, and still says why it cannot tell.
 gate "cssom-parity publishes OK but the job failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=OK
 gate_says "the instrument said clean and the job" "…and names the contradiction"
+
+# (s) THE MODAL ORACLE'S TWO ARMS, BOTH DRIVEN. Added with the `modal-oracle`
+#     job (cch-w22-s1-residue-modal-oracle-uninvoked). Every `R_MODAL=` above
+#     is `success` or `skipped`, so without these two cases the new leg would
+#     be present in every fixture and decidable in none — the same shape as the
+#     unwitnessable `REFUSED)` arm this block exists to have caught. exit 1 and
+#     exit 2 are indistinguishable at the aggregator by design, so each arm is
+#     told apart ONLY by the verdict the job publishes; drive both.
+gate "modal-oracle MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  O_CONSOLE=true V_MODAL=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the modal defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured modal defect a refusal"
+gate_names "modal-oracle" "cssom-parity"
+
+gate "modal-oracle REFUSED" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  O_CONSOLE=true V_MODAL=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the oracle refused, not that the modal is broken"
+gate_names "modal-oracle" "cssom-parity"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0

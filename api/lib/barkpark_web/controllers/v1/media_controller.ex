@@ -303,17 +303,44 @@ defmodule BarkparkWeb.V1.MediaController do
 
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+    # `count` KEEPS ITS SHIPPED VALUE — the grand total — and that is deliberate.
+    # Re-pointing it at the page rows to match the document query path (§4,
+    # "`count` = page rows") would silently change the meaning of a live key for
+    # whichever consumer reads it correctly today, which is the same silent
+    # failure this row exists to end, aimed the other way. The ambiguity is
+    # closed ADDITIVELY instead: `total` and `hasMore` say what they mean on
+    # every /v1/media/* list, so no consumer ever has to know which of the two
+    # `count` conventions it just met. See task-3d7a770cf4ea11cd.
+    #
+    # `hasMore` is exact, not an inference from `count == limit`: on a last page
+    # that happens to be exactly `limit` rows, `offset + length(assets)` equals
+    # `total` and the answer is false. That is the same law #13616 gave the
+    # document query, and the shape `media.search` already had.
+    total_returned = length(assets)
+    has_more = opts[:offset] + total_returned < total
+
     json(conn, %{
-      result: %{
-        assets: assets,
-        count: total,
-        limit: opts[:limit],
-        offset: opts[:offset]
-      },
+      result:
+        %{
+          assets: assets,
+          count: total,
+          total: total,
+          hasMore: has_more,
+          limit: opts[:limit],
+          offset: opts[:offset]
+        }
+        |> maybe_next_offset(has_more, opts[:offset], total_returned),
       syncTags: ["bp:ds:#{dataset}:media"],
       ms: ms
     })
   end
+
+  # `nextOffset` only when a next page genuinely exists — an exhausted result
+  # set never hands back an offset onto an empty page.
+  defp maybe_next_offset(result, false, _offset, _returned), do: result
+
+  defp maybe_next_offset(result, true, offset, returned),
+    do: Map.put(result, :nextOffset, offset + returned)
 
   @doc """
   Single asset, gated by `Access.allowed?/4` at `:view`.
@@ -513,8 +540,9 @@ defmodule BarkparkWeb.V1.MediaController do
          # reference graph (`Relations.graph/3` walks mediaAsset<->mediaAsset
          # edges only), so this door used to answer 200 while blanking a live
          # page. Consult usage BEFORE the irreversible delete.
-         :ok <- refuse_if_referenced(conn, file, params),
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+         {:ok, override} <- refuse_if_referenced(conn, file, params),
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
       # This used to discard it and echo the `:id` path param. NOTE the trap the
@@ -522,8 +550,14 @@ defmodule BarkparkWeb.V1.MediaController do
       # at :403 by a PRE-WRITE `Media.get_file/2` read, so `file.filename` would
       # be store-SHAPED but not descended from the write. Every field below
       # comes off `deleted` — the delete's own return.
+      #
+      # `override` is nil unless the caller disarmed the where-used guard, so an
+      # ordinary delete's receipt is byte-for-byte what it always was and only a
+      # FORCED one grows `forced` + `referencedByCount`.
+      result = %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset}
+
       json(conn, %{
-        result: %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset},
+        result: Map.merge(result, override || %{}),
         syncTags: ["bp:ds:#{dataset}:media"]
       })
     else
@@ -535,13 +569,19 @@ defmodule BarkparkWeb.V1.MediaController do
   # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
   # envelope reuses the public `conflict` code but carries a `details` census
   # that no shared builder would know how to assemble.
+  #
+  # Returns `{:ok, override}` — `override` is `nil` on the unforced path and the
+  # witness receipt fields on the forced one (task-ef676cfc88e71fae). The forced
+  # branch used to return a bare `:ok` and skip the census, so an override left
+  # no trace anywhere: no log line, and a 200 indistinguishable from an unforced
+  # delete of an unreferenced blob.
   defp refuse_if_referenced(conn, file, params) do
     if WhereUsed.forced?(params) do
-      :ok
+      {:ok, WhereUsed.witness_forced_delete(conn, file)}
     else
       case WhereUsed.referrers(file) do
         %{count: 0} ->
-          :ok
+          {:ok, nil}
 
         census ->
           env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)

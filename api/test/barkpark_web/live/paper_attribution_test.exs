@@ -104,11 +104,23 @@ defmodule BarkparkWeb.PaperAttributionTest do
   # working correctly and not what these tests are about.
   defp reader_history(slug), do: Enum.filter(history(slug), &(&1.action == "edit-on-link"))
 
+  # EVERY mutation the shipped editor sends carries a `request_id`
+  # (`api/priv/static/assets/bp-paper-editor-hooks.js` stamps one on the wire
+  # payload before it leaves the browser), which is what routes the write onto
+  # the exactly-once seam. A test that omits it drives the unidentified legacy
+  # seam instead — and that seam drops an op with no `if_rev` in silence, so the
+  # omission does not fail loudly, it just stops testing the path a reader uses.
+  # The id is a fresh UUID per call: the seam is exactly-once and fingerprints by
+  # request id (`normalize_paper_ops_request_id/1` casts it and refuses anything
+  # that is not a UUID with `:invalid_request_id`), so a repeated id is a REPLAY,
+  # not a second edit.
   defp edit_body(view, text) do
     render_hook(view, "paper-op", %{
       "op" => "patch-block",
       "id" => "b-body",
-      "patch" => %{"content" => [%{"type" => "text", "value" => text}]}
+      "patch" => %{"content" => [%{"type" => "text", "value" => text}]},
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => assigns_of(view).paper_rev
     })
   end
 
@@ -168,11 +180,16 @@ defmodule BarkparkWeb.PaperAttributionTest do
       {_token, conn} = write_token!(conn)
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
 
-      # No such block — the op path returns an error before any write.
+      # No such block — the op path returns an error before any write. The
+      # `request_id` keeps this on the seam a reader actually drives; without one
+      # the op is dropped before the paper ever sees it and the assertions below
+      # would hold for a reason that has nothing to do with the refusal.
       render_hook(view, "paper-op", %{
         "op" => "patch-block",
         "id" => "b-does-not-exist",
-        "patch" => %{"content" => [%{"type" => "text", "value" => "nope"}]}
+        "patch" => %{"content" => [%{"type" => "text", "value" => "nope"}]},
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev
       })
 
       assert reader_history(slug) == []

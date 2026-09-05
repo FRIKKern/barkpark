@@ -9,7 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
 
     1. `{:error, :not_found}` — `lifecycle.ex:96-97`, the TOCTOU where the draft
        is gone (discarded, or published from another tab).
-    2. `{:error, {:rev_mismatch, %{expected:, actual:}}}` — `mutations.ex:151`,
+    2. `{:error, {:rev_mismatch, %{expected:, actual:}}}` — `mutations.ex:apply_one/3` (the create arm),
        `lifecycle.ex:149`. The autosave / second-tab race.
     3. `{:error, {:invalid_task_content, %{field => [msg]}}}` —
        `lifecycle.ex:349/352/365`, `mutations.ex:451/565/…`. Each `msg` is

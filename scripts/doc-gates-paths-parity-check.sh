@@ -22,13 +22,16 @@
 #     merge, on protected main, which is the failure mode this epic exists to
 #     remove: a permanently-correct red nobody can land a fix through.
 #
-# It has ALREADY DRIFTED, which is the point. On origin/main today `push.paths`
-# carries `api/test/**/*.exs` and `pull_request.paths` does not — 70 globs
-# against 69. That specific asymmetry is behaviourally harmless because
-# `**/*.exs` is in BOTH lists and subsumes it, and THAT is exactly why it went
-# unnoticed: a harmless drift and a load-bearing one arrive by the identical
-# mechanism (someone edits one list and not the other) and look identical in a
-# diff. A guard is cheap and re-earns itself every run; a code review does not.
+# It HAD ALREADY DRIFTED when this guard was written, which is the point. On
+# origin/main then, `push.paths` carried `api/test/**/*.exs` and
+# `pull_request.paths` did not — 70 globs against 69. That specific asymmetry
+# was behaviourally harmless because `**/*.exs` is in BOTH lists and subsumes
+# it, and THAT is exactly why it went unnoticed: a harmless drift and a
+# load-bearing one arrive by the identical mechanism (someone edits one list and
+# not the other) and look identical in a diff. A guard is cheap and re-earns
+# itself every run; a code review does not. That entry was added to
+# `pull_request.paths` by cgsiw-s5-doc-gates-paths-gaps, and its pin deleted in
+# the same change (see THE PIN below); the lists are set-equal at 87/87 today.
 #
 # `paths-ignore`, THE OTHER HALF OF THE FILTER (cgsiw-parity-paths-ignore-blind-spot)
 # -----------------------------------------------------------------------------
@@ -71,11 +74,14 @@
 #
 # THE PIN, AND WHY IT IS NOT A WAIVER
 # -----------------------------------------------------------------------------
-# The live one-sided entry above is PINNED in KNOWN_ONE_SIDED below rather than
-# fixed here, because .github/workflows/doc-gates.yml is owned by a sibling
-# slice this wave (cgsiw-s1, unmerged at the time of writing) and a second
-# writer would collide with it. The pin is a ratchet, not a waiver, and it cuts
-# BOTH ways:
+# The one-sided entry above WAS PINNED in KNOWN_ONE_SIDED below rather than
+# fixed here, because .github/workflows/doc-gates.yml was owned by a sibling
+# slice this wave (cgsiw-s1) and a second writer would have collided with it.
+# The pin set is now EMPTY: cgsiw-s5 added `api/test/**/*.exs` to
+# `pull_request.paths` and deleted the pin line in the same change, which is
+# exactly the retirement the mechanism below was built to force. The grammar and
+# both selftest arms stay — the next drift that needs buying will use them. The
+# pin is a ratchet, not a waiver, and it cuts BOTH ways:
 #
 #   * any one-sided entry that is NOT pinned reds immediately (exit 1). The pin
 #     buys today's known drift, never tomorrow's.
@@ -84,9 +90,10 @@
 #     must delete its pin line in the same change. The pin cannot rot into a
 #     permanent blind spot, because it retires itself loudly.
 #
-# The one-line fix is handed to cgsiw-s5-doc-gates-paths-gaps, which owns
-# doc-gates.yml's paths block after cgsiw-s1 lands. Removing the pin line here
-# is part of that fix.
+# The one-line fix was handed to cgsiw-s5-doc-gates-paths-gaps, which owns
+# doc-gates.yml's paths block after cgsiw-s1 landed. Removing the pin line here
+# was part of that fix, and the STALE PIN red is what demanded it: the parity
+# run on the fixing branch reported the pin stale before the pin was deleted.
 #
 # FAIL CLOSED. Scanning zero globs is the vacuous pass this guard exists to
 # refuse. A doc-gates.yml that cannot be read, cannot be parsed, has no
@@ -165,7 +172,10 @@ TARGET="${DOC_GATES_PATHS_PARITY_TARGET:-$DEFAULT_TARGET}"
 # is not a rounding error somebody should be able to park here.
 # See "THE PIN, AND WHY IT IS NOT A WAIVER" above: an entry here must STILL be
 # one-sided or the guard reds. Deleting a line is how the fix lands.
-KNOWN_ONE_SIDED='push:api/test/**/*.exs'
+# EMPTY on purpose (cgsiw-s5): the one drift this ever bought,
+# `push:api/test/**/*.exs`, is fixed in doc-gates.yml. An empty pin set means
+# EVERY one-sided entry reds, which is the intended resting state.
+KNOWN_ONE_SIDED=''
 
 # The pin set is env-overridable ONLY when the target has been retargeted away
 # from the real doc-gates.yml. For the DEFAULT target there is deliberately NO
@@ -441,7 +451,15 @@ run_case() {
   local out rc=0
   out="$(DOC_GATES_PATHS_PARITY_TARGET="$fixture" DOC_GATES_PATHS_PARITY_PINS="$pins" \
         bash "${BASH_SOURCE[0]}" 2>&1)" || rc=$?
-  if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$needle"; then
+  # HERE-STRING, NOT A PIPE (cgsiw-s5). `printf ... | grep -qF` is an
+  # EARLY-EXIT pipe reader under `set -o pipefail` (line 153): grep -q exits on
+  # the first match, printf takes SIGPIPE, the pipeline reports 141, and this
+  # `&&` reads a REAL MATCH AS A MISS. It is load-dependent, so it presents as a
+  # flaky selftest — measured on origin/main at ~1 spurious FAIL in 3 runs on a
+  # busy box, always on whichever arm's `$out` is longest. Same defect class as
+  # #16182 in the two doc gates. A here-string has no second process and cannot
+  # SIGPIPE.
+  if [ "$rc" -eq "$want" ] && grep -qF -- "$needle" <<<"$out"; then
     st_ok "$label (rc=$rc)"
   else
     st_no "$label — expected rc=$want with '$needle', got rc=$rc"
@@ -464,14 +482,14 @@ write_fixture() {
     echo "    branches: [main]"
     echo "    paths:"
     printf '%s\n' "$push" | grep . | sed 's/^/      - "/; s/$/"/' || true
-    if printf '%s\n' "$push_ign" | grep -q .; then
+    if grep -q . <<<"$push_ign"; then
       echo "    paths-ignore:"
       printf '%s\n' "$push_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
     fi
     echo "  pull_request:"
     echo "    paths:"
     printf '%s\n' "$pr" | grep . | sed 's/^/      - "/; s/$/"/' || true
-    if printf '%s\n' "$pr_ign" | grep -q .; then
+    if grep -q . <<<"$pr_ign"; then
       echo "    paths-ignore:"
       printf '%s\n' "$pr_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
     fi
@@ -621,7 +639,7 @@ selftest() {
   # fall through into the full gate.
   local out rc=0
   out="$(bash "${BASH_SOURCE[0]}" --bogus 2>&1)" || rc=$?
-  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF -- "unknown argument '--bogus'"; then
+  if [ "$rc" -eq 2 ] && grep -qF -- "unknown argument '--bogus'" <<<"$out"; then
     st_ok "an unknown argument refuses at exit 2 (rc=$rc)"
   else
     st_no "an unknown argument should exit 2 with a usage line — got rc=$rc"

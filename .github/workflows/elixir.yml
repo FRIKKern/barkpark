@@ -497,6 +497,39 @@ jobs:
       - name: A touched unformatted file reds the gate, an untouched one does not
         run: bash scripts/format-diff-scope.test.sh
 
+      # ── the Elixir pin-agreement gate (task-0c3081a2e534bdfc) ────────────
+      # The production toolchain is `.tool-versions`, which is what asdf
+      # resolves on the Hetzner box. `mix-test` and `mix-prod-compile` below are
+      # the two jobs whose green is supposed to mean "it works on the box", so
+      # their matrices must cover that pin to MAJOR.MINOR. They do today. This
+      # step is what stops a one-line edit to either side from breaking it in
+      # silence — the check reads all three files rather than restating them.
+      #
+      # It ALSO compares api/Dockerfile's build stage (the self-host image
+      # compose-smoke boots) against the same matrices. That stage was
+      # elixir:1.19-alpine — a divergence the check carried by value as its
+      # RULE 2 record until the owner ruled (via main, 2026-09-05,
+      # task-729be45412588f07): pin the image to the tested elixir
+      # 1.18.4-otp-27-alpine. The record is gone with the divergence; a new gap
+      # between the image and the matrices reds on its own, no record needed.
+      # `format`'s 1.19.5 is deliberately out of scope: that pin tracks the
+      # authoring toolchain, for the reason written above its matrix.
+      #
+      # HERE and not in `mix-prod-compile`: that job carries
+      # `if: needs.changes.outputs.compile == 'true'`, so a diff touching only
+      # `.tool-versions` or `.github/workflows/elixir.yml` — exactly the edits
+      # that create the skew — would skip it. This job has no `if:`.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      - name: The pin-agreement gate must be able to fail
+        run: bash scripts/toolchain-skew-check.sh --selftest
+
+      - name: The production Elixir pin is covered by the jobs that test it
+        run: bash scripts/toolchain-skew-check.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
     # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`

@@ -402,3 +402,53 @@ func TestParseEnvSecretsD36(t *testing.T) {
 		t.Errorf("empty BARKPARK_KEK_PREVIOUS must be omitted: %v", got)
 	}
 }
+
+// ── --stop is fast-only, and says so ─────────────────────────────────────────
+
+// TestNeutralArchiveStopWithoutFastIsLoud is the regression for the silent
+// accept: `--stop` was registered in runNeutralArchive's bool list (so
+// parseHzArgs' `unknown flag` arm never fired) and then read NOWHERE on the
+// portable path — `bp cloud instance archive x --stop` exited 0 having quiesced
+// nothing, while the operator believed the writers were stopped. The portable
+// bundle does not need a quiesce (pg_dump --format=custom is MVCC-consistent by
+// construction), so the honest answer is a usage error, not a no-op.
+func TestNeutralArchiveStopWithoutFastIsLoud(t *testing.T) {
+	withFakeBundleStore(t)
+	_, stderr, code := runInstanceCapture(t, "table", "archive", "--provider", "fake", "--stop", "web-1")
+	if code != exitUsage {
+		t.Fatalf("--stop without --fast should be a usage error (exit %d), got %d\n%s", exitUsage, code, stderr)
+	}
+	for _, want := range []string{"--stop", "--fast"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("--stop refusal should name %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestNeutralArchiveStopIsAdvertised proves the flag is no longer swallowed
+// SILENTLY *and* undocumented: the usage line the refusal quotes names --stop
+// and the --fast it depends on, so a reader learns the real availability from
+// the error itself.
+func TestNeutralArchiveStopIsAdvertised(t *testing.T) {
+	withFakeBundleStore(t)
+	_, stderr, _ := runInstanceCapture(t, "table", "archive", "--provider", "fake", "--stop", "web-1")
+	if !strings.Contains(stderr, "[--fast [--stop]]") {
+		t.Errorf("usage should advertise --stop as a --fast-only flag:\n%s", stderr)
+	}
+}
+
+// TestNeutralArchiveFastStopStillForwards proves the registration was NOT
+// simply deleted: `--fast --stop` on hetzner is a legitimate combination — line
+// 201's stripFlag removes only --fast, so --stop reaches runInstanceArchive,
+// which passes a.bools["stop"] into instArchive. The guard must not fire here.
+// The run still fails LATER (no hetzner credential in a test), and that is the
+// point: the failure must not be the new usage refusal.
+func TestNeutralArchiveFastStopStillForwards(t *testing.T) {
+	withFakeBundleStore(t)
+	t.Setenv("HCLOUD_TOKEN", "")
+	t.Setenv("HETZNER_API_TOKEN", "")
+	_, stderr, code := runInstanceCapture(t, "table", "archive", "--provider", "hetzner", "--fast", "--stop", "web-1")
+	if code == exitUsage && strings.Contains(stderr, "--stop needs --fast") {
+		t.Fatalf("--fast --stop is a working combination and must not be refused:\n%s", stderr)
+	}
+}

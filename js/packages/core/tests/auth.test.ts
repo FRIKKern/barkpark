@@ -189,7 +189,7 @@ describe('client.auth', () => {
     server.use(
       http.post(`${TEST_BASE_URL}/v1/auth/reset`, async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown>
-        if (body.token === 'good') return HttpResponse.json({ ok: true })
+        if (body.token === 'good') return HttpResponse.json({ ok: true, sessionsRevoked: 3 })
         return HttpResponse.json(
           { error: { code: 'invalid_token', message: 'the reset link is invalid or expired' } },
           { status: 422 },
@@ -197,10 +197,40 @@ describe('client.auth', () => {
       }),
     )
     const bp = createClient(baseConfig)
-    await expect(bp.auth.resetPassword('good', 'newpw')).resolves.toBeUndefined()
+    await expect(bp.auth.resetPassword('good', 'newpw')).resolves.toEqual({ sessionsRevoked: 3 })
     await bp.auth.resetPassword('stale', 'newpw').then(
       () => expect.fail('expected throw on a stale token'),
       (err) => expect(err.serverCode).toBe('invalid_token'),
     )
+  })
+
+  it('resetPassword surfaces the sessionsRevoked count the server stamped', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/reset`, () =>
+        HttpResponse.json({ ok: true, sessionsRevoked: 7 }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const receipt = await bp.auth.resetPassword('good', 'newpw')
+    // The whole point of the row: the count must reach the caller, not be
+    // discarded into a void return.
+    expect(receipt.sessionsRevoked).toBe(7)
+  })
+
+  it('resetPassword keeps a counted zero distinct from an unreported count', async () => {
+    // 0 is a MEASUREMENT — the server counted and there were no other sessions.
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/reset`, () =>
+        HttpResponse.json({ ok: true, sessionsRevoked: 0 }),
+      ),
+    )
+    let bp = createClient(baseConfig)
+    expect((await bp.auth.resetPassword('good', 'newpw')).sessionsRevoked).toBe(0)
+
+    // null is an ABSENCE — a server that predates the field reported nothing.
+    // Folding this into 0 would claim a measurement the server never made.
+    server.use(http.post(`${TEST_BASE_URL}/v1/auth/reset`, () => HttpResponse.json({ ok: true })))
+    bp = createClient(baseConfig)
+    expect((await bp.auth.resetPassword('good', 'newpw')).sessionsRevoked).toBeNull()
   })
 })

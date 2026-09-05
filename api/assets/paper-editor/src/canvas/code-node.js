@@ -320,40 +320,50 @@ export const Code = Node.create({
       // debounce mirrors the editor's DEBOUNCE_MS so a burst of keystrokes coalesces
       // into one attr write (and thus one op batch).
       let writeTimer = null;
+      const commitNow = () => {
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        const nextValue = area.value;
+        // lang: empty string → null so an absent language round-trips as ABSENT
+        // (put_if_present drops "" / nil on persist).
+        const rawLang = langInput.value;
+        const nextLang = rawLang === "" ? null : rawLang;
+        if (cur.attrs.value === nextValue && (cur.attrs.lang || null) === nextLang) {
+          return; // nothing changed — emit nothing
+        }
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, {
+              ...cur.attrs,
+              value: nextValue,
+              lang: nextLang,
+            });
+            return true;
+          })
+          .run();
+      };
       const scheduleWrite = () => {
         if (!editor.isEditable) return;
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur) return;
-          const nextValue = area.value;
-          // lang: empty string → null so an absent language round-trips as ABSENT
-          // (put_if_present drops "" / nil on persist).
-          const rawLang = langInput.value;
-          const nextLang = rawLang === "" ? null : rawLang;
-          if (cur.attrs.value === nextValue && (cur.attrs.lang || null) === nextLang) {
-            return; // nothing changed — emit nothing
-          }
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, {
-                ...cur.attrs,
-                value: nextValue,
-                lang: nextLang,
-              });
-              return true;
-            })
-            .run();
+          commitNow();
         }, DEBOUNCE_MS);
+      };
+      const flushPending = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitNow();
       };
 
       area.addEventListener("input", scheduleWrite);
       langInput.addEventListener("input", scheduleWrite);
+      dom.addEventListener("bp-flush-node", flushPending);
       // Keep the resting-chrome gate in step as the user types a lang (empty→set
       // must not snap back to hidden while they are focused, and clearing it while
       // idle must re-hide it once blur+mouseleave settle).
@@ -387,6 +397,7 @@ export const Code = Node.create({
           if (writeTimer) clearTimeout(writeTimer);
           area.removeEventListener("input", scheduleWrite);
           langInput.removeEventListener("input", scheduleWrite);
+          dom.removeEventListener("bp-flush-node", flushPending);
           langInput.removeEventListener("input", syncChrome);
           dom.removeEventListener("mouseenter", onEnter);
           dom.removeEventListener("mouseleave", onLeave);

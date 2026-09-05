@@ -1028,6 +1028,39 @@ defmodule Barkpark.Tasks.Close do
           Map.put(doc.content, "lifecycle_status", new_status)
       end
 
+    # THE CLOSE-SIDE DISPOSITION ADVANCE (task-e91cbd0cceafc44e).
+    #
+    # `close` wrote no adjudication term at all — `git grep -c disposition` over
+    # this file returned 0 — so a row staged `open` or `parked` and LATER closed
+    # kept its pre-close term forever. That is not hypothetical: a census of
+    # 1,320 dispositioned rows found 42 terminal rows still carrying `open` or
+    # `parked`, their `disposition_reason` reading "AWAITING MERGE" and "STAYS
+    # OPEN" beside a `close_reason` describing finished work. Two fields on one
+    # row asserting opposite things, and every later reader had to guess which.
+    #
+    # SAME TRANSACTION, not a follow-up write: this rides the single rev-CAS
+    # `fenced_content_write` below, so lifecycle and disposition advance together
+    # or not at all. A second call could fail after the lifecycle landed and
+    # recreate exactly the contradiction being closed.
+    #
+    # ONLY THE TERM MOVES. `disposition_reason` is deliberately NOT touched — it
+    # is the durable WHY somebody wrote by hand, and a close has no better text
+    # for it than the one already there; `close_reason` carries the close's own
+    # sentence. Overwriting the reason to match the term would destroy the more
+    # informative of the two.
+    #
+    # `Stage` REMAINS THE SANCTIONED VERB for a caller-chosen disposition. This
+    # is not a second door into the vocabulary: close advances to exactly one
+    # value, "closed", on exactly the terminal statuses, and a caller cannot
+    # name a term here. The raw `/v1/data/mutate` refusal on `content.disposition`
+    # is untouched.
+    #
+    # ABSENT STAYS ABSENT. A row that never carried a disposition is not GIVEN
+    # one by being closed — birth adjudication is `ensure_disposition_via_verb`'s
+    # business, and inventing a term here would manufacture an adjudication
+    # nobody made.
+    new_content = advance_disposition_on_close(new_content, new_status)
+
     # Dossier close rationale: one scalar write riding the close call. Blank
     # reasons never overwrite an existing value.
     new_content =
@@ -1417,4 +1450,18 @@ defmodule Barkpark.Tasks.Close do
       Map.get(c, "lifecycle_status") == "done"
     end)
   end
+  # `done` and `cancelled` are terminal; `blocked` is an honest partial and the
+  # row is still live work, so its disposition is left alone. The guard is on
+  # the PRESENCE of a disposition, so an unadjudicated row stays unadjudicated.
+  @terminal_for_disposition ~w(done cancelled)
+
+  defp advance_disposition_on_close(content, new_status)
+       when new_status in @terminal_for_disposition do
+    case Map.get(content, "disposition") do
+      nil -> content
+      _present -> Map.put(content, "disposition", "closed")
+    end
+  end
+
+  defp advance_disposition_on_close(content, _non_terminal), do: content
 end

@@ -581,6 +581,83 @@ defmodule Barkpark.SheetsParityTest do
            "cells.ex @engine_errors drifted from Engine.error_values/0 — update the local mirror"
   end
 
+  # DRIFT GUARD — the `#rrggbb` BACKGROUND rule, same story one axis over.
+  # `walk.ex` used to CALL `Plugins.Sheets.CondFormat.valid_bg?/1` from the CORE
+  # render path — the one real `portable_doc>sheets` edge the concept-map
+  # boundary gate named, and exactly the fresh-install breakage the error-vocab
+  # mirror above exists to prevent. walk.ex now mirrors the RULE locally
+  # (`@sheet_bg_re` + `sheet_bg_valid?/1`) and this is that mirror's LOCK.
+  #
+  # A vocabulary mirror can be locked by list equality; a RULE mirror cannot —
+  # two different regexes can both be `#rrggbb`-ish and disagree on the shapes
+  # that matter. So this compares ANSWERS, term for term, over a fixture set
+  # that hits every discrimination the rule makes: accepted lowercase, accepted
+  # uppercase (acceptance is case-insensitive), wrong length, non-hex digits,
+  # the `\z` trailing-newline stowaway that `$` would let through (the reason
+  # the canonical is `\z`-anchored at all — this value lands inside an inline
+  # `style` attribute), surrounding whitespace, a missing `#`, `#rgb`
+  # shorthand, CSS colour names, a style-attribute injection payload, and the
+  # non-binary terms `valid_bg?/1` accepts as input. A one-sided edit to either
+  # side reds HERE.
+  @bg_fixtures [
+    "#aabbcc",
+    "#AABBCC",
+    "#AaBbCc",
+    "#000000",
+    "#ffffff",
+    "#012345",
+    "#abcdef",
+    "#ABCDEF",
+    "#aabbcc\n",
+    "#aabbcc\r\n",
+    "\n#aabbcc",
+    "#aabbcc ",
+    " #aabbcc",
+    "#aabbc",
+    "#aabbccd",
+    "#gggggg",
+    "#aabbcz",
+    "aabbcc",
+    "#abc",
+    "#ABC",
+    "red",
+    "rgb(1,2,3)",
+    "",
+    "#",
+    "#aabbcc;color:red",
+    "#aabbcc\";x:y",
+    nil,
+    123,
+    :red,
+    %{},
+    ["#aabbcc"]
+  ]
+
+  test "walk.ex bg-validator mirror answers term-identically to CondFormat.valid_bg?/1" do
+    disagreements =
+      for v <- @bg_fixtures,
+          Barkpark.PortableDoc.Render.Walk.sheet_bg_valid?(v) !=
+            Barkpark.Plugins.Sheets.CondFormat.valid_bg?(v),
+          do:
+            {v, Barkpark.PortableDoc.Render.Walk.sheet_bg_valid?(v),
+             Barkpark.Plugins.Sheets.CondFormat.valid_bg?(v)}
+
+    assert disagreements == [],
+           """
+           walk.ex `sheet_bg_valid?/1` drifted from the canonical            `Plugins.Sheets.CondFormat.valid_bg?/1` (@canonical            capability:sheets-bg-sanitizer). {value, walk, canonical}:
+             #{inspect(disagreements, pretty: true)}
+           Update the local `@sheet_bg_re` mirror in walk.ex — do NOT call the            plugin from core render, that edge is what this guard retired.
+           """
+
+    # NON-VACUITY — a fixture set that were all-accepted (or all-rejected) would
+    # pass against a mirror that answers a constant. Both answers must occur.
+    assert Enum.any?(@bg_fixtures, &Barkpark.Plugins.Sheets.CondFormat.valid_bg?/1),
+           "@bg_fixtures exercises no ACCEPTED value — the comparison above is vacuous"
+
+    refute Enum.all?(@bg_fixtures, &Barkpark.Plugins.Sheets.CondFormat.valid_bg?/1),
+           "@bg_fixtures exercises no REJECTED value — the comparison above is vacuous"
+  end
+
   # ── THE TYPESCRIPT MIRRORS, LOCKED FROM A CONTEXT THAT CAN BLOCK ─────────────
   #
   # The two TS surfaces below cannot call `Engine.error_values/0`, so each keeps
@@ -795,7 +872,8 @@ defmodule Barkpark.SheetsParityTest do
   defp extract_fmt_classes(src) do
     body =
       case Regex.run(~r/const\s+FMT_CLASSES\s*=\s*new\s+Set\(\[(.*?)\]\)/s, src,
-             capture: :all_but_first) do
+             capture: :all_but_first
+           ) do
         [body] -> body
         _ -> flunk(fmt_extractor_refusal("no `const FMT_CLASSES = new Set([...])` literal"))
       end

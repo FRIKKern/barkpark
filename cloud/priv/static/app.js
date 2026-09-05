@@ -4020,10 +4020,19 @@
   // (`Sites.AutoDeployWorker.refuse/1` → `Notifications.dispatch_site_event`)
   // landed in the same change, and arm (b) reds until this row names it. This is
   // not a promise ahead of a mechanism — it is the console catching up to one.
+  //
+  // cch-w30-bl — EIGHT. `deployment_succeeded` is BACK, and the paragraph above
+  // is why it can be: the objection was never the toggle, it was that nothing
+  // could send it and that `settle_live/2` "legally re-reports live". Both are
+  // answered in the same change — `Registry.dispatch_deployment_terminal/2`
+  // fires it from the fenced writer AND from the `with_site_update` writer
+  // `settle_live/2` drives, EDGE-TRIGGERED on the prior status so a live → live
+  // re-report sends nothing. Arm (b) of the census reds until this row exists.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
+    ["deployment_succeeded", "Deployment live"],
     ["deployment_refused", "Deployment refused"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
@@ -4328,9 +4337,17 @@
       }).join("") + "</div>";
   }
 
-  // The email-delivery card. Admin: a buffered form (transport seg + from + SMTP)
-  // with its own save-row → PUT /settings. Member: a read-only definition list —
-  // no inputs, no save-row, no affordances (GR33 plain-member law).
+  // The alert-delivery card. Admin: a buffered form (the master switch + transport
+  // seg + from + SMTP) with its own save-row → PUT /settings. Member: a read-only
+  // definition list — no inputs, no save-row, no affordances (GR33 plain-member law).
+  //
+  // cch-notif-card-email-framing: the heading was "Email delivery" and the purpose
+  // sentence spoke only of email, while the card HOSTS `alerts_enabled` — the master
+  // switch for the whole rail. w32-s1 fixed the switch's own two labels and left the
+  // frame around them, so the surface still read "this is an email control". The
+  // heading and both purpose sentences now name what the card actually governs: the
+  // whole rail, plus the email-specific transport that lives here with it. The
+  // control, its id, its endpoint and its save button are unchanged.
   //
   // cch-w32-s1: the `alerts_enabled` switch was labelled "Email alerts" in BOTH
   // places this function renders it (the member <dd> and the admin checkbox),
@@ -4344,8 +4361,8 @@
     var transport = s.transport || "instance";
     if (!canManage) {
       return '<section class="set-section">' +
-        '<h3 class="set-h">Email delivery</h3>' +
-        '<p class="set-purpose">Your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<h3 class="set-h">Alert delivery</h3>' +
+        '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team\'s alert email. Only team admins can change these settings.</p>' +
         '<dl class="set-readonly">' +
           "<div><dt>All alerts (email and chat)</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
           "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
@@ -4361,8 +4378,8 @@
           '<input class="form-input" id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
       "</div>";
     return '<section class="set-section">' +
-      '<h3 class="set-h">Email delivery</h3>' +
-      '<p class="set-purpose">The transport your team\'s alert email is sent over, and who it comes from.</p>' +
+      '<h3 class="set-h">Alert delivery</h3>' +
+      '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and the transport your team\'s alert email is sent over, with who it comes from.</p>' +
       '<div class="field"><label class="set-toggle"><input type="checkbox" id="notif-alerts"' +
         (s.alerts_enabled !== false ? " checked" : "") + "> All alerts enabled (email and chat channels)</label></div>" +
       '<div class="field"><span class="label">Transport</span>' + notifTransportSegHtml(transport) + "</div>" +
@@ -4377,8 +4394,20 @@
   // One chat-channel row: a `.set-check` enable (name + configured tag + mandatory
   // consequence sub-line) plus the write-only credential fields for its shape, and
   // a "Send test" affordance only when the channel is enabled AND configured.
+  //
+  // cch-notif-card-email-framing: `ch.off` states only the OFF consequence, so a
+  // channel left ON read as live — including while `alerts_enabled` is false, where
+  // `enqueue_chat/3`'s `alerts_enabled: false` clause drops the event before any
+  // transport is picked. The row now carries a second, CONDITIONAL sub-line naming
+  // that override, rendered only for an enabled channel on a muted team: that is the
+  // exact cell where "on" and "receiving" come apart. The five per-channel `off`
+  // strings are untouched — the override is one sentence in one place, not a
+  // qualifier bolted onto each of them.
   function notifChannelRowHtml(s, ch) {
     var st = notifChannelState(s, ch.type);
+    var muted = st.enabled === true && !!s && s.alerts_enabled === false
+      ? '<span class="set-check-sub">On, but muted: the master alerts switch is off, so this channel receives nothing until alerts are enabled again.</span>'
+      : "";
     var tag = st.configured
       ? '<span class="set-cred-tag">configured</span>'
       : '<span class="set-cred-tag set-cred-tag--empty">not configured</span>';
@@ -4394,7 +4423,7 @@
       '<label class="set-check"><input type="checkbox" data-chan-enable data-channel="' + esc(ch.type) + '" data-initial="' +
         (st.enabled ? "1" : "0") + '"' + (st.enabled ? " checked" : "") + ">" +
         '<span class="set-check-main"><span class="set-check-name">' + esc(ch.label) + " " + tag + "</span>" +
-        '<span class="set-check-sub">' + esc(ch.off) + "</span></span></label>" +
+        '<span class="set-check-sub">' + esc(ch.off) + "</span>" + muted + "</span></label>" +
       '<div class="set-channel-creds">' + creds + test + "</div>" +
       "</div>";
   }
@@ -7839,17 +7868,25 @@
   // both promising an actor that does not exist:
   //
   //   * "Your payment failed on {day}" was back-computed as current_period_end
-  //     minus a client-side 3-day constant — and mark_past_due/2 re-anchors
-  //     current_period_end to now+3d on EVERY webhook delivery
-  //     (billing.ex:827, put_new_lazy(:current_period_end, &default_grace_anchor/0)),
-  //     so that "failed on" day is approximately TODAY, forever.
+  //     minus a client-side 3-day constant — and mark_past_due/2 re-anchors the
+  //     grace window to now+3d on EVERY webhook delivery
+  //     (put_new_lazy(:grace_ends_at, &default_grace_anchor/0)), so that
+  //     "failed on" day is approximately TODAY, forever.
   //   * "keep running until {day}, then they're suspended" named a suspension
-  //     with NO EXECUTOR. maybe_enforce/1 (billing.ex:883) is the only
-  //     grace-elapse suspender; its sole caller is mark_past_due/2, which has
-  //     just pushed the period end three days out, so the `:gt -> :ok` arm
-  //     always fires and Registry.suspend_team_barkparks(tid, "billing_past_due")
-  //     is unreachable on every production path. No worker, route, task or CLI
-  //     reaches it either.
+  //     with NO EXECUTOR. maybe_enforce/1 is the only grace-elapse suspender;
+  //     its sole caller is mark_past_due/2, which has just pushed the anchor
+  //     three days out, so the in-window arm always fires and
+  //     Registry.suspend_team_barkparks(tid, "billing_past_due") is unreachable
+  //     on every production path. No worker, route, task or CLI reaches it
+  //     either.
+  //
+  //  cch-w57-bl: the anchor those two bullets describe moved off
+  //  current_period_end — three clocks in one column — onto its own
+  //  grace_ends_at. The console reads NEITHER for this banner (it names no day
+  //  at all, which is the whole point of cch-w54-s5), so nothing here changes
+  //  behaviourally; the pointers are corrected so a reader who follows them
+  //  lands on the column mark_past_due/2 actually writes. Line numbers are
+  //  dropped rather than re-pinned — they were already stale.
   //
   // What grace elapse ACTUALLY does is flip Billing.entitled?/1, whose only lib
   // call site outside billing.ex is router.ex:8744 (entitled_or_trial_started?/1,
@@ -8507,7 +8544,28 @@
   // is DROPPED, because `position: fixed` on a control nobody may press would
   // float a dead button over every screen of the page forever and strand its
   // own reason span back at the timeline. Emphasis belongs to the offer.
-  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml, emphasis) {
+  //
+  // cch-w47-rv-bl — THE SENTENCE GETS ONE OWNER PER BUTTON GROUP, NOT PER
+  // BUTTON. Measured on origin/main@b2529b02c, not taken from the filing: a
+  // refused member's instance-detail render (instanceDetailHtml, the
+  // #instance-body seam cch-w45-s5 counts over) on a LIVE, BEHIND,
+  // policy-bearing box carried FORBIDDEN_ROLE_COPY.admin THIRTEEN times —
+  // header strip 3 controls x (title + reason span) = 6, updates strip 3
+  // controls x 2 = 6, plus the fleet-support card's empty state = 1. (The row
+  // said nine and named four autoupdate toggles; autoupdateActions is two
+  // mutually-exclusive PAIRS, so at most two of them ever render at once. The
+  // count is higher than filed and the arithmetic behind it is different.)
+  //
+  // `groupReasonId` names a span the CALLER emits once per strip
+  // (adminWriteGroupReasonHtml below). Given it, the non-grant arms drop BOTH
+  // per-control copies of the sentence and point at that one span with
+  // `aria-describedby` — so a screen-reader user still hears the refusal on
+  // every disabled control (the description is read with the button), while the
+  // screen says it once per group. Withheld, the two arms are byte-identical to
+  // what shipped: the two SINGLETON sites (the timeline's Retry setup, the
+  // verify note's Re-provision) are their own group of one and keep the shipped
+  // title + reason pair, which is already the two-occurrence budget.
+  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml, emphasis, groupReasonId) {
     if (authority !== "refuse" && authority !== "unknown") {
       if (emphasis === "primary") {
         return '<button class="btn btn-primary btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
@@ -8521,6 +8579,15 @@
       return '<button class="btn btn-ghost btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
     }
     var reason = authority === "refuse" ? FORBIDDEN_ROLE_COPY.admin : "";
+    if (groupReasonId) {
+      // The explanation lives once, in the group's span; this control carries a
+      // POINTER to it. `aria-describedby` is the same relationship the visible
+      // span already had (an explanation attached to a control), stated in
+      // markup instead of by proximity — and it holds on BOTH non-grant arms,
+      // so the unknown arm's "Checking capabilities…" is announced too.
+      return '<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled' +
+        ' aria-describedby="' + esc(groupReasonId) + '">' + labelHtml + "</button></div>";
+    }
     return '<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled' +
       (reason ? ' title="' + esc(reason) + '"' : "") + ">" + labelHtml + "</button>" +
       (reason
@@ -8528,6 +8595,35 @@
         : '<span class="inst-life-note">Checking capabilities&hellip;</span>' + (exitHtml || "")) +
       "</div>";
   }
+
+  // cch-w47-rv-bl — the group's ONE sentence, addressed by the id every disabled
+  // control in the strip points `aria-describedby` at. Emits nothing on grant
+  // (an offered strip explains nothing) and nothing when the strip drew no
+  // grouped control at all, which is why the call sites test the rendered bytes
+  // for the pointer rather than re-deriving which arm they took. The copy and
+  // the two span classes are the rail's, verbatim — this mints neither.
+  // `exitHtml` rides the unknown arm only, and now ONCE per strip rather than
+  // once per control (wireMeRetry takes the first match, so the copies it
+  // replaces were already dead bytes).
+  function adminWriteGroupReasonHtml(authority, groupReasonId, exitHtml) {
+    if (!groupReasonId) return "";
+    if (authority === "refuse") {
+      return '<span class="inst-life-reason" id="' + esc(groupReasonId) + '">' +
+        esc(FORBIDDEN_ROLE_COPY.admin) + "</span>";
+    }
+    if (authority === "unknown") {
+      return '<span class="inst-life-note" id="' + esc(groupReasonId) + '">Checking capabilities&hellip;</span>' +
+        (exitHtml || "");
+    }
+    return "";
+  }
+
+  // The two ids the strips above and below address. Named constants because the
+  // control and its reason must agree byte for byte — a typo on either side is
+  // an aria-describedby pointing at nothing, which reads to a screen reader
+  // exactly like the refusal never being spoken.
+  var HEADER_ACTIONS_REASON_ID = "inst-header-actions-reason";
+  var UPDATE_ACTIONS_REASON_ID = "inst-update-actions-reason";
 
   // cch-w46-rv — THE AUTHORITY-BEARING HALF OF THE HEADER, LIFTED OUT WHOLE.
   //
@@ -8562,7 +8658,7 @@
     var updateBtn = lc.live && bp.update_state === "behind"
       ? adminWriteControlHtml(authority,
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update"),
-          'id="inst-update"', "", "primary")
+          'id="inst-update"', "", "primary", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
@@ -8573,7 +8669,7 @@
     // (meRetryHtml's [data-me-retry]), wired by wireMeRetry at the render site,
     // so a /v1/me that never landed is a state you can leave.
     var domainBtn = lc.live && !bp.custom_host
-      ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', meRetryHtml())
+      ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', "", "", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // cloud-agent onramp: reveal this instance's admin credential so an agent
@@ -8586,7 +8682,7 @@
     // a suspended one is refused 409 by design (cch-w54-s2), so neither is
     // offered a control that could only fail.
     var connectBtn = lc.live
-      ? adminWriteControlHtml(authority, "Connect agent", 'id="inst-connect-agent"', meRetryHtml())
+      ? adminWriteControlHtml(authority, "Connect agent", 'id="inst-connect-agent"', "", "", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
@@ -8617,7 +8713,7 @@
           // whole actions strip in the removeFailed state — nothing else on it
           // carries the exit, so the still-checking arm gets meRetryHtml() here
           // (unlike the live-box CTAs above, which sit beside connectBtn's).
-          ? adminWriteControlHtml(authority, "Retry removal", 'id="inst-remove-retry"', meRetryHtml(), "primary")
+          ? adminWriteControlHtml(authority, "Retry removal", 'id="inst-remove-retry"', "", "primary", HEADER_ACTIONS_REASON_ID)
           : lc.failed
             ? cliToggle
             : lc.suspended
@@ -8632,7 +8728,15 @@
                   '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
                   connectBtn + domainBtn + cliToggle
                 : "";
-    return actions;
+    // cch-w47-rv-bl: ONE reason for the strip, appended only when the arm that
+    // fired actually drew a grouped control (the cliToggle-only arms — failed,
+    // suspended — draw none, and a reason with nothing to describe is the
+    // nagging this slice deletes). The strip is the page's home for the
+    // still-checking exit, so meRetryHtml() rides HERE now, once, instead of on
+    // each of the three CTAs that used to carry a copy of it.
+    return actions + (actions.indexOf('aria-describedby="' + HEADER_ACTIONS_REASON_ID + '"') === -1
+      ? ""
+      : adminWriteGroupReasonHtml(authority, HEADER_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   // cch-w45-s5: `authority` is instanceAdminAuthority()'s three-valued answer,
@@ -10475,10 +10579,10 @@
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
-      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "");
-      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "");
-      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "");
-      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "");
+      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "", "", UPDATE_ACTIONS_REASON_ID);
     }
     // isu-w6: Rollback is offered for every hosted box (this panel only renders
     // when the box has a host). It's a DISTINCT affordance from the policy toggles
@@ -10491,8 +10595,13 @@
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
     // header, where the still-checking arm first appears).
-    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "");
-    return buttons;
+    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
+    // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
+    // re-deriving which arms fired) keeps this correct if a future control is
+    // added or a policy block goes missing — no grouped control, no span.
+    return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
+      ? ""
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
   }
 
   function updatePanelHtml(bp, authority) {
@@ -11230,15 +11339,40 @@
         "Nothing was attempted, so there is no rate to report and no class table to draw — " +
         "an empty window is not a healthy one, and a table of zeroes would say the opposite.</p>";
     }
-    var basis = data.failure_rate && data.failure_rate.basis
-      ? '<p class="op-foot">Denominator: ' + esc(String(data.failure_rate.basis)) + "</p>"
+    // ONE foot, BOTH denominators — each beside the rate it belongs to. The
+    // basis strings are the SERVER's own sentences (`@basis_attempted` /
+    // `@basis_terminal`), never re-worded here: a console-side paraphrase of a
+    // denominator is a second definition of the population.
+    var bases = [];
+    if (data.failure_rate && data.failure_rate.basis) {
+      bases.push("attempted: " + String(data.failure_rate.basis));
+    }
+    if (data.terminal_failure_rate && data.terminal_failure_rate.basis) {
+      bases.push("settled: " + String(data.terminal_failure_rate.basis));
+    }
+    var basis = bases.length
+      ? '<p class="op-foot">Denominator: ' + esc(bases.join(" · ")) + "</p>"
       : "";
     var table = data.classes.length
       ? '<div class="set-list">' + data.classes.map(operatorCensusClassRowHtml).join("") + "</div>"
       : '<p class="set-empty">No failure class was recorded in this window — the ledger names ' +
         "no failed row here. The counts below are still the whole population.</p>";
+    // BOTH BASES OR NEITHER (dr-w31). The same numerator over two denominators:
+    // `failure_rate` divides by ATTEMPTED rows, which include deferrals — a
+    // deferral is a WAIT, not an outcome, so adding capacity pressure raises
+    // deferrals and MECHANICALLY LOWERS this number with zero change in
+    // reliability. `terminal_failure_rate` divides by SETTLED rows (failed +
+    // live) and cannot be moved that way. Rendering one alone lets a reader
+    // quote a rate that a fleet can improve by waiting more.
+    //
+    // The settled line prints on EVERY path, including a control plane that
+    // sends no `terminal_failure_rate` at all: operatorCensusRateHtml's
+    // no-node arm says "not reported" in the settled line's own place. That is
+    // the "or NEITHER" half of the rule — an omitted line reads as "there is
+    // only one convention", which is the claim this row exists to remove.
     return win +
-      operatorCensusRateHtml(data.failure_rate, "Failure rate") +
+      operatorCensusRateHtml(data.failure_rate, "Failure rate (attempted)") +
+      operatorCensusRateHtml(data.terminal_failure_rate, "Failure rate (settled)") +
       basis + table + operatorCensusTotalsHtml(data);
   }
 
@@ -12329,10 +12463,25 @@
   // The tab is ABOUT the box, not served BY it — an unreachable box gets a
   // retry, never an infinite spinner; a too-old box gets the update chip; a
   // coded (or older uncoded 404) not-found says so plainly.
-  function webhookErrorHtml(resp, instance) {
+  //
+  // cch-w31-bl — `respStatus` is the RESPONSE status (r.status, which both call
+  // sites already had in scope one frame up and threw away). It is optional and
+  // reaches ONLY the terminal sentence: every coded branch below still wins, so
+  // a proxied upstream_error that carries a real instance fact still reads as
+  // that fact. What it fixes is the fall-through. `err.code` / `err.detail` are
+  // `undefined` on the FLAT string envelope the router's own handle_errors/2
+  // sends ({error:"server_error"}), so a CONTROL-PLANE crash — plus a
+  // bad_gateway slug and an empty HTML-502 body — missed every branch and told
+  // the operator "Something went wrong reaching this instance", naming a box
+  // this console never reached out to and never measured. That is the same
+  // structural defect webhookMutationError had (fixed in w31-s4, and the
+  // positive control for this row); this is its lexically adjacent sibling.
+  function webhookErrorHtml(resp, instance, respStatus) {
     resp = resp || {};
     var err = resp.error || {};
     var code = typeof err === "object" ? err.code : null;
+    // `status` is the UPSTREAM status the proxy relays inside the envelope —
+    // NOT respStatus, which is the control plane's own answer code.
     var status = typeof err === "object" ? err.status : null;
     var detail = typeof err === "object" && typeof err.detail === "string" ? err.detail : null;
     var title, body, retry = true, updateChip = false;
@@ -12361,7 +12510,14 @@
       body = "This endpoint no longer exists — it may have been deleted elsewhere.";
     } else {
       title = "Couldn't load webhooks";
-      body = detail || "Something went wrong reaching this instance.";
+      // Nothing above matched, so this envelope named no instance fact. Route
+      // the terminal sentence through the same 5xx/transport switch every other
+      // crash path uses; a real 4xx answer keeps the instance-shaped copy.
+      // `err` may be a flat slug string, which friendly() reads off `error`.
+      // (One line on purpose: the census guard in __app.test.mjs reads the LINE
+      // a blaming fallback sits on and demands faultCopy( on it.)
+      var flat = typeof err === "string" ? { error: err } : resp;
+      body = detail || faultCopy(respStatus, flat, "Something went wrong reaching this instance.");
     }
     return '<div class="wh-error empty-state"><h2>' + esc(title) + "</h2><p>" + esc(body) + "</p>" +
       (retry ? '<p><button class="btn btn-sm btn-primary" type="button" data-wh-retry>Retry</button></p>' : "") +
@@ -12509,7 +12665,7 @@
     api("GET", whPath(bp, "", ds)).then(function (r) {
       if (seq !== webhookLoadSeq) return; // a newer dataset load owns the list
       if (!r.ok) {
-        listBox.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        listBox.innerHTML = webhookErrorHtml(r.data, cliInstance(bp), r.status);
         var rt = listBox.querySelector("[data-wh-retry]");
         if (rt) rt.addEventListener("click", function () { loadWebhooks(root, bp, ds); });
         return;
@@ -12860,7 +13016,7 @@
     box.innerHTML = '<div class="loading">Loading deliveries&hellip;</div>';
     api("GET", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries", ds)).then(function (r) {
       if (!r.ok) {
-        box.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        box.innerHTML = webhookErrorHtml(r.data, cliInstance(bp), r.status);
         var rt = box.querySelector("[data-wh-retry]");
         if (rt) rt.addEventListener("click", function () { loadDeliveries(listBox, bp, ds, wh); });
         return;
@@ -13245,6 +13401,63 @@
     return base;
   }
 
+  // ── THE BACKUP TRISTATE, RENDERED WITHOUT COLLAPSING IT ───────────────────
+  //
+  // Pure: the one honest backup sentence for a beat payload, or "" when the
+  // payload says nothing about backups at all (so a beat without the fields
+  // renders exactly as it did before).
+  //
+  // WHY A FUNCTION AND NOT A TERNARY ON backup_ok. For the whole life of the
+  // beat, `backup_ok:false` was the Go ZERO VALUE on every box in the fleet —
+  // ReportConfig.BackupProbe was declared and wired NOWHERE — so `false` meant
+  // "no probe was ever wired", "the probe ran and the backup is missing", and
+  // "the probe itself errored" all at once, with a free-text detail as the only
+  // discriminator no consumer is allowed to parse. A console that renders that
+  // `false` as "Backup failed" invents a measurement nobody made, on every
+  // instance at once. `backup_state` (internal/agent/report.go BackupState) is
+  // the discriminator; this reads it and REFUSES to invent one when it is not
+  // there. Same ruling, same five names, as BarkparkCloud.Telemetry.backup_state/1
+  // — the cloud-side reader this console sits downstream of.
+  //
+  //   ok / failed    the ONLY MEASURED backup facts. Only these two may be
+  //                  worded as a verdict about this box's backups.
+  //   unconfigured   the probe RAN; this box has no backup location. "You never
+  //                  set backups up" and "your backups are broken" are different
+  //                  sentences with different next actions.
+  //   error          the probe itself failed. A fact about the INSTRUMENT; the
+  //                  box's backup state is unknown.
+  //   unmeasured     no probe wired — nobody looked. Carries the agent's own
+  //                  sentinel verbatim, which is what the empty state quotes
+  //                  and what __app.test.mjs pins against report.go.
+  //
+  // TWO VERSION-SKEW ARMS, because the fleet upgrades one box at a time:
+  //   * no backup_state, backup_ok:true → OK. `true` is unambiguous: only a
+  //     wired probe that measured a backup can produce it.
+  //   * no backup_state, anything else, OR a state string from a producer newer
+  //     than this reader → UNKNOWN. Never coerced into a backup fact, and
+  //     never worded as a failure: on today's fleet that would report a backup
+  //     failure on every box in it.
+  function backupStateText(payload) {
+    var p = payload && typeof payload === "object" ? payload : {};
+    var hasState = typeof p.backup_state === "string" && p.backup_state !== "";
+    var hasLegacy = typeof p.backup_ok === "boolean" ||
+      (typeof p.backup_detail === "string" && p.backup_detail !== "");
+    if (!hasState && !hasLegacy) return "";
+    var detail = typeof p.backup_detail === "string" && p.backup_detail !== ""
+      ? " — " + p.backup_detail
+      : "";
+    var state = hasState ? p.backup_state : (p.backup_ok === true ? "ok" : "");
+    if (state === "ok") return "Backup: measured present and fresh" + detail;
+    if (state === "failed") return "Backup: measured missing" + detail;
+    if (state === "unconfigured") return "Backup: no backup location configured on this box" + detail;
+    if (state === "error") return "Backup: the probe errored, so the backup state is unknown" + detail;
+    if (state === "unmeasured") {
+      return "Backup: “no backup probe wired” — nobody looked, so this is not a statement about backups" + detail;
+    }
+    // An old agent's ambiguous `false`, or a state this reader does not know.
+    return "Backup: this agent did not report a backup state, so nobody here looked" + detail;
+  }
+
   // Pure: does the entry carry anything worth an inline expansion?
   function tlvHasDetail(entry) {
     var p = entry && entry.payload;
@@ -13266,10 +13479,17 @@
           (pr.evidence ? " — " + String(pr.evidence) : ""));
       }).join("\n");
     }
+    // A health beat's backup fields get ONE plain sentence above the raw
+    // record, because the raw record is `backup_ok:false` — the value that
+    // means three different things — and an operator reading it unaided will
+    // read a backup failure that nobody measured. The raw JSON stays: this
+    // line interprets it, it does not replace it.
+    var backup = backupStateText(p);
+    var head = backup ? esc(backup) + "\n\n" : "";
     try {
-      return esc(JSON.stringify(p, null, 2));
+      return head + esc(JSON.stringify(p, null, 2));
     } catch (e) {
-      return esc(String(p));
+      return head + esc(String(p));
     }
   }
 
@@ -13311,17 +13531,31 @@
       : "";
     if (!entries.length) {
       // The enumeration names ONLY what a producer can write (charter D578):
-      // health + space beats, verify runs, team audit rows. The second sentence
-      // is ADJUDICATED WORDING — it states the absence of a MEASUREMENT, never
-      // "No backup" and never "Backup failed", because backup_ok on the wire is
-      // a plain Go bool whose `false` conflates three realities (no probe wired
-      // / probe ran and failed / probe errored) and the only discriminator is
-      // the agent's free-text detail, which today says exactly one thing.
+      // health + space beats, verify runs, team audit rows.
+      //
+      // THE BACKUP SENTENCE WAS REWRITTEN WHEN THE PROBE LANDED (wave 51 s2 →
+      // this PR). It used to state, in the console's own voice, that the on-box
+      // agent reports “no backup probe wired” and that nothing here could tell
+      // you whether this instance is backed up. That was TRUE BY CONSTRUCTION —
+      // ReportConfig.BackupProbe was a declared-but-never-wired seam, so every
+      // beat in the fleet carried the Go zero value — and it went FALSE the day
+      // cmd/barkpark-agent/main.go wired agent.NewBackupProbe. Keeping it would
+      // have been the console asserting a measurement outcome it no longer
+      // knows, on a screen whose entire point is that it has no beats yet.
+      //
+      // What replaces it is still ADJUDICATED WORDING: never "No backup" and
+      // never "Backup failed" here, because an EMPTY feed has observed nothing.
+      // It names the five states a health report can carry (see
+      // backupStateText, and internal/agent/report.go BackupState) so the three
+      // realities the old bool conflated — a real verdict, a real negative, and
+      // nobody-looked — stay three sentences rather than one.
       return quiet + '<div class="empty-state"><h2>Nothing here yet</h2>' +
         "<p>Events will appear here as this Barkpark works &mdash; health reports, disk-space reports, " +
-        "verification runs, and team actions, in order. Backups are not among them: the on-box agent " +
-        "reports “no backup probe wired”, so nothing here can tell you whether this " +
-        "instance is backed up.</p></div>";
+        "verification runs, and team actions, in order. Backups ride the health report rather than a " +
+        "line of their own: nothing has been reported yet, so nothing here has looked at this " +
+        "instance’s backups. When a health report arrives it says which of five it is — a backup " +
+        "measured present and fresh, one measured missing, no backup location configured, a probe " +
+        "that errored, or “no backup probe wired”, which means nobody looked.</p></div>";
     }
     var open = opts.expandedKeys || [];
     var openGroups = opts.openGroups || [];
@@ -17851,6 +18085,101 @@
     return billingCanManage(me.role) ? "owner" : "blocked";
   }
 
+  // cch-w49-s7 — THE CONSUMER FOR THE DECLARATION #10509 SHIPPED. D554 puts
+  // `billing_capability` on GET /v1/subscription — `{checkout, plans}`, BOTH
+  // computed by CALLING the context (checkout_capability/0, priced_plans/0) —
+  // and until this slice the console read exactly ONE field of it (`checkout`,
+  // for cch-w50-bl's test-mode disclosure) and NEVER `plans`. So on a deploy
+  // whose Stripe prices are absent, or whose webhook signing secret is missing,
+  // or whose catalog is only HALF priced, priced Subscribe buttons stood on the
+  // money screen and the person found out AFTER the click, in a toast — the
+  // fourteenth unread flag, on the one screen aimed at the one role that can act.
+  //
+  // A NEW SIBLING, NEVER A WIDENING (D439). billingIsOwner()/billingCanManage()
+  // stay two-valued booleans about the CALLER; this is a many-valued fact about
+  // the DEPLOY. Folding one into the other would make `if (billingIsOwner())`
+  // true for a capability STRING, which is the exact fail-open D439 forbids —
+  // and this key cannot over-state anything about the caller, because it is
+  // deploy config and not authority.
+  //
+  // FIVE-VALUED, NOT FOUR. The filing specified
+  // unknown|available|unconfigured|unverifiable. cch-w50-bl has since added
+  // `test_mode` to Billing.checkout_capability/0 AND to the wire, so a
+  // four-valued reader would fold a real wire value into "unknown" and quietly
+  // re-offer the very button that slice disabled. It is carried by name.
+  function billingCheckoutCapability(payload) {
+    var cap = payload && typeof payload === "object" ? payload.billing_capability : null;
+    if (!cap || typeof cap !== "object") return "unknown";
+    var checkout = cap.checkout;
+    return checkout === "available" || checkout === "unconfigured" ||
+      checkout === "unverifiable" || checkout === "test_mode"
+      ? checkout
+      : "unknown";
+  }
+
+  // May a checkout CTA be rendered for `plan` at all?
+  //
+  // UNKNOWN IS FAIL-OPEN, and it is safe ONLY because THE SERVER IS THE GATE:
+  // Billing.checkout/2 consults checkout_capability/0 BEFORE
+  // create_checkout_session/3 is ever called and refuses
+  // :unconfigured/:unverifiable with {:error, :billing_not_configured} and
+  // :test_mode with {:error, :billing_test_mode} (#10509 and cch-w50-bl, both
+  // on main — proven ancestors of this branch). A cold cache, an older payload
+  // or a failed read therefore costs a REFUSED CLICK, never a charged card,
+  // while hiding the CTA on a capability nobody told us about would refuse a
+  // real owner on a working deploy. It is renderNewPricing's committed
+  // precedent, one contract over: "a failed read leaves the CTAs standing
+  // (unknown, not refused)".
+  //
+  // test_mode KEEPS ITS EXISTING DISCLOSURE GHOST (cch-w50-bl). That card is
+  // already labelled, already UNWIRED (no data-plan, so renderTiers binds no
+  // handler) and already carries the server's own sentence. This function
+  // answers true there and tierCardHtml's test-mode arm — which runs first —
+  // renders it, so this slice neither widens nor restructures merged bytes.
+  function billingPlanOffered(plan, payload) {
+    var cap = billingCheckoutCapability(payload);
+    if (cap === "unknown" || cap === "test_mode") return true;
+    if (cap !== "available") return false;
+    var plans = payload.billing_capability.plans;
+    // PARTIAL WIRING IS THE POINT: `available` means SOME plan is priced, never
+    // that THIS one is. priced_plans/0 lists exactly the plans whose price id
+    // resolved, so a paid tier missing from it can only ever answer plan_invalid
+    // — and "That plan can't be checked out." blames the person for the deploy.
+    // A declaration with no readable list is a shape we were not told about:
+    // unknown, not a refusal.
+    if (!Array.isArray(plans)) return true;
+    return plans.indexOf(plan) !== -1;
+  }
+
+  // The one sentence `unverifiable` gets, and it is NOT `unconfigured`'s.
+  // unconfigured is HARMLESS — no plan has a price, checkout/2 can only refuse,
+  // no card is ever touched. unverifiable is the DANGEROUS one: prices resolve,
+  // a REAL hosted session would open, the card IS charged, and verify_webhook/2
+  // answers {:error, :no_secret} forever, so activation can never land.
+  // Collapsing the two into "Billing isn't set up on this deployment yet." tells
+  // a person the deploy is merely unfinished when what it actually is, is unable
+  // to honour money it can take. Past/present tense: it promises no fix and
+  // dates nothing.
+  var BILLING_UNVERIFIABLE_COPY =
+    "This deployment can't confirm a completed payment, so a card would be charged and the plan could never activate. No plan is offered here.";
+
+  // The sentence that replaces the omitted CTA. OMIT, NEVER DISABLE-AND-EXPLAIN
+  // (D428 scopes disable-and-explain to seven instance-lifecycle verbs and keeps
+  // billing in the OMIT set; Subscribe is not one of the seven). The two
+  // whole-deploy states reuse curated copy that already exists rather than
+  // minting a string; only the PARTIAL case names tiers, because only there is
+  // the fact per-tier. Returns "" when nothing was withheld.
+  function billingOmissionCopy(capability, omitted) {
+    if (capability === "unconfigured") return ERRORS.billing_not_configured;
+    if (capability === "unverifiable") return BILLING_UNVERIFIABLE_COPY;
+    if (!omitted || !omitted.length) return "";
+    var names = omitted.length === 1
+      ? omitted[0]
+      : omitted.slice(0, -1).join(", ") + " and " + omitted[omitted.length - 1];
+    return names + (omitted.length === 1 ? " isn't" : " aren't") +
+      " set up for checkout on this deployment yet.";
+  }
+
   // cch-w49-s1: the tier states its NAME, its note and its CTA — and no price.
   // There is no amount anywhere server-side for it to state (see PLAN_CATALOG);
   // the real figure arrives on Stripe's own checkout page, which is the first
@@ -17871,11 +18200,26 @@
   // GR36 plain-member law). BOTH arms state the same thing, and neither states
   // a price: the blocked arm used to quote two figures while withholding the
   // button, which is the money claim without even the affordance behind it.
-  function launchPlanGridHtml(authority) {
+  // cch-w49-s7 — AND THE CAPABILITY RIDES THE SAME OMIT FORK, not a second
+  // mechanism. `payload` is GET /v1/subscription's body (the dashboard's cached
+  // one, or /new's own conditional read); absent, billingCheckoutCapability
+  // answers "unknown" and every CTA stands exactly as it did before this slice.
+  // The omission sentence sits beside LAUNCH_OWNER_ONLY_COPY's, OUTSIDE
+  // `.new-tiers`, for the same reason that one does: the grid is a grid.
+  function launchPlanGridHtml(authority, payload) {
     var withCta = authority !== "blocked";
-    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; })
-      .map(function (t) { return launchPlanTierHtml(t, withCta); }).join("");
+    var capability = billingCheckoutCapability(payload);
+    var paid = PLAN_CATALOG.filter(function (t) { return !t.free; });
+    var offered = {};
+    paid.forEach(function (t) { offered[t.plan] = billingPlanOffered(t.plan, payload); });
+    var omitted = withCta
+      ? paid.filter(function (t) { return !offered[t.plan]; }).map(function (t) { return t.name; })
+      : [];
+    var tiers = paid
+      .map(function (t) { return launchPlanTierHtml(t, withCta && offered[t.plan]); }).join("");
+    var capNote = omitted.length ? billingOmissionCopy(capability, omitted) : "";
     return (withCta ? "" : '<p class="dim">' + esc(LAUNCH_OWNER_ONLY_COPY) + "</p>") +
+      (capNote ? '<p class="dim">' + esc(capNote) + "</p>" : "") +
       '<div class="new-tiers">' + tiers + "</div>";
   }
 
@@ -17895,7 +18239,7 @@
       : "Your free trial isn't available — pick a plan to launch " + esc(name) + ". Cancel anytime.";
     var inner = hero +
       '<p class="dim launch-plan-lead">' + lead + "</p>" +
-      launchPlanGridHtml(authority) +
+      launchPlanGridHtml(authority, { billing_capability: capCache }) +
       '<button class="btn btn-ghost btn-block launch-plan-back" type="button">Back</button>';
     container.innerHTML = launchFlowShell(inner, opts);
     container.querySelectorAll(".new-plan").forEach(function (b) {
@@ -18001,9 +18345,13 @@
   //
   // TWO BULLETS WERE DELETED HERE (cch-w50-s1), not reworded:
   //   * "Daily backups" — no backup worker exists, the crontab has zero backup
-  //     rows, no BackupProbe is wired into the agent (so production's own
-  //     health beats have carried backup_ok=false forever), and the remote
-  //     "backup" verb shells a make target that does not exist.
+  //     rows, and the remote "backup" verb shells a make target that does not
+  //     exist. THE PROBE HALF OF THIS SENTENCE IS NOW STALE AND THE RULING IS
+  //     NOT: cmd/barkpark-agent wires agent.NewBackupProbe, so the beat can
+  //     finally SAY whether a backup artifact is there (it used to carry
+  //     backup_ok=false on every box because nothing ever looked). Observing a
+  //     backup is not TAKING one; nothing in this plane still makes them, so
+  //     the bullet stays deleted.
   //   * "Priority support" / "Standard support" — no support route, address,
   //     inbox, SLA or docs page exists anywhere in the plane.
   // An unbacked bullet is a promise the plane cannot keep; the honest move is
@@ -18732,7 +19080,15 @@
   // cache, an older payload) renders exactly what it rendered before, and the
   // server still refuses the POST — this card is the disclosure, never the
   // enforcement.
-  function tierCardHtml(t, active, subscribed, capability, trialDays) {
+  //
+  // cch-w49-s7 — `offered` is the SIXTH argument and the one that kills the
+  // offer: false means this plan's capability is declared un-checkout-able (the
+  // whole deploy, or just this tier's price id) and NO button is rendered at
+  // all. OPTIONAL, exactly like `trialDays` above: an absent value is not
+  // evidence of a refusal, so a 5-arg call renders what a 5-arg call rendered
+  // before. The reason is stated ONCE above the grid by renderTiers, never as a
+  // disabled ghost per card — D428 keeps billing in the OMIT set.
+  function tierCardHtml(t, active, subscribed, capability, trialDays, offered) {
     var isCurrent = t.plan === active;
     var testMode = capability === "test_mode";
     var btn;
@@ -18774,6 +19130,13 @@
       // renderTiers binds no click handler at all, so there is no path from
       // this card to a checkout the plane would only refuse.
       btn = '<button class="btn" disabled>Subscribe unavailable</button>';
+    } else if (offered === false) {
+      // OMIT, NEVER DISABLE. Not a ghost, not a label — NOTHING. A disabled
+      // Subscribe is still an offer with its hand withdrawn, and D428 reserves
+      // disable-and-explain for the seven instance-lifecycle verbs; Subscribe is
+      // not one of them and billing is expressly in the OMIT set. The sentence
+      // renderTiers puts above the grid is where the fact is stated.
+      btn = "";
     } else {
       btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
     }
@@ -18811,7 +19174,27 @@
     var trialDays = subCache && typeof subCache.trial_days_remaining === "number"
       ? subCache.trial_days_remaining
       : null;
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability, trialDays); }).join("");
+    // cch-w49-s7 — the plane's declaration, consulted BEFORE the offer is
+    // painted. Only a tier that would actually render a Subscribe can be
+    // "omitted": a current plan, a subscribed team's portal button and the Free
+    // card were never offers, so counting them would put a sentence on a screen
+    // that withheld nothing.
+    var payload = { billing_capability: capCache };
+    var offers = {};
+    PLAN_CATALOG.forEach(function (t) { offers[t.plan] = billingPlanOffered(t.plan, payload); });
+    var omitted = PLAN_CATALOG.filter(function (t) {
+      return !t.free && !subscribed && t.plan !== active && !offers[t.plan];
+    }).map(function (t) { return t.name; });
+    var omitNote = omitted.length ? billingOmissionCopy(capability, omitted) : "";
+    // The note is a FULL-WIDTH row of the tier grid (.tier-omit-note spans every
+    // track). #billing-tiers IS the grid — an unspanned <p> here would take a
+    // 230px column beside the cards, which is the geometry the 230px floor and
+    // the tier-floor render gate measure.
+    grid.innerHTML =
+      (omitNote ? '<p class="dim tier-omit-note">' + esc(omitNote) + "</p>" : "") +
+      PLAN_CATALOG.map(function (t) {
+        return tierCardHtml(t, active, subscribed, capability, trialDays, offers[t.plan]);
+      }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -22047,10 +22430,41 @@
   // once, and re-renders if the answer is "not the owner". Until that answer
   // lands the authority is "unknown" and the CTAs stand — an unknown role must
   // never be rendered as a refusal.
+  // cch-w49-s7 — /new READS /v1/me AND NOT /v1/subscription, so the plane's
+  // pre-hoc billing declaration never reached this screen at all and its plan
+  // grid could offer a Subscribe the server can only refuse. ONE conditional
+  // GET, asked at most once per document, in the SAME shape the two reads above
+  // already commit to: absorb, then repaint ONLY while this step is still the
+  // one mounted and no checkout is in flight, so a late answer can never clobber
+  // another step or destroy an "Opening checkout…" button mid-request.
+  //
+  // A FAILED READ CHANGES NOTHING (unknown, not refused) — capCache is LEFT
+  // UNTOUCHED on a non-200, exactly as loadSubscription leaves it, because an
+  // unknown capability must never read as a known one.
+  //
+  // The repaint passes `authority` through rather than dropping it: calling
+  // renderNewPricing(tpl) again would re-enter the `if (!authority)` arm and
+  // fire a SECOND /v1/me.
+  var newPricingCapAsked = false;
+
+  function newAskCheckoutCapability(tpl, authority) {
+    if (newPricingCapAsked || capCache) return;
+    newPricingCapAsked = true;
+    api("GET", "/v1/subscription").then(function (r) {
+      if (!r.ok || !r.data || !r.data.billing_capability) return;
+      capCache = r.data.billing_capability;
+      var body = $("#new-body");
+      if (!body || typeof body.querySelector !== "function") return;
+      if (!body.querySelector(".new-pricing")) return;
+      if (body.querySelector(".new-plan[disabled]")) return;
+      renderNewPricing(tpl, authority);
+    });
+  }
+
   function renderNewPricing(tpl, authority) {
     var known = authority || "unknown";
     var blocked = known === "blocked";
-    var tiers = launchPlanGridHtml(known);
+    var tiers = launchPlanGridHtml(known, { billing_capability: capCache });
     newSetBody(newPanel(newTemplateHead(tpl) +
       '<div class="new-pricing"><h2>' +
         esc(blocked ? "A paid plan is needed to launch" : "Choose a plan to launch") + "</h2>" +
@@ -22078,6 +22492,7 @@
         renderNewPricing(tpl, resolved);
       });
     }
+    newAskCheckoutCapability(tpl, known);
     document.querySelectorAll(".new-plan").forEach(function (b) {
       var label = b.textContent; // "Choose <Tier>" — restored after an error
       b.addEventListener("click", function () {
@@ -27043,6 +27458,7 @@
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
       mergeTimeline: mergeTimeline, auditMirrorsEvent: auditMirrorsEvent,
       tlvEntryTitle: tlvEntryTitle, tlvRowHtml: tlvRowHtml, tlvDetailHtml: tlvDetailHtml,
+      backupStateText: backupStateText,
       // The LIVE title vocabulary, read by running (never by parsing the
       // literal) — __agent_event_vocabulary_census.mjs's render side.
       tlvEventTitles: Object.keys(TLV_EVENT_TITLES),
@@ -27480,6 +27896,13 @@
       tierCardHtml: tierCardHtml,
       checkoutCapability: checkoutCapability,
       testModeDisclosure: TEST_MODE_DISCLOSURE,
+      // cch-w49-s7 — the pure capability sibling and its two consequences. Kept
+      // BESIDE checkoutCapability rather than replacing it: that one is a cache
+      // read for the disclosure string, this one is a fact about the payload.
+      billingCheckoutCapability: billingCheckoutCapability,
+      billingPlanOffered: billingPlanOffered,
+      billingOmissionCopy: billingOmissionCopy,
+      billingUnverifiableCopy: BILLING_UNVERIFIABLE_COPY,
       billingChipModel: billingChipModel,
       billingPortalFlag: billingPortalFlag,
       // gr-p2 launch theater (GR18): the price-before-charge fold — pure model

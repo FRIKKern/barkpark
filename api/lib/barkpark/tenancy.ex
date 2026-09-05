@@ -19,6 +19,7 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
+  alias Barkpark.Tenancy.DefaultScopeCache
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Catalog
@@ -70,6 +71,7 @@ defmodule Barkpark.Tenancy do
       organization_id: organization_id
     })
     |> Repo.update()
+    |> bust_default_scope()
   end
 
   @doc """
@@ -270,19 +272,45 @@ defmodule Barkpark.Tenancy do
   @default_project_name "Default Project"
   @production_dataset_slug "production"
 
-  @doc "Returns the seeded Default Workspace, or nil if the backfill hasn't run."
+  @doc """
+  Returns the seeded Default Workspace, or nil if the backfill hasn't run.
+
+  Read through `DefaultScopeCache` — `Plugs.AssignDefaultScope` calls this on
+  every flat `/v1/*` request, including requests that touch no data at all. A
+  `nil` is never cached, and every write path that can change the row busts the
+  cache; see that module's moduledoc for the full list and the reasoning.
+  """
   @spec get_default_workspace() :: Workspace.t() | nil
   def get_default_workspace do
-    Repo.get_by(Workspace, slug: @default_slug)
+    DefaultScopeCache.fetch(:default_workspace, fn ->
+      Repo.get_by(Workspace, slug: @default_slug)
+    end)
   end
 
-  @doc "Returns the Default Project under the Default Workspace, or nil."
+  @doc """
+  Returns the Default Project under the Default Workspace, or nil.
+
+  ONE round-trip. This used to call `get_default_workspace/0` first and then
+  `Repo.get_by(Project, workspace_id: ws_id, ...)`, which cost two queries for
+  a single answer — and `Plugs.AssignDefaultScope` calls BOTH functions on
+  every flat `/v1/*` request, so the workspace lookup was issued twice per
+  request (three queries total for two rows). The join asks the same question
+  in one statement: the project slugged `default` whose workspace is slugged
+  `default`. Identical result for every input, including the pre-backfill DB
+  where either row is absent and the answer stays `nil`.
+  """
   @spec get_default_project() :: Project.t() | nil
   def get_default_project do
-    case get_default_workspace() do
-      nil -> nil
-      %Workspace{id: ws_id} -> Repo.get_by(Project, workspace_id: ws_id, slug: @default_slug)
-    end
+    DefaultScopeCache.fetch(:default_project, fn ->
+      Repo.one(
+        from(p in Project,
+          join: w in Workspace,
+          on: w.id == p.workspace_id,
+          where: w.slug == ^@default_slug and p.slug == ^@default_slug,
+          select: p
+        )
+      )
+    end)
   end
 
   @doc """
@@ -318,6 +346,15 @@ defmodule Barkpark.Tenancy do
       {_absent, workspace} when is_binary(workspace) -> nil
       {_absent, _unresolved} -> scope_default_project_id()
     end
+  end
+
+  # Every write that can change the Default Workspace / Default Project row —
+  # or create a row that BECOMES one — funnels through here. Unconditional on
+  # the result: busting after a failed write costs one cold read and cannot be
+  # wrong, whereas deciding not to bust can.
+  defp bust_default_scope(result) do
+    DefaultScopeCache.invalidate()
+    result
   end
 
   defp scope_default_project_id do
@@ -428,6 +465,7 @@ defmodule Barkpark.Tenancy do
       settings: settings
     })
     |> Repo.update()
+    |> bust_default_scope()
   end
 
   defp do_set_workspace_theme(id, theme) when is_binary(id) do
@@ -496,6 +534,7 @@ defmodule Barkpark.Tenancy do
       settings: settings
     })
     |> Repo.update()
+    |> bust_default_scope()
   end
 
   defp do_set_workspace_plugin_settings(id, plugins) when is_binary(id) do
@@ -566,6 +605,7 @@ defmodule Barkpark.Tenancy do
       settings: settings
     })
     |> Repo.update()
+    |> bust_default_scope()
   end
 
   defp do_set_workspace_chat_settings(id, chat) when is_binary(id) do
@@ -766,6 +806,7 @@ defmodule Barkpark.Tenancy do
       settings: settings
     })
     |> Repo.update()
+    |> bust_default_scope()
   end
 
   defp do_set_pull_provenance(id, dataset_slug, provenance) when is_binary(id) do
@@ -893,6 +934,7 @@ defmodule Barkpark.Tenancy do
     %Workspace{}
     |> Workspace.changeset(attrs)
     |> Repo.insert()
+    |> bust_default_scope()
   end
 
   @doc """
@@ -907,6 +949,7 @@ defmodule Barkpark.Tenancy do
     %Project{}
     |> Project.changeset(Map.put(attrs, :workspace_id, ws_id))
     |> Repo.insert()
+    |> bust_default_scope()
   end
 
   @doc """
@@ -1504,7 +1547,10 @@ defmodule Barkpark.Tenancy do
       _ -> Media.clear_deferred_media_effects()
     end
 
-    result
+    # AFTER the transaction, never inside it: a mid-transaction clear lets a
+    # concurrent reader repopulate from the row this delete has not committed
+    # away yet.
+    bust_default_scope(result)
   rescue
     e ->
       Media.clear_deferred_media_effects()
@@ -1699,7 +1745,9 @@ defmodule Barkpark.Tenancy do
     |> where([m], m.workspace_id == ^ws_id)
     |> Repo.all()
     |> Enum.reduce_while(:ok, fn %MediaFile{} = file, :ok ->
-      case Media.delete_file(file.id, workspace_id: ws_id) do
+      # CASCADE: the workspace that owns both the blob and every document that
+      # could reference it is being torn down. See `Media.delete_file/2`.
+      case Media.delete_file(file.id, workspace_id: ws_id, where_used: :cascade) do
         {:ok, _} -> {:cont, :ok}
         {:error, :not_found} -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}

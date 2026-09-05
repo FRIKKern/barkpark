@@ -112,7 +112,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
       # From here on the media plugin's delete callback is out of the chain.
       :ok = Barkpark.PluginEnv.with_plugins([NoPluginHooks], ctx)
 
-      assert {:ok, _deleted} = Media.delete_file(file.id)
+      assert {:ok, _deleted} = Media.delete_file(file.id, where_used: :cascade)
 
       refute Assets.find_by_media_file_id(file.id, @dataset),
              "the mediaAsset document survived the blob delete while the API answered {:ok, _} " <>
@@ -133,7 +133,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       :ok = Barkpark.PluginEnv.with_plugins([NoPluginHooks], ctx)
 
-      assert {:ok, _deleted} = Media.delete_file(file.id)
+      assert {:ok, _deleted} = Media.delete_file(file.id, where_used: :cascade)
 
       assert doc_ids(file.id) == [],
              "a mediaAsset variant survived the blob delete — the published+draft pair is " <>
@@ -144,8 +144,8 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
       file = upload!("idem.png")
       :ok = Barkpark.PluginEnv.with_plugins([NoPluginHooks], ctx)
 
-      assert {:ok, _} = Media.delete_file(file.id)
-      assert {:error, :not_found} = Media.delete_file(file.id)
+      assert {:ok, _} = Media.delete_file(file.id, where_used: :cascade)
+      assert {:error, :not_found} = Media.delete_file(file.id, where_used: :cascade)
     end
 
     test "a blob with NO companion document deletes exactly as before", ctx do
@@ -155,7 +155,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       :ok = Barkpark.PluginEnv.with_plugins([NoPluginHooks], ctx)
 
-      assert {:ok, _} = Media.delete_file(file.id)
+      assert {:ok, _} = Media.delete_file(file.id, where_used: :cascade)
     end
   end
 
@@ -166,7 +166,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       :ok = Barkpark.PluginEnv.with_plugins([HaltAssetDelete], ctx)
 
-      result = Media.delete_file(file.id)
+      result = Media.delete_file(file.id, where_used: :cascade)
 
       assert match?({:error, {:asset_doc_delete_failed, {:halted, _}}}, result),
              "delete_file/2 reported #{inspect(result)} while the mediaAsset document " <>
@@ -190,7 +190,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       :ok = Barkpark.PluginEnv.with_plugins([VanishAssetDocRows], ctx)
 
-      result = Media.delete_file(file.id)
+      result = Media.delete_file(file.id, where_used: :cascade)
 
       refute result == {:error, :rollback},
              "delete_file/2 leaked DBConnection's bare {:error, :rollback} — the exact tuple " <>
@@ -213,9 +213,10 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
       # struct it read a moment ago. Repo.delete/2 must surface that as a stale
       # changeset (→ 404), never an uncaught Ecto.StaleEntryError.
       {:ok, stale_struct} = Media.get_file(file.id)
-      {:ok, _} = Media.delete_file(file.id)
+      {:ok, _} = Media.delete_file(file.id, where_used: :cascade)
 
-      assert Barkpark.Media.delete_file(stale_struct.id) == {:error, :not_found}
+      assert Barkpark.Media.delete_file(stale_struct.id, where_used: :cascade) ==
+               {:error, :not_found}
     end
   end
 
@@ -270,7 +271,9 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
   defp delete_file_source! do
     source = File.read!(Path.join(__DIR__, "../../../../lib/barkpark/media.ex"))
 
-    [_head, tail] = String.split(source, "def delete_file(id, opts \\\\ []) do", parts: 2)
+    [_head, tail] =
+      String.split(source, "def delete_file(id, opts) when is_list(opts) do", parts: 2)
+
     [body, _rest] = String.split(tail, "# ── Deferred media-delete effects", parts: 2)
     body
   end

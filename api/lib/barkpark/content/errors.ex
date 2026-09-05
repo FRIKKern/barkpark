@@ -75,6 +75,11 @@ defmodule Barkpark.Content.Errors do
     # Per-workspace quota gate at the mutate seam (perfect-plan-build W1, D11).
     "workspace_suspended" =>
       "This workspace is suspended — no writes are accepted until an operator reinstates it. Contact your workspace admin; details.reason names why.",
+    # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a, main 2026-09-05).
+    "workspace_scope_required" =>
+      "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to.",
+    # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
+    # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
       "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
   }
@@ -381,6 +386,45 @@ defmodule Barkpark.Content.Errors do
       message: "workspace is suspended",
       status: 403,
       details: %{reason: reason}
+    }
+
+  # ── The unscoped-WRITE refusal (task-6fa023cdabdc5f6a) ──────────────────────
+  #
+  # A write arrived with NO workspace scope and its principal could have meant
+  # zero workspaces (a platform / global-admin token) or several. The ruling is
+  # infer-when-unambiguous, REFUSE-when-ambiguous: nothing is written and the
+  # caller is told which door to send it through.
+  #
+  # 422, not 400/409/403 — read off this module's own vocabulary:
+  #
+  #   * `malformed` (400) is a BODY-SHAPE failure ("send a well-formed JSON body
+  #     matching the endpoint's expected shape"). This body is perfectly well
+  #     formed; the request is unprocessable for a reason the parser cannot see.
+  #   * `conflict` (409) is a resource-STATE collision ("the document already
+  #     exists"). Nothing collided; no state is involved.
+  #   * `forbidden` (403) would be a lie: the caller is very likely ENTITLED to
+  #     write — to one of several workspaces. It must choose, not be denied.
+  #
+  # 422 is the slot this codebase already uses for "well-formed, but I cannot
+  # act on it as sent" — `slug_mismatch`, `create_wall`, `invalid_grant`,
+  # `batch_too_large`. This is that.
+  #
+  # `details.workspaces` carries the slugs the caller CAN write to (empty for a
+  # platform token), so the refusal is actionable in one hop instead of a
+  # round-trip to GET /v1/workspaces.
+  defp build({:error, :workspace_scope_required}),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422
+    }
+
+  defp build({:error, {:workspace_scope_required, workspaces}}) when is_list(workspaces),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422,
+      details: %{workspaces: workspaces}
     }
 
   defp build({:error, :quota_exceeded}),
@@ -800,6 +844,22 @@ defmodule Barkpark.Content.Errors do
   # missing `kind` surfaced as a bare 500 "unknown error" — a validation
   # failure with ZERO signal about what to fix (found by the typed-verbatim
   # cheatsheet pass, 2026-06-10).
+  # Mutate-path schema validation, ENFORCE arm (task-41a740fd6701ec28). Only
+  # reachable when the write's dataset opted in via
+  # `config :barkpark, Barkpark.Content.Validation, enforce_datasets: [...]` —
+  # the DEFAULT advises (warnings in the success envelope) and never reaches
+  # here. Same canonical `validation_failed` code and same per-field `details`
+  # map shape as the `unknown_fields` refusal already on that door, so the CLI
+  # and SDK need no new code path.
+  defp build({:error, {:schema_validation_failed, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "document content failed schema validation",
+      status: 422,
+      details: errors
+    }
+  end
+
   defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
     %{
       code: "validation_failed",

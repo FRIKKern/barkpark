@@ -35,6 +35,13 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
   @heading_styles ~w(h1 h2 h3 h4 h5 h6)
   @inline_always ~w(text)
   @inline_marks ~w(strong em strikethrough underline code)
+  # The list kinds this vocabulary can name (`bullet` → ordered:false,
+  # `number` → ordered:true) and the extra block types `of` can admit — the
+  # two halves of the moduledoc mapping that have no table of their own.
+  @list_kinds ~w(bullet number)
+  @of_types ~w(image divider code diagram)
+  # `link` is the only annotation portable-doc carries (moduledoc).
+  @annotation_types ~w(link)
 
   @type vocabulary :: map()
 
@@ -44,10 +51,43 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
   def blocks_field?(_), do: false
 
   @doc """
-  The declared vocabulary, normalised. Absent keys mean "nothing of that kind".
+  The DEFAULT declaration — what a field opting into the block editor gets
+  when it does NOT narrow the vocabulary itself.
+
+  There is no second, hand-typed list here: every entry is derived from THIS
+  module's own mapping tables (`@style_types`, `@heading_styles`,
+  `@inline_marks`, `@list_kinds`, `@of_types`, `@annotation_types`), so the
+  default is exactly "every block and mark this vocabulary language can
+  express" — the papers surface's own block set, which the paper editor's
+  `<bp-paper-canvas>` run carries UNRESTRICTED (it stamps no
+  `data-canvas-vocabulary` at all). A field that DOES declare `"blocks"`
+  narrows this; it never widens it, because a declaration is read verbatim.
+
+  Returned in the DECLARATION shape (the Sanity-shaped registry a schema
+  author writes), not the normalised one, so the same value can ride to the
+  client as `data-canvas-vocabulary` and back through `from_field/1`.
+  """
+  @spec default_declaration() :: map()
+  def default_declaration do
+    %{
+      "styles" => Enum.sort(Map.keys(@style_types)) ++ @heading_styles,
+      "lists" => @list_kinds,
+      "marks" => @inline_marks,
+      "annotations" => @annotation_types,
+      "of" => @of_types
+    }
+  end
+
+  @doc """
+  The declared vocabulary, normalised. Absent keys mean "nothing of that kind"
+  — EXCEPT for a field that opted into the block editor and declared no
+  `"blocks"` registry at all: that field gets `default_declaration/0`, so
+  `"editor": "blocks"` alone is a complete opt-in rather than an editor with
+  an empty slash menu that refuses every op.
   """
   @spec from_field(map()) :: vocabulary()
   def from_field(%{"blocks" => v}) when is_map(v), do: normalise(v)
+  def from_field(%{"editor" => "blocks"}), do: normalise(default_declaration())
   def from_field(_), do: normalise(%{})
 
   defp normalise(v) do

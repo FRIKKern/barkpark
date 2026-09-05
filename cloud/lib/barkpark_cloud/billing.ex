@@ -890,19 +890,31 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Mark `sub` past-due (a payment failed). Sets `status: "past_due"` +
-  `past_due: true`, and anchors the grace window: `attrs` MAY carry an explicit
-  `current_period_end`, but when it doesn't (the real `invoice.payment_failed`
-  Invoice object has no period end — only the Subscription object does) we anchor
-  grace at `now + #{@grace_days}d` so a past_due team is NOT entitled forever. A
-  past_due sub is STILL entitled within grace (Coolify keeps a past_due team
-  running and emails admins).
+  `past_due: true`, and anchors the grace window on `grace_ends_at`: `attrs` MAY
+  carry an explicit `grace_ends_at`, but when it doesn't (the real
+  `invoice.payment_failed` Invoice object has no period end — only the
+  Subscription object does) we anchor grace at `now + #{@grace_days}d` so a
+  past_due team is NOT entitled forever. A past_due sub is STILL entitled within
+  grace (Coolify keeps a past_due team running and emails admins).
+
+  ## The anchor is `grace_ends_at`, NOT `current_period_end` (cch-w57-bl)
+
+  This used to write `current_period_end`, the same column that carries the trial
+  expiry and — the moment anything syncs it — Stripe's renewal date. That single
+  column decided entitlement for BOTH the trial arm and the dunning arm of
+  `entitled?/1`, so a payload-sourced write could extend a 3-day grace to Stripe's
+  next renewal (~27 days of free running boxes), suspend a paying team's boxes
+  in-band with a past renewal date, or — on an ABSENT field, which is exactly what
+  an unpinned API version can hand you — write nil and leave an unpaid team
+  entitled forever. `grace_ends_at` is written HERE and nowhere else, and is
+  lifted off no payload, so none of those three is reachable through it.
 
   Grace elapse does NOT suspend anything on the webhook path. Because this
-  function re-anchors `current_period_end` `#{@grace_days}` days FORWARD on every
+  function re-anchors `grace_ends_at` `#{@grace_days}` days FORWARD on every
   call that carries no explicit one (`Map.put_new_lazy/3`, below), `maybe_enforce/1`'s
-  `:gt -> :ok` arm always fires and its `Registry.suspend_team_barkparks/2` call is
+  in-window arm always fires and its `Registry.suspend_team_barkparks/2` call is
   unreachable in production — only a caller passing an explicit PAST
-  `current_period_end` (the tests do) reaches it. What elapsed grace actually costs
+  `grace_ends_at` (the tests do) reaches it. What elapsed grace actually costs
   the team is ISOLATION: `entitled?/1` goes false and the go-live gate refuses to
   launch a NEW instance. Nothing stops, nothing is deleted.
   """
@@ -921,7 +933,7 @@ defmodule BarkparkCloud.Billing do
           {:ok, Subscription.t() | :already_past_due} | {:error, term}
   def mark_past_due(%Subscription{} = sub, attrs \\ %{}) do
     already_past_due? = sub.status == "past_due"
-    attrs = Map.put_new_lazy(attrs, :current_period_end, &default_grace_anchor/0)
+    attrs = Map.put_new_lazy(attrs, :grace_ends_at, &default_grace_anchor/0)
 
     with {:ok, sub} <- update_status(sub, Map.merge(%{status: "past_due", past_due: true}, attrs)) do
       _ = maybe_enforce(sub)
@@ -975,13 +987,21 @@ defmodule BarkparkCloud.Billing do
   # past_due is entitled while inside the grace window; past it, the team's managed
   # boxes are suspended with the softer "billing_past_due" reason. In PRODUCTION
   # that suspend is unreachable: the only caller is `mark_past_due/2`, which
-  # re-anchors the period end `@grace_days` FORWARD whenever the caller supplies
-  # none, so the `:gt -> :ok` arm always wins. Only an explicit PAST
-  # `current_period_end` gets here. Nothing sweeps in behind it either — charter
-  # D657 decided against a nightly reconciler: a grace that elapses with no further
-  # webhook is enforced synchronously at request time by `entitled?/1`.
-  defp maybe_enforce(%Subscription{status: "past_due", current_period_end: pe, team_id: tid}) do
-    if is_nil(pe) or DateTime.compare(pe, DateTime.utc_now()) == :gt do
+  # re-anchors `grace_ends_at` `@grace_days` FORWARD whenever the caller supplies
+  # none, so the in-window arm always wins. Only an explicit PAST `grace_ends_at`
+  # gets here. Nothing sweeps in behind it either — charter D657 decided against a
+  # nightly reconciler: a grace that elapses with no further webhook is enforced
+  # synchronously at request time by `entitled?/1`.
+  #
+  # cch-w57-bl: a NIL `grace_ends_at` ENFORCES rather than no-ops. The old
+  # `is_nil(pe) or ...` arm read a missing anchor as "no enforcement", so a
+  # past_due row that ever acquired a nil in that column was an unpaid box that
+  # never suspended and never expired. An unanchored dunning row is now CLOSED —
+  # the only writer of this column always fills it, so nil here means the row
+  # reached past_due by a path that never anchored, which is not a licence to run.
+  # This is the same rule `entitled?/1`'s past_due arm applies, deliberately.
+  defp maybe_enforce(%Subscription{status: "past_due", grace_ends_at: grace, team_id: tid}) do
+    if within_grace?(grace) do
       :ok
     else
       {:ok, _count} = Registry.suspend_team_barkparks(tid, "billing_past_due")
@@ -990,6 +1010,12 @@ defmodule BarkparkCloud.Billing do
   end
 
   defp maybe_enforce(_sub), do: :ok
+
+  # The ONE grace predicate, shared by `maybe_enforce/1` and `entitled?/1` so the
+  # two can never disagree about what an unanchored past_due row means (nil =>
+  # OUT of grace, in both).
+  defp within_grace?(%DateTime{} = grace), do: DateTime.compare(grace, DateTime.utc_now()) == :gt
+  defp within_grace?(_), do: false
 
   defp update_status(%Subscription{} = sub, attrs) do
     sub |> Subscription.changeset(attrs) |> Repo.update()
@@ -1458,8 +1484,14 @@ defmodule BarkparkCloud.Billing do
   Is `team` entitled to managed resources right now? True for an `active`
   subscription, for a `forever` comp, for a non-expired `trial`
   (`current_period_end` in the future), and for a `past_due` one still inside its
-  grace window (`current_period_end` in the future, or unset). False otherwise —
-  no live sub, an EXPIRED trial, or past_due past grace. The launch gate reads
+  grace window (`grace_ends_at` in the future). False otherwise — no live sub, an
+  EXPIRED trial, or past_due past grace.
+
+  cch-w57-bl: the past_due arm reads `grace_ends_at`, a column written ONLY by
+  `mark_past_due/2` — never the trial expiry, never a Stripe payload — and an
+  UNSET anchor is now false, not true. It used to be `is_nil(pe) or ...` on the
+  shared `current_period_end`, so a past_due row with a nil there was entitled
+  FOREVER while `maybe_enforce/1` no-opped on the same nil. The launch gate reads
   this instead of the old binary
   active-subscription check, so a paying customer in a transient dunning window
   is not locked out (Coolify-anchor: isSubscriptionActive() stays true through
@@ -1482,8 +1514,8 @@ defmodule BarkparkCloud.Billing do
       %Subscription{status: "active"} ->
         true
 
-      %Subscription{status: "past_due", current_period_end: pe} ->
-        is_nil(pe) or DateTime.compare(pe, DateTime.utc_now()) == :gt
+      %Subscription{status: "past_due", grace_ends_at: grace} ->
+        within_grace?(grace)
 
       _ ->
         false

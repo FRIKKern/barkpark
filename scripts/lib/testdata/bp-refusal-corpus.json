@@ -1,0 +1,27 @@
+{
+  "note": "CAPTURED LIVE, never hand-written. Each entry is the exact stdout bytes bp printed plus the exit status it returned, recorded beside them. The whole point of this row is that these envelopes carry NO `docs`/`tasks`/`children` key at all, so `d.get(\"docs\") or []` yields [] and a refusal becomes a count of zero.",
+  "recapture": "env -u BARKPARK_TOKEN bp task ls --parent task-3f1fe755ed53738e --limit 5 -o json; echo exit=$?",
+  "refusals": [
+    {
+      "name": "usage",
+      "command": "bp task ls --parent task-3f1fe755ed53738e --limit 5 -o json",
+      "captured_at": "2026-09-04T21:55Z",
+      "captured_against": "guerrilla.barkpark.cloud (live, env -u BARKPARK_TOKEN)",
+      "stdout": "{\"error\":{\"code\":\"usage\",\"message\":\"unknown flag --parent for task ls\"},\"ok\":false}\n",
+      "exit_code": 2
+    },
+    {
+      "name": "not_found",
+      "command": "bp doc get task task-3f1fe755ed5373 -o json",
+      "captured_at": "2026-09-04T21:55Z",
+      "captured_against": "guerrilla.barkpark.cloud (live, env -u BARKPARK_TOKEN)",
+      "stdout": "{\"error\":{\"code\":\"not_found\",\"hint\":\"Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.\",\"message\":\"not found: document not found\",\"request_id\":\"GNI8g2oVyPXB-j0AAbHh\"},\"ok\":false}\n",
+      "exit_code": 4
+    }
+  ],
+  "genuinely_empty": {
+    "note": "The negative arm. A real, successful read of a parent with no children. Hand-built ON PURPOSE: the point is the SHAPE (ok:true + a present-but-empty docs key), and it must keep reading as a true zero.",
+    "stdout": "{\"ok\":true,\"docs\":[]}\n",
+    "exit_code": 0
+  }
+}

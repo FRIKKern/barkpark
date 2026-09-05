@@ -118,7 +118,7 @@ defmodule Barkpark.Sharing.Links do
 
     * `BarkparkWeb.Plugs.RequireShareScope.maybe_grant_item_token/4` — the
       conn-side gate, passing `conn.path_params`;
-    * `BarkparkWeb.PluginScopeSession.on_mount(:scope, …)` — the socket-side
+    * `BarkparkWeb.PluginScopeSession.on_mount/4`, at `:scope` — the socket-side
       gate, passing the mount params, re-derived on EVERY mount because a
       `live_redirect` / reconnect replays no router pipeline
       (task-9e74fdbdf0242c22).

@@ -208,6 +208,15 @@ defmodule Barkpark.Structure do
 
     curated_types = collect_claimed_types(List.flatten(curated), [])
 
+    # Gyldendal parity E3.3 — `desk.hidden: true` on a schema takes the type OUT
+    # of the desk entirely: no generic/settings node, and it is CLAIMED so the
+    # …Rest census does not resurrect it. This is the explicit opt-out the
+    # never-hide invariant demands — a precompute type (the twin's
+    # catalogueRow / frontpageResolved) is written by a worker, never edited,
+    # and only confuses an editor. The documents stay readable everywhere else.
+    hidden_types = hidden_type_set(schemas)
+    curated_types = MapSet.union(curated_types, hidden_types)
+
     # `build_generic_types_group/3` sits right before Settings: it and
     # `build_settings_group/3` read the SAME unowned, uncurated schema set and
     # partition it by the `singleton` flag ALONE, so they are kept adjacent
@@ -268,7 +277,12 @@ defmodule Barkpark.Structure do
 
     # ── …Rest tier: honest census of every DB type with no home, LAST ──
     placed_nodes = List.flatten(non_rest_groups)
-    claimed = collect_claimed_types(placed_nodes, top_menu_claimed_types(enablement, owned_map))
+
+    claimed =
+      placed_nodes
+      |> collect_claimed_types(top_menu_claimed_types(enablement, owned_map))
+      |> MapSet.union(hidden_types)
+
     rest_children = build_rest_children(claimed, schemas, dataset, opts)
 
     rest_tier =
@@ -1026,6 +1040,16 @@ defmodule Barkpark.Structure do
   # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
   # caller's workspace. Absent → :none (the hardcoded tree). A malformed
   # document degrades to :none with a logged reason — never a blank desk.
+  defp hidden_type_set(schemas) do
+    schemas
+    |> Map.values()
+    |> Enum.filter(&desk_hidden?/1)
+    |> MapSet.new(& &1.name)
+  end
+
+  defp desk_hidden?(%{desk: %{"hidden" => true}}), do: true
+  defp desk_hidden?(_), do: false
+
   @desk_structure_type "deskStructure"
 
   defp declared_desk(_schemas, dataset, opts) do
@@ -1033,10 +1057,12 @@ defmodule Barkpark.Structure do
 
     case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
       {:ok, %{content: %{"items" => items}}} when is_list(items) and items != [] ->
+        ctx = %{dataset: dataset, scope: scope}
+
         nodes =
           items
           |> Enum.with_index()
-          |> Enum.map(fn {item, i} -> declared_item_to_node(item, "desk-#{i}") end)
+          |> Enum.map(fn {item, i} -> declared_item_to_node(item, "desk-#{i}", ctx) end)
           |> Enum.reject(&is_nil/1)
 
         if nodes == [] do
@@ -1065,7 +1091,7 @@ defmodule Barkpark.Structure do
       :none
   end
 
-  defp declared_item_to_node(%{"kind" => "singleton"} = item, idx) do
+  defp declared_item_to_node(%{"kind" => "singleton"} = item, idx, _ctx) do
     type = item["type"]
 
     if is_binary(type) and type != "" do
@@ -1081,15 +1107,15 @@ defmodule Barkpark.Structure do
     end
   end
 
-  defp declared_item_to_node(%{"kind" => "divider"} = item, idx),
+  defp declared_item_to_node(%{"kind" => "divider"} = item, idx, _ctx),
     do: %Node{type: :divider, id: item["id"] || idx, title: item["title"]}
 
-  defp declared_item_to_node(%{"kind" => "list"} = item, idx) do
+  defp declared_item_to_node(%{"kind" => "list"} = item, idx, ctx) do
     children =
       (item["items"] || [])
       |> List.wrap()
       |> Enum.with_index()
-      |> Enum.map(fn {child, j} -> declared_item_to_node(child, "#{idx}-#{j}") end)
+      |> Enum.map(fn {child, j} -> declared_item_to_node(child, "#{idx}-#{j}", ctx) end)
       |> Enum.reject(&is_nil/1)
 
     %Node{
@@ -1101,7 +1127,7 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx) do
+  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx, _ctx) do
     type = item["type"]
 
     if is_binary(type) and type != "" do
@@ -1118,7 +1144,53 @@ defmodule Barkpark.Structure do
     end
   end
 
-  defp declared_item_to_node(_item, _idx), do: nil
+  # Gyldendal parity E3.3 — `groupBy`: Sanity's "Etter kategori" — one child
+  # list per document of the `over` type, each filtered to the rows whose `by`
+  # path equals that document's id. Built at desk time from the PUBLISHED
+  # `over` rows (bounded); an `over` type with no rows yields an empty group.
+  #
+  #   {"kind":"groupBy","title":"Etter kategori","type":"publication",
+  #    "by":"content.category","over":"category","orderings":[…]}
+  @group_by_fanout 200
+
+  defp declared_item_to_node(%{"kind" => "groupBy"} = item, idx, ctx) do
+    type = item["type"]
+    over = item["over"]
+    by = item["by"]
+
+    if is_binary(type) and is_binary(over) and is_binary(by) do
+      children =
+        over
+        |> Content.list_documents(
+          ctx.dataset,
+          [perspective: :published, limit: @group_by_fanout] ++ ctx.scope
+        )
+        |> Enum.map(fn doc ->
+          key = Barkpark.Content.DraftId.published_id(doc.doc_id)
+
+          %Node{
+            id: "#{idx}-#{key}",
+            title: doc.title || key,
+            icon: item["icon"],
+            type: :document_type_list,
+            type_name: type,
+            visibility: :public,
+            filter: %{by => %{"eq" => key}},
+            orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+          }
+        end)
+
+      %Node{
+        id: item["id"] || idx,
+        title: item["title"] || "By #{over}",
+        icon: item["icon"],
+        type: :list,
+        items: children
+      }
+    end
+  end
+
+  defp declared_item_to_node(_item, _idx, _ctx), do: nil
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)

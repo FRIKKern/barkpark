@@ -19,6 +19,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Sites, StudioLinkFakeHttpClient}
+  alias BarkparkCloud.Cloudflare.Fake, as: CfFake
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Sites.FakeBoxRelay
   alias BarkparkCloud.Web.Router
@@ -2939,6 +2940,154 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert FakeBoxRelay.calls() == []
       # Box-first: a refused teardown never deregisters a still-serving box.
       refute Registry.get_site(site.id) == nil
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## DELETE /v1/sites/:id — THE DNS HALF (task-b2c41cd0b0be41b4)
+  ##
+  ## The second instance of the support-remove shape (task-688ebffc4b0aa50a):
+  ## creation is wired, destruction is not. `do_bind_cloudflare/5` writes an A
+  ## record and persists `cf_zone_id` + `cf_record_id` on the site row; the
+  ## teardown above deleted that row and never read either field, so the record
+  ## outlived the only artefact that named it — dangling DNS pointing at a
+  ## released address.
+  ##
+  ## Why the SIXTEEN delete tests above never caught it, stated so the next reader
+  ## does not trust them either: every one of them builds its fixture with
+  ## `static_site/1`, which sets no `cf_record_id`. They take the `:noop` arm under
+  ## ANY fix and stay green against the bug forever — exactly the vacuity the
+  ## sibling row warned about on the supports side. The three tests below are the
+  ## ones that are NOT vacuous, and the third of them is the one that pins the
+  ## `:noop` arm on purpose so the common path stays measured rather than assumed.
+  ## ---------------------------------------------------------------------------
+
+  # The state `POST /v1/sites/:id/deploy via=cloudflare` leaves behind: a real
+  # record in the fake's zone, and the row that names it.
+  defp cf_bound_site(team, bp, domain) do
+    site = static_site(bp)
+
+    {:ok, _} =
+      Registry.connect_provider(
+        team,
+        "cloudflare",
+        Jason.encode!(%{"api_token" => "cf_live_token", "zone_id" => "zone_acme"})
+      )
+
+    {:ok, %{record_id: record_id}} =
+      BarkparkCloud.Cloudflare.upsert_dns_record("cf_live_token", "zone_acme", %{
+        type: "A",
+        name: domain,
+        content: "203.0.113.10",
+        proxied: true
+      })
+
+    {:ok, bound} =
+      Registry.set_cf_binding(site, %{
+        serving_mode: "cf_proxied",
+        tls_mode: "cf_internal",
+        cf_domain: domain,
+        cf_zone_id: "zone_acme",
+        cf_record_id: record_id
+      })
+
+    {bound, record_id}
+  end
+
+  describe "DELETE /v1/sites/:id — the Cloudflare A record dies with the site" do
+    test "a cf-bound site's record is deleted with the STORED record id, BEFORE the row goes" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {site, record_id} = cf_bound_site(team, bp, "blog.acme.example")
+      token = login_token(user)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      # The record really is in the zone before the request — otherwise a fake
+      # that never held it would let a no-op delete look like a success.
+      assert Enum.any?(CfFake.records(), &(&1.record_id == record_id))
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      body = json_body(conn)
+      assert body["ok"] == true
+      assert body["cf_record"] == "deleted"
+      refute Map.has_key?(body, "cf_warning")
+
+      # THE ASSERTION THIS ROW EXISTS FOR: the delete went out, addressed by the
+      # zone + record id the ROW carried — not by a name re-derived from the
+      # domain, which is the derivation that goes wrong once the row is gone.
+      assert Enum.any?(CfFake.deletes(), fn d ->
+               d.zone_id == "zone_acme" and d.record_id == record_id
+             end)
+
+      # The fake models a ZONE, not a call log: the record is really gone.
+      refute Enum.any?(CfFake.records(), &(&1.record_id == record_id))
+
+      # And the row — the only pointer to that record — is gone too, AFTER it.
+      assert Registry.get_site(site.id) == nil
+    end
+
+    test "a Cloudflare delete that FAILS still deletes the row, and the 200 NAMES the record nothing else can find" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {site, record_id} = cf_bound_site(team, bp, "ghost.acme.example")
+      token = login_token(user)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      # The honesty-edge seam: every delete in THIS process fails, regardless of
+      # token/zone validity.
+      CfFake.fail_deletes(true)
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      # THE DEFINED TERMINAL STATE, named: the box is already torn down, so
+      # refusing here would leave a dead site still registered. The row goes, and
+      # the response carries the pointer out — the same contract the unconfirmed
+      # read-token revoke one field over already has.
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["ok"] == true
+      assert body["status"] == "deleted"
+      assert body["cf_record"] == "not_deleted"
+
+      assert body["cf_warning"] =~ record_id
+      assert body["cf_warning"] =~ "zone_acme"
+      assert body["cf_warning"] =~ "ghost.acme.example"
+      assert body["cf_warning"] =~ "may still be LIVE"
+
+      # The read-token warning key is UNTOUCHED by the DNS one — a delete can
+      # strand both leftovers and neither may clobber the other.
+      refute body["cf_warning"] == body["warning"]
+
+      assert Registry.get_site(site.id) == nil
+    end
+
+    test "a site that was never cf-bound (cf_record_id nil) deletes cleanly with ZERO Cloudflare calls" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      assert site.cf_record_id == nil
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      body = json_body(conn)
+      assert body["cf_record"] == "none"
+      refute Map.has_key?(body, "cf_warning")
+
+      # The standalone path is byte-identical to before this arm existed: no
+      # credential read, no DNS call, no zone touched.
+      assert CfFake.deletes() == []
+      assert CfFake.records() == []
+
+      assert Registry.get_site(site.id) == nil
     end
   end
 

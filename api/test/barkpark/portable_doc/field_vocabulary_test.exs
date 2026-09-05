@@ -41,10 +41,32 @@ defmodule Barkpark.PortableDoc.FieldVocabularyTest do
     assert V.allowed_inline_types(vocab) == MapSet.new(["text", "strong", "em", "link"])
   end
 
-  test "an empty declaration admits nothing but text-less nothing" do
-    vocab = V.from_field(%{"editor" => "blocks"})
+  # An EXPLICITLY empty declaration still admits nothing — a schema author who
+  # writes `"blocks": {}` said "nothing", and is taken at their word.
+  test "an explicitly empty declaration admits nothing but text-less nothing" do
+    vocab = V.from_field(%{"editor" => "blocks", "blocks" => %{}})
     assert V.allowed_block_types(vocab) == MapSet.new([])
     assert {:error, {:out_of_vocabulary, _}} = V.validate(vocab, [p("hi")])
+  end
+
+  # OPTION A (S9 criterion 3, rich-text half): opting in with `"editor":
+  # "blocks"` and NOTHING ELSE is a complete opt-in — the field gets the papers
+  # block vocabulary, on the WRITE path as well as in the rendered editor, so a
+  # canvas that offers a block cannot then have its op refused.
+  test "editor: blocks with NO declaration gets the papers default vocabulary" do
+    vocab = V.from_field(%{"type" => "richText", "name" => "body", "editor" => "blocks"})
+
+    refute Enum.empty?(V.allowed_block_types(vocab)),
+           "the default vocabulary admits no block types — the write path would " <>
+             "refuse every op an undeclared blocks field produced"
+
+    assert V.allowed_block_types(vocab) ==
+             V.allowed_block_types(
+               V.from_field(%{"editor" => "blocks", "blocks" => V.default_declaration()})
+             )
+
+    assert "paragraph" in V.allowed_block_types(vocab)
+    assert :ok == V.validate(vocab, [p("hi")])
   end
 
   test "an in-vocabulary agency body validates" do

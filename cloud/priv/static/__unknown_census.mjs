@@ -171,10 +171,10 @@ const EXPECT = [
     proof: [/!r\.ok/],
     why: "cch-w34-s1: hoisted arm — 'No sites yet' may only describe a 200" },
   { f: "loadWebhooks", p: 'whPath(bp, "", ds)', v: "guarded",
-    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\)\)/],
+    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\), r\.status\)/],
     why: "failure paints webhookErrorHtml + Retry" },
   { f: "loadDeliveries", p: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries", ds)', v: "guarded",
-    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\)\)/],
+    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\), r\.status\)/],
     why: "failure paints webhookErrorHtml + Retry" },
   { f: "loadTimeline", p: '"/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=100"', v: "guarded",
     proof: [/Couldn\\'t load the timeline/],
@@ -277,6 +277,18 @@ const EXPECT = [
   { f: "newAskLaunchAuthority", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
     why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed)" },
+  // cch-w49-s7 — /new's ONLY read of the plane's billing declaration. SANCTIONED,
+  // not guarded: the absence of an answer is the ANSWER this screen already
+  // commits to. capCache is LEFT UNTOUCHED on a non-200, billingCheckoutCapability
+  // then reads "unknown", and unknown is FAIL-OPEN — the CTAs stand, exactly as
+  // they stood before the read existed. That is safe only because the SERVER is
+  // the gate (Billing.checkout/2 refuses :unconfigured/:unverifiable pre-flight,
+  // #10509), so a failed read costs a refused click and never a charged card.
+  // The proof pins the fail-open MECHANISM: strip the early return and the
+  // absence starts writing the cache.
+  { f: "newAskCheckoutCapability", p: '"/v1/subscription"', v: "sanctioned",
+    proof: [/if \(!r\.ok \|\| !r\.data \|\| !r\.data\.billing_capability\) return;/],
+    why: "an unread capability stays unknown, and unknown leaves every CTA standing — the server refuses the POST" },
   { f: "renderNewPricing", p: '"/v1/me"', v: "sanctioned",
     proof: [/if \(resolved !== "blocked"\) return;/],
     why: "a failed read leaves the CTAs standing — unknown is not refused (comment at site); the checkout POST is the enforcer" },

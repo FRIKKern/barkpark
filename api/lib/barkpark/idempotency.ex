@@ -33,29 +33,40 @@ defmodule Barkpark.Idempotency do
   import Ecto.Query
   require Logger
   alias Barkpark.Repo
+  alias Barkpark.Repo.IdempotencyStore
+  alias Barkpark.Repo.IdempotencyStore.Key
 
   @default_ttl_seconds 86_400
   @default_pending_ttl_seconds 60
-
-  defmodule Key do
-    use Ecto.Schema
-
-    @primary_key {:key_hash, :string, autogenerate: false}
-
-    schema "idempotency_keys" do
-      field :scope, :string
-      # "pending" = reservation held, handler executing; "completed" = response cached.
-      field :state, :string, default: "pending"
-      field :status_code, :integer
-      field :response_body, :string
-      field :response_headers, :map, default: %{}
-      field :inserted_at, :utc_datetime_usec
-    end
-  end
+  # Upper bound on rows one `sweep_batch/1` statement removes.
+  @default_sweep_batch_limit 5_000
 
   def hash_key(raw_key, token_id, method, path) do
     material = "#{raw_key}|#{token_id}|#{method}|#{path}"
     :crypto.hash(:sha256, material) |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  Claim an idempotency row whose payload identity is carried by `scope`.
+
+  Unlike `claim/2`, this transaction-bound variant never reclaims a pending
+  row: its caller inserts the claim, performs the mutation, and completes the
+  row in one database transaction. A rollback removes all three together.
+  Reusing the same key with a different scope fails closed.
+  """
+  def claim_exact(hash, scope) when is_binary(hash) and is_binary(scope) do
+    IdempotencyStore.claim_exact(hash, scope)
+  end
+
+  @doc """
+  Complete one exact pending claim with a JSON receipt.
+
+  The scope and pending-state predicates are load-bearing: completing a row
+  claimed for another payload, or overwriting an existing replay, is refused.
+  """
+  def complete_exact(hash, scope, receipt)
+      when is_binary(hash) and is_binary(scope) and is_map(receipt) do
+    IdempotencyStore.complete_exact(hash, scope, receipt)
   end
 
   @doc """
@@ -218,6 +229,37 @@ defmodule Barkpark.Idempotency do
     n
   end
 
+  @doc """
+  ONE BOUNDED PASS of `sweep/1` — deletes at most `sweep_batch_limit` expired
+  rows, OLDEST first, and returns how many it removed.
+
+  `sweep/1` is a single unbounded DELETE. That is fine for a table that is
+  swept regularly; it is not fine for the first pass over a table that has
+  never been swept at all, which is exactly the state this store was in
+  (`Barkpark.Idempotency.Sweeper` explains why). The subquery picks the oldest
+  `limit` expired keys by primary key and the outer DELETE removes just those,
+  so one statement is bounded no matter how deep the backlog is. Returning 0
+  means "nothing left past the TTL" and is the loop's terminator.
+  """
+  @spec sweep_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_batch(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -ttl_seconds(), :second)
+
+    victims =
+      from(k in Key,
+        where: k.inserted_at < ^cutoff,
+        order_by: [asc: k.inserted_at],
+        limit: ^sweep_batch_limit(),
+        select: k.key_hash
+      )
+
+    {n, _} =
+      from(k in Key, where: k.key_hash in subquery(victims))
+      |> Repo.delete_all()
+
+    n
+  end
+
   defp stale?(nil, _now), do: true
 
   defp stale?(%DateTime{} = ts, now) do
@@ -232,6 +274,11 @@ defmodule Barkpark.Idempotency do
   defp pending_ttl_seconds do
     Application.get_env(:barkpark, :idempotency, [])
     |> Keyword.get(:pending_ttl_seconds, @default_pending_ttl_seconds)
+  end
+
+  defp sweep_batch_limit do
+    Application.get_env(:barkpark, :idempotency, [])
+    |> Keyword.get(:sweep_batch_limit, @default_sweep_batch_limit)
   end
 
   defp headers_to_map(list) when is_list(list), do: Map.new(list)

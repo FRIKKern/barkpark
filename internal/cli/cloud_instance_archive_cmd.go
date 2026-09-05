@@ -180,7 +180,7 @@ func parseEnvSecrets(raw []byte) map[string]string {
 // lifecycleDispatch VerbArchive entries exist only to register the capability —
 // Decision 21). --fast is the hetzner-only snapshot escape.
 func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
-	const usageTail = "<fqdn|name> --provider hetzner|azure|fake [--fast] [--zone <z>] [--fqdn <f>] [--team <t>]"
+	const usageTail = "<fqdn|name> --provider hetzner|azure|fake [--fast [--stop]] [--zone <z>] [--fqdn <f>] [--team <t>]"
 	usage := "bp cloud instance archive " + usageTail
 	valueFlags := append([]string{"zone", "fqdn", "team", "dns-token", "control-url", "worker-token"}, azureCredFlags...)
 	a, err := parseHzArgs(rest, valueFlags, []string{"fast", "stop"}, usage)
@@ -189,6 +189,25 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 	}
 	if len(a.pos) != 1 {
 		return useError(out, "usage", "want exactly one <fqdn|name> (usage: "+usage+")", exitUsage)
+	}
+
+	// --stop is a --fast-only flag and REFUSING it is the fix, not deleting it.
+	// It stays registered because line 201 forwards `stripFlag(rest, "--fast")`
+	// — only --fast is removed — to runInstanceArchive, which DOES honour
+	// --stop (hetzner_instance_cmd.go passes a.bools["stop"] into instArchive,
+	// running instStopCommand over SSH). Dropping the registration would make
+	// parseHzArgs' default arm reject `--fast --stop`, breaking a working
+	// combination. But the bare registration is exactly what created the silent
+	// accept: on the portable path a.bools["stop"] is read nowhere, so the flag
+	// exited 0 having quiesced nothing while the operator believed writers were
+	// stopped. The portable path does not NEED a quiesce — bundleArchiveScript
+	// runs `pg_dump --format=custom`, MVCC-consistent by construction — so the
+	// honest behaviour is a usage error, never a no-op.
+	if a.bools["stop"] && !a.bools["fast"] {
+		return useError(out, "usage",
+			"--stop needs --fast: it quiesces the DB writers over SSH on the hetzner snapshot path only. "+
+				"The portable bundle takes an MVCC-consistent pg_dump and needs no quiesce, so --stop would do "+
+				"nothing here (usage: "+usage+")", exitUsage)
 	}
 
 	// --fast: the Hetzner snapshot optimisation. Forward to the existing free

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDocument } from "@/lib/get-document";
+import { readerHref } from "@/lib/find";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { metadataFromPreview } from "@/lib/preview-metadata";
 import { DocumentDetail } from "@/components/document-detail";
@@ -52,7 +53,7 @@ export async function generateMetadata({
   return metadataFromPreview({
     preview: (doc as { preview?: unknown }).preview,
     apiOrigin: PUBLIC_API_URL,
-    pageUrl: `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`,
+    pageUrl: readerHref(type, slug),
     fallbackTitle: doc.title ?? slug,
   });
 }

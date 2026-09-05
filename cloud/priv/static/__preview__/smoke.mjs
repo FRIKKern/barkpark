@@ -2781,7 +2781,9 @@ const EXPECTATIONS = {
       // cch-w49-s1: the card states the tier and its features and NO ceiling —
       // PLAN_CATALOG carries instances:10 for this tier and it must reach no DOM.
       assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
-      assert.ok(!/\b10\b/.test(box), "the Support++ instance ceiling (10) is data, not copy — it must reach no DOM");
+      // Match the forbidden claim, not an unrelated 10 in the localized
+      // subscription timestamps rendered by this same card.
+      assert.ok(!/\b10\s+managed instances?\b/i.test(box), "the Support++ instance ceiling (10) is data, not rendered copy");
       // The owner action sections a paid plan unlocks.
       assert.equal(reg.get("billing-manage-section").hidden, false, "a paid plan shows the Manage-billing section");
       assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
@@ -2789,6 +2791,56 @@ const EXPECTATIONS = {
       assert.ok((reg.get("billing-cancel").innerHTML || "").includes("Cancel plan"), "the Cancel-plan danger action renders");
       // A healthy active sub shows NO topbar billing chip (trial XOR past-due).
       assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
+    },
+  },
+
+  // ── cch-w49-s7 · THE CORPUS ASSERTION ─────────────────────────────────────
+  // THE OFFER THE SERVER CAN ONLY REFUSE. With the plane declaring
+  // `unconfigured`, Billing.checkout/2 answers {:error, :billing_not_configured}
+  // for every plan, so a Subscribe button here is an offer with no honest
+  // outcome. The assertion reads innerHTML STRINGS and NOT selectors: smoke's
+  // DOM shim is flat, so `querySelectorAll("[data-plan]")` here would match
+  // nothing and go green over a grid full of buttons — a selector-based version
+  // of this arm is vacuous BY CONSTRUCTION.
+  //
+  // NOT BUILT ON A #plan-more CLICK (charter D551): this actor's grid is open at
+  // first paint (renderTrial unhides it), so nothing is toggled — listeners
+  // accumulate on that button and an even number of clicks leaves it dead, which
+  // would make the assertion measure the toggle rather than the offer.
+  "billing-unconfigured": {
+    what: "the plane declares checkout UNCONFIGURED — the tier grid carries ZERO Subscribe offers and states the reason in curated copy",
+    check(reg) {
+      // The grid is OPEN (this is billing-trial's actor), so an empty-bytes
+      // pass is impossible: a grid that never painted would fail here first.
+      assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open — otherwise this arm proves nothing");
+      const grid = reg.get("billing-tiers").innerHTML || "";
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(grid.length > 0, "#billing-tiers rendered empty");
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // NON-VACUITY: the cards themselves still render. Only the OFFER is gone.
+      for (const q of ["Free", "Supporter", "Support++"]) {
+        assert.ok(grid.includes(">" + q + "<"), "the tier card must still name " + JSON.stringify(q));
+      }
+      // THE ASSERTION. Zero offers, in BOTH regions, by rendered bytes.
+      for (const [name, html] of [["#billing-tiers", grid], ["#billing-recommended", box]]) {
+        assert.equal((html.match(/data-plan=/g) || []).length, 0,
+          name + " must carry ZERO [data-plan] under an unconfigured declaration");
+        assert.ok(!/Subscribe/.test(html),
+          name + " must carry no Subscribe affordance at all — omitted, never a disabled ghost");
+      }
+      // OMIT, NOT DISABLE: no ghost anywhere in the grid. The Free card and a
+      // current plan legitimately render `<button class="btn" disabled>`, so the
+      // pin is on the LABELS an offer would wear, not on the word "disabled".
+      assert.ok(!grid.includes("Subscribe unavailable"),
+        "the test-mode disclosure ghost is a DIFFERENT state and must not be borrowed for unconfigured");
+      // THE SENTENCE, and it is the curated string that already existed
+      // (ERRORS.billing_not_configured), not a mint.
+      assert.ok(grid.includes("Billing isn&#39;t set up on this deployment yet.") ||
+                grid.includes("Billing isn't set up on this deployment yet."),
+        "the grid must state WHY nothing is offered, in the curated copy");
+      // …and NOT the unverifiable sentence — the two states must not collapse.
+      assert.ok(!/could never activate/.test(grid),
+        "unconfigured must never borrow unverifiable's sentence: no card is charged in this state");
     },
   },
 
@@ -3411,6 +3463,32 @@ const EXPECTATIONS = {
         "an ANSWERED /v1/me is not a checking state on the body either");
       assert.ok(!body.includes("data-me-retry"),
         "and an answered read offers no /v1/me retry — the exit belongs to the unknown arm alone");
+
+      // ── cch-w47-rv-bl: THE SENTENCE HAS ONE OWNER PER BUTTON GROUP ────────
+      // The five wrappers above are five CONTROLS, and until this slice each of
+      // them stated the refusal TWICE (a `title` and a visible span) — so this
+      // rendered screen said one sentence ten times, plus once more in the
+      // fleet-support card's control-less empty state. The count is asserted on
+      // the SAME bytes the wrapper count above reads, so the two cannot drift:
+      // controls stay five, sentences drop to one per strip plus that prose.
+      const w47RvBlSentence = "You need the admin role on this team — an admin on this team can grant it.";
+      assert.equal(countMatches(body, w47RvBlSentence), 3,
+        "the refusal must be stated once per button strip (#inst-header-actions, #inst-update-actions) plus " +
+        "the support card's control-less empty state — got " + countMatches(body, w47RvBlSentence));
+      // …AND NOT AT THE COST OF THE EXPLANATION. Every disabled control still
+      // names the refusal in its accessible description, and the id it names
+      // must resolve to a span that actually carries the sentence — an
+      // aria-describedby pointing at nothing is silence, and the count assertion
+      // above would certify it happily.
+      const w47RvBlPointers = [...body.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)].map((m) => m[1]);
+      assert.equal(w47RvBlPointers.length, 5,
+        "all five disabled controls must point at their strip's reason; got " + w47RvBlPointers.length);
+      for (const id of new Set(w47RvBlPointers)) {
+        assert.ok(body.includes('<span class="inst-life-reason" id="' + id + '">' + w47RvBlSentence + "</span>"),
+          'aria-describedby="' + id + '" resolves to no reason span carrying the server\'s sentence');
+      }
+      assert.ok(!/disabled[^>]*title="You need the admin role/.test(body),
+        "a grouped control kept its own title — that is the per-control repetition this slice deletes");
     },
   },
 
@@ -4119,7 +4197,7 @@ const EXPECTATIONS = {
       assert.ok(!html.includes('id="notif-status"'), "the loose #notif-status span is retired");
       assert.ok(!html.includes("notif-card"), "the superseded .notif-card is gone from this view");
       // Email section: transport seg (single-select) + its own save-row.
-      assert.ok(html.includes("Email delivery") && html.includes("notif-transport-seg"), "email section with the transport seg");
+      assert.ok(html.includes("Alert delivery") && html.includes("notif-transport-seg"), "alert-delivery section with the transport seg");
       assert.ok(html.includes('id="notif-email-save"'), "email section owns its save-row button");
       // Channels roster: 6 channels (email transport + 5 chat), configured honesty,
       // consequence sub-lines, its own save-row.
@@ -4192,7 +4270,7 @@ const EXPECTATIONS = {
     what: "first-run notifications — no channels configured, empty delivery log, honest defaults",
     check(reg) {
       const html = reg.get("notif-body").innerHTML || "";
-      assert.ok(html.includes("Email delivery") && html.includes("Event routing"), "the page still composes all sections");
+      assert.ok(html.includes("Alert delivery") && html.includes("Event routing"), "the page still composes all sections");
       assert.ok(html.includes("not configured"), "an untouched channel reads not-configured");
       const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
       assert.ok(log.includes("No notifications have been delivered yet"), "the empty log states the honest empty case");

@@ -2,8 +2,8 @@
 // rule 6 / D13). Two layers, both pure-Node (no DOM, no browser):
 //
 //   1. The resting-chrome PREDICATE (`configControlHidden`, contract.js) — the
-//      real logic behind hiding an empty optional config control (code `lang`,
-//      diagram `caption`) until the frame is hovered/focused. Unit-tested here so
+//      real logic behind hiding code's empty optional `lang` control until the
+//      frame is hovered/focused. Diagram controls use a closed native disclosure.
 //      the "no resting chrome on an idle atom" rule is machine-checked, not just
 //      eyeballed in the browser.
 //
@@ -11,9 +11,9 @@
 //      cannot mount a node-view without a browser, so instead of asserting the
 //      live DOM we assert the SOURCE that builds it: a listed atom must not
 //      construct bare `<button>` chrome (the audit's forbidden edit-only control),
-//      and the two config-bearing atoms must keep the resting-chrome gate wired.
+//      and both config-bearing atoms must keep their resting-chrome gate wired.
 //      This locks the sweep's result: an atom cannot silently regrow button
-//      chrome, and a refactor cannot silently drop the hover/focus reveal.
+//      chrome, and a refactor cannot silently expose the config controls at rest.
 //
 // NO canvas node-view builds a `<button>` anymore. The callout fold — once the
 // single documented `<button>` exception — moved to a native `<details>`/
@@ -119,33 +119,24 @@ check("callout fold is a native <summary> disclosure, not a <button> (guard is n
   );
 });
 
-// The two config-bearing atoms must keep the resting-chrome gate wired: an empty
-// optional control (lang / caption) stays hidden until interaction. Asserting the
-// source references the shared predicate locks the fix against a silent regression
-// back to an always-visible placeholder.
-const CONFIG_GATE_FILES = ["canvas/code-node.js", "canvas/diagram-node.js"];
+check("code config keeps its hover/focus resting-chrome gate", () => {
+  const src = readSrc("canvas/code-node.js");
+  assert.match(src, /configControlHidden/);
+  assert.match(src, /focusin/);
+  assert.match(src, /mouseenter/);
+  assert.match(src, /relatedTarget/);
+});
 
-check("config-bearing atoms wire the resting-chrome gate (configControlHidden)", () => {
-  for (const rel of CONFIG_GATE_FILES) {
-    const src = readSrc(rel);
-    assert.ok(
-      /configControlHidden/.test(src),
-      `${rel} no longer references configControlHidden — the empty lang/caption ` +
-        `control would show at rest again (rule-6 resting chrome the reader never paints).`,
-    );
-    assert.ok(
-      /focusin/.test(src) && /mouseenter/.test(src),
-      `${rel} dropped the hover/focus reveal wiring — the gated config control ` +
-        `would be unreachable (hidden with no way to reveal it).`,
-    );
-    assert.ok(
-      /relatedTarget/.test(src),
-      `${rel} dropped the focus-within (relatedTarget) guard in focusout — ` +
-        `focusout fires BEFORE the next element gains focus, so hiding while ` +
-        `focus merely MOVES within the atom yanks display:none onto the input ` +
-        `mid-Tab and keyboard users can never reach it.`,
-    );
-  }
+check("diagram controls stay in a closed, editable-only native disclosure", () => {
+  const src = readSrc("canvas/diagram-node.js");
+  assert.match(src, /createElement\("details"\)/,
+    "diagram controls lost their native closed-at-rest disclosure");
+  assert.match(src, /createElement\("summary"\)/,
+    "the diagram disclosure is no longer keyboard-accessible");
+  assert.match(src, /disclosure\.hidden\s*=\s*!editor\.isEditable/,
+    "diagram edit controls would leak into non-editable rendering");
+  assert.match(src, /disclosure\.appendChild\(fields\)/,
+    "diagram source/caption controls no longer live inside the disclosure");
 });
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

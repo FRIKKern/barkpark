@@ -260,6 +260,7 @@ defmodule Barkpark.Content.GraphBoundedReadsTest do
       assert "orph-b-lonely" in b_ids
       refute "orph-b-src" in b_ids, "B's connected source must not be an orphan"
       refute "orph-b-dst" in b_ids, "B's connected target must not be an orphan"
+
       assert mentions(q_b, "content_edges") > 0,
              "orphans/1 must still consult content_edges — otherwise the " <>
                "connectivity answer above is vacuous"

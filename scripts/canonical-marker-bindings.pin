@@ -1,3 +1,4 @@
+agent-backup-state	NewBackupProbe
 audit-emit	emit
 chat-stable-boundary	advance
 chat-stable-segments	advance
@@ -29,12 +30,16 @@ indx-index-identity	index_key
 instance-content-bootstrap	Run
 instrument-exit-vocabulary	createExitVocabulary
 mcp-task-tools	registerTaskTools
+media-where-used	referrers
 merge-gate-criterion-predicate	merge_gated?
 platform-delivery-record	record_all
 preview-manifest	project
 published-paper-provenance-gate	gateNodes
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
+read-perspective-parse	parse
+read-perspective-validate	unsupported
+release-boot-plugin-census	take
 schema-resolution-for-redaction	get_schema_for_redaction
 scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for

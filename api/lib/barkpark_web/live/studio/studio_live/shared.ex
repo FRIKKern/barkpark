@@ -15,9 +15,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   alias Barkpark.{Content, Tenancy}
   alias Barkpark.Content.Warnings
+  alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
@@ -53,7 +55,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket
 
       block ->
-        push_event(socket, "bp:block-update", %{block_id: block_id, block: block})
+        rev = get_in((paper && Map.get(paper, :content)) || %{}, ["rev"])
+        push_event(socket, "bp:block-update", %{block_id: block_id, block: block, rev: rev})
     end
   end
 
@@ -207,6 +210,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defdelegate paper_ops(socket, ops), to: Paper
 
   @doc false
+  defdelegate paper_ops(socket, ops, request_id), to: Paper
+  defdelegate paper_ops(socket, ops, request_id, if_rev), to: Paper
+
+  @doc false
   defdelegate push_task_previews(socket), to: Paper
 
   @doc false
@@ -235,6 +242,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_reorder(socket, blocks, idx, dir), to: Paper
+  defdelegate paper_reorder(socket, blocks, idx, dir, meta), to: Paper
 
   @doc false
   defdelegate sync_paper_edit_doc(socket), to: Paper
@@ -314,17 +322,58 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # predicate treats as unresolvable and refuses FOR A GRANT-GRADED SOCKET ONLY.
   # A membership-derived socket is untouched: `grant_target_denied?/3` returns
   # false without loading anything.
+  # task-3cae133ab3aca51d — THE MEDIA PERMISSION SET, ASKED AT THIS SEAM TOO.
+  #
+  # The two arms above are the Studio's own authority: "may this PRINCIPAL
+  # write" and "does this principal's GRANT name this target". A `mediaAsset`
+  # has a THIRD authority that predates both and that neither can see — the
+  # media permission set, `Media.Storage.Access`, which guards the same
+  # `altText`/`caption` fields on the HTTP door
+  # (`V1.MediaController.patch_metadata` -> `Access.allowed?/4` in
+  # media_controller.ex) and withholds `edit_metadata` from a non-admin
+  # who does not hold the asset's CHECKOUT lock.
+  #
+  # PR #16066 made `mediaAsset` documents openable in this editor, so those
+  # fields acquired a second write path — and this one had no idea the lock
+  # existed. Reproduced by run before this arm
+  # (`media_asset_edit_metadata_authority_test.exs`): a `["read","write"]` token
+  # labelled `s9-not-the-holder`, which `Access.allowed?/4` answers `false` for,
+  # submitted `form#editor-form` and the draft read back
+  # `%{"altText" => %{"nob" => "SKREVET AV EN NEKTET SKRIBENT"},
+  #    "checkedOutBy" => "another-editor"}`. A permission WIDENING through the
+  # UI: refused over HTTP, accepted in the Studio.
+  #
+  # ONE AUTHORITY, NOT A THIRD COPY. This calls the SAME function the media
+  # controller's guard now delegates to — `Access.edit_metadata_allowed?/2`,
+  # behind `Access.metadata_write_denied?/3`, which also owns the "is this the
+  # asset type" test so the media type name does not get a copy in a module that
+  # knows nothing about media. No new permission kind, and the HTTP behaviour is
+  # byte-identical (the media controller tests are unchanged and green).
+  #
+  # LAST, DELIBERATELY. The principal question and the grant question are
+  # cheaper and broader; this one is media-only and answers `false` for every
+  # other type, so it must not shadow the two refusals that carry their own
+  # user-facing wording.
   @doc false
   def do_autosave(socket, params) do
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
+    type = socket.assigns[:editor_type]
 
     cond do
       Paper.write_denied?(socket) ->
         Paper.refuse_write_denied(socket)
 
-      Paper.grant_target_denied?(socket, socket.assigns[:editor_type], doc_id) ->
+      Paper.grant_target_denied?(socket, type, doc_id) ->
         Paper.refuse_outside_grant(socket)
+
+      MediaAccess.metadata_write_denied?(socket, type, doc) ->
+        socket
+        |> put_flash(
+          :error,
+          "This asset is checked out by another editor, so its metadata is read-only for you."
+        )
+        |> assign(save_status: "Read-only")
 
       true ->
         autosave_write(socket, params)
@@ -1583,8 +1632,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # already there rather than a second one, so what the panel LISTS and what it
   # lets you TOUCH can never drift apart.
   #
-  # The instance-authority arm keeps the full list by design: that principal is
-  # exactly what `/v1/shares` demands.
+  # THE FOREIGN ARM IS THE WRITE HALVES' OWN PREDICATE (task-87c43ffa0be7ad95).
+  #
+  # This filter used to be `declarable_scope?/2` alone, whose foreign arm is
+  # `instance_declare_authority?/1` — `Auth.has_permission?(token, "admin")`,
+  # a GLOBAL bit with no membership lookup and no workspace resolution. That
+  # made the token arm of the clamp VACUOUS rather than merely weak:
+  # `Caps.admin?/1`'s token arm already requires the SAME global bit to open
+  # the panel at all, so every token principal that could reach this listing
+  # satisfied the foreign arm for EVERY scope, and nothing was filtered.
+  #
+  # Meanwhile PR #15025 clamped both WRITE halves with
+  # `Handlers.Shares.target_workspace_admits?/2`, which resolves the scope's
+  # workspace and demands `Tenancy.Auth.workspace_admin?/2` — the predicate
+  # `POST/DELETE /v1/shares` enforces. So the panel LISTED, for a global-admin
+  # token seated as a plain `member` of workspace B, exactly the rows it
+  # refused to let that token declare or remove. The read half now asks THAT
+  # function — not a second copy of it — so the disclosure half cannot drift
+  # from the availability half again.
+  #
+  # DELIBERATELY `workspace_admin?/2`, NEVER `authorize/3`: `authorize/3`'s
+  # api_token arm ORs the token's GLOBAL permissions[] with membership, so the
+  # attacker shape passes it. That ruling is recorded at
+  # `Handlers.Shares.target_workspace_admits?/2` and in `ShareController`.
+  #
+  # A principal that administers the foreign workspace still sees its rows: the
+  # list is scoped to authority, not to the mounted workspace.
   def load_share_rows(socket) do
     env = Enum.map(Barkpark.Sharing.shares_env(), &share_row(&1, "env"))
     stored = Enum.map(Barkpark.Sharing.list_stored(), &share_row(&1, "stored"))
@@ -1592,7 +1665,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     env
     |> Enum.concat(stored)
-    |> Enum.filter(&declarable_scope?(socket, &1.scope))
+    |> Enum.filter(&share_scope_visible?(socket, &1.scope))
     |> Enum.map(fn row -> %{row | url: Map.get(urls, row.scope)} end)
   end
 
@@ -1611,15 +1684,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def declarable_scope?(socket, scope) do
     mounted = scope_slug(socket.assigns[:current_workspace], "default")
 
+    case scope_workspace(scope) do
+      ^mounted -> true
+      _ -> instance_declare_authority?(socket)
+    end
+  end
+
+  @doc false
+  # MAY THIS CALLER SEE THIS SHARE ROW? The read half's clamp, and the reason
+  # `load_share_rows/1` above is no longer vacuous on the token arm.
+  #
+  # BOTH predicates, ANDed, deliberately: `declarable_scope?/2` keeps the read
+  # half a third enforcement point of the shared predicate (so the listing can
+  # never be WIDER than what the write halves' first gate admits), and
+  # `Handlers.Shares.target_workspace_admits?/2` adds what that first gate does
+  # not ask on the foreign arm — the scope's own workspace, resolved, with
+  # `Tenancy.Auth.workspace_admin?/2` demanded on it. The mounted arm is
+  # untouched by both: there `Caps.admin?/1` has already proved an admin seat
+  # in this workspace, for BOTH principal kinds.
+  def share_scope_visible?(socket, scope) do
+    declarable_scope?(socket, scope) and
+      SharesHandler.target_workspace_admits?(socket, scope_workspace(scope))
+  end
+
+  # The workspace segment of a share scope. ONE splitter for
+  # `declarable_scope?/2` and `share_scope_visible?/2`, so a full
+  # `ws/proj/dataset` scope and a bare workspace slug are read identically by
+  # both — and neither can drift about what "the scope's workspace" means.
+  defp scope_workspace(scope) do
     scope
     |> String.split("/")
     |> List.first()
     |> to_string()
     |> String.trim()
-    |> case do
-      ^mounted -> true
-      _ -> instance_declare_authority?(socket)
-    end
   end
 
   @doc false

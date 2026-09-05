@@ -691,21 +691,44 @@ func (c *Client) ArchiveChatSession(id string) (ChatSession, error) {
 // → 200 {session}. Same oracle, same idempotency (unarchiving a live session is
 // a no-op that still 200s).
 func (c *Client) UnarchiveChatSession(id string) (ChatSession, error) {
-	return c.chatArchiveFlip(id, "unarchive")
+	s, _, _, err := c.chatArchiveFlipRaw(id, "unarchive")
+	return s, err
+}
+
+// UnarchiveChatSessionRaw is UnarchiveChatSession plus the UNTOUCHED receipt
+// (status + body), for exactly the reason CreateChatSessionWithOptionsRaw
+// exists (#15917): the one write-receipt discriminator lives in internal/cli,
+// which imports this package, so apiclient cannot call it without an import
+// cycle — and a SECOND copy of the discriminator is the thing that consolidation
+// forbids. So apiclient keeps no verdict of its own and simply lets the caller
+// screen the bytes. The old signature is untouched and delegates; the TUI and
+// every other caller are unchanged.
+func (c *Client) UnarchiveChatSessionRaw(id string) (ChatSession, int, []byte, error) {
+	return c.chatArchiveFlipRaw(id, "unarchive")
 }
 
 // chatArchiveFlip is the shared body of the two archive verbs — they differ by
 // one path segment and nothing else, so they are one implementation.
 func (c *Client) chatArchiveFlip(id, verb string) (ChatSession, error) {
-	body, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/"+verb), nil, http.StatusOK)
+	s, _, _, err := c.chatArchiveFlipRaw(id, verb)
+	return s, err
+}
+
+// chatArchiveFlipRaw is chatArchiveFlip with the response STATUS and RAW BODY
+// surfaced. It exists because the decode below is exactly the laundering
+// #15917 found on chat_spawn_session: {}, null and {"result":null} all
+// json.Unmarshal into a ZERO ChatSession with a NIL error, and the caller then
+// prints that zero value as a completed lifecycle write.
+func (c *Client) chatArchiveFlipRaw(id, verb string) (ChatSession, int, []byte, error) {
+	status, body, err := c.chatSendRaw(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/"+verb), nil, http.StatusOK)
 	if err != nil {
-		return ChatSession{}, err
+		return ChatSession{}, status, body, err
 	}
 	var s ChatSession
 	if err := json.Unmarshal(body, &s); err != nil {
-		return ChatSession{}, fmt.Errorf("decode %s response: %w", verb, err)
+		return ChatSession{}, status, body, fmt.Errorf("decode %s response: %w", verb, err)
 	}
-	return s, nil
+	return s, status, body, nil
 }
 
 // RespondChatApproval answers a pending permission request (204). decision is

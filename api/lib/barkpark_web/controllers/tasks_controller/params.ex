@@ -96,6 +96,16 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # perspective=drafts OR ?drafts=true → :drafts (token-gated, live extract).
   # Anything else → :published (the materialised default).
+  #
+  # DELIBERATELY NOT MERGED into `BarkparkWeb.AnonPerspective.parse/1` (the
+  # canonical lenient parser). Two real differences, either of which a collapse
+  # would silently destroy: this one takes the whole PARAMS MAP because it also
+  # honours the `?drafts=true` alias, and its value set is NARROWER — the graph
+  # surface declares `published | drafts`, with no `raw`. Merging would either
+  # drop a working alias or widen the graph route to a perspective its manifest
+  # entry does not offer. The strictness the fork used to cost is now bought
+  # separately: `graph_show/2` refuses an unsupported value through
+  # `BarkparkWeb.ReadPerspective` before this is reached.
   def parse_perspective(%{"perspective" => "drafts"}), do: :drafts
   def parse_perspective(%{"drafts" => v}) when v in ["true", "1", true], do: :drafts
   def parse_perspective(_), do: :published
@@ -275,10 +285,34 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_unless(:status, doc.status, "published")
     |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
     |> put_brief_criteria(content)
+    |> put_brief_labels(content)
     |> put_brief_engagement(content)
     |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
+  end
+
+  # LABELS ON THE BRIEF CARD (task-14eac58b39fd3692), additive and pruned.
+  #
+  # The brief card is a deliberate payload diet, so a new key needs a reason
+  # this one has: WITHOUT labels the card cannot be reasoned about at all by
+  # the readers that matter. A row carrying `landed:pr-NNNNN@sha` looks
+  # identical on the wire to one that never shipped, so a lead reads met:false
+  # criteria as untouched work and dispatches a builder that comes back
+  # "already fixed" — the burn this row was filed for. Measured 2026-09-05:
+  # 21 of 1,658 rows in `bp task ready` carry a landed:pr-* label, nine of them
+  # at ZERO criteria met, and a census that filtered the ready card by label
+  # returned a confident 0 because the field could never be present.
+  #
+  # ADDITIVE BY CONSTRUCTION: absent or empty labels prune away, so every card
+  # that carried no labels is byte-identical to before. Labels are short tokens,
+  # not prose, so no truncation arm is needed and charter law 2's help[] line is
+  # unaffected.
+  defp put_brief_labels(map, content) do
+    case Map.get(content, "labels") do
+      [_ | _] = labels -> Map.put(map, :labels, labels)
+      _ -> map
+    end
   end
 
   # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
@@ -712,6 +746,187 @@ defmodule BarkparkWeb.TasksController.Params do
   # the sole offset in the codebase with a floor but no ceiling.
   def parse_offset(raw), do: raw |> parse_int(0) |> max(0) |> min(100_000)
 
+  # ─── The keyset cursor on `GET /v1/tasks` (bl-api-tasks-stable-cursor) ────
+  #
+  # THE DEFECT the cursor closes. The index serves a WINDOW — `limit` rows of a
+  # corpus ordered `desc: updated_at, desc: id`, capped at
+  # `index_limit_cap/0`. Every write to any task re-stamps its `updated_at` and
+  # rotates it to the head, so the window's TAIL falls off under ordinary
+  # traffic. A reader that walks the window and then asks "is task X still
+  # here?" gets the same answer — absent — whether X was CLOSED or merely
+  # pushed past row 1000 by a thousand unrelated touches. Absence was not
+  # decidable, and `internal/taskboard/merge.go` (the CLI lane) documents a
+  # client-side heuristic built on top of that ambiguity (PR #14251).
+  #
+  # THE FIX is a keyset (seek) cursor over the tuple the ordering ALREADY uses
+  # — `(updated_at, id)` for the default list, `(inserted_at, id)` for the
+  # `parent=` rail — so paging is bounded by a WHERE clause instead of by
+  # OFFSET, and a caller can walk past the cap to the end of the corpus. A row
+  # that rotated out of page 1 is reachable on a later page; a row that went
+  # terminal is REACHED and renders `lifecycle_status: "done"`. Absence now
+  # means "not in the corpus", which is a fact a reader can act on.
+  #
+  # THE REJECTED ALTERNATIVE was a closed-since delta feed
+  # (`GET /v1/tasks?closed_since=<ts>` returning only terminal transitions).
+  # It answers ONE question — "which of the rows I knew about closed?" — and
+  # answers it cheaply, but it is a SECOND source of truth about task state
+  # with its own ordering, its own window and its own drift, and it still
+  # cannot tell a caller about a row that rotated out WITHOUT closing (moved,
+  # re-parented, relabelled). The keyset cursor makes the ONE list route
+  # complete instead of adding a second incomplete one. `GET /v1/tasks/events`
+  # already covers "what changed since" over `mutation_events`; a third feed
+  # would have overlapped it.
+  #
+  # OPT-IN, so today's envelope is byte-stable. The `page` block gains
+  # `next_cursor` ONLY when the caller spells `?cursor=` (any value, including
+  # empty — empty means "page 1, and mint me a cursor"). A request that names
+  # no `cursor` param gets the pre-change envelope, key for key.
+  #
+  # HONEST LIMIT, stated because a keyset over a MUTABLE key has one: the walk
+  # is skip-free and duplicate-free for every row NOT written during it. A row
+  # touched mid-walk re-stamps `updated_at` and rotates AHEAD of the cursor, so
+  # that walk will not see it — the next walk from the head will. This is
+  # strictly better than OFFSET paging (which shifts every subsequent page on
+  # any insert) and it is the price of ordering by "most recently touched".
+  # The `parent=` rail keys on `inserted_at`, which is immutable, so that walk
+  # is exact.
+
+  @cursor_version 1
+
+  # The default cap on `?limit=`. Overridable per-environment so a test can
+  # prove the ACROSS-THE-BOUNDARY property with a small corpus instead of
+  # seeding 1001 real rows — the property under test is "paging reaches rows
+  # the clamp excluded", and that property does not care whether the clamp is
+  # 1000 or 4.
+  @index_limit_cap 1000
+
+  def index_limit_cap,
+    do: Application.get_env(:barkpark, :tasks_index_limit_cap, @index_limit_cap)
+
+  @doc """
+  True when the caller spelled `?cursor=` at all — the opt-in signal that turns
+  `page.next_cursor` on. Presence, not truthiness: `?cursor=` (empty) is a
+  legitimate "start at the head and mint me one".
+  """
+  def cursor_requested?(params), do: Map.has_key?(params, "cursor")
+
+  @doc """
+  The keyset axis this request's ordering implies. Mirrors
+  `Barkpark.Tasks.Query.apply_index_order/2` exactly — if that ordering ever
+  changes, this must change with it or a cursor would seek on a column the
+  query does not sort by.
+  """
+  def cursor_axis(parent) when is_binary(parent), do: :inserted_asc
+  def cursor_axis(_), do: :updated_desc
+
+  @doc """
+  Parse `?cursor=` into `{:ok, nil}` (no cursor / page 1) or
+  `{:ok, {axis, timestamp, id}}`, or `{:error, reason}`.
+
+  Fail-CLOSED, the doctrine this module already applies to `filter[...]`: a
+  cursor that cannot be decoded, carries an unknown version, or was minted
+  under a DIFFERENT ordering than this request would use is a 400 naming the
+  problem — never a silent restart from the head, which would look exactly
+  like a completed walk and hand the caller a duplicate page it cannot detect.
+  """
+  def parse_index_cursor(params, parent) do
+    case Map.get(params, "cursor") do
+      nil -> {:ok, nil}
+      "" -> {:ok, nil}
+      raw when is_binary(raw) -> decode_cursor(raw, cursor_axis(parent))
+      _ -> {:error, "cursor must be a string"}
+    end
+  end
+
+  defp decode_cursor(raw, axis) do
+    with {:ok, json} <- cursor_b64(raw),
+         {:ok, %{"v" => @cursor_version, "k" => k, "t" => t, "i" => i}} <- cursor_json(json),
+         {:ok, ^axis} <- cursor_axis_token(k),
+         {:ok, ts, _off} <- DateTime.from_iso8601(t),
+         true <- is_binary(i) and i != "" do
+      {:ok, {axis, ts, i}}
+    else
+      {:ok, other_axis} when is_atom(other_axis) ->
+        {:error,
+         "cursor was minted for the #{cursor_axis_string(other_axis)} ordering but this " <>
+           "request orders by #{cursor_axis_string(axis)} — re-page from the head"}
+
+      _ ->
+        {:error, "cursor is not a cursor this route minted"}
+    end
+  end
+
+  defp cursor_b64(raw) do
+    case Base.url_decode64(raw, padding: false) do
+      {:ok, json} -> {:ok, json}
+      :error -> :error
+    end
+  end
+
+  defp cursor_json(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> {:ok, map}
+      _ -> :error
+    end
+  end
+
+  defp cursor_axis_token("updated_at"), do: {:ok, :updated_desc}
+  defp cursor_axis_token("inserted_at"), do: {:ok, :inserted_asc}
+  defp cursor_axis_token(_), do: :error
+
+  defp cursor_axis_string(:updated_desc), do: "updated_at DESC"
+  defp cursor_axis_string(:inserted_asc), do: "inserted_at ASC"
+
+  @doc """
+  Seek past the cursor's row. The predicate is the row-value comparison the
+  ordering implies — `(updated_at, id) < (t, i)` for the DESC list,
+  `(inserted_at, id) > (t, i)` for the ASC rail — spelled as the equivalent
+  `a < t OR (a = t AND id <=> i)` so it composes with the existing filters
+  without a tuple constructor.
+  """
+  def apply_index_cursor(query, nil), do: query
+
+  def apply_index_cursor(query, {:updated_desc, ts, id}) do
+    from(d in query,
+      where: d.updated_at < ^ts or (d.updated_at == ^ts and d.id < type(^id, :binary_id))
+    )
+  end
+
+  def apply_index_cursor(query, {:inserted_asc, ts, id}) do
+    from(d in query,
+      where: d.inserted_at > ^ts or (d.inserted_at == ^ts and d.id > type(^id, :binary_id))
+    )
+  end
+
+  @doc """
+  The cursor that resumes AFTER the last row of this page, or `nil` when the
+  page is short (which PROVES the walk is finished — the exact direction of
+  `has_more`).
+
+  Minted from the LAST doc actually rendered, so the cursor and the page it
+  follows are derived from the same list.
+  """
+  def next_cursor([], _axis), do: nil
+
+  def next_cursor(docs, axis) do
+    last = List.last(docs)
+
+    %{
+      "v" => @cursor_version,
+      "k" => cursor_axis_column(axis),
+      "t" => DateTime.to_iso8601(cursor_axis_value(last, axis)),
+      "i" => last.id
+    }
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp cursor_axis_column(:updated_desc), do: "updated_at"
+  defp cursor_axis_column(:inserted_asc), do: "inserted_at"
+
+  defp cursor_axis_value(%Document{updated_at: v}, :updated_desc), do: v
+  defp cursor_axis_value(%Document{inserted_at: v}, :inserted_asc), do: v
+
   # ─── `filter[...]` container (gr-bl-tasks-route-parent-filter-ignored) ────
   #
   # `GET /v1/tasks` reads its narrowing params FLAT (`?parent=`, `?kind=`, …).
@@ -781,19 +996,53 @@ defmodule BarkparkWeb.TasksController.Params do
   @prime_filter_keys ~w(worker)
   @events_filter_keys []
 
+  # THE FLAT ALLOWLIST (task-233cb8a1d033c738). `flat:` used to be PROSE — a
+  # sentence for an error message, listing six of the eleven keys `index`
+  # actually honours. Now it is a LIST and the prose is derived from it, so the
+  # thing the message promises and the thing the route enforces cannot drift.
+  #
+  # WHY THE TOP LEVEL NEEDED CLOSING AT ALL. PR #12780 closed the `filter[...]`
+  # container: a key that route cannot honour is a 400 naming the key. The flat
+  # namespace stayed fail-OPEN, and `parent_id` is the exact spelling a caller
+  # reaches for after reading the task schema (`content.parent_id`) — the route
+  # only ever read `parent`. Measured before this change: `?filter[parent_id]=X`
+  # returned 18 rows under one parent, while `?parent_id=X` returned all 383
+  # across 76 parents, 200 OK. That is not a missing feature, it is a FALSE
+  # CONFIRMATION an automated re-parent driver will act on.
+  #
+  # `parent_id` is therefore listed as an ACCEPTED ALIAS of `parent` rather than
+  # refused: refusing the spelling the schema itself teaches would trade a wrong
+  # answer for a wrong lesson.
+  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label)
+  @ready_flat_keys ~w(view limit offset phase_id order worker)
+  @prime_flat_keys ~w(view limit offset worker order)
+  @events_flat_keys ~w(since limit)
+
   @route_filters %{
     index: %{
       label: "GET /v1/tasks",
       keys: @index_filter_keys,
-      flat: "kind, lifecycle_status, parent, phase_id, label, type"
+      flat_keys: @index_flat_keys,
+      flat: Enum.join(@index_flat_keys, ", ")
     },
     ready: %{
       label: "GET /v1/tasks/ready",
       keys: @ready_filter_keys,
-      flat: "phase_id, order, limit, offset"
+      flat_keys: @ready_flat_keys,
+      flat: Enum.join(@ready_flat_keys, ", ")
     },
-    prime: %{label: "GET /v1/tasks/prime", keys: @prime_filter_keys, flat: "worker, order, limit"},
-    events: %{label: "GET /v1/tasks/events", keys: @events_filter_keys, flat: "since, limit"}
+    prime: %{
+      label: "GET /v1/tasks/prime",
+      keys: @prime_filter_keys,
+      flat_keys: @prime_flat_keys,
+      flat: Enum.join(@prime_flat_keys, ", ")
+    },
+    events: %{
+      label: "GET /v1/tasks/events",
+      keys: @events_filter_keys,
+      flat_keys: @events_flat_keys,
+      flat: Enum.join(@events_flat_keys, ", ")
+    }
   }
 
   @doc "The `filter[...]` keys `route` can honour (`:index` / `:ready` / `:prime` / `:events`)."
@@ -812,6 +1061,50 @@ defmodule BarkparkWeb.TasksController.Params do
   dropped filter. The `:index` seat of `parse_route_filters/2`.
   """
   def parse_index_filters(params) when is_map(params), do: parse_route_filters(params, :index)
+
+  @doc """
+  The FLAT (top-level) query params `route` honours.
+
+  One list, used both to enforce and to name — `flat:` in `@route_filters` is
+  derived from it, so an error message cannot promise a key the route drops.
+  """
+  @spec flat_keys(atom()) :: [String.t()]
+  def flat_keys(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:flat_keys)
+
+  @doc """
+  Refuse an unknown TOP-LEVEL query param on `route`.
+
+  `:ok`, or `{:error, {:unknown_flat_param, key, route}}` for the first
+  unrecognised key in sorted order — deterministic, so the same request always
+  names the same key.
+
+  WHY FAIL-CLOSED. The sibling `filter[...]` container was closed by #12780; the
+  flat namespace was still fail-OPEN, so `?parent_id=X` and `?bogus=1` both
+  returned a 200 carrying the UNFILTERED page. A caller who asked to narrow and
+  got everything back cannot tell that from a parent with many children, which
+  is why this is a wrong ANSWER rather than a missing feature.
+
+  Phoenix injects its own routing keys into `params`, so those are skipped by
+  name rather than by guesswork: they are not caller input and refusing them
+  would 400 every request.
+  """
+  @phoenix_injected ~w(format _format _method _csrf_token dataset workspace project)
+
+  @spec reject_unknown_flat_params(map(), atom()) ::
+          :ok | {:error, {:unknown_flat_param, String.t(), atom()}}
+  def reject_unknown_flat_params(params, route) when is_map(params) and is_atom(route) do
+    allowed = flat_keys(route) ++ @phoenix_injected ++ ["filter"]
+
+    params
+    |> Map.keys()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.sort()
+    |> Enum.find(&(&1 not in allowed))
+    |> case do
+      nil -> :ok
+      key -> {:error, {:unknown_flat_param, key, route}}
+    end
+  end
 
   @doc """
   Parse the optional `filter[...]` container for `route`.
@@ -905,6 +1198,17 @@ defmodule BarkparkWeb.TasksController.Params do
   (name the offending key and list what this route accepts), because the caller
   it refuses is one who believed the request was already filtered.
   """
+  # task-233cb8a1d033c738 — the FLAT namespace's refusal. It names the key AND
+  # the accepted set, because a caller who reached for `parent_id` guessed a
+  # PLAUSIBLE spelling (it is what content.parent_id is called) and needs to be
+  # told which one this route reads, not merely that theirs was wrong.
+  def filter_message({:unknown_flat_param, key, route}) do
+    "#{filter_route_label(route)} does not read the query param #{inspect(key)}, and " <>
+      "ignoring it would return an UNFILTERED page that looks like an answer; " <>
+      "accepted flat params: #{flat_clause(route)}. " <>
+      "Structured filters go in the filter[<key>]=<value> container."
+  end
+
   def filter_message({:unknown_filter_key, key, route}) do
     "unknown filter key #{inspect(key)} on #{filter_route_label(route)}; " <>
       supported_clause(route)
@@ -938,6 +1242,14 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp flat_clause(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:flat)
+
+  def filter_details({:unknown_flat_param, key, route}),
+    do: %{
+      key: key,
+      route: filter_route_label(route),
+      supported_flat: flat_keys(route),
+      supported_filter: filter_keys(route)
+    }
 
   def filter_details({:unknown_filter_key, key, route}),
     do: %{key: key, route: filter_route_label(route), supported: filter_keys(route)}

@@ -164,12 +164,18 @@ on:
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/breaker-capture.sh"
+      - "scripts/stale-tree-regression-check.sh"
+      - "scripts/stale-tree-ci-wiring.test.sh"
+      - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "tooling/gate-map/gate-map.mjs"
+      - "tooling/gate-map/gate-map.test.mjs"
+      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY (epic-cycle distribution w1-s6). The two scripts are
@@ -377,12 +383,18 @@ on:
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/breaker-capture.sh"
+      - "scripts/stale-tree-regression-check.sh"
+      - "scripts/stale-tree-ci-wiring.test.sh"
+      - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "tooling/gate-map/gate-map.mjs"
+      - "tooling/gate-map/gate-map.test.mjs"
+      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY — mirrors the pull_request list above, glob included.
@@ -666,10 +678,16 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses tooling/gate-map/gate-map.mjs
+          tooling-harnesses tooling/gate-map/gate-map.test.mjs
+          tooling-harnesses tooling/gate-map/gate-map.json
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
           tooling-harnesses scripts/breaker-capture.sh
+          tooling-harnesses scripts/stale-tree-regression-check.sh
+          tooling-harnesses scripts/stale-tree-ci-wiring.test.sh
+          tooling-harnesses .github/workflows/required-checks-drift.yml
           tooling-harnesses .github/workflows/doc-gates.yml
           tooling-harnesses .github/workflows/security.yml
           tooling-harnesses .github/workflows/compose-smoke.yml
@@ -1293,10 +1311,33 @@ jobs:
         run: |
           bash -n scripts/main-red-breaker.sh
           bash scripts/main-red-breaker.test.sh
+      - name: "stale-tree CI wiring (job, job-level if, concurrency, breaker arm, Decide step)"
+        # The `Head does not silently revert main (stale tree)` job in
+        # required-checks-drift.yml is a six-place change and five of those
+        # places fail SILENTLY — a deleted Decide step over three
+        # continue-on-error gate steps is a job that cannot go red. The harness
+        # mutates a COPY of the workflow for each clause and asserts the red.
+        # PyYAML is load-bearing: without it the harness exits 2
+        # (HARNESS-UNAVAILABLE, never a pass), so install rather than skip.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash -n scripts/stale-tree-regression-check.sh
+          bash scripts/stale-tree-ci-wiring.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
         run: bash -n scripts/audit-paper-readers.sh
+      - name: "gate-map: the composed slice gate still finds __css_check over breakpoint-sweep.mjs"
+        # The wave-16 red this composer exists for. Its selftest is built to
+        # LOSE — a planted map entry, a removed instrument, and a narrowed scan
+        # set each red it — so a green here is evidence, not a tally. --verify
+        # runs first: a snapshot that stopped describing the tree is a REFUSAL
+        # (exit 3), because a composed gate off a stale map is a guess.
+        run: |
+          node --check tooling/gate-map/gate-map.mjs
+          node tooling/gate-map/gate-map.mjs --verify
+          node --test tooling/gate-map/gate-map.test.mjs
+
       - name: paper-reader audit fixture
         # paper-readers.yml executes audit-paper-readers.sh on every run; its
         # fixture harness — the only thing that proves the audit can report a

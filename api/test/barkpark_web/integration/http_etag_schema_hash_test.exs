@@ -153,14 +153,35 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
       refute header == ~s("#{rev}")
     end
 
+    # The list header folds a THIRD input on top of (body etag, schemaHash): the
+    # page envelope's own scalars (perspective/count/limit/offset/hasMore/
+    # nextOffset/total), because `list_etag/3` folds only the `_id:_rev` tuples
+    # and an empty page therefore degenerated to one constant per
+    # (dataset, type). So this arm pins the SEPARATION property it is named for
+    # from the outside — the header is not the body token, and it answers to
+    # something the body token cannot see — rather than re-deriving the
+    # controller's hash here, which would fork it.
     test "the list route's BODY etag is still main's ids/revs fold, not the validator" do
       resp = get(scoped_conn(), list_path())
       assert resp.status == 200, "request never arrived (status #{resp.status})"
       body = json_response(resp, 200)
 
       assert is_binary(body["etag"])
-      assert etag_of(resp) == ~s("#{cache_validator(body["etag"], body["schemaHash"])}")
       refute etag_of(resp) == ~s("#{body["etag"]}")
+      refute etag_of(resp) == ~s("#{cache_validator(body["etag"], body["schemaHash"])}")
+
+      # …and the header moves on an input the BODY etag is blind to. Same
+      # documents, same schema, different page shape.
+      other = get(scoped_conn(), list_path() <> "?limit=7")
+      other_body = json_response(other, 200)
+
+      assert other_body["etag"] == body["etag"],
+             "fixture is off-target: ?limit= moved the DOCUMENTS, so this proves nothing about the header"
+
+      assert other_body["schemaHash"] == body["schemaHash"]
+
+      refute etag_of(other) == etag_of(resp),
+             "two DIFFERENT page shapes shared one cache validator"
     end
   end
 

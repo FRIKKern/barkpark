@@ -98,6 +98,10 @@ on:
       # fixture-only PRs — the same #963->#969-class gap the pdrender carve-out above
       # closes, which whitelisted its testdata but not the board's.
       - "internal/taskboard/testdata/**"
+      # StudioChat-produced rail snapshots consumed by internal/chat. These can
+      # change without a .go diff, so fixture-only seam changes must dispatch the
+      # Go decoder/render tests that assert them.
+      - "internal/chat/testdata/**"
       # Hetzner live-proof fixtures (internal/cli/testdata/pds_live_hetzner_*.json).
       # TestPDSLiveFixturesRecordTheirOwnKindAndLength pins every harvested body to
       # the byte count its manifest records, TestPDSLiveManifestIsMachineEmitted pins

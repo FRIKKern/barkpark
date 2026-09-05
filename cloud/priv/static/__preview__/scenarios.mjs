@@ -654,6 +654,118 @@ const CRUEL_SITE_DOMAIN = atLength("site domain", [
   "customerfacingmarketingexperienceclusterprimaryingressnodea19x1",
   "internalacmegroupholdingsinfrastructureexampledomainnamecorpg",
 ].join("."), 253);
+// cch-w50 (task-696a2fcf95e9c4da) — THE TWO SHAPES cch-w24-s7 DID NOT CARRY.
+//
+//   THE 511-CHAR `github_repo@github_branch` SPAN — the compact `siteRow`'s
+//     `.site-meta .mono` (app.js: `'<span class="mono">' + esc(s.github_repo) +
+//     (s.github_branch ? "@" + esc(s.github_branch) : "")`). It is the ONLY one
+//     of the row's three text hosts that the global list does not also paint,
+//     and nothing in this corpus had ever driven it past 18 characters.
+//     THE FILING SAYS "two independent 255 caps"; ONLY ONE OF THEM IS A
+//     CHANGESET RULE. Re-derived by symbol on this tree:
+//       `validate_length(:github_branch, max: 255)`  — registry/site.ex:252
+//       `validate_github_repo/1`                     — registry/site.ex:341-355,
+//         a FORMAT check (`@github_repo_format`, owner/repo) with NO length
+//         clause at all; github_repo's only cap is the column,
+//         `add :github_repo, :string` (varchar(255)) in
+//         20260627160000_add_github_to_sites.exs. So the span's ceiling is
+//         255 + 1 + 255 = 511, but a length census over site.ex sees only half
+//         of it — the same census blindness the 253-char domain has.
+//       Re-derive: grep -n 'validate_github_repo\|validate_length(:github_branch' \
+//         cloud/lib/barkpark_cloud/registry/site.ex
+//     HONESTY: 255/255 is what the CONTROL PLANE accepts and stores. GitHub
+//     itself would not mint a 255-char `owner/repo` (39-char owner, 100-char
+//     repo are its own ceilings) — this span is FORMAT-legal and storable, not
+//     registrable, exactly as the 253-char domain is. The branch half needs no
+//     such caveat: git has no practical ref-name ceiling and a generated
+//     release ref is the realistic producer.
+//     NO HYPHEN, NO DOT, NO SECOND SLASH — and that is the whole point, MEASURED
+//     rather than assumed. The first draft of this pair was the ordinary
+//     kebab-case shape (`acme-corporate-…/…-static-asset-origin` @
+//     `release/2026-09/…`) and it made the leg that guards this host VACUOUS:
+//     deleting `.site-meta .mono`'s `overflow-wrap: anywhere` from app.css and
+//     re-driving all 20 cells gave exit 0, because `-` and `/` are CSS break
+//     opportunities and the default wrap already broke the span. `anywhere`
+//     only earns its line against a run with NOTHING to break on, which is what
+//     app.css's own comment beside that rule claims is reachable ("a 511-char
+//     unbreakable token"). `@github_repo_format` is `[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`
+//     — separators are PERMITTED, never required — so CamelCase on both halves
+//     is as legal as the kebab shape and is the one that bites.
+const CRUEL_SITE_REPO = atLength("site github_repo", [
+  "AcmeCorporateMarketingPlatformEngineeringGroupHoldings",
+  "/",
+  "CorporateMarketingPlatformProductionContentDeliveryEdgeGateway",
+  "CustomerFacingExperienceClusterPrimaryIngressNorthernEuropean",
+  "RegionalStaticAssetOriginForAcmeCommerceMonorepo01",
+  "AndInternalInfrastructure01",
+].join(""), 255);
+const CRUEL_SITE_BRANCH = atLength("site github_branch", [
+  "release202609AcmeCorporateMarketingPlatformProductionContent",
+  "DeliveryEdgeGatewayCustomerFacingExperienceClusterPrimary",
+  "IngressNorthernEuropeanRegionalStaticAssetOriginRebuildAfter",
+  "TheQuarterlyRegistryMigrationStepTwoOfFourNoSeparatorsAt0139x",
+  "PhaseThreeOfSeven",
+].join(""), 255);
+// THE CRUELTY IS SHAPE AS WELL AS LENGTH, so it is asserted as shape: the only
+// break opportunity in the whole 511-character span is the single `/` the
+// owner/repo format REQUIRES. A future retune that reaches 511 with hyphens in
+// it is still 511 characters long and no longer bites — that is exactly the
+// silent regression `atLength` cannot see, so it is checked here.
+for (const [what, v] of [["github_repo", CRUEL_SITE_REPO], ["github_branch", CRUEL_SITE_BRANCH]]) {
+  const seps = v.replace(/[A-Za-z0-9]/g, "");
+  const want = what === "github_repo" ? "/" : "";
+  if (seps !== want) {
+    throw new Error(
+      "cruel fixture: " + what + " carries the break opportunit" + (seps.length === 1 ? "y" : "ies") +
+      " \"" + seps + "\", expected \"" + want + "\" — a separator makes the 511-char span breakable by the " +
+      "DEFAULT wrap, which makes the .site-meta .mono guard vacuous (measured: exit 0 with the rule deleted)",
+    );
+  }
+}
+// The span the row actually paints, asserted here so a reader does not have to
+// add two numbers and a separator by eye.
+export const CRUEL_SITE_REPO_SPAN_LEN =
+  CRUEL_SITE_REPO.length + 1 + CRUEL_SITE_BRANCH.length;
+if (CRUEL_SITE_REPO_SPAN_LEN !== 511) {
+  throw new Error("cruel fixture: the .site-meta .mono span is " + CRUEL_SITE_REPO_SPAN_LEN + " chars, must be 511");
+}
+
+//   THE 66-CHAR HOST WHOSE FIRST BREAK OPPORTUNITY IS AT CHARACTER 63 — the
+//     SHAPE axis, not the length axis. The 253-char domain above is long enough
+//     that any narrow column fails on it for the boring reason; this one is
+//     SHORT and still unbreakable across a phone column, which is the case a
+//     width-only remedy passes and a wrap-only remedy fails.
+//     THE FILING ASKED FOR A "66-CHAR SINGLE-LABEL HOST" AND THAT STRING IS NOT
+//     SERVER-LEGAL: `@domain_format` (registry/site.ex:28) is
+//     `^label(\.label)+$` — the `+` makes at least one dot MANDATORY, so a
+//     single-label domain is refused by `validate_domains/1` outright, and 66
+//     is over the 63-octet DNS label ceiling besides. The nearest thing the
+//     server does accept, and the one that carries the filing's intent, is a
+//     66-character host that is ONE 63-character label plus a two-letter TLD:
+//     `<63>.io`. Its leading run is the same 63-char unbroken token
+//     `CRUEL_SITE_SLUG` already justifies (clean_url/1 emits it verbatim
+//     through the non-admin POST /v1/launch), and the whole host is 66 chars
+//     with exactly one break opportunity in it, at char 63.
+//     Re-derive: grep -n '@domain_format' cloud/lib/barkpark_cloud/registry/site.ex
+const CRUEL_SITE_HOST_ONE_LABEL = atLength("site one-label host",
+  CRUEL_SITE_SLUG + ".io", 66);
+
+// EXPORTED so overflow-guard.mjs's W50 leg DERIVES the strings it expects to
+// find on the page instead of transcribing them. A transcribed expectation
+// rots silently the first time a constant above is retuned; a derived one
+// cannot. `CRUEL_SITE_ROW_ID` is the row the leg has to be able to point at —
+// the harness reads it off `.site-row[data-id]`.
+export const CRUEL_SITE_STRINGS = {
+  name: CRUEL_SITE_NAME,
+  slug: CRUEL_SITE_SLUG,
+  domain: CRUEL_SITE_DOMAIN,
+  oneLabelHost: CRUEL_SITE_HOST_ONE_LABEL,
+  repo: CRUEL_SITE_REPO,
+  branch: CRUEL_SITE_BRANCH,
+  repoSpanLen: CRUEL_SITE_REPO_SPAN_LEN,
+};
+export const CRUEL_SITE_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000c9";
+export const ONE_LABEL_HOST_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000ca";
 
 const sitesListRows = [
   site({
@@ -716,7 +828,16 @@ const sitesListRows = [
   // the failed and rebuilding rows above follow.
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000ca",
-    name: "acme-media", slug: "acme-media", domains: ["media.acme.com"],
+    // cch-w50: this row's host is the 66-char ONE-LABEL-PLUS-TLD shape (see
+    // CRUEL_SITE_HOST_ONE_LABEL above). It is CARRIED BY AN EXISTING ROW ON
+    // PURPOSE: `sitesListRows` is read positionally and by count by five
+    // FIXTURE_SHAPE_PINS and by two smoke scenarios, so a new row costs a
+    // five-pin edit while a swapped `domains` value costs none — and neither
+    // smoke check names "media.acme.com" (the `sites` check keys acme-media by
+    // its NAME, the `sites-on-instance` check names four other hosts).
+    // Nothing else about this row moves: still deferred, still deployed, still
+    // one domain, so `siteExtraDomains` stays 0.
+    name: "acme-media", slug: "acme-media", domains: [CRUEL_SITE_HOST_ONE_LABEL],
     framework: "astro", github_webhook_configured: true,
     current_deployment_id: depOf(8),
     last_deployment: lastDeploy("deferred", "content-auto", 240),
@@ -791,7 +912,11 @@ const sitesListRows = [
     name: CRUEL_SITE_NAME,
     slug: CRUEL_SITE_SLUG,
     domains: [CRUEL_SITE_DOMAIN],
-    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    // cch-w50: the 511-char `.site-meta .mono` span. Substituted on THIS row
+    // rather than added as a new one, for the same shape-pin reason as
+    // acme-media above; "acme/platform"@"main" was 18 characters and no
+    // instrument had ever driven that host past a comfortable width.
+    framework: "nextjs", github_repo: CRUEL_SITE_REPO, github_branch: CRUEL_SITE_BRANCH,
     github_webhook_configured: true,
     current_deployment_id: depOf(9),
     last_deployment: lastDeploy("live", "manual", 1200),
@@ -2226,18 +2351,22 @@ const siteStatesDomains = {
 // the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
 //
-// SEVEN AS OF cch-w29-bl, and it was SIX, NOT NINE before that (wave 30 S1).
+// EIGHT AS OF cch-w30-bl. It was SEVEN as of cch-w29-bl, and SIX, NOT NINE
+// before that (wave 30 S1).
 // `deployment_refused` is the auto-deploy PREBUILT refusal: column, producer and
 // console row all landed together, so the fixture seeds it too.
-// `deployment_succeeded`, `member_invited` and
-// `token_expiring` were dropped from `EmailSettings` end to end — no column, no
-// producer, no toggle. A fixture that still seeded them was claiming to be
-// backend-true while describing a backend that no longer exists, which is the
-// exact shape this wave exists to remove; `__app.test.mjs`'s bidirectional
-// census guards app.js but has no reach into this file, so it stayed green.
+// `deployment_succeeded` came BACK the same way — `Registry`'s
+// `dispatch_deployment_terminal/2` fires it from both writers that can land the
+// `live` terminal, so the column, the render arms and the console row returned
+// with it. `member_invited` and `token_expiring` are still dropped from
+// `EmailSettings` end to end — no column, no producer, no toggle. A fixture that
+// still seeded them was claiming to be backend-true while describing a backend
+// that no longer exists, which is the exact shape wave 30 exists to remove;
+// `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
+// this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
-  "deployment_refused",
+  "deployment_succeeded", "deployment_refused",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
@@ -5128,6 +5257,35 @@ export const SCENARIOS = {
     },
   },
 
+  // ── cch-w49-s7 · THE DEPLOY THAT CANNOT TAKE MONEY ────────────────────────
+  // THE HOLE THIS CLOSES. #10509 put `billing_capability` on GET
+  // /v1/subscription and NO fixture in this corpus had ever carried one — so
+  // every console consumer of it was green BY CONSTRUCTION, in the same way
+  // `billing-free-owner` found the upsell card's four markers had zero hits.
+  // `billing-trial` is the only actor whose #billing-tiers is VISIBLE at first
+  // paint (renderTrial unhides the grid), so it is the only actor from which a
+  // rendered-bytes assertion about the tier grid can be made at all; this is
+  // that actor with the plane declaring `unconfigured` — no plan priced, so
+  // Billing.checkout/2 can only ever answer {:error, :billing_not_configured}.
+  // Everything else is billing-trial's data verbatim: the ONE variable is the
+  // declaration.
+  "billing-unconfigured": {
+    label: "Billing — the plane declares checkout UNCONFIGURED: the tier grid offers no Subscribe at all and says why",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [liveInstance],
+      subscription: trialSub,
+      // checkout_capability/0's :unconfigured arm, verbatim: priced_plans() is
+      // empty, so `plans` is [] and not a missing key — an empty LIST is the
+      // server's own answer, and it is not the same thing as no declaration.
+      billingCapability: { checkout: "unconfigured", plans: [] },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // ── cch-w12-followup-login-fixture-gap · THE SUCCESSFUL LOGIN ──────────────
   // THE HOLE THIS CLOSES. Until now this file answered POST /v1/auth/login from
   // exactly ONE fixture (`loggedout-twofactor`), and that fixture returns
@@ -5568,7 +5726,18 @@ export function route(name, method, path, state) {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
-  if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
+  // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
+  // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:
+  // billing_capability_json()}`). It is OPT-IN here rather than defaulted:
+  // an absent key is exactly the "unknown" the console fail-opens on, which is
+  // what every scenario written before this slice was already modelling, so no
+  // committed fixture's rendered bytes move. A scenario that wants to drive a
+  // declared capability sets `billingCapability` in its data.
+  if (p === "/v1/subscription") {
+    const sub = { subscription: d.subscription };
+    if (d.billingCapability) sub.billing_capability = d.billingCapability;
+    return { status: 200, body: sub };
+  }
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
   // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
   // to drive the failure variants (401 password_invalid, 403 forbidden, …). The

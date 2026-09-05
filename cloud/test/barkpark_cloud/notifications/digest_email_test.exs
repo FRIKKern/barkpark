@@ -354,7 +354,18 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
   # and the census they compare against share one clock.
   @ledger_now ~U[2026-08-09 12:00:00Z]
 
-  defp window(label, door, deferred, failed, rate) do
+  # THE DOUBLE CARRIES BOTH BASES (dr-w31/D525), because the renderer under test
+  # now prints both and a double that carried one would make every assertion
+  # below a test of the ABSENT-node arm rather than of the rendered pair.
+  #
+  # `settled` defaults to `door - deferred` HERE, IN A TEST DOUBLE ONLY — the
+  # production reader takes it from `census.failed + census.live` and never from
+  # a subtraction (D257 forbids the subtractive success count, which folds
+  # in-flight, cancelled and residual rows into `live`). A caller that needs a
+  # settled cohort the subtraction cannot express passes it explicitly.
+  defp window(label, door, deferred, failed, rate, settled \\ nil) do
+    settled = settled || door - deferred
+
     %{
       label: label,
       from: DateTime.add(@read_at, -86_400, :second),
@@ -362,7 +373,36 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
       door: door,
       deferred: deferred,
       failed: failed,
-      rate: rate
+      settled: settled,
+      rate: rate,
+      terminal_rate: terminal_rate(failed, settled, rate)
+    }
+  end
+
+  # The settled-basis twin, refusing on ITS OWN sample. It refuses exactly when
+  # the attempted node refuses is NOT the rule: the two denominators differ, so
+  # each crosses `min_sample` on its own — that is the point of printing both.
+  defp terminal_rate(failed, settled, _rate) when settled >= 200 do
+    %{
+      sample: settled,
+      pct: Float.round(failed * 100 / settled, 2),
+      numerator: failed,
+      min_sample: 200,
+      refused: false,
+      reason: nil,
+      basis: "TERMINAL rows only: failed + live"
+    }
+  end
+
+  defp terminal_rate(failed, settled, _rate) do
+    %{
+      sample: settled,
+      pct: nil,
+      numerator: failed,
+      min_sample: 200,
+      refused: true,
+      reason: "sample #{settled} below min_sample 200",
+      basis: "TERMINAL rows only: failed + live"
     }
   end
 
@@ -453,7 +493,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
       health([
         window("last 24h", 852, 564, 53, measured_rate(53, 852)),
         %{
-          window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+          window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156), 6_180)
           | from: DateTime.add(@read_at, -604_800, :second)
         }
       ])
@@ -463,19 +503,19 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert body =~
              "Deploy health for this team's sites (control-plane deploy ledger, read 2026-08-09 06:00 UTC):"
 
-    # THE BINDING SHAPE: door, deferrals and the post-door rate on ONE line.
+    # THE BINDING SHAPE: door, deferrals and BOTH bases of the rate on ONE line.
     assert body =~
-             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 852 attempted, of which 564 deferred by a busy box — 6.22% failed post-door (53 of 852 attempted)."
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 852 attempted, of which 564 deferred by a busy box — 6.22% failed on attempted (53 of 852 attempted); 18.4% failed on settled (53 of 288 settled)."
 
     assert body =~
-             "  last 7d (2026-08-02 06:00 UTC to 2026-08-09 06:00 UTC): 9,156 attempted, of which 3,043 deferred by a busy box — 67.5% failed post-door (6,180 of 9,156 attempted)."
+             "  last 7d (2026-08-02 06:00 UTC to 2026-08-09 06:00 UTC): 9,156 attempted, of which 3,043 deferred by a busy box — 67.5% failed on attempted (6,180 of 9,156 attempted); 100.0% failed on settled (6,180 of 6,180 settled)."
   end
 
   test "a rate can never be rendered without its door and its deferrals beside it" do
     deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
 
-    [line] = for l <- String.split(body, "\n"), l =~ "failed post-door", do: l
+    [line] = for l <- String.split(body, "\n"), l =~ "failed on attempted", do: l
 
     # Every number the percentage depends on is on the SAME line as the
     # percentage. A future refactor that splits them apart reds here.
@@ -496,7 +536,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     # The reassuring readings a zero window must never be able to produce.
     refute body =~ "0% failed"
     refute body =~ "0.0% failed"
-    refute body =~ "failed post-door"
+    refute body =~ "failed on attempted"
   end
 
   test "an empty window and a team with NO SITES are different sentences" do
@@ -532,9 +572,9 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
 
     assert body =~
-             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 74 attempted, of which 12 deferred by a busy box — failure rate UNMEASURED (sample 74 below min_sample 200); 3 of 74 attempted are settled failures"
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 74 attempted, of which 12 deferred by a busy box — failure rate on attempted UNMEASURED (sample 74 below min_sample 200); 3 of 74 attempted are settled failures; failure rate on settled UNMEASURED (sample 62 below min_sample 200); 3 of 62 settled are settled failures"
 
-    refute body =~ "% failed post-door"
+    refute body =~ "% failed on attempted"
   end
 
   ## ── THE DEFERRAL WAIT ─────────────────────────────────────────────────────
@@ -555,7 +595,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
 
     assert body =~
-             "760 attempted, of which 502 deferred by a busy box — 2.37% failed post-door (18 of 760 attempted). " <>
+             "760 attempted, of which 502 deferred by a busy box — 2.37% failed on attempted (18 of 760 attempted); 6.98% failed on settled (18 of 258 settled). " <>
                "The slowest of those deferrals waited 41.7m for a box; 492 of 502 deferred rows have since rebuilt, 8 are still waiting."
 
     # The wait and the population it was measured over are on ONE line, for the
@@ -828,7 +868,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     body = DigestEmail.body(DigestEmail.summary([fresh_box()]))
 
     assert body =~ "Deploy health: UNMEASURED — this send supplied no deploy-ledger reading."
-    refute body =~ "failed post-door"
+    refute body =~ "failed on attempted"
   end
 
   test "no team scope is UNMEASURED and is NEVER read as the whole fleet" do
@@ -846,7 +886,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
       assert body =~
                "Deploy health: UNMEASURED — this send supplied no team scope, so no reading was taken."
 
-      refute body =~ "failed post-door"
+      refute body =~ "failed on attempted"
       refute body =~ "attempted, of which"
     end
   end
@@ -874,14 +914,14 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: reading))
     assert body =~ "Deploy health: UNMEASURED — the deploy ledger could not be read"
-    refute body =~ "failed post-door"
+    refute body =~ "failed on attempted"
   end
 
   test "the digest never prints a lifetime deploy rate" do
     deploy =
       health([
         window("last 24h", 852, 564, 53, measured_rate(53, 852)),
-        window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+        window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156), 6_180)
       ])
 
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
@@ -925,8 +965,8 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     six_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: six))
     sixty_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: sixty))
 
-    assert six_body =~ "6.22% failed post-door (53 of 852 attempted)"
-    assert sixty_body =~ "67.49% failed post-door (575 of 852 attempted)"
+    assert six_body =~ "6.22% failed on attempted (53 of 852 attempted)"
+    assert sixty_body =~ "67.49% failed on attempted (575 of 852 attempted)"
 
     # If the block ever stops reading the reading, these two bodies become
     # identical and this reds.

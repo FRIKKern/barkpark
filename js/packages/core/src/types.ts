@@ -34,27 +34,54 @@ export type OrderDirection = 'asc' | 'desc'
 export type OrderSpec = `${OrderField}:${OrderDirection}` | (string & {})
 
 /**
- * Filter operators Phoenix supports (content/query.ex apply_field_op).
+ * The documented public filter operators, in `@valid_filter_ops` order.
  *
- * NULL / absence checks have no dedicated op — use `eq`/`neq` with a `null`
- * value instead: `eq(field, null)` becomes the server's `IS NULL` and
- * `neq(field, null)` becomes `IS NOT NULL` (so they find documents actually
- * missing the field, not ones equal to the empty string).
+ * ONE OWNER, TWO LANGUAGES. `Barkpark.Content.Query.valid_filter_ops/0`
+ * (api/lib/barkpark/content/query.ex) is the source of truth: it is what
+ * `QueryController` derives its door from, so it IS the wire vocabulary. This
+ * array is its TypeScript mirror, and the two are pinned to each other by the
+ * shared fixture `api/test/fixtures/filter_ops.json` — the Elixir side asserts
+ * the fixture equals `valid_filter_ops/0`
+ * (api/test/barkpark/content/filter_ops_fixture_parity_test.exs) and this
+ * package asserts this array equals the same fixture
+ * (tests/filter-op-parity.test.ts). Neither list can move alone.
+ *
+ * NOT `@doc_id_only_ops` (`starts_with`, `not_starts_with`). Those are
+ * builder-only spellings with clauses on the `doc_id`/`_id` column only; the
+ * controller's door refuses them and `filter_ops_test.exs` pins that refusal as
+ * a specification ("the door stays narrower than the builder"). Putting them
+ * here would type-bless a filter every HTTP caller gets a 400 for.
+ *
+ * `FilterOp` is DERIVED from this array rather than hand-written beside it. A
+ * union spelled separately would make the parity test compare a hand-copy to a
+ * hand-copy: the runtime array could gain an op the compile-time type refused,
+ * and the fixture assertion would still be green.
+ *
+ * `is` takes the literal string `'null'` or `'notnull'` and nothing else — it
+ * is the server's IS NULL / IS NOT NULL test (`filter[<field>][is]=null`).
+ * `eq`/`neq` with a `null` VALUE are sugar for the same wire form:
+ * `eq(field, null)` serialises to `filter[<field>][is]=null` and
+ * `neq(field, null)` to `…=notnull`, so they find documents actually missing
+ * the field rather than ones equal to the empty string.
  */
-export type FilterOp =
-  | 'eq'
-  | 'neq'
-  | 'in'
-  | 'nin'
-  | 'has'
-  | 'hasStrong'
-  | 'contains'
-  | 'startsWith'
-  | 'endsWith'
-  | 'gt'
-  | 'gte'
-  | 'lt'
-  | 'lte'
+export const FILTER_OPS = [
+  'eq',
+  'neq',
+  'in',
+  'nin',
+  'has',
+  'hasStrong',
+  'contains',
+  'startsWith',
+  'endsWith',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'is',
+] as const
+
+export type FilterOp = (typeof FILTER_OPS)[number]
 
 /**
  * @internal
@@ -112,7 +139,13 @@ export interface BarkparkClientConfig extends BarkparkHooks {
   token?: string // Bearer for write + listen + admin surfaces
   useCdn?: boolean // reserved — guard rejects useCdn:true + perspective:'drafts'
   perspective?: Perspective // default 'published'
-  timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport)
+  timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport) — bounds ONE attempt
+  /** Overall budget (ms) per call, retries and backoff sleeps included.
+   *  Undefined (default) means unbounded. Set it when the caller has a real
+   *  global bound — a serverless route handler's budget, an `AbortSignal.timeout`
+   *  — and the retry loop will decline any retry that cannot finish inside it
+   *  rather than spending the remainder on a backoff sleep. */
+  deadlineMs?: number
   requestTagPrefix?: string // X-Barkpark-Request-Tag: <prefix>-<uuid> for observability; default 'bp', set '' to disable
   fetch?: typeof globalThis.fetch // user override (MSW, tracing)
 }
@@ -781,8 +814,34 @@ export interface BarkparkAuth {
   verifyEmail(token: string, opts?: { signal?: AbortSignal }): Promise<void>
   /** Request a password-reset email (`POST /v1/auth/request-reset`); always succeeds. */
   requestPasswordReset(email: string, opts?: { signal?: AbortSignal }): Promise<void>
-  /** Set a new password with a reset token (`POST /v1/auth/reset`); throws on a bad token. */
-  resetPassword(token: string, password: string, opts?: { signal?: AbortSignal }): Promise<void>
+  /**
+   * Set a new password with a reset token (`POST /v1/auth/reset`); throws on a
+   * bad token. Resolves with the reset receipt, whose `sessionsRevoked` is how
+   * many other sessions the server killed (`null` when the server reported no
+   * count at all — not the same fact as `0`).
+   */
+  resetPassword(
+    token: string,
+    password: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<PasswordResetReceipt>
+}
+
+/**
+ * The receipt returned by a successful password reset.
+ *
+ * A reset revokes every OTHER session for the user; `sessionsRevoked` is the
+ * count the server actually stamped, so a caller can tell the user how many
+ * devices were signed out instead of guessing.
+ *
+ * `null` and `0` are deliberately distinct. `0` is a measurement: the server
+ * counted and there were none. `null` is an absence: the server returned no
+ * count (it predates the field), so nothing was measured. Collapsing `null` to
+ * `0` would turn "we do not know" into "we checked and it was none", which is
+ * the same unread-receipt defect the endpoint was changed to fix.
+ */
+export interface PasswordResetReceipt {
+  sessionsRevoked: number | null
 }
 
 /**

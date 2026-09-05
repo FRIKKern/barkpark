@@ -489,8 +489,23 @@ defmodule PDS.Census do
     # ONE inserted defp hop. `unrouted` is INHERITED UNCHANGED at 12 — the two sites did
     # not fall out of the route relation, they landed in the other routed class, and a
     # row that did not move is evidence too.
-    write: 58,
-    read: 25,
+    #
+    # RE-DERIVED AGAIN at task-41a740fd6701ec28 (PR #16147, the mutate-path schema
+    # validation mount): 58 -> 57 and 25 -> 26. Mounting `Content.Validation` at the
+    # `Writer.create_document/4` / update chokepoint inserted a hop that moved ONE
+    # already-routed receipt from the write class into the read class; the emitted
+    # population (95), the phantoms (9) and `unrouted` (12) did not move — the site did
+    # not fall out of the route relation, it landed in the other routed class, exactly
+    # the shape task-a0ce4e18f6776400 recorded above. DERIVED BY THE INSTRUMENT ITSELF,
+    # not typed from memory: the D448-DRIFT-REFUSES line of this census on the PR's own
+    # head (CI run 33960196892, head c6a4b42b1f, engine Elixir 1.18.4 · Erlang/OTP 27 (erts 15.0.1) · x86_64-pc-linux-gnu) printed
+    # "write-routed baseline 58 derived 57 · read-routed baseline 25 derived 26"; the
+    # lead amended the baseline from that run because the local box could not complete
+    # the census under load (>10 min at load 90). Re-run `--sites` against origin/main
+    # to NAME the member when the box is quiet — this comment records the count, not
+    # the member.
+    write: 57,
+    read: 26,
     unrouted: 12
   }
 
@@ -978,12 +993,12 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
-    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "32386685"},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "15541809"},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "54697721"},
     {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "41987025"},
     {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
-    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "100313143"},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
     {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
@@ -992,7 +1007,7 @@ defmodule PDS.Census do
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
-    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "100313143"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
@@ -2050,9 +2065,15 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.edges_for_kind/3", "41908878", "113319186"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
-    # barkpark_web/controllers/tasks_controller.ex:952
+    # barkpark_web/controllers/tasks_controller.ex — the graph payload, moved from
+    # graph_show/2 into the private graph_traverse/3 this branch extracted so the
+    # ?perspective refusal can run BEFORE the traversal. The SITE fingerprint is
+    # unchanged (14314567) — the receipt is byte-identical and simply sits inside a
+    # new enclosing def, which moved the def fingerprint 68876245 -> 72555353.
+    # Verdict and basis are carried over untouched: nothing about what this payload
+    # reports, or about it being the postcondition, changed.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.graph_show/2", "68876245", "14314567"},
+            "BarkparkWeb.TasksController.graph_traverse/3", "72555353", "14314567"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:984
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -2760,6 +2781,15 @@ defmodule PDS.Census do
       # both need it, and re-walking a body per lookup is what turned this seam from a
       # 8 s census into a 48 s one.
       |> Enum.map(&Map.put(&1, :binds, concat_bindings(&1[:body])))
+      # THE MEMO KEY (PDS-D712). One unique integer per def, stamped where :calls and
+      # :binds are stamped and for the same reason: verb_hits/1 and callees/2 are pure
+      # per-def lenses the BFS sweeps re-ask hundreds of thousands of times, and a key
+      # they can index on has to be UNIQUE — `callee_key/1`'s {module, name, arity, line}
+      # is the dedup key for a callee list, not an identity, and two files declaring one
+      # module could repeat it. Defs that never pass through this index carry no :cid and
+      # take the uncached clause.
+      |> Enum.with_index()
+      |> Enum.map(fn {d, i} -> Map.put(d, :cid, i) end)
 
     by_key = Enum.group_by(all, fn d -> {d.module, d.name} end)
     by_module = Enum.group_by(all, & &1.module)
@@ -3029,11 +3059,59 @@ defmodule PDS.Census do
 
   defp label(d), do: "#{Enum.join(d.module, ".")}.#{d.name}/#{d.arity}"
 
-  defp verb_hits(%{delegate: {_, _}}), do: []
+  # ------------------------------------------------ THE TWO MEMOISED LENSES (PDS-D712)
+  #
+  # PROFILED, NOT GUESSED. `:timer.tc` around these two entry points over ONE plain
+  # census of the live corpus (842 files, load1 27, this host): `callees/2` cost
+  # 31 277,9 ms over 360 435 calls and `verb_hits/1` 7 945,6 ms over 778 433 calls —
+  # 39,2 s of a 62,2 s run, 63 percent of the census, and the two phases that pay it are
+  # the two whole-corpus BFS sweeps (`sweep_rows/3` 19,0 s, the LiveView `bfs_budgets`
+  # reach 18,4 s). #15828 already took the redundancy BETWEEN BUDGETS out of both sweeps
+  # — one walk, twelve rows. What was left is the redundancy BETWEEN STARTS: 360 435
+  # `callees/2` calls over a corpus holding some thousands of defs is the SAME def
+  # re-resolved dozens of times, once per walk that passes through it.
+  #
+  # THE PARSE IS NOT THE LEVER, AND THE FILING SAID IT WAS. task-2bde38694b4539b2 leads
+  # with "parse the corpus ONCE and share the AST across the four arms". The profile puts
+  # `parse_file/1` over all 842 files at 5 536,2 ms — 8,9 percent of the run. A perfect
+  # cross-arm AST cache could not buy a tenth of what these two memos buy, and it would
+  # add a serialisation format, a digest and a cache file to an instrument whose whole
+  # claim is that it derives everything by run.
+  #
+  # WHY IT CANNOT CHANGE A NUMBER. Both are PURE functions of one def (plus, for
+  # `callees_uncached/2`, the index — which `main/1` builds exactly once per process:
+  # `census/1`, `keys_run/1` and `citations_run/0` are alternative dispatches, never
+  # nested). The key is `:cid`, a per-run unique integer stamped on every def by
+  # `build_index/1` — NOT `callee_key/1`, whose {module, name, arity, line} could in
+  # principle repeat across two files declaring one module. A def that carries no `:cid`
+  # (anything not resolved through the index) falls through to the uncached clause, so
+  # the memo can only ever return the value the uncached function would have returned.
+  # The proof is the c2 diff: the whole census output is byte-identical before and after
+  # on the live corpus AND on a mutated tree, save the `user cpu` line it labels volatile.
+  #
+  # THE PROCESS DICTIONARY, DELIBERATELY. These sweeps run in ONE process (`Enum.map`,
+  # never `Task.async`), so a pdict entry is a constant-time read with no ETS table to
+  # own, name-collide or clean up — and it dies with the process, which is the scope the
+  # cache is correct for.
+  defp verb_hits(%{cid: cid} = d) do
+    case :erlang.get({:pds_vh, cid}) do
+      :undefined ->
+        v = verb_hits_uncached(d)
+        :erlang.put({:pds_vh, cid}, v)
+        v
 
-  defp verb_hits(%{body: nil}), do: []
+      v ->
+        v
+    end
+  end
 
-  defp verb_hits(%{body: body}) do
+  defp verb_hits(d), do: verb_hits_uncached(d)
+
+  defp verb_hits_uncached(%{delegate: {_, _}}), do: []
+
+  defp verb_hits_uncached(%{body: nil}), do: []
+
+  defp verb_hits_uncached(%{body: body}) do
     {_, hits} =
       Macro.prewalk(body, [], fn
         {{:., _, [{:__aliases__, _, segs}, f]}, meta, args} = n, acc when is_list(args) ->
@@ -3063,15 +3141,30 @@ defmodule PDS.Census do
     hits
   end
 
+  # THE SECOND MEMO — see the block above verb_hits/1 for the profile that named it.
+  defp callees(%{cid: cid} = d, index) do
+    case :erlang.get({:pds_cl, cid}) do
+      :undefined ->
+        v = callees_uncached(d, index)
+        :erlang.put({:pds_cl, cid}, v)
+        v
+
+      v ->
+        v
+    end
+  end
+
+  defp callees(d, index), do: callees_uncached(d, index)
+
   # callees: defdelegate target, or every local/remote call resolvable in the corpus
-  defp callees(%{delegate: {target, as}} = d, index) when is_list(target),
+  defp callees_uncached(%{delegate: {target, as}} = d, index) when is_list(target),
     do: resolve(index, target, as, d.arity)
 
-  defp callees(%{delegate: {_, _}}, _index), do: []
+  defp callees_uncached(%{delegate: {_, _}}, _index), do: []
 
-  defp callees(%{body: nil}, _index), do: []
+  defp callees_uncached(%{body: nil}, _index), do: []
 
-  defp callees(%{module: mod} = d, index) do
+  defp callees_uncached(%{module: mod} = d, index) do
     binds = d[:binds] || concat_bindings(d[:body])
 
     (d[:calls] || raw_calls(d))

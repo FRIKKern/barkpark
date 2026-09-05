@@ -26,12 +26,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
+
+  alias Barkpark.Content.{
+    AuthoringWall,
+    Broadcast,
+    Document,
+    DraftId,
+    Encryption,
+    Labels,
+    Sheets,
+    Writer
+  }
+
   alias Barkpark.Content.CallerContext
+
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
+  alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -633,12 +646,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
        rev}}` on the per-doc topic.
 
   Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
-  rev:}}` on success.
+  rev:}}` on success. When `opts[:if_rev]` is present, it must match the
+  paper's current streaming revision and the final row update is atomically
+  fenced; omitting it preserves the legacy last-write-wins contract.
   """
   def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
@@ -710,7 +727,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           "rev" => generate_rev()
         })
 
-      case Repo.update(changeset) do
+      case fenced_or_plain_paper_update(changeset, doc, opts) do
         {:ok, saved} ->
           # Edit-on-the-link slice 4: the delta frame names WHO produced it.
           # Server-side only (a frame is a `handle_info` payload, never bytes on
@@ -783,7 +800,106 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
-         if_rev = Keyword.get(opts, :if_rev),
+         {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
+      run_paper_batch_effects(effects, dataset, opts)
+      {:ok, receipt}
+    else
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  @doc """
+  Apply one request-identified paper-op batch once within the idempotency
+  store's bounded retention window (24 hours by default; the editor retries for
+  at most one hour).
+
+  The request id is scoped to the physical paper row, its complete tenant
+  identity, and the authenticated principal. The ops plus `:if_rev` form the
+  payload fingerprint. A matching retry returns the original receipt without
+  rechecking the now-stale revision and without repeating post-commit effects;
+  reuse for different input fails closed. This facade must own its transaction
+  boundary so those effects run only after the actual commit; calling it from
+  an already-open transaction is rejected before any read, claim, or mutation.
+  """
+  def apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      )
+
+  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+      when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
+      key_hash = paper_ops_key_hash(doc, request_id, principal_key)
+      exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
+
+      Repo.transaction(fn ->
+        case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+          :claimed ->
+            maybe_after_idempotency_claim(opts)
+
+            case get_block_op_paper(slug, dataset, opts) do
+              %Document{id: current_id} = current_doc when current_id == doc.id ->
+                case persist_paper_block_ops(current_doc, slug, ops, dataset, opts) do
+                  {:ok, receipt, effects} ->
+                    maybe_before_idempotency_complete(opts)
+
+                    case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                      :ok -> {:applied, receipt, effects}
+                      {:error, reason} -> Repo.rollback(reason)
+                    end
+
+                  {:error, reason} ->
+                    Repo.rollback(reason)
+                end
+
+              _ ->
+                Repo.rollback(:not_found)
+            end
+
+          {:replay, stored_receipt} ->
+            case normalize_stored_paper_ops_receipt(stored_receipt) do
+              {:ok, receipt} -> {:replayed, receipt}
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          :in_progress ->
+            Repo.rollback(:idempotency_in_progress)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {:applied, receipt, effects}} ->
+          run_paper_batch_effects(effects, dataset, opts)
+          {:ok, receipt, :applied}
+
+        {:ok, {:replayed, receipt}} ->
+          {:ok, receipt, :replayed}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      true -> {:error, :paper_ops_nested_transaction_unsupported}
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
+    do: {:error, :invalid_paper_ops_request}
+
+  defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
+    with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
@@ -814,7 +930,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
              op_count: 0,
              rev: paper_current_rev(doc),
              block_ids: []
-           }}
+           }, nil}
 
         true ->
           rev = paper_next_rev(doc)
@@ -858,17 +974,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
                   CallerContext.actor_stamp_from_opts(opts)
                 )
 
-              broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
-              enqueue_edge_projection(saved)
-              maybe_save_batch_revision(saved, dataset, opts)
-
               {:ok,
                %{
                  slug: slug,
                  op_count: length(ops),
                  rev: rev,
                  block_ids: block_ids
-               }}
+               }, {saved, slug, frame}}
 
             {:error, :precondition_failed} = err ->
               err
@@ -878,9 +990,176 @@ defmodule Barkpark.Content.Papers.BlockOps do
           end
       end
     else
-      nil -> {:error, :not_found}
       {:error, _reason} = err -> err
     end
+  end
+
+  defp run_paper_batch_effects(nil, _dataset, _opts), do: :ok
+
+  defp run_paper_batch_effects({%Document{} = saved, slug, frame}, dataset, opts) do
+    broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
+    enqueue_edge_projection(saved)
+    maybe_save_batch_revision(saved, dataset, opts)
+    :ok
+  end
+
+  defp normalize_paper_ops_request_id(request_id) when is_binary(request_id) do
+    case Ecto.UUID.cast(request_id) do
+      {:ok, canonical} -> {:ok, canonical}
+      :error -> {:error, :invalid_request_id}
+    end
+  end
+
+  defp normalize_paper_ops_request_id(_), do: {:error, :invalid_request_id}
+
+  defp normalize_paper_ops_principal(principal_key) when is_binary(principal_key) do
+    case String.trim(principal_key) do
+      "" -> {:error, :missing_principal}
+      canonical -> {:ok, canonical}
+    end
+  end
+
+  defp normalize_paper_ops_principal(_), do: {:error, :missing_principal}
+
+  # Internal contention seam: the unboxed two-connection regression pauses the
+  # winning transaction after INSERT so the losing INSERT is forced to observe
+  # a genuinely in-flight Postgres uniqueness conflict. No host passes it.
+  defp maybe_after_idempotency_claim(opts) do
+    case Keyword.get(opts, :after_idempotency_claim) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+  end
+
+  # Test-only fault seam: lets the transaction regression remove/corrupt the
+  # pending receipt after the document UPDATE, proving completion failure rolls
+  # the document back too. Production hosts never set this option.
+  defp maybe_before_idempotency_complete(opts) do
+    case Keyword.get(opts, :before_idempotency_complete) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+  end
+
+  defp paper_ops_key_hash(%Document{} = doc, request_id, principal_key) do
+    {
+      "paper_ops:v1",
+      doc.id,
+      doc.workspace_id,
+      doc.project_id,
+      doc.dataset_id,
+      doc.dataset,
+      principal_key,
+      request_id
+    }
+    |> deterministic_hash()
+  end
+
+  defp paper_ops_payload_fingerprint(ops, opts) do
+    {ops, Keyword.get(opts, :if_rev)}
+    |> deterministic_hash()
+  end
+
+  defp document_op_key_hash(
+         %Document{} = doc,
+         target_doc_id,
+         type,
+         request_id,
+         principal_key
+       ) do
+    {
+      "document_op:v1",
+      target_doc_id,
+      type,
+      doc.workspace_id,
+      doc.project_id,
+      doc.dataset_id,
+      doc.dataset,
+      principal_key,
+      request_id
+    }
+    |> deterministic_hash()
+  end
+
+  defp document_op_payload_fingerprint(op, opts) do
+    {op, Keyword.get(opts, :if_rev)}
+    |> deterministic_hash()
+  end
+
+  defp deterministic_hash(term) do
+    term
+    |> :erlang.term_to_binary([:deterministic])
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  defp normalize_stored_paper_ops_receipt(%{
+         "slug" => slug,
+         "op_count" => op_count,
+         "rev" => rev,
+         "block_ids" => block_ids
+       })
+       when is_binary(slug) and is_integer(op_count) and is_integer(rev) and
+              is_list(block_ids) do
+    {:ok, %{slug: slug, op_count: op_count, rev: rev, block_ids: block_ids}}
+  end
+
+  defp normalize_stored_paper_ops_receipt(_),
+    do: {:error, :idempotency_receipt_invalid}
+
+  defp normalize_stored_document_op_receipt(%{
+         "block" => block,
+         "block_id" => block_id,
+         "op_kind" => op_kind,
+         "position" => position,
+         "written_doc_id" => written_doc_id,
+         "written_row_id" => written_row_id,
+         "rev" => rev
+       })
+       when is_map(block) and (is_binary(block_id) or is_nil(block_id)) and
+              is_binary(op_kind) and (is_integer(position) or is_nil(position)) and
+              is_binary(written_doc_id) and is_binary(written_row_id) and is_binary(rev) do
+    {:ok,
+     %{
+       block: block,
+       block_id: block_id,
+       op_kind: op_kind,
+       position: position,
+       written_doc_id: written_doc_id,
+       written_row_id: written_row_id,
+       rev: rev
+     }}
+  end
+
+  defp normalize_stored_document_op_receipt(_),
+    do: {:error, :idempotency_receipt_invalid}
+
+  defp finish_document_op_transaction(
+         {:ok, {:applied, receipt, {{:ok, %Document{} = saved}, payload}}},
+         _dataset,
+         _previous_doc,
+         _opts
+       ) do
+    Broadcast.flush_deferred_broadcasts()
+    _ = Writer.finish_deferred_after_save({:ok, saved}, payload)
+    {:ok, receipt, :applied}
+  end
+
+  defp finish_document_op_transaction(
+         {:ok, {:replayed, receipt}},
+         _dataset,
+         _previous_doc,
+         _opts
+       ) do
+    Broadcast.clear_deferred_broadcasts()
+    Writer.clear_deferred_after_save()
+    {:ok, receipt, :replayed}
+  end
+
+  defp finish_document_op_transaction({:error, reason}, _dataset, _previous_doc, _opts) do
+    Broadcast.clear_deferred_broadcasts()
+    Writer.clear_deferred_after_save()
+    {:error, reason}
   end
 
   # Atomic fold: thread the block list through each op via Patch.apply_patch/2,
@@ -1225,7 +1504,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       }
 
       case Content.upsert_document(type, attrs, dataset, opts) do
-        {:ok, _saved} ->
+        {:ok, saved} ->
           {:ok,
            %{
              block: affected.block,
@@ -1237,7 +1516,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
              # NOT the published `<slug>` row a reader resolves. Naming it in
              # the result lets an HTTP receipt be honest about which document
              # changed instead of echoing the requested slug.
-             written_doc_id: attrs["doc_id"]
+             written_doc_id: attrs["doc_id"],
+             written_row_id: saved.id,
+             rev: saved.rev
            }}
 
         {:error, _} = err ->
@@ -1248,6 +1529,185 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} = err -> err
     end
   end
+
+  @doc """
+  Apply one request-identified Beta document block operation exactly once.
+
+  The request identity is bound to the stable draft target, tenancy, principal,
+  operation payload, and optimistic revision. The completed receipt also binds
+  the physical row UUID, so deleting and recreating the same document leaf can
+  never inherit an old success. Matching retries return the original receipt
+  without repeating the write. This facade also owns the generic writer's
+  deferred effect queue and flushes it only after commit.
+
+  `apply_document_block_op/5` remains the compatible keyless API.
+  """
+  @spec apply_document_block_op_once(
+          String.t(),
+          String.t(),
+          map(),
+          String.t(),
+          String.t(),
+          String.t(),
+          keyword()
+        ) :: {:ok, map(), :applied | :replayed} | {:error, term()}
+  def apply_document_block_op_once(
+        doc_id,
+        type,
+        op,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      )
+
+  def apply_document_block_op_once(
+        doc_id,
+        type,
+        op,
+        dataset,
+        request_id,
+        principal_key,
+        opts
+      )
+      when is_binary(doc_id) and is_binary(type) and is_map(op) and is_binary(dataset) and
+             is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         target_doc_id = DraftId.draft_id(DraftId.published_id(doc_id)),
+         {:ok, %Document{} = doc} <-
+           get_document_op_base(target_doc_id, doc_id, type, dataset, opts) do
+      key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
+      exact_scope = "document_op:v1:" <> document_op_payload_fingerprint(op, opts)
+
+      Broadcast.clear_deferred_broadcasts()
+      Writer.clear_deferred_after_save()
+
+      try do
+        Repo.transaction(fn ->
+          case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+            :claimed ->
+              maybe_after_idempotency_claim(opts)
+
+              case lock_document_op_base(target_doc_id, doc_id, type, dataset, opts) do
+                {:ok, %Document{id: current_id}} when current_id == doc.id ->
+                  write_opts = Keyword.put(opts, :defer_after_save, true)
+
+                  case apply_document_block_op(doc.doc_id, type, op, dataset, write_opts) do
+                    {:ok, receipt} ->
+                      maybe_before_idempotency_complete(opts)
+
+                      case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                        :ok ->
+                          case Writer.take_deferred_after_save() do
+                            {{:ok, %Document{id: row_id}}, _payload} = deferred
+                            when row_id == receipt.written_row_id ->
+                              {:applied, receipt, deferred}
+
+                            _ ->
+                              Repo.rollback(:document_after_save_effect_missing)
+                          end
+
+                        {:error, reason} ->
+                          Repo.rollback(reason)
+                      end
+
+                    {:error, reason} ->
+                      Repo.rollback(reason)
+                  end
+
+                _ ->
+                  Repo.rollback(:not_found)
+              end
+
+            {:replay, stored_receipt} ->
+              with {:ok, %Document{id: current_row_id}} <-
+                     lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
+                   {:ok, %{written_row_id: written_row_id} = receipt} <-
+                     normalize_stored_document_op_receipt(stored_receipt) do
+                if written_row_id == current_row_id do
+                  {:replayed, receipt}
+                else
+                  Repo.rollback(:idempotency_target_replaced)
+                end
+              else
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            :in_progress ->
+              Repo.rollback(:idempotency_in_progress)
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
+        end)
+        |> finish_document_op_transaction(dataset, doc, opts)
+      rescue
+        exception ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+    else
+      true -> {:error, :document_op_nested_transaction_unsupported}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_document_block_op_once(
+        _doc_id,
+        _type,
+        _op,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _opts
+      ),
+      do: {:error, :invalid_document_op_request}
+
+  defp get_document_op_base(target_doc_id, requested_doc_id, type, dataset, opts) do
+    case Content.get_document(target_doc_id, type, dataset, opts) do
+      {:ok, %Document{} = draft} -> {:ok, draft}
+      {:error, :not_found} -> Content.get_document(requested_doc_id, type, dataset, opts)
+      {:error, _reason} = err -> err
+    end
+  end
+
+  defp lock_document_op_base(target_doc_id, requested_doc_id, type, dataset, opts) do
+    case get_document_op_base(target_doc_id, requested_doc_id, type, dataset, opts) do
+      {:ok, %Document{} = current} ->
+        query =
+          from(d in Document,
+            where:
+              d.id == ^current.id and d.doc_id == ^current.doc_id and d.type == ^current.type and
+                d.dataset == ^current.dataset,
+            lock: "FOR SHARE"
+          )
+          |> nullable_identity_filter(:dataset_id, current.dataset_id)
+          |> nullable_identity_filter(:workspace_id, current.workspace_id)
+          |> nullable_identity_filter(:project_id, current.project_id)
+
+        case Repo.one(query) do
+          %Document{} = locked -> {:ok, locked}
+          nil -> {:error, :idempotency_target_replaced}
+        end
+
+      {:error, _reason} = err ->
+        err
+    end
+  end
+
+  defp nullable_identity_filter(query, field_name, nil),
+    do: from(d in query, where: is_nil(field(d, ^field_name)))
+
+  defp nullable_identity_filter(query, field_name, value),
+    do: from(d in query, where: field(d, ^field_name) == ^value)
 
   @doc """
   Apply an ordered batch of block ops to ONE FIELD's block array — the write
@@ -1285,7 +1745,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       content =
         (doc.content || %{})
-        |> Map.put(field, Projection.project_body(new_blocks, Labels.render_opts(dataset, scope)))
+        |> Map.put(
+          field,
+          # task-c46967eb3dc49e77: this field body is read on a SCREEN — the
+          # Studio field editor and the paper/document readers — so it names
+          # `:article` instead of letting `Render.render_block/2`'s
+          # `Map.get(opts, :style, :email)` default stamp mail typography into
+          # a persisted field. Siblings: #15973 (document `content[body][html]`),
+          # #16037 (papers `body_html`).
+          Projection.project_body(
+            new_blocks,
+            Map.put(Labels.render_opts(dataset, scope), :style, :article)
+          )
+        )
 
       attrs = %{
         "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
@@ -3056,12 +3528,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
   defp maybe_project(content, blocks, type, dataset, slug, scope) when is_list(blocks) do
+    # task-c46967eb3dc49e77 — A FIFTH style-less site, found by this row's
+    # census and NOT in its filing. `write_encrypted_blocks_doc/8` renders
+    # `content["body_html"]` through `Labels.paper_render_opts/3` (`:article`
+    # since #16037) and then projects `content["body"]["html"]` through THESE
+    # opts, which carried no `:style` — so `Render.render_block/2`'s
+    # `Map.get(opts, :style, :email)` default decided and one paper row stored
+    # its body twice, on TWO DIFFERENT SURFACES. Measured on b2529b02c via
+    # `Content.upsert_paper/1` with a plain paragraph and no `content["style"]`:
+    #
+    #     body_html      => "<p>probe copy</p>"
+    #     body["html"]   => "<p style=\"margin:0 0 16px;font-family:'Iowan Old
+    #                        Style',…;font-size:17px;line-height:1.55;
+    #                        color:#15211d\">probe copy</p>"
+    #
+    # This path persists via direct Repo writes (`persist_blocks_doc/9`), so
+    # unlike the document leg it is NOT rescued downstream by
+    # `Writer.maybe_project_document_content/2` — the email bytes really landed.
     render_opts =
-      Map.put(
-        Labels.render_opts(dataset, scope),
-        :preview,
-        blocks_doc_preview_opts(type, slug, scope)
-      )
+      Labels.render_opts(dataset, scope)
+      |> Map.put(:preview, blocks_doc_preview_opts(type, slug, scope))
+      |> Map.put(:style, :article)
 
     Projection.project(content, blocks, render_opts)
   end
@@ -3103,10 +3590,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
-    Map.put(Labels.render_opts(dataset, scope), :preview, %{
+    # task-c46967eb3dc49e77: names `:article` rather than letting
+    # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default pick.
+    # Defence in depth on THIS leg — `apply_document_block_op/5` finishes
+    # through `Content.upsert_document/4`, whose
+    # `Writer.maybe_project_document_content/2` re-projects the same keys on
+    # the already-`:article` `doc_render_opts/3`, so nothing persisted here was
+    # ever wrong. The paper leg above (`maybe_project/6`) is the one that was.
+    Labels.render_opts(dataset, scope)
+    |> Map.put(:preview, %{
       media_resolver: Preview.media_resolver(scope),
       doc_type: type
     })
+    |> Map.put(:style, :article)
   end
 
   # Tenancy scope for the media resolver: an explicit caller scope wins, else the

@@ -103,6 +103,7 @@ defmodule BarkparkWeb.PluginScopeSession do
 
   alias Barkpark.Sharing
   alias Barkpark.Sharing.Links
+  alias BarkparkWeb.PaperViewer
 
   @session_ws_id "scoped_workspace_id"
   @session_ws_slug "scoped_workspace_slug"
@@ -337,6 +338,7 @@ defmodule BarkparkWeb.PluginScopeSession do
 
     case confine_item_share(params, session, socket) do
       {:cont, socket} ->
+        socket = PaperViewer.refresh_share_capability(socket, session)
         Process.send_after(self(), @share_liveness_msg, @share_liveness_interval_ms)
         {:halt, socket}
 

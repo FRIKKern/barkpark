@@ -45,15 +45,46 @@ defmodule BarkparkWeb.MediaController do
   # RESIDUAL, stated rather than left implicit: a NEW flat read action added to
   # this controller fails open again until that boundary work lands. Route any
   # new read through `confine_one/2` or `confine_many/2`.
-  defp scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
+  #
+  # ── THE SENTINEL INVERTED THIS PREDICATE (task-5ca36b127acf9cbd) ────────────
+  #
+  # `not is_nil(...)` was written when an unresolved request produced NO
+  # `:workspace_id` key at all, so `nil` was the one and only way to say "this
+  # caller resolved no tenant". `ScopeHelpers.put_workspace_scope/3` later gave
+  # that state a NAME — `workspace_id: :shared_only` (task-3e2a70930c6df723,
+  # its `:sentinel` clause) — and every HTTP conn on this controller's flat
+  # routes now carries the atom instead of the omission.
+  #
+  # `not is_nil(:shared_only)` is TRUE. So the predicate read the sentinel as
+  # "scope bound", and `confine_one/2` + `confine_many/2` NO-OPPED on exactly
+  # the request they were added to confine — the unresolved one. The guard did
+  # not merely stop helping; it reported the opposite of the truth.
+  #
+  # `is_binary/1` is the honest test, and it is the same guard the interpreters
+  # this class is about already use (`Content.Scope`, `Media.Delivery.Search`,
+  # `Media.Delivery.Retriever`): a workspace is BOUND when a UUID says which
+  # one. `nil` still means bound-by-absence for the internal callers that pass
+  # no scope at all — unchanged, because `is_binary(nil)` is false exactly as
+  # `not is_nil(nil)` was.
+  #
+  # NO EXPLOITABLE LEAK IS CLAIMED. Every read below narrows correctly on its
+  # own today: `Media.get_file/2` and `Media.list_files/2` both route the
+  # sentinel through `Content.Scope.scope_to_workspace_or_global/3`, which owns
+  # a `:shared_only` arm (`workspace_id IS NULL`). This layer is
+  # defence-in-depth, and the point of repairing it is that a fail-open SHAPE
+  # left in place is the thing the next reader trusts.
+  @doc false
+  def scope_bound?(opts), do: is_binary(Keyword.get(opts, :workspace_id))
 
-  defp confine_one(opts, %MediaFile{} = file) do
+  @doc false
+  def confine_one(opts, %MediaFile{} = file) do
     if scope_bound?(opts) or is_nil(file.workspace_id),
       do: {:ok, file},
       else: {:error, :not_found}
   end
 
-  defp confine_many(opts, files) do
+  @doc false
+  def confine_many(opts, files) do
     if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
   end
 
@@ -781,13 +812,19 @@ defmodule BarkparkWeb.MediaController do
     # this door used to answer 200 while blanking a live page. Consult usage
     # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
-         :ok <- refuse_if_referenced(conn, file, params),
+         {:ok, override} <- refuse_if_referenced(conn, file, params),
          # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
          # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
+      # `override` is nil unless the caller disarmed the where-used guard, so an
+      # ordinary delete's receipt is byte-for-byte what it always was and only a
+      # FORCED one grows `forced` + `referencedByCount`.
+      receipt = %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset}
+
+      json(conn, Map.merge(receipt, override || %{}))
     end
   end
 
@@ -795,13 +832,19 @@ defmodule BarkparkWeb.MediaController do
   # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
   # envelope reuses the public `conflict` code but carries a `details` census
   # that no shared builder would know how to assemble.
+  #
+  # Returns `{:ok, override}` — `override` is `nil` on the unforced path and the
+  # witness receipt fields on the forced one (task-ef676cfc88e71fae). The forced
+  # branch used to return a bare `:ok` and skip the census, so an override left
+  # no trace anywhere: no log line, and a 200 indistinguishable from an unforced
+  # delete of an unreferenced blob.
   defp refuse_if_referenced(conn, file, params) do
     if WhereUsed.forced?(params) do
-      :ok
+      {:ok, WhereUsed.witness_forced_delete(conn, file)}
     else
       case WhereUsed.referrers(file) do
         %{count: 0} ->
-          :ok
+          {:ok, nil}
 
         census ->
           env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)

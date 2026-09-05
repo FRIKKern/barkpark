@@ -81,14 +81,18 @@ INV-7|template|enforced|task-3771c96a4b554eeb|a TYPE 404 (BarkparkNotFoundError,
 "
 
 # ── INV-1 RATCHET LEDGER ─────────────────────────────────────────────────────
-# PATH|COUNT — unencoded `/d/${…}/${…}` builders known on main 2026-09-02,
-# owned by task-8bc560183cd37bf7 (which pays BOTH trees). MORE than the recorded
-# count, or ANY unencoded builder in a file absent from this ledger, is a RED.
-# FEWER is the fix landing: the guard says PROMOTABLE and passes.
+# PATH|COUNT — unencoded `/d/${…}/${…}` builders still tolerated. MORE than the
+# recorded count, or ANY unencoded builder in a file absent from this ledger, is
+# a RED. FEWER is the fix landing: the guard says PROMOTABLE and passes.
+#
+# RATCHETED TO EMPTY 2026-09-05 by task-8bc560183cd37bf7 (PR #16133), which paid
+# the debt in BOTH trees. The three entries that used to live here —
+# web/lib/find.ts|2, templates/search-starter/lib/find.ts|2 and
+# templates/search-starter/lib/prefix-seed.ts|1 — are now zero: every builder in
+# both lib trees routes through readerHref. An empty ledger means the strictest
+# reading of INV-1 is live, so ANY new unencoded builder anywhere in either lib
+# tree reds immediately. Do not re-add an entry to quiet a red; fix the builder.
 INV1_LEDGER="
-web/lib/find.ts|2
-templates/search-starter/lib/find.ts|2
-templates/search-starter/lib/prefix-seed.ts|1
 "
 
 # ── THE EXEMPTION LIST ───────────────────────────────────────────────────────
@@ -493,12 +497,12 @@ if [ "${1:-}" = "--selftest" ]; then
   expect "INV-1 restored" 0 ""
 
   echo
-  echo "[3b] PLANT INV-1 RATCHET: a THIRD unencoded builder in a LEDGERED file"
-  echo "     (web/lib/find.ts is recorded at 2 — the ratchet must red on 3, not on 2)"
+  echo "[3b] PLANT INV-1 RATCHET: an unencoded builder in a LEDGER-TRACKED file"
+  echo "     (web/lib/find.ts is at 0 since the ledger was ratcheted empty — one reds)"
   printf '\nexport const planted = (t: string, s: string) => `/d/${t}/${s}`;\n' \
     >> "$tmp/$WEB_LIB/find.ts"
   mutated "$WEB_LIB/find.ts" || true
-  expect "INV-1 ratchet" 1 "ledger allows 2"
+  expect "INV-1 ratchet" 1 "ledger allows 0"
   cp "$REPO_ROOT/$WEB_LIB/find.ts" "$tmp/$WEB_LIB/find.ts"
   expect "INV-1 ratchet restored" 0 ""
 

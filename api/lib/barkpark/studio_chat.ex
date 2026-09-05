@@ -1298,6 +1298,7 @@ defmodule Barkpark.StudioChat do
                 "task_type" => task["task_type"],
                 "description" => task["description"]
               })
+              |> seed_workflow_envelope(task["task_type"])
               |> Map.put("origin", "background")
               |> Map.put("status", "running")
 
@@ -1390,6 +1391,19 @@ defmodule Barkpark.StudioChat do
   defp rail_background_origin?(%{"origin" => "background"}), do: true
   defp rail_background_origin?(_), do: false
 
+  # Barkpark owns this stable envelope; the list elements themselves remain
+  # third-party workflow telemetry forwarded verbatim. Seed explicit
+  # unreported values when a local workflow first appears in the background
+  # snapshot so consumers can distinguish "not reported yet" from a renamed or
+  # missing envelope key without inventing token counts.
+  defp seed_workflow_envelope(entry, "local_workflow") do
+    entry
+    |> Map.put_new("workflow", [])
+    |> Map.put_new("usage", nil)
+  end
+
+  defp seed_workflow_envelope(entry, _task_type), do: entry
+
   @doc """
   Capture a `task_progress` frame's `workflow_progress` phase→agent tree and
   last-known usage into the task_id-keyed rail entry (charter D47). Only touches
@@ -1412,6 +1426,7 @@ defmodule Barkpark.StudioChat do
         entry =
           rail
           |> rail_entry(tid)
+          |> seed_workflow_envelope(if(is_list(wf), do: "local_workflow", else: nil))
           |> rail_put_workflow(wf)
           |> rail_put_usage(ev["usage"])
 

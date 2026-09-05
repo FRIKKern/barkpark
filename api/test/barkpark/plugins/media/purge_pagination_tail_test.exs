@@ -132,7 +132,7 @@ defmodule Barkpark.Plugins.Media.PurgePaginationTailTest do
 
   defp delete_all!(files) do
     Enum.count(files, fn file ->
-      match?({:ok, _}, Media.delete_file(file.id))
+      match?({:ok, _}, Media.delete_file(file.id, where_used: :cascade))
     end)
   end
 

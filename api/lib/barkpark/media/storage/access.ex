@@ -12,6 +12,8 @@ defmodule Barkpark.Media.Storage.Access do
 
   @type level :: :view | :preview | :original | :edit_metadata
 
+  @asset_type "mediaAsset"
+
   @doc "Visibility from asset content — `public`, `token`, or `private`."
   @spec visibility(Document.t() | nil) :: String.t()
   def visibility(nil), do: "public"
@@ -48,7 +50,7 @@ defmodule Barkpark.Media.Storage.Access do
 
     cond do
       level == :edit_metadata ->
-        "edit_metadata" in perms
+        edit_metadata_allowed?(conn, doc)
 
       level == :original ->
         "use_original" in perms and delivery_ok?(vis, auth, signed)
@@ -75,6 +77,83 @@ defmodule Barkpark.Media.Storage.Access do
       end
     end)
   end
+
+  # task-3cae133ab3aca51d — ONE AUTHORITY, TWO SEAMS.
+  #
+  # `:edit_metadata` was the one `allowed?/4` level that reads NOTHING from the
+  # request beyond `.assigns`: no `request_path`, no signed-URL params, not even
+  # the `%MediaFile{}`. It is `"edit_metadata" in permission_set(conn, doc)` and
+  # nothing else — which is why extracting it is a rename, not a redesign, and
+  # why the HTTP arm above delegates here instead of keeping its own copy.
+  #
+  # WHY IT HAD TO COME OUT. PR #16066 opened `mediaAsset` documents in the
+  # Studio editor, so `altText`/`caption` — the exact fields
+  # `V1.MediaController.patch_metadata` guards with `:edit_metadata`
+  # (`media_controller.ex:561`) — became writable through the DOCUMENT seam
+  # (`Fields.save/2` -> `Shared.do_autosave/2` -> `Content.upsert_draft/6`),
+  # whose gate is `Caps` `:write` + tenancy. That gate has no notion of a media
+  # CHECKOUT lock: nothing in `Caps` reads `checkedOutBy`. So the final `--` arm
+  # of `permission_set/2` — the one that strips `edit_metadata` from a non-admin
+  # who does not hold the lock — was enforced on the HTTP door and bypassable by
+  # opening the same asset in the Studio. MEASURED before this change:
+  # `media_asset_edit_metadata_authority_test.exs` wrote alt text as
+  # `"s9-not-the-holder"` onto an asset `checkedOutBy: "another-editor"`.
+  #
+  # #16066 deliberately did not invent a socket-shaped COPY of this rule (a new
+  # authority), and this change does not either: the socket calls the same
+  # function the conn does. `permission_set/2` reads only `.assigns`, which a
+  # `Phoenix.LiveView.Socket` carries in the same shape as a `Plug.Conn` — the
+  # contract `authenticated?/1` above already publishes and pins.
+  #
+  # DEFAULT BEHAVIOUR IS BYTE-IDENTICAL for every HTTP caller: the arm above is
+  # the only caller that changed, and it changed from an inlined expression to a
+  # call returning that same expression.
+  @doc """
+  Whether this principal may edit an asset's METADATA — the pure
+  `(principal, asset document)` core of `allowed?/4`'s `:edit_metadata` level,
+  callable from a `Plug.Conn` and from a `Phoenix.LiveView.Socket` alike.
+  """
+  @spec edit_metadata_allowed?(
+          Plug.Conn.t() | Phoenix.LiveView.Socket.t() | map(),
+          Document.t() | nil
+        ) :: boolean()
+  def edit_metadata_allowed?(principal, doc) do
+    "edit_metadata" in permission_set(principal, doc)
+  end
+
+  # THE MEDIA MODULE OWNS "WHICH TYPES THIS RULE GOVERNS", NOT THE STUDIO.
+  #
+  # The Studio write seam is type-agnostic; if it carried its own
+  # `type == "mediaAsset"` test, a second copy of the media type name would live
+  # in a module that knows nothing about media, and renaming the asset type
+  # would silently disarm the gate. Every other media module keys on the same
+  # `@asset_type` constant (`Barkpark.Media`, `Media.Storage.Checkout`, …), so
+  # this one does too.
+  @doc """
+  Whether a Studio document write must be REFUSED because the target is a media
+  asset whose metadata this principal may not edit.
+
+  `false` for every non-asset type: the media permission set governs media
+  assets and nothing else, so a `checkedOutBy` value sitting on some other type
+  means nothing here.
+  """
+  @spec metadata_write_denied?(
+          Plug.Conn.t() | Phoenix.LiveView.Socket.t() | map(),
+          String.t() | nil,
+          Document.t() | nil | term()
+        ) :: boolean()
+  def metadata_write_denied?(principal, @asset_type, %Document{} = doc) do
+    not edit_metadata_allowed?(principal, doc)
+  end
+
+  # A missing / not-yet-loaded asset document. `permission_set/2` reads a nil
+  # doc as "public, not checked out", so asking it here would answer purely on
+  # `authenticated?/1` — a different question from the one this gate exists to
+  # ask, and one the Studio principal gate already asked. Refusing to guess is
+  # the same choice `checked_out_by/1`'s fallthrough makes.
+  def metadata_write_denied?(_principal, @asset_type, _doc), do: false
+
+  def metadata_write_denied?(_principal, _type, _doc), do: false
 
   defp permission_set(conn, doc) do
     auth = authenticated?(conn)

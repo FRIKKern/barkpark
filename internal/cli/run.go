@@ -379,6 +379,33 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		}
 	}
 
+	// `bp task ls --status/--assignee/--claimed/--claimed-by`: the FOURTH
+	// additive, opt-in flag group the manifest never declares, stripped here for
+	// the same reason as the three above. Unlike --match this group is SPLIT —
+	// --status is pushed onto the URL as filter[lifecycle_status] (a filter
+	// GET /v1/tasks really has), while the claim-holder axes have no server
+	// filter at all and can only be honoured over walked rows. See
+	// tasks_scan.go for the full contract and why the split is stated out loud.
+	var taskScan taskScanOpts
+	if cmd.ID == taskLsCommandID {
+		var serr error
+		taskScan, tail, serr = extractTaskScanFlags(tail)
+		if serr != nil {
+			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
+				out.userErr("%v", serr)
+				usageCommand(out, cmd)
+			}
+			return exitUsage
+		}
+		// A client-side filter that read one page would answer "no foreign
+		// claims" about a ledger it never walked — the exact silence this flag
+		// group exists to end. So the claim-holder axes IMPLY --all, whether or
+		// not the caller typed it, and say so.
+		if taskScan.clientSide() {
+			g.all = true
+		}
+	}
+
 	// Resolve the request-side view HERE, with the writer in hand — never
 	// inside buildManifestRequest, which is pure/writer-less and shared by the
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
@@ -402,6 +429,21 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			}
 		}
 		return exitUsage
+	}
+
+	// --status rides the RESOLVED url, so it is visible to --dry-run, to the
+	// single-page send, and to every page of the --all walk alike (all three
+	// read req.url). Stamped only when --status was given, so no existing
+	// caller's URL changes shape by a byte.
+	if taskScan.status != "" {
+		stamped, serr := appendTaskStatusFilter(req.url, taskScan.status)
+		if serr != nil {
+			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
+				out.userErr("%v", serr)
+			}
+			return exitUsage
+		}
+		req.url = stamped
 	}
 
 	// Non-fatal notices from the writer-less build half (today: an unused
@@ -453,14 +495,38 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return code
 	}
 
+	// Stale-cite advisory (publish_cites_guard.go), PRE-WRITE half: read the
+	// DRAFT's prose now, because a successful publish removes the drafts.<id>
+	// twin this text lives on. Candidate ids only — the status lookups and the
+	// printing happen after the 2xx, so this cannot delay or influence the
+	// write. Silent, and does no network work at all, for every command that is
+	// not `doc publish` on a task.
+	var publishCites []publishCite
+	if typeName, bareID, ok := publishCitesArgs(cmd, tail); ok {
+		publishCites = readDraftCites(g, ctx, m, typeName, bareID)
+	}
+
 	// Paginated reads with --all loop over offset pages. A non-empty --match
 	// hands the walk a row filter; every other caller passes nil and the walk
 	// behaves exactly as it always has.
 	if cmd.Paginated && g.all && !cmd.Writes {
 		var opts paginatedAllOpts
+		var matchFilter func(json.RawMessage) bool
 		if taskMatch != "" {
-			opts.filter = taskRowMatcher(taskMatch)
+			matchFilter = taskRowMatcher(taskMatch)
 			opts.pageSize = taskWalkPageSize
+		}
+		// --match and the scan's claim-holder axes compose with AND: they narrow
+		// ONE question, they do not ask two. andRowFilters returns nil when both
+		// are absent, so every pre-existing caller keeps the unfiltered walk.
+		opts.filter = andRowFilters(matchFilter, taskScanRowMatcher(taskScan))
+		if taskScan.clientSide() {
+			// The big window for the same reason --match takes it: this walk
+			// reads the whole ledger, and 100-row pages pay ~9x the round-trips
+			// on the one command whose premise is that the old remedy cost too
+			// much.
+			opts.pageSize = taskWalkPageSize
+			out.errf("bp: %s", taskScanClientSideNotice(taskScan))
 		}
 		return runPaginatedAll(out, cmd, req.url, req.headers, opts)
 	}
@@ -495,6 +561,20 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// stderr in every output mode, silent on a row with no ruling
 		// (tasks_ruling.go).
 		emitTaskRuling(out, cmd, respBody)
+		// The stale-cite advisory's POST-WRITE half: the publish has already
+		// landed, so this is pure commentary — one stderr line per cited task
+		// id with its CURRENT lifecycle_status. It never refuses, never
+		// changes `code`, and never touches stdout, so `-o json` stays one
+		// byte-identical document (publish_cites_guard.go).
+		emitPublishCiteAdvisory(out, g, ctx, m, publishCites)
+		// `doc mutate` / `doc patch` write the DRAFT lens while every canonical
+		// reader is published-first, so a bare `rev:` receipt reads the same for
+		// a landed ledger edit and for a write parked on a draft twin. This
+		// names which lens moved, derived from the envelope's own
+		// results[].document._draft/_publishedId/_type — zero extra requests —
+		// and folds in #15851's fork advisory codes. stderr in every output
+		// shape, so `-o json` stays byte-identical (mutate_perspective.go).
+		emitMutatePerspective(out, cmd, respBody)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The

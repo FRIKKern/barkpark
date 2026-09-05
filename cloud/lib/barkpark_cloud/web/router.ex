@@ -92,8 +92,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → show one instance webhook
       PUT     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → update one instance webhook
       DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → delete one instance webhook
-      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
-      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate admin proxy → rotate a webhook signing secret (team-admin: a credential verb)
+      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries admin proxy → a webhook's delivery log (team-admin: payload bodies)
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
@@ -3383,9 +3383,15 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: this route sits AFTER
+      # Auth.require_user, so the caller's identity is already resolved — key
+      # the bucket on it, not on peer_ip. The limiter's own docstring makes the
+      # case for push_register: clients share carrier/corporate-NAT IPs, so a
+      # per-IP bucket lets one user starve strangers behind the same address.
+      # Limit (10), window (60 s) and the 429 shape are unchanged.
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
@@ -3477,9 +3483,11 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: per-USER, same reasoning as
+      # the app_token bucket above (authenticated route, NAT-shared IPs).
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
@@ -5171,12 +5179,23 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.delete")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): rotating a signing secret is a CREDENTIAL
+  # verb, so it gates at team admin like /credentials and POST /v1/providers do —
+  # the plane spends the decrypted instance admin token on the caller's behalf,
+  # a token /credentials refuses to hand a plain member. The other seven proxy
+  # verbs stay member-tier beside site CRUD (rbac-roles). Cross-team stays 404
+  # inside proxy_instance_webhook; this only adds the role bar in front of it.
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/rotate" do
-    proxy_instance_webhook(conn, :"webhook.rotate")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.rotate")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): delivery PAYLOAD BODIES are customer data
+  # the instance's own /v1/webhooks door withholds from non-admins, so the read
+  # gates at team admin too. Same shape as rotate above.
   get "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries" do
-    proxy_instance_webhook(conn, :"webhook.deliveries")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.deliveries")
   end
 
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
@@ -8145,6 +8164,26 @@ defmodule BarkparkCloud.Web.Router do
 
     case teardown_result do
       :ok ->
+        # THE DNS HALF, AND IT RUNS BEFORE THE ROW GOES (this row's fix; the
+        # ordering is borrowed wholesale from the support-remove sibling,
+        # task-688ebffc4b0aa50a / #14038). `site.cf_zone_id` + `site.cf_record_id`
+        # are the ONLY artefacts anywhere that name the Cloudflare A record
+        # `do_bind_cloudflare/5` created, and `delete_site/1` below is a hard
+        # `Repo.delete` — so a row deleted first takes the record's name with it
+        # and leaves the record LIVE, pointing at an origin that has just been
+        # torn down. Cloudflare zones here are per-team BYOA: there is no
+        # sweeper, no reaper and no second pointer that could ever reach it
+        # again. That is the dangling-DNS / subdomain-takeover shape.
+        #
+        # It does NOT gate the delete, and that is deliberate: `teardown/2`
+        # above has ALREADY disarmed the box, so refusing here would manufacture
+        # the exact inverse orphan the `registration_not_removed` arm below
+        # exists to describe — a dead site that is still registered. The
+        # precedent one seam over is `revoke_site_read_token/1`: do the outbound
+        # cleanup, then STATE its outcome in the 200 and NAME the leftover,
+        # because this response is the last place the pointer exists.
+        cf_record = release_cf_record(site)
+
         # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
         # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
         # `Repo.delete` on a struct with no declared constraint, so every child
@@ -8192,10 +8231,17 @@ defmodule BarkparkCloud.Web.Router do
               ok: true,
               status: "deleted",
               slug: site.slug,
-              read_token: read_token_status(read_token)
+              read_token: read_token_status(read_token),
+              cf_record: cf_record_status(cf_record)
             }
 
-            json(conn, 200, site_delete_token_warning(body, site, read_token))
+            json(
+              conn,
+              200,
+              body
+              |> site_delete_token_warning(site, read_token)
+              |> site_delete_cf_warning(site, cf_record)
+            )
 
           {:error, :foreign_key_constraint, constraint} ->
             json(conn, 500, %{
@@ -12415,7 +12461,11 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id is the SAME 404 as a teamless caller (no existence leak). A
   # resolved instance dispatches through the catalog capability.
   defp proxy_instance_webhook(conn, capability) do
-    conn = Auth.require_user(conn, [])
+    # The two admin-gated verbs (rotate, deliveries) arrive with the principal
+    # already resolved by Auth.require_team_admin; do not verify the session a
+    # second time. Same skip gate_role/4 applies. Every other verb resolves here.
+    conn =
+      if conn.assigns[:current_user], do: conn, else: Auth.require_user(conn, [])
 
     cond do
       conn.halted ->
@@ -14214,6 +14264,109 @@ defmodule BarkparkCloud.Web.Router do
   defp read_token_status(:ok), do: "revoked"
   defp read_token_status(:noop), do: "none"
   defp read_token_status(_), do: "not_revoked"
+
+  # The DNS half of `DELETE /v1/sites/:id`, called from `delete_site_after_audit/2`
+  # BEFORE `Registry.delete_site/1` — see the ordering comment at that call site.
+  # Three outcomes, all of them named rather than swallowed (this used to be no
+  # call at all, which is why the record survived its site):
+  #
+  #   * `:noop`  — this site was never cf-in-front bound (the overwhelming common
+  #                case: `serving_mode` "direct", `cf_record_id` nil). ZERO
+  #                Cloudflare calls, so a standalone delete is byte-identical to
+  #                before this arm existed.
+  #   * `:ok`    — Cloudflare confirmed the record is gone.
+  #   * `{:error, reason}` — it did NOT. The record may still be live and about to
+  #                be unnameable, so this is the loudest line this process will
+  #                ever say about it (mirroring `cloudflare_bind_ORPHANED_RECORD`
+  #                on the write path), and the 200 carries the same pointer out to
+  #                the caller.
+  #
+  # A row carrying a `cf_record_id` with NO `cf_zone_id` is its own error arm, not
+  # a `:noop`: the record exists and this process simply cannot address it, which
+  # is exactly the state that must be shouted rather than treated as "nothing to
+  # do". `registry.ex`'s cf-binding doc already names that pairing as the
+  # inconsistency to fear.
+  defp release_cf_record(%Registry.Site{} = site) do
+    record_id = cf_field(site.cf_record_id)
+    zone_id = cf_field(site.cf_zone_id)
+
+    cond do
+      is_nil(record_id) ->
+        :noop
+
+      is_nil(zone_id) ->
+        Logger.error(
+          "site_delete_DANGLING_RECORD: site #{site.slug} carries cf_record_id #{record_id} " <>
+            "with NO cf_zone_id — the A record cannot be addressed, and the row naming it is " <>
+            "about to be deleted. Find it by value in the team's Cloudflare zone."
+        )
+
+        {:error, :no_zone}
+
+      true ->
+        delete_cf_record(site, zone_id, record_id)
+    end
+  end
+
+  defp delete_cf_record(site, zone_id, record_id) do
+    case Registry.resolve_cloudflare_credential(site.team_id) do
+      {:ok, %{token: token}} when is_binary(token) and token != "" ->
+        case Cloudflare.delete_dns_record(token, zone_id, record_id) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "site_delete_DANGLING_RECORD: site #{site.slug} zone #{zone_id} record " <>
+                "#{record_id} (#{site.cf_domain}) — deleting the A record failed: " <>
+                "#{inspect(reason)}. The site row is about to be deleted; after that " <>
+                "nothing in this control plane can name this record again."
+            )
+
+            {:error, reason}
+        end
+
+      other ->
+        Logger.error(
+          "site_delete_DANGLING_RECORD: site #{site.slug} zone #{zone_id} record #{record_id} " <>
+            "(#{site.cf_domain}) — the team's Cloudflare credential could not be read " <>
+            "(#{inspect(other)}), so the A record was never deleted. The site row is about to " <>
+            "be deleted; after that nothing in this control plane can name this record again."
+        )
+
+        {:error, :cloudflare_credential_unreadable}
+    end
+  end
+
+  defp cf_field(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp cf_field(_), do: nil
+
+  defp cf_record_status(:ok), do: "deleted"
+  defp cf_record_status(:noop), do: "none"
+  defp cf_record_status(_), do: "not_deleted"
+
+  # The DNS twin of `site_delete_token_warning/3`, under its OWN key so the two
+  # leftovers never clobber each other (a delete can strand both). Same reason as
+  # the read-token one: the deleted row was the only thing that held zone +
+  # record id, so if this sentence does not carry them out, nothing does.
+  defp site_delete_cf_warning(body, _site, status) when status in [:ok, :noop], do: body
+
+  defp site_delete_cf_warning(body, site, _status) do
+    Map.put(
+      body,
+      :cf_warning,
+      "the site is deleted, but its Cloudflare DNS record could not be removed: record " <>
+        "#{site.cf_record_id} in zone #{site.cf_zone_id} (#{site.cf_domain}) may still be LIVE " <>
+        "and now points at an origin that has just been torn down. Delete it by hand in " <>
+        "Cloudflare — the site row that named it is gone, so nothing here can find it again."
+    )
+  end
 
   # On an unconfirmed revoke, hand the caller the pointer the deleted row can no
   # longer hold: which box, which workspace scope, which label. Without these

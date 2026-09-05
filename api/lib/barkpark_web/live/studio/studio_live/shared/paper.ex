@@ -28,8 +28,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
 
+  @server_minted_block :__server_minted_block__
+
   @doc false
   def paper_op(socket, op) do
+    socket = failed_result(socket, op)
+
     cond do
       socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta and
           socket.assigns[:editor_doc] != nil ->
@@ -68,6 +72,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @read_only_pane_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # pds-w42 — THE PRINCIPAL GATE, AT THE CHOKEPOINT.
@@ -125,6 +130,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @write_denied_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # pds-w44 (PDS-D644) — THE GRANT'S OWN NARROWING, TRAVELLED INTO THE DOOR.
@@ -252,10 +258,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @outside_grant_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   @doc false
   def paper_pane_op(socket, op) do
+    if is_binary(op["request_id"]) do
+      paper_pane_op_once(socket, op)
+    else
+      paper_pane_unidentified_op(socket, op)
+    end
+  end
+
+  defp paper_pane_op_once(socket, op) do
+    request_id = op["request_id"]
+    op = stable_request_op(op, request_id)
+
+    case paper_ops(
+           socket,
+           [Map.drop(op, ["if_rev", "request_id"])],
+           request_id,
+           op["if_rev"]
+         ) do
+      {:ok, socket, receipt, outcome} ->
+        assign(socket,
+          last_paper_save_result: %{
+            saved: true,
+            request_id: request_id,
+            replayed: outcome == :replayed,
+            rev: receipt.rev
+          }
+        )
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  defp paper_pane_unidentified_op(socket, op) do
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
     dataset = socket.assigns.dataset
@@ -275,19 +315,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         refuse_read_only_pane(socket)
 
       is_nil(slug) ->
-        socket
+        failed_result(socket, op)
+
+      paper_revision(op["if_rev"]) == :error ->
+        failed_result(socket, op)
 
       true ->
+        {:ok, if_rev} = paper_revision(op["if_rev"])
+
         case Content.apply_paper_block_op(
                slug,
-               op,
+               Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
                dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
              ) do
-          {:ok, _result} ->
+          {:ok, result} ->
             socket
             |> resync_pane_after_op()
             |> assign(save_status: "Auto-saved")
+            |> assign(last_paper_save_ok?: true)
+            |> assign(
+              last_paper_save_result: %{
+                saved: true,
+                request_id: op["request_id"],
+                rev: result.rev
+              }
+            )
             # A prior halt cleared: the next accepted edit dismisses the banner.
             |> assign(paper_halt: nil)
 
@@ -297,6 +350,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, constraint_flash(message))
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
 
           # A lifecycle-hook HALT (server-owned quality gate — the hollow-doc
           # gate from sibling p-hollow-gate-server lands here) carries a
@@ -305,10 +359,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:error, {:halted, reason}} ->
             put_paper_halt(socket, reason)
 
+          {:error, :precondition_failed} ->
+            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(op["request_id"])
+
+            socket
+            |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
+            |> assign(
+              last_paper_save_result: %{
+                saved: false,
+                request_id: op["request_id"],
+                conflict: true,
+                current_rev: socket.assigns[:paper_rev]
+              }
+            )
+
           {:error, _reason} ->
             socket
             |> put_flash(:error, "Edit failed")
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
+            |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
     end
   end
@@ -326,89 +397,154 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # empty batch — and a nil paper_doc — as a no-op so a stray event never writes.
   # Mirrors paper_pane_op/2's load (current paper_doc slug), apply (atomic fold),
   # persist (one Repo.update), and re-sync (sync_paper_edit_doc → View re-streams).
-  def paper_ops(socket, ops) when is_list(ops) and ops != [] do
+  def paper_ops(socket, ops) do
+    case paper_ops(socket, ops, nil, nil) do
+      {:ok, socket, _receipt, _outcome} -> socket
+      {:error, socket} -> socket
+    end
+  end
+
+  @doc false
+  def paper_ops(socket, ops, request_id), do: paper_ops(socket, ops, request_id, nil)
+
+  def paper_ops(socket, ops, request_id, supplied_rev) do
+    socket = failed_result(socket, %{"request_id" => request_id})
+    {socket, revoked_token?} = refresh_replay_token(socket)
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
     dataset = socket.assigns.dataset
 
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
     cond do
-      # pds-w42 — same principal gate as paper_pane_op/2, for the same reason
-      # the read-only-pane guard is duplicated here: a batch reaches this seam
-      # WITHOUT passing through paper_pane_op/2. See write_denied?/1.
+      invalid_credential? ->
+        {:error, refuse_write_denied(socket)}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:error, refuse_write_denied(socket)}
+
       write_denied?(socket) ->
-        refuse_write_denied(socket)
+        {:error, refuse_write_denied(socket)}
 
-      # pds-w44 — the batch path needs the target narrowing for the same reason
-      # it needs the principal gate: a canvas run reaches this seam WITHOUT
-      # passing through paper_pane_op/2. Same doc, same predicate.
       grant_target_denied?(socket, doc_field(paper, :type), slug) ->
-        refuse_outside_grant(socket)
+        {:error, refuse_outside_grant(socket)}
 
-      # Same v1 read-only guard as paper_pane_op/2 — see its comment. The batch
-      # path needs its own: a canvas run reaches here without passing through
-      # paper_pane_op/2.
       read_only_pane?(socket) ->
-        refuse_read_only_pane(socket)
+        {:error, refuse_read_only_pane(socket)}
 
-      is_nil(slug) ->
-        socket
+      not (is_binary(slug) and is_list(ops) and ops != []) ->
+        {:error, assign(socket, save_status: "Save failed", last_paper_save_ok?: false)}
+
+      paper_revision(supplied_rev) == :error ->
+        {:error, failed_result(socket, %{"request_id" => request_id})}
 
       true ->
-        case Content.apply_paper_block_ops(
+        {:ok, if_rev} = paper_revision(supplied_rev)
+
+        case Content.apply_paper_block_ops_once(
                slug,
                ops,
                dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               request_id,
+               replay_principal_key(socket),
+               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
              ) do
-          {:ok, _result} ->
-            # Re-read the paper (apply_paper_block_ops returns only the batch
-            # receipt %{slug, op_count, rev, block_ids} — NOT the post-apply
-            # blocks), assigning the fresh paper_doc. The View pane re-streams off
-            # that, AND it carries the CONFIRMED blocks we echo back to the canvas.
-            socket
-            |> sync_paper_edit_doc()
-            |> push_canvas_echo()
-            |> push_task_previews()
-            |> push_block_renders()
-            # A LANDED batch must SAY it landed. The batch path used to assign
-            # save_status only on its three error branches, so the footer save
-            # region ([data-test-id="bp-paper-footer-save"], the page's only
-            # role="status" aria-live region) could say "Save failed" or nothing
-            # — never success. Measured on the deployed build: after a save the
-            # API proved persisted, that region was the EMPTY STRING for 25s
-            # while the footer counts moved. Same "Auto-saved" token the
-            # single-op path (paper_pane_op/2) already assigns — ONE vocabulary
-            # across both write seams, no third state and NO in-flight
-            # "Saving…" transient (charter D242 defers pending feedback).
-            |> assign(save_status: "Auto-saved")
-            # A prior halt cleared: the next accepted batch dismisses the banner.
-            |> assign(paper_halt: nil)
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> sync_paper_edit_doc()
+              |> push_canvas_echo(request_id)
+              |> push_task_previews()
+              |> push_block_renders()
+              |> assign(save_status: "Auto-saved")
+              |> assign(last_paper_save_ok?: true)
+              |> assign(paper_halt: nil)
 
-          # A constraint veto (pdd-t20) carries a human-readable reason —
-          # surface it so a calmly-rejected batch explains itself. Mark the
-          # save failed too, matching the single-op path — a rejected batch
-          # must never leave a stale "Auto-saved" on screen.
+            {:ok, socket, receipt, outcome}
+
+          {:error, :precondition_failed} ->
+            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
+
+            {:error,
+             socket
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+             |> assign(
+               last_paper_save_result: %{
+                 saved: false,
+                 request_id: request_id,
+                 conflict: true,
+                 current_rev: socket.assigns[:paper_rev]
+               }
+             )}
+
           {:error, {:constraint, message, _op}} ->
-            socket
-            |> put_flash(:error, constraint_flash(message))
-            |> assign(save_status: "Save failed")
+            {:error,
+             socket
+             |> put_flash(:error, constraint_flash(message))
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
 
-          # A lifecycle-hook HALT on the batch path. The batch branch never set
-          # save_status on error before — put_paper_halt/2 fixes that so a
-          # rejected canvas run reads "Save failed" just like the single-op
-          # path, and raises the server reason verbatim in the mirror banner.
           {:error, {:halted, reason}} ->
-            put_paper_halt(socket, reason)
+            {:error, put_paper_halt(socket, reason)}
 
           {:error, _reason} ->
-            socket
-            |> put_flash(:error, "Edit failed")
-            |> assign(save_status: "Save failed")
+            {:error,
+             socket
+             |> put_flash(:error, "Edit failed")
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
         end
     end
   end
 
-  def paper_ops(socket, _ops), do: socket
+  defp refresh_replay_token(socket) do
+    current_user = socket.assigns[:current_user]
+
+    case socket.assigns[:api_token] do
+      %{id: _} ->
+        case socket.assigns[:api_token_raw] do
+          raw when is_binary(raw) and raw != "" ->
+            case Barkpark.Auth.verify_token(raw) do
+              {:ok, token} ->
+                {assign(socket, api_token: token), false}
+
+              _ when is_nil(current_user) ->
+                # Preserve the stale struct as identity-only evidence that this
+                # was an authenticated token socket. The revoked flag prevents
+                # Caps from treating it as public-demo, including on every
+                # subsequent retry returned from this handler.
+                {socket, true}
+
+              _ ->
+                {assign(socket, api_token: nil), false}
+            end
+
+          _ when is_nil(current_user) ->
+            {socket, true}
+
+          _ ->
+            {assign(socket, api_token: nil), false}
+        end
+
+      nil ->
+        {socket, false}
+
+      _ when is_nil(current_user) ->
+        {socket, true}
+
+      _ ->
+        {assign(socket, api_token: nil), false}
+    end
+  end
+
+  defp replay_principal_key(%{assigns: %{current_user: %{id: id}}}) when is_binary(id),
+    do: "user:" <> id
+
+  defp replay_principal_key(%{assigns: %{api_token: %{id: id}}}) when is_binary(id),
+    do: "token:" <> id
+
+  defp replay_principal_key(%{assigns: %{api_token_credential_present?: true}}), do: nil
+  defp replay_principal_key(_socket), do: "public-demo"
 
   # ── spd-bl-publish-affordance-triple — the hand path's missing affordances ──
   #
@@ -654,6 +790,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> assign(paper_halt: message)
     |> put_flash(:error, message)
     |> assign(save_status: "Save failed")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # Normalise a lifecycle-hook halt reason into a display string. The paper
@@ -893,7 +1030,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # advances the canvas diff baseline so the NEXT batch is INCREMENTAL, not
   # cumulative-from-mount. No-op when the canvas flag is OFF (no canvas is mounted
   # to receive the event, but we also gate so the OFF path pushes nothing).
-  def push_canvas_echo(socket) do
+  def push_canvas_echo(socket, request_id \\ nil) do
     if PaperCanvas.paper_canvas_enabled?() do
       {slug, blocks} =
         case socket.assigns[:paper_doc] do
@@ -916,7 +1053,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             []
         end)
 
-      push_event(socket, "bp:canvas-update", %{runs: runs})
+      rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
+      push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
     else
       socket
     end
@@ -924,11 +1062,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def document_op(socket, op) do
+    socket = failed_result(socket, op)
+    {socket, revoked_token?} = refresh_replay_token(socket)
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
 
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
     cond do
+      invalid_credential? ->
+        refuse_write_denied(socket)
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        refuse_write_denied(socket)
+
       # pds-w42 — paper_op/2's OTHER branch. The `{:paper_op, …}` message is
       # routed by the same handle_info regardless of which branch it lands in,
       # so the Beta document block editor is reachable from the same
@@ -942,21 +1092,122 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       grant_target_denied?(socket, type, doc_field(doc, :doc_id)) ->
         refuse_outside_grant(socket)
 
+      not (is_binary(op["if_rev"]) and op["if_rev"] != "") ->
+        failed_result(socket, op)
+
+      is_binary(op["request_id"]) ->
+        document_op_once(socket, doc, type, dataset, op)
+
       true ->
         case Content.apply_document_block_op(
                doc.doc_id,
                type,
-               op,
+               Map.drop(op, ["if_rev", "request_id"]),
                dataset,
-               Shared.hook_opts(socket)
+               Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
              ) do
           {:ok, _result} ->
-            sync_editor_blocks(socket)
+            socket
+            |> sync_editor_blocks()
+            |> assign(last_paper_save_ok?: true)
+            |> then(fn saved ->
+              assign(saved,
+                last_paper_save_result: %{
+                  saved: true,
+                  request_id: op["request_id"],
+                  rev: doc_field(saved.assigns[:editor_doc], :rev)
+                }
+              )
+            end)
+
+          {:error, {:rev_mismatch, current_rev}} ->
+            socket
+            |> sync_editor_blocks()
+            |> assign(last_paper_save_ok?: false)
+            |> assign(
+              last_paper_save_result: %{
+                saved: false,
+                request_id: op["request_id"],
+                conflict: true,
+                current_rev: current_revision(current_rev)
+              }
+            )
 
           {:error, _reason} ->
-            put_flash(socket, :error, "Edit failed")
+            socket
+            |> put_flash(:error, "Edit failed")
+            |> assign(last_paper_save_ok?: false)
+            |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
     end
+  end
+
+  defp document_op_once(socket, doc, type, dataset, op) do
+    case Content.apply_document_block_op_once(
+           doc.doc_id,
+           type,
+           Map.drop(op, ["if_rev", "request_id"]),
+           dataset,
+           op["request_id"],
+           replay_principal_key(socket),
+           Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
+         ) do
+      {:ok, receipt, outcome} ->
+        socket
+        |> sync_editor_blocks()
+        |> assign(last_paper_save_ok?: true)
+        |> assign(
+          last_paper_save_result: %{
+            saved: true,
+            request_id: op["request_id"],
+            replayed: outcome == :replayed,
+            rev: receipt.rev
+          }
+        )
+
+      {:error, {:rev_mismatch, current_rev}} ->
+        document_conflict(socket, op["request_id"], current_rev)
+
+      {:error, _reason} ->
+        socket
+        |> put_flash(:error, "Edit failed")
+        |> assign(last_paper_save_ok?: false)
+        |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
+    end
+  end
+
+  defp document_conflict(socket, request_id, current_rev) do
+    socket
+    |> sync_editor_blocks()
+    |> assign(last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        conflict: true,
+        current_rev: current_revision(current_rev)
+      }
+    )
+  end
+
+  defp paper_revision(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp paper_revision(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp paper_revision(_), do: :error
+
+  defp current_revision(%{actual: actual}), do: actual
+  defp current_revision(current), do: current
+
+  defp failed_result(socket, op) do
+    socket
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
   end
 
   @doc false
@@ -966,8 +1217,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     with %{doc_id: doc_id} <- doc,
-         {:ok, fresh} <-
-           Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
+         target_doc_id = Content.draft_id(Content.published_id(doc_id)),
+         {:ok, fresh} <- get_fresh_editor_doc(target_doc_id, doc_id, type, dataset, socket) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
 
       assign(socket,
@@ -981,10 +1232,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
-  @doc false
-  def paper_reorder(socket, _blocks, nil, _dir), do: socket
+  defp get_fresh_editor_doc(target_doc_id, original_doc_id, type, dataset, socket) do
+    opts = ScopeHelpers.scope_opts(socket)
 
-  def paper_reorder(socket, blocks, idx, "up") when idx > 0 do
+    case Content.get_document(target_doc_id, type, dataset, opts) do
+      {:ok, fresh} -> {:ok, fresh}
+      {:error, :not_found} -> Content.get_document(original_doc_id, type, dataset, opts)
+      {:error, _reason} = err -> err
+    end
+  end
+
+  @doc false
+  def paper_reorder(socket, blocks, idx, dir), do: paper_reorder(socket, blocks, idx, dir, %{})
+
+  def paper_reorder(socket, _blocks, nil, _dir, meta), do: failed_result(socket, meta)
+
+  def paper_reorder(socket, blocks, idx, "up", meta) when idx > 0 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx - 1)
 
@@ -993,32 +1256,71 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # already hides/disables these controls; this guard keeps a stale click (or
     # a context-menu race) a calm no-op instead of a rejected op + error flash.
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_result(socket, meta)
     else
       after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
 
-      paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+      paper_op(
+        socket,
+        write_meta(
+          %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id},
+          meta
+        )
+      )
     end
   end
 
-  def paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
+  def paper_reorder(socket, blocks, idx, "down", meta) when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx + 1)
 
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_result(socket, meta)
     else
       anchor_id = Map.get(displaced, "id")
 
-      paper_op(socket, %{
-        "op" => "move-block",
-        "id" => Map.get(moved, "id"),
-        "after" => anchor_id
-      })
+      paper_op(
+        socket,
+        write_meta(
+          %{
+            "op" => "move-block",
+            "id" => Map.get(moved, "id"),
+            "after" => anchor_id
+          },
+          meta
+        )
+      )
     end
   end
 
-  def paper_reorder(socket, _blocks, _idx, _dir), do: socket
+  def paper_reorder(socket, _blocks, _idx, _dir, meta), do: failed_result(socket, meta)
+
+  defp write_meta(op, meta) do
+    op
+    |> Map.put("if_rev", meta["if_rev"])
+    |> Map.put("request_id", meta["request_id"])
+  end
+
+  # Server-authored structural ops mint a block id before this shared seam.
+  # Derive that id from the retry-stable request id so the exact facade sees
+  # the same payload after a lost acknowledgement.
+  defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
+    op
+    |> Map.delete(@server_minted_block)
+    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+  end
+
+  defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
+
+  defp request_block_id(request_id) do
+    suffix =
+      request_id
+      |> then(&:crypto.hash(:sha256, &1))
+      |> binary_part(0, 9)
+      |> Base.url_encode64(padding: false)
+
+    "b-" <> suffix
+  end
 
   # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
@@ -1028,9 +1330,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
 
-    case slug && Content.get_paper(slug, socket.assigns.dataset) do
-      %{} = fresh -> assign(socket, paper_doc: fresh)
-      _ -> socket
+    case slug &&
+           Content.get_paper(slug, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
+      %{content: content} = fresh when is_map(content) ->
+        assign(socket, paper_doc: fresh, paper_rev: Map.get(content, "rev") || 0)
+
+      _ ->
+        socket
     end
   end
 

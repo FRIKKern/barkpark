@@ -374,14 +374,100 @@ defmodule Barkpark.Content.Lifecycle do
 
           WriteScope.fire_after(result, :after_publish, payload)
       end
+    else
+      # ── THE REFUSAL MUST NOT MANUFACTURE A STRANDED DRAFT ──────────────────
+      #
+      # `duplicate_of` (E4) is the ONE wall code whose refusal is TERMINAL: it
+      # says the content this draft carries is ALREADY PUBLISHED, and it names
+      # the incumbent (`payload.duplicate_of`, rendered into the 409 body as
+      # `details.duplicate_of` by `Content.Errors`). Leaving the draft behind
+      # after that verdict manufactures a `drafts.<id>` row that every
+      # canonical reader — `bp task ready`, the board, the epic roster, all
+      # published-first — is blind to. 409 such rows had accumulated by the
+      # 2026-09-04 census (31 of them carrying a published row's byte-identical
+      # title). So the draft is discarded HERE, in the same operation that
+      # refused it, and the caller is told where the surviving copy is.
+      #
+      # THE OTHER FOUR REFUSALS DELIBERATELY KEEP THE DRAFT:
+      #
+      #   * `label_spine`, `unknown_tag`, `invalid_epic_paper_quality` are
+      #     AUTHOR-FIXABLE — the remedy is to edit this draft's tags/content
+      #     and republish it. Discarding it would delete the exact work the
+      #     refusal is asking the author to correct.
+      #   * `dedup_unavailable` is TRANSIENT by construction (`DedupWall`'s
+      #     bounded scan could not RUN) — the remedy is to resend, which needs
+      #     the draft to still be there.
+      #
+      # Under `Content.Mutations` this delete is inside the batch transaction
+      # and is rolled back with it; `Mutations.compensating_discard/4` re-runs
+      # it after the rollback off `payload.refused_draft_id`, so both doors
+      # (a direct `publish_document/4` and `POST /v1/data/mutate`) end with no
+      # draft. A batch that CREATED the draft in the same transaction needs
+      # neither: the rollback already removed it.
+      {:error, {:duplicate_of, payload}} ->
+        discard_draft_refused_as_duplicate(draft, payload, type, dataset, opts)
 
-      # A wall rejection ({:label_spine,…}/{:unknown_tag,…}/{:duplicate_of,…})
-      # falls straight out of `AuthoringWall.enforce` above — the `with`
-      # returns it UNCHANGED (each shape emits its telemetry at
-      # AuthoringWall's own else seam), and the controllers map it to
-      # 422/422/409.
+      # Every other wall rejection ({:label_spine,…}/{:unknown_tag,…}/
+      # {:invalid_epic_paper_quality,…}/{:dedup_unavailable,…}) falls straight
+      # out of `AuthoringWall.enforce` UNCHANGED (each shape emitted its
+      # telemetry at AuthoringWall's own else seam), and the controllers map it
+      # to 422/422/422/503.
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  # Rev-fenced discard of the draft a `duplicate_of` refusal just rejected.
+  # The refusal tuple is returned UNCHANGED except for two additions, both of
+  # which `Content.Errors.build/1` keeps out of the wire body
+  # (`Map.take(payload, [:duplicate_of, :similar, :advise])`) EXCEPT the
+  # message: `:refused_draft_id` is the compensation key `Mutations` reads
+  # after a batch rollback, and the message gains the sentence that names what
+  # happened to the draft alongside the incumbent that survived.
+  #
+  # A fenced-delete refusal (a concurrent write bumped the draft, or it already
+  # vanished) does NOT become the caller's error: the publish was refused on its
+  # merits and that is the answer the caller must see. The draft simply stays,
+  # and the census's population is the place that shows it.
+  defp discard_draft_refused_as_duplicate(%Document{} = draft, payload, type, dataset, opts) do
+    payload = payload |> Map.put(:refused_draft_id, draft.doc_id) |> annotate_discard(draft)
+
+    case fenced_delete(draft) do
+      :ok ->
+        Broadcast.tap_broadcast(
+          {:ok, draft},
+          dataset,
+          type,
+          "discardDraft",
+          draft.rev,
+          Keyword.get(opts, :source, :api),
+          Keyword.get(opts, :user_id)
+        )
+
+        {:error, {:duplicate_of, payload}}
+
+      {:error, reason} ->
+        Logger.warning(
+          "publish refused as duplicate_of but the draft #{draft.doc_id} could not be " <>
+            "discarded (#{inspect(reason)}) — it survives the refusal"
+        )
+
+        {:error, {:duplicate_of, payload}}
+    end
+  end
+
+  defp annotate_discard(%{message: message} = payload, %Document{} = draft)
+       when is_binary(message) do
+    Map.put(
+      payload,
+      :message,
+      message <>
+        " The refused draft #{draft.doc_id} was discarded, so this publish left nothing behind; " <>
+        "the published document named above is the surviving copy."
+    )
+  end
+
+  defp annotate_discard(payload, _draft), do: payload
 
   # ── Supersession stamp (the DedupWall pairwise exemption's other half) ─────
   #

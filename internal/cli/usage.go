@@ -255,6 +255,29 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	if cmd.ID == taskLsCommandID {
 		out.errf("")
 		out.errf("search: --match <substring>  case-insensitive over doc_id and title, walks every page")
+		// The scan flags (tasks_scan.go) are undeclarable for the same reason,
+		// and the SPLIT is part of the help: a reader has to be able to tell
+		// which narrowing the server did and which one cost a full walk.
+		out.errf("")
+		out.errf("scan (foreign claims):")
+		out.errf("  --status <lifecycle_status>  server-side filter[lifecycle_status]; one of %s", strings.Join(taskLifecycleStatuses, ", "))
+		out.errf("  --claimed                    rows currently held by SOMEONE (client-side, implies --all)")
+		out.errf("  --claimed-by <worker>        rows held by that worker      (client-side, implies --all)")
+		out.errf("  --assignee <worker>          rows assigned to that worker  (client-side, implies --all)")
+		out.errf("  e.g. bp task ls --status in_progress --claimed -o json")
+	}
+	// `doc mutate` is the ONE command whose whole payload is a free-form batch
+	// the manifest cannot describe: its flags are --file/--quiet, and the shape
+	// of a mutation lives only in the server's apply_one clauses. Without this
+	// block the caller's next move after a `malformed` 400 is to open
+	// mutations.ex — which is exactly what was reported (#18). The list and its
+	// derivation live in mutate_shapes.go, guarded against server drift by
+	// TestMutateHelpNamesEveryServerMutationClause.
+	if cmd.ID == docMutateCommandID {
+		out.errf("")
+		for _, line := range mutateShapeLines() {
+			out.errf("%s", line)
+		}
 	}
 	if cmd.Writes {
 		out.errf("")

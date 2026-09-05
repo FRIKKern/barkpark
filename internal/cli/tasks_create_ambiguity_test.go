@@ -41,11 +41,16 @@ func TestRunTaskCreateTransportErrorCarriesAmbiguityCaveat(t *testing.T) {
 	title := "Reindex the search shard before the fleet restarts"
 	code := runTaskCreate(w, globals{yes: true}, ctx, []string{title})
 
-	if code != exitGeneric {
-		t.Fatalf("exit = %d, want exitGeneric", code)
+	// task-f81c88e2c54f8e57: an ambiguous write no longer shares an exit code
+	// with a definite refusal — exit 9 says "sent, answer lost, go READ".
+	if code != exitAmbiguous {
+		t.Fatalf("exit = %d, want exitAmbiguous", code)
 	}
+	// In the HUMAN shapes stdout stays byte-empty: the receipt channel must not
+	// carry a failure. (The `-o json` envelope lands on stdout instead — pinned
+	// in tasks_create_silent_write_test.go.)
 	if so.Len() != 0 {
-		t.Fatalf("stdout should stay empty on failure, got %q", so.String())
+		t.Fatalf("stdout should stay empty on failure in table mode, got %q", so.String())
 	}
 	got := se.String()
 	if !strings.Contains(got, "i/o timeout") {
@@ -67,11 +72,16 @@ func TestRunTaskCreate5xxCarriesAmbiguityCaveat(t *testing.T) {
 	title := "Backfill the media checksum column"
 	code := runTaskCreate(w, globals{yes: true}, ctx, []string{title})
 
-	if code != exitGeneric {
-		t.Fatalf("exit = %d, want exitGeneric", code)
+	// task-f81c88e2c54f8e57: an ambiguous write no longer shares an exit code
+	// with a definite refusal — exit 9 says "sent, answer lost, go READ".
+	if code != exitAmbiguous {
+		t.Fatalf("exit = %d, want exitAmbiguous", code)
 	}
+	// In the HUMAN shapes stdout stays byte-empty: the receipt channel must not
+	// carry a failure. (The `-o json` envelope lands on stdout instead — pinned
+	// in tasks_create_silent_write_test.go.)
 	if so.Len() != 0 {
-		t.Fatalf("stdout should stay empty on failure, got %q", so.String())
+		t.Fatalf("stdout should stay empty on failure in table mode, got %q", so.String())
 	}
 	got := se.String()
 	if !strings.Contains(got, "database connection pool is exhausted") {

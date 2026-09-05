@@ -13,6 +13,7 @@ import {
   DEFAULT_ENGINE,
   DOC_TYPES,
   FACET_DIMENSIONS,
+  isReaderPathActive,
   SORTS,
   typeLabel,
   type FindHit,
@@ -1537,9 +1538,7 @@ export function Finder({
                       sessionId={sessionId}
                       position={i}
                       selected={
-                        master &&
-                        (pathname === hit.href ||
-                          pathname === `/d/${hit.type}/${hit.slug}`)
+                        master && isReaderPathActive(pathname, hit)
                       }
                     />
                   </li>

@@ -10,6 +10,56 @@ defmodule Barkpark.Content.Mutations do
   unchanged; the per-mutation write/publish primitives are called back through
   `Barkpark.Content.*`, rev generation through `Content.Writer`, deferral
   through `Content.Broadcast`.
+
+  ## `patch` on a `type:task` is PUBLISHED-FIRST (task-b9c618482e688500)
+
+  Every other mutation kind resolves its base through
+  `DraftId.draft_id/1` — draft-first — and `Writer.upsert_document/4` always
+  writes to `drafts.<id>`. That is correct for a CMS content type: an edit is
+  a draft until someone publishes it. It is WRONG for a `type:task` row,
+  because the task API (`tasks_controller.ex find_task_by_doc_id/2`, the board,
+  the ready queue, `bp task get`) reads PUBLISHED-first. The two doors
+  therefore disagreed about which row `task-…` names, and the disagreement was
+  silent: a patch carrying the rev `GET /v1/tasks/<id>` served 412'd (the
+  actual rev being the draft twin's), and a patch carrying the TWIN's rev
+  returned 200 with `results[0].id = "drafts.task-…"` while the row every
+  reader serves stayed unchanged. Measured live on guerrilla 2026-09-02;
+  22 task rows had already forked their `lifecycle_status` this way.
+
+  THE BLAST RADIUS IS EXACTLY ONE MUTATION KIND AND ONE TYPE:
+
+    * kinds: `patch` only — both clauses (plain `set`, and the compound
+      `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` clause).
+    * types: `@published_first_patch_types` — `task` only. `create`,
+      `createOrReplace`, `createIfNotExists`, `replace` and `delete` keep their
+      draft-first semantics VERBATIM for every type, tasks included; ordinary
+      content types keep draft-first patching too, so the draft/publish model
+      the Studio is built on is untouched.
+    * ids: a BARE id only. `patch` naming `drafts.task-…` explicitly still
+      resolves and writes the draft — the escape hatch for a caller that really
+      does mean the twin.
+
+  With a published row present, the patch base is that published row (so the
+  rev a task reader served is the rev `ensure_rev/2` checks) and the write is
+  LANDED there: `land_patch/5` publishes the freshly written draft through
+  `Content.publish_document/4`, which upserts the published row and deletes the
+  draft. Two consequences worth naming:
+
+    * a task patch now passes the publish door's gates —
+      `Content.Lifecycle.ensure_task_publish_transition_legal/5` (legal
+      lifecycle transition, no claim substitution, no criteria regression) and
+      `Content.AuthoringWall.enforce/5` (`task` is a walled type). Those turn
+      writes that used to 200-onto-nothing into honest refusals. This is the
+      point: the write now goes where readers look, so it is now held to the
+      rules that guard what readers see.
+    * a PRE-EXISTING draft twin is refused, not merged: publishing through it
+      would silently destroy whatever that twin holds. The refusal is a 422
+      `validation_failed` whose detail NAMES `drafts.<id>` and says how to
+      resolve it (`discardDraft` or `publish`).
+
+  A task with NO published row (never published) still resolves and writes
+  draft-first — the same fallback `find_task_by_doc_id/2` performs, so the two
+  doors agree in that case too.
   """
 
   alias Barkpark.Repo
@@ -99,13 +149,69 @@ defmodule Barkpark.Content.Mutations do
 
         _ ->
           Broadcast.clear_deferred_broadcasts()
-          result
+          compensating_discard(result, mutations, dataset, opts)
       end
     rescue
       e ->
         Broadcast.clear_deferred_broadcasts()
         reraise(e, __STACKTRACE__)
     end
+  end
+
+  # ── The `duplicate_of` compensation, OUTSIDE the batch transaction ─────────
+  #
+  # `Lifecycle.publish_after_gate/5` discards the draft a `duplicate_of` (E4)
+  # refusal rejected — the wall's ONE terminal code, whose body names the
+  # incumbent published document that survives. That delete is correct and
+  # commits for a direct `Content.publish_document/4` caller, but under THIS
+  # door it runs inside the batch transaction and `Repo.rollback/1` above puts
+  # the draft straight back. A publish refused through `POST /v1/data/mutate`
+  # would therefore still strand a `drafts.<id>` that no published-first reader
+  # (`bp task ready`, the board, the epic roster) can see — the exact row the
+  # 2026-09-04 census counted 409 of.
+  #
+  # So the delete is re-run HERE, after the rollback has unwound, keyed on
+  # `payload.refused_draft_id` (stamped by Lifecycle, and dropped from the wire
+  # body by `Content.Errors.build/1`'s `Map.take`). Two properties make this
+  # safe rather than a second guess at the batch's intent:
+  #
+  #   * it fires ONLY on `{:duplicate_of, _}` — the other four wall refusals
+  #     (label_spine / unknown_tag / invalid_epic_paper_quality / the transient
+  #     dedup_unavailable) are author-fixable or retryable and their draft must
+  #     survive, so they never reach this clause.
+  #   * the id must be named by a `publish` op IN THIS BATCH, so a rollback
+  #     reason can never authorise a delete the caller did not ask for. A batch
+  #     that created the draft in the same transaction needs no compensation —
+  #     the rollback already removed it, and `discard_draft/4` then answers
+  #     `{:error, :not_found}`, which is discarded here.
+  #
+  # The refusal itself is returned UNCHANGED: the caller still gets the 409 and
+  # the incumbent id.
+  defp compensating_discard(
+         {:error, {:duplicate_of, %{refused_draft_id: draft_id}}} = result,
+         mutations,
+         dataset,
+         opts
+       )
+       when is_binary(draft_id) do
+    case publish_op_type(mutations, draft_id) do
+      nil -> result
+      type -> with _ <- Content.discard_draft(draft_id, type, dataset, opts), do: result
+    end
+  end
+
+  defp compensating_discard(result, _mutations, _dataset, _opts), do: result
+
+  defp publish_op_type(mutations, draft_id) do
+    bare = DraftId.published_id(draft_id)
+
+    Enum.find_value(mutations, fn
+      %{"publish" => %{"id" => id, "type" => type}} when is_binary(id) ->
+        if DraftId.published_id(id) == bare, do: type
+
+      _ ->
+        nil
+    end)
   end
 
   # Resolve the type's schema for the redacted echo, memoised across the batch.
@@ -201,8 +307,33 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
-    with {:ok, doc} <- Content.publish_document(id, type, dataset, opts),
-         do: {:ok, doc, "publish"}
+    case Content.publish_document(id, type, dataset, opts) do
+      {:ok, doc} ->
+        {:ok, doc, "publish"}
+
+      {:error, :not_found} = err ->
+        # ALREADY LANDED, not missing (task-b9c618482e688500). `patch` on a
+        # published-first type now publishes what it wrote (`land_patch/5`), and
+        # publishing DELETES the draft — so the trailing `publish` of the
+        # documented patch-then-publish idiom (`bp doc patch` + `bp doc publish`,
+        # the cmux hook's met-flip republish) would find no draft and 404, which
+        # reads to its caller as "the patch did not land" precisely when it did.
+        # A publish whose whole effect is already on the published row is a NOOP,
+        # not a failure. Deliberately NOT widened to every type: for an ordinary
+        # content type a publish with no draft is still a genuine 404, because
+        # nothing on that path lands a patch for it.
+        if published_first_patch?(DraftId.published_id(id), type) do
+          case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+            {:ok, doc} -> {:ok, doc, "noop"}
+            _ -> err
+          end
+        else
+          err
+        end
+
+      other ->
+        other
+    end
   end
 
   defp apply_one(%{"unpublish" => %{"id" => id, "type" => type}}, dataset, opts) do
@@ -319,6 +450,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
+           {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
   end
@@ -350,6 +482,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
+           {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
   end
@@ -889,7 +1022,87 @@ defmodule Barkpark.Content.Mutations do
   # guard the published row while the draft is what's written. Read the draft
   # first (falling back to the raw id when no draft exists) so merge base ==
   # write target and the rev guard checks the row actually being written.
+  # Land a `patch` where the type's READERS look.
+  #
+  # `Writer.upsert_document/4` ALWAYS draft-prefixes its write target, so
+  # resolving a published base is only half the repair: without this step the
+  # patch would read the published row and still park the result on
+  # `drafts.<id>` — the same invisible write, now with a rev check that passes.
+  # When the base we resolved IS the published row (published-first types only,
+  # see `published_first_patch?/2`), publish the draft we just wrote:
+  # `Content.publish_document/4` upserts the published row from it and deletes
+  # the draft, so `GET /v1/tasks/<id>` reflects the patch and no twin is left
+  # behind for the next patch to trip over.
+  #
+  # Keyed on the BASE's `doc_id`, not on the request's: a draft-first base
+  # (`drafts.…`) — every non-task type, and a task with no published row —
+  # returns the upsert's own document untouched, which is the pre-existing
+  # behaviour byte for byte.
+  defp land_patch(%{doc_id: base_id}, type, doc, dataset, opts) do
+    if published_first_patch?(base_id, type) do
+      Content.publish_document(DraftId.published_id(doc.doc_id), type, dataset, opts)
+    else
+      {:ok, doc}
+    end
+  end
+
+  # The types whose `patch` base is resolved PUBLISHED-first, mirroring the read
+  # door that serves them (`tasks_controller.ex find_task_by_doc_id/2`: exact id
+  # first, `drafts.` fallback). Deliberately a one-element list rather than a
+  # blanket "whenever a published row exists": widening this to every type would
+  # convert the Studio's draft/publish model into publish-on-write. See the
+  # moduledoc's blast-radius note.
+  @published_first_patch_types ~w(task)
+
   defp get_patch_base(id, type, dataset, opts) do
+    if published_first_patch?(id, type) do
+      published_first_patch_base(id, type, dataset, opts)
+    else
+      draft_first_patch_base(id, type, dataset, opts)
+    end
+  end
+
+  # BARE ids only: `drafts.task-…` names the twin explicitly and keeps the
+  # draft-first path (the escape hatch). A nil/non-binary id falls through to
+  # the draft-first clause, whose `id &&` guard already handles it.
+  defp published_first_patch?(id, type),
+    do: is_binary(id) and type in @published_first_patch_types and not DraftId.draft?(id)
+
+  defp published_first_patch_base(id, type, dataset, opts) do
+    case Content.get_document(id, type, dataset, opts) do
+      {:ok, published} ->
+        # A twin already exists. `land_patch/5` would publish OVER it, so refuse
+        # instead of destroying it — and NAME it, because an agent holding a 200
+        # onto an invisible row is exactly the failure this path was filed for.
+        case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
+          {:ok, _twin} -> {:error, {:invalid_task_content, draft_twin_error(id)}}
+          _ -> {:ok, published}
+        end
+
+      _ ->
+        # No published row — an unpublished task. `find_task_by_doc_id/2` falls
+        # back to `drafts.<id>` here too, so draft-first is the AGREEING answer.
+        draft_first_patch_base(id, type, dataset, opts)
+    end
+  end
+
+  defp draft_twin_error(id) do
+    twin = DraftId.draft_id(id)
+
+    %{
+      "_id" => [
+        "a draft twin `#{twin}` already exists for the published task `#{id}`, and no reader " <>
+          "serves it (`GET /v1/tasks/#{id}`, the board and the ready queue are all " <>
+          "published-first). Patching through it would return 200 for a write nothing reads, " <>
+          "and landing this patch on the published row would silently destroy the twin. " <>
+          "Resolve the fork first — `discardDraft` `#{id}` to drop the twin, or `publish` " <>
+          "`#{id}` to land it — then resend this patch. To edit the twin deliberately, " <>
+          "address it by name: `\"id\": \"#{twin}\"`."
+      ]
+    }
+  end
+
+  defp draft_first_patch_base(id, type, dataset, opts) do
     # `id &&` mirrors the create/replace clauses — a nil id short-circuits to the
     # raw lookup, which returns {:error, :not_found} rather than raising in
     # DraftId.draft_id/1.

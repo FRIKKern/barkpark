@@ -40,6 +40,8 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
     %{conn: conn, slug: slug, default_ws: default_ws, default_proj: default_proj}
   end
 
+  defp assigns_of(view), do: :sys.get_state(view.pid).socket.assigns
+
   defp seed_paper!(slug) do
     {:ok, paper} =
       Content.upsert_paper(
@@ -124,7 +126,9 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
       render_hook(view, "paper-op", %{
         "op" => "patch-block",
         "id" => "b-body",
-        "patch" => %{"content" => [%{"type" => "text", "value" => "Edited"}]}
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Edited"}]},
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev
       })
 
       await_rows(slug, 2)
@@ -156,7 +160,9 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
         render_hook(view, "paper-op", %{
           "op" => "patch-block",
           "id" => "b-body",
-          "patch" => %{"content" => [%{"type" => "text", "value" => text}]}
+          "patch" => %{"content" => [%{"type" => "text", "value" => text}]},
+          "request_id" => Ecto.UUID.generate(),
+          "if_rev" => assigns_of(view).paper_rev
         })
       end
 
@@ -204,7 +210,9 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
         render_hook(view, "paper-op", %{
           "op" => "patch-block",
           "id" => "b-body",
-          "patch" => %{"content" => [%{"type" => "text", "value" => text}]}
+          "patch" => %{"content" => [%{"type" => "text", "value" => text}]},
+          "request_id" => Ecto.UUID.generate(),
+          "if_rev" => assigns_of(view).paper_rev
         })
       end
 

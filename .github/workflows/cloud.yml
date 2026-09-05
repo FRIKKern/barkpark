@@ -208,6 +208,37 @@ jobs:
       - name: Every repo-root read is dispatched on
         run: bash scripts/cloud-path-escape-check.sh
 
+      # ── the FailureCopy scrub/strip_ansi ORDER tripwire ──────────────────
+      # Lives in THIS job, not a new one, and not in shell-harnesses.yml:
+      #
+      #   * `path-escape` is already in `cloud-gate`'s `needs:`, so a red here
+      #     reds the REQUIRED `Cloud gate` context. A new job would have to be
+      #     added to that needs set to mean anything, and a new WORKFLOW could
+      #     not be required at all without a fresh branch-protection context.
+      #   * `path-escape` is DELIBERATELY UNFILTERED (see the comment at the
+      #     top of this job): no `if:`, no dependency on the dispatcher. The
+      #     tripwire inherits that. A leak added on a PR that the cloud
+      #     dispatcher happens not to fire on would otherwise skip the only
+      #     gate that sees it — and the skip would report green.
+      #   * shell-harnesses.yml states the rule for the other direction: a
+      #     harness "already REACHED by a wired parent's --selftest" is
+      #     deliberately NOT duplicated there, because that buys a second
+      #     runner for the same assertions. The --selftest step below IS that
+      #     wired parent, so this script has no row in that census by the
+      #     census's own doctrine.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom. A gate
+      # that cannot be shown to fail is not evidence that nothing failed.
+      - name: Harness (the scrub-order tripwire must be able to fail)
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/failure-copy-scrub-order-check.sh --selftest
+
+      - name: No display boundary scrubs before it strips ANSI
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/failure-copy-scrub-order-check.sh
+
   compile:
     name: Cloud control-plane (compile + format)
     needs: changes

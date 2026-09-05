@@ -112,6 +112,11 @@ func attentionStatus(b cloudclient.Barkpark) string {
 		return "unreported"
 	case live && (b.HealthStatus != "up" || b.AgentStatus != "online"):
 		return "degraded"
+	// A current control plane ALWAYS emits queued_deploy_age_seconds, including
+	// an explicit null when nothing is queued. Missing is therefore a broken or
+	// pre-contract producer, not evidence that the deploy queue is healthy.
+	case live && b.QueuedDeployAgeSecondsMissing:
+		return "degraded"
 	case live && strained(b):
 		return "strained"
 	case live && filling(b):
@@ -194,6 +199,13 @@ const queuedDeployStalledAfterSeconds = 300
 // the vitals fences keep: an alarm may only fire on a number it was given).
 func deployStalled(b cloudclient.Barkpark) bool {
 	return b.QueuedDeployAgeSeconds != nil && *b.QueuedDeployAgeSeconds >= queuedDeployStalledAfterSeconds
+}
+
+func queuedDeployAgeMarker(b cloudclient.Barkpark) string {
+	if !b.QueuedDeployAgeSecondsMissing {
+		return ""
+	}
+	return "deploy queue unreadable — control plane omitted queued_deploy_age_seconds"
 }
 
 // deployStalledReason renders the WHY for a deploy_stalled row: how long the
@@ -625,8 +637,8 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
 	// the same separator the strained reason uses for its swap clause, and every
 	// empty one drops out rather than leaving a dangling dot.
-	parts := make([]string, 0, 5)
-	for _, s := range []string{reason, slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
+	parts := make([]string, 0, 6)
+	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
@@ -1148,7 +1160,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to see your fleet's status", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to see your fleet's status, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	list, lerr := cfg.CloudClient().ListBarkparks(cloudCtx())

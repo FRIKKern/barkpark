@@ -36,6 +36,11 @@ on:
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - "api/priv/static/assets/bp-paper-editor.css"
+      # Files the unit tests READ from outside api/assets/paper-editor. A move of a
+      # sink without this line goes blind: #16022 lifted the Studio inline CSS out
+      # of root.html.heex and main was red for 14 h with no run to say so.
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
+      - "api/lib/barkpark_web/layouts/root.html.heex"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -43,6 +48,11 @@ on:
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - "api/priv/static/assets/bp-paper-editor.css"
+      # Files the unit tests READ from outside api/assets/paper-editor. A move of a
+      # sink without this line goes blind: #16022 lifted the Studio inline CSS out
+      # of root.html.heex and main was red for 14 h with no run to say so.
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
+      - "api/lib/barkpark_web/layouts/root.html.heex"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -64,8 +74,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: api/assets/paper-editor/package-lock.json
+          # No npm cache on purpose: with it (#15747) the median run went 45 s -> 76 s
+          # over 10 runs each; restoring+saving ~/.npm costs more than this one-dep npm ci.
 
       - name: Install (pinned via lockfile)
         run: npm ci

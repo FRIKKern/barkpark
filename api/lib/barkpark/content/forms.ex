@@ -199,7 +199,26 @@ defmodule Barkpark.Content.Forms do
         |> Map.drop(["title", "status"])
         |> Map.merge(build_content(unbound_params, schema))
         |> Map.put("blocks", new_blocks)
-        |> Projection.project(new_blocks, Labels.render_opts(dataset))
+        # task-c46967eb3dc49e77: the re-projection NAMES `:article`, the same
+        # surface `Content.Writer.doc_render_opts/3` names since #15973,
+        # instead of leaving these opts style-less and letting
+        # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default
+        # pick one.
+        #
+        # This is defence in depth, NOT a live-defect fix — and the row's
+        # filing is wrong that it was one. `Content.upsert_document/4` runs
+        # `Writer.maybe_project_document_content/2` on the SAME write, which
+        # re-projects `content["body"]` + every bound field from
+        # `content["blocks"]` through the already-`:article` `doc_render_opts/3`,
+        # so whatever this line produces is overwritten before anything is
+        # persisted. Proved both ways in PR #16047: reverting this line alone
+        # leaves `classic_form_render_surface_test.exs` GREEN, while reverting
+        # writer.ex's `:article` instead REDS it. The value of naming the
+        # surface here is a future write path that skips that re-projection.
+        |> Projection.project(
+          new_blocks,
+          Map.put(Labels.render_opts(dataset), :style, :article)
+        )
 
       _ ->
         # Merge over the existing content instead of replacing it: a key
