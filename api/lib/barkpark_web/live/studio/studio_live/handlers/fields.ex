@@ -70,7 +70,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       else: Map.put(attrs, "title", @untitled)
   end
 
-  def save(%{"doc" => params}, socket) do
+  def save(params, socket) when is_map(params) do
+    case fold_dot_paths(params) do
+      %{"doc" => doc} -> do_save(doc, socket)
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def save(_params, socket), do: {:noreply, socket}
+
+  defp do_save(params, socket) do
     socket = Shared.do_autosave(socket, params)
 
     case socket.assigns[:save_status] do
@@ -119,12 +128,63 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
-  def autosave(%{"doc" => params}, socket) do
-    {:noreply, mark_dirty(Shared.do_autosave(socket, params))}
+  def autosave(params, socket) when is_map(params) do
+    case fold_dot_paths(params) do
+      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
+      _ -> {:noreply, socket}
+    end
   end
 
   def autosave(_params, socket) do
     {:noreply, socket}
+  end
+
+  # ── The dot-path fold (S9 crit 3, task-6d80c6cc7d97b1d1) ────────────────────
+  #
+  # `LocalizedTextField` renders its per-language inputs with a BRACKET
+  # envelope followed by a DOT segment — `name="doc[altText].nob"` — and the
+  # nested composite / array renderers compose the same shape.
+  # `Plug.Conn.Query.decode/1`, which Phoenix applies to the serialized form,
+  # only nests BRACKET segments: a trailing `.nob` is not one, so that input
+  # arrives as a FLAT top-level key `"doc[altText].nob"` and never lands inside
+  # the `"doc"` map `Shared.do_autosave/2` writes from.
+  #
+  # The value was therefore DISCARDED on every save. That is why an editor
+  # still could not write alt text once the asset panel opened: the field
+  # rendered, took the keystrokes, and dropped them.
+  #
+  # `StudioLive.parse_path/1` already understands exactly this shape — it is
+  # what `array_op/2` parses its `phx-value-path` with, and it strips the
+  # `doc[` envelope itself. Folding here reuses that parser rather than adding
+  # a second reading of the same syntax, and it changes NOTHING that is
+  # rendered: the input names stay as they are, so the paper-canvas and ONIX
+  # surfaces that also emit them keep their markup and simply start persisting.
+  #
+  # Fold only when there is something to fold: an untouched params map must
+  # come back byte-identical, or a payload with no `"doc"` key at all would
+  # gain an empty one and save a blank document over a real one.
+  defp fold_dot_paths(params) do
+    {dotted, rest} =
+      Enum.split_with(params, fn {k, _v} ->
+        is_binary(k) and String.starts_with?(k, "doc[")
+      end)
+
+    if dotted == [] do
+      params
+    else
+      rest = Map.new(rest)
+      doc = Map.get(rest, "doc", %{})
+
+      doc =
+        Enum.reduce(dotted, doc, fn {key, value}, acc ->
+          case StudioLive.parse_path(key) do
+            [] -> acc
+            path -> StudioLive.put_value_at(acc, path, value)
+          end
+        end)
+
+      Map.put(rest, "doc", doc)
+    end
   end
 
   def toggle_content_preview(socket) do

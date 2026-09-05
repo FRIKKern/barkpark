@@ -126,18 +126,25 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
 
     render_click(view, "select-group", %{"group" => "metadata"})
 
-    # THE WIRE SHAPE, stated exactly. `LocalizedTextField` emits
-    # `name="doc[altText].nob"`; LiveView's form serializer sends that string
-    # and Phoenix decodes it with `Plug.Conn.Query`, which yields the nested
-    # map below. This is the payload `Fields.save/2` receives.
-    decoded = Plug.Conn.Query.decode("doc[altText].nob=Et+fyrt%C3%A5rn+i+t%C3%A5ke")
-    IO.inspect(decoded, label: "DECODED")
+    # THE WIRE SHAPE, not a hand-built one. `LocalizedTextField` emits
+    # `name="doc[altText].nob"`; LiveView serializes the form to that string
+    # and Phoenix decodes it with `Plug.Conn.Query`, which does NOT nest the
+    # trailing dot segment. Submitting the decode output is the only way this
+    # test can claim an editor's keystrokes persist — a hand-nested
+    # `%{"doc" => %{"altText" => %{"nob" => …}}}` would pass against a payload
+    # the browser never sends.
+    wire =
+      Plug.Conn.Query.decode(
+        "doc[altText].nob=Et+fyrt%C3%A5rn+i+t%C3%A5ke&doc[altText].eng=A+lighthouse+in+fog"
+      )
 
-    render_submit(view, "save", %{
-      "doc" => %{
-        "altText" => %{"nob" => "Et fyrtårn i tåke", "eng" => "A lighthouse in fog"}
-      }
-    })
+    flat_top_level? = Map.has_key?(wire, "doc[altText].nob")
+
+    assert flat_top_level?,
+           "the wire shape changed; this test's premise (a flat dotted key) no longer holds: " <>
+             inspect(wire)
+
+    render_submit(view, "save", wire)
 
     # Draft-first: the editor's save writes the draft, exactly as it does for
     # every other type. Either row proves the round trip persisted.
