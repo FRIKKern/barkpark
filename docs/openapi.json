@@ -187,6 +187,7 @@
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found",
+                  "workspace_scope_required",
                   "workspace_slug_conflict",
                   "workspace_suspended"
                 ],

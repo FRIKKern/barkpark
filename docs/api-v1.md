@@ -25,7 +25,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, sent/304 only on anonymous unshaped reads (no `?fields=`/`?expand=`/`?resolve=`/`?count=`) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
@@ -74,13 +74,13 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ### 5c. History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; `rev` is null on history written before it was recorded, and such rows resolve by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
+A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{"mutations":[…]}`.
 
-**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2).
+**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
 **`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
@@ -113,7 +113,7 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. **Keepalive:** `: keepalive` per 30 s idle.
 
 **Shed frame:** a stalled consumer gets ONE `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (Chat never sheds.)
 
@@ -138,7 +138,7 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 
 ## 8d. Media asset record — `absoluteUrl`
 
-Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, scheme+host from `:media_cdn, :base_url` else the API's own origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied. Fetchable as-is from any origin.
+Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
 
 ## 9. Error Codes
 
@@ -146,9 +146,9 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 (registered; no producer in api/lib today) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `storage_unavailable` 503 (media, dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
 
-Endpoint-specific: [api/error-codes.md](api/error-codes.md). Source `Errors.known_codes/0`.
+Endpoint-specific: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 
 ## 10. Legacy `/api/*` Routes
 
