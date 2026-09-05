@@ -514,6 +514,45 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       end)
     end
 
+    test "fallback autosave acknowledges only the current successful write", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               BulldocsLive.handle_event(
+                 "paper-block-autosave",
+                 %{"block_id" => "b-body", "text" => "Fallback saved"},
+                 socket_of(view)
+               )
+
+      assert block_text(slug, "b-body") == "Fallback saved"
+      before = stored_blocks(slug)
+
+      for params <- [%{}, %{"block_id" => nil}] do
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-block-autosave", params, saved_socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+      end
+
+      denied_socket = Phoenix.Component.assign(saved_socket, :can_edit?, false)
+
+      assert {:reply, %{saved: false}, rejected_socket} =
+               BulldocsLive.handle_event(
+                 "paper-block-autosave",
+                 %{"block_id" => "b-body", "text" => "Must not land"},
+                 denied_socket
+               )
+
+      assert rejected_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == before
+    end
+
     test "paper-ops replays one committed request and reauthorizes before replay", %{
       conn: conn,
       slug: slug

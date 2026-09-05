@@ -662,8 +662,14 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-edit-block", params, socket),
     do: {:noreply, Edit.edit_block(socket, params)}
 
-  def handle_event("paper-block-autosave", params, socket),
-    do: {:noreply, Edit.edit_block(socket, params)}
+  def handle_event("paper-block-autosave", params, socket) do
+    socket =
+      socket
+      |> assign(last_save_ok?: false, save_status: "Save failed")
+      |> Edit.edit_block(params)
+
+    {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
+  end
 
   def handle_event("paper-add-block", params, socket),
     do: {:noreply, Edit.add_block(socket, params)}
