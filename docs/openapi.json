@@ -5891,6 +5891,73 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/papers/{slug}/access": {
+      "get": {
+        "operationId": "paper.access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow to one dataset (default: every dataset).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max rows to return (capped at 500).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Who has viewed and edited one paper — the append-only access trail, newest first. Anonymous access is counted with no identity.",
+        "tags": [
+          "paper"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/tasks/{doc_id}/pulse": {
       "post": {
         "operationId": "task.pulse",
@@ -17276,6 +17343,10 @@
     {
       "description": "Bundled cross-type reads over a dataset (per-type counts).",
       "name": "data"
+    },
+    {
+      "description": "Published papers — the reader surface and its access trail.",
+      "name": "paper"
     },
     {
       "description": "Outbound webhook subscriptions.",

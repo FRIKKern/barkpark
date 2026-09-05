@@ -359,6 +359,12 @@ config :barkpark, Oban,
        # nightly reads never kick off in the same tick.
        {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # edit-on-the-link slice 4 — retention sweep for the paper view/edit
+       # trail (`paper_access_log`). Daily, fifteen minutes after the search
+       # prune so the two range deletes never open their scans in one tick.
+       # Window: `:paper_access_log_ttl_days` below. Core (not a plugin), so it
+       # lives in this static crontab and rides the `default` queue.
+       {"15 4 * * *", Barkpark.Content.Workers.PaperAccessSweeper},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -419,6 +425,15 @@ config :barkpark, Oban,
 # higher than the rest of the fleet (Search.Crystallize / Prune are
 # daily).
 config :barkpark, :task_lease_ttl_seconds, 2700
+
+# edit-on-the-link slice 4 — retention window for `paper_access_log`, the paper
+# view/edit trail. 90 days is a quarter: long enough to answer "who has been on
+# this link" for the period anybody actually asks about, short enough that an
+# unbounded per-mount series stays bounded. Swept daily by
+# Barkpark.Content.Workers.PaperAccessSweeper; tests pass an explicit `days` in
+# the job args rather than overriding this. Runtime override:
+# BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS (see runtime.exs).
+config :barkpark, :paper_access_log_ttl_days, 90
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`

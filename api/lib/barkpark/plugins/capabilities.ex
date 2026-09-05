@@ -671,6 +671,16 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" => "Bundled cross-type reads over a dataset (per-type counts).",
         "plugin" => nil
       },
+      # The `paper.access` verb (GET /v1/papers/:slug/access) is a core command
+      # whose noun is `paper` — the reader's own view/edit trail, served from
+      # core (Barkpark.Content.PaperAccess), not from the Bulldocs plugin.
+      # Declaring the noun keeps the manifest honest: every command's noun must
+      # resolve to a declared noun, the invariant dataset.stats' orphan tripped.
+      %{
+        "name" => "paper",
+        "summary" => "Published papers — the reader surface and its access trail.",
+        "plugin" => nil
+      },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
       %{
         "name" => "token",
@@ -1538,6 +1548,30 @@ defmodule Barkpark.Plugins.Capabilities do
       # `scoped_prefix` is set ONLY where router.ex actually mounts a
       # `/w/:workspace_slug/p/:project_slug` mirror — settings, synonym-preview
       # and promote have none.
+      # ── paper access trail (edit-on-the-link slice 4, task-e99a8e946f80f52c).
+      # Behind `:flat_admin_api` (RequireToken + RequireAdmin) -> tier "admin",
+      # the same pipeline the media/documents search-config blocks below ride.
+      # No `scoped_prefix`: router.ex mounts no
+      # /w/:workspace_slug/p/:project_slug mirror for it — the workspace is
+      # derived from the token by DeriveWorkspaceFromToken instead.
+      core_cmd(
+        "paper.access",
+        "paper",
+        "access",
+        "Who has viewed and edited one paper — the append-only access trail, newest first. " <>
+          "Anonymous access is counted with no identity.",
+        "GET",
+        "/v1/papers/:slug/access",
+        "admin",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag("dataset", "string", "Narrow to one dataset (default: every dataset)."),
+          flag("limit", "int", "Max rows to return (capped at 500).", default: 100)
+        ],
+        writes: false,
+        paginated: false,
+        default_output: "table"
+      ),
       core_cmd(
         "media.search-settings",
         "media",

@@ -52,15 +52,27 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   """
 
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
+  import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3, connected?: 1]
 
   alias Barkpark.{Auth, Content}
+  alias Barkpark.Content.PaperAccess
+  alias BarkparkWeb.PaperActor
+  alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
+  alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
   @server_minted_block :__server_minted_block__
+
+  # The `action` string stamped on the revision every reader edit now writes.
+  # Free-form by contract (`:revision_action` already carries
+  # "valueref-accept-baseline" / "valueref-writeback"), and deliberately NOT
+  # "update": history should be able to say that this change arrived through
+  # the shared link rather than through Studio, because that is exactly the
+  # distinction slice 4 exists to make visible.
+  @revision_action "edit-on-link"
 
   # Every `paper-*` event Studio wires. Membership here means "an edit event":
   # refused for a socket without `:can_edit?`, whether or not the reader wires
@@ -150,7 +162,15 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
       true ->
         editing? = socket.assigns[:editing?] != true
-        socket = assign(socket, :editing?, editing?)
+
+        socket =
+          socket
+          |> assign(:editing?, editing?)
+          # Slice 4: tell the room. The presence meta's `editing?` is what puts
+          # the dot next to a name in `#paper-presence`, so it must flip on the
+          # SAME event that flips the mode — not on the first op, which may never
+          # come.
+          |> update_presence_editing(editing?)
 
         if editing?, do: socket |> sync() |> refresh_canvas(), else: socket
     end
@@ -217,7 +237,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         |> Content.apply_paper_block_op(
           Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
           socket.assigns[:dataset],
-          ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+          write_opts(socket) ++ [if_rev: if_rev]
         )
         |> handle_result(socket, nil)
     end
@@ -241,7 +261,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         |> Content.apply_paper_block_ops(
           ops,
           socket.assigns[:dataset],
-          ScopeHelpers.scope_opts(socket)
+          write_opts(socket)
         )
         |> handle_result(socket)
     end
@@ -273,15 +293,29 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       true ->
         {:ok, if_rev} = revision(supplied_rev)
 
+        # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —
+        # `bp-paper-editor-hooks.js` stamps a `request_id` on every mutation — so
+        # the attribution opts belong here, not only on the unidentified legacy
+        # seam below. `write_opts/1` is `ScopeHelpers.scope_opts/1` plus the
+        # three things a reader edit owes history (`:caller_context`,
+        # `:revision_action`, `:actor_user_id`); dropping to the bare scope here
+        # would leave every real reader edit unattributed while the tests that
+        # drive the legacy seam stayed green.
         case Content.apply_paper_block_ops_once(
                slug,
                ops,
                socket.assigns[:dataset],
                request_id,
                replay_principal_key(assigns),
-               ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+               write_opts(socket) ++ [if_rev: if_rev]
              ) do
           {:ok, receipt, outcome} ->
+            # One access row per ACCEPTED op, exactly as the legacy seam records
+            # it in `handle_result/3`. A REPLAY changed nothing about the paper —
+            # it is an acknowledgement of a write that already happened and
+            # already has its row — so it does not write a second one.
+            if outcome != :replayed, do: record_edit(socket)
+
             socket =
               socket
               |> sync()
@@ -494,6 +528,35 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   # ── internals ───────────────────────────────────────────────────────────────
 
+  @doc """
+  The opts every reader write carries — edit-on-the-link slice 4
+  (task-e99a8e946f80f52c).
+
+  Three things on top of the tenant scope, and nothing else:
+
+    * `:caller_context` — the one `ScopeHelpers.scope_opts/1` already produced,
+      upgraded to the account principal when the socket has one, and stamped
+      with the attribution actor. `PaperActor.caller_context/2` never
+      downgrades and the actor never widens access; see its docs.
+    * `:revision_action` — the OPT-IN that makes the op path write a version
+      row at all. Block ops are keystroke-grade, so `Papers.BlockOps` writes
+      history only for a caller that asks; the reader asks, because an edit
+      arriving on a shared link is precisely the act that must be attributable.
+    * `:actor_user_id` — the legacy single-column actor, kept in step with the
+      new triple so `revisions.actor_user_id` does not go quiet for user edits.
+
+  Public so a test can assert the shape without driving a whole LiveView.
+  """
+  def write_opts(socket) do
+    scope = ScopeHelpers.scope_opts(socket)
+    ctx = PaperActor.caller_context(scope, socket.assigns)
+
+    scope
+    |> Keyword.put(:caller_context, ctx)
+    |> Keyword.put(:revision_action, @revision_action)
+    |> Keyword.put(:actor_user_id, ctx.user_id)
+  end
+
   # The ONLY write predicate. See the moduledoc: never Caps.write_capable?/2.
   defp writable?(socket), do: socket.assigns[:can_edit?] == true
 
@@ -557,6 +620,13 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp handle_result(result, socket), do: handle_result(result, socket, nil)
 
   defp handle_result({:ok, result}, socket, request_id) do
+    # Slice 4: one access row per ACCEPTED op. Rejected ops (a constraint veto,
+    # a lifecycle halt, a stale rev) write nothing — the trail records what
+    # happened to the paper, not what was attempted against it. Best-effort by
+    # construction: `PaperAccess.record/1` always returns `:ok`, so a log the
+    # database cannot take never costs the author her edit.
+    record_edit(socket)
+
     socket
     |> sync()
     |> reconcile_canvas(request_id)
@@ -650,6 +720,44 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       |> Base.url_encode64(padding: false)
 
     "b-" <> suffix
+  end
+
+  # ── slice 4 internals ───────────────────────────────────────────────────────
+
+  # Flip this viewer's presence meta and re-materialise our own strip.
+  #
+  # `Presence.update/4` broadcasts a diff to the room, which every OTHER viewer
+  # picks up in `BulldocsLive`'s `presence_diff` clause. We refresh our own
+  # assign directly rather than wait for that diff to come back around, so the
+  # editor sees her own dot immediately.
+  defp update_presence_editing(socket, editing?) do
+    topic = socket.assigns[:presence_topic]
+    actor = socket.assigns[:paper_actor]
+
+    if connected?(socket) and is_binary(topic) and is_map(actor) do
+      Presence.update(self(), topic, PaperPresence.key(actor), fn meta ->
+        Map.put(meta, :editing?, editing?)
+      end)
+
+      BarkparkWeb.BulldocsLive.refresh_paper_presence(socket)
+    else
+      socket
+    end
+  end
+
+  # One `paper_access_log` row for an accepted edit, carrying the SAME actor the
+  # revision was stamped with — the two surfaces cannot disagree about who did
+  # it, because both read `socket.assigns.paper_actor`.
+  defp record_edit(socket) do
+    PaperAccess.record(
+      PaperAccess.entry(
+        socket.assigns[:slug],
+        socket.assigns[:dataset],
+        socket.assigns[:paper_workspace_id],
+        "edit",
+        socket.assigns[:paper_actor] || PaperActor.anonymous()
+      )
+    )
   end
 
   defp constraint_flash(message) when is_binary(message),

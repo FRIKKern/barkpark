@@ -10,13 +10,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (41 today; the three
+    * **E1** — every table carrying a `workspace_id` column (42 today; the three
       epic-cycle ledgers `cycle_waves` / `epic_assignments` /
       `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
       generic `WHERE workspace_id = $ws` path, the three
       registered Chat host / execution tables are workspace-owned, the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
-      column with no FK to `workspaces`, `roles` is one, both
+      column with no FK to `workspaces`, and so does `paper_access_log` (the
+      paper view/edit trail, edit-on-the-link slice 4 — same zero-FK,
+      append-only, workspace-attributed shape as `audit_events`), `roles` is
+      one, both
       `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys`
       (the per-dataset DEK store, bpb-datakeys-write-path-workspace-attribution)
       were re-pinned from the allowlist, and the five `sync_*` bare-slug tables
@@ -95,7 +98,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_correction_roots cycle_correction_targets
     cycle_release_gate_admissions cycle_release_gate_challenges cycle_waves
     data_keys documents epic_assignments
-    epic_benchmark_experiments media_files mutation_events paper_events
+    epic_benchmark_experiments media_files mutation_events paper_access_log
+    paper_events
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
@@ -560,7 +564,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     shares (access-granting registry — copying would silently re-open
   #     public surfaces on the target), registered_chat_hosts,
   #     preview_token_jti.
-  #   * PII / conversation / audit trails: audit_events, workspace_memberships,
+  #   * PII / conversation / audit trails: audit_events, paper_access_log
+  #     (who read which paper and when, identified where the reader could
+  #     identify them — the same trail shape as audit_events and denied for the
+  #     same reason: a dev target must not inherit a production readership),
+  #     workspace_memberships,
   #     chat_execution_leases, chat_execution_events, search_intel_events
   #     (raw user-typed `query` text + `actor_key`/`session_key` identity —
   #     per-user behavioral telemetry; the DERIVED aggregates
@@ -595,7 +603,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     data_keys epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events
-    preview_token_jti registered_chat_hosts revisions search_intel_events
+    paper_access_log preview_token_jti registered_chat_hosts revisions
+    search_intel_events
     secrets secrets_audit
     share_links shares sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks

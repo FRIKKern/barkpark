@@ -38,6 +38,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     Writer
   }
 
+  alias Barkpark.Content.CallerContext
+
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
@@ -727,16 +729,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       case fenced_or_plain_paper_update(changeset, doc, opts) do
         {:ok, saved} ->
-          frame = %{
-            op_kind: op_kind,
-            block_id: affected.block_id,
-            fragment_html: fragment_html,
-            position: affected.position,
-            rev: rev
-          }
+          # Edit-on-the-link slice 4: the delta frame names WHO produced it.
+          # Server-side only (a frame is a `handle_info` payload, never bytes on
+          # the wire), and additive — a subscriber that ignores the keys sees
+          # the frame it always saw.
+          frame =
+            Map.merge(
+              %{
+                op_kind: op_kind,
+                block_id: affected.block_id,
+                fragment_html: fragment_html,
+                position: affected.position,
+                rev: rev
+              },
+              CallerContext.actor_stamp_from_opts(opts)
+            )
 
           broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
           enqueue_edge_projection(saved)
+          maybe_save_op_revision(saved, dataset, opts)
 
           {:ok,
            %{
@@ -948,14 +959,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
           case fenced_or_plain_paper_update(changeset, doc, opts) do
             {:ok, saved} ->
-              frame = %{
-                op_kind: :batch,
-                block_id: List.last(block_ids),
-                block_ids: block_ids,
-                fragment_html: nil,
-                position: nil,
-                rev: rev
-              }
+              # Same actor stamp as the single-op frame (slice 4), same posture:
+              # server-side, additive, ignorable.
+              frame =
+                Map.merge(
+                  %{
+                    op_kind: :batch,
+                    block_id: List.last(block_ids),
+                    block_ids: block_ids,
+                    fragment_html: nil,
+                    position: nil,
+                    rev: rev
+                  },
+                  CallerContext.actor_stamp_from_opts(opts)
+                )
 
               {:ok,
                %{
@@ -1268,7 +1285,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
                @paper_type,
                dataset,
                action,
-               Keyword.get(opts, :actor_user_id)
+               Keyword.get(opts, :actor_user_id),
+               # Slice 4: the principal behind the batch, with its kind. Derived
+               # from the SAME `:caller_context` the caller already threads, so
+               # no caller grows a second way to say who it is.
+               CallerContext.actor_stamp_from_opts(opts)
              ) do
           {:ok, _rev} ->
             :ok
@@ -1278,6 +1299,54 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
             Logger.warning(
               "batch revision (#{action}) failed for #{inspect(saved.doc_id)}: #{inspect(reason)}"
+            )
+
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  # The single-op twin of `maybe_save_batch_revision/3` (edit-on-the-link
+  # slice 4).
+  #
+  # WHY IT IS GATED ON `:revision_action` AND NOTHING ELSE. A block op is a
+  # keystroke-grade write — the streaming editor emits one per autosave — so an
+  # unconditional revision per op would turn version history into a keylog and
+  # multiply the `revisions` table by the number of characters typed. The gate
+  # is therefore OPT-IN by the caller, exactly as the batch path's is: only a
+  # caller that has decided this op is a HISTORICAL EVENT asks for a row.
+  #
+  # The paper READER opts in (`BulldocsLive.Edit`): an edit made on a shared
+  # link is by construction an attributable act by someone who is not the
+  # workspace's own author, and slice 4's whole premise is that such an act must
+  # be visible in history. The Studio pane does not opt in, so its behaviour is
+  # unchanged by this commit.
+  #
+  # BEST-EFFORT, same posture as the batch twin: the content write is the source
+  # of truth and has already committed. A failed history insert is logged, never
+  # raised, and never rolls the op back.
+  defp maybe_save_op_revision(%Document{} = saved, dataset, opts) do
+    case Keyword.get(opts, :revision_action) do
+      action when is_binary(action) and action != "" ->
+        case Broadcast.save_revision(
+               saved,
+               @paper_type,
+               dataset,
+               action,
+               Keyword.get(opts, :actor_user_id),
+               CallerContext.actor_stamp_from_opts(opts)
+             ) do
+          {:ok, _rev} ->
+            :ok
+
+          {:error, reason} ->
+            require Logger
+
+            Logger.warning(
+              "op revision (#{action}) failed for #{inspect(saved.doc_id)}: #{inspect(reason)}"
             )
 
             :ok

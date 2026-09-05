@@ -54,7 +54,11 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.Content.PaperAccess
   alias BarkparkWeb.BulldocsLive.Edit
+  alias BarkparkWeb.Presence
+  alias BarkparkWeb.PaperActor
+  alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
   alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandlers
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -126,6 +130,19 @@ defmodule BarkparkWeb.BulldocsLive do
       # on the very assign it guards.
       |> Edit.defaults(paper)
       |> Edit.attach_gate()
+      # Slice 4 (task-e99a8e946f80f52c): the attribution actor + the presence
+      # room for THIS paper. Assigned for every viewer, including the anonymous
+      # one: the strip below renders only for an identified viewer, so an
+      # anonymous render is byte-identical to before this slice, but the actor
+      # is what her "view" access row is stamped with and her presence is what
+      # the anonymous COUNT is made of.
+      |> assign(:paper_actor, PaperActor.from_assigns(socket.assigns))
+      |> assign(:paper_workspace_id, paper.workspace_id)
+      |> assign(
+        :presence_topic,
+        PaperPresence.topic(paper.workspace_id, dataset, slug)
+      )
+      |> assign(:paper_presence, PaperPresence.empty())
 
     reader_source =
       case Content.Papers.reader_source(paper, dataset, reader_scope) do
@@ -274,8 +291,75 @@ defmodule BarkparkWeb.BulldocsLive do
       # omits the attribute → byte-identical to before.
       |> assign(:bp_theme, reader_theme(paper, reader_scope, paper_workspace))
       |> assign_block_mode(paper, reader_source)
+      # Slice 4: join the paper's presence room and record the view. LAST,
+      # because it reads `:slug` and `:dataset` off the socket — the access row
+      # names the paper, so it must be assigned before the row is built.
+      #
+      # Both halves are CONNECTED-ONLY. A dead render is a crawler, an
+      # unfurler, or the first half of the LiveView handshake: counting it as a
+      # reader would make every social preview look like a visit, and tracking
+      # it would track a process that is about to exit.
+      |> join_paper_presence()
 
     {:ok, socket, layout: false}
+  end
+
+  # ── slice 4: presence + the access trail ────────────────────────────────────
+
+  @doc """
+  Join the paper's presence room and record the view. Public so the presence
+  test can drive it, and a no-op on a dead socket.
+
+  Three things, in this order and for a reason:
+
+    1. SUBSCRIBE to the presence topic first, so the diff produced by our own
+       `track` below reaches us — a track before the subscribe is a join
+       nobody, including us, is told about.
+    2. TRACK ourselves. An identified viewer joins under her own key; every
+       anonymous viewer joins under one shared key, which is what makes the
+       anonymous population a COUNT with nowhere to hold an identity
+       (`PaperPresence`).
+    3. RECORD the view. Best-effort by construction — `PaperAccess.record/1`
+       always returns `:ok` — so a log the database cannot take never costs the
+       reader her page.
+  """
+  def join_paper_presence(socket) do
+    if connected?(socket) and is_binary(socket.assigns[:presence_topic]) do
+      topic = socket.assigns.presence_topic
+      actor = socket.assigns[:paper_actor] || PaperActor.anonymous()
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+      Presence.track(self(), topic, PaperPresence.key(actor), PaperPresence.meta(actor))
+
+      PaperAccess.record(
+        PaperAccess.entry(
+          socket.assigns[:slug],
+          socket.assigns[:dataset],
+          # The PAPER's own workspace — the same key the presence topic uses,
+          # so a row and a presence always name the same tenant. nil is
+          # legitimate (a legacy NULL-workspace paper) and reads back through
+          # the NULL-tolerant clause in `PaperAccess.list/2`.
+          socket.assigns[:paper_workspace_id],
+          "view",
+          actor
+        )
+      )
+
+      assign(socket, :paper_presence, PaperPresence.list(topic))
+    else
+      socket
+    end
+  end
+
+  @doc """
+  Re-materialise the presence strip. Called from the `presence_diff` handler
+  and after our own `Presence.update/4`, so the two paths can never diverge.
+  """
+  def refresh_paper_presence(socket) do
+    case socket.assigns[:presence_topic] do
+      topic when is_binary(topic) -> assign(socket, :paper_presence, PaperPresence.list(topic))
+      _ -> socket
+    end
   end
 
   # Resolve the theme identity for the reader: the paper's OWN workspace, falling
@@ -1169,6 +1253,22 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
 
+  # Slice 4: somebody joined or left this paper's presence room. Re-materialise
+  # the strip; the anonymous render ignores the assign entirely.
+  #
+  # The topic is matched, not assumed: this LiveView subscribes to several
+  # topics and only the presence one produces this event today, but a future
+  # subscription that also carries presence must not be able to overwrite this
+  # paper's strip with another room's occupants.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "presence_diff", topic: topic},
+        %{assigns: %{presence_topic: topic}} = socket
+      ),
+      do: {:noreply, refresh_paper_presence(socket)}
+
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket),
+    do: {:noreply, socket}
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # A gap is any received rev that is not exactly the next one we expect. The
@@ -1364,6 +1464,47 @@ defmodule BarkparkWeb.BulldocsLive do
         >
           {if @editing?, do: "View", else: "Edit"}
         </button>
+      </div>
+
+      <%!-- Edit on the link, slice 4 (task-e99a8e946f80f52c). Who else is on
+            this paper, for an IDENTIFIED viewer only.
+
+            The `@viewer.kind != :anonymous` guard is the privacy contract in
+            one line, and it runs in BOTH directions: an anonymous visitor is
+            never shown who is reading (her render is byte-identical to before
+            this slice), and no viewer is ever shown WHO the anonymous readers
+            are — only how many, because the presence layer tracks them all
+            under one key and has nowhere to put a name.
+
+            Rendered here, alongside the edit bar and OUTSIDE the article
+            subtree: the strip is page chrome, and a presence diff must never
+            re-render a single byte of the paper itself. --%>
+      <div
+        :if={@viewer.kind != :anonymous and (@paper_presence.identified != [] or
+          @paper_presence.anonymous_count > 0)}
+        id="paper-presence"
+        class="bp-paper-presence"
+      >
+        <span
+          :for={p <- @paper_presence.identified}
+          class={["bp-paper-presence-who", p.editing? && "bp-paper-presence-who--editing"]}
+          data-presence-key={p.key}
+          data-presence-kind={p.kind}
+          data-editing={to_string(p.editing?)}
+        >
+          <span :if={p.editing?} class="bp-paper-presence-dot" aria-label="editing">•</span>
+          {PaperPresence.display(p)}
+        </span>
+        <%!-- Anonymous readers are a NUMBER. There is deliberately no way to
+              expand this into a list. --%>
+        <span
+          :if={@paper_presence.anonymous_count > 0}
+          class="bp-paper-presence-anon"
+          id="paper-presence-anon"
+          data-count={@paper_presence.anonymous_count}
+        >
+          {@paper_presence.anonymous_count} anonymous
+        </span>
       </div>
 
       <%!-- P6.U5 action bar. These are the paper doc action buttons
