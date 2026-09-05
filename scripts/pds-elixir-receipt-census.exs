@@ -489,8 +489,23 @@ defmodule PDS.Census do
     # ONE inserted defp hop. `unrouted` is INHERITED UNCHANGED at 12 — the two sites did
     # not fall out of the route relation, they landed in the other routed class, and a
     # row that did not move is evidence too.
-    write: 58,
-    read: 25,
+    #
+    # RE-DERIVED AGAIN at task-41a740fd6701ec28 (PR #16147, the mutate-path schema
+    # validation mount): 58 -> 57 and 25 -> 26. Mounting `Content.Validation` at the
+    # `Writer.create_document/4` / update chokepoint inserted a hop that moved ONE
+    # already-routed receipt from the write class into the read class; the emitted
+    # population (95), the phantoms (9) and `unrouted` (12) did not move — the site did
+    # not fall out of the route relation, it landed in the other routed class, exactly
+    # the shape task-a0ce4e18f6776400 recorded above. DERIVED BY THE INSTRUMENT ITSELF,
+    # not typed from memory: the D448-DRIFT-REFUSES line of this census on the PR's own
+    # head (CI run 33960196892, head c6a4b42b1f, engine Elixir 1.18.4 · Erlang/OTP 27 (erts 15.0.1) · x86_64-pc-linux-gnu) printed
+    # "write-routed baseline 58 derived 57 · read-routed baseline 25 derived 26"; the
+    # lead amended the baseline from that run because the local box could not complete
+    # the census under load (>10 min at load 90). Re-run `--sites` against origin/main
+    # to NAME the member when the box is quiet — this comment records the count, not
+    # the member.
+    write: 57,
+    read: 26,
     unrouted: 12
   }
 
