@@ -57,7 +57,8 @@ jobs:
         with:
           # PRs need the base ref's history so turbo can scope to `...[origin/<base>]`
           # (task-4e377262789d8fd3). main keeps the shallow clone.
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          # Quoted on purpose: a bare 0 is FALSY in expressions, so `&& 0 || 1` always gave 1.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
