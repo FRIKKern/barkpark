@@ -403,7 +403,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_create",
 		Title:       "Create a task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. NOTE: this MCP tool defaults publish TRUE, unlike the `bp task create` CLI which defaults it FALSE (draft-first) — reach for publish:false here only when you deliberately want a draft. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation. Give tags as weighted labels — each {tag, strength (integer 1-100), rationale}, all three required. Strengths must be DISTINCT with a single UNIQUE MAXIMUM (that top-weighted tag is the main tag). Bounds are HARD: 1-12 tags; the healthy advisory norm is 2-4. Once the authoring-excellence publish wall is live, a task that violates these rules is rejected at publish — so shape tags to the rules and this tool is the retry channel.",
+		Description: mcpTaskCreateDescription,
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -1091,3 +1091,9 @@ func mcpTextError(msg string) *mcp.CallToolResult {
 		IsError: true,
 	}
 }
+
+// mcpTaskCreateDescription is the task_create tool's description. It is a named
+// const, not an inline literal, so the test that asserts the CLI/MCP
+// publish-default asymmetry is documented AT BOTH SITES can read this half
+// (task-ede6e18e8c397ee0 c1). The CLI half lives in printTaskCreateHelp.
+const mcpTaskCreateDescription = "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. NOTE — THE PUBLISH-DEFAULT ASYMMETRY, DOCUMENTED AT BOTH SITES (`bp task create --help` carries the same paragraph): this MCP tool defaults publish TRUE, while the `bp task create` CLI defaults it FALSE (draft-first). Reach for publish:false here only when you deliberately want a draft, and remember that a draft is NOT on the board and NOT in `bp task ready` as a pair — unpublished rows filed through the draft-first door are the documented source of unclaimable drafts.task-N residue on the queue. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation. Give tags as weighted labels — each {tag, strength (integer 1-100), rationale}, all three required. Strengths must be DISTINCT with a single UNIQUE MAXIMUM (that top-weighted tag is the main tag). Bounds are HARD: 1-12 tags; the healthy advisory norm is 2-4. Once the authoring-excellence publish wall is live, a task that violates these rules is rejected at publish — so shape tags to the rules and this tool is the retry channel."
