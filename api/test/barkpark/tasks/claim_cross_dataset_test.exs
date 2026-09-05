@@ -125,17 +125,31 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
       twins = mk_in_both!(scope, doc_id)
 
       # Both twins are drafts, so the published-first arm ties and `dataset`
-      # ASC decides. "aker-brygge" sorts before "production", so the winner is
-      # named by the RULE rather than by whichever row was inserted first.
+      # ASC decides. The fixture inserts `production` FIRST and `aker-brygge`
+      # second, so insertion order and dataset order DISAGREE: a resolver that
+      # returned "whatever came first" would answer `production` here.
       expected = Enum.min_by(twins, & &1.dataset)
+      assert expected.dataset == @secondary
 
-      # The exact match wins over the drafts. fallback, and among the exact
-      # matches the published-first arm decides. Asserting the resolved id
-      # rather than merely "it did not raise" is what makes the published-first
-      # arm load-bearing in this file.
-      assert {:ok, %Document{id: id}} = Tasks.claim_by_id(doc_id, "worker-cross", scope)
+      assert {:ok, %Document{id: id, dataset: ds}} =
+               Tasks.claim_by_id(doc_id, "worker-cross", scope)
+
       assert id == expected.id
+      assert ds == @secondary, "the dataset arm of the order did not decide the tie"
     end
+
+    # HONEST LIMIT OF THIS FILE, measured rather than assumed. Disarming the
+    # order and limit entirely reds three of these four tests with
+    # `Ecto.MultipleResultsError` — the defect verbatim. But keeping `limit: 1`
+    # and dropping only the `dataset`/`id` tiebreak (leaving published-first
+    # alone) leaves all four GREEN: with two heap rows Postgres happened to
+    # return the same one anyway. So this suite proves the RAISE is fixed and
+    # does NOT prove the order is total. The total order is defended by the
+    # canonical rule it copies (`Content.Graph.resolve_doc/3`,
+    # `@canonical capability:slug-resolve`, and `fetch_task_exact/3`) and by
+    # the reasoning that a partial order trades a loud 500 for a silent
+    # alternating answer — not by a red test. Stated here so nobody reads
+    # green as coverage it does not have.
 
     test "an ordinary single-dataset row is unaffected", %{scope: scope} do
       doc_id = uniq("single-dataset")
