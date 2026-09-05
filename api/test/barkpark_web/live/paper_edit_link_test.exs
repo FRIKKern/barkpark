@@ -335,6 +335,50 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       refute flash_of(view)["error"]
     end
 
+    test "an edit-link batch replays once and revocation denies every subsequent retry", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      granted: granted
+    } do
+      {raw, link} = mint_link!(ws, proj, granted, "edit")
+      {:ok, view, _html} = live(conn, shared_path(ws, proj, granted, raw))
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "request_id" => request_id,
+        "ops" => [
+          %{
+            "op" => "insert-after",
+            "afterId" => "b-body",
+            "block" => %{"id" => "shared-once", "type" => "paragraph", "text" => "Saved once"}
+          }
+        ]
+      }
+
+      render_hook(view, "paper-ops", params)
+      assert assigns_of(view).last_save_ok? == true
+      before = stored_blocks(granted, ws, proj)
+      assert Enum.count(before, &(&1["id"] == "shared-once")) == 1
+      socket = :sys.get_state(view.pid).socket
+
+      assert {:reply, %{saved: true, request_id: ^request_id, replayed: true}, socket} =
+               BarkparkWeb.BulldocsLive.handle_event("paper-ops", params, socket)
+
+      assert stored_blocks(granted, ws, proj) == before
+      {:ok, _} = Links.revoke(link.id)
+
+      Enum.reduce(1..2, socket, fn _, previous ->
+        assert {:reply, %{saved: false, request_id: ^request_id}, refused} =
+                 BarkparkWeb.BulldocsLive.handle_event("paper-ops", params, previous)
+
+        assert refused.assigns.last_save_ok? == false
+        assert stored_blocks(granted, ws, proj) == before
+        refused
+      end)
+    end
+
     test "the reader loads the editor assets for an edit-link viewer", %{
       conn: conn,
       ws: ws,
@@ -406,6 +450,11 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       before = stored_blocks(granted, ws, proj)
 
       for {event, params} <- @denied_probes do
+        params =
+          if event == "paper-ops",
+            do: Map.put(params, "request_id", Ecto.UUID.generate()),
+            else: params
+
         render_hook(view, event, params)
 
         assert flash_of(view)["error"] == Edit.denial(), "#{event} was not refused"

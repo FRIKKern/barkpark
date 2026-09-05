@@ -27,6 +27,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
+  alias Barkpark.Idempotency
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
@@ -773,7 +774,106 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
-         if_rev = Keyword.get(opts, :if_rev),
+         {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
+      run_paper_batch_effects(effects, dataset, opts)
+      {:ok, receipt}
+    else
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  @doc """
+  Apply one request-identified paper-op batch once within the idempotency
+  store's bounded retention window (24 hours by default; the editor retries for
+  at most one hour).
+
+  The request id is scoped to the physical paper row, its complete tenant
+  identity, and the authenticated principal. The ops plus `:if_rev` form the
+  payload fingerprint. A matching retry returns the original receipt without
+  rechecking the now-stale revision and without repeating post-commit effects;
+  reuse for different input fails closed. This facade must own its transaction
+  boundary so those effects run only after the actual commit; calling it from
+  an already-open transaction is rejected before any read, claim, or mutation.
+  """
+  def apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      )
+
+  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+      when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
+      key_hash = paper_ops_key_hash(doc, request_id, principal_key)
+      exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
+
+      Repo.transaction(fn ->
+        case Idempotency.claim_exact(key_hash, exact_scope) do
+          :claimed ->
+            maybe_after_idempotency_claim(opts)
+
+            case Repo.get(Document, doc.id) do
+              %Document{} = current_doc ->
+                case persist_paper_block_ops(current_doc, slug, ops, dataset, opts) do
+                  {:ok, receipt, effects} ->
+                    maybe_before_idempotency_complete(opts)
+
+                    case Idempotency.complete_exact(key_hash, exact_scope, receipt) do
+                      :ok -> {:applied, receipt, effects}
+                      {:error, reason} -> Repo.rollback(reason)
+                    end
+
+                  {:error, reason} ->
+                    Repo.rollback(reason)
+                end
+
+              nil ->
+                Repo.rollback(:not_found)
+            end
+
+          {:replay, stored_receipt} ->
+            case normalize_stored_paper_ops_receipt(stored_receipt) do
+              {:ok, receipt} -> {:replayed, receipt}
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          :in_progress ->
+            Repo.rollback(:idempotency_in_progress)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {:applied, receipt, effects}} ->
+          run_paper_batch_effects(effects, dataset, opts)
+          {:ok, receipt, :applied}
+
+        {:ok, {:replayed, receipt}} ->
+          {:ok, receipt, :replayed}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      true -> {:error, :paper_ops_nested_transaction_unsupported}
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
+    do: {:error, :invalid_paper_ops_request}
+
+  defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
+    with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
@@ -804,7 +904,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
              op_count: 0,
              rev: paper_current_rev(doc),
              block_ids: []
-           }}
+           }, nil}
 
         true ->
           rev = paper_next_rev(doc)
@@ -842,17 +942,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
                 rev: rev
               }
 
-              broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
-              enqueue_edge_projection(saved)
-              maybe_save_batch_revision(saved, dataset, opts)
-
               {:ok,
                %{
                  slug: slug,
                  op_count: length(ops),
                  rev: rev,
                  block_ids: block_ids
-               }}
+               }, {saved, slug, frame}}
 
             {:error, :precondition_failed} = err ->
               err
@@ -862,10 +958,96 @@ defmodule Barkpark.Content.Papers.BlockOps do
           end
       end
     else
-      nil -> {:error, :not_found}
       {:error, _reason} = err -> err
     end
   end
+
+  defp run_paper_batch_effects(nil, _dataset, _opts), do: :ok
+
+  defp run_paper_batch_effects({%Document{} = saved, slug, frame}, dataset, opts) do
+    broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
+    enqueue_edge_projection(saved)
+    maybe_save_batch_revision(saved, dataset, opts)
+    :ok
+  end
+
+  defp normalize_paper_ops_request_id(request_id) when is_binary(request_id) do
+    case Ecto.UUID.cast(request_id) do
+      {:ok, canonical} -> {:ok, canonical}
+      :error -> {:error, :invalid_request_id}
+    end
+  end
+
+  defp normalize_paper_ops_request_id(_), do: {:error, :invalid_request_id}
+
+  defp normalize_paper_ops_principal(principal_key) when is_binary(principal_key) do
+    case String.trim(principal_key) do
+      "" -> {:error, :missing_principal}
+      canonical -> {:ok, canonical}
+    end
+  end
+
+  defp normalize_paper_ops_principal(_), do: {:error, :missing_principal}
+
+  # Internal contention seam: the unboxed two-connection regression pauses the
+  # winning transaction after INSERT so the losing INSERT is forced to observe
+  # a genuinely in-flight Postgres uniqueness conflict. No host passes it.
+  defp maybe_after_idempotency_claim(opts) do
+    case Keyword.get(opts, :after_idempotency_claim) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+  end
+
+  # Test-only fault seam: lets the transaction regression remove/corrupt the
+  # pending receipt after the document UPDATE, proving completion failure rolls
+  # the document back too. Production hosts never set this option.
+  defp maybe_before_idempotency_complete(opts) do
+    case Keyword.get(opts, :before_idempotency_complete) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+  end
+
+  defp paper_ops_key_hash(%Document{} = doc, request_id, principal_key) do
+    {
+      "paper_ops:v1",
+      doc.id,
+      doc.workspace_id,
+      doc.project_id,
+      doc.dataset_id,
+      doc.dataset,
+      principal_key,
+      request_id
+    }
+    |> deterministic_hash()
+  end
+
+  defp paper_ops_payload_fingerprint(ops, opts) do
+    {ops, Keyword.get(opts, :if_rev)}
+    |> deterministic_hash()
+  end
+
+  defp deterministic_hash(term) do
+    term
+    |> :erlang.term_to_binary([:deterministic])
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  defp normalize_stored_paper_ops_receipt(%{
+         "slug" => slug,
+         "op_count" => op_count,
+         "rev" => rev,
+         "block_ids" => block_ids
+       })
+       when is_binary(slug) and is_integer(op_count) and is_integer(rev) and
+              is_list(block_ids) do
+    {:ok, %{slug: slug, op_count: op_count, rev: rev, block_ids: block_ids}}
+  end
+
+  defp normalize_stored_paper_ops_receipt(_),
+    do: {:error, :idempotency_receipt_invalid}
 
   # Atomic fold: thread the block list through each op via Patch.apply_patch/2,
   # collecting the affected block id per op against the post-op state. Halts on

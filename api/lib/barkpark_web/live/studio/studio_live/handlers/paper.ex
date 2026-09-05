@@ -261,12 +261,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # paper-op uses (Shared.paper_ops → Content.apply_paper_block_ops). A non-list
   # or empty `ops` is a quiet failed acknowledgement (guarded in
   # Shared.paper_ops/2): no batch was persisted, so the client must retain it.
-  def paper_ops(%{"ops" => ops}, socket) do
-    socket = Shared.paper_ops(socket, ops)
-    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
-  end
+  def paper_ops(params, socket) do
+    request_id = if is_map(params), do: Map.get(params, "request_id")
+    ops = if is_map(params), do: Map.get(params, "ops")
 
-  def paper_ops(_params, socket), do: {:reply, %{saved: false}, socket}
+    case Shared.paper_ops(socket, ops, request_id) do
+      {:ok, socket, receipt, outcome} ->
+        {:reply,
+         %{
+           saved: true,
+           request_id: request_id,
+           replayed: outcome == :replayed,
+           rev: receipt.rev
+         }, socket}
+
+      {:error, socket} ->
+        {:reply, %{saved: false, request_id: request_id}, socket}
+    end
+  end
 
   @doc """
   t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed

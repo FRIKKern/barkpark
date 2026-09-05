@@ -360,7 +360,10 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
       # `:live_scope_write_scope` hook DOES observe — unlike the component
       # route. Same string, different producer, and the seam is never entered:
       # `save_status` is untouched.
-      render_hook(view, "paper-ops", %{"ops" => [append_op(@batch_block_id)]})
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "ops" => [append_op(@batch_block_id)]
+      })
 
       assert stored_block_ids(ws, proj, @other_slug) == ids_before
       assert flash_error(view) == @outside_grant_flash

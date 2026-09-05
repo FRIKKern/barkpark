@@ -640,14 +640,23 @@ defmodule BarkparkWeb.BulldocsLive do
     {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
   end
 
-  def handle_event("paper-ops", %{"ops" => ops}, socket) do
-    socket = Edit.apply_ops(socket, ops)
-    {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
-  end
+  def handle_event("paper-ops", params, socket) do
+    request_id = if is_map(params), do: Map.get(params, "request_id")
+    ops = if is_map(params), do: Map.get(params, "ops")
 
-  def handle_event("paper-ops", _params, socket) do
-    socket = Edit.apply_ops(socket, nil)
-    {:reply, %{saved: false}, socket}
+    case Edit.apply_ops(socket, ops, request_id) do
+      {:ok, socket, receipt, outcome} ->
+        {:reply,
+         %{
+           saved: true,
+           request_id: request_id,
+           replayed: outcome == :replayed,
+           rev: receipt.rev
+         }, socket}
+
+      {:error, socket} ->
+        {:reply, %{saved: false, request_id: request_id}, socket}
+    end
   end
 
   def handle_event("paper-edit-block", params, socket),

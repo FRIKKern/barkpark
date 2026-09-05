@@ -181,7 +181,7 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
     socket = socket_of(view)
     assert Caps.write_capable?(socket.assigns, Caps.derive(socket)) == true
 
-    render_hook(view, "paper-ops", %{"ops" => patch_ops()})
+    render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
 
     # Read back from the STORE. This is what a denied principal would have got
     # if either gate were missing.
@@ -200,7 +200,8 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
       assert_write_denied_socket!(view)
       assert_canvas_mounted!(view)
 
-      render_hook(view, "paper-ops", %{"ops" => patch_ops()})
+      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
+
       render(view)
 
       # THE CENTRAL CLAIM, read from the store.
@@ -226,7 +227,8 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
       before = socket_of(view).assigns[:save_status]
       assert before != "Read-only"
 
-      render_hook(view, "paper-ops", %{"ops" => patch_ops()})
+      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
+
       render(view)
 
       after_socket = socket_of(view)

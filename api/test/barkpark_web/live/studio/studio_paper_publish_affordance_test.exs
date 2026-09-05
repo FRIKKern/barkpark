@@ -264,6 +264,7 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
       # and verify against the STORE: published row exists, draft is gone.
       view
       |> render_hook("paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
         "ops" => [%{"op" => "insert-after", "afterId" => "b0", "block" => content_paragraph()}]
       })
 

@@ -431,6 +431,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_click(view, "paper-toggle-edit", %{})
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -472,6 +473,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_click(view, "paper-toggle-edit", %{})
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -485,16 +487,94 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-body") == "Saved first"
       before = stored_blocks(slug)
 
-      Enum.reduce([%{"ops" => []}, %{"ops" => "not-a-list"}, %{}], socket_of(view), fn
-        params, socket ->
-          assert {:reply, %{saved: false}, rejected_socket} =
-                   BulldocsLive.handle_event("paper-ops", params, socket)
+      valid_ops = [
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Must not land"}]}
+        }
+      ]
 
-          assert rejected_socket.assigns.last_save_ok? == false
-          assert rejected_socket.assigns.save_status == "Save failed"
-          assert stored_blocks(slug) == before
-          rejected_socket
+      invalid_payloads = [
+        %{"request_id" => Ecto.UUID.generate(), "ops" => []},
+        %{"request_id" => Ecto.UUID.generate(), "ops" => "not-a-list"},
+        %{"ops" => valid_ops},
+        %{"request_id" => "not-a-uuid", "ops" => valid_ops},
+        %{}
+      ]
+
+      Enum.reduce(invalid_payloads, socket_of(view), fn params, socket ->
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-ops", params, socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+        rejected_socket
       end)
+    end
+
+    test "paper-ops replays one committed request and reauthorizes before replay", %{
+      conn: conn,
+      slug: slug
+    } do
+      raw = "eol-replay-writer-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "eol replay writer", @dataset, ["read", "write"])
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "request_id" => request_id,
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{
+              "id" => "replay-once",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Only once"}]
+            }
+          }
+        ]
+      }
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: false,
+                rev: committed_rev
+              }, committed_socket} =
+               BulldocsLive.handle_event("paper-ops", params, socket_of(view))
+
+      committed_blocks = stored_blocks(slug)
+      assert Enum.count(committed_blocks, &(&1["id"] == "replay-once")) == 1
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: true,
+                rev: ^committed_rev
+              }, replayed_socket} =
+               BulldocsLive.handle_event("paper-ops", params, committed_socket)
+
+      assert stored_blocks(slug) == committed_blocks
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               BulldocsLive.handle_event("paper-ops", params, replayed_socket)
+
+      assert denied_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == committed_blocks
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_again_socket} =
+               BulldocsLive.handle_event("paper-ops", params, denied_socket)
+
+      assert denied_again_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == committed_blocks
     end
 
     test "canvas readiness refresh pushes the shared display channels", %{conn: conn, slug: slug} do

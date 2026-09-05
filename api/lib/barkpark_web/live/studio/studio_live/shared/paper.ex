@@ -419,6 +419,125 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def paper_ops(socket, _ops), do: assign(socket, last_paper_save_ok?: false)
 
+  @doc false
+  def paper_ops(socket, ops, request_id) do
+    {socket, revoked_token?} = refresh_replay_token(socket)
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+    dataset = socket.assigns.dataset
+
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
+    cond do
+      invalid_credential? ->
+        {:error, refuse_write_denied(socket)}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:error, refuse_write_denied(socket)}
+
+      write_denied?(socket) ->
+        {:error, refuse_write_denied(socket)}
+
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        {:error, refuse_outside_grant(socket)}
+
+      read_only_pane?(socket) ->
+        {:error, refuse_read_only_pane(socket)}
+
+      not (is_binary(slug) and is_list(ops) and ops != []) ->
+        {:error, assign(socket, save_status: "Save failed", last_paper_save_ok?: false)}
+
+      true ->
+        case Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               dataset,
+               request_id,
+               replay_principal_key(socket),
+               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+             ) do
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> sync_paper_edit_doc()
+              |> push_canvas_echo()
+              |> push_task_previews()
+              |> push_block_renders()
+              |> assign(save_status: "Auto-saved")
+              |> assign(last_paper_save_ok?: true)
+              |> assign(paper_halt: nil)
+
+            {:ok, socket, receipt, outcome}
+
+          {:error, {:constraint, message, _op}} ->
+            {:error,
+             socket
+             |> put_flash(:error, constraint_flash(message))
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
+
+          {:error, {:halted, reason}} ->
+            {:error, put_paper_halt(socket, reason)}
+
+          {:error, _reason} ->
+            {:error,
+             socket
+             |> put_flash(:error, "Edit failed")
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
+        end
+    end
+  end
+
+  defp refresh_replay_token(socket) do
+    current_user = socket.assigns[:current_user]
+
+    case socket.assigns[:api_token] do
+      %{id: _} ->
+        case socket.assigns[:api_token_raw] do
+          raw when is_binary(raw) and raw != "" ->
+            case Barkpark.Auth.verify_token(raw) do
+              {:ok, token} ->
+                {assign(socket, api_token: token), false}
+
+              _ when is_nil(current_user) ->
+                # Preserve the stale struct as identity-only evidence that this
+                # was an authenticated token socket. The revoked flag prevents
+                # Caps from treating it as public-demo, including on every
+                # subsequent retry returned from this handler.
+                {socket, true}
+
+              _ ->
+                {assign(socket, api_token: nil), false}
+            end
+
+          _ when is_nil(current_user) ->
+            {socket, true}
+
+          _ ->
+            {assign(socket, api_token: nil), false}
+        end
+
+      nil ->
+        {socket, false}
+
+      _ when is_nil(current_user) ->
+        {socket, true}
+
+      _ ->
+        {assign(socket, api_token: nil), false}
+    end
+  end
+
+  defp replay_principal_key(%{assigns: %{current_user: %{id: id}}}) when is_binary(id),
+    do: "user:" <> id
+
+  defp replay_principal_key(%{assigns: %{api_token: %{id: id}}}) when is_binary(id),
+    do: "token:" <> id
+
+  defp replay_principal_key(%{assigns: %{api_token_credential_present?: true}}), do: nil
+  defp replay_principal_key(_socket), do: "public-demo"
+
   # ── spd-bl-publish-affordance-triple — the hand path's missing affordances ──
   #
   # Three writers, one guard ladder. The sidebar's description input, its

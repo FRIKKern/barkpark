@@ -81,6 +81,9 @@ function append(canvas, text) {
 }
 function textOf(canvas) { return canvas._editor.state.doc.textContent; }
 function inserted(batch) { return batch.payload.ops.find(op => op.op === "insert-after" || op.op === "append-block").block; }
+function resolveSaved(request, saved) {
+  request.resolve({saved, request_id: request.payload.request_id});
+}
 
 try {
   const test = await mount();
@@ -95,7 +98,7 @@ try {
   assert.equal(test.requests.length, 1, "newer local input waits behind the in-flight save");
   test.echo([paragraph("original", "Original"), block]);
   assert.match(textOf(test.canvas), /Alpha beta/, "a delayed own echo cannot overwrite newer input");
-  first.resolve({saved:true});
+  resolveSaved(first, true);
   await tick();
   assert.equal(test.requests.length, 2, "acknowledgement sends the newer incremental edit");
   const second = test.requests[1];
@@ -103,7 +106,7 @@ try {
     "the next batch cannot reinsert the same paragraph");
   assert.ok(second.payload.ops.some(op => op.id === block.id && op.patch?.content?.[0]?.value === "Alpha beta"));
   test.echo([paragraph("original", "Original"), paragraph(block.id, "Alpha beta")]);
-  second.resolve({saved:true});
+  resolveSaved(second, true);
   await tick();
   assert.match(textOf(test.canvas), /Alpha beta/);
   test.close();
@@ -113,7 +116,7 @@ try {
   retry.canvas.flushPendingChanges();
   const failed = retry.requests[0];
   const initialPayload = JSON.stringify(failed.payload);
-  failed.resolve({saved:false});
+  resolveSaved(failed, false);
   await tick();
   for (const value of ["First source change", "Second source change"]) {
     retry.canvas.toggleSourceMode();
@@ -128,7 +131,7 @@ try {
   assert.equal(JSON.stringify(retry.requests[1].payload), initialPayload, "retry preserves the original batch identity");
   const firstInsert = inserted(failed);
   retry.echo([paragraph("original", "Original"), firstInsert]);
-  retry.requests[1].resolve({saved:true});
+  resolveSaved(retry.requests[1], true);
   await tick();
   assert.equal(retry.requests.length, 3, "only the final source state follows the retried head");
   const final = retry.requests[2];
@@ -136,7 +139,7 @@ try {
   assert.ok(final.payload.ops.some(op => op.id === firstInsert.id && op.patch?.content?.[0]?.value === "Second source change"));
   assert.equal(retry.toggles(), 0, "View waits for the final source state");
   retry.echo([paragraph("original", "Original"), paragraph(firstInsert.id, "Second source change")]);
-  final.resolve({saved:true});
+  resolveSaved(final, true);
   await tick();
   assert.equal(retry.toggles(), 1);
   assert.match(textOf(retry.canvas), /Second source change/);

@@ -14,7 +14,7 @@
 
 (function () {
   const Hooks = {};
-
+  const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
   // Finish local edits and wait for their save replies before unmounting the
   // editor. A refused save leaves the paper open with its server halt message.
   Hooks.BarkparkPaperEditToggle = {
@@ -323,15 +323,72 @@
         this._sendingOps = false;
         this._opsFailed = false;
         this._saveBridgeDestroyed = false;
+        const paperOpsRequestId = () => {
+          try {
+            const crypto = window.crypto;
+            const requestId = crypto?.randomUUID?.();
+            if (typeof requestId === "string" && requestId !== "") return requestId;
+            if (typeof crypto?.getRandomValues !== "function") return null;
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            bytes[6] = (bytes[6] & 0x0f) | 0x40;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+            return [
+              hex.slice(0, 4).join(""),
+              hex.slice(4, 6).join(""),
+              hex.slice(6, 8).join(""),
+              hex.slice(8, 10).join(""),
+              hex.slice(10, 16).join(""),
+            ].join("-");
+          } catch (_) {
+            return null;
+          }
+        };
+        const reportUnretryableOps = (entry, code, message) => {
+          this._opsFailed = true;
+          entry.unretryable = true;
+          const status = this.el.closest("main")?.querySelector(
+            '[data-test-id="bp-paper-footer-save"][role="status"]',
+          );
+          if (status) status.textContent = message;
+          if (entry.errorReported) return;
+          entry.errorReported = true;
+          this.el.dispatchEvent(new CustomEvent("bp-error", {
+            detail: { code, error: message },
+            bubbles: true,
+            composed: true,
+          }));
+        };
         const sendNextOps = () => {
           if (
             this._saveBridgeDestroyed || this._sendingOps ||
             this._opsFailed || !this._opsQueue.length
           ) return;
           const entry = this._opsQueue[0];
+          if (!entry.requestId) {
+            reportUnretryableOps(
+              entry,
+              "paper_ops_request_id_unavailable",
+              "Save paused: this browser cannot create a safe retry ID. Your edits are still here.",
+            );
+            return;
+          }
+          if (Date.now() >= entry.expiresAt) {
+            reportUnretryableOps(
+              entry,
+              "paper_ops_retry_expired",
+              "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.",
+            );
+            return;
+          }
           this._sendingOps = true;
-          const pending = this.pushEvent("paper-ops", { ops: entry.ops })
-            .then((reply) => reply?.saved === true)
+          const pending = this.pushEvent("paper-ops", {
+            ops: entry.ops,
+            request_id: entry.requestId,
+          })
+            .then((reply) =>
+              reply?.saved === true && reply?.request_id === entry.requestId
+            )
             .catch(() => false)
             .then((saved) => {
               this._sendingOps = false;
@@ -358,7 +415,12 @@
           this._pendingSaves.add(pending);
         };
         this._onCanvasOps = (e) => {
-          this._opsQueue.push({ ops: e.detail.ops, seq: e.detail.seq });
+          this._opsQueue.push({
+            ops: e.detail.ops,
+            seq: e.detail.seq,
+            requestId: paperOpsRequestId(),
+            expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+          });
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
@@ -371,6 +433,11 @@
           }
           if (this._pendingSaves.size) {
             event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          } else if (this._opsQueue.length) {
+            // An expired batch (or a browser without secure UUID support) is
+            // intentionally retained. Keep View mounted so the local document
+            // remains available to copy or recover instead of silently losing it.
+            event.detail.waitUntil(Promise.resolve(false));
           }
         };
         this.el.addEventListener("bp-flush-pending", this._onFlushPending);

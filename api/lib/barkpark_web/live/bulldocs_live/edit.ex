@@ -54,7 +54,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
-  alias Barkpark.Content
+  alias Barkpark.{Auth, Content}
+  alias BarkparkWeb.PaperViewer
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
@@ -209,6 +210,46 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     socket
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
+  end
+
+  @doc "Apply one request-identified canvas batch exactly once."
+  def apply_ops(socket, ops, request_id) do
+    paper = socket.assigns[:paper_doc]
+    workspace_id = doc_field(paper, :workspace_id)
+    slug = socket.assigns[:slug]
+    assigns = fresh_authorization_assigns(socket.assigns)
+
+    cond do
+      not PaperViewer.can_edit?(assigns, workspace_id, slug) ->
+        {:error, refuse_save(socket)}
+
+      not (is_binary(slug) and is_list(ops) and ops != []) ->
+        {:error, failed_save(socket)}
+
+      true ->
+        case Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               socket.assigns[:dataset],
+               request_id,
+               replay_principal_key(assigns),
+               ScopeHelpers.scope_opts(socket)
+             ) do
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> sync()
+              |> reconcile_canvas()
+              |> assign(:save_status, "Auto-saved")
+              |> assign(:last_save_ok?, true)
+              |> assign(:paper_halt, nil)
+
+            {:ok, socket, receipt, outcome}
+
+          {:error, reason} ->
+            {:error, handle_result({:error, reason}, socket)}
+        end
+    end
   end
 
   # ── the MVP editor events, each mapping to exactly ONE op ───────────────────
@@ -394,6 +435,60 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp writable?(socket), do: socket.assigns[:can_edit?] == true
 
   defp refuse(socket), do: put_flash(socket, :error, @denial)
+
+  defp refuse_save(socket), do: socket |> refuse() |> failed_save()
+
+  defp failed_save(socket) do
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+  end
+
+  # Connected item-share readers retain the signed mount session in the
+  # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
+  # write so revocation/expiry is checked before an idempotency receipt lookup.
+  defp fresh_authorization_assigns(assigns) do
+    assigns
+    |> refresh_api_token()
+    |> refresh_item_share()
+  end
+
+  defp refresh_api_token(%{api_token: %{id: _}} = assigns) do
+    case Map.get(assigns, :api_token_raw) do
+      raw when is_binary(raw) and raw != "" ->
+        case Auth.verify_token(raw) do
+          {:ok, token} -> Map.put(assigns, :api_token, token)
+          _ -> Map.put(assigns, :api_token, nil)
+        end
+
+      _ ->
+        Map.put(assigns, :api_token, nil)
+    end
+  end
+
+  defp refresh_api_token(assigns), do: assigns
+
+  defp refresh_item_share(assigns) do
+    case {Map.get(assigns, :paper_share_grant),
+          get_in(assigns, [:__plugin_scope_session_share_liveness__, :session])} do
+      {%{grant: :item}, session} when is_map(session) ->
+        Map.put(assigns, :paper_share_grant, PaperViewer.resolve_share_grant(session))
+
+      _ ->
+        assigns
+    end
+  end
+
+  defp replay_principal_key(%{current_user: %{id: id}}) when is_binary(id), do: "user:" <> id
+  defp replay_principal_key(%{api_token: %{id: id}}) when is_binary(id), do: "token:" <> id
+
+  defp replay_principal_key(%{paper_share_grant: %{id: id}}) when is_binary(id),
+    do: "share:" <> id
+
+  defp replay_principal_key(_assigns), do: nil
+
+  defp doc_field(doc, field) when is_map(doc), do: Map.get(doc, field)
+  defp doc_field(_doc, _field), do: nil
 
   defp handle_result({:ok, _result}, socket) do
     socket
