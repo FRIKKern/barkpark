@@ -858,13 +858,23 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // smoke.mjs, which is what the drive is measuring anyway.
   // Both integers were RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on this
   // branch and reading what it PRINTED, never by adding one.
-  assert.equal(r.total, 121);
+  // cch-w49-s7 moves it by ONE: `billing-unconfigured`, the corpus's first
+  // fixture to carry D554's `billing_capability` on the /v1/subscription 200 —
+  // so the first from which the console's consumption of that key can be
+  // asserted from rendered bytes rather than assumed. Total 121 -> 122, residue
+  // 97 -> 98. CELLS (25), distinctCovered (24) and families (13) are
+  // DELIBERATELY UNMOVED: it lands in the residue, not a cell, and its familyOf
+  // is `hash:#billing` — a family that already had seven members, so it cannot
+  // create a 14th. Both integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED, never by adding one to the line above.
+  assert.equal(r.total, 122);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 97, "97 is the RESIDUE, not the census");
+  assert.equal(r.residue, 98, "98 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 97, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 98, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

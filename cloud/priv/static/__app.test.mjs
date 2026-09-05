@@ -27279,7 +27279,11 @@ test("cch-bl-tier-card: renderTiers threads the SAME trial field trialCardHtml r
   // future tense — the fix would be reachable only from the test hook.
   assert.ok(/subCache && typeof subCache\.trial_days_remaining === "number"/.test(region),
     "the clock must come from the sub envelope's own field");
-  assert.ok(/tierCardHtml\(t, active, subscribed, capability, trialDays\)/.test(region),
+  // cch-w49-s7 added a SIXTH argument (the per-plan offer), so the pin is on the
+  // clock's position in the call rather than on the call's total arity — a
+  // regex that spelled the whole argument list would have to be rewritten by
+  // every future slice and would stop being about the clock.
+  assert.ok(/tierCardHtml\(t, active, subscribed, capability, trialDays[,)]/.test(region),
     "renderTiers must pass the clock through to the card");
   assert.ok(appRegion(src, "  function trialCardHtml(", "  function renderTrial(")
     .includes("sub.trial_days_remaining"),
@@ -28297,4 +28301,265 @@ test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
     assert.notEqual(hooks.friendly({ error: slug }, "Please try again."), "Please try again.",
       slug + ": the control's rig is broken — every slug would look unregistered");
   }
+});
+
+// ── cch-w49-s7 · THE CONSOLE STOPS OFFERING A CHECKOUT THE SERVER CAN ONLY
+//    REFUSE ────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT. #10509 shipped D554's `billing_capability` — `{checkout, plans}`
+// on GET /v1/subscription, both values computed by CALLING the context — and the
+// console read exactly ONE field of it (`checkout`, for cch-w50-bl's test-mode
+// disclosure) and NEVER `plans`. So on a deploy with no price ids, or no webhook
+// signing secret, or only HALF its catalog priced, priced Subscribe buttons stood
+// on the money screen, and the person learned the truth AFTER the click, from a
+// toast — a declaration with no consumer, which is the class
+// cch-w45-bl-console-never-consults-caps-catalog-before-mounting-a-catalog is
+// still open on.
+//
+// DRIVEN, NOT POKED. Every rendered-bytes arm below goes through the REAL
+// renderBilling → loadSubscription().then(...) path in its own vm realm (the
+// cch-w49-s6 rig above), with the capability arriving ON THE WIRE the way the
+// router puts it there. The one thing a source read could not tell us is whether
+// the console ACTS on the key, and that is precisely what these measure.
+//
+// FAIL-OPEN IS SAFE HERE, AND ONLY HERE. `unknown` leaves the CTAs standing
+// because Billing.checkout/2 refuses :unconfigured/:unverifiable pre-flight with
+// {:error, :billing_not_configured} and :test_mode with :billing_test_mode —
+// both on main (2a2b009c2 / d0a34d7a7 are proven ancestors of this branch), both
+// BEFORE create_checkout_session/3 is called. A stale page costs a refused click
+// and never a charged card.
+
+const W49S7_TRIAL_SUB = {
+  plan: "trial", status: "active", past_due: false, cancel_at_period_end: false,
+  current_period_end: "2030-01-01T00:00:00Z", canceled_at: null,
+  started_at: "2026-01-01T00:00:00Z", is_trial: true, trial_days_remaining: 14,
+};
+
+// The billing screen painted through the REAL renderBilling, with a
+// /v1/subscription 200 that carries whatever declaration this case is about.
+// `cap === undefined` omits the key entirely — the pre-D554 payload, and the
+// unknown arm. `status` drives the FAILED read.
+async function w49s7Paint(cap, opts) {
+  opts = opts || {};
+  const { h, box } = w49s6Realm(APP_SRC);
+  box.localStorage.setItem("bp.active-team", "t1");
+  await w49s6DriveMe(box, h, 200, W49S6_ME_OWNER);
+  const nodes = w49s6MountBilling(box);
+  const body = { subscription: opts.sub === undefined ? W49S7_TRIAL_SUB : opts.sub };
+  if (cap !== undefined) body.billing_capability = cap;
+  const saved = box.fetch;
+  box.fetch = fetchStub(opts.status || 200, body);
+  try { h.renderBilling(); await w49s6Settle(); } finally { box.fetch = saved; }
+  return {
+    h, box, nodes,
+    tiers: nodes["#billing-tiers"].innerHTML || "",
+    recommended: nodes["#billing-recommended"].innerHTML || "",
+  };
+}
+
+const w49s7Offers = (html) => (html.match(/data-plan="([a-z_]+)"/g) || []).map((m) => m.slice(11, -1));
+
+test("cch-w49-s7: billingCheckoutCapability is a NEW pure sibling over the PAYLOAD — five wire values, everything else unknown", () => {
+  assert.equal(typeof hooks.billingCheckoutCapability, "function");
+  // The four the filing named, plus `test_mode` — which cch-w50-bl added to
+  // Billing.checkout_capability/0 AND to the wire after this row was written. A
+  // four-valued reader would fold a REAL wire value into "unknown" and re-offer
+  // the very button that slice disabled, so it is carried by name.
+  for (const v of ["available", "unconfigured", "unverifiable", "test_mode"]) {
+    assert.equal(hooks.billingCheckoutCapability({ billing_capability: { checkout: v, plans: [] } }), v,
+      v + " must survive the read verbatim");
+  }
+  // Every malformed shape answers UNKNOWN — never a state that withdraws an
+  // affordance on the strength of a payload nobody can parse.
+  for (const bad of [
+    undefined, null, {}, "nonsense", 7, [],
+    { billing_capability: null }, { billing_capability: "unconfigured" },
+    { billing_capability: {} }, { billing_capability: { checkout: null } },
+    { billing_capability: { checkout: "UNCONFIGURED" } },
+    { billing_capability: { checkout: "made_up" } },
+    { checkout: "unconfigured" },              // the NESTING trap: not a sibling
+  ]) {
+    assert.equal(hooks.billingCheckoutCapability(bad), "unknown",
+      JSON.stringify(bad) + " must read as unknown");
+  }
+});
+
+test("cch-w49-s7: D439 — billingIsOwner / billingCanManage are NOT widened by this slice", () => {
+  // A NEW sibling, never a widening. If someone folded the capability into
+  // either of these, `if (billingIsOwner())` would be true for the STRING
+  // "unconfigured" — the exact fail-open D439 forbids. Both are pinned by BYTES
+  // (a diff that touches either body reds here) and by TYPE.
+  const src = APP_SRC;
+  assert.ok(src.includes('function billingIsOwner() { return billingOwnerAuthority() === "grant"; }'),
+    "billingIsOwner must still be exactly the two-valued delegation cch-w49-s6 landed");
+  assert.ok(src.includes("function billingCanManage(role) { return actorRoleIn(role, CONSOLE_OWNER_ROLES); }"),
+    "billingCanManage must still be exactly the role predicate");
+  assert.equal(typeof hooks.billingCanManage("owner"), "boolean");
+  assert.equal(typeof hooks.billingCanManage("member"), "boolean");
+  // …and the new sibling is a STRING, so the two can never be confused.
+  assert.equal(typeof hooks.billingCheckoutCapability({}), "string");
+});
+
+test("cch-w49-s7: OMIT, NOT DISABLE — an `unconfigured` plane renders ZERO offers in BOTH billing regions, and says why", async () => {
+  const r = await w49s7Paint({ checkout: "unconfigured", plans: [] });
+  // NON-VACUITY FIRST: the grid really painted, and the cards are all still
+  // there. Only the OFFER is gone — this is not an empty-screen green.
+  assert.equal(r.nodes["#billing-tiers"].hidden, false, "the trial actor's grid must be OPEN, or this arm proves nothing");
+  for (const q of ["Free", "Supporter", "Support++"]) {
+    assert.ok(r.tiers.includes(">" + q + "<"), "the tier card must still name " + q);
+  }
+  // THE ASSERTION, on rendered bytes, in both regions.
+  for (const [name, html] of [["#billing-tiers", r.tiers], ["#billing-recommended", r.recommended]]) {
+    assert.deepEqual(w49s7Offers(html), [], name + " must carry ZERO [data-plan]");
+    assert.ok(!/Subscribe/.test(html), name + " must carry no Subscribe affordance at all");
+  }
+  // NOT a disabled ghost: the label cch-w50-bl's test-mode arm wears must not be
+  // borrowed, and no button element may sit where the offer was.
+  assert.ok(!r.tiers.includes("Subscribe unavailable"),
+    "test_mode's labelled ghost is a DIFFERENT state — unconfigured OMITS (D428 keeps billing in the OMIT set)");
+  // THE SENTENCE, and it is the curated string that already existed at
+  // ERRORS.billing_not_configured — the copy the post-click toast has always
+  // used — rather than a mint.
+  assert.ok(r.tiers.includes("Billing isn&#39;t set up on this deployment yet."),
+    "the grid must state the fact in the curated copy");
+  assert.equal(hooks.billingOmissionCopy("unconfigured", ["Supporter"]),
+    "Billing isn't set up on this deployment yet.",
+    "…which is ERRORS.billing_not_configured, single-sourced");
+});
+
+test("cch-w49-s7: PARTIAL WIRING IS KILLED — `available` with ONE priced plan offers exactly that one", async () => {
+  // The state the filing is really about: configured? is true, so the old
+  // console offered all three, and the tier whose price_id is nil answered
+  // plan_invalid — "That plan can't be checked out." — blaming the person for
+  // the DEPLOY. priced_plans/0 lists exactly the plans whose price resolved.
+  const r = await w49s7Paint({ checkout: "available", plans: ["supporter"] });
+  assert.deepEqual(w49s7Offers(r.tiers), ["supporter"],
+    "exactly ONE Subscribe renders, and it is the plan the server declared priced");
+  assert.ok(!r.tiers.includes('data-plan="support_plus"'), "the unpriced paid tier offers nothing");
+  assert.ok(r.tiers.includes(">Support++<"), "…while its CARD still renders — omitted, not deleted");
+  assert.ok(r.tiers.includes("Support++ isn&#39;t set up for checkout on this deployment yet."),
+    "the omitted tier is NAMED, because at this capability the fact is per-tier");
+  // The plural form, and the shape of the sentence, pinned pure.
+  assert.equal(hooks.billingOmissionCopy("available", ["Supporter", "Support++"]),
+    "Supporter and Support++ aren't set up for checkout on this deployment yet.");
+  assert.equal(hooks.billingOmissionCopy("available", []), "",
+    "nothing withheld says nothing");
+});
+
+test("cch-w49-s7: `unverifiable` gets its OWN sentence and does NOT collapse into `unconfigured`", async () => {
+  const bad = await w49s7Paint({ checkout: "unverifiable", plans: ["supporter", "support_plus"] });
+  const none = await w49s7Paint({ checkout: "unconfigured", plans: [] });
+  assert.deepEqual(w49s7Offers(bad.tiers), [], "unverifiable withdraws every offer too — a card WOULD be charged");
+  const said = (html) => (html.match(/<p class="dim tier-omit-note">([\s\S]*?)<\/p>/) || [])[1] || "";
+  const unverifiable = said(bad.tiers);
+  const unconfigured = said(none.tiers);
+  assert.ok(unverifiable.length > 0 && unconfigured.length > 0, "both states must SAY something");
+  assert.notEqual(unverifiable, unconfigured,
+    "the two states are not the same event: unconfigured touches no card, unverifiable CHARGES one that can never activate");
+  // The distinguishing claim is present in one and absent from the other, in
+  // both directions — a mere length difference would not prove they discriminate.
+  assert.ok(/could never activate/.test(unverifiable), "unverifiable must name the consequence: the money moves and activation cannot land");
+  assert.ok(!/could never activate/.test(unconfigured), "unconfigured must NOT borrow it — no card is touched in that state");
+  assert.ok(/set up on this deployment yet/.test(unconfigured));
+  assert.ok(!/set up on this deployment yet/.test(unverifiable));
+});
+
+test("cch-w49-s7: UNKNOWN IS FAIL-OPEN — an absent key AND a failed read both leave the CTAs standing", async () => {
+  // The pre-D554 payload: the key is simply not there.
+  const absent = await w49s7Paint(undefined);
+  assert.deepEqual(w49s7Offers(absent.tiers).sort(), ["support_plus", "supporter"],
+    "an undeclared capability must render exactly what it rendered before this slice");
+  assert.ok(!absent.tiers.includes("tier-omit-note"), "…and must say nothing, because nothing was withheld");
+  // A read that FAILED. loadSubscription leaves capCache untouched on a non-200,
+  // so the capability is unknown and the affordance stands. Hiding it here would
+  // refuse a real owner on a working deploy over one blipped GET.
+  const failed = await w49s7Paint({ checkout: "unconfigured", plans: [] }, { status: 500 });
+  assert.equal(failed.h.checkoutCapability(), "", "a failed read must never write the cache");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "unconfigured" } }), false);
+  assert.equal(hooks.billingPlanOffered("supporter", {}), true, "unknown offers");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "available" } }), true,
+    "a declaration with no readable plan LIST is a shape we were not told about — unknown, not a refusal");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "available", plans: "supporter" } }), true,
+    "…and a non-array `plans` is the same unknown, never a substring match");
+});
+
+test("cch-w49-s7: test_mode keeps cch-w50-bl's labelled ghost — this slice neither widens nor restructures it", async () => {
+  const r = await w49s7Paint({ checkout: "test_mode", plans: ["supporter", "support_plus"] });
+  assert.deepEqual(w49s7Offers(r.tiers), [], "test_mode was ALREADY unwired");
+  assert.ok(r.tiers.includes("Subscribe unavailable"), "…by a LABELLED disabled button, which stays");
+  assert.ok(r.tiers.includes("Checkout runs in Stripe test mode — no real card can pay."),
+    "…carrying the server's own sentence, single-sourced");
+  assert.ok(!r.tiers.includes("tier-omit-note"),
+    "and this slice adds NO second sentence on top of it — test_mode already explains itself");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "test_mode", plans: [] } }), true,
+    "the offer predicate answers true so tierCardHtml's OWN test-mode arm — which runs first — keeps rendering it");
+});
+
+test("cch-w49-s7: BOTH grid builders are paid — launchPlanGridHtml threads the capability through its EXISTING withCta omit fork", () => {
+  const pay = (cap) => (cap === undefined ? {} : { billing_capability: cap });
+  const owner = hooks.launchPlanGridHtml("owner", pay(undefined));
+  assert.deepEqual(w49s7Offers(owner).sort(), ["support_plus", "supporter"], "unknown leaves /new's and the fold's CTAs standing");
+
+  const none = hooks.launchPlanGridHtml("owner", pay({ checkout: "unconfigured", plans: [] }));
+  assert.deepEqual(w49s7Offers(none), [], "an unconfigured plane offers nothing here either");
+  assert.ok(!/<button/.test(none), "OMIT: no button at all, never a disabled ghost");
+  assert.ok(none.includes("Billing isn&#39;t set up on this deployment yet."), "…and it says why, in curated copy");
+  assert.ok(none.includes('<div class="new-tiers">'), "the cards themselves still render — non-vacuity");
+
+  const half = hooks.launchPlanGridHtml("owner", pay({ checkout: "available", plans: ["support_plus"] }));
+  assert.deepEqual(w49s7Offers(half), ["support_plus"], "partial wiring is killed on this builder too");
+  assert.ok(half.includes("Supporter isn&#39;t set up for checkout on this deployment yet."));
+
+  // THE EXISTING FORK IS REUSED, NOT DUPLICATED: a blocked principal still gets
+  // LAUNCH_OWNER_ONLY_COPY and no CTA, and the capability sentence does NOT pile
+  // on top of it — that person was refused for a different reason and there is
+  // nothing to tell them about the deploy's Stripe config.
+  const blocked = hooks.launchPlanGridHtml("blocked", pay({ checkout: "unconfigured", plans: [] }));
+  assert.deepEqual(w49s7Offers(blocked), []);
+  assert.ok(blocked.includes(hooks.launchOwnerOnlyCopy.slice(0, 40)), "the authority sentence stays the one it always was");
+  assert.ok(!blocked.includes("Billing isn&#39;t set up on this deployment yet."),
+    "a blocked principal is not told about the deploy's billing config — they were already refused");
+
+  // 2-arg is the live shape; the 1-arg call every pre-slice caller made must be
+  // byte-identical, so no committed fixture moves.
+  assert.equal(hooks.launchPlanGridHtml("owner"), owner);
+  assert.equal(hooks.launchPlanGridHtml("blocked"), hooks.launchPlanGridHtml("blocked", {}));
+});
+
+test("cch-w49-s7: /new's added /v1/subscription read follows renderNewPricing's OWN mounted-screen re-check pattern", () => {
+  const region = appRegion(APP_SRC, "  function newAskCheckoutCapability(", "  function renderNewPricing(");
+  // ONE conditional read, asked at most once, and only while nothing is known.
+  assert.ok(/if \(newPricingCapAsked \|\| capCache\) return;/.test(region), "asked once, and never over a known capability");
+  assert.ok(/api\("GET", "\/v1\/subscription"\)/.test(region), "…and it is the route that carries the declaration");
+  // The fail-open: a non-200 leaves the cache untouched.
+  assert.ok(/if \(!r\.ok \|\| !r\.data \|\| !r\.data\.billing_capability\) return;/.test(region),
+    "a failed read must write nothing — unknown, not refused");
+  // The mounted-screen re-check, the same three clauses the /v1/me read above it
+  // already commits to, in the same order.
+  for (const clause of [
+    'var body = $("#new-body");',
+    'if (!body || typeof body.querySelector !== "function") return;',
+    'if (!body.querySelector(".new-pricing")) return;',
+    'if (body.querySelector(".new-plan[disabled]")) return;',
+  ]) assert.ok(region.includes(clause), "the repaint must re-check: " + clause);
+  // The repaint passes the authority THROUGH — renderNewPricing(tpl) alone would
+  // re-enter its `if (!authority)` arm and fire a second /v1/me.
+  assert.ok(/renderNewPricing\(tpl, authority\);/.test(region), "the repaint must not re-trigger the /v1/me read");
+  const pricing = appRegion(APP_SRC, "  function renderNewPricing(", "\n  function newClearTimers(");
+  assert.ok(pricing.includes("newAskCheckoutCapability(tpl, known);"), "…and renderNewPricing must actually call it");
+});
+
+test("cch-w49-s7: the corpus assertion reads innerHTML STRINGS and is NOT built on a #plan-more click", () => {
+  // smoke's DOM shim is flat: a `querySelectorAll("[data-plan]")` there matches
+  // NOTHING and would go green over a grid full of buttons. And D551: listeners
+  // accumulate on #plan-more, so an even number of clicks leaves the toggle dead
+  // — an assertion built on one would be measuring the toggle, not the offer.
+  const smoke = fs.readFileSync(new URL("./__preview__/smoke.mjs", import.meta.url), "utf8");
+  const arm = appRegion(smoke, '  "billing-unconfigured": {', '  // ── gr-p2 launch theater');
+  assert.ok(arm.length > 0, "the corpus arm must exist");
+  assert.ok(arm.includes('reg.get("billing-tiers").innerHTML'), "it reads the grid's BYTES");
+  assert.ok(arm.includes('reg.get("billing-recommended").innerHTML'), "…and the recommended region's");
+  assert.ok(!/querySelector/.test(arm), "no selector may appear in it — the shim is flat");
+  assert.ok(!/plan-more/.test(arm), "and it must not depend on a #plan-more click (D551)");
+  assert.ok(/hidden, false/.test(arm), "it must first prove the grid was OPEN, or the zero-offer claim is vacuous");
 });

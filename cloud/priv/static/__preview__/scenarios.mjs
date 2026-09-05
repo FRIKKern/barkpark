@@ -5128,6 +5128,35 @@ export const SCENARIOS = {
     },
   },
 
+  // ── cch-w49-s7 · THE DEPLOY THAT CANNOT TAKE MONEY ────────────────────────
+  // THE HOLE THIS CLOSES. #10509 put `billing_capability` on GET
+  // /v1/subscription and NO fixture in this corpus had ever carried one — so
+  // every console consumer of it was green BY CONSTRUCTION, in the same way
+  // `billing-free-owner` found the upsell card's four markers had zero hits.
+  // `billing-trial` is the only actor whose #billing-tiers is VISIBLE at first
+  // paint (renderTrial unhides the grid), so it is the only actor from which a
+  // rendered-bytes assertion about the tier grid can be made at all; this is
+  // that actor with the plane declaring `unconfigured` — no plan priced, so
+  // Billing.checkout/2 can only ever answer {:error, :billing_not_configured}.
+  // Everything else is billing-trial's data verbatim: the ONE variable is the
+  // declaration.
+  "billing-unconfigured": {
+    label: "Billing — the plane declares checkout UNCONFIGURED: the tier grid offers no Subscribe at all and says why",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [liveInstance],
+      subscription: trialSub,
+      // checkout_capability/0's :unconfigured arm, verbatim: priced_plans() is
+      // empty, so `plans` is [] and not a missing key — an empty LIST is the
+      // server's own answer, and it is not the same thing as no declaration.
+      billingCapability: { checkout: "unconfigured", plans: [] },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // ── cch-w12-followup-login-fixture-gap · THE SUCCESSFUL LOGIN ──────────────
   // THE HOLE THIS CLOSES. Until now this file answered POST /v1/auth/login from
   // exactly ONE fixture (`loggedout-twofactor`), and that fixture returns
@@ -5568,7 +5597,18 @@ export function route(name, method, path, state) {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
-  if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
+  // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
+  // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:
+  // billing_capability_json()}`). It is OPT-IN here rather than defaulted:
+  // an absent key is exactly the "unknown" the console fail-opens on, which is
+  // what every scenario written before this slice was already modelling, so no
+  // committed fixture's rendered bytes move. A scenario that wants to drive a
+  // declared capability sets `billingCapability` in its data.
+  if (p === "/v1/subscription") {
+    const sub = { subscription: d.subscription };
+    if (d.billingCapability) sub.billing_capability = d.billingCapability;
+    return { status: 200, body: sub };
+  }
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
   // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
   // to drive the failure variants (401 password_invalid, 403 forbidden, …). The

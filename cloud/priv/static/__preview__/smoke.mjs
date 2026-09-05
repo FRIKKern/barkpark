@@ -2792,6 +2792,56 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── cch-w49-s7 · THE CORPUS ASSERTION ─────────────────────────────────────
+  // THE OFFER THE SERVER CAN ONLY REFUSE. With the plane declaring
+  // `unconfigured`, Billing.checkout/2 answers {:error, :billing_not_configured}
+  // for every plan, so a Subscribe button here is an offer with no honest
+  // outcome. The assertion reads innerHTML STRINGS and NOT selectors: smoke's
+  // DOM shim is flat, so `querySelectorAll("[data-plan]")` here would match
+  // nothing and go green over a grid full of buttons — a selector-based version
+  // of this arm is vacuous BY CONSTRUCTION.
+  //
+  // NOT BUILT ON A #plan-more CLICK (charter D551): this actor's grid is open at
+  // first paint (renderTrial unhides it), so nothing is toggled — listeners
+  // accumulate on that button and an even number of clicks leaves it dead, which
+  // would make the assertion measure the toggle rather than the offer.
+  "billing-unconfigured": {
+    what: "the plane declares checkout UNCONFIGURED — the tier grid carries ZERO Subscribe offers and states the reason in curated copy",
+    check(reg) {
+      // The grid is OPEN (this is billing-trial's actor), so an empty-bytes
+      // pass is impossible: a grid that never painted would fail here first.
+      assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open — otherwise this arm proves nothing");
+      const grid = reg.get("billing-tiers").innerHTML || "";
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(grid.length > 0, "#billing-tiers rendered empty");
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // NON-VACUITY: the cards themselves still render. Only the OFFER is gone.
+      for (const q of ["Free", "Supporter", "Support++"]) {
+        assert.ok(grid.includes(">" + q + "<"), "the tier card must still name " + JSON.stringify(q));
+      }
+      // THE ASSERTION. Zero offers, in BOTH regions, by rendered bytes.
+      for (const [name, html] of [["#billing-tiers", grid], ["#billing-recommended", box]]) {
+        assert.equal((html.match(/data-plan=/g) || []).length, 0,
+          name + " must carry ZERO [data-plan] under an unconfigured declaration");
+        assert.ok(!/Subscribe/.test(html),
+          name + " must carry no Subscribe affordance at all — omitted, never a disabled ghost");
+      }
+      // OMIT, NOT DISABLE: no ghost anywhere in the grid. The Free card and a
+      // current plan legitimately render `<button class="btn" disabled>`, so the
+      // pin is on the LABELS an offer would wear, not on the word "disabled".
+      assert.ok(!grid.includes("Subscribe unavailable"),
+        "the test-mode disclosure ghost is a DIFFERENT state and must not be borrowed for unconfigured");
+      // THE SENTENCE, and it is the curated string that already existed
+      // (ERRORS.billing_not_configured), not a mint.
+      assert.ok(grid.includes("Billing isn&#39;t set up on this deployment yet.") ||
+                grid.includes("Billing isn't set up on this deployment yet."),
+        "the grid must state WHY nothing is offered, in the curated copy");
+      // …and NOT the unverifiable sentence — the two states must not collapse.
+      assert.ok(!/could never activate/.test(grid),
+        "unconfigured must never borrow unverifiable's sentence: no card is charged in this state");
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
   "new-launch": {
     what: "/new signed-in — the template card + the one-field Launch step",
