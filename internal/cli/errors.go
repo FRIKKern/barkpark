@@ -225,8 +225,13 @@ var codeExit = map[string]int{
 	// not resolve, nothing was written), and `payload_too_large` is a 413.
 	// Both are bucketed by the status their emitter actually returns, because
 	// bucketing on the NAME is exactly the guesswork this table exists to end.
-	"label_spine":                exitValidation, // 422, errors.ex:561
-	"unknown_tag":                exitValidation, // 422, errors.ex:620
+	"label_spine": exitValidation, // 422, errors.ex:561
+	"unknown_tag": exitValidation, // 422, errors.ex:620
+	// workspace_scope_required: an unscoped WRITE whose credential could mean
+	// more than one workspace (task-6fa023cdabdc5f6a ruling, errors.ex:413-425).
+	// 422 -> validation; the fix is in the request (a /w/:ws/p/:proj path or a
+	// single-workspace token), never a retry.
+	"workspace_scope_required":   exitValidation, // 422, errors.ex:417
 	"invalid_paper_structure":    exitValidation, // 422, errors.ex:569
 	"invalid_epic_paper_quality": exitValidation, // 422, errors.ex:577
 	"unsupported_media_type":     exitValidation, // 422, errors.ex:724
