@@ -292,3 +292,193 @@ func TestMutateStaleDraftBaseIsNamed(t *testing.T) {
 		t.Fatalf("the stale-base line does not name the field that actually rots: %q", stderr)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// #17 — THE CREATE FAMILY (task-7f06080cfd584194).
+//
+// RED WITHOUT the fix — measured by reverting mutatePerspectiveVerbs to the
+// two-entry map (`doc mutate`, `doc patch`) and re-running:
+//
+//	--- FAIL: TestDocCreateSaysItMadeADraft/doc_create
+//	    `bp doc create` said nothing about a draft. stdout="rev: tx-90\n" stderr=""
+//	--- FAIL: TestDocCreateSaysItMadeADraft/doc_create-or-replace
+//	    stdout="rev: tx-91\n" stderr=""
+//	--- FAIL: TestDocCreateSaysItMadeADraft/doc_create-if-not-exists
+//
+// That is #17 exactly: a create returned a fresh transaction rev — the universal
+// "it worked" signal — for a document no published reader can see. Gyldendal's
+// imported tasks were invisible until publication and the receipt never said
+// why.
+
+// createDraftMutateBody is what the server answers a `doc create` with today:
+// the new row is the `drafts.` twin, and results[].operation names the op.
+func createDraftMutateBody(tx, op, id string) string {
+	return `{
+  "transactionId": "` + tx + `",
+  "results": [
+    {"id": "drafts.` + id + `", "operation": "` + op + `",
+     "document": {"_id":"drafts.` + id + `","_type":"task","_rev":"r1","_draft":true,"_publishedId":"` + id + `","title":"Imported"}}
+  ]
+}`
+}
+
+func docWriteCommand(id, verb, op string) manifest.Command {
+	return manifest.Command{
+		ID:            id,
+		Noun:          "doc",
+		Verb:          verb,
+		HTTP:          manifest.HTTP{Method: http.MethodPost, PathTemplate: "/v1/data/mutate/production"},
+		Writes:        true,
+		MutationOp:    op,
+		DefaultOutput: "minimal",
+	}
+}
+
+// TestDocCreateSaysItMadeADraft is criterion c1's create half: `create` must SAY
+// it made a draft and give the EXACT publish command. It drives the real
+// runCommand against httptest for all three create-family verbs and all four
+// output shapes.
+func TestDocCreateSaysItMadeADraft(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  manifest.Command
+		op   string
+		verb string // the word the receipt must open with
+	}{
+		{"doc create", docWriteCommand("doc.create", "create", "create"), "create", "DRAFT created"},
+		{"doc create-or-replace", docWriteCommand("doc.create-or-replace", "create-or-replace", "createOrReplace"), "createOrReplace", "DRAFT created"},
+		{"doc create-if-not-exists", docWriteCommand("doc.create-if-not-exists", "create-if-not-exists", "createIfNotExists"), "create", "DRAFT created"},
+	}
+	for _, tc := range cases {
+		for _, shape := range []string{"minimal", "table", "json", "yaml"} {
+			t.Run(tc.name+"/"+shape, func(t *testing.T) {
+				fake := &fakeMutateAPI{
+					mutateBody: createDraftMutateBody("tx-90", tc.op, "t1"),
+					published:  unchangedPublished,
+				}
+				srv := httptest.NewServer(fake.handler())
+				defer srv.Close()
+
+				stdout, stderr, code := runAgainst(t, srv.URL, shape, tc.cmd)
+				if code != exitOK {
+					t.Fatalf("exit = %d, want 0; stdout=%q stderr=%q", code, stdout, stderr)
+				}
+				if !strings.Contains(stderr, tc.verb+" (drafts.t1)") {
+					t.Fatalf("`bp %s` said nothing about a draft. stdout=%q stderr=%q",
+						tc.name, stdout, stderr)
+				}
+				if !strings.Contains(stderr, "bp doc publish task t1") {
+					t.Fatalf("the create receipt named no publish remedy. stderr=%q", stderr)
+				}
+				if !strings.Contains(stderr, "published row is UNCHANGED") {
+					t.Fatalf("the create receipt never said the published row is unchanged. stderr=%q", stderr)
+				}
+			})
+		}
+	}
+}
+
+// TestDocCreateReceiptSaysCREATEDNotUPDATED is the wording discrimination c1
+// demands. "DRAFT updated" on a fresh create would be a receipt describing a
+// document the caller has never seen — it would pass a loose contains-"DRAFT"
+// assertion while still misdescribing the write.
+func TestDocCreateReceiptSaysCREATEDNotUPDATED(t *testing.T) {
+	fake := &fakeMutateAPI{mutateBody: createDraftMutateBody("tx-92", "create", "t2"), published: unchangedPublished}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	_, stderr, _ := runAgainst(t, srv.URL, "minimal", docWriteCommand("doc.create", "create", "create"))
+	if strings.Contains(stderr, "DRAFT updated") {
+		t.Fatalf("a create was reported as an UPDATE. stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "DRAFT created") {
+		t.Fatalf("a create was not reported as a create. stderr=%q", stderr)
+	}
+
+	// And the mirror: a patch must still say "updated", not "created".
+	fake2 := &fakeMutateAPI{mutateBody: draftOnlyMutateBody, published: unchangedPublished}
+	srv2 := httptest.NewServer(fake2.handler())
+	defer srv2.Close()
+	_, stderr2, _ := runAgainst(t, srv2.URL, "minimal", mutateCommand())
+	if !strings.Contains(stderr2, "DRAFT updated") {
+		t.Fatalf("a patch stopped saying `updated`. stderr=%q", stderr2)
+	}
+}
+
+// TestCreateIfNotExistsNoopSaysNothingChanged: the server answers a
+// createIfNotExists against an existing id with operation "noop". A receipt that
+// claimed a write there would be a second, quieter lie.
+func TestCreateIfNotExistsNoopSaysNothingChanged(t *testing.T) {
+	fake := &fakeMutateAPI{mutateBody: createDraftMutateBody("tx-93", "noop", "t3"), published: unchangedPublished}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	_, stderr, _ := runAgainst(t, srv.URL, "minimal",
+		docWriteCommand("doc.create-if-not-exists", "create-if-not-exists", "createIfNotExists"))
+	if !strings.Contains(stderr, "left unchanged") {
+		t.Fatalf("a no-op createIfNotExists was not reported as a no-op. stderr=%q", stderr)
+	}
+	if strings.Contains(stderr, "DRAFT created") {
+		t.Fatalf("a no-op was reported as a create. stderr=%q", stderr)
+	}
+}
+
+// TestPublishVerbGetsNoDraftVerdict is the NEGATIVE arm (criterion c3): the
+// draft model is untouched, and the verbs that MOVE the published lens keep
+// their receipt exactly as it was.
+func TestPublishVerbGetsNoDraftVerdict(t *testing.T) {
+	for _, verb := range []string{"publish", "unpublish", "discard-draft", "delete"} {
+		t.Run(verb, func(t *testing.T) {
+			fake := &fakeMutateAPI{mutateBody: createDraftMutateBody("tx-94", "create", "t4"), published: unchangedPublished}
+			srv := httptest.NewServer(fake.handler())
+			defer srv.Close()
+			_, stderr, _ := runAgainst(t, srv.URL, "minimal", docWriteCommand("doc."+verb, verb, verb))
+			if strings.Contains(stderr, "DRAFT") {
+				t.Fatalf("`bp doc %s` printed a draft verdict; those verbs are not the trap. stderr=%q",
+					verb, stderr)
+			}
+		})
+	}
+}
+
+// TestTaskAcceptanceCriteriaPatchReceiptIsSelfEvidencing is criterion c5: our
+// OWN trapped flow, the one memory `bp-task-write-contract` records — a
+// `bp doc patch task <id> --set acceptance_criteria:=[…]` whose printed rev is
+// NOT persistence, and whose working recipe was "read the criteria back from
+// .doc.content.* to confirm they landed". The receipt must now carry that fact
+// itself, so the read-back is no longer the only way to know.
+func TestTaskAcceptanceCriteriaPatchReceiptIsSelfEvidencing(t *testing.T) {
+	const body = `{
+  "transactionId": "tx-95",
+  "results": [
+    {"id": "drafts.task-7f06080cfd584194", "operation": "update",
+     "document": {"_id":"drafts.task-7f06080cfd584194","_type":"task","_rev":"r9","_draft":true,
+                  "_publishedId":"task-7f06080cfd584194","title":"S6"}}
+  ],
+  "warnings": [
+    {"code":"patch.forked_published","severity":"warning",
+     "message":"this patch names a published document but writes a DRAFT twin."}
+  ]
+}`
+	fake := &fakeMutateAPI{mutateBody: body, published: unchangedPublished}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	patchCmd := docWriteCommand("doc.patch", "patch", "patch")
+	stdout, stderr, code := runAgainst(t, srv.URL, "minimal", patchCmd)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, want := range []string{
+		"DRAFT updated (drafts.task-7f06080cfd584194)",
+		"published row is UNCHANGED",
+		"bp doc publish task task-7f06080cfd584194",
+		"FORKED the published row",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("the acceptance-criteria patch receipt is missing %q.\nstdout=%q\nstderr=%q",
+				want, stdout, stderr)
+		}
+	}
+	t.Logf("c5 receipt:\nstdout=%s\nstderr=%s", stdout, stderr)
+}
