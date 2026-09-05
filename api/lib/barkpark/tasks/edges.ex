@@ -55,6 +55,30 @@ defmodule Barkpark.Tasks.Edges do
   def add_dep(child_id, parent_id, kind \\ :blocks) do
     kind_str = normalize_kind(kind)
 
+    # TWIN-EDGE CANONICALISATION (task-85bba5cb33dbd59b).
+    #
+    # `task_edges` FKs reference `documents.id` — a PER-ROW uuid — so an edge
+    # binds to ONE twin. The ready query's twin-collapse axis then surfaces the
+    # PUBLISHED row, so a `blocks` edge filed onto the DRAFT twin's uuid did not
+    # gate the row anybody can actually claim: a blocker that silently does not
+    # block. `queue.ex` documents the gap and names this cure — "canonicalizing
+    # edge endpoints to the published uuid is the real fix".
+    #
+    # WHY THE WRITE PATH AND NOT THE READ. The read fix would mean joining both
+    # endpoints through doc_id/published_id inside the ready query, and that
+    # query's own moduledoc records what that costs when it goes wrong there: a
+    # CTE form that removed 1,320,188 rows by a join filter on a 12k corpus, and
+    # a `NOT EXISTS` the planner flattens into an anti-join priced at 25 ms on a
+    # custom plan and 2.5 s on the GENERIC plan pooled connections settle into.
+    # This path is COLD — once per edge — and normalising here leaves the hot
+    # query byte-identical.
+    #
+    # ONE CHOKEPOINT, verified rather than assumed: every task-edge writer
+    # reaches this function (`Tasks.add_dep/4` -> `Fence.add_dep/4` -> here).
+    # `Barkpark.Content.Edges` writes a DIFFERENT table.
+    child_id = canonical_endpoint(child_id)
+    parent_id = canonical_endpoint(parent_id)
+
     attrs = %{from_id: child_id, to_id: parent_id, kind: kind_str}
     changeset = Edge.changeset(%Edge{}, attrs)
 
@@ -202,4 +226,51 @@ defmodule Barkpark.Tasks.Edges do
       )
     )
   end
+
+  # Resolve a document uuid to its CANONICAL twin's uuid: if the row is a
+  # `drafts.<id>` shadow and a published `<id>` exists in the SAME scope
+  # (type + dataset + workspace + project), return the published row's uuid.
+  #
+  # Everything else is returned UNCHANGED — an unknown uuid, a row that is
+  # already published, and a draft with NO published twin. That last case is
+  # deliberate: an unpaired draft is admitted to the ready queue AS ITSELF
+  # (queue.ex axis 3 suppresses a draft only when a published twin exists), so
+  # its edges must keep binding to it or the blocker would vanish entirely.
+  defp canonical_endpoint(id) when is_binary(id) do
+    with %Document{doc_id: doc_id} = doc <- Repo.get(Document, id),
+         true <- String.starts_with?(doc_id, "drafts."),
+         published_id <- String.replace_prefix(doc_id, "drafts.", ""),
+         %Document{id: canonical} <- fetch_twin(doc, published_id) do
+      canonical
+    else
+      _ -> id
+    end
+  end
+
+  defp canonical_endpoint(id), do: id
+
+  # The twin lookup is scoped on every axis the uniqueness index carries, so a
+  # same-slug row in ANOTHER dataset or another tenant can never be adopted as
+  # this row's twin. `limit: 1` because `(doc_id, type, dataset_id)` is unique
+  # and a bare `Repo.one/1` here would raise on the one shape that is supposed
+  # to be impossible — the same fork that made `bp task claim` 500
+  # (task-ca05dd6a02a0b55f).
+  defp fetch_twin(%Document{} = doc, published_id) do
+    from(d in Document,
+      where:
+        d.doc_id == ^published_id and d.type == ^doc.type and
+          d.dataset == ^doc.dataset,
+      limit: 1
+    )
+    |> scope_twin(:workspace_id, doc.workspace_id)
+    |> scope_twin(:project_id, doc.project_id)
+    |> Repo.one()
+  end
+
+  defp scope_twin(query, field, nil),
+    do: from(d in query, where: is_nil(field(d, ^field)))
+
+  defp scope_twin(query, field, value),
+    do: from(d in query, where: field(d, ^field) == ^value)
+
 end
