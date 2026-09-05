@@ -2065,9 +2065,15 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.edges_for_kind/3", "41908878", "113319186"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
-    # barkpark_web/controllers/tasks_controller.ex:952
+    # barkpark_web/controllers/tasks_controller.ex — the graph payload, moved from
+    # graph_show/2 into the private graph_traverse/3 this branch extracted so the
+    # ?perspective refusal can run BEFORE the traversal. The SITE fingerprint is
+    # unchanged (14314567) — the receipt is byte-identical and simply sits inside a
+    # new enclosing def, which moved the def fingerprint 68876245 -> 72555353.
+    # Verdict and basis are carried over untouched: nothing about what this payload
+    # reports, or about it being the postcondition, changed.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.graph_show/2", "68876245", "14314567"},
+            "BarkparkWeb.TasksController.graph_traverse/3", "72555353", "14314567"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:984
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
