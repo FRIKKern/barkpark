@@ -18,8 +18,29 @@
 //
 //   node scripts/sync-starter-templates.mjs           # mirror canonical → cloud
 //
-// A CI drift gate that FAILS when the mirror lags the canonical lands separately
-// (fail-before rule — the gate must be able to go red before this sync exists).
+// THE DRIFT GATE ALREADY EXISTS — do not build a second one.
+// cloud/test/barkpark_cloud/templates/app_files_drift_test.exs
+// (BarkparkCloud.Templates.AppFilesDriftTest) asserts byte-identity in BOTH
+// directions across the two roots and runs in the `Cloud control-plane (test)`
+// job, which feeds `Cloud gate` — a context enforced by branch protection
+// (.github/required-checks.json). Its trigger covers BOTH sides: cloud.yml's
+// dispatcher resolves `cloud` through scripts/cloud-path-escape-check.sh, whose
+// CLOUD_PATHS carries `cloud/**` AND `js/packages/create-barkpark-app/templates/**`,
+// so editing either root runs the guard on THAT PR.
+//
+// That gate PREDATES this script: it landed 2026-07-02 in aa2fbccd6 (#821);
+// this file landed 2026-07-10 in e76a9759d (#2244). The sentence that used to
+// sit here — that a CI drift gate "lands separately" — was already false the
+// day it was written, and reading it as a TODO is how a duplicate gate gets
+// filed. Proven able to red 2026-09-05 on bbc9d399f: appending ONE byte to
+// cloud/priv/templates/blog-starter/lib/csp.ts (1884 -> 1885) turned 3 tests,
+// 0 failures into 2 failures naming `blog-starter/lib/csp.ts`; reverting the
+// byte restored 3 tests, 0 failures.
+//
+// The corollary for any migration of these trees (e.g. moving the hand-forked
+// lib/csp.ts onto @barkpark/nextjs/csp): it CANNOT be split into a cloud-only
+// PR and a js-only PR. Either half alone reds a REQUIRED context. Edit the
+// canonical tree and run this script in the SAME commit.
 import { cpSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
