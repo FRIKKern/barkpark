@@ -370,6 +370,49 @@
 # AnonPerspective, and counting that answer as "no drafts exist" would
 # manufacture a clean board out of a permission the caller does not have.
 #
+# CLAUSE 9 -- THE DRAFTS LENS'S CREDENTIAL CONTRACT (wave 33)
+#
+# THE DEFECT THIS CLAUSE CLOSES. Wave 47 shipped the UNREAD state and it is
+# correct, but it never said WHOSE read was ignored -- so on a host whose shell
+# BARKPARK_TOKEN is published-pinned, the DEFAULT invocation measured the
+# never-published class as nothing, said so honestly, and gave the reader no way
+# to tell a broken permission from a broken lens. Measured 2026-08-04 on this
+# box: the shell token reports UNREAD while the operator token in
+# ~/.config/barkpark/config.json reads the lens and names
+# drafts.pds-bl-wrongpath-arm-blind-to-wrong-id and drafts.task-85d64913a19c0d70.
+# An instrument that reports the same UNREAD for "the server has no drafts
+# perspective" and for "you asked with the wrong token" is one an operator
+# cannot act on.
+#
+# THE CONTRACT, IN THREE PARTS:
+#
+#   (a) ONE CREDENTIAL, THE CENSUS'S OWN. The drafts lens is read with the SAME
+#       credential every other read uses, resolved in the order --token, then
+#       BARKPARK_TOKEN, then ~/.config/barkpark/config.json. The census NEVER
+#       reaches for a second, more privileged token behind the caller's back:
+#       a lens whose contents depend on a credential the caller did not choose
+#       produces a report the caller cannot reproduce, and "it worked on the
+#       host with the good token" is exactly the undescended claim this file
+#       exists to refuse. That credential MUST be draft-capable for the arm to
+#       mean anything, and the run says whether it was.
+#
+#   (b) THE UNREAD LINE NAMES THE PIN AND THE CREDENTIAL. When the server
+#       answers `perspective: published` to a `perspective=drafts` request, the
+#       block prints the pin, the credential SOURCE that was used (never the
+#       secret), and the remedy. The credential is printed on the READ path too:
+#       a label that shows up only on failure cannot be compared against a
+#       working run.
+#
+#   (c) UNREAD IS A REPORT, NOT A GATE -- UNTIL A RUN ASKS. The blind-spot block
+#       is a report about what the denominator cannot see, and a report that
+#       aborts because one arm is blind tells the reader LESS than one that
+#       prints and says so. So the default exit is unchanged. `--require-drafts`
+#       is the certifying form: with it, an UNREAD lens is EXIT 2 (fail closed),
+#       named, after the report has been printed. There is no third option in
+#       which the published answer is counted as zero drafts -- that
+#       manufactures a clean board out of a permission the caller does not have,
+#       and it is refused here by construction, not by convention.
+#
 # STATED AND NOT FIXED: the read pages by explicit offsets over `_createdAt:asc`,
 # so a row created mid-page is invisible to it — and to any independent walk
 # reading through the same pager. Two such walks agreeing does not rule it out.
@@ -440,7 +483,8 @@
 #                                [--anchor-unbound] [--no-anchor]
 #                                [--assert-reason-artifacts]
 #                                [--reason-sample N] [--reason-sample-seed S]
-#                                [--fixture-dir DIR] [--server URL]
+#                                [--require-drafts]
+#                                [--fixture-dir DIR] [--server URL] [--token T]
 #   bash scripts/pds-ledger-census_test.sh    # the mutation fixtures
 #
 # --fixture-dir DIR replaces the network with canned HTTP responses
@@ -636,12 +680,20 @@ def die(code, msg, detail=None):
 
 
 class HttpTransport(object):
-    def __init__(self, server, token):
+    def __init__(self, server, token, credential):
         self.server = server.rstrip("/")
         self.token = token
+        # WHICH CREDENTIAL, CARRIED WITH THE TRANSPORT THAT SENDS IT. Clause 9
+        # reports the credential the drafts lens was read with, and a label
+        # rebuilt at the point of printing is a label that can drift from the
+        # token actually on the wire. It is a SOURCE name, never the secret.
+        self.credential = credential
 
     def describe(self):
         return self.server
+
+    def describe_credential(self):
+        return self.credential
 
     def get(self, path, query, page_index, attempt, kind="page"):
         # `kind` is the fixture transport's file key. Over HTTP the lens rides
@@ -704,6 +756,12 @@ class FixtureTransport(object):
 
     def describe(self):
         return "fixture://%s" % self.dir
+
+    def describe_credential(self):
+        # A fixture sends no credential at all, and saying "no credential" is
+        # not the same claim as naming one -- a fixture run must never read as
+        # evidence about a token.
+        return "none (--fixture-dir cans the transport; no credential is sent)"
 
     def get(self, path, query, page_index, attempt, kind="page"):
         path_i = os.path.join(self.dir, "%s-%d-attempt-%d.http" % (kind, page_index, attempt))
@@ -884,6 +942,12 @@ def read_drafts_lens(transport, dataset, doctype, limit, pace, retries):
     counted that response as "no drafts exist" would manufacture a clean board
     out of a permission it does not have). Every other failure fails closed
     inside fetch_page, unchanged.
+
+    CLAUSE 9 (see the header): the lens is read with the census's OWN credential
+    and no other, and the UNREAD reason NAMES that credential, because "the lens
+    was ignored" without saying WHOSE read was ignored is a diagnosis nobody can
+    act on -- the remedy is a different token, and the run has to say which one
+    it used before a reader can pick another.
     """
     try:
         rows, _pages, _dupes, perspectives = read_corpus(
@@ -895,7 +959,9 @@ def read_drafts_lens(transport, dataset, doctype, limit, pace, retries):
     if answered:
         return None, ("source answered perspective:%s for a perspective=%s read -- the "
                       "lens was IGNORED, so the never-published class is UNMEASURED, "
-                      "not zero" % ("+".join(answered), DRAFT_PERSPECTIVE))
+                      "not zero (credential: %s -- NOT draft-capable)"
+                      % ("+".join(answered), DRAFT_PERSPECTIVE,
+                         transport.describe_credential()))
     return rows, None
 
 
@@ -1929,9 +1995,14 @@ def render_blind_spots(report, root):
     if unread:
         out.append("  (2) NEVER PUBLISHED      UNREAD   %s" % (blind.get("drafts_unread_reason") or ""))
         out.append("      This is an ABSENCE, not a zero: the honest total is UNMEASURED on this run.")
+        out.append("      credential  %s" % (blind.get("drafts_credential") or "<unrecorded>"))
+        out.append("      REMEDY: re-run with a DRAFT-CAPABLE credential. Pass `--require-drafts` to")
+        out.append("      turn this absence into a REFUSAL (exit 2) on a run that must certify.")
         return out
     out.append("  (2) NEVER PUBLISHED      %5d   `open` draft, NO published twin -- HIDDEN WORK, added"
                % len(never))
+    out.append("      credential  %s   (DRAFT-CAPABLE: the source answered perspective:%s)"
+               % (blind.get("drafts_credential") or "<unrecorded>", DRAFT_PERSPECTIVE))
     for entry in never:
         out.append("      %s   (no published twin)" % entry["id"])
     if not never:
@@ -2339,6 +2410,13 @@ def main(argv):
                         help="SELFTEST REPO ONLY -- refused outside --fixture-dir, for the "
                              "same reason --anchor is: a repo chosen by argv is a repo where "
                              "every citation can be made to resolve.")
+    parser.add_argument("--require-drafts", action="store_true",
+                        help="CLAUSE 9. Turn the UNREAD drafts lens from a reported "
+                             "absence into a REFUSAL (exit 2). Off by default: the "
+                             "blind-spot block is a report, and a report that refuses "
+                             "to print because one of its arms is blind tells the "
+                             "reader less than one that prints and says so. A "
+                             "CERTIFYING run passes it.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fixture-dir")
     parser.add_argument("--server")
@@ -2388,20 +2466,30 @@ def main(argv):
             die(EXIT_USAGE, "--fixture-dir %s is not a directory" % args.fixture_dir)
         transport = FixtureTransport(args.fixture_dir)
     else:
+        # CLAUSE 9: ONE CREDENTIAL, AND IT SAYS WHICH. The precedence below is
+        # unchanged (argv, then env, then the bp config) -- what is new is that
+        # the WINNER is named and carried, so a run that comes back UNREAD can
+        # be acted on. The census never resolves a SECOND, draft-capable token
+        # behind the caller's back: a report whose lens depends on a credential
+        # the caller did not choose is a report nobody can reproduce.
         server = args.server or os.environ.get("BARKPARK_SERVER")
         token = args.token or os.environ.get("BARKPARK_TOKEN")
+        credential = ("--token (argv)" if args.token
+                      else "BARKPARK_TOKEN (environment)" if token else None)
         if not server or not token:
             config = os.path.expanduser("~/.config/barkpark/config.json")
             if os.path.exists(config):
                 with open(config) as fh:
                     data = json.load(fh)
                 server = server or data.get("server")
-                token = token or data.get("token")
+                if not token and data.get("token"):
+                    token = data.get("token")
+                    credential = "~/.config/barkpark/config.json (bp login)"
         if not server or not token:
             die(EXIT_USAGE,
                 "no server/token: pass --server/--token, set BARKPARK_SERVER/"
                 "BARKPARK_TOKEN, or run `bp login`")
-        transport = HttpTransport(server, token)
+        transport = HttpTransport(server, token, credential)
 
     # CLAUSE 5: the window is named before the first byte is read.
     started = datetime.now(timezone.utc)
@@ -2444,6 +2532,11 @@ def main(argv):
                     lease_ttl)
     report["blind_spots"] = blind_spots(
         corpus, closure, args.root, drafts, drafts_unread, started, lease_ttl)
+    # The credential is a property of the READ, so it is reported on every run --
+    # not only the UNREAD one. A label that appears only on failure is a label
+    # nobody can compare a green run against.
+    report["blind_spots"]["drafts_credential"] = transport.describe_credential()
+    report["drafts_required"] = bool(args.require_drafts)
     report["lease_ttl_source"] = lease_ttl_source
     # CLAUSE 8. It runs on EVERY invocation -- there is no flag that turns the
     # measurement off, only one (--assert-reason-artifacts) that turns its
@@ -2513,6 +2606,24 @@ def main(argv):
             % (len(report["drifted"]), report["instant"]["started"],
                report["instant"]["finished"]),
             ["%s updated %s" % (i, t) for i, t in report["drifted"][:8]])
+
+    # CLAUSE 9's REFUSAL, AND WHY IT SITS HERE. It is LAST among the fail-closed
+    # verdicts on purpose: an incoherent snapshot (exit 4) outranks a missing
+    # lens, because there is no snapshot for the lens to be missing FROM. And it
+    # comes AFTER the report is printed, exactly as clause 5 does -- a run that
+    # refuses without printing what it did measure has destroyed the evidence
+    # that would let the reader pick a different credential.
+    if args.require_drafts and report["blind_spots"].get("drafts_lens") != "read":
+        die(EXIT_FAIL_CLOSED,
+            "--require-drafts: the drafts lens is UNREAD, so the never-published "
+            "class is UNMEASURED and this run cannot certify a board",
+            [report["blind_spots"].get("drafts_unread_reason") or "(no reason recorded)",
+             "credential used: %s" % report["blind_spots"].get("drafts_credential"),
+             "REMEDY: re-run with a draft-capable credential "
+             "(--token <draft-capable>, or unset a published-pinned BARKPARK_TOKEN "
+             "so ~/.config/barkpark/config.json is used). Counting the published "
+             "answer as zero drafts is NOT a remedy: it manufactures a clean board "
+             "out of a permission the caller does not have."])
 
     # THE HUMAN BLOCK FOLLOWS THE HUMAN STREAM. Under --json stdout is the
     # machine channel and every human line goes to stderr, which is the whole
