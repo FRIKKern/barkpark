@@ -35,6 +35,42 @@
 # --live mutates a throwaway branch in the repo (never main; it refuses) and
 # cleans up after itself.
 #
+# THE EXIT-CODE TABLE — AND WHY 4 EXISTS
+#
+#   0   every assertion passed, and the tally line was reached
+#   1   ASSERTION DRIFT: the suite read every input it needed and something it
+#       asserts about the toolchain is no longer true. A verdict AGAINST the
+#       repo — someone must fix the repo.
+#   2   you invoked me wrong (unknown flag, contradictory flags, a non-bash or
+#       POSIX-mode interpreter)
+#   3   no git object database / no shared check-runs lib — a PRECONDITION of
+#       the run is absent, refused before the first assertion
+#   4   INPUT UNREADABLE / PRODUCER REFUSED: the suite could not obtain an input
+#       it needed to make an assertion — the generator refused and wrote no
+#       spec, a fixture could not be read. NOT a verdict about the repo's
+#       required set; the suite never got far enough to have one. A caller
+#       should HOLD, not report drift.
+#   70  the run ended before its tally line while reporting success (a crash is
+#       not a pass; see the EXIT trap below)
+#
+# 4 IS THE MACHINE HALF OF #14371. That fix made the generator's refusal
+# READABLE ("the generator REFUSED (exit N), wrote no <file>, and said: …")
+# after `Required-check spec gate` sat red for the 2026-08-24T21:59Z ->
+# 2026-08-31 bracket and the whole fleet learned to ignore the red. The human
+# half alone leaves a machine reading `exit 1` unable to tell "your PR drifted
+# the spec" from "our generator is down", which is how a red gets ignored in
+# the first place. 4 separates them.
+#
+# PRECEDENCE, AND IT IS DELIBERATE: 4 outranks 1. A run that could not read an
+# input cannot be trusted to have completed the assertions that WOULD have
+# found drift, so a run with both a blocked site and a failed one reports the
+# blocked one — "I could not tell you" beats a partial verdict. The tally line
+# still prints, and it prints the blocked count separately from the failed
+# count so neither is hidden inside the other. No assertion drift ever maps to
+# 4: only `blocked()` raises it, and only `fail_emit` routes to `blocked()`,
+# and only when the producer's own refusal is on record in GEN_EMIT_ERR.
+# Section 25 pins both directions.
+#
 # THE INTERPRETER GUARD, AND THE VACUOUS GREEN IT DELETES (wave 53)
 #
 # The shebang above only decides who runs this file when it is EXECUTED. An
@@ -154,6 +190,12 @@ fi
 
 PASS=0
 FAIL=0
+# BLOCKED is the third tally, and it is NOT a kind of FAIL. A `bad` is a verdict
+# about the repo; a `blocked` is the suite reporting that it could not obtain an
+# input and therefore has no verdict to give. They are counted apart so the
+# tally line cannot hide one inside the other, and `rc_exit_code` maps them to
+# distinct exit codes (see the table in the header).
+BLOCKED=0
 TMP="$(mktemp -d)"
 # A CRASH IS NOT A PASS, AND THIS FILE USED TO REPORT IT AS ONE.
 # `cleanup() { rm -rf "$TMP"; }` ends in a command that succeeds, and an EXIT
@@ -184,6 +226,20 @@ trap cleanup EXIT
 
 ok()   { PASS=$((PASS + 1)); echo "  ok   $*"; }
 bad()  { FAIL=$((FAIL + 1)); echo "  FAIL $*" >&2; }
+# A site that could not READ its input says so in its own word. `BLOCKED` never
+# increments FAIL: the exit code, not the failed count, is what tells the two
+# apart, and a caller that greps `0 failed` must still see the blocked count on
+# the same tally line.
+blocked() { BLOCKED=$((BLOCKED + 1)); echo "  BLOCKED $*" >&2; }
+
+# The exit-code table as a FUNCTION, so the tally line and section 25 read the
+# same rule rather than two copies of it. <failed> <blocked> -> code.
+rc_exit_code() {
+  if   [ "${2:-0}" -gt 0 ]; then printf '4'
+  elif [ "${1:-0}" -gt 0 ]; then printf '1'
+  else                           printf '0'
+  fi
+}
 
 section() { echo; echo "── $* ──"; }
 
@@ -246,6 +302,13 @@ emit_spec() {
 }
 # Prefer the generator's own refusal over the caller's jq-derived text.
 why_emit() { if [ -n "$GEN_EMIT_ERR" ]; then printf '%s' "$GEN_EMIT_ERR"; else printf '%s' "$1"; fi; }
+# …and the MACHINE half of the same distinction. `why_emit` fixes the TEXT a
+# human reads; `fail_emit` fixes the EXIT CODE a caller reads. The condition is
+# identical and deliberately so — the producer's own refusal is on record in
+# GEN_EMIT_ERR or it is not, and nothing else may promote a red to a hold. Every
+# site that consumes a file `emit_spec` was supposed to write goes through this;
+# section 25 reds if one of them goes back to a bare `bad`.
+fail_emit() { if [ -n "$GEN_EMIT_ERR" ]; then blocked "$1"; else bad "$1"; fi; }
 
 # ═══ fixtures ════════════════════════════════════════════════════════════════
 # A miniature repo: four workflows covering every selection stage, plus a
@@ -467,7 +530,7 @@ emit_spec "$TMP/sel-spec.json" bash "$GEN" --workflows "$WF" --fixture-dir "$FIX
 if jq -e '[.protection.required_status_checks.checks[].context] == ["Aggregate gate"]' "$TMP/sel-spec.json" >/dev/null 2>&1; then
   ok "the emitted spec is EXACTLY the aggregator — 'Only on B' (present on one sha only) and every stage's specimen are gone"
 else
-  bad "$(why_emit "the emitted spec is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/sel-spec.json" 2>&1), not [Aggregate gate]")"
+  fail_emit "$(why_emit "the emitted spec is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/sel-spec.json" 2>&1), not [Aggregate gate]")"
 fi
 
 section "3b. the matrix suffix is read from the SOURCE, never by stripping a parenthetical"
@@ -680,7 +743,16 @@ fi
 RC3C_COPY="$TMP/rc3c-renamed"
 mkdir -p "$RC3C_COPY"
 cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_COPY/"
-RC3C_KEEP1="$(printf '%s\n' "$RC3C_CLEAN_OUT" | awk '/^  keep     / { print substr($0, 12); exit }')"
+# FIRST MATCH WINS WITHOUT `exit`, AND THAT IS NOT A STYLE CHOICE. This line
+# used to end `{ print substr($0, 12); exit }`. Under `set -o pipefail` an awk
+# that exits early closes the pipe while `printf` is still writing the
+# generator's multi-kilobyte log, printf takes SIGPIPE and returns 141, pipefail
+# hands 141 to the command substitution and `set -e` kills the whole suite —
+# MEASURED here twice in a row on this file's own §3c, `line 746: printf: write
+# error: Broken pipe`, with the run dying mid-section and no tally line. It is
+# payload-size- and load-dependent, which is why CI has not shown it. Draining
+# the input costs nothing and the flag preserves first-match-wins exactly.
+RC3C_KEEP1="$(printf '%s\n' "$RC3C_CLEAN_OUT" | awk '/^  keep     / && !seen { print substr($0, 12); seen = 1 }')"
 RC3C_CTX="${RC3C_KEEP1%%  (*}"
 RC3C_PROV="${RC3C_KEEP1#*  (}"; RC3C_PROV="${RC3C_PROV%)}"
 RC3C_FILE="${RC3C_PROV%% job *}"
@@ -2136,7 +2208,7 @@ if jq -e '[.protection.required_status_checks.checks[].context]
      "$TMP/ack-spec.json" >/dev/null 2>&1; then
   ok "…and per-NAME acknowledgement lets it through, emitting exactly the four contexts"
 else
-  bad "$(why_emit "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the REFUSAL is load-bearing. Neuter its condition — one line —
@@ -2170,7 +2242,7 @@ if jq -e '[.protection.required_status_checks.checks[].context]
      "$TMP/overwrite-spec.json" >/dev/null 2>&1; then
   ok "the OVERWRITE path emits a spec MISSING both committed names — the merge, not the refusal, is what carries them"
 else
-  bad "$(why_emit "the overwrite specimen did not drop the committed names: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/overwrite-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the overwrite specimen did not drop the committed names: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/overwrite-spec.json" 2>&1)")"
 fi
 
 section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the merge CARRIES the row, the refusal NOTICES it"
@@ -2262,16 +2334,19 @@ emit_spec "$TMP/seeded-spec.json" \
 if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and once acknowledged the seeded row SURVIVES the regeneration (the merge carries what the sample cannot see)"
 else
-  bad "$(why_emit "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
-# Set inclusion, never a count: a count is satisfied by any 26 rows at all.
+# Set inclusion, never a count: a count is satisfied by any N rows at all.
+# The narration below is DERIVED for the same reason the assertion is a set
+# predicate — a typed 26 inside a green line is a number nobody re-earns, and
+# the committed spec has since moved off it.
 if jq -e --slurpfile base "$SEEDX" \
      '[.exclusions[].context] as $out
       | ($base[0].exclusions | map(.context) | map(. as $c | $out | index($c) != null) | all)' \
      "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (set inclusion over the whole seeded base)"
 else
-  bad "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 # The union must not FREEZE a row's grounds: where this run restated a reason,
 # the DERIVED one wins. `Security gate` is committed as an S7 decision and the
@@ -2282,7 +2357,7 @@ if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
              | any(startswith("S7 EXCLUDED BY DECISION"))' "$SEEDX" >/dev/null 2>&1; then
   ok "…and where BOTH sides carry a row the DERIVED reason wins ('Security gate': S7 committed → S5 emitted)"
 else
-  bad "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the UNION is load-bearing. Drop the base out of it — the exact
@@ -2302,9 +2377,9 @@ emit_spec "$TMP/nounion-spec.json" \
 if jq -e --arg c "$SEEDNAME" \
      '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
-  ok "…and without it the IDENTICAL run drops the seeded row and emits 18 of 26 (mutation-proven able to fail)"
+  ok "…and without it the IDENTICAL run drops the seeded row and emits $(jq '.exclusions | length' "$TMP/nounion-spec.json") of $(jq '.exclusions | length' "$SEEDX") (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)")"
 fi
 
 # MUTATION (ii): the REFUSAL is separately load-bearing. The union alone buys
@@ -2354,7 +2429,73 @@ if jq -e '([.exclusions[].context] | index("Cloud gate") | not)
      "$TMP/promoted-spec.json" >/dev/null 2>&1; then
   ok "…and --expect-promoted DROPS that row instead of carrying it, so no context is emitted as both required and excluded"
 else
-  bad "$(why_emit "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)")"
+fi
+
+# ── THE INTERSECTION, IN BOTH DIRECTIONS (cgsiw-s4 c6) ──────────────────────
+#
+# The clause above proves ONE direction, and only for ONE name: a committed
+# EXCLUSION (`Cloud gate`) that this run derives as REQUIRED is refused, and its
+# acknowledgement drops the row. That leaves the mirror unasserted. A spec can
+# also go incoherent the other way round — a context the COMMITTED spec requires
+# arriving in the emitted `.exclusions` — and nothing here would have noticed,
+# because every predicate above is keyed on `Cloud gate` by name.
+#
+# So state the invariant as a SET operation over the whole emitted document,
+# spelled out in both directions rather than once (a jq `index` on one list is
+# not a symmetric read of two: it asks whether THIS name is on THAT list, and
+# the answer depends on which list you iterate). Applied to every spec this
+# section had the generator write.
+rc_intersect_empty() { # <spec.json> -> prints the offending contexts, if any
+  jq -r '([.protection.required_status_checks.checks[]?.context] // []) as $req
+         | ([.exclusions[]?.context] // []) as $exc
+         | (($req | map(. as $c | $exc | index($c) != null) | indices(true) | map($req[.])) +
+            ($exc | map(. as $c | $req | index($c) != null) | indices(true) | map($exc[.])))
+         | unique | .[]' "$1" 2>/dev/null
+}
+RC_INT_BAD=""
+for rc_int_f in "$TMP/seeded-spec.json" "$TMP/promoted-spec.json"; do
+  [ -s "$rc_int_f" ] || { RC_INT_BAD="$RC_INT_BAD $(basename "$rc_int_f"):unwritten"; continue; }
+  rc_int_hits="$(rc_intersect_empty "$rc_int_f" | tr '\n' ',')"
+  [ -z "$rc_int_hits" ] || RC_INT_BAD="$RC_INT_BAD $(basename "$rc_int_f"):$rc_int_hits"
+done
+# Non-vacuity FIRST: a predicate that reads zero names from both lists reports an
+# empty intersection for the same reason an empty file does.
+RC_INT_REQ_N="$(jq '[.protection.required_status_checks.checks[]?.context] | length' "$TMP/promoted-spec.json" 2>/dev/null || echo 0)"
+RC_INT_EXC_N="$(jq '[.exclusions[]?.context] | length' "$TMP/promoted-spec.json" 2>/dev/null || echo 0)"
+if [ "$RC_INT_REQ_N" -ge 1 ] && [ "$RC_INT_EXC_N" -ge 1 ] && [ -z "$RC_INT_BAD" ]; then
+  ok "the emitted spec's required×excluded intersection is EMPTY in BOTH directions ($RC_INT_REQ_N required × $RC_INT_EXC_N excluded, read as a set operation over the whole document rather than an \`index\` on one name)"
+elif [ "$RC_INT_REQ_N" -lt 1 ] || [ "$RC_INT_EXC_N" -lt 1 ]; then
+  bad "the intersection clause read $RC_INT_REQ_N required and $RC_INT_EXC_N excluded context(s) — one empty list makes the predicate vacuous"
+else
+  bad "a context is emitted as BOTH required and excluded:$RC_INT_BAD"
+fi
+# …and the committed side of the mirror: no context the COMMITTED spec REQUIRES
+# may arrive in an emitted `.exclusions`. This is the direction the clause above
+# does not cover at all.
+RC_INT_CROSS="$(jq -r --slurpfile b "$SPEC" \
+  '[.exclusions[]?.context] as $exc
+   | [$b[0].protection.required_status_checks.checks[]?.context]
+   | map(. as $c | select($exc | index($c) != null)) | .[]' \
+  "$TMP/promoted-spec.json" 2>/dev/null | tr '\n' ',')"
+if [ -z "$RC_INT_CROSS" ]; then
+  ok "…and no context the COMMITTED spec REQUIRES appears in the emitted exclusions (committed-REQUIRED × derived-EXCLUDED — the direction the \`Cloud gate\` clause above never reads)"
+else
+  bad "a committed REQUIRED context was emitted as an exclusion: $RC_INT_CROSS"
+fi
+# MUTATION PROOF of the predicate itself. Both clauses above are ASSERTIONS over
+# a document, not a guard with a call site to remove — so what has to be shown is
+# that the predicate can SEE the state it forbids. Plant the contradiction in a
+# scratch copy and it must name the planted context, in both directions.
+RC_INT_MUT="$TMP/int-contradiction.json"
+RC_INT_PLANT="$(jq -r '.protection.required_status_checks.checks[0].context' "$TMP/promoted-spec.json" 2>/dev/null)"
+jq --arg c "$RC_INT_PLANT" '.exclusions += [{context: $c, reason: "PLANTED BY THE TEST SUITE"}]' \
+  "$TMP/promoted-spec.json" > "$RC_INT_MUT" 2>/dev/null || : > "$RC_INT_MUT"
+RC_INT_MUT_HITS="$(rc_intersect_empty "$RC_INT_MUT" | tr '\n' ',')"
+if [ -n "$RC_INT_PLANT" ] && [ "$RC_INT_MUT_HITS" = "$RC_INT_PLANT," ]; then
+  ok "…and the predicate is mutation-proven able to fail: planting \`$RC_INT_PLANT\` on the exclusion list of an otherwise-coherent spec makes it name exactly that context (mutation-proven able to fail)"
+else
+  bad "the planted both-lists contradiction was not reported (planted '$RC_INT_PLANT', predicate said '${RC_INT_MUT_HITS:-nothing}') — the intersection clauses above are vacuous"
 fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
@@ -2402,7 +2543,7 @@ if jq -e '[.protection.required_status_checks.checks[].context] as $c
      "$TMP/nos6-spec.json" >/dev/null 2>&1; then
   ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
 fi
 
 section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
@@ -2728,7 +2869,7 @@ if jq -e '[.protection.required_status_checks.checks[].context] | index("Securit
      "$TMP/nos7-spec.json" >/dev/null 2>&1; then
   ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
 else
-  bad "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
 fi
 
 # The committed file must not still be teaching the evaporated ground.
@@ -3109,12 +3250,27 @@ section "19. docs/ops/merge-gates.md never calls a TRANSITIVE UPSTREAM of a requ
 # come out of `.github/workflows/`, the required contexts out of
 # `.github/required-checks.json`. Editing either one re-aims the guard.
 #
-# THREE CLASSES, AND THE GUARD MUST NOT COLLAPSE THEM. `format` really is
+# THREE CLASSES, AND THE GUARD MUST NOT COLLAPSE THEM. Some jobs really ARE
 # advisory — `continue-on-error: true`, and deliberately NOT in any required
-# aggregator's `needs:` — so a guard that simply deleted the "do not block"
-# sentence would ship a NEW lie about `format`. The guard therefore reds only on
-# a name that is a transitive upstream, which is what forces the doc to make the
+# aggregator's `needs:` — so a guard that simply deleted every "do not block"
+# sentence would ship a NEW lie about those. The guard therefore reds only on a
+# name that is a transitive upstream, which is what forces the doc to make the
 # split rather than to soften the wording.
+#
+# THE 2026-09-04 FLIP, AND WHY THE SPECIMEN IS NOW DERIVED. Until #15971
+# (15f3d9607a, task-e31b816b4b416db6) this section and §20 named `format` as
+# THE canonical advisory specimen, typed into both the mutation below and §20's
+# clause 5. That PR dropped `format`'s `continue-on-error` and put it in
+# `elixir-gate`'s `needs:` — diff-scoped, but a real blocking upstream — and
+# rewrote merge-gates.md's format disclosure. Both typed premises flipped at
+# once, so five assertions across §19/§20 went red on a CORRECT tree and main's
+# `Required-check spec gate` stayed red for twelve hours (run 33907498184,
+# b2529b02c, "239 passed, 5 failed"; the run on 68d85542e twelve hours earlier
+# was green). NOTHING here names a specimen any more: `rc_advisory_specimen`
+# derives one from the live graph and `rc_doc_disclosure_specimen` picks the one
+# merge-gates.md actually discloses, and if the tree ever runs out of advisory
+# jobs the fixture PLANTS one. The next job that changes class re-aims this
+# section instead of reddening main.
 #
 # SENTENCE-SCOPED, NOT LINE-SCOPED, AND THIS IS MEASURED. merge-gates.md soft-
 # wraps its prose at ~78 columns, so a subject and its predicate routinely sit on
@@ -3319,6 +3475,66 @@ rc_gate_report() { # <workflow-dir> <spec-json> <doc>
   rc_nonblocking_claims "$3" "$all" "$tgt"
 }
 
+# Job ids carrying a JOB-LEVEL `continue-on-error: true`. Step-level ones are
+# out of scope on purpose: they do not change `needs.<job>.result`, which is the
+# whole mechanism this class is about (elixir.yml's format guard STEP is exactly
+# that case and must not be mistaken for the job).
+rc_coe_jobs() { # <workflow-dir>
+  local f
+  for f in "$1"/*.yml; do
+    [ -f "$f" ] || continue
+    awk '
+      BEGIN { injobs = 0; job = "" }
+      /^jobs:[[:space:]]*$/ { injobs = 1; next }
+      injobs && /^[^[:space:]#]/ { job = ""; injobs = 0; next }
+      injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
+        j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); job = j; next
+      }
+      # A TRAILING COMMENT IS THE COMMON SHAPE, not the exception:
+      # reland-check.yml writes `continue-on-error: true # advisory — report,
+      # never block`, and an end-anchored `true$` dropped it silently — measured,
+      # the derived candidate list came back one job short and §20 clause 5 had
+      # nothing to mutate.
+      injobs && job != "" && /^    continue-on-error:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$/ { print job }
+    ' "$f"
+  done | sort -u
+}
+
+# THE SPECIMEN, DERIVED. Every `continue-on-error: true` job that is neither a
+# required context nor a transitive upstream of one — i.e. every job the doc may
+# honestly call non-blocking. Emitted sorted, so the pick below is deterministic
+# and a reader can reproduce it with two greps.
+rc_advisory_specimen() { # <workflow-dir> <spec-json> [must-appear-in-doc]
+  local tgt doc j
+  tgt="$( { rc_transitive_upstreams "$1" "$2" | grep '^JOB' | cut -f2
+            jq -r '.protection.required_status_checks.checks[].context' "$2"; } | sort -u )"
+  doc="${3:-}"
+  while IFS= read -r j; do
+    [ -n "$j" ] || continue
+    if grep -qxF "$j" <<EOF
+$tgt
+EOF
+    then continue; fi
+    if [ -n "$doc" ] && ! grep -qF "\`$j\`" "$doc"; then continue; fi
+    printf '%s\n' "$j"
+  done <<EOF
+$(rc_coe_jobs "$1")
+EOF
+}
+
+# The `needs:` line of the job that publishes a required context, BY JOB KEY —
+# never by its current contents. #15971 appended one entry to `elixir-gate`'s
+# list and three mutations below, each `sed`-anchored on the five-name line,
+# silently stopped applying. An anchor that reads the job key survives the next
+# append.
+rc_needs_lineno() { # <workflow-file> <job-key>
+  awk -v key="  $2:" '
+    $0 == key { inj = 1; next }
+    inj && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { exit }
+    inj && /^    needs:[[:space:]]*\[/ { print NR; exit }
+  ' "$1"
+}
+
 RC19_TARGETS="$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$SPEC" | grep '^JOB' | cut -f2 | sort -u | tr '\n' ' ')"
 if [ -n "$RC19_TARGETS" ]; then
   ok "derived the required aggregators' transitive upstreams from source, nothing typed: $RC19_TARGETS"
@@ -3334,12 +3550,55 @@ else
   printf '%s\n' "$RC19_OUT" | sed 's/^/       /' >&2
 fi
 
+# THE ADVISORY SPECIMEN FOR MUTATION 2, DERIVED FROM THE LIVE GRAPH. If the
+# tree ever carries no advisory job at all, one is PLANTED into a fixture copy
+# rather than the split going untested — a section that quietly stops testing
+# the split is the same vacuous green this suite exists to delete. The workflow
+# dir the two clauses below run against is therefore a variable, not a constant.
+#
+# NEVER `| head -1` HERE. This file runs under `set -euo pipefail`: `head` closes
+# the pipe on line one, the producer takes SIGPIPE, and the whole SUITE dies
+# mid-section with "printf: write error: Broken pipe" — measured, once, on the
+# first draft of this very clause. The first line is taken by expansion instead.
+RC19_WFDIR="$REPO_ROOT/.github/workflows"
+RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
+if [ -n "$RC19_ADV" ]; then
+  ok "derived the advisory specimen from the live graph: \`$RC19_ADV\` carries continue-on-error and is in no required aggregator's needs (candidates: $(tr '\n' ' ' <<<"$RC19_ADV_ALL"))"
+else
+  RC19_WFDIR="$TMP/rc19-planted-workflows"
+  rm -rf "$RC19_WFDIR"; mkdir -p "$RC19_WFDIR"
+  cp "$REPO_ROOT"/.github/workflows/*.yml "$RC19_WFDIR/"
+  cat > "$RC19_WFDIR/rc19-planted.yml" <<'YAML'
+name: rc19 planted advisory
+on: pull_request
+jobs:
+  rc19-planted-advisory:
+    name: rc19 planted advisory
+    runs-on: ubuntu-latest
+    continue-on-error: true
+YAML
+  RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+  RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
+  if [ "$RC19_ADV" = "rc19-planted-advisory" ]; then
+    ok "no advisory job survives on the live tree, so one is PLANTED in the fixture copy — the split below is still tested rather than skipped"
+  else
+    bad "no advisory job on the live tree and the planted one did not derive either (got '${RC19_ADV:-<empty>}') — the split is untested"
+  fi
+fi
+
 # MUTATION 1 — DIRECTION 1, the doc lies. A copy of the doc with the retired
 # sentence put back must be reported, naming the check.
 RC19_DOC_CANARY="$TMP/merge-gates-canary.md"
 cp "$MERGE_GATES_DOC" "$RC19_DOC_CANARY"
-printf '\nEverything else on a PR is advisory: `mix-prod-compile`, `validation-perf`\nand `format` do not block.\n' >> "$RC19_DOC_CANARY"
-RC19_CANARY_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_DOC_CANARY")"
+printf '\nEverything else on a PR is advisory: `mix-prod-compile`, `validation-perf`\nand `%s` do not block.\n' "$RC19_ADV" >> "$RC19_DOC_CANARY"
+RC19_CANARY_N="$(grep -cF "and \`$RC19_ADV\` do not block." "$RC19_DOC_CANARY" || true)"
+if [ "$RC19_CANARY_N" -eq 1 ] && ! diff -q "$MERGE_GATES_DOC" "$RC19_DOC_CANARY" >/dev/null; then
+  ok "the canary sentence APPLIED exactly once, naming the derived specimen \`$RC19_ADV\` — the two clauses below are not reading a doc copy that never changed"
+else
+  bad "the canary sentence landed $RC19_CANARY_N time(s) — the two mutation proofs below would be vacuous"
+fi
+RC19_CANARY_OUT="$(rc_gate_report "$RC19_WFDIR" "$SPEC" "$RC19_DOC_CANARY")"
 if grep -q '^CLAIM	mix-prod-compile' <<<"$RC19_CANARY_OUT" \
    && grep -q '^CLAIM	validation-perf' <<<"$RC19_CANARY_OUT"; then
   ok "…and it FIRES, BY NAME, on the retired sentence put back (mutation-proven able to fail)"
@@ -3348,14 +3607,16 @@ else
   printf '%s\n' "$RC19_CANARY_OUT" | sed 's/^/       /' >&2
 fi
 
-# MUTATION 2 — the SPLIT. The same planted sentence names `format`, which is
-# genuinely advisory. If the guard ever red on it, the honest fix (say the
-# mechanism) and the dishonest one (delete the sentence) would be
-# indistinguishable, and deleting it would ship a new lie about `format`.
-if ! grep -q '^CLAIM	format' <<<"$RC19_CANARY_OUT"; then
-  ok "…and it does NOT fire on \`format\`, which is genuinely advisory — the split is measured, not asserted"
+# MUTATION 2 — the SPLIT. The same planted sentence names the DERIVED advisory
+# job. If the guard ever red on it, the honest fix (say the mechanism) and the
+# dishonest one (delete the sentence) would be indistinguishable, and deleting
+# it would ship a new lie about that job. THE NAME HERE WAS TYPED AS `format`
+# until 2026-09-04: #15971 made `format` a blocking upstream and this clause
+# reddened on a correct tree for twelve hours. It is derived now.
+if ! grep -q "^CLAIM	$RC19_ADV	" <<<"$RC19_CANARY_OUT"; then
+  ok "…and it does NOT fire on \`$RC19_ADV\`, which is genuinely advisory — the split is measured, not asserted"
 else
-  bad "the guard reddened on \`format\`, a continue-on-error job in no required aggregator's needs — it has become a word filter"
+  bad "the guard reddened on \`$RC19_ADV\`, a continue-on-error job in no required aggregator's needs — it has become a word filter"
 fi
 
 # MUTATION 3 — SENTENCE vs LINE, run rather than argued. The specimen is one
@@ -3397,8 +3658,23 @@ fi
 # MUTATION 5 — a `needs:` edge pointed at a job that does not exist. Same
 # refusal, one level down: the walk must not simply find nothing and continue.
 cp "$REPO_ROOT"/.github/workflows/elixir.yml "$RC19_WF/elixir.yml"
-sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile-renamed, validation-perf, path-escape]/' \
-  "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+# ANCHORED ON THE JOB KEY, NOT ON THE LIST'S CONTENTS. This sed used to match the
+# literal five-name `needs:` line; #15971 appended `format` to it on 2026-09-04,
+# the mutation silently stopped applying, and the clause below reddened while
+# asserting nothing about the guard at all. `rc_needs_lineno` finds the line by
+# walking to the `elixir-gate` job key, so the next append re-aims it.
+RC19_NEEDS_LN="$(rc_needs_lineno "$RC19_WF/elixir.yml" elixir-gate)"
+if [ -n "$RC19_NEEDS_LN" ]; then
+  sed -i.bak "${RC19_NEEDS_LN}s/mix-prod-compile/mix-prod-compile-renamed/" \
+    "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+fi
+RC19_DANGLE_N="$(grep -c 'mix-prod-compile-renamed' "$RC19_WF/elixir.yml" || true)"
+if [ -n "$RC19_NEEDS_LN" ] && [ "$RC19_DANGLE_N" -eq 1 ] \
+   && ! diff -q "$REPO_ROOT/.github/workflows/elixir.yml" "$RC19_WF/elixir.yml" >/dev/null; then
+  ok "the dangling-\`needs:\` mutation APPLIED: \`elixir-gate\`'s needs line (line $RC19_NEEDS_LN, found by job key) now names a job that does not exist, exactly once"
+else
+  bad "the dangling-\`needs:\` mutation did not apply (needs line '${RC19_NEEDS_LN:-<none>}', $RC19_DANGLE_N occurrence(s)) — the clause below would be reding on an UNMUTATED tree"
+fi
 if grep -q '^UNRESOLVED.*mix-prod-compile-renamed' <<<"$(rc_gate_report "$RC19_WF" "$SPEC" "$MERGE_GATES_DOC")"; then
   ok "…and a \`needs:\` entry naming no job is UNRESOLVED — a job rename refuses instead of shrinking the graph"
 else
@@ -3474,6 +3750,17 @@ fi
 # about its own `Required-check spec gate` and is not in scope (filed as
 # cch-w49-bl-required-checks-drift-calls-its-own-job-blocking).
 section "20. docs/ops/merge-gates.md never presents a check that CANNOT block as one a PR must clear"
+
+# THE 2026-09-04 FLIP (same one §19's header records). Clause 5 and clause 7 both
+# named a moving part in a string literal — clause 5 sed'd one sentence of
+# merge-gates.md about `format`, clause 7 sed'd `elixir-gate`'s five-name
+# `needs:` line. #15971 (15f3d9607a) rewrote the sentence AND appended `format`
+# to the line, so both mutations stopped applying and both clauses reddened
+# while proving nothing. Neither is typed any more: the DELETE specimen is
+# derived from the graph crossed with the page, and the ADD anchor walks to the
+# job key. A mutation that does not apply is now its own FAIL, said in those
+# words, so the next flip reports "the mutation did not apply" instead of
+# accusing the tree.
 
 # The third name source §19 does not need and this section cannot work without.
 rc20_workflow_names() { # <workflow-dir> -> `<file>\t<workflow name>`
@@ -3732,17 +4019,81 @@ else
   printf '%s\n' "$RC20_CANARY_OUT" | sed 's/^/       /' >&2
 fi
 
-# CLAUSE 5 — DELETE. `format` is genuinely advisory and genuinely disclosed, so
-# it is NOT reported today; strip the disclosure from a copy and it must be. The
-# green on item 2 is therefore earned by the sentence, not by blindness.
-RC20_DEL="$TMP/rc20-nodisclosure.md"
-sed 's/Today a red `format` check still does not block merge, and it is the/Today a red `format` check still shows on the PR, and it is the/' \
-  "$MERGE_GATES_DOC" > "$RC20_DEL"
-RC20_DEL_OUT="$(rc20_overstatements "$RC20_DEL" "$RC20_ALL" "$RC20_BLK")"
-if grep -q '^OVER	format	' <<<"$RC20_DEL_OUT" && ! grep -q '^OVER	format	' <<<"$RC20_OUT"; then
-  ok "…and DELETING item 2's \`format\` disclosure reds it by name, while the unmutated page does not report \`format\` at all — the disclosure is what earns the green"
+# CLAUSE 5 — DELETE. A genuinely advisory job that this page lists as one a PR
+# must clear is saved from the report by ONE thing: its disclosure. Strip it from
+# a copy and the name must appear. The green on that roster item is therefore
+# earned by the sentence, not by blindness.
+#
+# THE SPECIMEN IS DERIVED, TWICE OVER, AND THAT IS THE 2026-09-04 LESSON. It used
+# to be `format`, with the mutation a `sed` on one typed sentence. #15971 made
+# `format` blocking (so it can never be reported here again) AND rewrote that
+# exact sentence, so the sed matched nothing and the clause reddened on a correct
+# tree. Now: `rc_advisory_specimen` supplies the jobs that CANNOT block, and
+# `rc20_disclosure_saved` asks the section itself which of them the live page
+# would report if its disclosure vanished. Nothing about the page's wording is
+# typed here.
+#
+# THE MUTATION IS A REPLACEMENT, NOT A PHRASE EDIT, on purpose: merge-gates.md
+# soft-wraps, so a disclosure ("**Advisory\n only**") routinely straddles two
+# physical lines and no line-scoped sed can reliably remove it. The whole roster
+# item is replaced by a disclosure-FREE item naming the same job, which is
+# exactly the drift being guarded against.
+
+# The names the live page would report if the disclosure regex matched nothing —
+# i.e. the names a disclosure is currently saving.
+# SUBSHELL, not a `VAR=x func` prefix: bash keeps such an assignment after a
+# FUNCTION call (unlike a command), which would silently disarm the disclosure
+# regex for every clause below it.
+rc20_disclosure_saved() { # <doc> <all-names> <blocking-names>
+  ( RC_NONBLOCKING_RE='RC20_DISCLOSURE_REGEX_THAT_MATCHES_NOTHING'
+    rc20_overstatements "$1" "$2" "$3" ) | grep '^OVER' | cut -f2
+}
+
+# Replace <name>'s numbered roster item with a disclosure-free one. Range is
+# found by the item's own numbering, never by line number.
+rc20_strip_disclosure() { # <doc> <name> <out>
+  awk -v nm="$2" '
+    BEGIN { inside = 0; done = 0 }
+    /^[0-9]+\.[[:space:]]/ {
+      if (inside) { inside = 0 }
+      if (!done && index($0, "`" nm "`") > 0) {
+        num = $0; sub(/\..*$/, "", num)
+        print num ". **`" nm "` CI job** — see `.github/workflows/`."
+        inside = 1; done = 1; next
+      }
+      print; next
+    }
+    inside && /^[[:space:]]/ { next }
+    inside && /^[[:space:]]*$/ { inside = 0; print; next }
+    inside { inside = 0 }
+    { print }
+  ' "$1" > "$3"
+}
+
+# Same SIGPIPE rule as §19: no `| head -1` under `pipefail`.
+RC20_ADV_SAVED_ALL="$(comm -12 \
+  <(rc_advisory_specimen "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC" | sort -u) \
+  <(rc20_disclosure_saved "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK" | sort -u))"
+RC20_ADV_SAVED="${RC20_ADV_SAVED_ALL%%$'\n'*}"
+if [ -n "$RC20_ADV_SAVED" ]; then
+  ok "derived the DELETE specimen: \`$RC20_ADV_SAVED\` is on the must-clear roster, carries continue-on-error, is in no required aggregator's needs, and is reported the moment its disclosure stops matching"
 else
-  bad "removing the \`format\` disclosure changed nothing (or \`format\` was already reported) — the section is not reading the disclosure:"
+  bad "no roster item names a genuinely advisory job whose disclosure is load-bearing — clause 5 has nothing to mutate and would pass by having nothing to test"
+fi
+RC20_DEL="$TMP/rc20-nodisclosure.md"
+rc20_strip_disclosure "$MERGE_GATES_DOC" "$RC20_ADV_SAVED" "$RC20_DEL"
+RC20_DEL_ITEM_N="$(grep -cF "**\`$RC20_ADV_SAVED\` CI job** — see \`.github/workflows/\`." "$RC20_DEL" || true)"
+if [ "$RC20_DEL_ITEM_N" -eq 1 ] && ! diff -q "$MERGE_GATES_DOC" "$RC20_DEL" >/dev/null \
+   && ! grep -qE "$RC_NONBLOCKING_RE" <<<"$(grep -F "\`$RC20_ADV_SAVED\` CI job" "$RC20_DEL")"; then
+  ok "the DELETE mutation APPLIED: \`$RC20_ADV_SAVED\`'s roster item is replaced EXACTLY ONCE by a disclosure-free item that still names it"
+else
+  bad "the disclosure-strip did not apply ($RC20_DEL_ITEM_N replacement(s)) — the clause below would be reding on an unmutated page"
+fi
+RC20_DEL_OUT="$(rc20_overstatements "$RC20_DEL" "$RC20_ALL" "$RC20_BLK")"
+if grep -q "^OVER	$RC20_ADV_SAVED	" <<<"$RC20_DEL_OUT" && ! grep -q "^OVER	$RC20_ADV_SAVED	" <<<"$RC20_OUT"; then
+  ok "…and DELETING \`$RC20_ADV_SAVED\`'s disclosure reds it by name, while the unmutated page does not report it at all — the disclosure is what earns the green"
+else
+  bad "removing the \`$RC20_ADV_SAVED\` disclosure changed nothing (or \`$RC20_ADV_SAVED\` was already reported) — the section is not reading the disclosure:"
   printf '%s\n' "$RC20_DEL_OUT" | sed 's/^/       /' >&2
 fi
 
@@ -3780,8 +4131,21 @@ fi
 RC20_WF="$TMP/rc20-workflows"
 rm -rf "$RC20_WF"; mkdir -p "$RC20_WF"
 cp "$REPO_ROOT"/.github/workflows/*.yml "$RC20_WF/"
-sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, doc-gates]/' \
-  "$RC20_WF/elixir.yml" && rm -f "$RC20_WF/elixir.yml.bak"
+# ANCHORED ON THE JOB KEY. Same 2026-09-04 lesson as §19's mutation 5: this sed
+# matched the literal five-name `needs:` line, #15971 appended `format`, and the
+# clause below reddened because `doc-gates` was never actually wired.
+RC20_NEEDS_LN="$(rc_needs_lineno "$RC20_WF/elixir.yml" elixir-gate)"
+if [ -n "$RC20_NEEDS_LN" ]; then
+  sed -i.bak "${RC20_NEEDS_LN}s/\]$/, doc-gates]/" \
+    "$RC20_WF/elixir.yml" && rm -f "$RC20_WF/elixir.yml.bak"
+fi
+RC20_ADD_N="$(grep -c ', doc-gates\]$' "$RC20_WF/elixir.yml" || true)"
+if [ -n "$RC20_NEEDS_LN" ] && [ "$RC20_ADD_N" -eq 1 ] \
+   && ! diff -q "$REPO_ROOT/.github/workflows/elixir.yml" "$RC20_WF/elixir.yml" >/dev/null; then
+  ok "the ADD mutation APPLIED: \`doc-gates\` joined \`elixir-gate\`'s needs line (line $RC20_NEEDS_LN, found by job key), exactly once"
+else
+  bad "the doc-gates ADD mutation did not apply (needs line '${RC20_NEEDS_LN:-<none>}', $RC20_ADD_N occurrence(s)) — the topology flip below would be vacuous"
+fi
 cat >> "$RC20_WF/elixir.yml" <<'YAML'
   doc-gates:
     name: Doc budgets + anchors
@@ -3930,6 +4294,135 @@ fi
 # The clause that DOES bite on a table left standing over a dead emission is
 # clause 5; a page that keeps a correct table beside wrong prose is out of reach
 # here, as it is for every other doc guard in this file.
+# ── §20 CLAUSE: EVERY `**N · <script>**` CROSS-REFERENCE RESOLVES ───────────
+#
+# THE HOLE (cgsiw-s4). §20 gates the doc-gates step count three ways — the
+# workflow grep, the prose claim, the table row count — and canaries it against
+# the pre-fix 17. It gates NO OTHER numeric cross-reference on this page, and
+# four of them have already rotted by exactly +2: the "Touching root.html.heex"
+# section calls studio-literal-check.sh #10, design/check.mjs Part E #9,
+# paper-editor-mirror-check.sh #6 and studio-link-lint.sh #11, while the roster
+# table numbers those same scripts 12, 11, 8 and 13. A reader following #10
+# lands on `scripts/preview-parity-check.sh`, which has nothing to do with
+# Studio colour literals. That is exactly the failure mode §19/§20 exist for,
+# on a number instead of a sentence.
+#
+# THE RESOLVER READS THE TABLE, NEVER A TYPED MAP. Rows are parsed out of the
+# `| N | Step | Runs |` grid and each `**N · \`<path>\`**` reference is resolved
+# by asking which ROW's Runs cell names that path. A typed number-to-script map
+# in this file would rot the same way the page did — and rot silently, since
+# nothing would compare it to anything.
+#
+# THE BASELINE IS EMPTY, AND STAYS EMPTY. It held the four root.html.heex
+# references #16063 could not renumber in its own PR (docs/ops/merge-gates.md
+# was out of that slice's fence). The renumbering landed with this diff, all
+# four now resolve, and the pins came down in the same commit — so the clause
+# guards EVERY citation on the page rather than reddening only on a fifth
+# drift. Same shape as BLOCKING_HEADER_UNRESOLVED_BASELINE: a NEW mis-reference
+# reds, a REPAIRED one prints a note asking for the baseline to come down, and
+# the baseline names each entry rather than counting them — a count is
+# satisfied by any four wrong numbers at all. Re-pinning here is a ratchet
+# release: fix the page instead.
+RC20_XREF_BASELINE=''
+
+rc20_xref_report() { # <merge-gates.md> -> one "KIND<TAB>cited<TAB>path<TAB>actual" line per bad reference
+  awk '
+    # THE ROSTER GRID. `| N | Step | Runs |` — the first cell is the number and
+    # everything past the second pipe is the Runs cell.
+    /^\|[ \t]*[0-9]+[ \t]*\|/ {
+      n = $0; sub(/^\|[ \t]*/, "", n); sub(/[ \t]*\|.*$/, "", n)
+      rest = $0; sub(/^\|[^|]*\|[^|]*\|/, "", rest)
+      row[n] = rest
+      if (n + 0 > maxrow) maxrow = n + 0
+      next
+    }
+    # THE REFERENCES. `**N · `path`**`, anywhere on the page.
+    {
+      s = $0
+      while (match(s, /\*\*[0-9]+ · `[^`]+`/)) {
+        m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        num = m; sub(/^\*\*/, "", num); sub(/ ·.*$/, "", num)
+        pi = index(m, "`"); path = substr(m, pi + 1); sub(/`.*$/, "", path)
+        # Deterministic: walk the rows in NUMERIC order, never `for (k in row)`,
+        # whose order awk does not define — a nondeterministic verdict on a
+        # page where two rows can legitimately name the same script.
+        found = ""
+        for (k = 1; k <= maxrow; k++)
+          if (k in row && index(row[k], "`" path "`") > 0) { found = k; break }
+        if (found == "")        printf "UNRESOLVED\t%s\t%s\t-\n", num, path
+        else if (found != num)  printf "MISNUMBERED\t%s\t%s\t%s\n", num, path, found
+        else                    printf "OK\t%s\t%s\t%s\n", num, path, found
+      }
+    }
+  ' "$1"
+}
+
+RC20_XREF_ALL="$(rc20_xref_report "$MERGE_GATES_DOC")"
+RC20_XREF_N="$(grep -c . <<<"$RC20_XREF_ALL" || true)"
+RC20_XREF_ROWS="$(grep -cE '^\|[ \t]*[0-9]+[ \t]*\|' "$MERGE_GATES_DOC" || true)"
+# NON-VACUITY FIRST. A resolver that reads zero rows or zero references reports
+# an empty problem list for the same reason a clean page does.
+if [ "$RC20_XREF_N" -ge 4 ] && [ "$RC20_XREF_ROWS" -ge 20 ]; then
+  ok "the §20 cross-reference resolver reads the page: $RC20_XREF_ROWS numbered roster row(s) and $RC20_XREF_N \`**N · <script>**\` reference(s), each resolved through the row whose Runs cell names that script (never a typed map)"
+else
+  bad "the cross-reference resolver read $RC20_XREF_ROWS row(s) and $RC20_XREF_N reference(s) — too few to be reading the page at all, so every clause below is vacuous"
+fi
+# The bad references, minus the committed baseline. `comm` over sorted keys, so
+# a baselined entry whose ACTUAL row moves is NOT waved through by its cited
+# number matching.
+# `|| true`: the page is CLEAN now, so `grep -v '^OK'` matches nothing and exits
+# 1. Under `set -euo pipefail` that status is the assignment's status and the
+# whole suite dies here — an empty problem list is the SUCCESS case, not an error.
+RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort || true)"
+RC20_XREF_BASE_SORTED="$(printf '%s\n' "$RC20_XREF_BASELINE" | sort)"
+RC20_XREF_NEW="$(comm -23 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+RC20_XREF_FIXED="$(comm -13 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+if [ -z "$RC20_XREF_NEW" ]; then
+  ok "…and no \`**N · <script>**\` reference points at the wrong roster row, beyond the $(grep -c . <<<"$RC20_XREF_BASE_SORTED" || true) committed baseline entries (the baseline is empty: every citation on the page resolves through the roster row that names its script)"
+else
+  bad "a NEW cross-reference points at the wrong roster row: $(tr '\n' '⏎' <<<"$RC20_XREF_NEW")"
+fi
+if [ -n "$RC20_XREF_FIXED" ]; then
+  echo "  note   $(grep -c . <<<"$RC20_XREF_FIXED") baselined cross-reference(s) now RESOLVE — drop them from RC20_XREF_BASELINE to ratchet: $(tr '\n' '⏎' <<<"$RC20_XREF_FIXED")"
+fi
+# MUTATION PROOF, BOTH ARMS, on a scratch copy of the page. Every reference the
+# page carries today is already in the baseline, so the arm that matters is a
+# reference the baseline does NOT know about: plant a CORRECT one (green) and
+# the same reference with its number moved by one (red). Without the correct
+# arm, the red one passes on a resolver that reds on any new text at all.
+RC20_XREF_SCRATCH="$TMP/rc20-xref-doc.md"
+# SEED FROM ANY RESOLVED REFERENCE, not from a BROKEN one. The page is clean
+# now, so keying the seed on a MISNUMBERED line would make both arms below
+# vacuous the moment the page is correct — a mutation proof that only works
+# while the bug is still there proves nothing about the fix.
+RC20_XREF_PATH="$(awk -F'\t' '$4 != "-" { print $3; exit }' <<<"$RC20_XREF_ALL")"
+RC20_XREF_TRUE="$(awk -F'\t' -v p="$RC20_XREF_PATH" '$4 != "-" && $3 == p { print $4; exit }' <<<"$RC20_XREF_ALL")"
+cp "$MERGE_GATES_DOC" "$RC20_XREF_SCRATCH"
+printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, correct arm.\n' \
+  "$RC20_XREF_TRUE" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
+if [ -n "$RC20_XREF_PATH" ] && [ -n "$RC20_XREF_TRUE" ] \
+   && ! diff -q "$MERGE_GATES_DOC" "$RC20_XREF_SCRATCH" >/dev/null; then
+  ok "the cross-reference mutation applies: a scratch copy of the page carries a planted \`**$RC20_XREF_TRUE · $RC20_XREF_PATH**\` (non-empty diff, and the page itself is never written — it is out of fence)"
+else
+  bad "the cross-reference mutation did not apply (path='$RC20_XREF_PATH' row='$RC20_XREF_TRUE') — the two arms below are vacuous"
+fi
+RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
+if [ -z "$RC20_XREF_GOOD" ]; then
+  ok "…and a reference citing the RIGHT row number resolves clean — the clause is reading the table, not reddening on any \`**N · …**\` it has not seen before"
+else
+  bad "a correctly-numbered planted reference was reported bad: $(tr '\n' '⏎' <<<"$RC20_XREF_GOOD")"
+fi
+printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, WRONG arm.\n' \
+  "$((RC20_XREF_TRUE + 1))" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
+RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+                 | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
+if [ "$RC20_XREF_RED" = "$((RC20_XREF_TRUE + 1))|$RC20_XREF_PATH|$RC20_XREF_TRUE" ]; then
+  ok "…and moving that ONE number by one makes the clause name it — cited $((RC20_XREF_TRUE + 1)), resolves to row $RC20_XREF_TRUE (mutation-proven able to fail)"
+else
+  bad "the mutated number was not caught (got '${RC20_XREF_RED:-nothing}') — the cross-reference clause cannot fail, which is the disease"
+fi
+
 section "21. every gate that announces \`green — nothing ran\` is disclosed on merge-gates.md, and every gate the page says announces it still does"
 
 # SIDE A. Derived: the annotation title IS the contract, so a gate is an emitter
@@ -4655,6 +5148,624 @@ else
 fi
 
 
+section "25. the exit-code contract: a PRODUCER THAT REFUSED is 4, an ASSERTION THAT DRIFTED is 1, and neither can wear the other's code"
+
+# WHY THIS SECTION EXISTS AT ALL. #14371 made a generator refusal READABLE and
+# deliberately left the machine half alone, because promoting unreadable-input
+# to its own exit code is a CONTRACT change and a contract change smuggled
+# inside an outage fix is how a gate acquires two owners and no reviewer. This
+# is that contract change, paid separately — and a contract with no mutation
+# behind it re-conflates the moment someone writes the next `bad`. Both
+# directions are pinned here, because a single-direction proof is worthless:
+# the whole value is that the two are SEPARABLE.
+#
+# The end-to-end shape (chmod the generator unreadable, run the whole suite,
+# watch it exit 4) cannot live inside the suite — it would have to re-invoke
+# itself, and a ~4-minute run per clause is not a test, it is a second CI job.
+# What lives here is the two things that decide the code: the TABLE, and the
+# ROUTER that feeds it. Everything above them is ordinary assertion counting.
+
+# (a) THE TABLE. rc_exit_code is the single copy of the rule the tally line
+# also uses, so this clause is asserting the shipped mapping, not a restatement
+# of it. Blocked outranks failed, and zero/zero is the only 0.
+RC25_TABLE=""
+for RC25_CASE in "0 0 0" "3 0 1" "0 2 4" "5 2 4"; do
+  # shellcheck disable=SC2086
+  set -- $RC25_CASE
+  RC25_TABLE="$RC25_TABLE f=$1,b=$2->$(rc_exit_code "$1" "$2") expected $3;"
+done
+if [ "$RC25_TABLE" = " f=0,b=0->0 expected 0; f=3,b=0->1 expected 1; f=0,b=2->4 expected 4; f=5,b=2->4 expected 4;" ]; then
+  ok "the exit-code table holds: clean=0, drift-only=1, blocked-only=4, and BOTH=4 (a run that could not read an input has no verdict to report, so the hold outranks the partial red)"
+else
+  bad "rc_exit_code does not implement the header's table: $RC25_TABLE"
+fi
+
+# (b) THE ROUTER, BOTH DIRECTIONS, against the REAL fail_emit — not a copy of
+# its condition. The counters are saved and restored around the specimens so
+# this section costs the tally exactly the assertions it declares.
+RC25_P0=$PASS; RC25_F0=$FAIL; RC25_B0=$BLOCKED; RC25_ERR0="$GEN_EMIT_ERR"
+
+GEN_EMIT_ERR="SELFTEST SPECIMEN: the generator REFUSED (exit 9), wrote no spec.json"
+fail_emit "SELFTEST SPECIMEN — not a real failure, section 25 is proving the router" 2>/dev/null
+RC25_REFUSAL_B=$((BLOCKED - RC25_B0)); RC25_REFUSAL_F=$((FAIL - RC25_F0))
+
+GEN_EMIT_ERR=""
+fail_emit "SELFTEST SPECIMEN — not a real failure, section 25 is proving the router" 2>/dev/null
+RC25_DRIFT_B=$((BLOCKED - RC25_B0 - RC25_REFUSAL_B)); RC25_DRIFT_F=$((FAIL - RC25_F0 - RC25_REFUSAL_F))
+
+PASS=$RC25_P0; FAIL=$RC25_F0; BLOCKED=$RC25_B0; GEN_EMIT_ERR="$RC25_ERR0"
+
+if [ "$RC25_REFUSAL_B" -eq 1 ] && [ "$RC25_REFUSAL_F" -eq 0 ]; then
+  ok "(a) with the producer's own refusal on record, a consuming site counts BLOCKED and not failed — the code the tally maps to 4"
+else
+  bad "a producer refusal did not route to BLOCKED (blocked +$RC25_REFUSAL_B, failed +$RC25_REFUSAL_F) — every generator outage would report as spec drift again, which is exactly what #14371 left unpaid"
+fi
+if [ "$RC25_DRIFT_F" -eq 1 ] && [ "$RC25_DRIFT_B" -eq 0 ]; then
+  ok "(b) …and with NO refusal on record the identical call counts FAILED and not blocked — genuine drift still maps to 1, so 4 can never absorb a real verdict"
+else
+  bad "an ordinary assertion failure routed to BLOCKED (blocked +$RC25_DRIFT_B, failed +$RC25_DRIFT_F) — drift would be reported as a hold and nobody would fix the repo"
+fi
+
+# (c) THE RATCHET. The two clauses above prove the router; this one proves the
+# router is still WIRED. A future site written as a bare `bad` over a file the
+# generator never wrote re-conflates the contract silently — the suite would
+# stay green and exit 1 on an outage again. The needles are SPLIT so this
+# clause cannot match its own source lines (the trap that makes a self-grep
+# report a phantom hit).
+RC25_OLD_NEEDLE='bad "$('"why_emit"
+RC25_NEW_NEEDLE='fail_emit "$('"why_emit"
+RC25_OLD_N="$(grep -cF "$RC25_OLD_NEEDLE" "$0" || true)"
+RC25_NEW_N="$(grep -cF "$RC25_NEW_NEEDLE" "$0" || true)"
+if [ "$RC25_NEW_N" -gt 0 ]; then
+  ok "the ratchet is non-vacuous: $RC25_NEW_N site(s) consume a generator-written spec through the router"
+else
+  bad "no site routes a generator-written spec through fail_emit — the two clauses above are proving a function nothing calls"
+fi
+if [ "$RC25_OLD_N" -eq 0 ]; then
+  ok "…and NO site still reds a generator-written spec with a bare failure — the exit-4 contract cannot be silently re-conflated one call site at a time"
+else
+  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(grep -nF "$RC25_OLD_NEEDLE" "$0" | head -3 | tr '\n' '⏎')"
+fi
+
+# ═══ 26. the INVERSE blocking-authority clause, planted as suite clauses ════
+
+section "26. a workflow may not claim BLOCKING authority the committed spec DENIES — and may not be accused when it is telling the truth"
+
+# WHAT THIS SECTION IS FOR (cgsiw-s4, clause group A). cgsiw-s1 shipped
+# `blocking_authority_check` and recorded its disarm proof BY HAND, in a comment
+# block at required-checks-verify.sh:1035-1057. A proof that lives in a comment
+# re-earns itself never. This section is that proof, mechanized, so it runs on
+# every CI invocation of this suite.
+#
+# THE TRAP, AND WHY NOTHING BELOW USES `--selftest`. `probe()` inside the
+# verifier used to re-exec "$REPO_ROOT/scripts/required-checks-verify.sh" rather
+# than the file it was launched from, so a fully disarmed COPY graded the
+# COMMITTED script and printed SELFTEST OK at rc=0. cgsiw-s1 repaired that (it
+# re-execs $SELF now), but a suite clause must not depend on the repair of the
+# thing it is testing: every mutation below invokes the mutant DIRECTLY with
+# --spec/--readback/--runs/--sha/--workflows, which is §8b(d)'s template and the
+# only non-vacuous way to mutation-prove one clause.
+#
+# AND THE MUTANT LIVES INSIDE scripts/. required-checks-verify.sh resolves
+# REPO_ROOT from its own dirname, so a copy under $TMP has $TMP for a repo: the
+# workflow scan, the tracked-prose corpus and the committed spec all resolve to
+# nothing, every probe exits 127 or refuses for a reason that is not the clause
+# under test, and a widened flag list "fixing" that would be widening the wrong
+# thing. §8b(d) writes the same trap down. So the mutant is written next to the
+# original, and removed on the way out whatever happens.
+
+RC26_MUT="$REPO_ROOT/scripts/.rc26-mutant-verify.$$.sh"
+rc26_cleanup() { rm -f "$REPO_ROOT"/scripts/.rc26-mutant-verify.*.sh; }
+# CHAIN the EXIT trap, never replace it. `trap cleanup EXIT` at :225 is what
+# turns a crash into the 70 this file's exit-code table promises and what removes
+# $TMP; a bare `trap rc26_cleanup EXIT` here would silently drop both, and the
+# only symptom would be a suite that exits 0 out of a crash. Pinned rather than
+# assumed: if the installed handler stops being `cleanup`, say so instead of
+# overwriting whatever replaced it.
+if [ "$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\\1/")" = "cleanup" ]; then
+  trap 'rc26_cleanup; cleanup' EXIT
+  ok "§26 chains the EXIT trap onto \`cleanup\` instead of replacing it (the mutant copy is removed AND the 70-on-crash contract survives)"
+else
+  bad "the EXIT trap is no longer plain \`cleanup\` ($(trap -p EXIT)) — §26 refuses to overwrite it; chain by hand"
+fi
+
+RC26_WF_DENY="$TMP/rc26-wf-deny"        # the violation
+RC26_WF_HATCH="$TMP/rc26-wf-hatch"      # annotated with a real reason
+RC26_WF_EMPTY="$TMP/rc26-wf-hatch-empty"
+RC26_WF_LEAF="$TMP/rc26-wf-leaf"        # the S3-shaped false-red guard
+mkdir -p "$RC26_WF_DENY" "$RC26_WF_HATCH" "$RC26_WF_EMPTY" "$RC26_WF_LEAF"
+
+# Each fixture gets its OWN directory: the clause scans every *.yml/*.yaml in
+# the one it is handed, so a shared directory would leak one specimen into
+# another section's verdict.
+cat > "$RC26_WF_DENY/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_HATCH/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  # spec-authority: advisory-ok — planted by required-checks.test.sh §26 to
+  # assert the hatch greens an overclaim that carries a reviewable reason.
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_EMPTY/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  # spec-authority: advisory-ok —
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+
+# THE FIXTURE SPEC AND ITS MIRROR. `Widget gate (blocking)` is in neither the
+# committed `.checks` nor the transitive needs-closure of anything in it — the
+# denied set is a COMPLEMENT, so it does not need a ledger row to be denied.
+RC26_SPEC="$TMP/enforced.json"
+RC26_WIDGET_SPEC="$TMP/rc26-widget-spec.json"
+RC26_WIDGET_RB="$TMP/rc26-widget-rb.json"
+RC26_WIDGET_RUNS="$TMP/rc26-widget-runs.json"
+jq '.protection.required_status_checks.checks += [{"context":"Widget gate (blocking)","app_id":15368}]' \
+  "$RC26_SPEC" > "$RC26_WIDGET_SPEC"
+jq '.required_status_checks.contexts = ((.required_status_checks.contexts // []) + ["Widget gate (blocking)"])
+    | .required_status_checks.checks += [{"context":"Widget gate (blocking)","app_id":15368}]' \
+  "$TMP/rb.json" > "$RC26_WIDGET_RB"
+jq '.check_runs += [{"name":"Widget gate (blocking)","conclusion":"success","started_at":"2026-07-28T01:00:00Z"}]' \
+  "$TMP/runs.json" > "$RC26_WIDGET_RUNS"
+
+rc26_run() { # <verify-script> <spec> <readback> <runs> <workflows-dir> -> sets RC26_OUT/RC26_RC
+  RC26_OUT="$(bash "$1" --spec "$2" --readback "$3" --runs "$4" --sha probe --workflows "$5" 2>&1)" \
+    && RC26_RC=0 || RC26_RC=$?
+}
+
+# (a) THE VIOLATION. A context in neither `.checks` nor its needs-closure,
+#     claiming `(blocking)` in its rendered job name -> red, and red BY NAME:
+#     a bare non-zero is satisfied by any of the dozen other refusals in the file.
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_DENY"
+if [ "$RC26_RC" -eq 1 ] && grep -q "claims BLOCKING authority the committed spec DENIES" <<<"$RC26_OUT" \
+   && grep -qF "Widget gate (blocking)" <<<"$RC26_OUT"; then
+  ok "a job claiming \`(blocking)\` for a context that is neither in the spec's \`.checks\` nor in its transitive needs-closure REDS by name (exit $RC26_RC)"
+else
+  bad "the blocking overclaim was not caught by name (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (b) THE MIRROR, and the whole point of the complement: the SAME file greens the
+#     moment that context IS required. A clause that stayed red here would be
+#     pinning a string, not tracking the committed set. Read-back and rendered
+#     names move with the spec so the other clauses stay honest.
+rc26_run "$VERIFY" "$RC26_WIDGET_SPEC" "$RC26_WIDGET_RB" "$RC26_WIDGET_RUNS" "$RC26_WF_DENY"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "…and the IDENTICAL file GREENS once that context is in \`.checks\` — the clause reads the complement of the committed set, not a frozen string"
+else
+  bad "the mirror did not green (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (c) THE ESCAPE HATCH, three ways. A reason greens; an EMPTY reason reds (a bare
+#     token is a silencer, a reason is a decision somebody can review); and the
+#     annotation on a context that IS required reds, because that is the lie
+#     advisory_prose_check catches wearing a machine-readable hat.
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HATCH"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "the escape hatch WITH a reason greens the identical violation (\`# spec-authority: advisory-ok — <why>\`)"
+else
+  bad "the annotated overclaim did not green (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_EMPTY"
+if [ "$RC26_RC" -eq 1 ] && grep -q "annotation carries no reason text" <<<"$RC26_OUT"; then
+  ok "…the hatch with an EMPTY reason REDS by name — a bare token silences the guard without recording a decision"
+else
+  bad "the reasonless hatch did not red by name (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+rc26_run "$VERIFY" "$RC26_WIDGET_SPEC" "$RC26_WIDGET_RB" "$RC26_WIDGET_RUNS" "$RC26_WF_HATCH"
+if [ "$RC26_RC" -eq 1 ] && grep -q "annotation sits on a context the committed spec REQUIRES" <<<"$RC26_OUT"; then
+  ok "…and the SAME annotation on a context the spec REQUIRES REDS — the hatch is checked in both directions, so it cannot be used to under-claim"
+else
+  bad "the hatch lying in the other direction was not caught (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (d) THE FALSE-RED GUARD, and it is the clause most likely to be lost in a
+#     later edit. A leaf job INSIDE the needs-closure of a required aggregator
+#     genuinely does block the merge, through the aggregator — so `(blocking)`
+#     on its name is TRUE and must not be accused. This is the S3 shape: the
+#     closure half is what keeps the complement honest in the other direction.
+#     Membership is by file+job id, so the leaf never renders a required name.
+RC26_AGG="$(jq -r '.protection.required_status_checks.checks[0].context' "$RC26_SPEC")"
+{ printf 'name: Aggregated\n'
+  printf '"on": [pull_request]\n'
+  printf 'jobs:\n'
+  printf '  leaf:\n'
+  printf '    name: Leaf unit tests (blocking)\n'
+  printf '    runs-on: ubuntu-latest\n'
+  printf '    steps:\n'
+  printf "      - run: 'true'\n"
+  printf '  agg:\n'
+  printf '    name: %s\n' "$RC26_AGG"
+  printf '    needs: [leaf]\n'
+  printf '    runs-on: ubuntu-latest\n'
+  printf '    steps:\n'
+  printf "      - run: 'true'\n"
+} > "$RC26_WF_LEAF/aggregated.yml"
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_LEAF"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "an S3-shaped leaf inside \`$RC26_AGG\`'s needs-closure may say \`(blocking)\` — it is telling the truth, and the clause does NOT red on it (the false-red guard)"
+else
+  bad "the clause accused a leaf that genuinely blocks through \`$RC26_AGG\` (exit $RC26_RC) — it has become a word filter: $(grep -m3 FAIL <<<"$RC26_OUT")"
+fi
+# …and the same fixture proves the leaf is really INSIDE the closure rather than
+# merely unexamined: drop the `needs:` edge and the identical leaf must be
+# accused. Without this, (d) passes on a clause that scans nothing at all.
+sed '/^    needs: \[leaf\]$/d' "$RC26_WF_LEAF/aggregated.yml" > "$RC26_WF_LEAF/../rc26-noneeds.yml"
+mkdir -p "$TMP/rc26-wf-noneeds" && mv "$RC26_WF_LEAF/../rc26-noneeds.yml" "$TMP/rc26-wf-noneeds/aggregated.yml"
+if [ "$(grep -c 'needs: \[leaf\]' "$TMP/rc26-wf-noneeds/aggregated.yml" || true)" -eq 0 ] \
+   && ! diff -q "$RC26_WF_LEAF/aggregated.yml" "$TMP/rc26-wf-noneeds/aggregated.yml" >/dev/null; then
+  ok "the closure mutation applies: a copy of the fixture drops the \`needs:\` edge (non-empty diff, anchor gone)"
+  rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$TMP/rc26-wf-noneeds"
+  if [ "$RC26_RC" -eq 1 ] && grep -qF "Leaf unit tests (blocking)" <<<"$RC26_OUT"; then
+    ok "…and WITHOUT the edge the identical leaf IS accused — (d) greens because the leaf is in the closure, not because the clause is asleep"
+  else
+    bad "the un-needed leaf was not accused (exit $RC26_RC) — clause (d) above is vacuous: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+else
+  bad "the closure mutation did not apply — the \`needs:\` line moved, so clause (d) is unproven"
+fi
+
+# (e) THE DISARM. Neuter the clause's STRUCTURAL EVIDENCE — the name token — in
+#     a copy inside scripts/, and (a)'s exact fixture must sail through green.
+#     Without this, (a) passes on any refusal the file happens to raise.
+rm -f "$RC26_MUT"
+sed -E "s%^BLOCKING_NAME_TOKEN=.*%BLOCKING_NAME_TOKEN='@@RC26_NEUTERED@@' # NAME TOKEN NEUTERED%" \
+  "$VERIFY" > "$RC26_MUT"
+RC26_MUTN="$(grep -c 'NAME TOKEN NEUTERED' "$RC26_MUT" || true)"
+if [ "$RC26_MUTN" -ne 1 ]; then
+  bad "the blocking-evidence mutation applied $RC26_MUTN times, not exactly 1 — BLOCKING_NAME_TOKEN moved, so the proof below is vacuous"
+elif diff -q "$VERIFY" "$RC26_MUT" >/dev/null 2>&1; then
+  bad "the mutant is byte-identical to the committed verifier — nothing was disarmed, so the proof below is vacuous"
+else
+  ok "the mutation applies: a copy INSIDE scripts/ (so its REPO_ROOT is this repo, never \$TMP) has BLOCKING_NAME_TOKEN neutered, and the diff is non-empty"
+  rc26_run "$RC26_MUT" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_DENY"
+  if [ "$RC26_RC" -eq 0 ] && ! grep -q "claims BLOCKING authority" <<<"$RC26_OUT"; then
+    ok "…and WITHOUT it the SAME violation fixture exits 0 in silence — the clause is mutation-proven able to lose (armed rc=1, disarmed rc=0)"
+  else
+    bad "the disarmed copy still refused (exit $RC26_RC) — clause (a) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+fi
+rc26_cleanup
+
+# ═══ 27. the four generator PARSER forms this suite never planted ══════════
+
+section "27. the generator index reads the forms GitHub accepts — quoted \`\"on\":\`, four continue-on-error spellings, step-level laundering, .yaml — and refuses one context on both lists"
+
+# WHY EVERY FIXTURE HERE IS SYNTHETIC (cgsiw-s4, clause group B). Measured on
+# origin/main before this section existed: the quoted-scalar `continue-on-error`
+# spellings appear ZERO times in this file, `${{ }}` as a continue-on-error value
+# ZERO times, a top-level `"on":` key ZERO times, and all four of the sections
+# that copy the real tree do it with `cp "$REPO_ROOT"/.github/workflows/*.yml` —
+# so a `.yaml` workflow is invisible to the SUITE for the same reason it was
+# invisible to the GENERATOR. A clause built on the real-tree copy idiom would
+# inherit the exact blindness it exists to catch, and would go quiet again the
+# day somebody deletes the specimen from .github/workflows. Every fixture below
+# is written into a fresh mktemp directory instead.
+#
+# Each mutation is a COPY of the generator with ONE anchor reverted, and each is
+# asserted to have applied EXACTLY ONCE before its arm is believed — a sed that
+# matched nothing produces a "mutant" identical to the original, and the disarm
+# arm then passes for the wrong reason.
+
+RC27="$TMP/rc27"
+mkdir -p "$RC27"
+rc27_feed() { # <dir> <sha>… — a green rendered row per name in RC27_NAMES
+  local d="$1"; shift
+  local s
+  for s in "$@"; do
+    jq -cn --args '{ check_runs: [ $ARGS.positional[]
+      | { name: ., conclusion: "success", started_at: "2026-07-28T01:00:00Z", app: { id: 15368 } } ] }' \
+      -- ${RC27_NAMES[@]+"${RC27_NAMES[@]}"} > "$d/checkruns-$s.json"
+  done
+}
+rc27_gen() { # <generator> <workflow-dir> <fixture-dir> <shaA> <shaB> [extra args…]
+  local g="$1" w="$2" f="$3" a="$4" b="$5"; shift 5
+  RC27_OUT="$(bash "$g" --workflows "$w" --fixture-dir "$f" --no-merge --sha "$a" --sha "$b" --explain "$@" 2>&1)" \
+    && RC27_RC=0 || RC27_RC=$?
+}
+
+# ── (a) THE QUOTED TRIGGER KEY ──────────────────────────────────────────────
+# YAML 1.1 resolves a BARE `on` to the boolean true, which is why yamllint's
+# `truthy` rule pushes authors to write `"on":` — and GitHub accepts it. Under a
+# byte anchor of `/^on:/` the quoted twin reads as a workflow with NO triggers:
+# `pf` never gets set, `/^jobs:/` still matches, and a paths-filtered job is
+# emitted REQUIRED at exit 0. The two fixtures below are the SAME workflow
+# differing in that one key, so nothing but the key can explain a divergence.
+RC27_ON="$RC27/on"; RC27_ONF="$RC27/on-fix"
+mkdir -p "$RC27_ON" "$RC27_ONF"
+cat > "$RC27_ON/plain.yml" <<'YML'
+name: Plain
+on:
+  pull_request:
+    paths:
+      - 'api/**'
+jobs:
+  a:
+    name: Plain filtered gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+sed 's/^on:/"on":/; s/Plain filtered gate/Quoted filtered gate/' "$RC27_ON/plain.yml" > "$RC27_ON/quoted.yml"
+RC27_NAMES=("Plain filtered gate" "Quoted filtered gate")
+rc27_feed "$RC27_ONF" onA onB mainA
+printf 'mainA\n' > "$RC27_ONF/main-shas.txt"
+if [ "$(grep -c '^"on":$' "$RC27_ON/quoted.yml" || true)" -eq 1 ]; then
+  ok "the quoted-trigger fixture really carries a top-level \`\"on\":\` key (0 occurrences of it existed anywhere in this suite before §27)"
+else
+  bad "the quoted-trigger fixture does not carry \`\"on\":\` — every clause below is vacuous"
+fi
+rc27_gen "$GEN" "$RC27_ON" "$RC27_ONF" onA onB
+if excluded_by "$RC27_OUT" "Plain filtered gate" "S4 PATHS-FILTERED" \
+   && excluded_by "$RC27_OUT" "Quoted filtered gate" "S4 PATHS-FILTERED"; then
+  ok "the SAME paths-filtered workflow written \`on:\` and \`\"on\":\` both yield S4 PATHS-FILTERED — the trigger key is read by all three legal spellings"
+else
+  bad "the quoted twin did not reach S4 (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+RC27_MUT_ON="$TMP/gen-bytes-on.sh"
+sed 's%^      /\^("on"|\\047on\\047|on)\[ \\t\]\*:/ { inon = 1; next }$%      /^on:/ { inon = 1; next } # TRIGGER ANCHOR REVERTED TO BYTES%' \
+  "$GEN" > "$RC27_MUT_ON"
+RC27_N="$(grep -c 'TRIGGER ANCHOR REVERTED TO BYTES' "$RC27_MUT_ON" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the trigger-anchor mutation applied $RC27_N times, not exactly 1 — the anchor moved, so the proof below is vacuous (note the index's copy is indented 6, workflow_has_head_trigger's 4)"
+elif diff -q "$GEN" "$RC27_MUT_ON" >/dev/null 2>&1; then
+  bad "the trigger-anchor mutant is byte-identical to the generator — nothing was reverted"
+else
+  ok "the trigger-anchor mutation applies exactly once, with a non-empty diff: a copy of the generator anchors on the bytes \`/^on:/\` again"
+  rc27_gen "$RC27_MUT_ON" "$RC27_ON" "$RC27_ONF" onA onB
+  if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Quoted filtered gate" \
+     && excluded_by "$RC27_OUT" "Plain filtered gate" "S4 PATHS-FILTERED"; then
+    ok "…and WITHOUT it the quoted twin is emitted REQUIRED at exit 0 while its identical unquoted sibling is still S4 — the D18/D20 deadlock, manufactured by the script written to prevent it (mutation-proven able to fail)"
+  else
+    bad "the byte-anchored copy did not require the quoted twin (exit $RC27_RC) — the clause above is vacuous: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+  fi
+fi
+
+# ── (b) THE FOUR CONTINUE-ON-ERROR VALUE FORMS ──────────────────────────────
+# `'true'`, `"true"`, `yes` and a `${{ … }}` expression are all continue-on-error
+# to GitHub and all escaped a `: *true` literal match. `false` (literal) must
+# stay BLOCKING — normalising the false spellings is the protective direction,
+# since classifying a blocking job as advisory LOSES a gate.
+RC27_COE="$RC27/coe"; RC27_COEF="$RC27/coe-fix"
+mkdir -p "$RC27_COE" "$RC27_COEF"
+{
+  printf 'name: Coe\non: [pull_request]\njobs:\n'
+  printf "  sq:\n    name: Single quoted gate\n    continue-on-error: 'true'\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+  printf '  dq:\n    name: Double quoted gate\n    continue-on-error: "true"\n    runs-on: ubuntu-latest\n    steps:\n'
+  printf "      - run: 'true'\n"
+  printf '  ex:\n    name: Expression gate\n    continue-on-error: ${{ github.event_name == %s }}\n    runs-on: ubuntu-latest\n    steps:\n' "'push'"
+  printf "      - run: 'true'\n"
+  printf "  ys:\n    name: Yes gate\n    continue-on-error: yes\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+  printf "  fl:\n    name: False gate\n    continue-on-error: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+} > "$RC27_COE/coe.yml"
+RC27_NAMES=("Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate" "False gate")
+rc27_feed "$RC27_COEF" coeA coeB mainA
+printf 'mainA\n' > "$RC27_COEF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_COE" "$RC27_COEF" coeA coeB
+RC27_MISS=""
+for rc27_n in "Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate"; do
+  excluded_by "$RC27_OUT" "$rc27_n" "S2 ADVISORY" || RC27_MISS="$RC27_MISS [$rc27_n]"
+done
+if [ -z "$RC27_MISS" ] && kept_in "$RC27_OUT" "False gate"; then
+  ok "all four continue-on-error spellings exclude S2 ADVISORY at job level — \`'true'\`, \`\"true\"\`, \`\${{ … }}\` and \`yes\` — while a literal \`false\` stays BLOCKING (losing a gate is never the safe direction)"
+else
+  bad "a continue-on-error spelling escaped S2 (exit $RC27_RC), missed:${RC27_MISS:- none}, false-gate kept: $(kept_in "$RC27_OUT" "False gate" && echo yes || echo NO)"
+fi
+RC27_MUT_COE="$TMP/gen-byte-coe.sh"
+sed 's%^          coe = (vn == "false" || v == "(empty)") ? "" : v$%          coe = (v == "true") ? v : "" # BYTE LITERAL RESTORED%' "$GEN" > "$RC27_MUT_COE"
+RC27_N="$(grep -c 'BYTE LITERAL RESTORED' "$RC27_MUT_COE" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the continue-on-error mutation applied $RC27_N times, not exactly 1 — the normalisation moved, so the proof below is vacuous"
+else
+  ok "the continue-on-error mutation applies exactly once: a copy of the generator matches the BYTES \`true\` again"
+  rc27_gen "$RC27_MUT_COE" "$RC27_COE" "$RC27_COEF" coeA coeB
+  RC27_LAUNDERED=""
+  for rc27_n in "Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate"; do
+    kept_in "$RC27_OUT" "$rc27_n" && RC27_LAUNDERED="$RC27_LAUNDERED [$rc27_n]"
+  done
+  if [ "$RC27_RC" -eq 0 ] && [ "$(grep -c . <<<"$RC27_LAUNDERED")" -ge 1 ] \
+     && [ "$RC27_LAUNDERED" = " [Single quoted gate] [Double quoted gate] [Expression gate] [Yes gate]" ]; then
+    ok "…and WITHOUT it ALL FOUR are emitted REQUIRED at exit 0 — four checks that cannot report a failure, pinned as merge gates (mutation-proven able to fail)"
+  else
+    bad "the byte-literal copy did not launder all four (exit $RC27_RC, kept:${RC27_LAUNDERED:- none}) — the clause above is vacuous"
+  fi
+fi
+
+# ── (c) STEP-LEVEL LAUNDERING, AND THE MIXED TWIN THAT MUST SURVIVE ─────────
+# A job with no job-level key whose EVERY decision-bearing step is advisory
+# publishes a check that cannot report a failure. It must produce the LOUD
+# REFUSAL rather than a silent classification, because a job that MIXES advisory
+# steps among blocking ones (the js-tests.yml `test` shape) is legitimate and
+# demoting one to catch the other would EXCLUDE a real gate. Both arms, because
+# a refusal with no mirror is one edit away from being a false red.
+RC27_LDY="$RC27/laundry"; RC27_LDYF="$RC27/laundry-fix"
+RC27_MIX="$RC27/mixed"; RC27_MIXF="$RC27/mixed-fix"
+mkdir -p "$RC27_LDY" "$RC27_LDYF" "$RC27_MIX" "$RC27_MIXF"
+cat > "$RC27_LDY/l.yml" <<'YML'
+name: Laundry
+on: [pull_request]
+jobs:
+  wash:
+    name: Laundered gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: one
+        run: 'true'
+        continue-on-error: true
+      - name: two
+        uses: actions/checkout@v4
+        continue-on-error: 'true'
+YML
+cat > "$RC27_MIX/m.yml" <<'YML'
+name: Mixed
+on: [pull_request]
+jobs:
+  test:
+    name: Mixed gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: advisory
+        run: 'true'
+        continue-on-error: true
+      - name: blocking
+        run: 'true'
+YML
+RC27_NAMES=("Laundered gate"); rc27_feed "$RC27_LDYF" ldA ldB mainA; printf 'mainA\n' > "$RC27_LDYF/main-shas.txt"
+RC27_NAMES=("Mixed gate");     rc27_feed "$RC27_MIXF" mxA mxB mainA; printf 'mainA\n' > "$RC27_MIXF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_LDY" "$RC27_LDYF" ldA ldB
+if [ "$RC27_RC" -ne 0 ] && grep -q "EVERY DECISION-BEARING STEP IS ADVISORY" <<<"$RC27_OUT" \
+   && grep -qF "job 'wash'" <<<"$RC27_OUT"; then
+  ok "a job whose every decision-bearing step carries continue-on-error draws the LOUD REFUSAL BY NAME (exit $RC27_RC), never a silent classification"
+else
+  bad "step-level laundering was not refused by name (exit $RC27_RC): $(head -2 <<<"$RC27_OUT" | tr '\n' '⏎')"
+fi
+rc27_gen "$GEN" "$RC27_MIX" "$RC27_MIXF" mxA mxB
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Mixed gate"; then
+  ok "…and the js-tests shape — advisory steps MIXED among blocking ones — is NOT demoted and NOT refused: demoting it to catch the other would EXCLUDE a real gate"
+else
+  bad "the mixed-steps job was demoted or refused (exit $RC27_RC) — the refusal above has become a false red: $(head -2 <<<"$RC27_OUT" | tr '\n' '⏎')"
+fi
+
+# ── (d) THE .yaml GLOB ──────────────────────────────────────────────────────
+# GitHub runs a `*.yaml` workflow exactly like a `*.yml` one. A `*.yml`-only
+# index leaves the `.yaml` job UNMAPPED and states the factually FALSE reason
+# "no job in <dir> publishes this name" — an operator sent to look for a
+# deletion that never happened.
+RC27_YM="$RC27/yamlmix"; RC27_YMF="$RC27/yamlmix-fix"
+mkdir -p "$RC27_YM" "$RC27_YMF"
+cat > "$RC27_YM/one.yml" <<'YML'
+name: One
+on: [pull_request]
+jobs:
+  a:
+    name: Yml gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC27_YM/two.yaml" <<'YML'
+name: Two
+on: [pull_request]
+jobs:
+  b:
+    name: Yaml gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+RC27_NAMES=("Yml gate" "Yaml gate"); rc27_feed "$RC27_YMF" ymA ymB mainA; printf 'mainA\n' > "$RC27_YMF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_YM" "$RC27_YMF" ymA ymB
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Yaml gate" && kept_in "$RC27_OUT" "Yml gate"; then
+  ok "a mixed .yml + .yaml fixture tree indexes BOTH spellings — the .yaml job is traced to two.yaml, not reported UNMAPPED"
+else
+  bad "the .yaml job was not indexed (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+RC27_MUT_YML="$TMP/gen-noyaml.sh"
+sed 's%^  for f in "\$WORKFLOW_DIR"/\*\.yml "\$WORKFLOW_DIR"/\*\.yaml; do$%  for f in "$WORKFLOW_DIR"/*.yml; do # YAML GLOB REMOVED%' "$GEN" > "$RC27_MUT_YML"
+RC27_N="$(grep -c 'YAML GLOB REMOVED' "$RC27_MUT_YML" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the glob mutation applied $RC27_N times, not exactly 1 — build_workflow_index's loop moved, so the proof below is vacuous"
+else
+  ok "the glob mutation applies exactly once: a copy of the generator indexes \`*.yml\` only"
+  rc27_gen "$RC27_MUT_YML" "$RC27_YM" "$RC27_YMF" ymA ymB
+  if excluded_by "$RC27_OUT" "Yaml gate" "S0 UNMAPPED" && kept_in "$RC27_OUT" "Yml gate"; then
+    ok "…and WITHOUT it the .yaml job draws the factually FALSE \`S0 UNMAPPED: no job … publishes this name\` while its .yml sibling is untouched (mutation-proven able to fail)"
+  else
+    bad "the yml-only copy did not report the .yaml job UNMAPPED (exit $RC27_RC) — the clause above is vacuous: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+  fi
+fi
+
+# ── (e) ONE CONTEXT ON BOTH LISTS ───────────────────────────────────────────
+# The mirror of §14b's STALE refusal: a name the COMMITTED spec REQUIRES that
+# this run derives as EXCLUDED. The check list is a base-first union, so the
+# committed row rode through while the derived exclusion was appended beside it,
+# and the emit put ONE CONTEXT ON BOTH LISTS at exit 0 — reproduced by adding
+# `continue-on-error: true` to an already-required job. Nothing downstream can
+# notice: required-checks-verify.sh contains zero reads of `.exclusions`.
+# The second job exists so selection is non-empty; without it the run refuses
+# with "selection produced ZERO contexts" and the clause proves nothing.
+RC27_BOTH="$RC27/both"; RC27_BOTHF="$RC27/both-fix"
+mkdir -p "$RC27_BOTH" "$RC27_BOTHF"
+cat > "$RC27_BOTH/b.yml" <<'YML'
+name: Both
+on: [pull_request]
+jobs:
+  g:
+    name: Both gate
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+  k:
+    name: Keeper gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+RC27_NAMES=("Both gate" "Keeper gate"); rc27_feed "$RC27_BOTHF" btA btB mainA
+printf 'mainA\n' > "$RC27_BOTHF/main-shas.txt"
+RC27_BASE="$TMP/rc27-base.json"
+jq '.protection.required_status_checks.checks = [{"context":"Both gate","app_id":15368},
+                                                 {"context":"Keeper gate","app_id":15368}]
+    | .exclusions = []' "$SPEC" > "$RC27_BASE"
+RC27_B_OUT="$(bash "$GEN" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+  --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-both.json" 2>&1)" \
+  && RC27_B_RC=0 || RC27_B_RC=$?
+if [ "$RC27_B_RC" -ne 0 ] && grep -q "REQUIRED × EXCLUDED" <<<"$RC27_B_OUT" \
+   && grep -q "CONTRADICTION  Both gate" <<<"$RC27_B_OUT"; then
+  ok "adding \`continue-on-error: true\` to an already-required job REFUSES by name (exit $RC27_B_RC, \`REQUIRED × EXCLUDED\`) instead of emitting one context on both lists"
+else
+  bad "the both-lists contradiction was not refused (exit $RC27_B_RC): $(head -2 <<<"$RC27_B_OUT" | tr '\n' '⏎')"
+fi
+emit_spec "$TMP/rc27-demoted.json" \
+  bash "$GEN" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+  --merge-base "$RC27_BASE" --sha btA --sha btB --expect-demoted "Both gate" \
+  --out "$TMP/rc27-demoted.json" || true
+if jq -e '([.protection.required_status_checks.checks[].context] | index("Both gate") | not)
+          and ([.exclusions[].context] | index("Both gate"))
+          and ([.protection.required_status_checks.checks[].context] | index("Keeper gate"))' \
+     "$TMP/rc27-demoted.json" >/dev/null 2>&1; then
+  ok "…and --expect-demoted DROPS the REQUIRED row rather than carrying both — the operator is saying the derivation is right and the check must stop gating (a protection change, so it is typed, never computed)"
+else
+  fail_emit "$(why_emit "the demotion acknowledgement left the spec self-contradictory: $(jq -c '{req:[.protection.required_status_checks.checks[].context],exc:[.exclusions[].context]}' "$TMP/rc27-demoted.json" 2>&1)")"
+fi
+RC27_MUT_CON="$TMP/gen-nocontra.sh"
+sed 's%^    if \[ -n "\$contra" \]; then$%    if false; then # DEMOTION REFUSAL REMOVED%' "$GEN" > "$RC27_MUT_CON"
+RC27_N="$(grep -c 'DEMOTION REFUSAL REMOVED' "$RC27_MUT_CON" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the contradiction-refusal mutation applied $RC27_N times, not exactly 1 — its condition moved, so the proof below is vacuous"
+else
+  ok "the contradiction-refusal mutation applies exactly once: a copy of the generator no longer refuses"
+  bash "$RC27_MUT_CON" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+    --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-nocontra.json" >/dev/null 2>&1 || true
+  RC27_BOTHLIST="$(jq -c '[.protection.required_status_checks.checks[].context] as $r
+                          | [.exclusions[].context] as $e
+                          | { both: ($r - ($r - $e)) }' "$TMP/rc27-nocontra.json" 2>&1)"
+  if [ "$RC27_BOTHLIST" = '{"both":["Both gate"]}' ]; then
+    ok "…and WITHOUT it the IDENTICAL run writes $RC27_BOTHLIST at exit 0, silently — the shape cgsiw-s2 measured, reproduced on demand (mutation-proven able to fail)"
+  else
+    bad "the unguarded run did not emit one context on both lists (got $RC27_BOTHLIST) — the refusal clause above is vacuous"
+  fi
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
@@ -4666,8 +5777,11 @@ fi
 
 echo
 echo "════════════════════════════════════════════════════════════"
-echo "required-checks: $PASS passed, $FAIL failed$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
+echo "required-checks: $PASS passed, $FAIL failed, $BLOCKED blocked$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
+if [ "$BLOCKED" -gt 0 ]; then
+  echo "required-checks: $BLOCKED site(s) BLOCKED — an input could not be read or a producer refused, so this run has NO verdict about the required set. Exit 4 means HOLD, not drift."
+fi
 # The run reached its own end. Anything that exits 0 without passing through
 # this line is a crash, and the EXIT trap turns it into a 70.
 RC_TALLY_REACHED=1
-[ "$FAIL" -eq 0 ] || exit 1
+exit "$(rc_exit_code "$FAIL" "$BLOCKED")"

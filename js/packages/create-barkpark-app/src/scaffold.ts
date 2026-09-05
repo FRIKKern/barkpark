@@ -1,9 +1,45 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BARKPARK_VERSION, type TemplateName } from './constants.js'
+import { BARKPARK_VERSION, SHARED_TEMPLATE_DIR, type TemplateName } from './constants.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+
+/**
+ * SHARED TEMPLATE SOURCE — ownership note.
+ *
+ * `templates/_shared/` holds the framework boilerplate that every starter needs
+ * BYTE-IDENTICALLY, authored ONCE. It was extracted after a duplicate audit
+ * measured 16 byte-identical file pairs across blog-starter and website-starter
+ * (double-authored, so any ordinary fix had to be applied twice or the two
+ * starters silently diverged). The files it owns today:
+ *
+ *   _gitignore                             next.config.mjs
+ *   app/api/barkpark/webhook/route.ts      package.json.tmpl
+ *   app/error.tsx                          postcss.config.js
+ *   app/globals.css                        tsconfig.json
+ *   app/loading.tsx                        barkpark.config.ts.tmpl
+ *   app/not-found.tsx                      docker-compose.yml
+ *   app/robots.ts                          docker-compose.override.yml.example
+ *   lib/format-date.ts                     lib/resolve-server-token.ts
+ *
+ * Everything else stays in the starter dir because it is INTENTIONALLY VARIANT
+ * — it differs today (app/layout.tsx, app/page.tsx, lib/csp.ts, middleware.ts,
+ * app/sitemap.ts, tailwind.config.ts, .env.example, README.md, the schemas and
+ * seeds) or exists in only one starter. A file only earns a place in _shared
+ * when it is byte-identical in EVERY starter AND is framework plumbing rather
+ * than product content.
+ *
+ * COMPOSITION IS BUILD-TIME, NOT RUN-TIME. `scaffold()` lays `_shared` down
+ * first and then copies the starter tree OVER it, so a starter can always take
+ * a file back by re-adding it under its own dir. The generated app is a plain
+ * self-contained tree: nothing it contains refers to `_shared`, and the
+ * directory is not copied into the output.
+ *
+ * The cloud mirror (`cloud/priv/templates/<slug>`) is composed the same way by
+ * `scripts/sync-starter-templates.mjs`, so the deploy button pushes exactly
+ * what this scaffolder writes.
+ */
 
 export interface ScaffoldOptions {
   template: TemplateName
@@ -19,9 +55,12 @@ export interface ScaffoldResult {
 }
 
 export async function scaffold(opts: ScaffoldOptions): Promise<ScaffoldResult> {
-  const templateDir = path.resolve(HERE, '..', 'templates', opts.template)
+  const templatesRoot = path.resolve(HERE, '..', 'templates')
+  const templateDir = path.join(templatesRoot, opts.template)
+  const sharedDir = path.join(templatesRoot, SHARED_TEMPLATE_DIR)
 
   await assertTemplateExists(templateDir, opts.template)
+  await assertTemplateExists(sharedDir, SHARED_TEMPLATE_DIR)
 
   await fs.mkdir(opts.targetDir, { recursive: true })
 
@@ -32,8 +71,13 @@ export async function scaffold(opts: ScaffoldOptions): Promise<ScaffoldResult> {
     barkparkVersion: BARKPARK_VERSION,
   }
 
+  // _shared FIRST, then the starter tree over it: a starter file with the same
+  // destination path wins, and the destination-keyed count below never
+  // double-counts an overridden file.
   const stats = { written: 0 }
-  await copyTree(templateDir, opts.targetDir, vars, stats)
+  const seen = new Set<string>()
+  await copyTree(sharedDir, opts.targetDir, vars, stats, seen)
+  await copyTree(templateDir, opts.targetDir, vars, stats, seen)
 
   return {
     filesWritten: stats.written,
@@ -42,7 +86,7 @@ export async function scaffold(opts: ScaffoldOptions): Promise<ScaffoldResult> {
   }
 }
 
-async function assertTemplateExists(dir: string, name: TemplateName): Promise<void> {
+async function assertTemplateExists(dir: string, name: string): Promise<void> {
   try {
     const st = await fs.stat(dir)
     if (!st.isDirectory()) {
@@ -61,6 +105,8 @@ async function copyTree(
   destDir: string,
   vars: Record<string, string>,
   stats: { written: number },
+  seen: Set<string>,
+  relPrefix = '',
 ): Promise<void> {
   const entries = await fs.readdir(srcDir, { withFileTypes: true })
   await fs.mkdir(destDir, { recursive: true })
@@ -73,7 +119,14 @@ async function copyTree(
     else if (destName === '_npmrc') destName = '.npmrc'
 
     if (entry.isDirectory()) {
-      await copyTree(srcPath, path.join(destDir, destName), vars, stats)
+      await copyTree(
+        srcPath,
+        path.join(destDir, destName),
+        vars,
+        stats,
+        seen,
+        relPrefix ? `${relPrefix}/${destName}` : destName,
+      )
       continue
     }
 
@@ -84,6 +137,7 @@ async function copyTree(
     if (isTmpl) destName = destName.slice(0, -'.tmpl'.length)
 
     const destPath = path.join(destDir, destName)
+    const rel = relPrefix ? `${relPrefix}/${destName}` : destName
 
     if (isTmpl || isTextFile(entry.name)) {
       const raw = await fs.readFile(srcPath, 'utf8')
@@ -92,7 +146,10 @@ async function copyTree(
     } else {
       await fs.copyFile(srcPath, destPath)
     }
-    stats.written++
+    if (!seen.has(rel)) {
+      seen.add(rel)
+      stats.written++
+    }
   }
 }
 

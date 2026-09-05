@@ -1,0 +1,1 @@
+A request id or equivalent correlator is emitted on the census route, or the artefact states plainly that a failed reading cannot be traced.

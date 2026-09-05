@@ -1,0 +1,1 @@
+A clean-box live transcript with RETAIN=5 matches the invariant, RETIRED reports every removal, current and .previous resolve, and static and node deploy engines stay behaviorally aligned.

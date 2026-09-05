@@ -1,0 +1,1 @@
+A claim scan is executable in one command: `bp task ls` (or a named sibling) filters by lifecycle_status and by claim holder. Paste the in_progress roster of one epic.

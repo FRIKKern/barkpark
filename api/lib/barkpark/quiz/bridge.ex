@@ -21,6 +21,15 @@ defmodule Barkpark.Quiz.Bridge do
   @pubsub Barkpark.PubSub
   @default_dataset "production"
 
+  # TEST-ONLY SEAM. `test/barkpark/quiz/bridge_sandbox_cascade_test.exs` has to
+  # observe the Bridge *while it holds the sandbox owner's connection*, and
+  # racing that window from outside is what made that test flake on main (row
+  # task-954f4dc7f924c359, run 33946170394). This attribute is resolved at
+  # COMPILE time: outside `MIX_ENV=test` it is `false`, the hook clause below
+  # compiles to `:ok`, and no Application lookup ever runs in dev or prod —
+  # apply_now/3 does exactly the work it did before.
+  @read_hook_enabled Mix.env() == :test
+
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -110,6 +119,8 @@ defmodule Barkpark.Quiz.Bridge do
   # A load failure (DB hiccup, transient error) must never crash the bridge —
   # that would drop every room↔quiz binding. Skip this update and carry on.
   defp apply_now(pin, quiz_id, dataset) do
+    before_read(quiz_id, dataset)
+
     case Quiz.load_question(quiz_id, dataset) do
       {:ok, question} -> Quiz.apply_question(pin, question)
       {:error, _} -> :ok
@@ -118,6 +129,20 @@ defmodule Barkpark.Quiz.Bridge do
     _ -> :ok
   catch
     _, _ -> :ok
+  end
+
+  # The seam itself. Armed only by a test, only under MIX_ENV=test, and any
+  # error it raises is swallowed by apply_now/3's own rescue — the same
+  # protection a load failure already gets.
+  if @read_hook_enabled do
+    defp before_read(quiz_id, dataset) do
+      case Application.get_env(:barkpark, :quiz_bridge_before_read) do
+        fun when is_function(fun, 2) -> fun.(quiz_id, dataset)
+        _ -> :ok
+      end
+    end
+  else
+    defp before_read(_quiz_id, _dataset), do: :ok
   end
 
   defp published_id("drafts." <> id), do: id

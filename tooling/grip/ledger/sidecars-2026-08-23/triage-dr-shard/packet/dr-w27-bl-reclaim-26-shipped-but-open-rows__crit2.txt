@@ -1,0 +1,1 @@
+dr-w26-s6's merge criterion is restated to the code-scoped grep (`git grep -l publish_clock origin/main -- cloud/lib internal api/lib cloud/priv` exits 1) - the unscoped grep can never be empty because the charter, two ledgers and two census tests must NAME the term they forbid.

@@ -38,6 +38,15 @@ var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 // scoped_prefix is never composed regardless of tier (e.g. workspace.project-
 // create is scoped_admin but self-scopes via :workspace_slug in its own path).
 //
+// THIRD ARM — a STATED, non-floor scope (scope.go). When the operator names
+// -w/-p to something other than the baked floor, a flat-tier command that
+// advertises a scoped_prefix composes it too. Without this arm the flag was
+// parsed and then dropped, and the flat route answered about the DEFAULT
+// workspace with exit 0 — the exact wrong-tenant silence scope.go documents.
+// The arm is keyed on StatedScope, not on the flag being present at all, so the
+// floor case (no -w, or a saved context whose workspace IS "default") keeps its
+// byte-identical flat URL and no existing invocation changes shape.
+//
 // Placeholder resolution per name:
 //   - :dataset                          -> ctx.Dataset
 //   - :workspace_slug / :workspace / :ws -> ctx.Workspace
@@ -50,7 +59,7 @@ func (m *Manifest) BuildURL(cmd Command, ctx Context, args map[string]string) (s
 	path := cmd.HTTP.PathTemplate
 
 	if cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" &&
-		(isScopedTier(cmd.AuthTier) || ctx.ScopedMirror) {
+		(isScopedTier(cmd.AuthTier) || ctx.ScopedMirror || len(StatedScope(ctx)) > 0) {
 		path = *cmd.ScopedPrefix + path
 	}
 

@@ -19,16 +19,42 @@ const MERGE_AREA_CAP = 10_000
 // value is one of these renders red + bold.
 //
 // This is a MIRROR of `Barkpark.Plugins.Sheets.Engine.error_values/0`
-// (@canonical capability:engine-error-vocabulary). Until now it was the one
-// unchecked mirror: nothing compared it to the engine, so a code added
-// engine-side would render as plain text here while every other surface marked
-// it red. `tests/sheet-error-vocabulary.test.ts` now locks it to the SAME
-// engine-generated fixture the web mirror consumes
-// (`web/__tests__/fixtures/engine-errors.json`, asserted equal to
-// `Engine.error_values/0` by api/test/barkpark/sheets_parity_test.exs), so
-// neither side can drift alone. Exported for that test only — it is not part
-// of the package's public entry points.
-export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!'])
+// (@canonical capability:engine-error-vocabulary). WHAT ACTUALLY HOLDS IT:
+// `tests/sheet-error-vocabulary.test.ts` in THIS package, which deep-equals the
+// set below against `web/__tests__/fixtures/engine-errors.json`. That fixture
+// is in turn pinned to `Engine.error_values/0` by
+// api/test/barkpark/sheets_parity_test.exs. So the chain has two links and only
+// ONE of them can block a merge:
+//
+//   Engine.error_values/0  ──[sheets_parity_test.exs, runs under `Elixir gate`,
+//                            REQUIRED + unfiltered]──► engine-errors.json
+//   engine-errors.json     ──[this package's vitest guard, runs under `js-tests`,
+//                            which publishes NO required context]──► ERROR_VALUES
+//
+// DO NOT read the second link as "neither side can drift alone" — an earlier
+// version of this comment said exactly that, and it was wrong. THE DRIFT
+// HAPPENED: PR #15374 added `#NAME?` engine-side, correctly regenerated the
+// fixture, and updated walk.ex, cells.ex, web/lib/sheets.ts and all three golden
+// mirrors — but not this file. The guard installed days earlier by #15404 fired
+// exactly as designed (run 33650238539 on main, headSha 551c26971b: 2 failed of
+// 617, `expected [7] to deeply equal [8]`, missing '#NAME?') and the merge went
+// through anyway, because a red in `js-tests` is not a red in the required set.
+// For ~a day every `#NAME?` cell rendered as plain black text through
+// @barkpark/react while the server, Studio, the Go TUI and mobile all painted it
+// as an error. Adding a code engine-side is therefore NOT sufficient: until the
+// second link is enforced by a context that can block, this list must be updated
+// by hand in the same PR, and a green `js-tests` is the only thing that says you
+// did. Exported for the test only — not a public entry point of the package.
+export const ERROR_VALUES = new Set([
+  '#CYCLE!',
+  '#REF!',
+  '#VALUE!',
+  '#DIV/0!',
+  '#N/A',
+  '#NUM!',
+  '#SPILL!',
+  '#NAME?',
+])
 
 // A cell whose ENTIRE value is an http(s) URL renders as an anchor.
 const SHEET_URL_RE = /^https?:\/\/[^\s<>"']+$/i

@@ -131,7 +131,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   # ── THE POPULATION, HALF (b): the router's terminal call sites ────────────
   #
-  # SIX `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
+  # THREE `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
   # — plus the one destructive billing verb, whose residue row is driven below.
   #
   # CITED BY ROUTE, NOT BY LINE. This register used to name the call sites as
@@ -147,10 +147,30 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # different, much shorter file), so quoting them makes the sweep resolve the
   # wrong file and red on a comment that is only describing the past.
   #
-  #   DELETE /v1/barkparks/:id ....................... 1 (inside Accounts.audit/2)
-  #   DELETE /v1/fleet/supports/:id .................. 2 (residue row below)
-  #   POST /v1/internal/barkparks/:id/deprovision .... 2
-  #   the site domain-status reaper .................. 1
+  #   DELETE /v1/barkparks/:id ....................... 1 (inline, in Accounts.audit/3)
+  #   audited_delete_barkpark/3, the shared helper ... 1
+  #   the resurrect enqueue-failure rollback ......... 1
+  #
+  # SIX -> THREE, deliberately, in the commit that lowered it
+  # (task-55fb1f33a217249b). Four call sites did not disappear — they were routed
+  # through ONE audited helper, because all four deleted a team's instance row
+  # and wrote no audit event: both arms of `DELETE /v1/fleet/supports/:id` and
+  # both arms of `POST /v1/internal/barkparks/:id/deprovision`. The two residue
+  # rows below still describe the two support ARMS; what changed is that a single
+  # call site now serves four of them.
+  #
+  # WHICH MEANS THIS COUNT NO LONGER EQUALS THE NUMBER OF TERMINAL ARMS, and
+  # saying so is the point: it counts CALL SITES, which is all a scan can do. The
+  # arm-level population is pinned instead by `audit_vocabulary_census_test.exs`
+  # ARM (d), which enumerates every row-destroying unit in `cloud/lib` and holds
+  # each of the four lanes by name.
+  #
+  # THE SIXTH ROW ABOVE USED TO READ "the site domain-status reaper .... 1", AND
+  # IT WAS FALSE. No reaper calls `Registry.delete_barkpark/1`; that call site is
+  # the resurrect enqueue-failure rollback, twenty lines under a
+  # `barkpark.resurrected` stamp. The error outlived the register — it was copied
+  # into the filing that commissioned this change — which is what a register
+  # naming its population by hand buys you when nothing re-reads the names.
   #
   # RESIDUE ROW for the call site this count GAINED (5 → 6).
   #
@@ -161,7 +181,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # HERE:
   #
   #   * `?mode=detach` — the caller asserts it already tore the box AND its A
-  #     record down itself. DESTROYS: the support row and its six cascade
+  #     record down itself. DESTROYS: the support row and its five cascade
   #     children. SURVIVES: nothing the row pointed at — that is the caller's
   #     assertion, and `bp cloud support remove` sends the mode ONLY on a run
   #     whose own by-value zone sweep actually ran. TOLD: push_event(team, "fleet").
@@ -174,14 +194,20 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # which deletes the row only AFTER the zone sweep succeeds — the row is the
   # sole pointer to the record that must die — and an in-flight
   # provision/resurrect is refused 409 rather than stranding a box being built.
-  @delete_barkpark_call_sites 6
+  @delete_barkpark_call_sites 3
   @billing_cancel_route {"post", "/v1/billing/cancel"}
 
-  # The six tables whose FK to `barkparks` is ON DELETE CASCADE. The seventh FK
+  # The five tables whose FK to `barkparks` is ON DELETE CASCADE. The sixth FK
   # edge — `barkparks.fleet_parent_id` — is `:nilify_all` and is this register's
   # built-in negative control (migration
   # 20260723000000_add_fleet_group_to_barkparks.exs:30).
-  @cascade_children ~w(agent_events agent_tokens env_vars provision_jobs sites usage_samples)
+  #
+  # SIX -> FIVE (cch-w53-bl env-var Option A, ruled 2026-09-02): `env_vars` was
+  # the sixth cascade child until the team env-var feature was deleted and the
+  # table dropped (prod held zero rows ever). The seed below and every count
+  # helper derive from this list, so the row it used to contribute is gone from
+  # all of them at once.
+  @cascade_children ~w(agent_events agent_tokens provision_jobs sites usage_samples)
 
   ## ── Fixtures (copied verbatim from web/router_audit_test.exs) ────────────
 
@@ -298,21 +324,6 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     )
 
     q.(
-      "INSERT INTO env_vars (id, team_id, barkpark_id, key, value_encrypted, scope, inserted_at, updated_at) " <>
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-      [
-        id.(),
-        team_id,
-        bp_id,
-        "SECRET_#{System.unique_integer([:positive])}",
-        "ct",
-        "barkpark",
-        now,
-        now
-      ]
-    )
-
-    q.(
       "INSERT INTO provision_jobs (id, barkpark_id, kind, status, inserted_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6)",
       [id.(), bp_id, "provision", "failed", now, now]
     )
@@ -331,7 +342,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     :ok
   end
 
-  # {table => row count for this barkpark}, for all six cascade children.
+  # {table => row count for this barkpark}, for all five cascade children.
   defp child_counts(%Barkpark{} = bp) do
     bp_id = Ecto.UUID.dump!(bp.id)
 
@@ -436,7 +447,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 1: DELETE /v1/barkparks/:id, NON-LIVE arm ────────────────────────
 
-  test "ROW 1 — decommission (non-live): DESTROYS the row and all SIX cascade children; the audit row SURVIVES" do
+  test "ROW 1 — decommission (non-live): DESTROYS the row and all FIVE cascade children; the audit row SURVIVES" do
     {user, team, token} = logged_in()
     bp = barkpark_fixture(team, %{name: "Doomed"})
     :ok = seed_children!(bp)
@@ -466,7 +477,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert ev.target_id == bp.id
   end
 
-  ## ── ROW 2: the NEGATIVE CONTROL — the seventh FK edge is not a cascade ───
+  ## ── ROW 2: the NEGATIVE CONTROL — the sixth FK edge is not a cascade ───
 
   test "ROW 2 (NEGATIVE CONTROL) — fleet_parent_id is :nilify_all: deleting a fleet MAIN leaves its SUPPORT box standing, orphaned" do
     {_user, team, token} = logged_in()
@@ -540,7 +551,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert conn.status == 202
     assert json_body(conn) == %{"ok" => true, "status" => "deprovisioning"}
 
-    # DESTROYED: nothing. The row, the host, and all six children are exactly
+    # DESTROYED: nothing. The row, the host, and all five children are exactly
     # where they were — the ONLY change is one more provision_jobs row, the
     # pending deprovision job.
     after_counts = child_counts(bp)
@@ -567,7 +578,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 5: THE LIVE TEARDOWN, END TO END, IN-PROCESS ─────────────────────
 
-  test "ROW 5 — the LIVE teardown DESTROYS the row and all six children, and SAYS SO on the trail" do
+  test "ROW 5 — the LIVE teardown DESTROYS the row and all five children, and SAYS SO on the trail" do
     {_user, team, token} = logged_in()
     bp = barkpark_fixture(team, %{name: "Live", host: "10.0.0.1"})
     :ok = seed_children!(bp)
@@ -665,7 +676,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 7: THE ARCHIVE BUNDLE — FOREIGN RESIDUE, DONE HONESTLY ───────────
 
-  test "ROW 7 — decommission makes ZERO object-storage requests, and OUR TREE exports no verb that could delete a bundle" do
+  test "ROW 7 — decommission makes ZERO object-storage requests; the one destructive export is NOT on the teardown path" do
     {_user, team, token} = logged_in()
 
     base = Application.get_env(:barkpark_cloud, ArchiveStore, [])
@@ -720,25 +731,49 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
            "the archived bundle is no longer listable after the teardown: #{inspect(archives)}"
 
     # THE REFLECTION ARM, derived by RUNNING __info__(:functions) — never by
-    # grep. The file carries five `def` lines but exports three functions (one is
-    # a second `list_archives` clause, one lives in the nested HttpClient module),
-    # so a grep-based reading of this guard would be wrong about the population it
-    # is guarding.
+    # grep. The file carries several `def` lines but exports four functions (a
+    # second `list_archives` clause and a second `delete_bundle` clause collapse,
+    # and the transport lives in the nested HttpClient module), so a grep-based
+    # reading of this guard would be wrong about the population it is guarding.
     exports = ArchiveStore.__info__(:functions) |> Enum.sort()
 
-    assert exports == [derive_signing_key: 4, list_archives: 1, sign_v4: 1],
+    assert exports == [
+             delete_bundle: 2,
+             derive_signing_key: 4,
+             list_archives: 1,
+             sign_v4: 1
+           ],
            "BarkparkCloud.ArchiveStore's exports changed: #{inspect(exports)}. Re-derive this row " <>
              "— a new export may be a new way for our tree to reach the bundle."
 
+    # cch-w54-bl RE-DERIVED THIS ARM RATHER THAN DELETING IT. It used to read
+    # `destructive == []` — our tree had no object-storage verb that could
+    # destroy anything, so the bundle's survival needed no further explanation.
+    # It has exactly one now, `delete_bundle/2`. What ROW 7 still measures is
+    # UNCHANGED and is the whole point: the destructive verb is NOT on this
+    # path. The teardown above ran to completion with the recorder armed and
+    # dialled the store zero times, so the bundle outlives the DELETE route and
+    # is erased later, on a schedule, by a caller this test does not run.
+    # (`ArchiveRetentionWorker` is run for real — with its window and its
+    # live-team carve-out driven in both directions — in
+    # `workers/archive_retention_worker_test.exs`. That proof stays there: this
+    # file may not claim a sweep it does not execute.)
     destructive =
       Enum.filter(exports, fn {name, _arity} ->
         Atom.to_string(name) =~ ~r/delete|purge|remove/
       end)
 
-    assert destructive == [],
-           "our tree now exports an object-storage verb that could destroy a bundle: " <>
-             "#{inspect(destructive)}. ROW 7 says only that OUR TREE MAKES NO SUCH CALL; that " <>
-             "sentence stops being true here."
+    assert destructive == [delete_bundle: 2],
+           "the destructive-export population changed: #{inspect(destructive)}. Every entry here " <>
+             "is a way our tree can reach into the bundle store, and each one must be shown to be " <>
+             "off the teardown path before this row's zero-requests reading means anything."
+
+    # And the reachability claim is asserted the only way it can be: the DELETE
+    # route above made no request AT ALL, so it reached no signed verb, and the
+    # anti-vacuity arm above proves the recorder could have caught one.
+    assert Process.get(:archive_reqs) |> Enum.all?(fn r -> r.method != :delete end),
+           "the teardown issued an object-storage DELETE — the erasure moved onto the synchronous " <>
+             "path and this row's premise is gone"
   end
 
   # The injected transport, modelled on archive_store_test.exs:461-541. Public so
@@ -794,7 +829,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     # is the whole act.
     assert json_body(conn)["status"] == "canceled"
 
-    # SURVIVES: the box, its host, and all six children. A verb the console calls
+    # SURVIVES: the box, its host, and all five children. A verb the console calls
     # a cancellation leaves every billable artefact exactly where it was; the
     # only thing that moved is a flag.
     assert %Barkpark{host: "10.0.0.2"} = survivor = Repo.get(Barkpark, bp.id)

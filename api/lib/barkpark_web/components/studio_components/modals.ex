@@ -196,7 +196,19 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   SECTION): this mints a direct, stable `/s/<token>` link to the single open
   item, with Copy + Revoke. Admin-only (the handlers re-check server-side).
 
-  `@links` is a pre-flattened list of `%{id, access, url}`.
+  Two mint buttons, one per access level (`phx-value-access` "read" / "edit").
+  Both land on the SAME `item-share-create` handler and the same
+  `Barkpark.Sharing.Links.create/1`; nothing about the edit level is decided
+  here. An edit link opens the paper reader's own block editor for that ONE
+  slug (`BarkparkWeb.PaperViewer.can_edit?/3`) and carries no write permission
+  anywhere else.
+
+  `@links` is a pre-flattened list of `%{id, access, url}`, where `url` is nil
+  for every link this socket did not JUST mint: the raw token is no longer
+  stored (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02), so a
+  listed link cannot be re-copied. Those rows render the sentence in place of
+  the input + Copy button and keep their Revoke affordance — the honest read is
+  "the link works, we cannot show it to you again; revoke and mint a new one".
   """
   attr :show, :boolean, default: false
   attr :admin?, :boolean, default: false
@@ -238,22 +250,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 <span class={"item-share-access item-share-access-#{link.access}"}>
                   <%= String.capitalize(link.access) %>
                 </span>
-                <input
-                  type="text"
-                  readonly
-                  value={link.url}
-                  class="form-input item-share-url"
-                  onclick="this.select()"
-                />
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-sm"
-                  data-url={link.url}
-                  onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
-                  title="Copy link"
-                >
-                  Copy
-                </button>
+                <%= if link.url do %>
+                  <input
+                    type="text"
+                    readonly
+                    value={link.url}
+                    class="form-input item-share-url"
+                    onclick="this.select()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    data-url={link.url}
+                    onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
+                    title="Copy link"
+                  >
+                    Copy
+                  </button>
+                <% else %>
+                  <span class="item-share-url item-share-url-hidden">
+                    Link is active. Regenerate to copy a new URL.
+                  </span>
+                <% end %>
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm item-share-revoke"
@@ -269,14 +287,22 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <p :if={@error} class="shares-error"><%= @error %></p>
 
             <div class="item-share-footer">
-              <span class="shares-note">Edit links are coming next.</span>
+              <span class="shares-note">An edit link opens this one paper in the reader's editor.</span>
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                class="btn btn-ghost btn-sm"
                 phx-click="item-share-create"
                 phx-value-access="read"
               >
                 Create view link
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                phx-click="item-share-create"
+                phx-value-access="edit"
+              >
+                Create edit link
               </button>
             </div>
           </div>

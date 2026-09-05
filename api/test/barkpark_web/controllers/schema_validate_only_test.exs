@@ -22,7 +22,7 @@ defmodule BarkparkWeb.SchemaValidateOnlyTest do
   leaves every status assertion GREEN and reds the read-backs — which is the
   whole reason they are here.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Content

@@ -25,7 +25,9 @@ defmodule Barkpark.Content.WriteScope do
   require Logger
   import Ecto.Query
 
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
+  alias Barkpark.Tenancy
 
   # ── Lifecycle-hook helpers ────────────────────────────────────────────────
   #
@@ -85,9 +87,9 @@ defmodule Barkpark.Content.WriteScope do
     # preserved and governed separately by resolve_owner_id_for_write/2 (admins
     # may assign ownership; a non-admin user write is forced to the acting user).
     attrs = Map.drop(attrs, @client_scope_keys)
-    {ws_id, project_id} = resolve_write_scope(opts)
 
-    with {:ok, dataset_id} <- resolve_dataset_id_for_write(attrs, project_id) do
+    with {:ok, {ws_id, project_id}} <- resolve_write_scope(opts),
+         {:ok, dataset_id} <- resolve_dataset_id_for_write(attrs, project_id) do
       owner_id = resolve_owner_id_for_write(attrs, opts)
 
       attrs =
@@ -243,35 +245,103 @@ defmodule Barkpark.Content.WriteScope do
   # it, which lets the dataset_id resolve too. NEVER-WORSE: if the workspace has
   # no projects, project_id stays nil (and dataset_id stays NULL) — the
   # yx7f NULL-tolerant read still finds the row.
+  #
+  # ── THE UNSCOPED-WRITE RULING (task-6fa023cdabdc5f6a) ──────────────────────
+  #
+  # Ratified on main 2026-09-05: an unscoped write is INFER-WHEN-UNAMBIGUOUS,
+  # REFUSE-WHEN-AMBIGUOUS, NEVER LOG-ONLY. A write that named no workspace
+  # succeeds ONLY when its principal resolves to exactly one workspace — that
+  # workspace is used and the response NAMES it; a multi-workspace or platform
+  # principal gets a typed 4xx naming the scope it must send. The old last
+  # branch (`true -> ws = Tenancy.get_default_workspace()`) is retired for that
+  # population: it was silent misattribution — a write belonging to nobody,
+  # recorded as belonging to one tenant, and nobody chose that.
+  #
+  # WHICH POPULATION. The ruling is about "the token", so it fires on the
+  # REQUEST-side sentinel and nothing else:
+  #
+  #   * `workspace_id: :shared_only` — a REQUEST arrived and the routing layer
+  #     resolved no tenant (`ScopeHelpers.put_workspace_scope/3`'s `:sentinel`
+  #     arm; only an HTTP conn can produce it). THE RULING APPLIES.
+  #   * the key ABSENT or nil — an internal, legitimately-unattributed writer:
+  #     seeds, mix tasks, Oban workers, plugin bootstrap, LiveView/channel
+  #     sockets (whose `:legacy` arm omits the key by design). They carry no
+  #     principal that could name a workspace, so refusing them would refuse a
+  #     write nobody can ever scope. They keep the seeded-Default fallback,
+  #     byte-identical.
+  #
+  # This is the write-side reading of "degrade to vacancy, never to capture":
+  # for a WRITE, vacancy is REFUSAL, not an unowned row. Writing a nil-workspace
+  # row would be publishing — `Content.Scope.scope_to_workspace_including_global/3`
+  # is `workspace_id == ^ws or is_nil(...)`, so such a row is readable by other
+  # tenants through `Content.Analytics` and `Content.TagRegistry`, both of which
+  # read via that scope. Refusal
+  # degrades to nothing existing; a shared-layer write degrades to everyone
+  # holding it.
   defp resolve_write_scope(opts) do
-    # `:shared_only` is the request-side empty-scope sentinel
-    # (task-3e2a70930c6df723). It is a READ instruction — "the shared layer" —
-    # and is meaningless as a workspace to WRITE into, so it collapses to nil
-    # here and the write keeps exactly today's unresolved-scope behaviour.
-    # Without this it would satisfy the `not is_nil` test below and be stamped
-    # onto the row as a workspace_id, which is an Ecto cast error (a 500) rather
-    # than a scope.
-    opt_ws =
-      case Keyword.get(opts, :workspace_id) do
-        :shared_only -> nil
-        other -> other
-      end
-
+    opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do
+      opt_ws == :shared_only ->
+        resolve_unscoped_request_write_scope(opts)
+
       not is_nil(opt_ws) and is_nil(opt_proj) ->
-        {opt_ws, default_project_id_for_workspace(opt_ws)}
+        {:ok, {opt_ws, default_project_id_for_workspace(opt_ws)}}
 
       not is_nil(opt_ws) ->
-        {opt_ws, opt_proj}
+        {:ok, {opt_ws, opt_proj}}
 
       true ->
-        ws = Barkpark.Tenancy.get_default_workspace()
-        proj = Barkpark.Tenancy.get_default_project()
-        {ws && ws.id, proj && proj.id}
+        ws = Tenancy.get_default_workspace()
+        proj = Tenancy.get_default_project()
+        {:ok, {ws && ws.id, proj && proj.id}}
     end
   end
+
+  defp resolve_unscoped_request_write_scope(opts) do
+    case infer_write_workspace(Keyword.get(opts, :caller_context)) do
+      {:ok, %{id: ws_id}} -> {:ok, {ws_id, default_project_id_for_workspace(ws_id)}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  The INFER half of the unscoped-write ruling: the one workspace this principal
+  can have meant, or a typed refusal.
+
+  Returns `{:ok, %Tenancy.Workspace{}}` when the principal is a member of
+  EXACTLY ONE workspace — the caller then both stamps `workspace.id` and has
+  the `slug` to NAME it back on the wire. Returns
+  `{:error, :workspace_scope_required}` for every other count: zero (a platform
+  / global-admin token, or an anonymous caller — no workspace to infer) and two
+  or more (genuinely ambiguous — inferring would pick a tenant for the caller).
+
+  MEMBERSHIP is the candidate set, via `Tenancy.Auth.list_workspaces_for/1` —
+  the same inverse membership index `ResolveWorkspace` admits on, so a write can
+  never be inferred into a workspace a read would be refused from. The
+  `principal_type` discriminator is carried explicitly (a `%User{}` struct for a
+  user, the raw id for a token, whose binary clause is pinned to `"api_token"`),
+  because that discriminator IS the cross-kind isolation.
+  """
+  @spec infer_write_workspace(CallerContext.t() | nil) ::
+          {:ok, Tenancy.Workspace.t()} | {:error, :workspace_scope_required}
+  def infer_write_workspace(ctx) do
+    case candidate_workspaces(ctx) do
+      [%Tenancy.Workspace{} = ws] -> {:ok, ws}
+      _zero_or_many -> {:error, :workspace_scope_required}
+    end
+  end
+
+  defp candidate_workspaces(%CallerContext{principal_type: :user, user_id: uid})
+       when is_binary(uid),
+       do: Tenancy.list_workspaces_for(%Barkpark.Accounts.User{id: uid})
+
+  defp candidate_workspaces(%CallerContext{principal_type: :api_token, token_id: tid})
+       when is_binary(tid),
+       do: Tenancy.list_workspaces_for(tid)
+
+  defp candidate_workspaces(_ctx), do: []
 
   # Resolve a workspace's OWN default project id for a workspace-only write.
   # Prefers the project whose slug is "default", else the first project (the

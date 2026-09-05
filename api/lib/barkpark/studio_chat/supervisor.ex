@@ -25,17 +25,60 @@ defmodule Barkpark.StudioChat.Supervisor do
     Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
-  @impl true
-  def init(:ok) do
-    children = [
+  @doc """
+  The child list this supervisor starts, resolved against the CURRENT
+  application env. Public so a test can assert the shape under a given config
+  value without booting a second supervision tree — in particular that
+  `BlockedSweeper` is present at the DEFAULT (dev/prod) value, so the test-env
+  gate below can never silently disable it in production.
+  """
+  @spec children() :: [Supervisor.child_spec() | {module(), term()} | module()]
+  def children do
+    [
       {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
       {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
       {DynamicSupervisor, name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
-      Barkpark.StudioChat.AgentStateSweeper,
-      Barkpark.StudioChat.BlockedSweeper,
-      Barkpark.StudioChat.FleetHub
-    ]
+      Barkpark.StudioChat.AgentStateSweeper
+    ] ++
+      blocked_sweeper_child() ++
+      [Barkpark.StudioChat.FleetHub]
+  end
 
-    Supervisor.init(children, strategy: :one_for_one)
+  # `BlockedSweeper` sweeps the Repo synchronously in `init/1` and re-arms every
+  # 60s. A boot-started instance in the test env ticks from a process that owns
+  # no ExUnit sandbox connection, so EVERY tick raises ownership and logs a
+  # warning on an exact 60s period for the whole `mix test` run — noise in every
+  # CI log and a foreign statement inside every telemetry-counting test's window.
+  # So it is gated OFF in test (config/test.exs); the sweeper's own tests drive
+  # the pure `sweep(now)`, and a test that wants the PROCESS starts its own
+  # instance under the sandbox owner. Defaults ON, so dev/prod are unchanged.
+  # Same shape as the `Barkpark.Plugins.Github.DrainWorker` gate.
+  defp blocked_sweeper_child do
+    enabled? =
+      :barkpark
+      |> Application.get_env(Barkpark.StudioChat.BlockedSweeper, [])
+      |> Keyword.get(:enabled, true)
+
+    if enabled?, do: [Barkpark.StudioChat.BlockedSweeper], else: []
+  end
+
+  @impl true
+  def init(:ok) do
+    children = children()
+
+    # WIDER than the OTP default 3/5s, which is the SAME budget
+    # `Barkpark.Supervisor` runs — with identical budgets the crash-loop this
+    # tier exists to contain exhausts both walls in the same window and
+    # escalates to the top, taking Repo, Oban and the Endpoint with it. The
+    # concrete path: `AgentStateSweeper`/`BlockedSweeper` wrap work in
+    # `safe_sweep`'s `rescue`, which does NOT catch a `GenServer.call` :exit out
+    # of a saturated Repo pool (config/runtime.exs records a measured
+    # pool-exhaustion incident), so four crashes inside five seconds is reachable.
+    # Matches `Barkpark.Plugins.Supervisor` and `Indx.Supervisor`.
+    Supervisor.init(children,
+      strategy: :one_for_one,
+      max_restarts: 5,
+      max_seconds: 10
+    )
   end
 end

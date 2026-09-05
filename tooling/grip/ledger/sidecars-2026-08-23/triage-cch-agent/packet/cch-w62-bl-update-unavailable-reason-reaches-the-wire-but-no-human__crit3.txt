@@ -1,0 +1,1 @@
+A smoke EXPECTATION on scenario instance-update-credential-refused asserts the measured cause renders AND asserts the negative — the panel no longer emits No update state reported yet while a reason is present.

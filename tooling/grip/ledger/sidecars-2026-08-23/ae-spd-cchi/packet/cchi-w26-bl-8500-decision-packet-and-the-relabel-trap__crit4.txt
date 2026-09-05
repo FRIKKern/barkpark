@@ -1,0 +1,1 @@
+The write-path refusal (parent_id patch rejected validation_failed) is reproduced or refuted, so the enforcement clause targets the real cause.

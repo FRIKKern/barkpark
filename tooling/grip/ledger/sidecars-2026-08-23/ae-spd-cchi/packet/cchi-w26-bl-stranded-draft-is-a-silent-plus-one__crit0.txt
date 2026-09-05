@@ -1,0 +1,1 @@
+Both drafts.* documents are discarded (not published), and the post-discard bp live count is re-read and matches the predicate's residue with no remainder.

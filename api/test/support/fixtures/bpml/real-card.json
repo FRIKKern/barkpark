@@ -1,0 +1,39 @@
+{
+  "blocks": [
+    {
+      "id": "auto:story-2",
+      "slots": {
+        "action": [
+          {
+            "href": "https://github.com/FRIKKern/barkpark/pull/14454",
+            "label": "See what changed",
+            "type": "action"
+          }
+        ],
+        "body": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Work focused on returning the full picture instead of something partial or misleading. People can trust that what they see is the whole story."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": [
+          {
+            "level": 3,
+            "text": "A bare-string was spread character by character, so the page never revalidated",
+            "type": "heading"
+          }
+        ]
+      },
+      "span": 1,
+      "tone": "info",
+      "type": "card"
+    }
+  ],
+  "paper": "barkpark-changelog-2026",
+  "type": "card"
+}

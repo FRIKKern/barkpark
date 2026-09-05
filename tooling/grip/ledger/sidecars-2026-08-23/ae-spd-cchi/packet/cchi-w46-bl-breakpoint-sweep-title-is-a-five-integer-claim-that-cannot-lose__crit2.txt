@@ -1,0 +1,1 @@
+The scope claim is re-derived rather than quoted from this row: only NINE typed integers in the instrument set are guarded by a runnable assert (__binding_census.mjs:602's four, proven reddable at total 79->80 giving rc 2, and breakpoint-sweep.test.mjs:586-590's five). Re-run the derivation and state the number this row leaves guarded.

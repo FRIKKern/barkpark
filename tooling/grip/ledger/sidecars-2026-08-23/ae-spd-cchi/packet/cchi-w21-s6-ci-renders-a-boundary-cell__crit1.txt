@@ -1,0 +1,1 @@
+A BOUNDED RENDERED SWEEP RUNS IN CI covering at least the `members` cell at the phone widths s1 fixed plus at least one width that IS a member of the sweep's derived WIDTHS axis, and the exact `run:` line is pasted.

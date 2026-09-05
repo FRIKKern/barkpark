@@ -124,6 +124,15 @@ func TestParseTaskCreateArgs_Errors(t *testing.T) {
 func taskCreateStubMutate(t *testing.T, docID string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		// The tag registry read, answered AUTHORITATIVELY. `bp task create
+		// --publish` now refuses when the registry cannot be read
+		// (task-ede6e18e8c397ee0 c0a), so a stub that 404s this route would make
+		// every --publish case in this file exercise the refusal instead of the
+		// receipt it is about.
+		if strings.Contains(req.URL.Path, "/v1/data/query/") {
+			_, _ = rw.Write([]byte(`{"result":{"documents":[{"_id":"cli"},{"_id":"tasks"}],"hasMore":false}}`))
+			return
+		}
 		if !strings.Contains(req.URL.Path, "/v1/data/mutate") {
 			rw.WriteHeader(http.StatusNotFound)
 			return
@@ -518,6 +527,271 @@ func TestTaskCreateHelpTeachesTypedAcceptanceCriteria(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("bp task create --help no longer teaches %q — filers fall back to prose criteria in --description, and the row lands with no acceptance_criteria key at all: %q", want, out)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// task-ede6e18e8c397ee0 — `bp task create` must not strand a draft, and must
+// say what a draft-first create costs.
+// ---------------------------------------------------------------------------
+
+// taskCreatePublishStub is a mutate+query endpoint whose PUBLISH arm answers
+// with a caller-supplied status/body, so each residue class can be driven
+// exactly. It counts every mutation kind it saw. The tag registry read always
+// answers authoritatively (cli+tasks registered) so the pre-flight clears and
+// the test reaches the publish arm it is about.
+type taskCreatePublishCounts struct {
+	creates, publishes, discards int
+	discardID                    string
+}
+
+func taskCreatePublishStub(t *testing.T, counts *taskCreatePublishCounts, publishStatus int, publishBody string, discardStatus int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/query/") {
+			_, _ = rw.Write([]byte(`{"result":{"documents":[{"_id":"cli"},{"_id":"tasks"}],"hasMore":false}}`))
+			return
+		}
+		var body struct {
+			Mutations []map[string]json.RawMessage `json:"mutations"`
+		}
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		if len(body.Mutations) == 0 {
+			rw.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if raw, ok := body.Mutations[0]["discardDraft"]; ok {
+			counts.discards++
+			var op struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(raw, &op)
+			counts.discardID = op.ID
+			if discardStatus != 0 && discardStatus/100 != 2 {
+				rw.Header().Set("Content-Type", "application/json")
+				rw.WriteHeader(discardStatus)
+				_, _ = rw.Write([]byte(`{"error":{"code":"forbidden","message":"no"}}`))
+				return
+			}
+			_ = json.NewEncoder(rw).Encode(map[string]any{"results": []any{map[string]any{"id": "drafts.task-77"}}})
+			return
+		}
+		if _, ok := body.Mutations[0]["publish"]; ok {
+			counts.publishes++
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(publishStatus)
+			_, _ = rw.Write([]byte(publishBody))
+			return
+		}
+		counts.creates++
+		_ = json.NewEncoder(rw).Encode(map[string]any{"results": []any{
+			map[string]any{"id": "drafts.task-77", "document": map[string]any{"_id": "drafts.task-77", "_draft": true, "lifecycle_status": "open"}},
+		}})
+	}))
+}
+
+func runTaskCreatePublish(t *testing.T, server string, extra ...string) (int, string, string) {
+	t.Helper()
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se}
+	tail := append([]string{"a task", "--publish", "--description", wallPassingDescription, "--set", wallPassingTags}, extra...)
+	code := runTaskCreate(w, globals{yes: true}, manifest.Context{Server: server, Dataset: "production", Token: "tok"}, tail)
+	return code, so.String(), se.String()
+}
+
+// THE RESIDUE SET IS CLOSED AND EVERY MEMBER RENDERS. A future arm that leaves
+// a draft without a name here has no entry in taskCreateResidueClasses, and its
+// rendering says "unclassified" — which this asserts never happens for the
+// declared set. The list is the c0(c) enumeration: these are the ONLY states in
+// which `bp task create --publish` ends with a draft still on the server.
+func TestTaskCreateResidueSetIsEnumerated(t *testing.T) {
+	declared := []string{
+		residuePublishAmbiguousTransport,
+		residuePublishAmbiguousServerFault,
+		residuePublishResultUnreadable,
+		residueDiscardFailed,
+	}
+	if len(taskCreateResidueClasses) != len(declared) {
+		t.Fatalf("residue map has %d entries, %d are declared — a class was added without a name or a why",
+			len(taskCreateResidueClasses), len(declared))
+	}
+	for _, class := range declared {
+		why, ok := taskCreateResidueClasses[class]
+		if !ok || strings.TrimSpace(why) == "" {
+			t.Fatalf("residue class %q carries no reason", class)
+		}
+		var so, se bytes.Buffer
+		w := &writer{stdout: &so, stderr: &se}
+		renderTaskCreateResidue(w, class, "drafts.task-77", "task-77")
+		got := se.String()
+		if strings.Contains(got, "unclassified") {
+			t.Fatalf("residue class %q rendered as unclassified:\n%s", class, got)
+		}
+		for _, want := range []string{"residue[" + class + "]", why, "drafts.task-77", "bp doc delete task task-77"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("residue %q rendering lacks %q:\n%s", class, want, got)
+			}
+		}
+	}
+}
+
+// A 5xx publish is AMBIGUOUS — it can hide a write that committed — so the
+// draft must NOT be discarded. The class is named instead. RED-WITHOUT: before
+// this change the 5xx arm printed the orphan remedy with no class name; a
+// naive "always discard" fix would red this by discarding.
+func TestTaskCreatePublishServerFaultLeavesNamedResidueAndDoesNotDiscard(t *testing.T) {
+	var counts taskCreatePublishCounts
+	ts := taskCreatePublishStub(t, &counts, http.StatusInternalServerError, `{"error":{"code":"internal_error","message":"boom"}}`, 0)
+	defer ts.Close()
+
+	code, so, se := runTaskCreatePublish(t, ts.URL)
+	if code == exitOK {
+		t.Fatalf("a 5xx publish exited OK: %s", so)
+	}
+	if counts.discards != 0 {
+		t.Fatalf("discardDraft was sent on an AMBIGUOUS publish — a landed publish's draft twin could be destroyed")
+	}
+	if !strings.Contains(se, "residue["+residuePublishAmbiguousServerFault+"]") {
+		t.Errorf("the residue class was not named:\n%s", se)
+	}
+	if !strings.Contains(se, "bp doc delete task task-77") {
+		t.Errorf("the residue arm dropped the disposal remedy:\n%s", se)
+	}
+}
+
+// A 2xx publish that echoes no record is the third residue class: whether a
+// published twin exists is unknown, so nothing is discarded and the class is
+// named.
+func TestTaskCreatePublishUnreadableResultLeavesNamedResidue(t *testing.T) {
+	var counts taskCreatePublishCounts
+	ts := taskCreatePublishStub(t, &counts, http.StatusOK, `{"results":[]}`, 0)
+	defer ts.Close()
+
+	code, so, se := runTaskCreatePublish(t, ts.URL)
+	if code == exitOK {
+		t.Fatalf("an unreadable publish result exited OK: %s", so)
+	}
+	if counts.discards != 0 {
+		t.Fatalf("discardDraft was sent although the publish may have landed")
+	}
+	if !strings.Contains(se, "residue["+residuePublishResultUnreadable+"]") {
+		t.Errorf("the residue class was not named:\n%s", se)
+	}
+}
+
+// THE FOURTH CLASS: the publish was definitively refused, the discard was
+// attempted, and the discard ITSELF failed. The draft really is stranded now,
+// and that is exactly the case c0(c) requires be enumerated by name.
+func TestTaskCreateNamesResidueWhenTheDiscardItselfFails(t *testing.T) {
+	var counts taskCreatePublishCounts
+	ts := taskCreatePublishStub(t, &counts,
+		http.StatusUnprocessableEntity, `{"error":{"code":"duplicate_of","message":"an incumbent already covers this"}}`,
+		http.StatusForbidden)
+	defer ts.Close()
+
+	code, so, se := runTaskCreatePublish(t, ts.URL)
+	if code == exitOK {
+		t.Fatalf("a refused publish exited OK: %s", so)
+	}
+	if counts.discards != 1 {
+		t.Fatalf("discards = %d, want 1 — the cleanup was not even attempted", counts.discards)
+	}
+	if !strings.Contains(se, "residue["+residueDiscardFailed+"]") {
+		t.Errorf("a stranded draft was not enumerated by class:\n%s", se)
+	}
+	if !strings.Contains(se, "bp doc delete task task-77") {
+		t.Errorf("the caller is given no way to dispose of the draft that really was left:\n%s", se)
+	}
+}
+
+// THE HAPPY PATH IS UNCHANGED. A --publish that clears the wall and publishes
+// sends exactly create+publish (no discard), exits OK, prints the same receipt,
+// and says nothing about drafts on stderr.
+func TestTaskCreatePublishHappyPathUnchanged(t *testing.T) {
+	var counts taskCreatePublishCounts
+	ts := taskCreatePublishStub(t, &counts, http.StatusOK,
+		`{"results":[{"id":"task-77","document":{"_id":"task-77","_draft":false,"lifecycle_status":"open"}}]}`, 0)
+	defer ts.Close()
+
+	code, so, se := runTaskCreatePublish(t, ts.URL)
+	if code != exitOK {
+		t.Fatalf("the happy path exited %d: %s", code, se)
+	}
+	if counts.creates != 1 || counts.publishes != 1 || counts.discards != 0 {
+		t.Fatalf("creates=%d publishes=%d discards=%d, want 1/1/0", counts.creates, counts.publishes, counts.discards)
+	}
+	if want := "created task task-77 (published, lifecycle open)\n"; so != want {
+		t.Fatalf("receipt = %q, want %q", so, want)
+	}
+	if strings.Contains(se, "DRAFT") || strings.Contains(se, "residue[") {
+		t.Fatalf("the happy path emitted draft/residue noise:\n%s", se)
+	}
+}
+
+// c1 — THE DRAFT-FIRST NAG. A create WITHOUT --publish says, in one line, that
+// the row is a draft, that it is not on the board and not in `bp task ready` as
+// a pair, and how to publish it. It goes to STDERR so the stdout receipt is
+// unchanged byte for byte, in both the human and the json shape.
+func TestTaskCreateWithoutPublishNagsThatItIsADraft(t *testing.T) {
+	for _, shape := range []string{"", "json"} {
+		t.Run("output="+shape, func(t *testing.T) {
+			ts := taskCreateStubMutate(t, "drafts.task-9")
+			defer ts.Close()
+
+			var so, se bytes.Buffer
+			w := &writer{stdout: &so, stderr: &se, output: shape}
+			ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+			if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+				t.Fatalf("exit = %d: %s", code, se.String())
+			}
+			got := se.String()
+			for _, want := range []string{
+				"note: created as a DRAFT",
+				"not on the board",
+				"not in `bp task ready` as a pair",
+				taskPublishCommand("task-9"),
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("the draft-first notice lacks %q:\n%s", want, got)
+				}
+			}
+			if lines := strings.Count(strings.TrimSpace(taskDraftFirstNotice("task-9")), "\n"); lines != 0 {
+				t.Errorf("the notice is %d lines, the criterion asks for ONE", lines+1)
+			}
+		})
+	}
+}
+
+// The notice must not name a verb that does not exist. `bp task publish` is a
+// usage error — the spelling is owned by taskPublishCommand.
+func TestTaskDraftFirstNoticeNamesARealPublishVerb(t *testing.T) {
+	got := taskDraftFirstNotice("task-9")
+	if strings.Contains(got, "bp task publish") {
+		t.Fatalf("the notice names a verb `bp task` does not declare:\n%s", got)
+	}
+	if !strings.Contains(got, taskPublishCommand("task-9")) {
+		t.Fatalf("the notice does not carry the real publish command:\n%s", got)
+	}
+}
+
+// c1's second half — the CLI/MCP publish-default asymmetry is documented at
+// BOTH sites. The MCP tool description already carried it; the CLI help did
+// not, and that gap is why 17 planner-filed sub-tasks sat unpublished.
+func TestPublishDefaultAsymmetryIsDocumentedAtBothSites(t *testing.T) {
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se}
+	printTaskCreateHelp(w)
+	help := so.String()
+	for _, want := range []string{"task_create", "publish TRUE", "draft-first", "tag_registry_unreadable"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("bp task create --help does not document %q", want)
+		}
+	}
+	desc := mcpTaskCreateDescription
+	for _, want := range []string{"defaults publish TRUE", "bp task create", "draft-first"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("the MCP task_create description does not document %q", want)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,8 +70,72 @@ func TestDecodeWorkflowPicksHighestSeq(t *testing.T) {
 	if decodeWorkflow(json.RawMessage(`{"t":{"status":"running","seq":1}}`)) != nil {
 		t.Fatal("a snapshot with no workflow entry must decode to nil")
 	}
+	if decodeWorkflow(json.RawMessage(`{"early":{"status":"running","seq":1,"row":{"task_type":"local_workflow"},"workflow":[],"usage":null}}`)) != nil {
+		t.Fatal("an explicit pre-progress local_workflow envelope must remain a legitimate empty workflow")
+	}
 	if decodeWorkflow(nil) != nil {
 		t.Fatal("an absent snapshot must decode to nil")
+	}
+}
+
+// TestWorkflowRailEnvelopeDriftIsVisible locks the Barkpark-owned half of the
+// rail seam. Workflow node fields are third-party telemetry and intentionally
+// remain passthrough; workflow/status/usage are our envelope. A rename of any
+// owned key must paint an explicit failure after both full-session hydration
+// paths instead of becoming an empty workflow that vanishes from the TUI.
+func TestWorkflowRailEnvelopeDriftIsVisible(t *testing.T) {
+	base := map[string]any{
+		"status": "running",
+		"seq":    1,
+		"row":    map[string]any{"task_type": "local_workflow", "description": "compatibility run"},
+		"usage":  map[string]any{"total_tokens": 10},
+		"workflow": []map[string]any{
+			{"type": "workflow_phase", "index": 1, "title": "Build"},
+			{"type": "workflow_agent", "phaseIndex": 1, "label": "build:rail", "state": "start"},
+		},
+	}
+
+	for _, missing := range []string{"workflow", "status", "usage"} {
+		t.Run("missing_"+missing, func(t *testing.T) {
+			entry := make(map[string]any, len(base))
+			for key, value := range base {
+				entry[key] = value
+			}
+			delete(entry, missing)
+			raw, err := json.Marshal(map[string]any{"task": entry})
+			if err != nil {
+				t.Fatalf("marshal rail: %v", err)
+			}
+
+			assertVisible := func(t *testing.T, m Model) {
+				t.Helper()
+				if m.st.Workflow == nil || !strings.Contains(m.st.Workflow.ContractError, missing) {
+					t.Fatalf("missing %s must survive decode as a contract error, got %+v", missing, m.st.Workflow)
+				}
+				paint := strings.Join(m.workflowPanelLines(), "\n")
+				if !strings.Contains(paint, "workflow data unavailable") || !strings.Contains(paint, missing) {
+					t.Fatalf("missing %s must paint a visible failure, got %q", missing, paint)
+				}
+			}
+
+			resumed := newTestModel(&fakeTransport{})
+			resumed.width = 80
+			resumed = resumed.openSession(Session{ID: "s1", RailSnapshot: raw})
+			resumed.st.LiveWorkflow = &SessionWorkflow{Terminal: true, Outcome: "completed"}
+			assertVisible(t, resumed)
+
+			st, _ := Reduce(State{
+				SessionID:    "s1",
+				LiveWorkflow: &SessionWorkflow{Terminal: true, Outcome: "completed"},
+			}, TailFetchedEvent{
+				Session: Session{ID: "s1", RailSnapshot: raw},
+			}, time.Now())
+			refetched := newTestModel(&fakeTransport{})
+			refetched.width = 80
+			refetched.screen = screenChat
+			refetched.st = st
+			assertVisible(t, refetched)
+		})
 	}
 }
 

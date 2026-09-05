@@ -5,6 +5,7 @@ import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { readTruncation } from "@/lib/graph-truncation";
+import { corpusGraphUrl } from "@/lib/graph-url";
 
 /**
  * The corpus graph for the landing — the one place that talks to Barkpark's
@@ -24,7 +25,10 @@ import { readTruncation } from "@/lib/graph-truncation";
  * Scope/auth: ONE flat URL shape, always — `GET /v1/graph?dataset=…` with the
  * bearer supplying tenancy (see `rawCorpusGraph`; the `/w/…/p/…`-scoped path
  * 404s for this endpoint, so no token-conditional route branch exists here).
- * The token + base URL come from the `server-only` `bp-fetch` module.
+ * That invariant is now ENFORCED rather than merely asserted: `lib/graph-url.ts`
+ * derives the bare origin, so a scoped `BARKPARK_API_URL` cannot concatenate
+ * into a 404 + a silently empty corpus. The token + base URL come from the
+ * `server-only` `bp-fetch` module.
  */
 
 /** Cache tag for the graph Data Cache — `revalidateTag(GRAPH_TAG)` busts it. */
@@ -167,9 +171,13 @@ function computeRootId(nodes: GraphNode[], edges: GraphEdge[]): string | null {
 async function rawCorpusGraph(): Promise<CorpusGraph> {
   // The corpus endpoint is mounted FLAT (`/v1/graph`, [:api, :require_token]) —
   // tenancy comes from the bearer's default scope, not a `/w/p/` path prefix
-  // (the scoped path 404s). bp-fetch bakes in the bearer + resilience (timeout,
-  // restart-window retry, res.ok guard, defensive JSON parse).
-  const url = `${API_URL}/v1/graph?dataset=${encodeURIComponent(DATASET)}`;
+  // (the scoped path 404s). The managed deploy path injects a SCOPED
+  // BARKPARK_API_URL (`<origin>/w/:ws/p/:proj` — correct for every content
+  // read), so `corpusGraphUrl` derives the BARE ORIGIN for this one flat call,
+  // matching templates/search-starter/lib/graph.ts. bp-fetch bakes in the
+  // bearer + resilience (timeout, restart-window retry, res.ok guard,
+  // defensive JSON parse).
+  const url = corpusGraphUrl(API_URL, DATASET);
 
   let json: UpstreamGraph;
   try {

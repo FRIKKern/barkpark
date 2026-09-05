@@ -33,10 +33,28 @@ defmodule Barkpark.Auth.LoginTicket do
 
   @type t :: %__MODULE__{}
 
+  # BYTE-IDENTICAL to `Barkpark.Accounts.User`'s `@email_format` (a private
+  # module attribute there, so it cannot be imported across the boundary).
+  # Keep the two in lockstep: the mint must refuse EXACTLY what registration
+  # would refuse, or a ticket mints for an address that can never be
+  # provisioned. See the note on `user_email` below.
+  @email_format ~r/^[^\s@]+@[^\s@]+$/
+
+  @doc """
+  The one seat every mint passes through (`Auth.mint_login_ticket/2` is the
+  sole caller). `user_email` is validated HERE, not at the consume, because
+  `Auth.consume_login_ticket/1` burns the single-use row BEFORE the caller
+  provisions the account: an address `Accounts.register_user` rejects made
+  `Sso.find_or_create_user/1` raise (500) with the ticket already spent. A
+  changeset error surfaces as the mint's existing `{:error, :unauthorized}` —
+  the same no-oracle shape the controller already renders. `validate_format`
+  is a no-op when `user_email` is absent (a token-shaped ticket).
+  """
   def changeset(ticket, attrs) do
     ticket
     |> cast(attrs, [:ticket_hash, :api_token, :user_email, :expires_at, :used_at])
     |> validate_required([:ticket_hash, :api_token, :expires_at])
+    |> validate_format(:user_email, @email_format, message: "must have the @ sign and no spaces")
     |> unique_constraint(:ticket_hash)
   end
 end

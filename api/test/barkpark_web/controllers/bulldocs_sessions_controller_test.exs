@@ -1,5 +1,5 @@
 defmodule BarkparkWeb.BulldocsSessionsControllerTest do
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
   alias Barkpark.Content
   alias Barkpark.Tenancy
 
@@ -142,7 +142,7 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
       assert conn |> authed() |> post(@path, body(slug)) |> json_response(200)
 
       anon =
-        build_conn()
+        scoped_conn()
         |> get("/v1/data/query/production/session")
 
       # `PublicRead`/QueryController fail CLOSED on a private type: 404, and in
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
       # Control: the SAME anonymous request against the PUBLIC sibling type
       # succeeds — so the refusal above is the private visibility, not a
       # broken route or a blanket anonymous block on this endpoint.
-      assert build_conn() |> get("/v1/data/query/production/paper") |> json_response(200)
+      assert scoped_conn() |> get("/v1/data/query/production/paper") |> json_response(200)
     end
 
     test "a token read of the same type still works", %{conn: conn} do

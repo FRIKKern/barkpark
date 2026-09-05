@@ -1,0 +1,1 @@
+If the cap survives, a withheld alert leaves a trace a PERSON can reach - an event row on the reaped deployment, or one incident-level alert saying N further deployments failed in this sweep and were not alerted individually. Evidence: the surface and how a person reaches it.

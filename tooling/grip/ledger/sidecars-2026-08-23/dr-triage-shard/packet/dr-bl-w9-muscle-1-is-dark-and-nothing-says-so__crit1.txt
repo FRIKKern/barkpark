@@ -1,0 +1,1 @@
+A duplicate registry row for the same box is detected and reported. Evidence: the detection and its output over the live registry.

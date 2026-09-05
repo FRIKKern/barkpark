@@ -1,0 +1,1 @@
+TWO scenarios ship and both assert at DOM level in the D428 shape (control ABSENT, never a disabled ghost, role chip surviving): an acting ADMIN over owner + peer-admin + member rows, and an acting OWNER over a PEER OWNER whose row carries Remove and NOT Change role. Evidence: the assertions and their green smoke lines.

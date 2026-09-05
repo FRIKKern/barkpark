@@ -168,7 +168,13 @@ export function colToLetters(c: number): string {
  */
 
 /** The six format classes; anything else is "general" (delegates to
- * `numberToDisplay`). Mirrors `Fmt.vocabulary/0`. */
+ * `numberToDisplay`). Mirrors `Map.keys(@canonical)` in
+ * `api/lib/barkpark/plugins/sheets/fmt.ex` — i.e. `Fmt.vocabulary/0` MINUS
+ * the display-only `"checkbox"`, which Studio renders as a toggle glyph and
+ * this view never formats. That difference is LOCKED (both directions, plus
+ * a second silent exclusion) by the FMT_CLASSES mirror test in
+ * `api/test/barkpark/sheets_parity_test.exs`, which runs under the required
+ * Elixir gate. */
 const FMT_CLASSES = new Set([
   "fixed",
   "percent",

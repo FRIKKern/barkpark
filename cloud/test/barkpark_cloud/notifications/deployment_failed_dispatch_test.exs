@@ -23,7 +23,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
 
   alias BarkparkCloud.{Accounts, Notifications, Registry}
   alias BarkparkCloud.Registry.Deployment
-  alias BarkparkCloud.Workers.StaleDeploymentReaper
+  alias BarkparkCloud.Workers.{DeploymentAlertWorker, StaleDeploymentReaper}
 
   @subject "Deployment failed"
 
@@ -53,6 +53,16 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
       Registry.create_site(bp, Map.merge(%{name: "Shop #{n}", slug: "shop-#{n}"}, site_attrs))
 
     {site, owner}
+  end
+
+  # THE REAPER'S ALERTS ARE OFF THE TICK (cch-w28-s6-followup). The sweep used to
+  # call `Mailer.deliver` inline; it now enqueues one `DeploymentAlertWorker` job
+  # per reaped deployment. So every reaper test below drains the queue between
+  # the sweep and its email assertion, and the drain is not a formality: it is
+  # the assertion. Every one of these tests is RED if the enqueue is replaced by
+  # a synchronous send, because §2b asserts the mailbox is EMPTY before it.
+  defp drain_alerts do
+    Oban.drain_queue(queue: :default, with_safety: false)
   end
 
   defp backdate(deployment_id) do
@@ -103,6 +113,40 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
 
     assert Repo.get(Deployment, d.id).status == "failed"
 
+    assert %{success: 1} = drain_alerts()
+
+    assert_email_sent(fn email ->
+      assert email.subject == @subject
+      assert {_, to} = hd(email.to)
+      assert to == owner.email
+    end)
+  end
+
+  ## 2b. ENQUEUED, NOT DELIVERED INLINE — the property the cap's deletion rests
+  ##     on. If the alert were still synchronous the sweep would hold the tick
+  ##     for the whole fan-out, which is the entire reason a cap existed.
+
+  test "the reaper's alert is an Oban job, and NOTHING is mailed until it runs" do
+    {site, owner} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    # The sweep sent NOTHING itself...
+    assert_no_email_sent()
+
+    # ...it left a job naming the site, carrying the payload the synchronous
+    # producers build by hand.
+    assert_enqueued(worker: DeploymentAlertWorker, args: %{site_id: site.id})
+
+    [job] = all_enqueued(worker: DeploymentAlertWorker)
+    assert job.args["payload"]["deployment_id"] == d.id
+    assert job.args["payload"]["detail"] =~ "no build source"
+
+    # ...and running it is what mails the owner.
+    assert %{success: 1} = drain_alerts()
+
     assert_email_sent(fn email ->
       assert email.subject == @subject
       assert {_, to} = hd(email.to)
@@ -125,6 +169,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
 
     assert {:ok, %{failed: 1}} = perform_job(StaleDeploymentReaper, %{})
     assert Repo.get(Deployment, claimed.id).status == "failed"
+    assert %{success: 1} = drain_alerts()
 
     assert_email_sent(fn email ->
       assert email.subject == @subject
@@ -202,38 +247,67 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     assert_no_email_sent()
   end
 
-  ## 5b. THE CAP — a person-facing SUPPRESSION, so it is measured, not asserted.
-  ##     `@reap_alert_cap` decides that the 26th owner of a cluster-wide incident
-  ##     hears nothing by email. A suppression branch no fixture drives is green
-  ##     by construction; this drives it.
+  ## 5b. THE MASS REAP — 27 deployments across TWO teams in ONE sweep, and
+  ##     EVERY owning team is alerted.
+  ##
+  ##     This replaces the cap test (wave 28 S6, rewritten wave 32 S2). The old
+  ##     one drove `Registry.reap_alert_cap()` + 2 rows and asserted that the
+  ##     tail was SUPPRESSED — `length(suppressed) == over * length(members)`.
+  ##     That assertion is gone, and gone on purpose: it pinned the policy this
+  ##     slice deletes. It cannot be kept byte-identical AND green, because with
+  ##     the cap deleted the sweep withholds nothing, so `over * length(members)`
+  ##     is now a demand for rows whose existence would be the bug. What it was
+  ##     protecting — the GRAIN of a withheld row, one per member with that
+  ##     member's own address — is not deleted with it: it moves to
+  ##     `withhold_batch_test.exs`, at the grain of `Withhold.record/4` itself,
+  ##     where it survives the cap's removal. The inverse of the old assertion is
+  ##     asserted below: ZERO suppressed rows, because nobody was skipped.
+  ##
+  ##     The old literal 25 stays in the fixture as a HARD-CODED number
+  ##     (`@over_the_old_cap`), not a call to a policy reader: the number the
+  ##     fixture must exceed is a historical fact about a deleted cap, and reading
+  ##     it from the code under test is how a driven test goes vacuous when that
+  ##     code changes.
+
+  # The cap that used to stand. A fixture must fail MORE than this in one sweep
+  # or it cannot tell an uncapped fan-out from the capped one it replaced.
+  @old_reap_alert_cap 25
+  @over_the_old_cap 2
 
   # Swoosh's test adapter delivers `{:email, %Swoosh.Email{}}` to the test
-  # process, so the mailbox itself is the counter. `assert_email_sent` consumes
-  # one message and cannot answer "how many".
-  defp drain_emails(acc \\ 0) do
+  # process, so the mailbox itself is the record. `assert_email_sent` consumes
+  # one message and cannot answer "how many, and to whom".
+  defp collect_emails(acc \\ []) do
     receive do
-      {:email, _email} -> drain_emails(acc + 1)
+      {:email, email} ->
+        collect_emails(Enum.map(email.to, fn {_name, address} -> address end) ++ acc)
     after
       100 -> acc
     end
   end
 
-  test "a mass reap alerts at most the cap, and RECORDS the ones it suppressed" do
-    # One container site with neither an artifact nor a repo: pass (0a) fails
-    # every queued row it owns in a single sweep.
-    {site, owner} = setup_site()
-    over = 2
-    n = Registry.reap_alert_cap() + over
+  # A second team, so "every OWNING TEAM" is a measured product and not a
+  # coincidence of there being only one. Returns {barkpark, [member emails]}.
+  defp second_team_with_two_members do
+    {team, owner} = team_with_owner()
+    n = System.unique_integer([:positive])
 
-    # One queued row per SITE: deploy-truth W1 re-keyed the active index onto
-    # (site_id, environment), so a mass reap is many SITES on the box, not many
-    # concurrent builds of one site (which the DB now refuses outright).
-    bp = Registry.get_barkpark(site.barkpark_id)
+    {:ok, extra} =
+      Accounts.register_user(%{
+        email: "extra-#{n}@example.com",
+        password: "correct-horse-battery"
+      })
 
-    # A SECOND member, so the withheld-row grain is measured as a product and not
-    # as a coincidence: a withheld alert is withheld from every person who would
-    # have received it, each under their own address.
-    team = Accounts.get_team(site.team_id)
+    {:ok, _} = Accounts.add_member(team, extra, "member")
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+    {team, bp, Enum.sort([owner.email, extra.email])}
+  end
+
+  test "a mass reap over the old cap alerts EVERY owning team, none suppressed" do
+    # Team A: the site fixture's own team, plus a second member so the per-team
+    # fan-out is a product.
+    {site_a, owner_a} = setup_site()
+    team_a = Accounts.get_team(site_a.team_id)
     m = System.unique_integer([:positive])
 
     {:ok, second} =
@@ -242,18 +316,34 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
         password: "correct-horse-battery"
       })
 
-    {:ok, _} = Accounts.add_member(team, second, "member")
-    members = [owner.email, second.email]
+    {:ok, _} = Accounts.add_member(team_a, second, "member")
+    members_a = Enum.sort([owner_a.email, second.email])
+
+    # Team B: a DIFFERENT team, two members of its own.
+    {team_b, bp_b, members_b} = second_team_with_two_members()
+
+    # One queued row per SITE: deploy-truth W1 re-keyed the active index onto
+    # (site_id, environment), so a mass reap is many SITES on the box, not many
+    # concurrent builds of one site (which the DB now refuses outright).
+    bp_a = Registry.get_barkpark(site_a.barkpark_id)
+
+    n = @old_reap_alert_cap + @over_the_old_cap
+    assert n > @old_reap_alert_cap
+
+    # Split across the two teams so the tail — the rows the cap used to throw
+    # away — belongs to a team that has NO row inside the old first 25.
+    a_count = @old_reap_alert_cap
+    b_count = @over_the_old_cap
 
     ids =
       for i <- 1..n do
-        site_i =
-          if i == 1 do
-            site
-          else
-            {:ok, s} =
-              Registry.create_site(bp, %{name: "Shop #{i}-#{n}", slug: "shop-#{i}-#{n}"})
+        {bp, owner_site} = if i <= a_count, do: {bp_a, i == 1}, else: {bp_b, false}
 
+        site_i =
+          if owner_site do
+            site_a
+          else
+            {:ok, s} = Registry.create_site(bp, %{name: "Shop #{i}-#{n}", slug: "shop-#{i}-#{n}"})
             s
           end
 
@@ -261,46 +351,44 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
         d.id
       end
 
-    ExUnit.CaptureLog.capture_log(fn ->
-      assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
-    end)
+    assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
 
-    # FIRST: every row really is terminal — the console, which is the surface of
-    # record, lost nothing. The cap suppresses the EMAIL, never the truth.
+    # FIRST: every row really is terminal — the fixture is proven able to produce
+    # the defect, and the console lost nothing.
     for id <- ids, do: assert(Repo.get(Deployment, id).status == "failed")
 
-    # Both members are alerted for each of the first `cap` deployments.
-    assert drain_emails() == Registry.reap_alert_cap() * length(members)
+    # THE UNCAPPED FAN-OUT: one job per reaped deployment, all n of them, and
+    # the 26th and 27th are there — under the cap they were dropped.
+    jobs = all_enqueued(worker: DeploymentAlertWorker)
+    assert length(jobs) == n
+    assert_no_email_sent()
 
-    # THE REWRITE (wave 32 S2). This test used to end on two `log =~` substrings —
-    # it PINNED the falsehood that a server-side Logger line is how the owner
-    # learns their alert was thrown away. It is not: the owner reads the console,
-    # not our logs, and the whole value of an alert is that nobody is looking.
-    # The cap stays (charter D349(g), resolved in favour of TRACING); the trace is
-    # now a row the owner can read, on the surface that answers "was I notified?".
-    suppressed = Notifications.list_deliveries(team, status: "suppressed", limit: 500)
+    assert %{success: ^n} = drain_alerts()
 
-    assert length(suppressed) == over * length(members),
-           "the #{over} withheld alerts left no trace on the delivery log for " <>
-             "#{length(members)} members — got #{length(suppressed)} suppressed rows"
+    # EVERY owning team's every member is mailed, once per failed deployment
+    # their team owns.
+    sent_to = collect_emails()
+    assert length(sent_to) == a_count * length(members_a) + b_count * length(members_b)
 
-    for row <- suppressed do
-      assert row.recipient in members,
-             "a suppressed row must name the PERSON it was withheld from, not a marker"
+    assert sent_to |> Enum.uniq() |> Enum.sort() == Enum.sort(members_a ++ members_b)
 
-      assert row.event == "deployment_failed"
-      assert row.last_error =~ "too many deployment alerts in one sweep"
+    # Team B is the whole point: its rows are the tail the cap suppressed, and
+    # both of its members hear about both of them.
+    for address <- members_b do
+      assert Enum.count(sent_to, &(&1 == address)) == b_count
     end
 
-    # ...and EVERY member, not just the first: the row a person cannot find is
-    # the same silence this slice exists to end.
-    assert suppressed |> Enum.map(& &1.recipient) |> Enum.uniq() |> Enum.sort() ==
-             Enum.sort(members)
+    # NOTHING was withheld — the inverse of the assertion the cap test made.
+    for team <- [team_a, team_b] do
+      assert Notifications.list_deliveries(team, status: "suppressed", limit: 500) == []
+    end
 
-    # The sent alerts are still on the same log, and the two outcomes are
-    # distinguishable — a filter that cannot separate them is not a filter.
-    assert length(Notifications.list_deliveries(team, status: "sent", limit: 500)) ==
-             Registry.reap_alert_cap() * length(members)
+    # ...and the sends are on the delivery log at the same grain as the mail.
+    assert length(Notifications.list_deliveries(team_a, status: "sent", limit: 500)) ==
+             a_count * length(members_a)
+
+    assert length(Notifications.list_deliveries(team_b, status: "sent", limit: 500)) ==
+             b_count * length(members_b)
   end
 
   ## 6. THE EMAIL — a classified cause, not raw reaper jargon, and the site named.
@@ -314,6 +402,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     assert reaped.status == "failed"
     # The raw reason the dashboard classifies — the jargon that used to ship.
     assert reaped.failure_reason =~ "no build source (upload an artifact"
+    assert %{success: 1} = drain_alerts()
 
     assert_email_sent(fn email ->
       # The SITE is named, not EventEmail's "Your Barkpark" fallback.
@@ -382,6 +471,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
 
     assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
     assert Repo.get(Deployment, d.id).status == "failed"
+    assert %{success: 1} = drain_alerts()
 
     assert_email_sent(fn email ->
       refute email.text_body =~ "stage "
@@ -396,6 +486,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
 
     assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
     assert Repo.get(Deployment, d.id).status == "failed"
+    assert %{success: 1} = drain_alerts()
 
     assert_email_sent(fn email ->
       # `deployments` carries no started_at/finished_at, and `became_live_at` is

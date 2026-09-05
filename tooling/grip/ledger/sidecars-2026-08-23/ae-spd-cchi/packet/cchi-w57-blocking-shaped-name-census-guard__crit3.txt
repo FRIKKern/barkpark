@@ -1,0 +1,1 @@
+Any number quoted in .github/required-checks.json or docs/ops/merge-gates.md is emitted BY the guard rather than typed by a human, so it cannot go stale in its own commit.

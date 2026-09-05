@@ -1,0 +1,1 @@
+The NAMED DEFERRAL comment in the delete "/v1/sites/:id" route no longer claims the refusal has no console surface; it names siteDeleteFailureCopy as the reader instead. Paste the diff.

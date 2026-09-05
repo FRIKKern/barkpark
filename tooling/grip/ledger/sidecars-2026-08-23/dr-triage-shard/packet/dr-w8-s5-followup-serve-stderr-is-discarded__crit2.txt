@@ -1,0 +1,1 @@
+overflow-guard.mjs:638's comment, which literally reads '`stdio: "ignore"` is a refusal nobody can audit', is updated or removed. A diagnosis comment that outlives its defect becomes a false map for the next reader.

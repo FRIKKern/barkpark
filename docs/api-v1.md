@@ -25,7 +25,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (dataset schema digest) · `etag` (change token; `ETag`+304 only on anonymous reads with no `?fields=`/`?expand=`) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
@@ -49,6 +49,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never a silent unfiltered 200) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
@@ -73,13 +74,15 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ### 5c. History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores as a draft.
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
+A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{"mutations":[…]}`.
 
-**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2).
+**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
+
+**`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
 
@@ -98,9 +101,9 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries it too.
+**Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`); a paper-ingest 200 too.
 
-Failures: §9.
+Failures: §9. `content.dedup_bypass: true` skips the duplicate scan — an owner decision, persisted on the doc.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -110,7 +113,7 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. **Keepalive:** `: keepalive` per 30 s idle.
 
 **Shed frame:** a stalled consumer gets ONE `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (Chat never sheds.)
 
@@ -125,41 +128,27 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 - `POST P/v1/schemas/:dataset` — upsert; 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-## 8a. Tickets plugin — `/v1/tickets`
+## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`
 
-A **`bptk_` key IS an identity**: minted per outsider, who files/reads tickets with only that key. Plugin-gated. `status` is **server-derived**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
-
-| Persona (auth) | Routes (`/v1` prefix) |
-|---|---|
-| Submitter (`bptk_`) | `POST /tickets` · `GET /tickets[/:id]` (stamps `submitter_seen_at`) · `POST /tickets/:id/{messages,attachments}` · `GET /tickets/:id/attachments/:asset_id` |
-| Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
-| Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
-
-**Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (as no token); **rotate** = new secret, same identity row.
-
-**Attachments** (submitter-only): MIME from magic bytes (client header ignored); allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits**/key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
-
-## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [admin]
-
-Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
-
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim; undo = the inverse). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
-
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a regression.
+Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint).
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
 Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
+## 8d. Media asset record — `absoluteUrl`
+
+Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
+
 ## 9. Error Codes
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
-Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
+Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 (registered; no producer in api/lib today) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `storage_unavailable` 503 (media, dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
 
-Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint`/`bpml`/`bpml_unavailable`/`bpml_unprintable`/`unknown_format`/`hollow_paper`/`structure` · sessions `missing_slug`/`invalid_kind`/`invalid_conversation`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_restarting`/`session_start_failed`/`invalid_request_id` · media `share_expired` · deploy `build_id_mismatch`/`deploy_runner_unavailable`/`invalid_deploy_mode` · grants `invalid_grant`/`unprocessable` · chat hosts `invalid_enrollment`/`invalid_state_report` · step-up `mfa_required`/`mfa_enrolment_required` · import/export `bundle_import_disabled`/`invalid_import_mode`/`workspace_slug_conflict`/`blob_path_conflict`/`import_constraint_violation`/`import_failed`/`export_transport_failed`/`export_build_failed`/`import_body_read_failed`/`import_body_too_large`/`import_spill_write_failed`/`insufficient_disk_space` · chat `runtime_capacity`/`runtime_unavailable`/`chat_unsupported`/`chat_create_failed`. Source `known_codes/0`.
+Endpoint-specific: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 
 ## 10. Legacy `/api/*` Routes
 

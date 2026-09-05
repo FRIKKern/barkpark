@@ -1,0 +1,1 @@
+A written ruling states what `build_seconds` measures on a CARRIED row versus a primary row. Evidence: the charter D or the schema comment.

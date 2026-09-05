@@ -261,6 +261,10 @@ defmodule BarkparkWeb.WorkspaceController do
 
   A COPY that dies mid-dump answers 503 `export_transport_failed` + a retry hint (PDS-D43),
   never the old bare 500 `internal_error / unknown error`.
+
+  Any OTHER engine error answers a logged 500 `internal_error`, never 404. A
+  404 on this route means the workspace is genuinely absent — an unknown slug,
+  or a row deleted between the slug lookup and the export — and nothing else.
   """
   # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
   # stronger argument than the three media_controller sites: `path` is a
@@ -336,11 +340,38 @@ defmodule BarkparkWeb.WorkspaceController do
           }
         })
 
-      # export/2 only errors on a nil/non-UUID id or a missing workspace — both
-      # unreachable once get_workspace_by_slug returns a real %Workspace{} — but
-      # fold any error into 404 rather than leak an engine tuple.
-      {:error, _} ->
+      # THE ENGINE'S ERROR CENSUS. `WorkspaceBundle.export_to_file/2` returns
+      # exactly two error atoms — `:workspace_not_found` and
+      # `:workspace_id_required` — plus the two tagged tuples `export_bundle/2`
+      # itself synthesises (`:export_scope`, `:export_failed`), both matched
+      # above. Each remaining shape gets its own answer, because they are not
+      # the same event.
+      #
+      # `:workspace_not_found` is genuine ABSENCE: the row this request already
+      # resolved by slug was deleted between that lookup and the export. 404 is
+      # the TRUE answer here, so this arm keeps it.
+      {:error, :workspace_not_found} ->
         {:error, :not_found}
+
+      # Everything else is NOT absence. The catch-all this replaces folded every
+      # remaining shape into 404 ("fold any error into 404 rather than leak an
+      # engine tuple"), so a real engine failure answered "no such workspace" to
+      # a caller we had JUST proven `workspace_admin` of — the system saying
+      # something other than the truth, and an incident that reached no operator
+      # because a 404 is not a 5xx. Hiding the TERM was right; hiding the
+      # FAILURE was not.
+      #
+      # Handing the term to FallbackController buys both halves at once: the
+      # wire gets the coarse, already-registered `internal_error` 500 (no
+      # engine tuple, no caller bytes — `Errors.build/1`'s catch-all reduces the
+      # term to its family), and the term itself is logged with the route and
+      # the request_id BEFORE the response goes out (task-96d8ab2b582818a4).
+      # A new export-specific §9 code is deliberately NOT minted: there is no
+      # branch a client could take on an engine invariant break that it would
+      # not take on `internal_error`, and the 503 `export_transport_failed` arm
+      # above already owns the one export failure that IS actionable (retry).
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -356,7 +387,18 @@ defmodule BarkparkWeb.WorkspaceController do
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-    WorkspaceBundle.export_to_file(workspace.id, opts)
+    # Test-only fault seam (mirrors `:export_copy_fault` / `:import_fault` in the
+    # engine): when configured, the export RETURNS the given `{:error, term}`
+    # instead of running, so the honest-outcome contract for an engine error
+    # shape is provable OVER THE WIRE without mocking the engine. The two real
+    # shapes are both unreachable through this route by construction — the
+    # workspace is already a resolved `%Workspace{}` with a UUID id — so without
+    # a seam the arms below could only ever be asserted by inspection. `nil` in
+    # every non-test env.
+    case Application.get_env(:barkpark, :export_engine_fault) do
+      {:error, _term} = fault -> fault
+      nil -> WorkspaceBundle.export_to_file(workspace.id, opts)
+    end
   rescue
     e in WorkspaceBundle.ExportScopeError ->
       {:error, {:export_scope, e.code, Exception.message(e)}}
@@ -477,7 +519,10 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path, grant_admin_to: operator_grant(conn)) do
+    case WorkspaceBundle.import_bundle_file(path,
+           grant_admin_to: operator_grant(conn),
+           expected_root_slug: expected_root_slug(conn)
+         ) do
       {:ok, stats} ->
         json(
           conn,
@@ -503,7 +548,8 @@ defmodule BarkparkWeb.WorkspaceController do
   defp merge_import(conn, path, receipt) do
     case WorkspaceBundle.import_bundle_file(path,
            mode: :merge,
-           grant_admin_to: operator_grant(conn)
+           grant_admin_to: operator_grant(conn),
+           expected_root_slug: expected_root_slug(conn)
          ) do
       {:ok, stats} ->
         json(
@@ -658,6 +704,14 @@ defmodule BarkparkWeb.WorkspaceController do
     |> json(%{
       error: %{
         code: "import_constraint_violation",
+        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+        # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
+        # colliding key values, and that IS the deliverable: the only caller
+        # who can reach this arm is a GLOBAL admin (the router's
+        # `:require_admin` pipeline gates the whole import action) importing a
+        # bundle they supplied, who needs the constraint + values to repair it.
+        # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
+        # import 500'd with nothing but "exit status 8".
         message: Exception.message(e),
         details: %{
           pg_code: Atom.to_string(code),
@@ -861,6 +915,17 @@ defmodule BarkparkWeb.WorkspaceController do
       _ -> nil
     end
   end
+
+  # The operator's stated target, handed to the engine as an EXPECTATION
+  # (task-b8218812cee2e4cc). `POST /api/workspaces/:workspace_slug/import` has
+  # always carried the workspace the caller MEANT in its path, and this
+  # controller used to discard it — so a merge-import of a bundle whose root
+  # slug is "default", POSTed at some other workspace's path, walked into the
+  # PDS-D9 empty-shell adopt branch and evicted the migrate-seeded Default,
+  # capturing the instance default scope. The engine cannot tell that from the
+  # supported `bp cloud support add --ws default` flow by state alone; the path
+  # segment is the only place the difference is written down.
+  defp expected_root_slug(conn), do: conn.params["workspace_slug"]
 
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.

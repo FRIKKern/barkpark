@@ -1,0 +1,1 @@
+A paging strategy over GET /v1/sites/:id/deployments is specified with its round-trip budget, and every quoted cost figure names the window it was taken over (never a page-local number quoted as a site total)

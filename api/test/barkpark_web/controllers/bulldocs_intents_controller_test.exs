@@ -9,7 +9,7 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
   `POST …/processed` marks one (so a follow-up GET omits it), and that a
   request without the token is rejected 401 (same as BulldocsIngestControllerTest).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Plugins.Bulldocs.Events
 

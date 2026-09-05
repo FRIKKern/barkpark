@@ -54,9 +54,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # The public zone every managed Barkpark lives under. The off-box Go warm-pool
   # provisioner turns the claim payload's subdomain label into `<label>.<base>`
   # (the DNS record + the Hetzner box name), so this MUST match the worker's own
-  # hardcoded base domain. Kept here so the control-plane-computed customer-facing
-  # FQDN (`provisioning_fqdn/1`) is identical to what the worker provisions.
-  @base_domain "barkpark.cloud"
+  # base domain. Kept here so the control-plane-computed customer-facing FQDN
+  # (`provisioning_fqdn/1`) is identical to what the worker provisions.
+  #
+  # This is the DEFAULT, not the value: it used to be a compile-time module
+  # attribute read directly at every site, which a release BUILD freezes — so a
+  # self-hosted control plane issued every site URL, every provisioning
+  # subdomain and every custom-host verdict under OUR zone, and its
+  # `custom_host_changeset/2` REJECTED the operator's own domain shape
+  # (gh-9531 residual, task-eeabfd9bf3ed8371). Read `base_domain/0` instead,
+  # which resolves `config :barkpark_cloud, :base_domain` (PLATFORM_BASE_DOMAIN)
+  # at CALL time and falls back to this literal, so nothing moves for an
+  # unconfigured deployment.
+  @default_base_domain "barkpark.cloud"
 
   # DNS label hard limit (RFC 1035). `<slug>-<team_short_id>` must never exceed it.
   @max_label_len 63
@@ -132,9 +142,16 @@ defmodule BarkparkCloud.Registry.Barkpark do
 
   # Instance custom domains — the PLATFORM shape: exactly ONE RFC-1035 label
   # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS
-  # zone, so the attach worker can stand the record up unassisted. The regex is
-  # the whole gate: anything it rejects never reaches a Caddyfile or a shell.
-  @custom_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$/
+  # zone, so the attach worker can stand the record up unassisted. The label
+  # regex is the whole gate: anything it rejects never reaches a Caddyfile or a
+  # shell.
+  #
+  # It matches the LABEL alone (the zone suffix is checked separately against
+  # `base_domain/0`) because it used to spell `\.barkpark\.cloud$` inline — a
+  # NINTH frozen read of the platform zone the filing missed, and the one that
+  # made the changeset reject a self-hoster's own zone even once every other
+  # site honoured the configured value.
+  @custom_host_label_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
   # Attach-domain V2 — the EXTERNAL customer-domain shape: an arbitrary
   # customer-owned FQDN (`barkpark.jarl.no`), TWO OR MORE well-formed lowercase
@@ -145,6 +162,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # alongside in `custom_host_changeset/2`. A host UNDER the platform zone never
   # takes this path — it must match the strict single-label platform shape.
   @external_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+  # The accepted shape of a CONFIGURED platform zone (`base_domain/0`): two or
+  # more lowercase RFC-1035 labels. Same defensive posture as the host regexes
+  # above — this value is interpolated into every FQDN, DNS label and Caddyfile
+  # the platform mints, so a scheme, a port, a path or a space is refused rather
+  # than carried.
+  @base_domain_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
 
   # An all-digit final label is the bare-IP shape (`203.0.113.9`) — no real TLD
   # is numeric, and an IP must never become an on-demand-ACME Caddy vhost.
@@ -396,9 +420,68 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def providers, do: @providers
   def fleet_roles, do: @fleet_roles
 
-  @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
+  @doc """
+  The public zone managed Barkparks live under — every provisioning subdomain,
+  site URL, custom-host verdict and DNS-label derivation on this control plane
+  hangs off it.
+
+  Read at CALL time from `config :barkpark_cloud, :base_domain`
+  (`PLATFORM_BASE_DOMAIN` in `config/runtime.exs`), defaulting to the historical
+  `barkpark.cloud` — an unconfigured deployment is byte-identical to before.
+
+  FAILS CLOSED: a configured-but-malformed zone raises rather than falling back
+  to ours. A silent fallback is the original defect in a new costume — the
+  operator would believe their zone was set while the box kept minting
+  `*.barkpark.cloud` FQDNs and rejecting their own domains.
+  `BarkparkCloud.Application.start/2` resolves it once at boot, so a typo
+  refuses the node instead of first surfacing as a customer's wrong site URL.
+
+  The off-box Go warm-pool worker carries its own base domain: configuring this
+  moves the control plane's half only, so the two MUST be set to the same zone.
+  """
   @spec base_domain() :: String.t()
-  def base_domain, do: @base_domain
+  def base_domain do
+    case Application.get_env(:barkpark_cloud, :base_domain) do
+      nil -> @default_base_domain
+      configured -> validate_base_domain!(configured)
+    end
+  end
+
+  @doc """
+  The compile-time fallback zone, for tests and for callers that need to state
+  what "unconfigured" means without reproducing the literal.
+  """
+  @spec default_base_domain() :: String.t()
+  def default_base_domain, do: @default_base_domain
+
+  # A base domain is interpolated into FQDNs, DNS labels, Caddyfiles and the
+  # claim payload the worker executes, so the accepted shape is the strict one:
+  # two or more lowercase RFC-1035 labels, nothing else. That rejects a scheme
+  # (`https://barkpark.cloud`), a space, a path, an uppercase host, a port, a
+  # leading/trailing dot and a bare single label — every spelling an operator
+  # plausibly types that would otherwise mint hosts nothing can resolve.
+  defp validate_base_domain!(value) when is_binary(value) do
+    if String.length(value) <= 253 and Regex.match?(@base_domain_format, value) do
+      value
+    else
+      bad_base_domain!(value)
+    end
+  end
+
+  defp validate_base_domain!(other), do: bad_base_domain!(other)
+
+  defp bad_base_domain!(value) do
+    raise ArgumentError, """
+    invalid platform base domain: #{inspect(value)}.
+
+    Expected a bare lowercase domain of two or more labels, e.g. "example.com" —
+    no scheme, no port, no path, no whitespace, no trailing dot.
+
+    Set PLATFORM_BASE_DOMAIN to the zone this control plane owns (and point the
+    warm-pool worker at the SAME zone), or leave it unset to keep the
+    #{@default_base_domain} default.
+    """
+  end
 
   @doc ~S"""
   The GLOBALLY-unique provisioning subdomain label for this Barkpark:
@@ -456,7 +539,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   """
   @spec provisioning_fqdn(t() | {String.t(), binary()}) :: String.t()
   def provisioning_fqdn(barkpark_or_pair),
-    do: provisioning_subdomain(barkpark_or_pair) <> "." <> @base_domain
+    do: provisioning_subdomain(barkpark_or_pair) <> "." <> base_domain()
 
   @doc """
   The customer-facing URL (https) for this Barkpark's FQDN. The value stored in
@@ -503,7 +586,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   fallback).
   """
   @spec clean_url(String.t()) :: String.t()
-  def clean_url(slug) when is_binary(slug), do: "https://" <> slug <> "." <> @base_domain
+  def clean_url(slug) when is_binary(slug), do: "https://" <> slug <> "." <> base_domain()
 
   @doc """
   The provisioning subdomain LABEL extracted from a stored Barkpark `url` — the
@@ -529,7 +612,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> String.downcase()
     |> String.replace_prefix("https://", "")
     |> String.replace_prefix("http://", "")
-    |> String.replace_suffix("." <> @base_domain, "")
+    |> String.replace_suffix("." <> base_domain(), "")
   end
 
   def subdomain_from_url(%__MODULE__{} = bp), do: provisioning_subdomain(bp)
@@ -537,22 +620,23 @@ defmodule BarkparkCloud.Registry.Barkpark do
   @doc """
   The platform DNS label of the attached custom host — `"gyldendal"` for
   `gyldendal.barkpark.cloud`. A platform custom host is exactly one label under
-  `#{@base_domain}` (enforced by `custom_host_changeset/2`), so stripping the
-  zone suffix is the whole derivation. `nil` when no custom host is attached
+  the platform zone (`base_domain/0`, default `#{@default_base_domain}`, enforced
+  by `custom_host_changeset/2`), so stripping the zone suffix is the whole
+  derivation. `nil` when no custom host is attached
   OR when the attached host is an EXTERNAL customer FQDN (attach-domain V2) —
   the customer owns that DNS, so there is no platform label to upsert.
   """
   @spec custom_host_label(t()) :: String.t() | nil
   def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host) do
     if platform_custom_host?(host),
-      do: String.replace_suffix(host, "." <> @base_domain, ""),
+      do: String.replace_suffix(host, "." <> base_domain(), ""),
       else: nil
   end
 
   def custom_host_label(%__MODULE__{}), do: nil
 
   @doc """
-  Is `host` a platform-zone custom host (any host under `#{@base_domain}`), as
+  Is `host` a platform-zone custom host (any host under `base_domain/0`), as
   opposed to an external customer FQDN (attach-domain V2)? Splits the claim
   payload: platform hosts carry `dns_label`/`dns_zone` for the worker's
   A-record upsert; external hosts carry nil halves and the worker verifies
@@ -560,7 +644,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   """
   @spec platform_custom_host?(String.t() | nil) :: boolean()
   def platform_custom_host?(host) when is_binary(host),
-    do: String.ends_with?(host, "." <> @base_domain)
+    do: String.ends_with?(host, "." <> base_domain())
 
   def platform_custom_host?(_), do: false
 
@@ -645,9 +729,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
     |> assoc_constraint(:team)
-    |> unique_constraint([:team_id, :slug],
+    # cch-w37-bl — see `TeamInvitation.changeset/2`. Opening the list with the
+    # `belongs_to` key made POST /v1/fleet/supports answer "team id already has
+    # a Barkpark with this slug" for a duplicate support name.
+    |> unique_constraint([:slug, :team_id],
       name: :barkparks_team_slug_unique_idx,
-      message: "already has a Barkpark with this slug"
+      message: "is already taken by another Barkpark on this team"
     )
     # Defense in depth: the resolved customer-facing FQDN (`url`) is GLOBALLY
     # unique. `provisioning_subdomain/1` already makes the label collision-free by
@@ -935,9 +1022,9 @@ defmodule BarkparkCloud.Registry.Barkpark do
   the ask-gate lookup can never diverge) and shape-validated, split by zone
   (attach-domain V2):
 
-    * under `#{@base_domain}` → the strict one-label platform format (we own
-      the zone; deeper nesting is never claimable)
-    * the `#{@base_domain}` apex itself → always rejected
+    * under the platform zone (`base_domain/0`) → the strict one-label platform
+      format (we own the zone; deeper nesting is never claimable)
+    * that zone's apex itself → always rejected
     * anywhere else → a well-formed lowercase external FQDN (≥ 2 labels,
       ≤ 253 chars, dots/hyphens/alphanumerics only, non-numeric TLD)
 
@@ -962,15 +1049,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # The zone-split shape gate (see `custom_host_changeset/2`). Runs on the
   # NORMALIZED value; anything it rejects never reaches a Caddyfile or a shell.
   defp validate_custom_host_shape(changeset) do
+    # ONE read of the configured zone per validation, so the apex reject, the
+    # zone split and the error message can never describe different zones.
+    zone = base_domain()
+
     validate_change(changeset, :custom_host, fn :custom_host, host ->
       cond do
-        host == @base_domain ->
+        host == zone ->
           [custom_host: {"the platform apex itself cannot be attached", []}]
 
-        String.ends_with?(host, "." <> @base_domain) ->
-          if Regex.match?(@custom_host_format, host),
+        String.ends_with?(host, "." <> zone) ->
+          label = String.replace_suffix(host, "." <> zone, "")
+
+          if Regex.match?(@custom_host_label_format, label),
             do: [],
-            else: [custom_host: {"must be a single label under #{@base_domain}", []}]
+            else: [custom_host: {"must be a single label under #{zone}", []}]
 
         Regex.match?(@external_host_format, host) and
             not Regex.match?(@numeric_tld_format, host) ->

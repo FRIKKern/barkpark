@@ -1,0 +1,1 @@
+The alias path is fixed so `bp task list --all` behaves identically to `bp task ls --all`, or the alias is removed so the failure is a usage error rather than a 500. Evidence: paste both invocations with their rc and row counts.

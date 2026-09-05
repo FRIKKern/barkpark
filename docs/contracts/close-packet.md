@@ -12,22 +12,29 @@ The [claim-lifecycle contract](task-claim-lifecycle.md) says what the system wil
 per-criterion `evidence`. Leave what you cannot prove `met:false` under
 `criteria_override`: a visible override beats an invisible false-done.**
 
-## Why — stamping is sealed at close
+## Why — the met flip is sealed at close, the attempt is not
 
-`bp task stamp` is **`in_progress` only**. On a closed row *both* halves refuse:
+`bp task stamp --met` is **`in_progress` only**. It stays refused on a terminal row
+because a met-flip rewrites the verdict the close sealed *and* overwrites `evidence`:
 
 ```
 bp task stamp <id> <worker> <epoch> --criterion 0 --met  --evidence "…"  -> bp: not_in_progress:done
-bp task stamp <id> <worker> <epoch> --criterion 0 --miss --note     "…"  -> bp: not_in_progress:done
 ```
 
-The `--miss` half traps people: after close you cannot even record an **honest failed
-attempt**. With no sanctioned post-hoc move, a closer who finds a gap reaches for a
-raw `/v1/data/mutate` and pastes one evidence string across every criterion. That
-mechanism — not carelessness — produced the misattached-proof population the audit
-measured (`task-c285e15a70e5bb59`), where a guard on *duplicate* evidence was
-rejected: it would only produce N varied strings, defeating the detector while
-leaving the criteria just as unproven.
+`--miss` is the exception, on `--withdraw`'s fence — pass the `rev` you read and the
+attempt lands on a `done` or `cancelled` row:
+
+```
+bp task stamp <id> <worker> <epoch> --criterion 0 --miss --note "…" --observed-rev <rev>
+```
+
+Append-only by construction: `met` is pinned to its stored value, `evidence` and the
+criterion text byte-unchanged, the event carrying `post_close: true`. `open` and
+`blocked` stay refused — they can be claimed, so nothing is missing.
+
+When both halves refused, closers reached for a raw `/v1/data/mutate` pasting one
+evidence string across every criterion — the mechanism behind the misattached-proof
+population (`task-c285e15a70e5bb59`). Still the wrong move.
 
 ## Where a row-level receipt can go
 
@@ -45,8 +52,8 @@ resurrect the row into `bp task ready`, which reopening to `open` would.
 
 **Stamp as you prove, not after.** While the row is `in_progress` and you hold the
 claim, a re-stamp **overwrites** that criterion's evidence — measured, 711 bytes
-replaced by 28, not appended. So a mis-filed criterion is fixable *there*; after
-close it is not.
+replaced by 28, not appended. So a mis-filed criterion is *repaired* there; after
+close all you can add is an attempt note beside it.
 
 Criterion **text** is builder-immutable — corrections belong in evidence or an attempt
 note, never a reword. People assume the record freezes at close, so they never fix
@@ -60,11 +67,10 @@ the unmet criteria **stay `met:false`** — an override never flips them. That i
 whole point: the row keeps saying what was not proven, next to a signed reason.
 
 > **A convention you keep, not a gate that keeps it for you.** A `done` close over an
-> unmet criterion is not always refused — one landed emitting `4/5 met — closed done
-> with unmet criteria (advisory, no gate)`. So a row can sit `done`, unmet, with
-> `close_override: null`: no actor, no reason. Un-setting a criterion in the close
-> write is one route there (`task-c652c3ba8129c607`). Pass the override even when
-> nothing stops you — a reader cannot tell an honest gap from a silent one.
+> unmet criterion is not always refused — one landed as `4/5 met … (advisory, no
+> gate)`, so a row can sit `done`, unmet, `close_override: null`: no actor, no
+> reason. Pass the override even when nothing stops you — a reader cannot tell an
+> honest gap from a silent one.
 
 It is one of **three** honesty gates on a `done` close, each with its own override,
 and **none of them discharges another**:
@@ -84,4 +90,4 @@ means.
 Per-criterion `evidence` answers *"what proves THIS criterion?"*; a row-level receipt
 answers *"what happened to this task?"* Copying the second into the first makes every
 criterion look proven by one artifact — indistinguishable from proof nobody checked,
-and, unlike an override, leaving no signature saying so.
+and, unlike an override, unsigned.

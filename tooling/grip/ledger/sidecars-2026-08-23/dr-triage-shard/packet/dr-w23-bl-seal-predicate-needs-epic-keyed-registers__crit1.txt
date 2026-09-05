@@ -1,0 +1,1 @@
+A new refusal `UNREGISTERED-EPIC` makes an --epic with no register a NO SEAL (exit 1), and a test pins that a deploy-reliability run before its register is filed cannot print b=PASS.

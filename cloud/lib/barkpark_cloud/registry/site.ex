@@ -254,9 +254,13 @@ defmodule BarkparkCloud.Registry.Site do
     |> validate_domains()
     |> assoc_constraint(:barkpark)
     |> assoc_constraint(:team)
-    |> unique_constraint([:team_id, :slug],
+    # cch-w37-bl — see `TeamInvitation.changeset/2`. Opening the list with the
+    # `belongs_to` key made POST /v1/sites answer "team id already has a site
+    # with this slug" for a duplicate name; `:slug` is the field the creator
+    # typed (or the one `slugify/1` derived from the name they typed).
+    |> unique_constraint([:slug, :team_id],
       name: :sites_team_slug_unique_idx,
-      message: "already has a site with this slug"
+      message: "is already taken by another site on this team"
     )
   end
 
@@ -359,6 +363,26 @@ defmodule BarkparkCloud.Registry.Site do
   def runtime_changeset(site, attrs) do
     site
     |> cast(attrs, [:port, :current_deployment_id])
+  end
+
+  @doc """
+  task-b3e3ec0f433b217d: NARROW changeset for a public-read credential ROTATION —
+  `Registry.rotate_site_read_token/1` and nothing else.
+
+  Casts ONE column, and deliberately not through `changeset/2`: the rotate runs
+  against a site row loaded some time earlier, so a wide cast would write back
+  whatever that stale struct happened to hold for `domains`, `env_encrypted` or
+  `current_deployment_id`. A credential swap must move the credential and
+  nothing else.
+
+  `read_token_encrypted` is required here: an unset (or explicitly `nil`) value
+  would blank the site's credential — the "site goes dark" outcome the rotate
+  exists to make impossible.
+  """
+  def read_token_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:read_token_encrypted])
+    |> validate_required([:read_token_encrypted])
   end
 
   @doc """

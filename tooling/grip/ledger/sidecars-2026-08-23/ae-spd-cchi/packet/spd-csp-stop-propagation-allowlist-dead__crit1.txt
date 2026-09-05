@@ -1,0 +1,1 @@
+CC=clang mix test test/barkpark_web/plugs/browser_csp_test.exs test/barkpark_web/plugs/paper_reader_csp_test.exs is green with output pasted.

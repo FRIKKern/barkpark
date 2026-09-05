@@ -34,7 +34,7 @@ defmodule BarkparkWeb.SynonymsDeleteNilWorkspaceTest do
       `AssignDefaultScope`, answers 200, and the seeded legacy/global row is
       destroyed. Restoring the guard greens it.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 
@@ -92,7 +92,7 @@ defmodule BarkparkWeb.SynonymsDeleteNilWorkspaceTest do
   end
 
   defp conn_for(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end

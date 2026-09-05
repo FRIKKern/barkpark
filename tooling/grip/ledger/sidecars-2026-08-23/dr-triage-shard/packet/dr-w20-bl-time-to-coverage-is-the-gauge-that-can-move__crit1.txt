@@ -1,0 +1,1 @@
+The `diff base:` decision is emitted as an output or annotation a census can ASSERT, not a log line nothing reads; a guard asserts base == the previous success's headSha and REDS when the `|| true` fallback fires.

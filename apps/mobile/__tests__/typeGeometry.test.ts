@@ -278,6 +278,10 @@ describe('the token table is pinned to numbers, not to relations', () => {
 // minted to preserve. They are written out here so the device pass has one
 // place to look and one line to change.
 const NAMED: Record<string, string> = {
+  // The context band's segments (chat-local-cloud-context-w3) — `scale.micro`,
+  // the chrome ladder's smallest rung. The band is identity chrome under the
+  // title row, so it must not compete with the transcript for weight.
+  'chat/ContextBand.tsx#segment': '11/15',
   'chat/PickerSheet.tsx#archiveText': '15/21',
   'chat/PickerSheet.tsx#chipText': '14/20',
   'chat/PickerSheet.tsx#degraded': '14/20',

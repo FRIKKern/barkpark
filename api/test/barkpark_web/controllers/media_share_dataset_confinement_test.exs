@@ -108,18 +108,12 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
     file
   end
 
-  defp with_shares(env_string) do
-    prior = Application.get_env(:barkpark, :shares)
-    Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
-
-    :ok
-  end
+  # arpss-w8: shares are planted as STORED rows via `Barkpark.SharingFixtures`,
+  # so `Sharing.refresh/0` — fired by add_share/remove_share, POST/DELETE
+  # /v1/shares and the Studio shares handlers — REBUILDS this fixture instead of
+  # ERASING it (a bare `put_env(:barkpark, :shares, …)` is in neither refresh
+  # input). Snapshots and restores `:shares_env` as well as `:shares`.
+  defp with_shares(env_string), do: Barkpark.SharingFixtures.plant_shares!(env_string)
 
   defp share_production_media(ws, proj),
     do: with_shares("#{ws.slug}/#{proj.slug}/#{@shared_dataset}:media:read")
@@ -235,7 +229,7 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
       raw = member_bearer!(ws)
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("accept", "*/*")
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get("#{base(ws, proj)}/media/#{unshared.id}/meta")
@@ -250,7 +244,7 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
       raw = member_bearer!(ws)
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("accept", "*/*")
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get("#{base(ws, proj)}/media/files/#{unshared.path}")

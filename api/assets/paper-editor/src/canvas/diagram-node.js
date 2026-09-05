@@ -18,9 +18,8 @@
 //       and Map.get(b,"caption","").
 //   So the diagram block is { id, type:"diagram", source:"<text>", caption:"<short>" }
 //   — a PLAIN STRING `source` (the raw Mermaid text, NOT inline runs, NOT marks) plus
-//   a `caption` string. v1 edits the SOURCE in the textarea — NO live Mermaid preview
-//   in the editor (a later polish; the VIEW-mode render via walk.ex/figures.ex is
-//   unchanged).
+//   a `caption` string. The node view paints the same Mermaid figure anatomy as the
+//   reader and exposes source/caption editing in an accessible disclosure.
 //
 //   NOTE the caption asymmetry vs the code node's `lang`: the STORED diagram always
 //   carries `caption` (default_block seeds "" and build_block_patch writes it
@@ -78,7 +77,7 @@
 // never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
+import { DEBOUNCE_MS } from "../contract.js";
 
 // The TipTap node NAME is `bpDiagram`, NOT `diagram`. UNLIKE code (whose name had to
 // dodge the StarterKit inline `code` MARK) there is NO StarterKit collision for
@@ -199,12 +198,10 @@ export const Diagram = Node.create({
     ];
   },
 
-  // ── the NodeView: a <pre> wrapping a NON-PM <textarea> island ────────────────
+  // ── the NodeView: reader figure + disclosed NON-PM edit island ─────────
   //
-  // Builds:
-  //   <pre class="bp-canvas-diagram" data-bp-type="diagram">  ← frame (monospace)
-  //     <textarea class="bp-canvas-diagram-area">…source…</textarea>  ← EDIT island
-  //     <input class="bp-canvas-diagram-caption" />            ← optional caption
+  // Builds the reader's `figure > pre.mermaid + figcaption` structure followed
+  // by a native <details> holding the textarea and caption input.
   //
   // The textarea is the edit surface ProseMirror DOES NOT MANAGE:
   //   * stopEvent:()=>true      — PM never turns its keystrokes/clicks into
@@ -220,21 +217,50 @@ export const Diagram = Node.create({
   // cosmetic — both are debounced non-PM controls writing one attr each.
   addNodeView() {
     return ({ node, editor, getPos }) => {
-      const dom = document.createElement("pre");
+      const dom = document.createElement("div");
       dom.className = "bp-canvas-diagram";
       dom.setAttribute("data-bp-type", "diagram");
-      // Monospace + preserve the textarea's own whitespace; the <pre> is a frame,
-      // the textarea owns the editable text.
-      dom.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      dom.style.whiteSpace = "normal"; // the textarea wraps/scrolls; the <pre> frame doesn't
+
+      const figure = document.createElement("figure");
+      figure.className = "bp-canvas-diagram-figure";
+      figure.setAttribute(
+        "style",
+        "margin:var(--bp-air-figure, 1.6rem) 0 0;" +
+          "margin-inline:var(--bp-evidence-pull, 0px);" +
+          "width:var(--bp-evidence-width, 100%);box-sizing:border-box;" +
+          "padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);" +
+          "border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;" +
+          "overflow-x:auto",
+      );
+      const preview = document.createElement("pre");
+      preview.className = "mermaid";
+      figure.appendChild(preview);
+      const figcaption = document.createElement("figcaption");
+      figcaption.className = "bp-figcaption";
+      figure.appendChild(figcaption);
+
+      const disclosure = document.createElement("details");
+      disclosure.className = "bp-canvas-diagram-editor";
+      disclosure.setAttribute("contenteditable", "false");
+      const summary = document.createElement("summary");
+      summary.className = "bp-canvas-diagram-editor-toggle";
+      summary.textContent = "Edit diagram";
+      disclosure.appendChild(summary);
+      const fields = document.createElement("div");
+      fields.className = "bp-canvas-diagram-fields";
 
       // The EDIT island: a textarea showing the Mermaid source. Monospace, full-width,
       // auto-sized to its content lines. PM never manages it (stopEvent /
       // ignoreMutation below).
+      const sourceLabel = document.createElement("label");
+      sourceLabel.className = "bp-canvas-diagram-field";
+      const sourceLabelText = document.createElement("span");
+      sourceLabelText.textContent = "Mermaid source";
       const area = document.createElement("textarea");
       area.className = "bp-canvas-diagram-area";
       area.setAttribute("spellcheck", "false");
+      area.setAttribute("aria-label", "Mermaid source");
+      area.setAttribute("contenteditable", "false");
       area.style.fontFamily =
         "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       area.style.width = "100%";
@@ -244,6 +270,8 @@ export const Diagram = Node.create({
       area.style.resize = "vertical";
       area.style.whiteSpace = "pre";
       area.style.overflowWrap = "normal";
+      sourceLabel.appendChild(sourceLabelText);
+      sourceLabel.appendChild(area);
 
       // The OPTIONAL caption input — a small non-PM control. Editing it writes the
       // `caption` attr (debounced) exactly like the textarea writes `source`.
@@ -253,8 +281,8 @@ export const Diagram = Node.create({
       // input showing its "caption" placeholder at rest is chrome absent from the
       // render. It becomes a HOVER/FOCUS affordance (see syncChrome) — hidden while
       // idle, revealed on interaction. A SET caption stays visible (figcaption
-      // parity). (The source textarea's raw-Mermaid-vs-rendered-figure divergence is
-      // a separate, deliberate no-live-preview exception recorded in the PR matrix.)
+      // parity). The caption input now lives inside the closed edit disclosure;
+      // the figcaption above remains the resting reader surface.
       const captionInput = document.createElement("input");
       captionInput.type = "text";
       captionInput.className = "bp-canvas-diagram-caption";
@@ -264,28 +292,56 @@ export const Diagram = Node.create({
       captionInput.setAttribute("aria-label", "diagram caption");
       captionInput.setAttribute("contenteditable", "false");
 
-      dom.appendChild(area);
-      dom.appendChild(captionInput);
+      const captionLabel = document.createElement("label");
+      captionLabel.className = "bp-canvas-diagram-field";
+      const captionLabelText = document.createElement("span");
+      captionLabelText.textContent = "Caption";
+      captionLabel.appendChild(captionLabelText);
+      captionLabel.appendChild(captionInput);
+
+      fields.appendChild(sourceLabel);
+      fields.appendChild(captionLabel);
+      disclosure.appendChild(fields);
+      dom.appendChild(figure);
+      dom.appendChild(disclosure);
 
       // Paint the controls from the node's current attrs. Re-run on every update()
       // so an external attr change (an echo, an undo) reflects. Guard against
       // clobbering the field the user is actively typing in (don't reset its value
       // mid-keystroke) by only writing when the incoming value differs.
-      // pdd-t18b: the resting-chrome gate (mirrors code-node.js). The empty caption
-      // input hides at rest and reveals only while the frame is hovered or focus is
-      // inside it, so an idle diagram atom carries no "caption" ghost chrome.
-      let hovered = false;
-      let focused = false;
       const syncChrome = () => {
-        // Both reveal channels are gated on editability: a non-editable editor
-        // (view mode) must not surface an empty readonly config control on
-        // hover OR focus — there is nothing the reveal could let you do.
-        const hide = configControlHidden({
-          value: captionInput.value,
-          hovered: hovered && editor.isEditable,
-          focused: focused && editor.isEditable,
-        });
-        captionInput.style.display = hide ? "none" : "";
+        disclosure.hidden = !editor.isEditable;
+      };
+
+      const paintCaption = (caption) => {
+        figcaption.replaceChildren();
+        if (!caption) {
+          figcaption.hidden = true;
+          return;
+        }
+        figcaption.hidden = false;
+        const match = /^(Figure\s+\S+?\.)\s*(.*)$/s.exec(caption);
+        if (!match) {
+          figcaption.textContent = caption;
+          return;
+        }
+        const lead = document.createElement("b");
+        lead.textContent = match[1];
+        figcaption.appendChild(lead);
+        if (match[2]) figcaption.appendChild(document.createTextNode(` ${match[2]}`));
+      };
+
+      let previewSource = null;
+      const paintPreview = (source) => {
+        if (previewSource === source) return;
+        previewSource = source;
+        preview.textContent = source;
+        preview.dataset.bpSrc = source;
+        preview.removeAttribute("data-processed");
+        const runtime = window.BarkparkPaperMermaid;
+        if (runtime && typeof runtime.runMermaid === "function") {
+          runtime.runMermaid.call({ el: figure });
+        }
       };
 
       // Auto-grow the source textarea to its content. A <textarea> with no `rows`
@@ -306,6 +362,8 @@ export const Diagram = Node.create({
         const caption = (n.attrs && n.attrs.caption) || "";
         if (area.value !== source) area.value = source;
         if (captionInput.value !== caption) captionInput.value = caption;
+        paintPreview(source);
+        paintCaption(caption);
         // Editability mirrors the editor's mode.
         const editable = editor.isEditable;
         area.readOnly = !editable;
@@ -317,37 +375,6 @@ export const Diagram = Node.create({
         syncChrome();
       };
 
-      // Reveal the config chrome on hover / focus-within; hide it again when idle.
-      const onEnter = () => {
-        hovered = true;
-        syncChrome();
-      };
-      const onLeave = () => {
-        hovered = false;
-        syncChrome();
-      };
-      const onFocusIn = () => {
-        focused = true;
-        syncChrome();
-      };
-      const onFocusOut = (e) => {
-        // Focus-within guard: focusout fires BEFORE the next element receives
-        // focus, so hiding here would yank display:none onto the captionInput in
-        // the middle of a Tab from the textarea INTO it (the caption follows the
-        // textarea in DOM order) — the browser's focus fixup then drops focus to
-        // <body> and the control is never reachable by keyboard. relatedTarget is
-        // the element gaining focus; when it is still inside this atom, focus is
-        // only MOVING within, not leaving — keep the chrome revealed and let the
-        // subsequent focusin confirm it.
-        if (e && e.relatedTarget && dom.contains(e.relatedTarget)) return;
-        focused = false;
-        syncChrome();
-      };
-      dom.addEventListener("mouseenter", onEnter);
-      dom.addEventListener("mouseleave", onLeave);
-      dom.addEventListener("focusin", onFocusIn);
-      dom.addEventListener("focusout", onFocusOut);
-
       paint(node);
 
       // Debounced write-back of source+caption to the node attrs. setNodeMarkup
@@ -356,48 +383,60 @@ export const Diagram = Node.create({
       // field(s). The debounce mirrors the editor's DEBOUNCE_MS so a burst of
       // keystrokes coalesces into one attr write (and thus one op batch).
       let writeTimer = null;
+      const commitNow = () => {
+        const nextSource = area.value;
+        const rawCaption = captionInput.value;
+        const nextCaption = rawCaption === "" ? null : rawCaption;
+        paintPreview(nextSource);
+        paintCaption(rawCaption);
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        // caption: empty string → null so an absent caption round-trips as ABSENT
+        // (mirrors code's lang "" → null; the canonical compare treats ""/null/
+        // absent equal, so a no-op edit emits nothing).
+        if (
+          cur.attrs.source === nextSource &&
+          (cur.attrs.caption || null) === nextCaption
+        ) {
+          return; // nothing changed — emit nothing
+        }
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, {
+              ...cur.attrs,
+              source: nextSource,
+              caption: nextCaption,
+            });
+            return true;
+          })
+          .run();
+      };
       const scheduleWrite = () => {
         if (!editor.isEditable) return;
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur) return;
-          const nextSource = area.value;
-          // caption: empty string → null so an absent caption round-trips as ABSENT
-          // (mirrors code's lang "" → null; the canonical compare treats ""/null/
-          // absent equal, so a no-op edit emits nothing).
-          const rawCaption = captionInput.value;
-          const nextCaption = rawCaption === "" ? null : rawCaption;
-          if (
-            cur.attrs.source === nextSource &&
-            (cur.attrs.caption || null) === nextCaption
-          ) {
-            return; // nothing changed — emit nothing
-          }
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, {
-                ...cur.attrs,
-                source: nextSource,
-                caption: nextCaption,
-              });
-              return true;
-            })
-            .run();
+          commitNow();
         }, DEBOUNCE_MS);
+      };
+      const flushPending = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitNow();
       };
 
       area.addEventListener("input", scheduleWrite);
       area.addEventListener("input", fitArea); // grow as the source is typed
       area.addEventListener("focus", fitArea); // re-fit once definitely attached
       captionInput.addEventListener("input", scheduleWrite);
-      // Keep the resting-chrome gate in step as the caption is typed / cleared.
-      captionInput.addEventListener("input", syncChrome);
+      dom.addEventListener("bp-flush-node", flushPending);
+      const syncCaptionFromInput = () => paintCaption(captionInput.value);
+      captionInput.addEventListener("input", syncCaptionFromInput);
 
       return {
         dom,
@@ -427,11 +466,8 @@ export const Diagram = Node.create({
           if (writeTimer) clearTimeout(writeTimer);
           area.removeEventListener("input", scheduleWrite);
           captionInput.removeEventListener("input", scheduleWrite);
-          captionInput.removeEventListener("input", syncChrome);
-          dom.removeEventListener("mouseenter", onEnter);
-          dom.removeEventListener("mouseleave", onLeave);
-          dom.removeEventListener("focusin", onFocusIn);
-          dom.removeEventListener("focusout", onFocusOut);
+          dom.removeEventListener("bp-flush-node", flushPending);
+          captionInput.removeEventListener("input", syncCaptionFromInput);
         },
       };
     };

@@ -1,0 +1,1 @@
+The post-PUT read-back is MEASURED, not asserted: `required-checks-apply.sh --confirm` is executed at least once end-to-end (nobody ever has), or the row states the concrete reason it cannot be and what stands in for it. Show the read-back's own failure path exiting non-zero.

@@ -1,0 +1,1 @@
+Every graced refusal and every start retry emits a counted signal that survives the reaching poll. Evidence: the telemetry/log line and a test asserting it fires.

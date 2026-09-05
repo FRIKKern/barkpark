@@ -1,0 +1,1 @@
+v1/graph is checked for the same tier: TasksController.graph_corpus/2 holds a SECOND copy of the public-read predicate, verified to still agree with Plugs.PublicRead.public_read_token?/1 rather than having drifted.

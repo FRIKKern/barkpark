@@ -1,0 +1,1 @@
+If implemented: a Go test drives the real production row shape (host set, last_seen_at nil, health_status up, agent_status offline) and asserts the CLI does not print a measured-failure word for it. Evidence: the test run.

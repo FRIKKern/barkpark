@@ -1,0 +1,1 @@
+deploy/cp-deploy_test.sh gains a flip assertion analogous to the static engine's `Caddy flipped to :4001` / first_upstream rows, including a collateral-scope row proving unrelated upstreams are untouched; FAIL-BEFORE pasted.

@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
   on some grant.
 
   It never fires on the paper editor's component route. `PaperFieldBlock.persist/2`
-  does `send(self(), {:paper_op, op})` (paper_field_block.ex:318), which lands
+  sends a `:paper_op` message to the parent, which lands
   in `StudioLive`'s `handle_INFO` → `Shared.Paper.paper_op/2` → `write_denied?/1`
   (shared/paper.ex:98-100) → `Caps.write_capable?/2`. No `handle_event` hook —
   parent socket or component socket — observes a `handle_info`, so
@@ -37,7 +37,7 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
 
   THE ORACLE IS STORED BYTES. Every assertion reads the persisted document back
   from the store — never a flash, never a "no session started" predicate (the
-  shipped `sheets_reader_live_test.exs:451` uses `Session.whereis(...) == nil`,
+  shipped `sheets_reader_live_test.exs` uses `Session.whereis(...) == nil`,
   which is VACUOUS the moment a session exists).
 
   NON-VACUITY, BY SUBSTITUTION ON THE SHIPPED MODULE (pds-w45). This block once
@@ -206,6 +206,7 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
   # THE ANTI-VACUITY GUARD. `with_target/2` on an id that is not in the DOM does
@@ -223,9 +224,14 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
   defp inner_change(view, params) do
     assert_editor_rendered!(view)
 
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok

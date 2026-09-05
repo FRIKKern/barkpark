@@ -1,0 +1,1 @@
+The change does not turn a computable verdict into rc 3 or 4, and the harness's hermetic probes still pass. Evidence: the harness tail.

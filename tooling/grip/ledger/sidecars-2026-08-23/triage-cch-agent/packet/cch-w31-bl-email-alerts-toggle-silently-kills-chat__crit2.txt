@@ -1,0 +1,1 @@
+A guard ties the console's claim to the server's gating and is mutation-proved able to lose: changing the server gate without the copy reds it. Evidence: the failing run.

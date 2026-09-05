@@ -56,7 +56,17 @@ defmodule Barkpark.Tasks.ReleaseTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         scope
@@ -116,7 +126,17 @@ defmodule Barkpark.Tasks.ReleaseTest do
           %{
             "doc_id" => doc_id,
             "title" => doc_id,
-            "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+            "content" => %{
+              "kind" => "task",
+              "acceptance_criteria" => [
+                %{
+                  "criterion" => "the fixture states its bar",
+                  "met" => true,
+                  "evidence" => "fixture"
+                }
+              ],
+              "lifecycle_status" => "open"
+            }
           },
           @dataset,
           scope
@@ -173,7 +193,17 @@ defmodule Barkpark.Tasks.ReleaseTest do
           %{
             "doc_id" => doc_id,
             "title" => doc_id,
-            "content" => %{"kind" => "task", "lifecycle_status" => "blocked"}
+            "content" => %{
+              "kind" => "task",
+              "acceptance_criteria" => [
+                %{
+                  "criterion" => "the fixture states its bar",
+                  "met" => true,
+                  "evidence" => "fixture"
+                }
+              ],
+              "lifecycle_status" => "blocked"
+            }
           },
           @dataset,
           scope
@@ -198,6 +228,111 @@ defmodule Barkpark.Tasks.ReleaseTest do
 
       assert epoch_of(doc) > epoch + 1 or epoch_of(doc) == epoch + 2
       assert get_in(Repo.get!(Document, doc.id).content, ["claim", "worker"]) == "w-next"
+    end
+  end
+
+  # ─── The stranded-claim deadlock (task-f07ead0c1f8025bb) ────────────────────
+  #
+  # RED BEFORE THE FIX: every assertion after the `stage` call reproduces the
+  # filed deadlock. `Release.release/3` returned `{:error, {:not_in_progress,
+  # "open"}}`, so this describe block fails on the pre-fix tree.
+  describe "a STRANDED claim (lifecycle open, claim.worker still set)" do
+    test "is reachable through a LEGAL stage, and only release can now free it",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-dead")
+      epoch = epoch_of(doc)
+
+      # THE PATH (row criterion 2): `stage` legally moves in_progress → open
+      # (Transitions D7) and deliberately never touches content.claim. Nothing
+      # here is a hack — this is the sanctioned reopen verb doing its job.
+      assert {:ok, _} = Tasks.stage(doc.id, "open")
+
+      stranded = Repo.get!(Document, doc.id).content
+      assert stranded["lifecycle_status"] == "open"
+      assert get_in(stranded, ["claim", "worker"]) == "w-dead"
+      assert get_in(stranded, ["claim", "epoch"]) == epoch
+
+      # The OTHER two verbs still refuse, exactly as filed — the deadlock is
+      # that TOGETHER they left no exit, not that any one of them is wrong.
+      assert {:error, :not_ready} = Tasks.claim_by_id(doc.doc_id, "w-rescuer", scope)
+
+      assert {:error, {:not_in_progress, "open"}} =
+               Tasks.stamp(doc.id, "w-rescuer",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 outcome: {:miss, "cannot stamp a stranded row"}
+               )
+
+      # THE FIX (remedy A): a bystander frees it, WITHOUT impersonating the
+      # dead holder. This is the line that reds on today's main.
+      assert {:ok, _} = Release.release(doc.id, "w-rescuer", observed_epoch: epoch)
+
+      freed = Repo.get!(Document, doc.id).content
+      assert freed["lifecycle_status"] == "open"
+      assert get_in(freed, ["claim", "worker"]) == nil
+      assert get_in(freed, ["claim", "epoch"]) == epoch + 1
+      # The attribution gap closes: released_by names the ACTOR, not the corpse.
+      assert get_in(freed, ["claim", "released_by"]) == "w-rescuer"
+
+      # …and the row is claimable again by anyone.
+      assert {:ok, _} = Tasks.claim_by_id(doc.doc_id, "w-rescuer", scope)
+    end
+
+    test "the mutation event records BOTH the freed holder and the actor", %{scope: scope} do
+      doc = claimed_task!(scope, "w-dead")
+      epoch = epoch_of(doc)
+      {:ok, _} = Tasks.stage(doc.id, "open")
+
+      assert {:ok, _} = Release.release(doc.id, "w-rescuer", observed_epoch: epoch)
+
+      ev =
+        Repo.one!(
+          from(e in MutationEvent,
+            where: e.doc_id == ^doc.doc_id and e.mutation == "task.released"
+          )
+        )
+
+      released = get_in(ev.document, ["released"])
+      assert released["previous_worker"] == "w-dead"
+      assert released["released_by"] == "w-rescuer"
+      assert released["stranded_open"] == true
+    end
+
+    test "the epoch fence still applies to a stranded row", %{scope: scope} do
+      doc = claimed_task!(scope, "w-dead")
+      epoch = epoch_of(doc)
+      {:ok, _} = Tasks.stage(doc.id, "open")
+
+      assert {:error, :fenced_off} =
+               Release.release(doc.id, "w-rescuer", observed_epoch: epoch - 1)
+    end
+
+    # PRESERVATION (row criterion 5, the half release owns): loosening the
+    # lifecycle gate must NOT loosen the holder gate on a LIVE lease. A
+    # bystander walking away with someone's in-flight claim is still refused.
+    test "a LIVE in_progress lease is still holder-only", %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+      epoch = epoch_of(doc)
+
+      assert {:error, :not_holder} = Release.release(doc.id, "w-thief", observed_epoch: epoch)
+    end
+
+    # PRESERVATION: an open row with NO holder is still a no-op target. The
+    # new branch keys on the HOLDER, not on the lifecycle alone.
+    test "an open row with a released (vacant) claim is still {:not_in_progress, \"open\"}",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+      epoch = epoch_of(doc)
+      {:ok, _} = Release.release(doc.id, "w-hold", observed_epoch: epoch)
+
+      # claim.worker is nil but the claim MAP survives with released_at —
+      # the exact shape task-eb2b6170e19f1611 measured on the live board.
+      content = Repo.get!(Document, doc.id).content
+      assert is_map(content["claim"])
+      assert get_in(content, ["claim", "released_at"]) != nil
+
+      assert {:error, {:not_in_progress, "open"}} =
+               Release.release(doc.id, "anyone", observed_epoch: epoch + 1)
     end
   end
 end

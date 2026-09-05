@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -36,7 +37,6 @@ import (
 //     a strict prefix — names that id as a suggestion. A suggestion, never a
 //     redirect: the CLI does not silently fetch a document the caller did not
 //     ask for.
-//
 const taskMatchFlag = "--match"
 
 // taskLsCommandID and taskGetCommandID are the manifest ids this file keys on.
@@ -151,6 +151,63 @@ const (
 	taskSuggestPageSize = taskRouteMaxLimit
 	taskSuggestMaxPages = 25
 
+	// taskSuggestConcurrency is how many pages are IN FLIGHT at once, and it is
+	// the reason this suggestion fires on the real ledger at all.
+	//
+	// The block below is right that the cost is server-side latency per
+	// request and that no projection can shrink it. It draws the wrong
+	// conclusion from that, because it only ever considered paying the latency
+	// SERIALLY. Re-measured 2026-09-05 against guerrilla: the ledger is 8,565
+	// rows — nine pages at the clamp — and a single `limit=1000&view=brief`
+	// page costs 1.01s / 1.54s / 0.86s (~350-420 KB each). Nine of those in a
+	// row is ~9-13s against a 6s deadline, so the walk did not merely risk
+	// abandoning on this ledger: it abandoned EVERY time, and `bp task get
+	// <prefix>` and `bp task get <bogus-id>` printed the identical
+	// "no close-id scan was made" line. The one message the caller needed to
+	// tell apart was the one message it could not.
+	//
+	// Four in flight turns nine pages into three waves — ~3-4s measured, inside
+	// the SAME 6s bound. Nothing about the spend the caller consented to
+	// changes: same nine requests, same bytes, same ceiling, same deadline.
+	// Only the waiting is no longer done one page at a time.
+	//
+	// FOUR, NOT MORE — and this is measured, not taste. Widening the wave does
+	// NOT keep paying: the route contends with itself. Same ledger, same
+	// binary, only the width changed, three runs each on a busy box:
+	//
+	//   width 6:  7.89s / 15.89s / 13.30s   (every run blew the 6s bound)
+	//   width 4:  3.34s /  9.22s /  7.29s
+	//   width 3:  7.07s /  3.05s /  1.87s
+	//
+	// Six is not "twice as fast as three", it is reliably the WORST of the
+	// three. Beyond a handful in flight the server starts queueing the walk
+	// behind itself, so the extra requests buy latency for everyone including
+	// the caller who issued them — and firing all 25 pages of the ceiling at a
+	// shared production route to enrich a 404 would be a thundering herd
+	// charged to every other caller. Four sits at the knee.
+	//
+	// WHAT THIS DOES AND DOES NOT BUY, stated plainly because the spread above
+	// is wide: those runs were taken while the box itself was under a task
+	// campaign (load average ~30-50), and at that load NO width hits the
+	// deadline every time. Serial hits it NEVER — its floor is nine sequential
+	// pages, ~9s, which is past 6s before the first slow page. So the claim
+	// here is the honest one: this makes the suggestion POSSIBLE on a
+	// nine-page ledger, where it was arithmetically impossible before. It is
+	// not a guarantee, and it does not need to be — the walk still abandons
+	// inside its bound and taskGetNotFoundHint still SAYS it abandoned, which
+	// is the pre-existing and correct behaviour for a scan that did not finish.
+	//
+	// CONCURRENCY DOES NOT WEAKEN THE UNIQUENESS CLAIM, and it is worth being
+	// exact about why, because "exactly one" is an absence claim over every row
+	// not read. Offset pagination over a shifting collection can miss a row
+	// between two reads — but that hazard is a function of the WALL-CLOCK GAP
+	// between the first page and the last, and this change shrinks that gap
+	// from ~11s to ~3s. Pages are still consumed in ascending order, so an
+	// unreadable page still abandons before any later page is inspected, and a
+	// short page still finalizes before the pages beyond it are looked at.
+	// Parallel here is strictly safer than serial, not merely no worse.
+	taskSuggestConcurrency = 4
+
 	// THE DEADLINE, CHOSEN AGAINST MEASURED PAGES, NOT TASTE — and it is the
 	// reason this suggestion is deliberately allowed to give up.
 	//
@@ -239,56 +296,101 @@ func taskPrefixSuggestion(out *writer, m *manifest.Manifest, ctx manifest.Contex
 		out.userErr("no such task id — scanning the ledger for a close match (up to %s)…", taskSuggestDeadline)
 	}
 
-	seen := map[string]bool{}
-	deadline := time.Now().Add(taskSuggestDeadline)
-	for page := 0; page < taskSuggestMaxPages; page++ {
-		if time.Now().After(deadline) {
-			return "", false
-		}
+	// fetchPage reads ONE page. ok=false covers every reason the page cannot be
+	// counted — transport error, non-2xx, or a 200 whose body is not a readable
+	// Barkpark list (the same law the --all walk applies: an HTTP 200 is no
+	// proof the body came from Barkpark). It returns a value rather than
+	// mutating shared state so it is safe to run in the wave below.
+	fetchPage := func(page int) suggestPageResult {
 		pageURL := withOffsetLimit(baseURL, page*taskSuggestPageSize, taskSuggestPageSize) + "&view=" + taskSuggestView
 		status, body, err := doRequest(lsCmd.HTTP.Method, pageURL, headers, nil)
 		if err != nil || status < 200 || status >= 300 {
-			return "", false
+			return suggestPageResult{}
 		}
 		rows, key := extractListRows(unwrapResult(body))
 		if key == "" {
-			// Same law the --all walk applies: an HTTP 200 is no proof the body
-			// came from Barkpark. An unreadable page cannot support an
-			// "exactly one" claim, so the suggestion is abandoned rather than
-			// computed over a partial read.
+			return suggestPageResult{}
+		}
+		return suggestPageResult{rows: rows, ok: true}
+	}
+
+	seen := map[string]bool{}
+	deadline := time.Now().Add(taskSuggestDeadline)
+	for base := 0; base < taskSuggestMaxPages; base += taskSuggestConcurrency {
+		if time.Now().After(deadline) {
 			return "", false
 		}
-		for _, row := range rows {
-			var obj struct {
-				DocID string `json:"doc_id"`
-			}
-			if json.Unmarshal(row, &obj) != nil {
-				continue
-			}
-			if len(obj.DocID) > len(typed) && strings.HasPrefix(obj.DocID, typed) {
-				seen[obj.DocID] = true
-				if len(seen) > 1 {
-					// Two candidates already: no further page can restore
-					// uniqueness, so stop paying for round-trips. This IS a
-					// complete answer: "not exactly one" is settled.
-					return "", true
-				}
-			}
+		width := taskSuggestConcurrency
+		if base+width > taskSuggestMaxPages {
+			width = taskSuggestMaxPages - base
 		}
-		if len(rows) < taskSuggestPageSize {
-			// Short page: the walk reached the end of the collection, so the
-			// count below is over EVERY row, which is what "exactly one" needs.
-			if len(seen) == 1 {
-				for id := range seen {
-					return id, true
+		// Each goroutine writes its own slot and reads none, so the slice needs
+		// no lock; the WaitGroup is the happens-before edge for every read below.
+		wave := make([]suggestPageResult, width)
+		var wg sync.WaitGroup
+		for i := 0; i < width; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				wave[i] = fetchPage(base + i)
+			}(i)
+		}
+		wg.Wait()
+
+		// ASCENDING ORDER IS THE CONTRACT. The pages arrived in whatever order
+		// the network gave them, but they are CONSUMED lowest-offset first, so
+		// every exit below fires exactly where the serial walk fired it: an
+		// unreadable page abandons before any later page is inspected, and a
+		// short page finalizes before the empty pages beyond it are looked at.
+		for i := 0; i < width; i++ {
+			p := wave[i]
+			if !p.ok {
+				// An unreadable page cannot support an "exactly one" claim, so
+				// the suggestion is abandoned rather than computed over a
+				// partial read.
+				return "", false
+			}
+			for _, row := range p.rows {
+				var obj struct {
+					DocID string `json:"doc_id"`
+				}
+				if json.Unmarshal(row, &obj) != nil {
+					continue
+				}
+				if len(obj.DocID) > len(typed) && strings.HasPrefix(obj.DocID, typed) {
+					seen[obj.DocID] = true
+					if len(seen) > 1 {
+						// Two candidates already: no further page can restore
+						// uniqueness. This IS a complete answer: "not exactly
+						// one" is settled.
+						return "", true
+					}
 				}
 			}
-			return "", true
+			if len(p.rows) < taskSuggestPageSize {
+				// Short page: the walk reached the end of the collection, so the
+				// count below is over EVERY row, which is what "exactly one" needs.
+				if len(seen) == 1 {
+					for id := range seen {
+						return id, true
+					}
+				}
+				return "", true
+			}
 		}
 	}
 	// Page ceiling reached without a short page — the walk never saw the end of
 	// the ledger, so it cannot claim uniqueness.
 	return "", false
+}
+
+// suggestPageResult is one page of the suggestion walk. ok=false is the single
+// "do not count this page" signal: it collapses transport failure, a non-2xx,
+// and an unreadable 200 body, because the walk's response to all three is
+// identical — abandon, and let the hint say no scan was made.
+type suggestPageResult struct {
+	rows []json.RawMessage
+	ok   bool
 }
 
 // taskGetNotFoundHint is the remedy for a `bp task get <id>` not_found: it

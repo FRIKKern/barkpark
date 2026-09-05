@@ -1,0 +1,1 @@
+Per-site `live` is emitted from site_row/2 and `Live *int json:"live"` is declared on DeployCensusSite IN THE SAME COMMIT. Paste `git show --stat HEAD` showing both files in one commit, and state why they cannot be split (set equality)

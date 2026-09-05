@@ -1,0 +1,1 @@
+The measured union is re-derived on the merged tree rather than quoted from this task — the floor is set to equality, never to a slack number.

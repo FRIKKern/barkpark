@@ -16,17 +16,25 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session.ReplayRing
 
   @dataset "ops_controller_test"
   @ingest_token "barkpark-test-ingest-token"
   @slug "ops-ctrl-test-sheet"
+  @ring_table :sheets_ops_replay
+  @sheets_sup Barkpark.Plugins.Sheets.Supervisor
 
   setup do
     stop_all_sessions()
 
-    on_exit(fn -> stop_all_sessions() end)
+    on_exit(fn ->
+      stop_all_sessions()
+      ensure_ring!()
+    end)
 
     :ok
   end
@@ -43,6 +51,45 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
     end
 
     :ok
+  end
+
+  # Restore the invariant a ring-deleting test broke: a live ring owning a live
+  # `:sheets_ops_replay` table. Copied in shape from session_ring_crash_test.exs
+  # — a REAL kill of the supervised singleton, so the supervisor rebuilds the
+  # table rather than a test hand-creating one it does not own.
+  defp ensure_ring! do
+    if :ets.whereis(@ring_table) == :undefined do
+      with_log(fn -> restart_ring!() end)
+    end
+
+    :ok
+  end
+
+  defp restart_ring! do
+    pid = Process.whereis(ReplayRing)
+    assert is_pid(pid)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 2_000
+
+    deadline = System.monotonic_time(:millisecond) + 2_000
+    wait_for_new_ring(pid, deadline)
+  end
+
+  defp wait_for_new_ring(old, deadline) do
+    case Process.whereis(ReplayRing) do
+      new when is_pid(new) and new != old ->
+        assert is_pid(Process.whereis(@sheets_sup))
+        new
+
+      _ ->
+        if System.monotonic_time(:millisecond) > deadline do
+          flunk("the ReplayRing did not come back after a kill")
+        else
+          Process.sleep(10)
+          wait_for_new_ring(old, deadline)
+        end
+    end
   end
 
   defp authed(conn) do
@@ -262,6 +309,57 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
     cells = get_in(content, ["tabs", Access.at(0), "cells"])
     assert Map.has_key?(cells, "A5")
     refute Map.has_key?(cells, "A7")
+  end
+
+  # ── 8. The ring is unreachable: a TRANSIENT 503, not a 422 ───────────────
+  #
+  # `Session.apply_ops/5` answers `{:error, :replay_unavailable}` when the
+  # exactly-once ring has no table to read (the fail-CLOSED backstop — see
+  # session_ring_crash_test.exs (2)). That is a SERVER-side, transient outage:
+  # the caller's batch was never applied and the SAME request will succeed once
+  # the ring is back. The catch-all rendered it as 422 `session_start_failed`,
+  # which tells a client its request was malformed and — because it is a 4xx —
+  # stops the retry that would have fixed it. Same class as
+  # `:session_unavailable`, so it takes the same envelope: 503 + `retry-after`.
+  #
+  # RED on the pre-change controller: 422, body code "session_start_failed".
+  test "returns 503 replay_unavailable with a retry-after hint when the replay ring is gone",
+       %{conn: conn} do
+    create_sheet(@slug)
+
+    # A request_id is what makes the session consult the ring at all; without
+    # one the batch never reaches the `:unavailable` branch.
+    payload =
+      Jason.encode!(%{
+        "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "world"}],
+        "request_id" => "ring-gone-1"
+      })
+
+    {resp, _log} =
+      with_log(fn ->
+        # An explicit delete is the one case the ETS heir cannot cover, and the
+        # only way to reach the backstop from the outside.
+        :ets.delete(@ring_table)
+        assert :ets.whereis(@ring_table) == :undefined
+
+        conn
+        |> authed()
+        |> post(ops_url(@slug, @dataset), payload)
+      end)
+
+    # Status and code asserted as ONE tuple so a failure prints both sides —
+    # the pre-change controller reads `left: {422, "session_start_failed"}`,
+    # which is the whole defect in one line. A 4xx tells the client its request
+    # was wrong and stops the retry that would have fixed it.
+    assert {resp.status, Jason.decode!(resp.resp_body)["error"]["code"]} ==
+             {503, "replay_unavailable"}
+
+    assert Plug.Conn.get_resp_header(resp, "retry-after") != [],
+           "a 503 on this door carries retry-after (the :session_unavailable precedent)"
+
+    # Refused, not applied: nothing landed.
+    {:ok, content} = Session.peek(@slug, @dataset)
+    refute Map.has_key?(get_in(content, ["tabs", Access.at(0), "cells"]), "B1")
   end
 
   # ── the authorization wall (pds-w44-bl-ops-controller-apply-ops-ungated) ──

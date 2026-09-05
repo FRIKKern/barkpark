@@ -1,0 +1,1 @@
+A zero-file scan is an explicit FAIL and the 'lower the ceiling to 0' advice can no longer fire on a vacuous green. Evidence: the stub-mix mutation now reds where it previously printed 'ok: 0 drifted files' at exit 0.

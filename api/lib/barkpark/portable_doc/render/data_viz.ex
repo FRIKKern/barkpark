@@ -420,7 +420,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     track = if row_labels == [], do: "", else: "auto "
 
-    ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,28px))">| <>
+    ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,44px))">| <>
       head <>
       body <>
       ~s|</div><div class="bp-heat__legend">less | <>
@@ -573,7 +573,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       end
 
     track = if gutter, do: "auto ", else: ""
-    cell_track = if show_vals, do: "minmax(28px,auto)", else: "minmax(10px,28px)"
+    cell_track = if show_vals, do: "minmax(28px,auto)", else: "minmax(10px,44px)"
     sum_track = if show_marg, do: " auto", else: ""
 
     ~s|<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},#{cell_track})#{sum_track}">| <>

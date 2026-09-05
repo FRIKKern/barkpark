@@ -1,0 +1,1 @@
+GATE: CC=clang go build ./... && CC=clang go vet ./internal/cli/... && CC=clang go test -count=1 ./internal/cli/ - paste the tail.

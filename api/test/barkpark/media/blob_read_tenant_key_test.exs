@@ -119,7 +119,7 @@ defmodule Barkpark.Media.BlobReadTenantKeyTest do
 
   # The REAL scoped GET route — the one the exposure was proved on.
   defp scoped_get(tenant, path) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> tenant.token)
     |> get("/w/#{tenant.ws.slug}/p/#{tenant.project.slug}/media/files/#{path}")
   end
@@ -214,7 +214,8 @@ defmodule Barkpark.Media.BlobReadTenantKeyTest do
 
       # And the delete verb is row-addressed too: B removing its row must not
       # erase A's bytes (the cross-tenant DESTROY through the same hole).
-      assert {:ok, _} = Media.delete_file(ctx.row_b.id, workspace_id: ctx.b.ws.id)
+      assert {:ok, _} =
+               Media.delete_file(ctx.row_b.id, workspace_id: ctx.b.ws.id, where_used: :cascade)
 
       resp_a = scoped_get(ctx.a, ctx.shared)
       assert resp_a.status == 200

@@ -1,0 +1,1 @@
+queued_seconds is IN the reader-less instrument register with a disposition and, if it stays, a stay that passes Stay.stayed?/1 or names a slice

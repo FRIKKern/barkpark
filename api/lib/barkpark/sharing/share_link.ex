@@ -3,15 +3,31 @@ defmodule Barkpark.Sharing.ShareLink do
   One ITEM share link (P7) — a direct, revocable `/s/<token>` link to a single
   document or media file. See `Barkpark.Sharing.Links` for the operations.
 
-  BOTH forms of the token are persisted: `token_hash` (the SHA256 digest the
-  resolve query matches on, mirroring `Barkpark.Auth.ApiToken`) AND the
-  PLAINTEXT `token` itself, which P7's stable re-copyable link needs so a later
-  `GET /v1/shares/links` can re-emit `/s/<token>`. That makes a ShareLink row a
-  LIVE CREDENTIAL at rest: any read path that serialises a row (see
-  `BarkparkWeb.ShareLinkController.link_json/1`, which emits `url:`) hands out
-  working access to the bound item, so every such path must be authorised
-  BEFORE it serialises. Revocation/expiry are enforced in the resolve query, so
-  a dead link is indistinguishable from a missing one.
+  ONLY THE DIGEST IS PERSISTED — `token_hash` (SHA256, mirroring
+  `Barkpark.Auth.ApiToken`), which is what `Links.resolve/1` matches on. THE
+  PLAINTEXT TOKEN IS NOT A FIELD OF THIS SCHEMA and there is no column behind
+  it (`20260904020000_drop_token_from_share_links.exs`). A ShareLink row is
+  therefore NOT a credential at rest: no read path that serialises one can hand
+  out working access, because the row does not contain the secret.
+
+  THE TRADEOFF, RE-ARGUED AND RECORDED HERE so the next auditor finds the
+  reasoning instead of re-opening it (`arpss-w8-bl-share-link-raw-token-at-rest`,
+  RULED by team-lead 2026-09-02: "RETIRE the plaintext token column"). The
+  column existed for a real P7 feature — a STABLE, RE-COPYABLE `/s/<token>`
+  URL the Studio popover showed every time, Google-Docs-style. Its migration
+  (`20260609150000_add_token_to_share_links.exs`) justified plaintext at rest
+  from "a self-hosted/LAN context — anyone who can read this column can already
+  read the shared content directly". THAT PREMISE IS VOID ON A MULTI-TENANT
+  INSTALL: the column's readers are not the shared content's readers, so a
+  serialising read path was handing a stranger a live credential rather than
+  metadata (which is exactly the hole arpss-w8 closed in
+  `ShareLinkController.list/2`). Dropping the column closes that disclosure
+  CLASS structurally rather than per-path, so a FUTURE tenancy regression on
+  this surface cannot leak a live token. The cost is paid in the UX: a link can
+  be listed, labelled and REVOKED, but its URL cannot be RE-DISPLAYED — the raw
+  token is returned in ONE place, the mint 201, and an operator who loses it
+  regenerates. Revocation/expiry are enforced in the resolve query, so a dead
+  link is indistinguishable from a missing one.
 
   EVERY ROW IS BOUND TO A TENANT SCOPE — `workspace_id` AND `project_id` are
   `validate_required` (`task-2da739b78e938be0`). Both columns are NULLABLE in
@@ -40,10 +56,6 @@ defmodule Barkpark.Sharing.ShareLink do
 
   schema "share_links" do
     field :token_hash, :string
-    # P7 UX: the raw token, stored so the link is stable + re-copyable (see the
-    # add_token_to_share_links migration for the tradeoff). NOT a secret beyond
-    # the content it already grants in a self-hosted/LAN context.
-    field :token, :string
     field :dataset, :string, default: "production"
     field :kind, :string
     field :ref_type, :string
@@ -61,7 +73,6 @@ defmodule Barkpark.Sharing.ShareLink do
 
   @fields [
     :token_hash,
-    :token,
     :workspace_id,
     :project_id,
     :dataset,

@@ -1,0 +1,1 @@
+The rendered output distinguishes the preview arm as structurally uncoverable (charter D557) rather than letting 'preview: N' read as a finding of the same kind as production. Evidence: the rendered line.

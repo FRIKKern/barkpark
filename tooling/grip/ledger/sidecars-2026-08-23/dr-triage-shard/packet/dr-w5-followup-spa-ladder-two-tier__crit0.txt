@@ -1,0 +1,1 @@
+app.js classifyBp gains strained and filling off the same pressure block, using the SAME fences the Go twin ships (load15/cpu_cores >= 1.75 with a load1 >= 2.0 fallback; disk_used_percent >= 90) and the same never-strain-on-nil rule. Evidence: the diff plus a table test over the seven fence shapes.

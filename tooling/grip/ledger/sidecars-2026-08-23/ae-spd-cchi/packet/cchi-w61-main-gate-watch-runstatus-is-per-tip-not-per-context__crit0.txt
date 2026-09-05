@@ -1,0 +1,1 @@
+A production observation is quoted where the per-tip rule delayed a genuine MISSING by more than one */30 tick — or the residual is closed as not-worth-building with the observation window stated.

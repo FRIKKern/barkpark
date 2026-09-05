@@ -1,0 +1,1 @@
+#billing-chip reports clientWidth >= scrollWidth at every width in {721, 750, 768, 769, 775, 780, 785, 800, 820, 830} in BOTH themes, on both the billing-past-due and overview-past-due scenarios. Before and after tables quoted.

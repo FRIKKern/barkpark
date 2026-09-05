@@ -1,0 +1,1 @@
+The recorder (or the crown reader) can LOSE on a merged_at that stopped being produced: show the check and mutate the committer literal to prove it reds.

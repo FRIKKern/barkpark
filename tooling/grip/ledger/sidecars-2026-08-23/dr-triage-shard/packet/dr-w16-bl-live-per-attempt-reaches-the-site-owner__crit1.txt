@@ -1,0 +1,1 @@
+The surface prints the live rate in the same rate-node shape with the same @min_sample refusal, per site

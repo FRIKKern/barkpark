@@ -1,0 +1,1 @@
+deploy.yml record-delivery reads that record over the SSH it already holds and writes serving_since on instance rows. Quote a real row from bp cloud deliveries with a non-null serving_since on target=instance.

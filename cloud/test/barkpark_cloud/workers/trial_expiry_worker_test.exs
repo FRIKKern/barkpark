@@ -648,4 +648,92 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
       refute_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
     end
   end
+
+  ## 10. cch-w50-s5 — THE DAY COUNT IS DERIVED, NOT TYPED
+  ##
+  ## THE DEFECT THIS CLOSES. `notify/3`'s day count used to be a bare literal at
+  ## the call site — `notify(team, sub, 3)` one line below a guard on
+  ## `@three_days` — and both renderers build the whole sentence from that
+  ## integer (`Notifications.Render.trial_window/1`,
+  ## `EventEmail.trial_window/1`), so THE INTEGER IS THE SENTENCE. Nothing
+  ## connected "who we selected" to "what we told them".
+  ##
+  ## MEASURED ON origin/main (d6de5fe6f), before the fix: widening `@three_days`
+  ## AND `Billing.@trial_scan_horizon_seconds` to `5 * 86_400` left the entire
+  ## committed suite GREEN (37 tests, 0 failures) while a trial ending in FOUR
+  ## days was noticed with `payload["days"] == 3` and a chat body reading "Your
+  ## free trial ends in 3 days" — sent five days out. The probe was proven
+  ## non-vacuous: reverting both to `3 * 86_400` flipped the same probe to
+  ## `noticed_3d: 0` and it FAILED.
+  ##
+  ## Test 7 above already pinned `payload["days"] == 3` at a HAND-TYPED two-day
+  ## fixture offset, which is why the mutation slipped past it: both the fixture
+  ## and the expectation were literals, so they agreed with each other while
+  ## disagreeing with the threshold. The tests below take BOTH from the accessor.
+
+  describe "the advance-notice schedule" do
+    # Declared HERE, not derived, for the reason billing_client_mirror_test.exs
+    # gives for @pinned_plans: a guard that only compares the code to itself goes
+    # green on a coordinated edit. This list is the third opinion, and the
+    # console's TRIAL_NOTICE_DAYS is the fourth (mirrored there).
+    @pinned_notice_days [3, 1]
+
+    test "the accessor is PUBLIC and states the schedule the console promises" do
+      assert TrialExpiryWorker.notice_thresholds_days() == @pinned_notice_days
+    end
+
+    test "the day count in the BODY equals the threshold that selected the team — for every threshold" do
+      # Both the fixture offset and the expected numeral come from the accessor,
+      # so this cannot go vacuous on a hand-typed pair. Each threshold is driven
+      # in its OWN team + its own run, an hour inside its boundary.
+      for days <- TrialExpiryWorker.notice_thresholds_days() do
+        {team, _sub} = trial_team(days * 86_400 - 3600)
+
+        {:ok, _} =
+          BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
+            "url" => "https://hooks.slack.com/x"
+          })
+
+        assert {:ok, summary} = perform_job(TrialExpiryWorker, %{})
+
+        assert summary.noticed_3d + summary.noticed_1d >= 1,
+               "a trial #{days} days out (the T-#{days} threshold, minus an hour) was noticed by nothing: #{inspect(summary)}"
+
+        payload =
+          all_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
+          |> Enum.map(& &1.args["payload"])
+          |> Enum.find(&(&1["name"] == team.name))
+
+        assert payload,
+               "the T-#{days} notice fanned out to no chat job for team #{team.name}"
+
+        assert payload["days"] == days,
+               "the T-#{days} threshold selected this team and then told it #{inspect(payload["days"])} — the day count is decoupled from the threshold again"
+
+        # ...and the SENTENCE, because the payload integer is only half the
+        # promise. Both rails build the window from it; this is the chat rail.
+        {_title, body, _sev} =
+          BarkparkCloud.Notifications.Render.render("trial_expiring", payload)
+
+        window = if days == 1, do: "in 1 day", else: "in #{days} days"
+
+        assert body =~ window,
+               "the T-#{days} notice's body does not say #{inspect(window)}: #{body}"
+      end
+    end
+
+    test "REACHABILITY: no threshold sits beyond Billing's trial scan horizon" do
+      # A threshold further out than `Billing.active_trials/1` looks is DEAD: the
+      # row is never returned, so the arm cannot fire. cch-w50 introduced that
+      # horizon as its OWN hand-typed `3 * 86_400` in a different module, and
+      # nothing tied the two together — which is exactly why the mutation above
+      # had to move BOTH to reproduce the defect.
+      horizon_days = div(Billing.trial_scan_horizon_seconds(), 86_400)
+
+      for day <- TrialExpiryWorker.notice_thresholds_days() do
+        assert day <= horizon_days,
+               "the worker notices at T-#{day} days but the scan horizon is #{horizon_days} days — that threshold can never fire"
+      end
+    end
+  end
 end

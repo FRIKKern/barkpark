@@ -1,0 +1,1 @@
+A forcing repro reproduces the 1440 wide-bucket no-op (click 1 collapses a 300px default rail, subsequent clicks are no-ops) distinctly from D178 rename case. Quote the observed sidebar state per click.

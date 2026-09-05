@@ -1,0 +1,1 @@
+IT FIRES ON SPECIMEN (b) TOO: the 08-06 22:xx intra-deferred rename (already_running -> box_at_capacity) is reported as :renamed even though the deferred cohort QUADRUPLES across it. Paste the fixture and the run

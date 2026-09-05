@@ -1,0 +1,1 @@
+scripts/check-deploy-smoke.sh gains instance-side coverage — its extractor is gated `job == "control-plane"` today, so the instance smoke has zero tripwire.

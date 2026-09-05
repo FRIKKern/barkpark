@@ -1,0 +1,1 @@
+THE NEW PREDICATE TESTS BREAK OPPORTUNITY, NOT JUST DECLARATIONS: it compares min-content width against clientWidth, or measures the longest token — a predicate computed from `white-space` + `text-overflow` alone is refused. Quote the committed predicate and the reasoning comment.

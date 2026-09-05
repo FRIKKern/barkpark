@@ -1,0 +1,1 @@
+Nullable numerics on the Go wire type are pointers, not values; paste the struct and name the sibling field whose idiom you followed.

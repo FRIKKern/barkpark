@@ -1,0 +1,1 @@
+A test proves the gap can be seen: a team with sites and no instance receives a digest, and that test FAILS on the current derivation. Evidence: the failing run before and the passing run after.

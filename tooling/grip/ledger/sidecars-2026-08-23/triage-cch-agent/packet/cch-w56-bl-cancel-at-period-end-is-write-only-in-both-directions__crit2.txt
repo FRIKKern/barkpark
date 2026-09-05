@@ -1,0 +1,1 @@
+The console recovers: after an un-cancel the badge stops saying Ending and `canCancel` becomes true again. Evidence: the hook-level assertion and the updated smoke pin at smoke.mjs:1654 (rewritten, never deleted).

@@ -1,0 +1,1 @@
+The wider question is ANSWERED on the record, not left open: state whether route ENVELOPES belong in the payload-key-set census (which today walks only named @pairs serializer entry functions, so a route-level Map.put is invisible to it) — either add the class or write the ruling that they stay out and why.

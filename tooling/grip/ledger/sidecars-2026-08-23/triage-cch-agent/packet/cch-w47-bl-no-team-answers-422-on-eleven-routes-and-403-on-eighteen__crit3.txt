@@ -1,0 +1,1 @@
+internal/cli/cloud_support_cmd.go:643 branches on the status the gate ACTUALLY emits, and its test at cloud_support_cmd_test.go:1117 no longer fabricates a status the server never sends.

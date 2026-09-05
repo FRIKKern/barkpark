@@ -1,0 +1,1 @@
+The Console gate failure on dfa5e4dac8fa9fd9644ad8cbe2dce0c4eefe66a4 is explained by reading the run log, and the answer states whether main was actually broken or the post-merge run failed for an environmental reason

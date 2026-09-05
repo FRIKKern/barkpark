@@ -1,0 +1,1 @@
+A push-triggered sheet-grid-js run on main concludes success, quoted with its run id and head sha

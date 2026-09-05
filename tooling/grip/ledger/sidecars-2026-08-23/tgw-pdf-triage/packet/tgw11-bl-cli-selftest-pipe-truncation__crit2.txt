@@ -1,0 +1,1 @@
+A regression test pins it and is proven able to fail against today's cli.mjs. Evidence: paste the not ok line then the green.

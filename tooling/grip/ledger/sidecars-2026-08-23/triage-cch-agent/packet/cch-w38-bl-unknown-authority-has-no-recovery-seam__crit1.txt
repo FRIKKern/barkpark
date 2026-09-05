@@ -1,0 +1,1 @@
+instanceAdminAuthority (or the rail model) distinguishes an in-flight /v1/me from a FAILED one, and the failed arm renders meFailureCopy() rather than the checking grammar — no new hand-written copy.

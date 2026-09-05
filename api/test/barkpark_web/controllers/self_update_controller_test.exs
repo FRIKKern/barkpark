@@ -49,7 +49,7 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
   # Poll GET until the runner reports "done" (cap ~2s); returns the last body.
   defp await_done(deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 2_000
-    body = build_conn() |> admin_conn() |> get("/v1/admin/self-update") |> json_response(200)
+    body = scoped_conn() |> admin_conn() |> get("/v1/admin/self-update") |> json_response(200)
 
     cond do
       body["state"] == "done" ->

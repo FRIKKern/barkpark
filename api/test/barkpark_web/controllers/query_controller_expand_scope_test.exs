@@ -20,7 +20,7 @@ defmodule BarkparkWeb.QueryControllerExpandScopeTest do
       author/a1` pair under the SAME dataset string.
     * A single-workspace expand still works (no regression on the happy path).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
 

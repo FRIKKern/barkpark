@@ -1,0 +1,1 @@
+Every emitted row already carries served_sha; a run pinned to a mismatching SHA is shown failing in the task evidence with its actual output

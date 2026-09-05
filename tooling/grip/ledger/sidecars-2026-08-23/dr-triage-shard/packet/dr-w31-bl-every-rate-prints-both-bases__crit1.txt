@@ -1,0 +1,1 @@
+Every reader that renders a deploy failure rate (bp cloud deployments, the fleet verdict, any console surface) shows both bases or neither — proven by a test that reds if a surface renders one alone.

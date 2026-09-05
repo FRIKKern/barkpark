@@ -218,7 +218,7 @@ const FABLE_STAMPS = {
 
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey', 'started_at', 'ended_at'],
+  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'candidates', 'survey', 'journey', 'started_at', 'ended_at'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
     direction_debate: { type: 'string', description: 'the rival directions you seriously developed and argued against each other, why the winner won, and the sharpest attack on the winner you found (with how the wave absorbs it) — a direction that never faced a rival is usually the first idea, not the best one' },
@@ -226,6 +226,24 @@ const STRATEGY_SCHEMA = {
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
     journey: JOURNEY_FIELD,
     ...FABLE_STAMPS,
+    // Charter D17 — the wave walks the lifecycle graph it exposes to users.
+    // A candidate that exists only in Paper prose cannot be watched, staged, or
+    // killed visibly; every entry here becomes a PUBLISHED `considering` task.
+    candidates: {
+      type: 'array',
+      description: "the candidate slices this wave might build or settle. Every entry is FILED AND PUBLISHED as a `considering` bp task in step 5, so the wave's uncertainty sits on the board instead of buried in Paper prose. Name candidates 1:1 with the survey assignment that settles them wherever there is one (reuse the same `key`). Name the ones you EXPECT to discard too: a discarded candidate becomes a visible `cancelled` row at Decide (charter D5 — kills are visible, never silent deletes), and that record is worth more than the tidiness of never having filed it.",
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['key', 'title', 'object', 'why'],
+        properties: {
+          key: { type: 'string', description: 'short kebab-case label — the SAME key as the survey assignment that settles this candidate, when there is one' },
+          title: { type: 'string', description: 'outcome-shaped task title: what would be true if this candidate were built, or what would be known if it were settled' },
+          object: { type: 'string', enum: ['research', 'build'], description: "what the thought is ABOUT: 'research' = a question to settle, 'build' = a slice to make. This is the value passed to `bp task stage --object` at birth and again when a worker stages the row to `researching`." },
+          why: { type: 'string', description: 'why it deserves a row on the board, and what would kill it' },
+          task_id: { type: 'string', description: 'OPTIONAL, filled in AFTER you file it: the SERVER-GENERATED id `bp task create -o json` returned for this candidate. Fill it whenever you have it — Decide must resolve EVERY candidate in candidates_resolved[], and an id it has to rediscover is an id it can miss.' },
+        },
+      },
+    },
     survey: {
       type: 'array',
       description: '5-20 broad survey assignments; each becomes one Opus surveyor at medium effort. Cast a WIDE net — width now buys precise depth later',
@@ -238,6 +256,7 @@ const STRATEGY_SCHEMA = {
           why: { type: 'string', description: 'how the answer changes the plan' },
           mode: { type: 'string', enum: ['research', 'drift-check'], description: "drift-check = a prior wave Paper already answered this; the surveyor re-runs its stored rerun commands and reports drift instead of re-deriving (epic-memory D4). Default: research." },
           prior_paper: { type: 'string', description: 'REQUIRED when mode=drift-check: the paper id that answered it' },
+          task_id: { type: 'string', description: 'OPTIONAL: the id of the `considering` candidate task this assignment settles (from candidates[].task_id). Present = the surveyor stages THAT doc to `researching` — the one write it is allowed to make. Absent = the assignment settles no candidate and the surveyor stays fully read-only.' },
         },
       },
     },
@@ -281,6 +300,7 @@ const SURVEY_SCHEMA = {
   required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions', 'journey'],
   properties: {
     key: { type: 'string' },
+    task_id: { type: 'string', description: 'OPTIONAL: the candidate task you staged to `researching` for this assignment, echoed back so Decide can resolve it. Empty/absent when the assignment carried no candidate task_id.' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
     coverage: {
       type: 'array',
@@ -318,6 +338,7 @@ const AIM_SCHEMA = {
           why: { type: 'string' },
           model: { type: 'string', enum: ['opus', 'fable'], description: "'opus' (at medium) is the default and fits most verification — mapping, breadth follow-ups, running a gate and quoting its output. 'fable' (at high) ONLY for genuinely judgment-heavy digs: subtle correctness, cross-surface reasoning, a call where being wrong is expensive and the answer is a judgment rather than a lookup. Depth comes from the model, never from straining one upward — there is no xhigh tier in this workflow. Most fleets should be mostly opus" },
           verify_commands: { type: 'string', description: 'shell command(s) the verifier must RUN to prove/refute the claim (tests, gates, curl against localhost) — empty string when reading suffices' },
+          task_id: { type: 'string', description: 'OPTIONAL: the id of the `considering`/`researching` candidate task this assignment settles (carry it forward from the survey assignment or candidates[]). Present = the verifier stages THAT doc to `researching`; absent = the verifier stays fully read-only on the ledger.' },
           needs_worktree: { type: 'boolean', description: 'true only if verification requires a throwaway probe edit or an isolated build dir. An assignment that will write ledger rows under tooling/grip/ledger/ must NOT set it — Decide commits from the shared checkout and never sees a throwaway worktree, so those rows would be stranded' },
         },
       },
@@ -331,6 +352,7 @@ const VERIFY_SCHEMA = {
   required: ['key', 'findings', 'coverage', 'facts', 'proofs', 'risks', 'journey'],
   properties: {
     key: { type: 'string' },
+    task_id: { type: 'string', description: 'OPTIONAL: the candidate task you staged to `researching` for this assignment, echoed back so Decide can resolve it. Empty/absent when the assignment carried no candidate task_id.' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
     coverage: {
       type: 'array',
@@ -492,7 +514,7 @@ function gateFactProvenance(reports) {
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'charter_pr', 'wave_referent_task', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'doc_facts_routed', 'wave', 'journey', 'started_at', 'ended_at'],
+  required: ['charter_written', 'charter_pr', 'wave_referent_task', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'doc_facts_routed', 'candidates_resolved', 'wave', 'journey', 'started_at', 'ended_at'],
   properties: {
     charter_written: { type: 'boolean', description: `true only after the docs-only PR carrying ${CHARTER_PATH} is OPEN and reporting its checks — a charter that never reached a PR is not published, and a direct push to main is REJECTED (GH006)` },
     charter_pr: { type: 'string', description: 'the docs-only charter PR — its number or URL (e.g. "#6123"); if no PR could be opened, the one-line reason instead, and charter_written stays false' },
@@ -506,6 +528,24 @@ const PLAN_SCHEMA = {
     doc_facts_routed: { type: 'string', description: 'durable repo-facts routed into their owning docs/ card this wave (path + one-line what, per fact), or "none — <why>". Facts that deserved docs but missed the byte budget were filed as backlog tasks instead — name them.' },
     journey: JOURNEY_FIELD,
     ...FABLE_STAMPS,
+    // Charter D17 + D5. Every `considering` candidate the strategist filed is
+    // RESOLVED here, on the record: promoted to `open` (and reused as the
+    // slice's task, same doc, same identity) or discarded to `cancelled` with a
+    // reason. A candidate left unresolved is a row that says `considering`
+    // forever while the wave that was considering it has ended.
+    candidates_resolved: {
+      type: 'array',
+      description: "one entry per candidate task the strategist filed — EVERY one, including the ones you killed. An empty array is only honest when the strategist filed no candidates at all. Never resolve a candidate by deleting it: a discard is a visible `cancelled` row carrying why (charter D5).",
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['task_id', 'outcome', 'note'],
+        properties: {
+          task_id: { type: 'string', description: 'the candidate task id (from candidates[].task_id, the survey/verify report that staged it, or the epic task\'s children)' },
+          outcome: { type: 'string', enum: ['promoted', 'discarded'], description: "'promoted' = staged to `open` and REUSED as this slice's wave[].task_id (same doc — never file a second task for a candidate you already published); 'discarded' = closed `cancelled` with a close_reason." },
+          note: { type: 'string', description: 'the one-line why, in the words a human reading the board next month needs: what exploration settled, and what would reopen it' },
+        },
+      },
+    },
     wave: {
       type: 'array',
       description: 'this wave of build slices, ≤8, integration-ordered',
@@ -614,6 +654,23 @@ for (const [name, schema] of [
   }
 }
 
+// The same required-vs-properties self-check as above, for the schemas defined
+// BELOW that loop (it runs at module scope, so it literally cannot see them).
+// The failure it catches is specific and total: every schema here is
+// additionalProperties:false, so a `required` key with no matching entry in
+// `properties` is a contract NO response can satisfy — the host rejects every
+// structured return and the phase dies with a shape error, not a useful one.
+for (const [name, schema] of [
+  ['AIM_SCHEMA', AIM_SCHEMA], ['PLAN_SCHEMA', PLAN_SCHEMA],
+  ['BUILD_SCHEMA', BUILD_SCHEMA], ['REVIEW_SCHEMA', REVIEW_SCHEMA],
+]) {
+  for (const key of schema.required || []) {
+    if (!Object.prototype.hasOwnProperty.call(schema.properties || {}, key)) {
+      throw new Error(`${name} declares required key '${key}' but does not define it in properties — with additionalProperties:false that contract is unsatisfiable and every response would be rejected. Fix the schema; do not proceed.`)
+    }
+  }
+}
+
 // Same class of tripwire for the clock: telemetry.clock reads these stamps.
 for (const [name, schema] of [
   ['STRATEGY_SCHEMA', STRATEGY_SCHEMA], ['AIM_SCHEMA', AIM_SCHEMA],
@@ -647,7 +704,23 @@ Your output:
 2. direction_debate — the rivals you weighed, why the winner won, the sharpest attack on it and how the wave absorbs it.
 3. survey — 5-20 BROAD assignments for the Opus surveyor fleet. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
-5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
+5. FILE THE CANDIDATES AS PUBLISHED \`considering\` TASKS (charter D17 — this workflow walks the lifecycle graph it exposes to users). Name your candidate slices in \`candidates\` and file ONE published bp task per candidate, NOW, before the surveyors fly. Uncertainty belongs on the board: a candidate that lives only in Paper prose cannot be watched, cannot be staged when someone starts researching it, and cannot be killed visibly. Per candidate:
+   \`\`\`
+   bp task create --title "<candidate.title>" \\
+     --description "<20+ chars: candidate.why, the wave it belongs to, and what would settle it>" \\
+     --publish --yes -o json \\
+     --set lifecycle_status=considering \\
+     --set parent_id=${EPIC_TASK_ID || '<the epic parent task id — omit this --set entirely if no epic task exists yet>'} \\
+     --set wave_paper=<the wave Paper id from step 4> \\
+     --set 'tags:=[{"tag":"<registered tag>","strength":80,"rationale":"20+ chars saying why this tag"}]' \\
+     --set 'acceptance_criteria:=[{"criterion":"exactly one placeholder criterion resolved: promoted or discarded","met":false,"evidence":""}]'
+   # then stamp what the thought is ABOUT (same-state stage is legal and is a no-op on status):
+   bp task stage <the returned id> considering --object <build|research> --worker strategist --yes
+   \`\`\`
+   THE ONE PLACEHOLDER CRITERION IS THE POINT: a \`considering\` row is a thought, not a commitment, so it carries exactly ONE unmet criterion and that criterion's whole content is that Decide must resolve it — promoted or discarded. Do not invent rubric criteria for a candidate; Decide writes those when it promotes one.
+   MECHANICS, MEASURED AGAINST THE LIVE LEDGER — get these wrong and the filing fails or, worse, half-succeeds: (a) \`bp task create\` has NO \`--id\` flag and no \`--parent\` flag; the id is SERVER-GENERATED and comes back in the \`-o json\` receipt (\`{"id":"task-…","lifecycle_status":"considering","status":"published"}\`) — read it from there, never guess it, and parent through \`--set parent_id=…\`. (b) \`--publish\` pays the publish wall IN THE SAME CALL — that is deliberate, because the boards read the published ledger only and a draft candidate is invisible — and the wall REQUIRES a 20+ char description plus 1-12 weighted tags whose strengths are DISTINCT integers 1-100 and every one of which is ALREADY a registered \`type:tag\` document. List the vocabulary with \`bp doc ls tag --all\` and never invent a tag; an unregistered one is refused BEFORE anything is created, so a failed \`--publish\` leaves no draft behind to clean up. (c) \`engagement\` is an EPHEMERAL lease the TTL sweeper deletes after ~900s, so \`engagement.object\` at birth is a live signal, not a durable record — the durable statements of what a candidate is about are \`candidates[].object\` in this report and the candidate's line in the wave Paper. Write both.
+   THEN WIRE THE IDS BACK, in two places, or the identity is lost: put each returned id on \`candidates[].task_id\`, and on the \`survey[].task_id\` of the assignment that settles it. A surveyor with no task_id stays fully read-only; a surveyor WITH one stages that exact doc to \`researching\` when it picks the question up. List every candidate with its task id in the wave Paper too, so Decide can resolve them all even if a report is lost.
+6. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
 CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
@@ -669,7 +742,7 @@ phase('Survey')
 const surveyResults = surveyAssignments.length === 0 ? [] : (await parallel(
   surveyAssignments.map((q) => () =>
     neverLose((m) => agent(
-      `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
+      `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, and exactly ONE sanctioned bp mutation — nothing else, anywhere. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, move it out of \`considering\` and into \`researching\` the moment you start, so the board shows that someone is actually looking — \`bp task stage <candidate-task-id> researching --object research --worker survey:${q.key} --yes\`, optionally followed by \`bp task pulse\` if you run long. That is the whole permission: no create, no patch, no close, no stamp, no publish, and nothing at all if your assignment names no candidate task. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
 
 ${USER_WISH_BLOCK}
 
@@ -678,6 +751,7 @@ ${strategist.direction}
 
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
+${q.task_id ? `CANDIDATE TASK: ${q.task_id} — this assignment settles a published \`considering\` candidate. Stage it to \`researching\` before you dig (the one mutation you are allowed), and echo the id back in task_id so Decide can resolve it.` : 'CANDIDATE TASK: none — this assignment settles no candidate; make no bp mutations at all.'}
 ${q.mode === 'drift-check' ? `
 DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper || 'MISSING — the strategist omitted prior_paper; treat this as research mode and say so in findings'} already answered this. Read it, re-run its facts' rerun commands, and report each fact CONFIRMED or DRIFTED in your facts[] (with a fresh rerun command). Spend remaining time ONLY on the delta — what changed, what was never asked. Do not re-derive settled ground.` : ''}
 
@@ -790,7 +864,7 @@ phase('Verify')
 const verifyResults = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
     neverLose((m) => agent(
-      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing; and the ledger carve-out below is DENIED to you: a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees)' : ', and exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
+      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, never touch main, and exactly ONE sanctioned bp mutation. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, stage it to \`researching\` as you begin — \`bp task stage <candidate-task-id> researching --object research --worker verify:${q.key} --yes\`, plus \`bp task pulse\` if you run long. Nothing else on the ledger: no create, no patch, no close, no stamp, no publish, and nothing at all when your assignment names no candidate task. REPO WRITES are a SEPARATE question with a separate answer${q.needs_worktree ? ': you are in your OWN throwaway worktree — probe edits are fine, but commit nothing, and the tooling/grip/ledger REPO-WRITE carve-out described in other runs is DENIED to you (a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees). That denial is about repo files only; the bp-ledger stage above still stands' : ' — exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
 
@@ -802,6 +876,7 @@ ${aim.synthesis}
 
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
+${q.task_id ? `CANDIDATE TASK: ${q.task_id} — this assignment settles a published \`considering\` candidate. Stage it to \`researching\` before you dig (the one mutation you are allowed), and echo the id back in task_id so Decide can resolve it.` : 'CANDIDATE TASK: none — this assignment settles no candidate; make no bp mutations at all.'}
 ${q.verify_commands ? `MUST RUN (proof, not reading): ${q.verify_commands}
 Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive output lines in proofs[] — never paraphrase a pass. A failing command is a finding, not a failure of yours.` : 'Reading suffices for this assignment, but if you find a load-bearing claim that only a run can settle, run it and record the proof.'}
 
@@ -847,11 +922,14 @@ ${strategist.direction_debate}
 DIGEST SYNTHESIS (from Digest):
 ${aim.synthesis}
 
+CANDIDATES THE STRATEGIST FILED AS PUBLISHED \`considering\` TASKS (charter D17 — every one of these is a live row on the board right now, and YOU are the only phase that can resolve it):
+${JSON.stringify(strategist.candidates || [], null, 2)}
+
 VERIFICATION REPORTS (the deep round — proofs[] carry actually-run output; trust proofs > facts > prose; spot-check anything load-bearing that smells off):
 ${JSON.stringify(verifications, null, 2)}
 
 SURVEY REPORTS (the wide round, already distilled by the synthesis — consult for detail, not direction):
-${JSON.stringify(surveys.map((s) => ({ key: s.key, findings: s.findings, facts: s.facts })), null, 2)}
+${JSON.stringify(surveys.map((s) => ({ key: s.key, task_id: s.task_id, findings: s.findings, facts: s.facts })), null, 2)}
 ${SURVEY_DEFICIT}
 ${VERIFY_DEFICIT}
 If either deficit above is non-empty, the wave did NOT get the coverage it planned for. That is a fact about this wave, not an excuse: record it in the Paper's decision section by name, and let it shape the cut — a slice whose correctness rests on an unanswered question is either re-scoped, moved to a later round with the question re-asked, or filed to the backlog with the gap stated. Do not cut a confident slice on top of a hole and let the Paper imply it was verified.
@@ -872,16 +950,37 @@ Your job:
    FILE AND CLAIM THE WAVE REFERENT **BEFORE** YOU OPEN THE PR — this is a step, not a formality, and doing it after \`gh pr create\` is already too late. The pr-task-gate's predicate is \`claim.expired_at >= pull_request.created_at\` (honest-gates charter D58): the verdict is FROZEN at PR-open time, so a task whose lease had ALREADY lapsed when the PR was created fails permanently. Measured live 2026-07-28 against the real ledger: a charter PR naming the epic parent at 21:30Z FAILS with \`had ALREADY lapsed 19979s before this PR was opened\`, while the SAME task with the PR opened at 15:00Z PASSES. Nothing rescues the losing side — not a re-run, not a re-claim, not close/reopen — because none of them move \`created_at\`; only a NEW PR opened under a live claim (or the \`hotfix!\` label) escapes. So, first:
    \`\`\`
    # a PER-WAVE referent, parented under the epic — published, then claimed
-   bp task create --id <epic-slug>-wave-<N>-log --parent ${EPIC_TASK_ID || '<the epic parent task id>'} --title "Wave <N> paperwork: charter PR + wave log" ...   # or the bp doc create task + bp doc publish fallback
-   bp task claim <epic-slug>-wave-<N>-log <this run's worker id>        # doc.claim.epoch comes back here
+   # THERE IS NO --id AND NO --parent. The id is SERVER-GENERATED; parent through --set parent_id=.
+   # This is the SAME create contract step 1 already states in full — flags invented here fail the
+   # very step that files the wave referent, and the wave then dies at the PR it cannot name.
+   bp task create --title "Wave <N> paperwork: charter PR + wave log" \\
+     --description "<20+ chars: this wave's charter PR and wave log, and what closes it>" \\
+     --publish --yes -o json \\
+     --set parent_id=${EPIC_TASK_ID || '<the epic parent task id>'} \\
+     --set 'tags:=[{"tag":"<registered tag>","strength":80,"rationale":"20+ chars saying why this tag"}]' \\
+     --set 'acceptance_criteria:=[{"criterion":"the charter PR is open and reporting its checks","met":false,"evidence":""}]'
+   # READ THE ID OUT OF THAT RECEIPT — {"id":"task-...","status":"published"} — never guess it:
+   REFERENT=$(... the "id" field of the -o json receipt above ...)
+   bp task claim "$REFERENT" <this run's worker id> --yes        # doc.claim.epoch comes back here
    \`\`\`
-   THE REFERENT IS PER-WAVE, AND THE REJECTED ALTERNATIVE IS RECORDED HERE SO NO LATER PHASE RE-DERIVES IT: claiming the long-lived epic parent Goal (${EPIC_TASK_ID || '<the epic parent task id>'}) would also satisfy the gate, and it is WRONG — it misrepresents that Goal's lifecycle for the whole wave, parking a multi-wave Goal in \`in_progress\` under one Decide agent's name for hours, and it makes the Goal's claim state a hostage of PR timing. A \`<epic-slug>-wave-<N>-log\` child is exactly as long-lived as this wave's paperwork, which is what the gate should be vouching for.
+   THE REFERENT IS PER-WAVE, AND THE REJECTED ALTERNATIVE IS RECORDED HERE SO NO LATER PHASE RE-DERIVES IT: claiming the long-lived epic parent Goal (${EPIC_TASK_ID || '<the epic parent task id>'}) would also satisfy the gate, and it is WRONG — it misrepresents that Goal's lifecycle for the whole wave, parking a multi-wave Goal in \`in_progress\` under one Decide agent's name for hours, and it makes the Goal's claim state a hostage of PR timing. A per-wave child row is exactly as long-lived as this wave's paperwork, which is what the gate should be vouching for. (Its id is whatever the create receipt returned — the \`<epic-slug>-wave-<N>-log\` shape is how to TITLE it, never an id you may pass.)
    THEN PULSE IT UNTIL THE PR IS OPEN: \`bp task pulse <referent> <worker> --now "…"\` at least every 30 MINUTES from the claim until \`gh pr create\` returns, and once more immediately after with the PR number. The lease is 2700s — \`api/lib/barkpark/tasks/ttl_sweeper.ex:158 @default_ttl_seconds 2700\`, i.e. 45 minutes — so 30 leaves margin for a slow push or a rebase. PULSE IS A KEEP-ALIVE AND NEVER A RESURRECT: \`api/lib/barkpark/tasks/pulse.ex:130-136\` \`check_live/1\` refuses anything not \`in_progress\` with \`:not_holder\`, so once the lease is reaped you cannot pulse your way back — you must re-claim, and if the PR is already open by then, that PR is dead and you open a new one.
    THEN OPEN THE PR: \`gh pr create --base main --head "$BR"\`, and its body MUST carry the line \`Task: <the wave referent id you just claimed>\` ON ITS OWN LINE — that is exactly what the pr-task-gate reads, and it reads it on EVERY pull request: \`.github/workflows/pr-task-gate.yml:43\` says verbatim "No paths filter: any change needs a task, so every PR is checked." THERE IS NO DOCS-ONLY SKIP FOR THIS GATE — a \`.md\`-only diff does NOT clear it (the paths-filtered skip you may be remembering belongs to the Elixir gate's dispatcher, a different workflow), so a charter PR carrying a lapsed or missing referent is unmergeable, permanently.
    REPORT, DO NOT PUSH: set charter_written=true, charter_pr=<the PR number or URL>, and wave_referent_task=<the referent id you claimed and pulsed> once the PR is OPEN and reporting its checks. The success condition of this phase is THE PR EXISTING AND REPORTING, not a push succeeding — do not block the wave waiting on the merge; the lead merges it. And because the charter therefore may NOT be on origin/main while the builders fly, name the PR in decisions_summary and make sure this wave's decisions are in the wave Paper IN FULL (step 7) — the Paper is what a builder can read today.
    THE SAME PR CARRIES THIS RUN'S LEDGER ROWS: the verify fleet may have written re-derivation recipe rows under tooling/grip/ledger/ and it is forbidden to commit them — that is YOUR step. Run \`git status --porcelain tooling/grip/ledger/\` in the PRIMARY checkout; for each untracked *.json it names, copy that file into the charter worktree BY EXPLICIT PATH and \`git add\` it there — never \`git add -A\`, never a directory, never a glob you did not first expand and read, because other sessions share this checkout. Same commit as the charter, or a second docs-only commit on the same branch — either is fine, both ride the one PR, and nothing here ever touches main directly. If it names nothing, skip the step silently; touch nothing else under tooling/grip/.
 2b. ROUTE DURABLE REPO-FACTS INTO DOCS (epic-memory D5) — do this WHILE THE CHARTER WORKTREE STILL EXISTS, i.e. before the \`git worktree remove\` that closes step 2b (if it is already gone, \`git worktree add\` a fresh one on \`$BR\`): from this wave's verified facts, the FEW that are durable repo-truths (not wave-local findings) go into their OWNING docs/ card per the CLAUDE.md routing table — corrections and gap-fills only, never additive research dumps; byte budgets and the 7-card cap are sovereign. Gate before committing: bash scripts/check-doc-budgets.sh && bash scripts/docs-anchors-check.sh. The edit RIDES THE CHARTER PR — never a direct push to main: make the edit in the primary checkout, then copy the card into the charter worktree BY EXPLICIT PATH and \`git add\` it there, on the same branch and in the same PR as the charter (same commit or a second docs-only one, either is fine). A fact that deserves docs but misses budget becomes a published backlog task instead. Record everything in doc_facts_routed. Then \`git worktree remove\` the worktree (the primary checkout keeps its working copy of the charter, uncommitted, so THIS run can still read it — leave it alone, do not commit it to main).
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
+3b. RESOLVE EVERY CANDIDATE — PROMOTED OR DISCARDED (charter D17; kills are visible, charter D5). Each candidate above is a published \`considering\` row that this wave created and only you can close out. Leaving one unresolved leaves the board saying "considering" about a wave that has ended. Take the candidate ids from the roster above, from the survey/verify reports' \`task_id\`, and from the epic task's children; resolve EVERY one and record it in \`candidates_resolved\`.
+   PROMOTE — the candidate becomes a real slice. REUSE THE SAME DOC; do not file a second task for something you already published:
+   \`\`\`
+   bp task stage <candidate-id> open --note "<why exploration promoted it>" --yes
+   \`\`\`
+   then patch that same doc up to slice rubric (title, description, acceptance criteria incl. the merge-gated one, priority, wave_paper) and put ITS id in \`wave[].task_id\`. Step 3's contract already tolerates a pre-existing published task — perfecting one you filed at Strategize is the intended path, and filing a duplicate beside it is the defect. Note that \`stage … open\` CLEARS the engagement lease, which is correct: an \`open\` row is committed work, not a thought.
+   DISCARD — exploration killed it. Close it \`cancelled\` with a reason a human reading the board next month can act on:
+   \`\`\`
+   bp task close <candidate-id> <this run's worker id> 0 cancelled "<what settled it, and what would reopen it>"
+   \`\`\`
+   MEASURED AGAINST THE LIVE LEDGER, so you do not have to guess: a candidate that was never claimed closes cleanly with observed epoch \`0\` — no claim, no holder, no \`holder_override\` — and a \`cancelled\` close is EXEMPT BY NAME from the unmet-criteria gate, so the placeholder criterion staying \`met:false\` is not an obstacle; that unmet placeholder beside a \`cancelled\` status IS the honest record of a discarded thought. If the row WAS claimed (a surveyor or verifier staged it), the epoch is \`bp task get <id>\` → \`.doc.claim.epoch\`, re-read at close time. NEVER resolve a candidate by deleting or silently dropping it — a kill that leaves no row never happened.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
 6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model, which sets BOTH the model and its depth ('opus' builds at medium, 'fable' at high — there is no separate effort knob and nothing above high, so this one choice is the whole decision and mis-classifying a hard slice as routine costs twice). TWO INDEPENDENT AXES, either one alone is enough to warrant fable. DIFFICULTY: 'opus' is the default and fits most well-specified building; reserve 'fable' for slices that are genuinely hard rather than merely large — subtle design judgment, cross-surface coupling, high blast radius. SURFACE: a VISUALLY DESIGNED slice gets 'fable' regardless of size — palette, layout, typography, CSS, LiveView/SPA chrome, anything judged against the Kinsta/Vercel bar; a small fully-specified CSS slice is easy on the difficulty axis and would wrongly fall to opus. (System/architecture design is not this axis — you already did that judgment here.) ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).

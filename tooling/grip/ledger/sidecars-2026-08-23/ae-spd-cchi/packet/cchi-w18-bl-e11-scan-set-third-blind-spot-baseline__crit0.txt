@@ -1,0 +1,1 @@
+The scan set is widened by SHAPE, not by name, and the widening is derived from the gate's own `citationScanFiles()` rather than a hardcoded list — the PR shows the derived file list before and after. Evidence: both derivations.

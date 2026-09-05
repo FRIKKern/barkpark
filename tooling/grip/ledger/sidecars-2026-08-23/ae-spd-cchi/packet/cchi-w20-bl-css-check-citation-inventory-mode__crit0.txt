@@ -1,0 +1,1 @@
+__css_check.mjs gains a `--citation-inventory` argv sub-mode placed ABOVE the gate body (alongside --swallow-check at :776 and --orphan-check at :790) that prints the scan set crossed with the ruled alternation and exits, so it works whether or not the gate is red.

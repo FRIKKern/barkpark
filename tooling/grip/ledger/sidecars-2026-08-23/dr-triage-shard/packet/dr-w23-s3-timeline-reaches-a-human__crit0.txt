@@ -1,0 +1,1 @@
+`.github/workflows/deploy.yml` posts one delivery row per carried sha, derived from `git rev-list OLD..NEW` on the box, all sharing `delivering_run_id`, using only credentials already in scope (no new secret is added to the workflow).

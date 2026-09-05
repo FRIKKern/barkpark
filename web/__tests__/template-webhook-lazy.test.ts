@@ -17,7 +17,7 @@
 // call — binding the behavioural proof to the bytes that actually ship.
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -147,13 +147,16 @@ test('AFTER: with the secret SET, the handler is memoized (built at most once)',
 
 // ── STRUCTURAL: bind the proof to the bytes that ship ────────────────────────
 
+// The two starters no longer carry a route.ts each: the scaffold-boilerplate
+// dedup collapsed them into ONE generator-owned shared source, copied into each
+// generated app at generation time. So this list is one entry, and the
+// drift test below changed shape accordingly — see its comment.
 const TEMPLATE_ROUTES = [
-  '../../js/packages/create-barkpark-app/templates/blog-starter/app/api/barkpark/webhook/route.ts',
-  '../../js/packages/create-barkpark-app/templates/website-starter/app/api/barkpark/webhook/route.ts',
+  '../../js/packages/create-barkpark-app/templates/_shared/app/api/barkpark/webhook/route.ts',
 ].map((p) => fileURLToPath(new URL(p, import.meta.url)))
 
 for (const path of TEMPLATE_ROUTES) {
-  const label = path.includes('blog-starter') ? 'blog-starter' : 'website-starter'
+  const label = '_shared'
 
   test(`SHIPPED (${label}): no unsafe module-scope createWebhookHandler with a non-null-asserted env secret`, () => {
     const src = readFileSync(path, 'utf8')
@@ -182,7 +185,28 @@ for (const path of TEMPLATE_ROUTES) {
   })
 }
 
-test('SHIPPED: both template route.ts files are byte-identical', () => {
-  const [a, b] = TEMPLATE_ROUTES.map((p) => readFileSync(p, 'utf8'))
-  assert.equal(a, b, 'blog-starter and website-starter webhook routes must not drift')
+// WAS: 'both template route.ts files are byte-identical'. That test existed to
+// catch drift between two hand-maintained copies. The dedup removed the second
+// copy, so comparing the list to itself would pass vacuously and prove nothing.
+// The invariant it protected — one webhook route, no per-starter fork — is now
+// structural, so assert THAT: neither starter may reintroduce its own copy.
+// If one ever does, the shared source stops being the only thing that ships and
+// the drift this file guards against becomes possible again.
+test('SHIPPED: the webhook route has exactly one source — no per-starter copy', () => {
+  const forks = ['blog-starter', 'website-starter'].filter((starter) =>
+    existsSync(
+      fileURLToPath(
+        new URL(
+          `../../js/packages/create-barkpark-app/templates/${starter}/app/api/barkpark/webhook/route.ts`,
+          import.meta.url,
+        ),
+      ),
+    ),
+  )
+  assert.deepEqual(
+    forks,
+    [],
+    `these starters reintroduced their own webhook route.ts (${forks.join(', ')}) — ` +
+      'the shared source under templates/_shared must stay the only one',
+  )
 })

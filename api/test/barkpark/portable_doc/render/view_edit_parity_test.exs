@@ -79,10 +79,31 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # not on the wire. Red-before (mutation-proven, paper-links): changing
   # `text-underline-offset` to `0.19em` on `.bp-paper-surface a` alone reds §2
   # ("a.text-underline-offset: View=\"0.19em\" Edit=\"0.18em\"").
-  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
+  # `.bp-figcaption` (papers/captions-floor): the article <figcaption> used to be
+  # ~200 bytes of INLINE style repeated at three emit sites (figures.ex diagram +
+  # asciicast, compose.ex figure frame) — and the third copy had drifted to a bare
+  # ink hex where its siblings read `var(--paper-ink-soft, …)`, 2.97:1 on the dark
+  # ground. Inline styles are invisible to this gate; a class is not. The canvas
+  # mounts figures through the SAME reader producer, so the class lands on both
+  # surfaces and both editor copies carry the twin.
+  # Red-before (mutation-proven — see the PR): with `.bp-figcaption` on this list,
+  # deleting `line-height: 1.45;` from the root.html.heex mirror reds §2
+  # (".bp-figcaption.line-height: View=\"1.45\" Edit=nil"); off the list the same
+  # mutation ships GREEN through the whole portable_doc tree.
+  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
+               __DIR__
+             )
+
+  # The Studio editor's SHELL stylesheet. It used to sit inline in
+  # root.html.heex's <style>; edit-on-the-link lifted it into a static asset so
+  # the public paper reader can link the same bytes. Studio still loads exactly
+  # these rules (root.html.heex links it between its two <style> halves), so the
+  # Edit side of every §2/§5 comparison is root.html.heex PLUS this file.
+  @shell_css Path.expand(
+               "../../../../priv/static/assets/bp-paper-editor-shell.css",
                __DIR__
              )
 
@@ -142,7 +163,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   defp normalize_ws(s), do: String.replace(s, ~r/\s+/, " ")
 
   defp view_css, do: strip_comments(Stylesheet.css())
-  defp edit_css, do: strip_comments(File.read!(@root_heex))
+  # Studio's Edit surface is now two files: the layout's remaining inline rules
+  # plus the shell stylesheet it links. Concatenated in load order (the <link>
+  # sits between the halves, and no rule in the second half restyles the editor).
+  defp edit_css, do: strip_comments(File.read!(@root_heex) <> "\n" <> File.read!(@shell_css))
   defp bundle_css, do: strip_comments(File.read!(@bundle_css))
 
   # Drop `/* … */` comments so a comment's prose (which contains commas and the
@@ -436,7 +460,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `a` / `a:focus-visible` ride here too (paper-links wave): §2 gates the link
   # rule reader↔root only, so WITHOUT these the bundle copy could drift and the
   # embedded editor would lose the underline while Studio kept it.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
+  # `.bp-figcaption` rides here too: §2 gates it reader↔root only, so WITHOUT this
+  # entry a bundle-side drift on the caption would ship green — an embedded editor
+  # whose captions read in a different voice from the Studio canvas.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption)
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()
@@ -945,5 +972,138 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
            that belongs in design/tokens.json `font.reading.stack` behind the
            au-w5-reading-typography gate, and then BOTH sides carry it.
            """
+  end
+
+  # ── 11. THE READING STACK, on EVERY surface that spells it out ──────────────
+  # §10 above pins two of the copies. There are FIVE. The one it could not see
+  # is the PUBLIC READER at `/papers/<slug>`: bulldocs.html.heex sets the
+  # article body's `font-family` directly, and until this task that was a
+  # FOURTH hand-written literal — it happened to match, and nothing gated it,
+  # so a reorder ratified in design/tokens.json would have silently left the
+  # public reader on the old stack while Studio and both editor bundles moved.
+  #
+  # The literal is gone: bulldocs.html.heex now DECLARES `--tok-reading-font`
+  # from `tokens.font.reading.stack` inside its GENERATED marker region (the
+  # reader's <body> is neither `.bp-paper-surface` nor `.bp-paper-body`, so the
+  # token paper-surface.css scopes to those classes does not reach it) and its
+  # `font-family` reads that var. This test pins the emitted result against the
+  # other four, so the emitter's output — not just the emitter's input — is on
+  # the wire.
+  #
+  # Two spellings exist across the five, and both are collected:
+  #   `--tok-reading-font: STACK;`                          — the emitted token
+  #   `--paper-font-serif: var(--tok-reading-font, STACK);` — a consumer's fallback
+  @bulldocs_heex Path.expand(
+                   "../../../../lib/barkpark_web/layouts/bulldocs.html.heex",
+                   __DIR__
+                 )
+
+  # The BUILT bundle the web demo and embedders actually serve. Included on
+  # purpose: it is the artifact, and a stale rebuild is exactly the drift that
+  # would ship a reordered stack to Studio while embedders kept the old one.
+  @vendored_editor_css Path.expand(
+                         "../../../../../web/public/assets/bp-paper-editor.css",
+                         __DIR__
+                       )
+
+  defp reading_stacks(css) do
+    tokens =
+      ~r/--tok-reading-font:\s*([^;]+);/
+      |> Regex.scan(css)
+      |> Enum.map(fn [_, v] -> String.trim(v) end)
+
+    fallbacks =
+      ~r/--paper-font-serif:\s*var\(\s*--tok-reading-font\s*,\s*([^;]+?)\s*\)\s*;/
+      |> Regex.scan(css)
+      |> Enum.map(fn [_, v] -> String.trim(v) end)
+
+    tokens ++ fallbacks
+  end
+
+  # Byte-for-byte on the FAMILY SEQUENCE, normalising the quote GLYPH and
+  # nothing else. This is not a loosening to make a red go away: the two
+  # hand-kept consumers spell the sixth family `'Source Serif 4'` with
+  # apostrophes, and the esbuild pass that produces bp-paper-editor.css
+  # rewrites its own source's apostrophes to double quotes — so a raw byte
+  # compare would red on a tree where every surface already agrees. CSS treats
+  # the two quote characters as identical. A different family, a different
+  # ORDER, an added or dropped fallback, or a changed generic all still red.
+  defp canonical_stack(stack) do
+    stack
+    |> String.replace("'", "\"")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  test "all five surfaces that name the reading stack name the SAME one" do
+    sources = [
+      {"paper-surface.css (the emitted token + its own consumer)", reading_stacks(view_css())},
+      {"public reader shell (bulldocs.html.heex)",
+       reading_stacks(strip_comments(File.read!(@bulldocs_heex)))},
+      {"Studio shell (root.html.heex)", reading_stacks(edit_css())},
+      {"embedder bundle source (assets/paper-editor/src/styles.css)",
+       reading_stacks(bundle_css())},
+      {"built bundle (web/public/assets/bp-paper-editor.css)",
+       reading_stacks(strip_comments(File.read!(@vendored_editor_css)))}
+    ]
+
+    # distrust-vacuous-green: a token rename, a selector rewrite or a regex that
+    # stops matching would empty every list and make the equality below trivially
+    # true. Require each surface to actually yield a plausible stack first.
+    for {name, stacks} <- sources do
+      assert stacks != [],
+             "#{name} names the reading stack NOWHERE. Either the surface stopped " <>
+               "declaring it (the public reader would fall back to the browser's " <>
+               "default serif) or this test's regex went blind after a rename."
+
+      for stack <- stacks do
+        families = stack |> String.split(",") |> Enum.map(&String.trim/1)
+
+        assert length(families) >= 5,
+               "#{name} yields #{inspect(stack)} — only #{length(families)} families. " <>
+                 "The ratified stack carries seven; a capture this short means the " <>
+                 "regex clipped the value, and a clipped value compares equal to nothing."
+
+        assert List.last(families) == "serif",
+               "#{name} yields #{inspect(stack)}, whose last entry is not the generic " <>
+                 "`serif`. Without it a reader with none of the named faces gets the " <>
+                 "browser default sans, not a serif."
+      end
+    end
+
+    canonical =
+      Enum.map(sources, fn {name, stacks} ->
+        {name, stacks |> Enum.map(&canonical_stack/1) |> Enum.uniq()}
+      end)
+
+    for {name, values} <- canonical do
+      assert length(values) == 1,
+             "#{name} names MORE THAN ONE reading stack: #{inspect(values)}. " <>
+               "One surface, one stack — a second, private copy is exactly the " <>
+               "divergence this section exists to prevent."
+    end
+
+    [{ref_name, [reference]} | rest] = canonical
+
+    for {name, [value]} <- rest do
+      assert value == reference,
+             """
+             Reading-stack drift on the paper surfaces.
+
+               #{ref_name}
+                 #{reference}
+               #{name}
+                 #{value}
+
+             The ratified order lives in design/tokens.json `font.reading.stack`
+             and is owned by au-w5-reading-typography (human-gated). Change it
+             THERE, run `node design/emit.mjs --write`, and hand-update the two
+             consumers that still repeat it as a var() fallback (root.html.heex
+             and assets/paper-editor/src/styles.css) plus the built bundle. Do
+             not patch one surface to silence this — that is the bug it catches:
+             the public reader at /papers/<slug> carried its own copy for months
+             and nothing compared it to anything.
+             """
+    end
   end
 end

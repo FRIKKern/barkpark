@@ -1,0 +1,1 @@
+NO HARDCODED CORE COUNT: the denominator is read from the beat's cpu_cores. A test proves a 4-core box at load1 4.0 (1.0x) is NOT strained — the case a `load1 >= 4.0` fallback would get silently wrong.

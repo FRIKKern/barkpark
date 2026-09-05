@@ -1,0 +1,1 @@
+The rendered waited line attributes the buckets it has and renders each missing bucket as its own UNMETERED sentence, never 0

@@ -1,0 +1,1 @@
+The reconciling path CLOSES issue #11217 (or files the reason it cannot), so the alarm's carrier is a state rather than an ever-growing log. Evidence: the issue state after a RECONCILED run.

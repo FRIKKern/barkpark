@@ -65,6 +65,15 @@ x-control-plane: &control_plane
     # top of this file), so setting it in .env alone would set it on the HOST
     # and leave the CONTAINER blind.
     - PLATFORM_ADMIN_EMAILS
+    # gh-9531 residual (task-eeabfd9bf3ed8371): the two deployment values that
+    # used to be frozen at BUILD time. PLATFORM_BASE_DOMAIN is the zone every
+    # managed instance is named under (keep it in step with the Go warm-pool
+    # worker's own base domain); TEMPLATES_REPO_URL points the template clone
+    # handoff at a fork. Both passthrough-only and optional — unset keeps the
+    # historical barkpark.cloud / upstream-repo defaults, and a MALFORMED value
+    # refuses the node at boot rather than silently serving ours.
+    - PLATFORM_BASE_DOMAIN
+    - TEMPLATES_REPO_URL
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own

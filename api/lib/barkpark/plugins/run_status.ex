@@ -12,6 +12,14 @@ defmodule Barkpark.Plugins.RunStatus do
     * `:seed` — last codelist-seed sweep for the named plugin. Carries
       whatever the per-plugin caller emits (typically `:ok` or
       `{:error, reason}`).
+    * `:schemas` — what the last bootstrap of that plugin actually INSTALLED:
+      `%{names: [schema_type_name], detail: :installed | :module_not_loaded |
+      :no_callback}`. Recorded alongside `:bootstrap` by
+      `Barkpark.Plugins.Bootstrap` and read by
+      `Barkpark.Plugins.Census.take/1`, which needs the type names — the
+      `:bootstrap` result carries only a count, so a plugin that registered
+      the WRONG schemas is indistinguishable from one that registered the
+      right ones by count alone.
 
   State is a flat map keyed by plugin name. Records are append-only from
   this process's perspective — every `record/3` overwrites the previous
@@ -29,7 +37,7 @@ defmodule Barkpark.Plugins.RunStatus do
 
   @name __MODULE__
 
-  @type kind :: :bootstrap | :seed
+  @type kind :: :bootstrap | :seed | :schemas
   @type entry :: %{at: DateTime.t(), result: term()}
   @type plugin_status :: %{optional(kind()) => entry()}
 
@@ -60,7 +68,7 @@ defmodule Barkpark.Plugins.RunStatus do
   """
   @spec record(kind(), String.t(), term()) :: :ok
   def record(kind, plugin_name, result)
-      when kind in [:bootstrap, :seed] and is_binary(plugin_name) do
+      when kind in [:bootstrap, :seed, :schemas] and is_binary(plugin_name) do
     # Synchronous call so the LV (and tests) observe the recorded entry
     # immediately after the recording site returns. The state is tiny —
     # a flat per-plugin map — so the call cost is negligible.

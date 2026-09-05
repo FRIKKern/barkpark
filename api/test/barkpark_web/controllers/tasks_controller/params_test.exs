@@ -6,6 +6,49 @@ defmodule BarkparkWeb.TasksController.ParamsTest do
   alias Barkpark.Content.Scope
   alias BarkparkWeb.TasksController.Params
 
+  # LABELS ON THE BRIEF CARD (task-14eac58b39fd3692).
+  #
+  # The brief card is what `bp task ready` serves. Before this it carried no
+  # `labels` key at all, so a row already labelled `landed:pr-NNNNN@sha` looked
+  # identical on the wire to one that never shipped — and a census that
+  # filtered ready cards by label returned a confident ZERO over 1,658 rows,
+  # because the field could never be present. Measured 2026-09-05: 21 of those
+  # rows carried a landed label, nine at zero criteria met.
+  describe "render_doc/2 :brief — labels" do
+    defp brief(content) do
+      Params.render_doc(
+        %Document{
+          doc_id: "t1",
+          title: "a task",
+          content: content,
+          updated_at: ~N[2026-09-05 10:00:00]
+        },
+        :brief
+      )
+    end
+
+    test "a row's labels ride the brief card" do
+      card = brief(%{"labels" => ["landed-on-main", "landed:pr-15505@a5b2ff3c67"]})
+
+      assert card.labels == ["landed-on-main", "landed:pr-15505@a5b2ff3c67"]
+    end
+
+    test "ADDITIVE: a card with no labels is unchanged — the key is absent, not empty" do
+      # The brief card is a deliberate payload diet, so a new key must not
+      # appear on rows that have nothing to put in it.
+      refute Map.has_key?(brief(%{}), :labels)
+      refute Map.has_key?(brief(%{"labels" => []}), :labels)
+      refute Map.has_key?(brief(%{"labels" => nil}), :labels)
+    end
+
+    test "a non-list labels value fails soft rather than raising" do
+      # Same fail-soft law as the filter builders below: a malformed stored
+      # value must not turn a list read into a 500.
+      refute Map.has_key?(brief(%{"labels" => "landed-on-main"}), :labels)
+      refute Map.has_key?(brief(%{"labels" => %{"a" => 1}}), :labels)
+    end
+  end
+
   # Array-style query params (?type[]=task) arrive as lists. Each filter
   # builder must fail soft (no filter) instead of raising a FunctionClauseError
   # → unhandled 500 on the index endpoint `bp task ready`/`list` hits.

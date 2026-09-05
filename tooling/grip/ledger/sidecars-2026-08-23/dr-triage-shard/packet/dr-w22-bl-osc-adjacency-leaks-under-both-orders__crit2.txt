@@ -1,0 +1,1 @@
+The scrub lookbehind stops being defeated by a just-stripped escape, proved by mutation

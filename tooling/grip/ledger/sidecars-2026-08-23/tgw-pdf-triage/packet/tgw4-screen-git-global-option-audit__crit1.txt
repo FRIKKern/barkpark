@@ -1,0 +1,1 @@
+The same check is run for commit/reset/merge/checkout behind -C, -c k=v and --no-pager, each with a test

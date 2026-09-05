@@ -1,0 +1,1 @@
+A short/abbreviated slug either resolves or fails with a message that distinguishes "no such row" from "that is a prefix, try the full slug".

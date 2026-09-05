@@ -7,7 +7,7 @@ defmodule BarkparkWeb.TasksSessionsRefTest do
   no server-side expansion.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

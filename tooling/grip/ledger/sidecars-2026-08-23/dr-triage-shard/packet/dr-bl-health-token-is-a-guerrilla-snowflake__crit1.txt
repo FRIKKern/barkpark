@@ -1,0 +1,1 @@
+A newly provisioned box reports a non-sentinel req_per_s and p95_ms, proved by a live beat read off the control plane.

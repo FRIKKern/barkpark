@@ -1,0 +1,1 @@
+If a new class is added it is operator-actionable and the start/poll distinction survives in the label; if none is added, the reason for leaving the rows in UNCLASSIFIED is written down

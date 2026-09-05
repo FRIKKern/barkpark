@@ -137,20 +137,36 @@ function parseStyle(raw: string | null): Record<string, string> {
 }
 
 /** Project a live DOM element into a normalized {@link ShapeNode}. */
+/**
+ * The `class` attribute as a SORTED set. Shared by BOTH projections below, so the
+ * cross-projector check in the parity harness actually exercises this normalization
+ * (see {@link parseGoldenShape}).
+ */
+function classSet(el: Element): string[] {
+  const classes = (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean)
+  classes.sort()
+  return classes
+}
+
+/** The `data-*` attributes as a name -> value map. Shared by both projections. */
+function dataAttrs(el: Element): Record<string, string> {
+  const data: Record<string, string> = {}
+  for (const attr of Array.from(el.attributes)) {
+    const name = attr.name.toLowerCase()
+    if (name.startsWith('data-')) data[name] = attr.value ?? ''
+  }
+  return data
+}
+
 function project(el: Element): ShapeNode {
   const tag = el.tagName.toLowerCase()
-  const classAttr = el.getAttribute('class') ?? ''
-  const classes = classAttr.split(/\s+/).filter(Boolean)
-  classes.sort()
+  const classes = classSet(el)
+  const data = dataAttrs(el)
 
-  const data: Record<string, string> = {}
   const attrs: Record<string, string> = {}
   for (const attr of Array.from(el.attributes)) {
     const name = attr.name.toLowerCase()
-    if (name.startsWith('data-')) {
-      data[name] = attr.value ?? ''
-      continue
-    }
+    if (name.startsWith('data-')) continue
     // `class` and `style` are projected into their own order-insensitive fields.
     if (name === 'class' || name === 'style') continue
     if (isVariableAttr(tag, name)) continue
@@ -297,5 +313,85 @@ export function assertShapeEqual(actualHtml: string, goldenHtml: string, opts: P
   const { equal, diffs } = diffShape(actualHtml, goldenHtml, opts)
   if (!equal) {
     throw new Error(`DOM shape mismatch (${diffs.length} divergence${diffs.length === 1 ? '' : 's'}):\n  - ` + diffs.join('\n  - '))
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The GOLDEN-shape projection — the cross-projector check on THIS module
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Every pd-golden fixture carries a `shape` field the ELIXIR side computed
+// (mix barkpark.portable_doc.gen_pd_parity, `shape/1`, via LazyHTML) from the
+// same `expectedHtml`. Until 2026-09-02 nothing read it: both parity suites
+// re-derived shape from `expectedHtml` with the JS parser above, so a
+// SYSTEMATIC bug here (e.g. dropping the class sort, or mis-scoping data-*)
+// cancelled on both sides of every comparison and all 64 went vacuously green.
+//
+// `parseGoldenShape` closes that. It projects `expectedHtml` into the ELIXIR
+// projector's schema so the two can be compared directly, and it does so through
+// the SAME {@link classSet} / {@link dataAttrs} normalization `project()` uses —
+// which is the point: an independent re-implementation would only validate the
+// copy. The Elixir projection is a second, independently-written witness to what
+// this parser should see.
+//
+// The Elixir schema differs from {@link ShapeNode} in three deliberate ways:
+//   - text nodes are SIBLINGS in `children`, in document order — not an
+//     `text` field on the parent (so `<p>a <b>x</b> c</p>` keeps its interleaving)
+//   - text is VERBATIM, not whitespace-collapsed; whitespace-ONLY nodes are
+//     dropped (`skip_whitespace_nodes: true`)
+//   - only `tag` / `classes` / `data` / `children` — no `style`, no `attrs`
+//     (those live in the frozen `expectedHtml`, per charter D10)
+
+/** One element in the Elixir `shape/1` projection. */
+export interface GoldenElementNode {
+  tag: string
+  classes: string[]
+  data: Record<string, string>
+  children: GoldenShapeNode[]
+}
+
+/** One non-whitespace text node in the Elixir `shape/1` projection. */
+export interface GoldenTextNode {
+  text: string
+}
+
+export type GoldenShapeNode = GoldenElementNode | GoldenTextNode
+
+function projectGolden(el: Element): GoldenElementNode {
+  return {
+    tag: el.tagName.toLowerCase(),
+    classes: classSet(el),
+    data: dataAttrs(el),
+    children: goldenChildren(el.childNodes),
+  }
+}
+
+function goldenChildren(nodes: ArrayLike<{ nodeType: number; textContent: string | null }>): GoldenShapeNode[] {
+  const out: GoldenShapeNode[] = []
+  for (const node of Array.from(nodes)) {
+    if (node.nodeType === NODE_TEXT) {
+      const text = node.textContent ?? ''
+      // `skip_whitespace_nodes: true` on the Elixir side: HEEx indentation must
+      // not become a phantom node. Non-whitespace text is kept VERBATIM.
+      if (text.trim() !== '') out.push({ text })
+    } else if (node.nodeType === NODE_ELEMENT) {
+      out.push(projectGolden(node as unknown as Element))
+    }
+    // comments / CDATA / processing instructions: dropped, same as Elixir.
+  }
+  return out
+}
+
+/**
+ * Project an HTML fragment into the Elixir `shape/1` schema, so a golden's
+ * Elixir-computed `shape` can be asserted against what this parser sees.
+ */
+export function parseGoldenShape(html: string): GoldenShapeNode[] {
+  const window = new Window()
+  try {
+    window.document.body.innerHTML = html
+    return goldenChildren(window.document.body.childNodes)
+  } finally {
+    window.close?.()
   }
 }

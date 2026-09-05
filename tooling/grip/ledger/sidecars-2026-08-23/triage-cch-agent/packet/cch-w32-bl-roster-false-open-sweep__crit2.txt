@@ -1,0 +1,1 @@
+The two cross-epic false-opens are adjudicated only after their successor chain is read, so closing them strands no obligation.

@@ -1,0 +1,79 @@
+{
+ "pds-w47-price-column-retake": {
+  "total": 12,
+  "met": 11,
+  "unmet_idx": [
+   11
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "task-b647a6bd2b844b7e": {
+  "total": 7,
+  "met": 6,
+  "unmet_idx": [
+   6
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "task-dc323510e1f2a7ce": {
+  "total": 6,
+  "met": 5,
+  "unmet_idx": [
+   5
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "task-11f875b94ceb7501": {
+  "total": 7,
+  "met": 6,
+  "unmet_idx": [
+   6
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "cch-w40-s3-the-binding-census-gets-a-fixture-control-and-2d-stops-freezing-a-live-defect": {
+  "total": 10,
+  "met": 9,
+  "unmet_idx": [
+   9
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "astro-guard-read-vs-publicread-tier": {
+  "total": 5,
+  "met": 4,
+  "unmet_idx": [
+   4
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ },
+ "pds-bl-w48-web-sibling-launders": {
+  "total": 7,
+  "met": 6,
+  "unmet_idx": [
+   6
+  ],
+  "life": "open",
+  "mg_flag": [
+   null
+  ]
+ }
+}

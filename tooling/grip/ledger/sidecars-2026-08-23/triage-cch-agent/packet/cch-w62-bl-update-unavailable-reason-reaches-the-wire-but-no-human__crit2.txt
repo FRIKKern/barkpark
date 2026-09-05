@@ -1,0 +1,1 @@
+Copy is ECHOED not minted (charter D734): each sentence references an existing shipped clause (usageUnavailableText / ERRORS) or states plainly why no shipped clause fits.

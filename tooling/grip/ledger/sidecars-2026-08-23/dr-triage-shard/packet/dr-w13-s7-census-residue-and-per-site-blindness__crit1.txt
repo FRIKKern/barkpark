@@ -1,0 +1,1 @@
+census/3 emits deferred_total and an ABSOLUTE abandoned count; NO abandonment RATE is computed anywhere (charter D174)

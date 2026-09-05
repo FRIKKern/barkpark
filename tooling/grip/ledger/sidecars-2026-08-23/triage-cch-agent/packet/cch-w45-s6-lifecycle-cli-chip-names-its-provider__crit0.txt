@@ -1,0 +1,1 @@
+The lifecycle CLI chip emits ` --provider <kind>` using the kind already computed in lifecycleActionsModel — for an azure box every mode:"cli" action string contains "--provider azure".

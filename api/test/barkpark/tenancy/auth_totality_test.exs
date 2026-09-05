@@ -74,6 +74,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     create_membership: 2,
     create_membership: 3,
     create_membership: 4,
+    list_workspaces_for: 1,
     member?: 2,
     member?: 3,
     membership: 2,
@@ -107,6 +108,12 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   #     like the constructors above, not a request-path predicate: every
   #     caller passes a workspace id derived from a loaded row, never client
   #     input, so LOUD on malformed input is the correct posture.
+  #   * list_workspaces_for/1 — the INVERSE index (relocated here from
+  #     Barkpark.Tenancy by task-e7571b83f9a101fd). It takes NO workspace id, so
+  #     the malformed-workspace-id matrix below has no argument position to
+  #     drive; its own totality (malformed PRINCIPAL id -> []) is pinned by
+  #     test/barkpark/tenancy/list_workspaces_for_totality_test.exs, which also
+  #     counts queries so the fail-open filter rewrite reds.
   #   * role_permits?/3 — SPLIT expectation, own dedicated test at the bottom.
   #     Its first argument is a ROLE NAME, not a principal id, and built-in
   #     roles are workspace-id-INDEPENDENT by design, so a blanket
@@ -149,7 +156,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 18 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 19 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

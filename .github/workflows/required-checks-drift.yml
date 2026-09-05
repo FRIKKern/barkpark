@@ -19,7 +19,13 @@
 #
 # A THIRD JOB THAT IS NOT ABOUT THE REQUIRED SET AT ALL, AND WHY IT IS HERE
 #
-#   `Every workflow job has runs-on+steps or uses`   Hermetic. The subject is
+#   `Every workflow job has runs-on+steps or uses`   Hermetic. Since wave 42 it
+#                                       also enforces the same rule one level
+#                                       down — every STEP carries exactly one of
+#                                       `run:`/`uses:` — after two `name:`+`env:`
+#                                       steps with no `run:` shipped green and
+#                                       silently disabled the job that existed to
+#                                       surface a red main push. The subject is
 #                                       the whole .github/workflows tree, not
 #                                       this workflow. It is here for ONE
 #                                       property this file has and the repo's
@@ -37,7 +43,7 @@
 #
 # WHAT THE SPEC GATE'S RED ACTUALLY DOES — AND THE HEADER USED TO OVERSTATE IT
 #
-# Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
+# Until wave 53 this header called the spec-gate job a stop. It is not, and
 # saying so here was the epic's own defect class in the epic's own workflow.
 # `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
 # DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate),
@@ -107,6 +113,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The required-set question is about the REPO's state, not about any one PR's
+  # diff, so it wants a clock as well as a merge. Nightly catches a protection
+  # change made in the GitHub UI, which no push to this repo would ever notice.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -114,11 +126,118 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: required-checks-drift-${{ github.ref }}
+  group: required-checks-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # ── THE VENUE RULE, AND WHY IT IS A JOB-LEVEL `if:` AND NOT A PATHS FILTER ──
+  #
+  # MEASURED (20 recent pull_request runs, compute derived from job steps, not
+  # from the job's wall clock which on a saturated queue is mostly waiting):
+  #
+  #     Required-check spec gate                       4.58 min/exec
+  #     Required-check spec drift (advisory)           3.16 min/exec
+  #     Every workflow job has runs-on+steps or uses   0.17 min/exec
+  #
+  # Across 1,227 PR pushes in 2026-08-30..09-02 that is on the order of 3,500
+  # job-minutes for a question that does not change with the PR: "has the
+  # required-checks roster moved?" is about the repo's state. Asking it 1,227
+  # times a window gets the same answer 1,227 times.
+  #
+  # THE HEADER'S NO-FILTER RULE STANDS AND IS NOT BEING BROKEN. It says a
+  # workflow-level `on:.paths` key emits NO check run on a PR that misses the
+  # paths, and an absent context routes to `is expected.` forever. That is true,
+  # and it is why there is still no `on:.paths` key here. A job-level `if:` is a
+  # different mechanism: the job still RENDERS, with conclusion `skipped`, so
+  # the name never goes absent and the deadlock the header warns about cannot
+  # occur. That distinction is the whole reason this shape is legal.
+  #
+  # `workflow-job-shape` is deliberately NOT conditioned. It costs 0.17 min, it
+  # is the reason this unfiltered home exists at all, and its subject is the
+  # WHOLE workflow tree — a job poisoned by an unrelated PR is invisible to any
+  # diff-derived condition. Conditioning it on its own inputs would be a
+  # category error: its input IS every PR.
+  changes:
+    # No `if:`, no paths filter, no matrix — it runs on every event so the jobs
+    # behind it always have a defined answer. Never a silent false: on an
+    # unresolvable base it FAILS rather than dispatching false, because a
+    # dispatcher that "could not tell" and emitted false would skip the gate
+    # and publish a quiet green.
+    name: Dispatch (required-checks inputs)
+    runs-on: ubuntu-latest
+    outputs:
+      touched: ${{ steps.sets.outputs.touched }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref — the same reason elixir.yml's
+          # dispatcher documents: the merge ref already contains main's
+          # advance, so a three-dot diff against a lagging base sweeps in
+          # everything main gained and the condition never fires narrowly.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
+          fetch-depth: 0
+          filter: blob:none
+      - id: sets
+        name: Does this PR touch what this workflow tests?
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull_request event — the gate runs unconditionally"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "base sha $base is not resolvable locally — REFUSING to guess" >&2
+            exit 1
+          fi
+          files="$(git diff --name-only "$base"...HEAD)"
+          if [ -z "$files" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "empty diff — dispatching TRUE rather than skipping a gate"
+            exit 0
+          fi
+          if printf '%s\n' "$files" | grep -qE '^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/required-checks-drift\.yml)$'; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "this PR edits the required-checks spec or its scripts — running the gate"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+            echo "no required-checks input touched — the gate is skipped on this PR"
+          fi
+          printf '%s\n' "$files" | head -50
+
   # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
   # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
@@ -126,6 +245,8 @@ jobs:
   # paths filter had. It renders on every PR, always, and its name is stable.
   spec-gate:
     name: Required-check spec gate
+    needs: changes
+    if: needs.changes.outputs.touched == 'true'
     runs-on: ubuntu-latest
     steps:
       # actions/checkout is REQUIRED, not incidental: §13's prose ratchet runs
@@ -141,8 +262,36 @@ jobs:
       # (the #8093 specimen) asserted against a COPY of the real workflow tree
       # with one poison planted, the deadlock detector, the superset floor, and
       # verify's own 16 mutation clauses via §9. No network, no token.
+      #
+      # THE rc==4 ARM, AND WHY IT IS NOT A BARE `run:` ANY MORE. Until this
+      # step was rewritten it was one line, so EVERY non-zero reddened it with
+      # the same faceless X — and the suite's exit 1 covered both "your PR
+      # drifted the required set" and "our generator refused and wrote no spec
+      # for the suite to read". #14371 is the measured cost of that conflation:
+      # this gate sat red from 2026-08-24T21:59Z to 2026-08-31 on a generator
+      # refusal, and the fleet learned to ignore the red because nothing in it
+      # said which of the two it was. The suite now exits 4 for the second
+      # case, and this step SAYS SO.
+      #
+      # It still exits 1 — HOLD renders as a named red, never as a pass. The
+      # gate is not required (see the header), so its whole value is a human
+      # reading it; swallowing a rc-4 into green would delete the signal this
+      # arm exists to sharpen. Same shape, same reason, as the rc==3 DEADLOCK
+      # arm in the advisory job's third step, which is the precedent this
+      # copies rather than a second convention.
       - name: Prove the toolchain by mutation (hermetic)
-        run: bash scripts/required-checks.test.sh --hermetic
+        id: s1
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks.test.sh --hermetic || rc=$?
+          if [ "$rc" -eq 4 ]; then
+            echo "::error::HOLD (not drift) — the mutation suite could not READ an input: a producer refused and wrote no spec, so the suite never reached a verdict about the required set. Its tally line above names every BLOCKED site with the producer's own refusal text. Fix the producer; do NOT read this as a claim about this PR's spec."
+            exit 1
+          fi
+          exit "$rc"
 
       # THE COMMIT PATH. apply.sh floors the WRITE path — it runs the floor
       # before the protection PUT and is fail-closed on every rc — but nothing
@@ -172,11 +321,28 @@ jobs:
       # actions/checkout gives the MERGE commit, so the candidate is the spec as
       # it would exist on main — a branch that is merely behind main cannot red
       # this.
+      #
+      # `+main:` (a FORCED ref update), and it is load-bearing on the push arm.
+      # On push:main the shallow checkout already carries refs/remotes/origin/main
+      # at the pushed sha; when main has moved on by the time this step runs (three
+      # merges landed inside one minute on 2026-09-03 17:26Z, runs 33784608224 /
+      # 33784621285 / 33784689210) an unforced fetch answers
+      # `! [rejected] main -> origin/main (non-fast-forward)` and the job reds one
+      # step AFTER the hermetic suite went green — a red that reads exactly like a
+      # spec-gate failure and is not one. The floor then compares the candidate
+      # against the NEWEST main, which is the reference it wants.
       - name: Fetch the floor's reference (origin/main's committed spec)
-        run: git fetch --depth=1 origin main:refs/remotes/origin/main
+        id: s2
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          git fetch --depth=1 origin +main:refs/remotes/origin/main
 
       - name: The committed spec holds the floor (contexts, _readme, enforced)
+        id: s3
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           set -euo pipefail
           rc=0
           bash scripts/required-checks-floor.sh .github/required-checks.json || rc=$?
@@ -186,6 +352,34 @@ jobs:
             2) echo "::error::FLOOR GROWTH — this PR ADDS required context(s). Every PR in this repo must render them forever, and a job that is green today and paths-filtered tomorrow deadlocks main (D69). CI never passes --acknowledge-growth on its own: a human decides each added name belongs, and says so in the PR."; exit 1 ;;
             *) echo "::error::the floor could not be evaluated (exit $rc) — an unreadable reference is a refusal, never a pass."; exit 1 ;;
           esac
+
+      # ── main-red circuit breaker (task-50b343c0403f8b06) ──────────────────
+      # THE MEASURED MISS THIS CLOSES. #15784 added prose that tripped
+      # required-checks-verify.sh's advisory-prose clause INSIDE a step main was
+      # already red on from a different file. Before the signature layer that
+      # fresh hit read as inherited; after it, this job had no Decide step at
+      # all, so the opposite failure applied — a red main already carries here
+      # landed on the PR author as their own, with no verdict line saying which
+      # it was. required-checks-drift accounted for 148 of the 631 measured
+      # inherited reds in 14 days, the third-largest source, and it was the one
+      # source with no breaker.
+      #
+      # SAFE HERE FOR THE SAME REASON THE OTHER NINE JOBS ARE: this job is NOT a
+      # required context (required-checks-floor.sh guards those four names and
+      # main-red-breaker.sh's harness asserts it names none of them), the
+      # check-run name is unchanged, and on push:main the breaker never
+      # forgives — main's own red stays main's red.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Prove the toolchain by mutation (hermetic)\", \"s2\": \"Fetch the floor's reference (origin/main's committed spec)\", \"s3\": \"The committed spec holds the floor (contexts, _readme, enforced)\"}"
+          JOB_NAME: "Required-check spec gate"
+          WORKFLOW_FILE: required-checks-drift.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   # ── the workflow-file shape ratchet ─────────────────────────────────────────
   # WHY IT LIVES HERE AND NOT IN shell-harnesses.yml, where every other
@@ -221,6 +415,12 @@ jobs:
       # legal `uses:` job in mktemp fixtures and asserts red/red/red/green, plus
       # the coverage floor (an empty scan exits 2, never a vacuous green) and an
       # unknown flag exiting 2 rather than 0.
+      #
+      # It also proves the STEP clause, and it does that on a COPY OF THIS FILE:
+      # the plant deletes the `run:` line from the step directly below, leaving
+      # the `name:`-only shape that ships green through every YAML parser in the
+      # repo, and asserts the red names the file, the job id and the step index.
+      # So the step below is both the check and the checked.
       - name: Prove the shape checker on planted fixtures (--selftest)
         run: bash scripts/workflow-job-shape-check.sh --selftest
 
@@ -228,9 +428,118 @@ jobs:
       - name: Every job in .github/workflows has a legal shape
         run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
 
+  # ── stale-tree regression check (task-e75a5acd30825d77, C1) ─────────────────
+  #
+  # WHY IT LIVES HERE AND NOT IN ITS OWN WORKFLOW. Its subject is the WHOLE tree
+  # of the head — "does this commit silently revert files nobody edited?" — so no
+  # diff-derived path predicate can bound it: the paths it must inspect are, by
+  # construction, the ones the PR's author never touched. That is the same
+  # argument that made this file the unfiltered home of `workflow-job-shape`, and
+  # it is why the check is a job HERE rather than a twelfth pull_request workflow
+  # boot. `on:` above carries no `paths:` key and gains none.
+  #
+  # THE JOB-LEVEL `if:` IS NOT A PATHS FILTER. On `push: main` and on the nightly
+  # schedule there is no head-vs-base pair to compare (the base IS the head), so
+  # the script would compare main with itself and print a vacuous OK. The job
+  # still RENDERS on those events with conclusion `skipped`, so the check name is
+  # never ABSENT — the deadlock this file's header warns about cannot occur.
+  #
+  # NOT a required context, and deliberately not proposed as one: arm (a) cannot
+  # tell an intentional delete from a stale-tree delete (the script's own header
+  # says so), so its red is a question, not a verdict. It is not in
+  # .github/required-checks.json's required set and needs no exclusion row —
+  # exclusions exist to explain why a name that COULD be required is not, and
+  # `Every workflow job has runs-on+steps or uses`, the sibling job in this file,
+  # carries no row either.
+  stale-tree:
+    name: Head does not silently revert main (stale tree)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # THE PR HEAD, never the merge ref, and `fetch-depth: 0`.
+      #
+      # The merge ref's merge-base against origin/main IS main's tip, which makes
+      # arm (a) vacuous — a stale tree checked out as a merge commit reports a
+      # clean OK. The head sha is the commit whose TREE is under suspicion.
+      #
+      # Depth: the script walks up to WALK_CAP=200 ancestor commits PER PATH for
+      # arm (b'), and arm (a) reads `git log <merge-base>..<base>` — a shallow
+      # checkout gives it neither, and a truncated history can only make it MISS.
+      # `fetch-depth: 0` is the only honest depth here.
+      - name: Checkout the PR head (full history — the check walks ancestors)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the base branch so the merge-base resolves
+        id: s1
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          set -euo pipefail
+          git fetch --no-tags --prune origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+          git rev-parse --verify "origin/${BASE_BRANCH}^{commit}"
+
+      # SELFTEST FIRST, same discipline as every other guard in this file: the
+      # steady state of this check is OK, which is also what a broken script
+      # prints. The harness builds fixture repos reproducing the #15930 shape and
+      # asserts RED on the stale squash, GREEN after the honest rebuild, and reds
+      # under two mutants (arm (a) dropped, arm (b') dropped).
+      - name: Prove the stale-tree check can fail (fixture repos, no network)
+        id: s2
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/stale-tree-regression-check.test.sh
+
+      # rc 2 is CANNOT READ — a ref did not resolve and NOTHING was compared. It
+      # must never read as the clean rc 0: a checkout that lost the base is an
+      # unmeasured head, not a green one.
+      - name: This head does not revert what the base landed
+        id: s3
+        continue-on-error: true # main-red breaker: the Decide step below owns the verdict
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          set -uo pipefail
+          rc=0
+          bash scripts/stale-tree-regression-check.sh "origin/${BASE_BRANCH}" HEAD || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::CANNOT READ — the base ref or the merge-base did not resolve, so NOTHING was compared. This is not a clean reading."
+            exit 1
+          fi
+          if [ "$rc" -eq 1 ]; then
+            echo "::error::This head deletes or reverts work the base landed after the merge-base (see the RED lines above). If that is deliberate, say so in the PR; if it is not, rebuild the head as an honest patch: git diff <old-base>..<head> -- <the paths you meant> | git apply --3way"
+          fi
+          exit "$rc"
+
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Fetch the base branch so the merge-base resolves\", \"s2\": \"Prove the stale-tree check can fail (fixture repos, no network)\", \"s3\": \"This head does not revert what the base landed\"}"
+          JOB_NAME: "Head does not silently revert main (stale tree)"
+          WORKFLOW_FILE: required-checks-drift.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
   # ── the advisory half ───────────────────────────────────────────────────────
   required-checks-drift:
     name: Required-check spec drift (advisory)
+    needs: changes
+    if: needs.changes.outputs.touched == 'true'
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
@@ -243,10 +552,25 @@ jobs:
       # NAME the phantom rather than merely exit non-zero. (The bare run is the
       # hermetic suite PLUS these; there is no third home for --selftest, which
       # §9 runs internally.)
+      #
+      # Same rc==4 arm as the hermetic job's step, and it matters MORE here:
+      # this job runs the API stage on a credential that rotates out from under
+      # CI, so "an input could not be read" is its likeliest non-zero. The job
+      # carries continue-on-error, so the exit code is swallowed either way —
+      # the ::error:: annotation is the entire deliverable, and a reader who
+      # sees it must not go looking for spec drift that was never measured.
       - name: Prove the toolchain against the live API (§10, §11)
         env:
           GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
-        run: bash scripts/required-checks.test.sh
+        run: |
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks.test.sh || rc=$?
+          if [ "$rc" -eq 4 ]; then
+            echo "::error::HOLD (not drift) — the mutation suite could not READ an input: a producer refused and wrote no spec, so the suite never reached a verdict about the required set. Its tally line above names every BLOCKED site with the producer's own refusal text. Fix the producer; do NOT read this as a claim about the committed spec."
+            exit 1
+          fi
+          exit "$rc"
 
       - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
         env:

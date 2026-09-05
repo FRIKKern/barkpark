@@ -35,11 +35,38 @@ with_tmp_root() {
   echo "$tmp"
 }
 
-# Case 1 — no plugins root => empty matrix.
+# Case 1 — no plugins root => HARNESS FAILURE, never an empty matrix.
+# A missing root is a failed read, not a genuine "no plugins": emitting
+# empty=true at exit 0 made plugin-node.yml skip every per-plugin job and end
+# green. The exit code is taken from the builder ITSELF (command substitution),
+# not through a pipe.
 echo "case: missing plugins root"
 TMP=$(mktemp -d)
-out=$(PLUGINS_ROOT="$TMP/does-not-exist" bash "$BUILDER")
-assert_eq "matrix is empty array" "[]" "$out"
+set +e
+out=$(PLUGINS_ROOT="$TMP/does-not-exist" bash "$BUILDER" 2>&1)
+status=$?
+set -e
+assert_eq "missing root exits 4 (not 0)" "4" "$status"
+case "$out" in
+  *"CANNOT READ: PLUGINS_ROOT"*) assert_eq "distinct CANNOT READ line" "yes" "yes" ;;
+  *) assert_eq "distinct CANNOT READ line" "yes" "no ($out)" ;;
+esac
+case "$out" in
+  *"empty=true"*|*"[]"*) assert_eq "does not emit an empty matrix" "yes" "no ($out)" ;;
+  *) assert_eq "does not emit an empty matrix" "yes" "yes" ;;
+esac
+rm -rf "$TMP"
+
+# Case 1b — root EXISTS but holds no plugin.json at all => honest empty, exit 0.
+# This is the case that must stay distinguishable from Case 1.
+echo "case: existing but empty plugins root"
+TMP=$(mktemp -d)
+set +e
+out=$(PLUGINS_ROOT="$TMP" bash "$BUILDER" 2>&1)
+status=$?
+set -e
+assert_eq "empty root exits 0" "0" "$status"
+assert_eq "empty root emits []" "[]" "$out"
 rm -rf "$TMP"
 
 # Case 2 — plugins exist but none declare "node" => empty matrix.

@@ -1,0 +1,1 @@
+GATE GREEN: `node --check cloud/priv/static/app.js && node cloud/priv/static/__app.test.mjs`, with a new assertion covering the pill.

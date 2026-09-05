@@ -188,8 +188,10 @@ defmodule Barkpark.Sharing.ShareLinkScopeBindingTest do
       # rule sits in `share_links` today. `Links.create/1` can no longer make one.
       row =
         Repo.insert!(%ShareLink{
+          # Only the digest — the plaintext column was retired
+          # (arpss-w8-bl-share-link-raw-token-at-rest). `resolve/1` has always
+          # matched on the hash, so this legacy row is reached the same way.
           token_hash: Links.hash_token(raw),
-          token: raw,
           workspace_id: ws.id,
           project_id: nil,
           dataset: @dataset,

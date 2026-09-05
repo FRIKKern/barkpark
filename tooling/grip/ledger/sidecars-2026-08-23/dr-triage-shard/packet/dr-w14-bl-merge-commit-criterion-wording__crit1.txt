@@ -1,0 +1,1 @@
+The correction is applied BEFORE any of the 25 rows is stamped, and a note records that gh's statusCheckRollup reports the HEAD commit

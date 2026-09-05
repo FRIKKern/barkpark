@@ -49,6 +49,16 @@ defmodule Barkpark.Tenancy.QuotaToctouDemonstrationTest do
        SURVIVES any fix to the race — an atomic `within_quota?` that still
        answers "room for one" before an unbounded batch is still fail-open.
 
+       SCOPE NOTE (`acpc-bl-quota-batch-overshoot-unbounded`): the HTTP DOOR is
+       now fenced — `RequireWithinQuota` counts the request's room-consuming ops
+       and asks `Quota.check(ws, needed)`, and caps `length(mutations)` at 1000.
+       Leg 4 deliberately still calls `Quota.check/1` (room for ONE) and
+       `Content.apply_mutations/3` DIRECTLY, so it keeps measuring the ENGINE:
+       `apply_mutations/3` itself remains quota-blind, and any future caller
+       that reaches it without passing the plug reproduces this exactly. Do not
+       "fix" this leg by routing it through the plug — that would delete the
+       only guard on the engine's own fail-open.
+
   `async: false` — the concurrent leg fans out `Task.async` children that need
   the shared sandbox connection.
   """

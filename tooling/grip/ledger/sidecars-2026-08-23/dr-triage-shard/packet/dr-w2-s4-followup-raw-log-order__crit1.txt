@@ -1,0 +1,1 @@
+A test pins the flipped order on a colourised non-prefixed secret (api_key=), and reds if the pipe is swapped back.

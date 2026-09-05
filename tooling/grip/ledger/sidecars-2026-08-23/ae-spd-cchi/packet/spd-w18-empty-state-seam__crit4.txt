@@ -1,0 +1,1 @@
+The type enumeration is DERIVED at runtime (union of Content.list_schemas and the register_schemas derivation), not hand-listed, and the test asserts the derived count is greater than zero.

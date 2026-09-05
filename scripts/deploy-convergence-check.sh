@@ -75,6 +75,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_YML_DEFAULT="$REPO_ROOT/.github/workflows/deploy.yml"
 
+# The ONE job/step boundary, shared with scripts/check-deploy-smoke.sh and
+# scripts/check-deployyml-filters.sh. This file carried the FIFTH hand-rolled
+# copy of `/^  [a-zA-Z0-9_-]+:/` (in extract_target_ere), and that rule matches
+# TEXT: a top-level block scalar with a 2-space body — `run-name: |` is valid
+# YAML and GitHub accepts it — reads as the `changes` job, so a workflow could
+# hand THIS gate its own relevance filter as a string literal. See the lib
+# header, and selftest 13 below, which is that fixture.
+# shellcheck source=scripts/lib/deploy-yaml-scope.sh
+. "$REPO_ROOT/scripts/lib/deploy-yaml-scope.sh"
+
 # Fallback window when the caller cannot name the instant the deploy pulled. A
 # commit younger than this has not yet owed a TERMINATED deploy run, so counting
 # it would manufacture the torn read described above. 900s is deliberately
@@ -160,12 +170,19 @@ globs_to_ere() {
 # control plane against the UNION would red it for an api-only merge it is not
 # supposed to carry — a false outage report on a box that is exactly right.
 #
-# Scoped to the `changes` job by the same 2-space job-boundary technique
+# Scoped to the `changes` job by the SHARED boundary
 # check-deployyml-filters.sh's extract_regexes uses, and for the same reason: a
 # `grep -qE` outside that job dispatches nothing, so it may not answer for a
 # target. The line is keyed on the assignment it guards (`cp=true` /
 # `instance=true`), so a renamed output breaks LOUDLY here instead of silently
 # selecting the other host's filter.
+#
+# The boundary is a real YAML parse (deploy_yaml_job_lines), not the 2-space
+# awk rule this function used to carry. That rule read the CONTENT of a
+# top-level block scalar as job lines, so a `run-name: |` block indented two
+# spaces could plant a wider `cp=true` filter that `awk NR==1` picked ahead of
+# the real job's — the gate answering itself with a string. Selftest 13 is that
+# exact fixture.
 #
 # THE TAIL IS awk NR==1 AND NOT head -1. head exits after the first line and
 # SIGPIPEs sed; with set -o pipefail that dead writer becomes this pipeline's
@@ -173,10 +190,15 @@ globs_to_ere() {
 # awk reads to EOF and prints only the first line: same answer, no broken pipe.
 extract_target_ere() {
   local yml="$1" target="$2"
-  awk -v want="${target}=true" '
-    /^  [a-zA-Z0-9_-]+:/ { job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job) }
-    job == "changes" && index($0, want) > 0
-  ' "$yml" | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'\$//" | awk 'NR==1'
+  local job_lines rc=0
+  job_lines="$(deploy_yaml_job_lines "$yml" changes)" || rc=$?
+  # 2 (no python3/PyYAML) and 3 (unparseable) are REFUSALS, not an empty filter.
+  # Returning nothing here lands in load_relevance's "extractor is broken" arm,
+  # which exits 2 — never a green.
+  [ "$rc" -eq 0 ] || return 0
+  printf '%s\n' "$job_lines" \
+    | { grep -F "${target}=true" || true; } \
+    | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'\$//" | awk 'NR==1'
 }
 
 RELEVANT_ERE=""
@@ -552,7 +574,7 @@ YML
   OWED_ALL="$(epoch_to_iso "$(( $(st_git "$repo" show -s --format=%ct "$D") + 1 ))")"
 
   # ── 1. THE RED-FIRST SPEC: the later-STARTED run carries the OLDER commit ──
-  echo "selftest 1/12: supersession must keep the DESCENDANT, not the run that started last"
+  echo "selftest 1/13: supersession must keep the DESCENDANT, not the run that started last"
   set +e
   out="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
         | "$0" survivor --repo "$repo" 2>&1)"
@@ -569,7 +591,7 @@ YML
   fi
 
   # The naive rule, run here so the spec shows it LOSING rather than asserting it does.
-  echo "selftest 2/12: the naive wall-clock rule gets this WRONG — that is the defect"
+  echo "selftest 2/13: the naive wall-clock rule gets this WRONG — that is the defect"
   naive="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
           | sort -k3 | tail -1 | awk '{print $1}')"
   if [ "$naive" = "31000002" ]; then
@@ -579,7 +601,7 @@ YML
   fi
 
   # ── 3. THE INCIDENT, as a convergence verdict ─────────────────────────────
-  echo "selftest 3/12: box on the OLDER commit while main carries a newer api change must be STRANDED"
+  echo "selftest 3/13: box on the OLDER commit while main carries a newer api change must be STRANDED"
   local c3=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c3=$?
@@ -590,7 +612,7 @@ YML
     echo "SELFTEST FAIL: the incident shape did not red (rc=$c3)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 4/12: the same box, once it serves the newer commit, is CONVERGED"
+  echo "selftest 4/13: the same box, once it serves the newer commit, is CONVERGED"
   local c4=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c4=$?
@@ -599,7 +621,7 @@ YML
   else echo "SELFTEST FAIL: a current box read as stranded (rc=$c4)" >&2; echo "$out" >&2; rc=1; fi
 
   # ── 5. The docs-only tail: the row's own "4 later commits are docs/tooling" ─
-  echo "selftest 5/12: a docs-only tail past the box must NOT red (it deploys nothing)"
+  echo "selftest 5/13: a docs-only tail past the box must NOT red (it deploys nothing)"
   local c5=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$D" --owed-before "$OWED_ALL" 2>&1)"; c5=$?
@@ -611,7 +633,7 @@ YML
   fi
 
   # ── 6/7. The torn-read guard, and the NEGATIVE ARM that it did not blind ──
-  echo "selftest 6/12: a relevant commit too NEW to be owed must not red (the torn-read guard)"
+  echo "selftest 6/13: a relevant commit too NEW to be owed must not red (the torn-read guard)"
   local c6=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --grace-seconds 86400 2>&1)"; c6=$?
@@ -622,7 +644,7 @@ YML
     echo "SELFTEST FAIL: the guard did not hold a too-new commit (rc=$c6)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 7/12: NEGATIVE ARM — the guard must not blind the instrument"
+  echo "selftest 7/13: NEGATIVE ARM — the guard must not blind the instrument"
   # Same repo, same pair, cutoff moved past B's commit date: it is owed again.
   local c7=0 owed_at bct
   bct="$(st_git "$repo" show -s --format=%ct "$B")"
@@ -637,7 +659,7 @@ YML
   fi
 
   # ── 8. Diverged candidates have no safe survivor ──────────────────────────
-  echo "selftest 8/12: diverged candidates must REFUSE, never silently pick one"
+  echo "selftest 8/13: diverged candidates must REFUSE, never silently pick one"
   local c8=0
   st_git "$repo" checkout -q -b side "$A"
   E="$(st_commit "$repo" api/e.ex 'E: a divergent api change')"
@@ -653,7 +675,7 @@ YML
   fi
 
   # ── 9. Cannot-look is never a pass ────────────────────────────────────────
-  echo "selftest 9/12: an unresolvable sha and an unreadable filter must exit 2, never 0"
+  echo "selftest 9/13: an unresolvable sha and an unreadable filter must exit 2, never 0"
   local c9a=0 c9b=0
   set +e
   "$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served deadbeefdeadbeef --tip "$B" --owed-before "$OWED_ALL" >/dev/null 2>&1; c9a=$?
@@ -666,7 +688,7 @@ YML
   fi
 
   # ── 10. per-target relevance: an api commit is the instance's debt, not cp's ─
-  echo "selftest 10/12: an api-only commit must strand the INSTANCE and NOT the control plane"
+  echo "selftest 10/13: an api-only commit must strand the INSTANCE and NOT the control plane"
   local c10a=0 c10b=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --target instance \
@@ -688,7 +710,7 @@ YML
   fi
 
   # ── 11. the filter must come from the `changes` job and nowhere else ───────
-  echo "selftest 11/12: a decoy job's identical grep must not answer for a target"
+  echo "selftest 11/13: a decoy job's identical grep must not answer for a target"
   # The fixture's `decoy` job carries a filter matching api/, cloud/ AND docs/.
   # If the extractor were unscoped it would harvest that one, and the docs tail
   # of case 5 would start reading as a strand. Prove cp's filter is cloud-only.
@@ -711,7 +733,7 @@ YML
   fi
 
   # ── 12. A BROKEN RELEVANCE TEST MUST REFUSE, NOT CALL EVERYTHING IRRELEVANT ─
-  echo "selftest 12/12: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
+  echo "selftest 12/13: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
   # The direction matters more than the case. commit_is_relevant answers 0 for
   # relevant and 1 for not; ANY other status is the tool failing, and the caller
   # now treats >1 as a refusal rather than as "not relevant". Before that it read
@@ -734,6 +756,65 @@ YML
   else
     # A red is not the designed answer here, but it is not a false green either.
     echo "  ok: exit $c12 — not a pass, which is the property under test"
+  fi
+
+  # ── 13. A TOP-LEVEL BLOCK SCALAR MUST NOT ANSWER FOR THE `changes` JOB ─────
+  echo "selftest 13/13: a 2-space block-scalar body must not be read as the changes job"
+  # THE DEFEAT THIS CLOSES. extract_target_ere used to scan for
+  # `/^  [a-zA-Z0-9_-]+:/` — a TEXT rule. `run-name: |` is a top-level block
+  # scalar GitHub accepts, and its body is indented two spaces, so every line of
+  # it looks like a job key or a job's contents. Planted BEFORE the real `jobs:`
+  # mapping, a fake `changes:` in that string hands the extractor a WIDER
+  # `cp=true` filter, and `awk NR==1` takes it ahead of the real one. The gate
+  # then judges the control plane against a relevance set the workflow wrote for
+  # it — a false green on demand, in the gate whose whole job is false greens.
+  # The file is valid YAML and executes nothing, so no parse check rejects it.
+  mkdir -p "$tmp/scalarwf"
+  cat > "$tmp/scalarwf/deploy.yml" <<'YML'
+name: Deploy (production)
+run-name: |
+  changes:
+    steps:
+      - run: |
+          if echo "$changed" | grep -qE '^(api|cloud|docs|anything)/'; then cp=true; else cp=false; fi
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "cloud/**"
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if echo "$changed" | grep -qE '^(cloud)/'; then cp=true; else cp=false; fi
+          if echo "$changed" | grep -qE '^(api)/'; then instance=true; else instance=false; fi
+YML
+  local scalar_re
+  scalar_re="$(extract_target_ere "$tmp/scalarwf/deploy.yml" cp)"
+  if [ "$scalar_re" = '^(cloud)/' ]; then
+    echo "  ok: cp's filter is '$scalar_re' — read from the real job, not the string literal"
+  else
+    echo "SELFTEST FAIL: cp's filter read as '$scalar_re' — the block scalar answered for the job" >&2
+    echo "  (the awk boundary is back; expected '^(cloud)/')" >&2
+    rc=1
+  fi
+  # The fixture must really be the defeat, not merely a file that happens to
+  # read right: the RETIRED awk rule must genuinely be fooled by it. Without
+  # this the row could go vacuous the day the fixture stops planting anything.
+  local naive_re
+  naive_re="$(awk -v want="cp=true" '
+    /^  [a-zA-Z0-9_-]+:/ { job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job) }
+    job == "changes" && index($0, want) > 0
+  ' "$tmp/scalarwf/deploy.yml" | { grep -oE "grep -qE '"'[^'"'"']+'"'" || true; } \
+    | sed -E "s/^grep -qE '//; s/'\$//" | awk 'NR==1')"
+  if [ "$naive_re" = '^(api|cloud|docs|anything)/' ]; then
+    echo "  ok: and the retired 2-space awk rule IS fooled by it ('$naive_re') — the fixture is not vacuous"
+  else
+    echo "SELFTEST FAIL: the fixture no longer defeats the old awk rule (it read '$naive_re')" >&2
+    echo "  A row that cannot fail before the fix proves nothing about the fix." >&2
+    rc=1
   fi
 
   rm -rf "$tmp"

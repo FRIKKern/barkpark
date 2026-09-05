@@ -1,0 +1,1 @@
+The two declared-but-unread CLOUD_PATHS rows are either given a real reading test or removed, and the false comment claiming deploy_ledger_test.exs measures them is corrected

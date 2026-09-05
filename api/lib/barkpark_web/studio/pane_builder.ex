@@ -78,6 +78,42 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # editor still open — the #1851 never-unreachable guarantee.
     {tree, segments} = resolve(nav_path, gated, dataset, opts)
 
+    {panes, editor} = walk_and_stamp(segments, gated, tree, dataset, opts)
+
+    # LAST-CHANCE NORMALIZATION (#35a, S9 crit 1a). `resolve/4` hands the walk
+    # the RAW nav_path whenever the head names ANY root item — and
+    # `root_has_segment?/2` matches a `:list` group by its declared `id`, not
+    # only a type list by its `type_name`. A declared desk (`deskStructure`)
+    # whose root holds a group node whose id happens to equal a type name
+    # therefore short-circuits the normalization for that type: the walk drills
+    # the GROUP, finds no child for the document tail and opens nothing, while
+    # the identical URL on a desk without that collision opens the document.
+    # Same URL, two meanings — exactly the #35a complaint, reached by desk-node
+    # id instead of by desk depth.
+    #
+    # Retry ONCE against the normalized path, and only when the first walk
+    # opened NO editor: a URL that resolves today is never re-routed, so the
+    # shadowing group keeps its own address (`/studio/publication` still opens
+    # the group) and only the path that opened nothing is rescued. This is the
+    # #1851 never-unreachable guarantee applied to a declared desk.
+    case {editor, retry_segments(nav_path, segments, tree)} do
+      {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
+      _ -> {panes, editor}
+    end
+  end
+
+  # Walk `segments` against `tree` and stamp every pane with its own address.
+  #
+  # Every pane carries the NORMALIZED segments that address it (`:path`), so a
+  # row click in pane `i` can build `pane.path ++ [id]` instead of slicing the
+  # raw URL by the pane's rendered index. The two diverge exactly when
+  # `resolve/4` normalized a demoted type into its group: the pane stack is
+  # then one longer than the URL, and `Enum.take(nav_path, i) ++ [id]` kept
+  # the OLD doc id and appended the new one (Gyldendal field report #35b:
+  # `/studio/publication/pub-a` → click → `/studio/publication/pub-a/pub-b`).
+  # Pane `i` is addressed by the first `i` segments: the root pane by none,
+  # the pane opened by consuming segment 0 by one, and so on.
+  defp walk_and_stamp(segments, gated, tree, dataset, opts) do
     root_pane = %{
       title: gated.title,
       role: :nav,
@@ -86,8 +122,32 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       selected: Enum.at(segments, 0)
     }
 
-    walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
+    {panes, editor} = walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
+
+    panes =
+      panes
+      |> Enum.with_index()
+      |> Enum.map(fn {pane, i} -> Map.put(pane, :path, Enum.take(segments, i)) end)
+
+    {panes, editor}
   end
+
+  # The normalized path to retry a MISSED walk with, or nil when there is none
+  # (no tail to open, no node listing the head's type, or the normalization
+  # lands on the segments already walked). Mirrors `resolve/4`'s own two
+  # normalization clauses: a singleton resolves by type name and drops the stale
+  # doc-id tail, a type list keeps it.
+  defp retry_segments([head | tail], segments, tree) when tail != [] do
+    case find_type_node(tree.items || [], head, []) do
+      {node_path, %{type: :document}} -> unless_same(node_path, segments)
+      {node_path, _node} -> unless_same(node_path ++ tail, segments)
+      nil -> nil
+    end
+  end
+
+  defp retry_segments(_nav_path, _segments, _tree), do: nil
+
+  defp unless_same(candidate, segments), do: if(candidate == segments, do: nil, else: candidate)
 
   # Pick the tree to walk and the (possibly normalized) segments to walk it
   # with. Returns `{tree, segments}` — `tree` is the gated desk unless a type
@@ -121,8 +181,37 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
           # Absent from the gated display — resolve against the ungated tree so
           # the panes / editor still open (top-menu Media, a disabled plugin).
+          #
+          # The ungated tree needs the SAME normalization the gated one just
+          # got, and for the same reason. Handing back the RAW `nav_path` only
+          # works when `head` names a ROOT item of that tree; a type that
+          # `Barkpark.Structure` nests under a group node is still unreachable,
+          # because `walk_path/7` looks for `head` among the root's children,
+          # finds nothing, and drops the editor to nil.
+          #
+          # `mediaAsset` is exactly that case, and it is the whole reason an
+          # editor cannot write alt text (S9 crit 3, task-6d80c6cc7d97b1d1).
+          # `build_media_group/2` nests it under the `media-desk` node, so
+          # `/studio/mediaAsset/<id>` — the canonical deep link into an asset's
+          # metadata — rendered the "Studio could not open this document" card
+          # for EVERY asset. The `altText` field is on the schema and the
+          # `localizedText` input already exists; the walk simply never reached
+          # the form. This restores the #1851 never-unreachable guarantee for
+          # the one type that only lives off the top menu.
           nil ->
-            {Structure.build(dataset, [gating: :none] ++ scope(opts)), nav_path}
+            ungated = Structure.build(dataset, [gating: :none] ++ scope(opts))
+
+            cond do
+              root_has_segment?(ungated, head) ->
+                {ungated, nav_path}
+
+              true ->
+                case find_type_node(ungated.items || [], head, []) do
+                  {node_path, %{type: :document}} -> {ungated, node_path}
+                  {node_path, _node} -> {ungated, node_path ++ tail}
+                  nil -> {ungated, nav_path}
+                end
+            end
         end
     end
   end
@@ -222,7 +311,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
           {doc, is_draft, has_pub} when not is_nil(doc) ->
             schema =
-              case Content.get_schema(type, dataset) do
+              case Content.resolve_schema(type, dataset, scope(opts)) do
                 {:ok, s} -> s
                 _ -> nil
               end
@@ -271,7 +360,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       # bypasses `Structure.parse_filter/1`.
       %{type: :plugin_document_list, type_name: type_name} = node ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end
@@ -318,7 +407,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       %{type: :document_type_list, type_name: type_name} = node ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end
@@ -345,6 +434,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               ),
             else: list_opts
 
+        # Gyldendal parity E3.1 — the declared sort: a desk group's own
+        # `orderings` win, else the schema's `desk.orderings` (Sanity's
+        # `orderings`, first entry = default). Absent → today's order.
+        list_opts =
+          case desk_order(active_group, schema, Map.get(node, :orderings)) do
+            [] -> list_opts
+            order -> Keyword.put(list_opts, :order, order)
+          end
+
         {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
 
         doc_pane = %{
@@ -364,16 +462,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         {panes ++ [doc_pane], editor}
 
-      %{type: :document, type_name: type_name} ->
+      %{type: :document, type_name: type_name} = node ->
         schema =
-          case Content.get_schema(type_name, dataset) do
+          case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
             _ -> nil
           end
 
         if schema do
+          # Gyldendal parity E3.2 — a declared singleton pins its own document
+          # id; the legacy desk's singletons keep id == type name.
+          doc_id = Map.get(node, :doc_id) || type_name
+
           {doc, is_draft, has_pub} =
-            Content.fetch_doc_with_draft(type_name, type_name, dataset, scope(opts))
+            Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
 
           editor =
             if doc do
@@ -759,6 +861,41 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
            "#{inspect(to_string(field))}, so it could not be applied. No documents are shown — " <>
            "fix the filter in this type's schema (desk groups)."}
     end
+  end
+
+  # The `Content.Query` `:order` specs for a list — from the active desk group's
+  # `orderings`, else the schema's `desk.orderings`. Each entry
+  # %{"field" => f, "direction" => "asc"|"desc"} becomes {:field, f, dir}; an
+  # entry the changeset would have refused is skipped, never raised on.
+  @doc false
+  def desk_order(active_group, schema, node_orderings \\ nil) do
+    group_orderings =
+      active_group && (Map.get(active_group, "orderings") || Map.get(active_group, :orderings))
+
+    schema_orderings =
+      case schema && (Map.get(schema, :desk) || Map.get(schema, "desk")) do
+        %{} = desk -> Map.get(desk, "orderings") || Map.get(desk, :orderings)
+        _ -> nil
+      end
+
+    (group_orderings || node_orderings || schema_orderings || [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{} = o ->
+        field = Map.get(o, "field") || Map.get(o, :field)
+        dir = Map.get(o, "direction") || Map.get(o, :direction) || "asc"
+
+        # The direction is user-authored schema data: map the two accepted
+        # words explicitly rather than atomising input (Sobelow DOS.StringToAtom).
+        case {is_binary(field) and field != "", dir} do
+          {true, "asc"} -> [{:field, field, :asc}]
+          {true, "desc"} -> [{:field, field, :desc}]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
   end
 
   defp schema_desk_groups(nil), do: []

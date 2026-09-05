@@ -1,0 +1,1 @@
+The TEST THAT PINS THE INVENTION AS CORRECT is corrected in the same diff and the new pin is mutation-proven: __app.test.mjs:196-197 currently asserts `hooks.newLaunchRefusalToast({ error: "forbidden" })` matches /admin role on this team/, which makes the guess load-bearing — the stamped-evidence-overstates shape. Quote the red on the old assertion.

@@ -1,0 +1,1 @@
+The exclusion is proved NOT to weaken gate 1: a real working-tree residue (a stray file, a byte-changed file) still reds assertTreesEqual after the change. Mutation-proved both ways, not argued.

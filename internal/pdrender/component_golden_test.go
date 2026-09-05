@@ -126,9 +126,7 @@ func renderComponent(t *testing.T, input json.RawMessage) string {
 	}
 	ctx := RenderCtx{Width: 200, Theme: DarkTheme(), Profile: NoColor}
 	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("component fell through to the unknown-block box:\n%s", out)
-	}
+	assertNoUnknownBlock(t, "component golden", out)
 	return out
 }
 

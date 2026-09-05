@@ -67,6 +67,12 @@ export interface TransportRequestOptions {
   /** Per-call timeout override (ms). Falls back to the client `timeoutMs`, then
    *  the default (30000 reads / 60000 writes). 0 disables the timeout. */
   timeoutMs?: number
+  /** Overall budget (ms) for this call, RETRIES AND BACKOFF SLEEPS INCLUDED —
+   *  as opposed to `timeoutMs`, which bounds one attempt. Falls back to the
+   *  client `deadlineMs`; undefined means unbounded. When set, a retry that
+   *  cannot complete inside the remaining time is not attempted at all and the
+   *  last error is thrown immediately. See the contract in retry.ts. */
+  deadlineMs?: number
 }
 
 /**
@@ -406,6 +412,15 @@ export async function request<T>(
   // request hung forever, contradicting the documented default. `0` disables it.
   const timeoutMs = opts.timeoutMs ?? config.timeoutMs ?? (opts.kind === 'write' ? 60_000 : 30_000)
 
+  // The WHOLE-call deadline, distinct from the per-attempt `timeoutMs` above.
+  // Undefined by default — an unbounded caller has not asked us to hurry, and
+  // inventing a bound here would silently shorten every existing consumer's
+  // reads. A caller with a real global bound (a route handler's budget, an
+  // AbortSignal.timeout) opts in, and the retry loop then declines any retry
+  // that cannot finish inside it.
+  const deadlineMs = opts.deadlineMs ?? config.deadlineMs
+  if (deadlineMs !== undefined && deadlineMs > 0) policy.deadlineAt = Date.now() + deadlineMs
+
   return retry<TransportResult<T>>(
     async (attempt) => {
       // Per-attempt timeout + user-signal combination.
@@ -532,6 +547,13 @@ export async function request<T>(
             }
             const rid = strOrUndefined(respHeaders['x-request-id'])
             if (rid !== undefined) respCtx.requestId = rid
+            // CACHE VALIDATOR, observability only. This is the HTTP `ETag`
+            // RESPONSE HEADER (RFC 9110 §8.8.1) — "is the cached
+            // REPRESENTATION still valid?" — which folds the dataset schema
+            // hash on top of the document rev. It is NOT a write precondition:
+            // never feed `respCtx.etag` into `ifMatch` / `If-Match`. The write
+            // token is the BODY's rev, which `getDoc` returns as
+            // `DocResult.etag` (js/packages/core/src/doc.ts).
             const etagRaw = strOrUndefined(respHeaders['etag'])
             if (etagRaw !== undefined) respCtx.etag = etagRaw.replace(/^"|"$/g, '')
             await config.onResponse(respCtx)

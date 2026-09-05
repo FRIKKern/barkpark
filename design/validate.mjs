@@ -305,6 +305,19 @@ for (const step of ["body", "h1", "h2", "h3"]) {
   const ls = ((type.reading || {})[step] || {}).letterSpacing;
   ok(ls === undefined || typeof ls === "number", `type.reading.${step}.letterSpacing must be a number (em)`);
 }
+// A per-step weight is optional too (device 3, charter D29) — the SHARED
+// headingWeight above stays pinned at 600 and never moves; a step that wants its
+// own voice declares `weight` and the emitter hands it out as
+// --tok-reading-<step>-weight. An integer on the CSS 100–900 ladder: the
+// reading stack is static system serifs, so anything off the ladder would snap
+// to a face the author did not pick.
+for (const step of ["body", "h1", "h2", "h3"]) {
+  const w = ((type.reading || {})[step] || {}).weight;
+  ok(
+    w === undefined || (Number.isInteger(w) && w >= 100 && w <= 900),
+    `type.reading.${step}.weight must be an integer 100–900 (CSS font-weight ladder) when present`,
+  );
+}
 
 // --- scalar ladders --------------------------------------------------------
 for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
@@ -312,20 +325,20 @@ for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
 }
 // space.air — the reader's EVIDENCE beat scale, stored as ratios of `beat`.
 // Two floors, both of which encode the law rather than the numbers:
-//   1. every step is a real OPENING — >= 1.0x the paragraph beat. A step below 1
+//   1. every step is a real OPENING — >= 1.0x the artifact's air unit. A step below 1
 //      would make an evidence block sit TIGHTER than two paragraphs, which is the
 //      exact defect this scale exists to fix (the reader's table opened at 0px).
 //   2. the ladder is MONOTONIC in the documented order, so the heavier a block is
 //      the more room it takes. Flattening it is a decision, not a typo.
 const AIR_LADDER = ["code", "table", "asciicast", "callout", "stats", "figure"];
 const air = (tokens.space || {}).air || {};
-ok(typeof air.beat === "number" && air.beat > 0, "space.air.beat is required (px, the paragraph beat the scale is a ratio of)");
+ok(typeof air.beat === "number" && air.beat > 0, "space.air.beat is required (px, the ARTIFACT's air unit the scale is a ratio of \u2014 not the reader's prose beat, which is --bp-para-margin-top; ruled 2026-09-02)");
 let prevAir = 0;
 for (const k of AIR_LADDER) {
   const v = air[k];
   ok(typeof v === "number", `space.air.${k} is required (a ratio of space.air.beat)`);
   if (typeof v !== "number") continue;
-  ok(v >= 1.0, `space.air.${k} is ${v}; an evidence block must open at or above the paragraph beat (1.0x)`);
+  ok(v >= 1.0, `space.air.${k} is ${v}; an evidence block must open at or above the artifact's air unit (1.0x)`);
   ok(v >= prevAir, `space.air ladder is not monotonic: ${k} (${v}) opens tighter than the step before it (${prevAir})`);
   prevAir = v;
 }

@@ -79,6 +79,9 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     beta_html = view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
     assert beta_html =~ ~s(data-test-id="studio-doc-beta-editor")
     assert beta_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert beta_html =~ ~s(id="paper-editor-toggle-demo-p3")
+    assert beta_html =~ ~s(data-paper-doc-key="production:post:toggle-demo-p3")
+    refute beta_html =~ ~s(id="paper-editor-drafts.toggle-demo-p3")
     # A bound field-block + the free body block both render.
     assert beta_html =~ ~s(data-test-id="paper-add-block")
   end
@@ -117,6 +120,8 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     # hook forwards a patch-block as a `paper-op` pushEvent (same wire the WC
     # uses). It routes through `Content.apply_document_block_op/5`.
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => current_doc_rev(view),
       "op" => "patch-block",
       "id" => title_block["id"],
       "patch" => %{"value" => "Beta Edited Title"}
@@ -142,6 +147,8 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     title_block = Enum.find(stored_blocks("drafts.toggle-demo-p3"), &(&1["fieldName"] == "title"))
 
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => current_doc_rev(view),
       "op" => "patch-block",
       "id" => title_block["id"],
       "patch" => %{"value" => "Round-Trip Title"}
@@ -157,4 +164,6 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     {:ok, doc} = Content.get_document(doc_id, "post", @dataset)
     doc.content["blocks"]
   end
+
+  defp current_doc_rev(view), do: :sys.get_state(view.pid).socket.assigns.editor_doc.rev
 end

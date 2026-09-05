@@ -1,0 +1,1 @@
+dr-w15-bl-deferral-cause-null-audit is updated: the NULL residue is historical, the current window is 1,019/1,019 BOX_AT_CAPACITY_DEFERRED.

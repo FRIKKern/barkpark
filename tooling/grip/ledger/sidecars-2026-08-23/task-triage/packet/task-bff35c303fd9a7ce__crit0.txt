@@ -1,0 +1,1 @@
+snapshotTree/snapshotSansReceipts stop capturing .git/ internals, so the byte-clean gate measures the WORKING TREE it is about and not git's volatile bookkeeping.

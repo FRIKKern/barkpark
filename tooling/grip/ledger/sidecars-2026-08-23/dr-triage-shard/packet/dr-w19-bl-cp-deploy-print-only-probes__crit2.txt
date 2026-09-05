@@ -1,0 +1,1 @@
+The provisioner restart's result is checked, so a `failed` unit can no longer coexist with exit 0.

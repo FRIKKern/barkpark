@@ -14,7 +14,7 @@ defmodule BarkparkWeb.TicketsControllerTest do
   fail-closed scoping, triage rows) independent of the router wiring the auth
   slice owns.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

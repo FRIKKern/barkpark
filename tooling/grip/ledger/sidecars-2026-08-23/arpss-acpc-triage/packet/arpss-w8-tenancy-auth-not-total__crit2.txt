@@ -1,0 +1,1 @@
+The moduledoc no longer claims totality it does not have, and states plainly that authorize/3 checks membership EXISTENCE plus global permissions while workspace_admin?/2 is the role gate. Evidence: the diff.

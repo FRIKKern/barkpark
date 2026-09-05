@@ -1,0 +1,1 @@
+The append-only guarantee is preserved and shown preserved: the original stamp survives in history and is readable after a withdrawal. Quote both the pre- and post-withdrawal reads.

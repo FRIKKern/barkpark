@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -172,11 +173,10 @@ func TestAttentionLadderIsTwelveRungs(t *testing.T) {
 	}
 }
 
-// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. The three honest-
-// silence shapes can NEVER stall — nil is both "nothing queued" and "a CP that
-// predates the field" — and the boundary is >= 300, not > 300. The nil arm is
-// the alarm's fail-closed contract stated positively: with no queued-age input
-// the alarm says NOTHING, it does not scan an empty corpus and report calm.
+// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. A nil VALUE can never
+// stall — explicit null is the producer's honest "nothing queued" response —
+// and the boundary is >= 300, not > 300. Wire-level omission is tested
+// separately because the decoder must not collapse it into this healthy arm.
 func TestDeployStalledFence(t *testing.T) {
 	age := func(v float64) *float64 { return &v }
 	cases := []struct {
@@ -184,7 +184,7 @@ func TestDeployStalledFence(t *testing.T) {
 		bp   cloudclient.Barkpark
 		want bool
 	}{
-		{"no field (older CP / nothing queued)", cloudclient.Barkpark{}, false},
+		{"explicit null / nothing queued", cloudclient.Barkpark{}, false},
 		{"fresh queue, under the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(299)}, false},
 		{"exactly the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(300)}, true},
 		{"the incident shape: 7.5h unclaimed", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(27000)}, true},
@@ -192,6 +192,45 @@ func TestDeployStalledFence(t *testing.T) {
 	for _, c := range cases {
 		if got := deployStalled(c.bp); got != c.want {
 			t.Errorf("%s: deployStalled = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMissingQueuedDeployAgeIsVisible proves a producer rename cannot turn the
+// stall detector off silently. Only JSON decoding can create the missing-field
+// marker: direct Barkpark literals retain their existing explicit-null meaning.
+func TestMissingQueuedDeployAgeIsVisible(t *testing.T) {
+	decode := func(raw string) cloudclient.Barkpark {
+		t.Helper()
+		var b cloudclient.Barkpark
+		if err := json.Unmarshal([]byte(raw), &b); err != nil {
+			t.Fatalf("decode fleet row: %v", err)
+		}
+		return b
+	}
+	base := `"host":"10.0.0.9","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"`
+
+	missing := decode(`{` + base + `}`)
+	if status := attentionStatus(missing); status != "degraded" {
+		t.Fatalf("missing field status = %q, want degraded", status)
+	}
+	if bucket := attentionBucket(attentionStatus(missing)); bucket != "attention" {
+		t.Fatalf("missing field bucket = %q, want attention", bucket)
+	}
+	if detail := attentionDetail(missing, attentionStatus(missing)); !strings.Contains(detail, "omitted queued_deploy_age_seconds") {
+		t.Fatalf("missing field detail = %q, want a visible wire-contract warning", detail)
+	}
+
+	for name, raw := range map[string]string{
+		"explicit null": `{` + base + `,"queued_deploy_age_seconds":null}`,
+		"young queue":   `{` + base + `,"queued_deploy_age_seconds":90}`,
+	} {
+		b := decode(raw)
+		if status := attentionStatus(b); status != "ok" {
+			t.Errorf("%s status = %q, want ok", name, status)
+		}
+		if detail := attentionDetail(b, attentionStatus(b)); detail != "" {
+			t.Errorf("%s detail = %q, want empty", name, detail)
 		}
 	}
 }
@@ -550,6 +589,27 @@ func loadAttentionFixture(t *testing.T) attentionFixture {
 // case-insensitive name tiebreak (alpha < ok-1 < Zeta within the ok bucket).
 func TestRankBarkparksFixture(t *testing.T) {
 	f := loadAttentionFixture(t)
+	wantFixtureOrder := []string{
+		"rf-1", "fail-1", "susp-1", "deg-1", "deg-2", "strain-1",
+		"fill-1", "unrep-1", "stall-1", "beh-1", "rem-1", "rem-2",
+		"prov-1", "alpha", "ok-1", "Zeta",
+	}
+	if !slices.Equal(f.ExpectedOrder, wantFixtureOrder) {
+		t.Fatalf("fixture no longer exercises the full named ranking:\n got: %v\nwant: %v", f.ExpectedOrder, wantFixtureOrder)
+	}
+	byName := make(map[string]cloudclient.Barkpark, len(f.Barkparks))
+	for _, b := range f.Barkparks {
+		if b.QueuedDeployAgeSecondsMissing {
+			t.Fatalf("producer-backed fixture row %q omits queued_deploy_age_seconds", b.Name)
+		}
+		byName[b.Name] = b
+	}
+	if got := attentionStatus(byName["stall-1"]); got != "deploy_stalled" {
+		t.Fatalf("fixture's 420s row status = %q, want deploy_stalled", got)
+	}
+	if got := attentionStatus(byName["Zeta"]); got != "ok" {
+		t.Fatalf("fixture's 90s row status = %q, want ok", got)
+	}
 	ranked := rankBarkparks(f.Barkparks)
 	got := make([]string, len(ranked))
 	for i, r := range ranked {
@@ -600,13 +660,13 @@ func TestRunCloudStatusJSON(t *testing.T) {
 			return
 		}
 		_, _ = io.WriteString(w, `{"barkparks":[
-			{"id":"a","name":"ok-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current",
+			{"id":"a","name":"ok-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":4,"cpu_cores":4,"mem_used_percent":22,"load1":0.2,"load15":0.1,"disk_used_percent":31,"swap_used_percent":null,"swap_total_bytes":null,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}},
-			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out"},
-			{"id":"c","name":"slow-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"unknown","agent_status":"online"},
-			{"id":"d","name":"hot-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online",
+			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out","queued_deploy_age_seconds":null},
+			{"id":"c","name":"slow-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"unknown","agent_status":"online","queued_deploy_age_seconds":null},
+			{"id":"d","name":"hot-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":41,"cpu_cores":2,"mem_used_percent":88,"load1":5.1,"load15":4.2,"disk_used_percent":62,"swap_used_percent":92.9,"swap_total_bytes":1073741824,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}},
-			{"id":"e","name":"full-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online",
+			{"id":"e","name":"full-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":6,"cpu_cores":4,"mem_used_percent":31,"load1":0.9,"load15":0.8,"disk_used_percent":95,"swap_used_percent":null,"swap_total_bytes":null,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}}
 		]}`)
 	}))
@@ -795,8 +855,8 @@ func TestRunCloudStatusTableDetailColumn(t *testing.T) {
 // which is the whole point — the deploy line is the sentence those columns
 // cannot say.
 const statusDeployFleet = `{"barkparks":[
-	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"},
-	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"}
+	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null},
+	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null}
 ]}`
 
 // statusDeploySites maps the census's site_ids onto boxes — the fold `bp cloud
@@ -1780,5 +1840,136 @@ func TestCommitCellCarriesSinceWhenMeasured(t *testing.T) {
 	// that is missing.
 	if got := commitCell(cloudclient.Barkpark{GitCommitFirstSeenAt: "2026-08-31T10:21:20Z"}); got != "UNMETERED" {
 		t.Fatalf("commitCell = %q for an absent sha, want UNMETERED", got)
+	}
+}
+
+// --- the deploy MARKER (dr-w13-bl-fleet-verdict-is-deploy-blind) -------------
+
+// statusTableRowFor returns the rendered TABLE row for a named box — the row in
+// one of the three bucket tables, NOT the box's line in the DEPLOY section
+// below them. The two are told apart by position: a table row starts with the
+// STATUS cell, so the name is never its first field.
+func statusTableRowFor(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, name+" ") || trimmed == "" {
+			continue // the DEPLOY section's own line, or a blank
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) >= 2 && fields[1] == name {
+			return trimmed
+		}
+	}
+	t.Fatalf("no table row for %q:\n%s", name, out)
+	return ""
+}
+
+// TestStatusDeployMarkerRidesTheOkRowWithItsWindow is the row's headline pin.
+//
+// BEFORE this slice the box producing every deferral in the fleet rendered as
+// `ok` with an EMPTY detail — the DETAIL column was not even switched on for
+// the HEALTHY bucket — while the DEPLOY section three tables further down
+// carried its live rate. The verdict row itself said nothing.
+//
+// The assertion is on the RENDERED TABLE ROW, not on a helper's return value:
+// a marker that computes correctly and never reaches the row is the exact
+// failure this row exists to end.
+//
+// It also pins the two boundaries the marker must not cross. (1) D330: the row
+// still reads `ok`, still sits in HEALTHY, and the ladder is still the
+// charter's twelve — a detail string moved, nothing else. (2) The window
+// travels WITH the number (dr-w13-bl-10129-window-is-pinned-by-nothing): the
+// rate is quoted on the row together with the pinned window it was taken over,
+// so it cannot be read out of this table without its population.
+func TestStatusDeployMarkerRidesTheOkRowWithItsWindow(t *testing.T) {
+	withTempConfigHome(t)
+	// alpha (site-a) attempted 435 and shipped 109. beta (site-c) attempted
+	// 1479 and shipped all 1479 — the negative arm.
+	newStatusDeployServer(t, 200, statusDeployCensus(200, 435, 109, 1479, 1479))
+
+	// Pin the clock so the window in the row is an exact string, not a moving one.
+	prev := statusDeployNow
+	statusDeployNow = func() time.Time { return time.Date(2026, 9, 2, 16, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { statusDeployNow = prev })
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+
+	row := statusTableRowFor(t, stdout, "alpha")
+	// The rate, WITH its denominator, ON THE ROW.
+	if !strings.Contains(row, "deploys live 109/435 (25.1%)") {
+		t.Fatalf("the verdict row must carry the deploy rate with its denominator, got:\n%s\nfull output:\n%s", row, stdout)
+	}
+	// And the WINDOW it was taken over, on the same row as the number.
+	if !strings.Contains(row, "2026-09-01T16:00:00Z → 2026-09-02T16:00:00Z (24 hours)") {
+		t.Fatalf("the marker must name the window it took, got:\n%s", row)
+	}
+	// The detail column exists at all — it did not before, for a healthy fleet.
+	if !strings.Contains(stdout, "DETAIL") {
+		t.Fatalf("the DETAIL column must switch on for a healthy box carrying a deploy sentence:\n%s", stdout)
+	}
+
+	// D330's boundary, asserted three ways: the status, the bucket and the ladder.
+	if f := strings.Fields(row); f[0] != "ok" {
+		t.Fatalf("the marker must move no status: row reads %q, want the first cell `ok`\n%s", f[0], row)
+	}
+	if !strings.Contains(stdout, "HEALTHY (2)") {
+		t.Fatalf("the marker must move no bucket:\n%s", stdout)
+	}
+	if len(attentionRankOrder) != 12 {
+		t.Fatalf("the marker must add no rung: %v", attentionRankOrder)
+	}
+
+	// The negative arm: a box that shipped everything it attempted has no
+	// happening to report, so it carries NO deploy sentence — the same policy
+	// err5xxMarker keeps for a quiet box.
+	if b := statusTableRowFor(t, stdout, "beta"); strings.Contains(b, "deploys live") {
+		t.Fatalf("a box that shipped 1479/1479 must add no sentence, got:\n%s", b)
+	}
+}
+
+// TestStatusDeployMarkerIsSilentOnEveryRefusal: the four absences the DEPLOY
+// section already words in full get NO second wording on the row. Silence here
+// is never a green — the section states the refusal twenty lines down — but a
+// marker inventing a fifth sentence for the same fact would be a second
+// definition of it.
+func TestStatusDeployMarkerIsSilentOnEveryRefusal(t *testing.T) {
+	rd := func(state string, b *statusDeployBox, min int) *statusDeployReading {
+		return &statusDeployReading{
+			State: state, MinSample: min,
+			Boxes: map[string]*statusDeployBox{"bp-1": b},
+		}
+	}
+	cases := []struct {
+		name string
+		rd   *statusDeployReading
+	}{
+		{"census unreadable", rd("census_unreadable", nil, 200)},
+		{"sites unattributable", rd("sites_unattributable", nil, 200)},
+		{"no rows for this box", rd("read", nil, 200)},
+		{"zero volume", rd("read", &statusDeployBox{Volume: 0, LiveKnown: true}, 200)},
+		{"below min_sample", rd("read", &statusDeployBox{Volume: 12, Live: 0, LiveKnown: true}, 200)},
+		{"no per-site live", rd("read", &statusDeployBox{Volume: 435, LiveKnown: false}, 200)},
+		{"no min_sample on the wire", rd("read", &statusDeployBox{Volume: 435, Live: 109, LiveKnown: true}, 0)},
+		{"everything shipped", rd("read", &statusDeployBox{Volume: 435, Live: 435, LiveKnown: true}, 200)},
+		{"nil reading", nil},
+	}
+	for _, c := range cases {
+		if got := deployMarker(c.rd, "bp-1"); got != "" {
+			t.Errorf("%s: deployMarker = %q, want silence", c.name, got)
+		}
+	}
+	// And the one positive arm, so the whole table above cannot go vacuous.
+	live := rd("read", &statusDeployBox{Volume: 435, Live: 109, LiveKnown: true}, 200)
+	live.From = time.Date(2026, 9, 1, 16, 0, 0, 0, time.UTC)
+	live.To = time.Date(2026, 9, 2, 16, 0, 0, 0, time.UTC)
+	if got := deployMarker(live, "bp-1"); !strings.Contains(got, "deploys live 109/435") {
+		t.Fatalf("the measured arm must speak, got %q", got)
 	}
 }

@@ -1,0 +1,1 @@
+If B is chosen, the three open sub-defect rows are re-prioritised or closed as consented

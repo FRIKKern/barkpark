@@ -1,0 +1,1 @@
+The mode is DRIVEN under both conditions — gate green and gate deliberately red — and produces the same inventory both times, proving it is not hostage to process.exit(1).

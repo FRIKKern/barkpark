@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): merged to main, green across the Elixir + Go + node gates. Evidence names the PR and the reviewer.

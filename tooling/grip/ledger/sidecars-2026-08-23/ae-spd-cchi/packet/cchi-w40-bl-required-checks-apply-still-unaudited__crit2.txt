@@ -1,0 +1,1 @@
+A mutation arm covering apply.sh is added to scripts/required-checks.test.sh and proven able to LOSE — quote the red on the mutated tree and the green on the clean one. Budget the CI cost honestly: required-checks-drift.yml is deliberately path-unfiltered and runs the hermetic suite on every PR in the repo.

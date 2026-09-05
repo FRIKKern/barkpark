@@ -1,0 +1,1 @@
+MUTATION PROOF: emptying the new recipient population reds the census — the counted-loss telemetry dr-w18-s3 added must still fire, so the failure mode stays LOUD rather than being replaced by a silent success.

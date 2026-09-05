@@ -53,10 +53,21 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
     }
   end
 
+  # THE BYTES MUST MATCH THE TYPE UNDER TEST (task-57ee9fff4aae9217 #4).
+  # This helper used to write PNG bytes under EVERY filename, so the
+  # `top-level-doc.pdf` fixture was a PNG wearing a `.pdf` name and the two
+  # facet values it seeds existed only because ingest derived the mime from
+  # the EXTENSION. Ingest now content-sniffs, so PNG bytes are `image/png`
+  # whatever the name — and both fixtures collapsed onto one facet value,
+  # which is the failure these two tests reported. The tests' INTENT (two
+  # distinct mimes ⇒ two facet values) is unchanged and correct; the fixture
+  # was the dishonest part, so each upload now carries bytes of its own type.
+  defp bytes_for("application/pdf"), do: "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n%%EOF\n"
+  defp bytes_for(_), do: Base.decode64!(@png_b64)
+
   defp upload_as(conn, filename, content_type) do
-    png_bin = Base.decode64!(@png_b64)
     tmp_path = Path.join(System.tmp_dir!(), "search-#{:rand.uniform(1_000_000)}")
-    File.write!(tmp_path, png_bin)
+    File.write!(tmp_path, bytes_for(content_type))
 
     upload = %Plug.Upload{path: tmp_path, filename: filename, content_type: content_type}
 

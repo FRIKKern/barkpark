@@ -1,0 +1,1 @@
+A 409 not_in_progress carries a hint naming the cure, and the hint is asserted by a test.

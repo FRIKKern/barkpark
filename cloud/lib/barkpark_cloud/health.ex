@@ -30,6 +30,8 @@ defmodule BarkparkCloud.Health do
   `serving_since` until it is durable.
   """
 
+  require Logger
+
   alias BarkparkCloud.Repo
 
   # The honest label on a gauge a `docker restart` can IMPROVE. Emitted next to
@@ -57,9 +59,14 @@ defmodule BarkparkCloud.Health do
     {:ok, Map.merge(%{db: :up, checked_at: DateTime.utc_now()}, serving())}
   rescue
     error ->
+      # /health is UNAUTHENTICATED (the load-balancer probe). The raw exception
+      # text names hosts, users and pool internals, so it goes to the server log
+      # only; the wire carries one fixed category string (arpss-classa ruling).
+      Logger.warning("cloud health probe: SELECT 1 failed: " <> Exception.message(error))
+
       {:error,
        Map.merge(
-         %{db: :down, checked_at: DateTime.utc_now(), reason: Exception.message(error)},
+         %{db: :down, checked_at: DateTime.utc_now(), reason: "database_unavailable"},
          serving()
        )}
   end

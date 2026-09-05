@@ -554,7 +554,12 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     end
 
     test "every other :mutate verb is refused the same way, upstream untouched" do
-      {user, team} = user_with_team("member")
+      # task-a0f4f8757ba28e76 (ARM B): `rotate` now gates at team ADMIN before the
+      # suspension check, so a plain member would be refused 403 there and never
+      # reach the 409 this sweep asserts. An admin walks every verb to the
+      # suspension arm; the member-side refusal has its own test in
+      # instance_api_proxy_admin_verbs_test.exs.
+      {user, team} = user_with_team("admin")
       bp = suspended_barkpark(team)
       Fake.program([])
       token = session_token(user)

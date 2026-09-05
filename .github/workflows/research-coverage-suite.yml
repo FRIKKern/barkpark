@@ -79,7 +79,7 @@ permissions:
   issues: write # so a failed run on main can surface itself to a human
 
 concurrency:
-  group: research-coverage-suite-${{ github.ref }}
+  group: research-coverage-suite-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the suite dark.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 

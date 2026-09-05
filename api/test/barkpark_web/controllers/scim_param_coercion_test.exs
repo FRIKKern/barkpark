@@ -9,7 +9,7 @@ defmodule BarkparkWeb.ScimParamCoercionTest do
   Each controller now has a trailing catch-all clause that degrades a
   non-binary filter to the no-filter path instead of crashing.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Scim, Tenancy}
 

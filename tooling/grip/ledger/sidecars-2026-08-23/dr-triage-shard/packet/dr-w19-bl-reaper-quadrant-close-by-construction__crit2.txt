@@ -1,0 +1,1 @@
+The change is mutation-proved: reverting the predicate widening makes the new test FAIL.

@@ -57,6 +57,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
+  # The open document's id — keys a field canvas wrapper so a doc→doc patch
+  # navigation remounts it instead of transplanting the `phx-update="ignore"`
+  # wrapper across documents (paper_canvas.ex bug #1c).
+  attr :doc_key, :string, default: "doc"
+  attr :doc_type, :string, default: "document"
+  attr :document_rev, :string, default: nil
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
@@ -80,22 +86,38 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
     val = Map.get(assigns.editor_form, name, "")
-    has_selection = val in opts
+    options = Barkpark.Content.SelectOptions.normalize(opts)
+    has_selection = val in Enum.map(options, & &1.value)
     required = get_in(f, ["validation", "required"]) == true
 
     assigns =
       assign(assigns,
         n: name,
-        opts: opts,
+        opts: options,
         v: val,
         show_placeholder: not has_selection,
-        required: required
+        required: required,
+        radio: Barkpark.Content.SelectOptions.radio?(f)
       )
 
     ~H"""
-    <select id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
+    <%!-- Gyldendal parity E1.5 — options normalise through
+         `Barkpark.Content.SelectOptions` (bare values or {value,title} pairs;
+         the TITLE is shown, the VALUE stored) and `"layout": "radio"` renders
+         Sanity's radio list. An optional radio group with no stored value has
+         NO checked input: nothing serialises, so the field stays absent — the
+         same "no selection" idiom the placeholder <option> gives the <select>. --%>
+    <div :if={@radio} class="form-radio-group" role="radiogroup" data-field={@n}>
+      <%= for o <- @opts do %>
+        <label class="form-radio">
+          <input type="radio" name={"doc[#{@n}]"} value={o.value} checked={o.value == @v} required={@required} phx-debounce="100" />
+          <span><%= o.label %></span>
+        </label>
+      <% end %>
+    </div>
+    <select :if={not @radio} id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
       <option :if={@show_placeholder} value="" selected disabled={@required}>Select…</option>
-      <%= for o <- @opts do %><option value={o} selected={o == @v}><%= o %></option><% end %>
+      <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
     """
   end
@@ -104,6 +126,56 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
   # See docs/studio/web-components.md for the full contract.
+  # richText with `"editor": "blocks"` — Gyldendal parity stage E1. The field
+  # is edited by the SAME <bp-paper-canvas> the paper editor uses, seeded with
+  # the field's own block array and the field's declared vocabulary
+  # (data-canvas-vocabulary, the twin of data-canvas-constraints). There is NO
+  # hidden input and no BarkparkFieldBridge: block edits travel as ops through
+  # the BarkparkFieldCanvas hook → `field-block-ops` → the field-scoped apply
+  # path, and the server echo comes back on `bp:field-canvas-update`. An
+  # unconfigured richText keeps the clause below byte-identically.
+  def input(%{field: %{"type" => "richText", "name" => name, "editor" => "blocks"} = f} = assigns) do
+    blocks = Barkpark.Content.field_blocks(Map.get(assigns.editor_form, name))
+
+    # A field that declares `"blocks"` keeps EXACTLY what it names — the
+    # declaration NARROWS. A field that says `"editor": "blocks"` and nothing
+    # else gets the papers block vocabulary, read from the ONE source the
+    # server-side write path reads (`FieldVocabulary.from_field/1` applies the
+    # same default in `apply_field_block_ops`), never a second list typed here.
+    vocab =
+      case Map.get(f, "blocks") do
+        %{} = declared -> declared
+        _ -> Barkpark.PortableDoc.FieldVocabulary.default_declaration()
+      end
+
+    assigns =
+      assign(assigns,
+        n: name,
+        blocks_json: Jason.encode!(blocks),
+        vocab_json: Jason.encode!(vocab)
+      )
+
+    ~H"""
+    <div
+      id={"bp-fc-wrap-#{@doc_key}-#{@n}"}
+      phx-update="ignore"
+      phx-hook="BarkparkFieldCanvas"
+      class="bp-paper-edit-canvas bp-field-canvas"
+      data-field={@n}
+      data-doc-key={@doc_key}
+      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@doc_key}"}
+      data-document-rev={@document_rev}
+      data-canvas-blocks={@blocks_json}
+      data-canvas-vocabulary={@vocab_json}
+      data-canvas-dataset={@dataset}
+      data-canvas-token={@api_token_raw}
+      data-test-id="field-canvas"
+    >
+      <bp-paper-canvas></bp-paper-canvas>
+    </div>
+    """
+  end
+
   def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
@@ -249,9 +321,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # session via LiveAuth.:fetch_api_token (empty string disables uploads).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
   # See docs/studio/web-components.md for the full contract.
-  def input(%{field: %{"type" => "image", "name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+  def input(%{field: %{"type" => "image", "name" => name} = f} = assigns) do
+    val = image_form_value(Map.get(assigns.editor_form, name, ""))
+
+    assigns =
+      assign(assigns,
+        n: name,
+        v: val,
+        hotspot: image_option?(f, "hotspot"),
+        alt: image_option?(f, "alt")
+      )
 
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
@@ -262,6 +341,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-mp-hidden-#{@n}"}
         data-token={@api_token_raw}
+        hotspot={@hotspot}
+        alt={@alt}
       ></bp-media-picker>
     </div>
     """
@@ -381,4 +462,21 @@ defmodule BarkparkWeb.Components.FieldInputs do
       {:error, _} -> inspect(value)
     end
   end
+
+  # Gyldendal parity E1 — an image field opts into the focal point and the
+  # alt-text input the way Sanity does (`options.hotspot`), or flat:
+  # {"type":"image","hotspot":true,"alt":true}. Absent → the picker renders
+  # byte-identically (the attribute is omitted, not set to "false").
+  defp image_option?(field, key) do
+    flat = Map.get(field, key)
+    nested = get_in(field, ["options", key])
+    if flat == true or nested == true, do: true, else: nil
+  end
+
+  # The picker's wire value is a STRING (a bare URL or a JSON object). A value
+  # that was decoded into a map at the save boundary (Forms.coerce_field_value)
+  # is re-encoded here so the same picker reads both.
+  defp image_form_value(%{} = map), do: Jason.encode!(map)
+  defp image_form_value(v) when is_binary(v), do: v
+  defp image_form_value(_), do: ""
 end

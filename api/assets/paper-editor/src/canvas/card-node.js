@@ -430,20 +430,29 @@ export const Card = Node.create({
 
       // ── title island: debounced write-back (cleared → null → round-trips ABSENT).
       let writeTimer = null;
+      const commitTitleWrite = () => {
+        const raw = titleEl.textContent || "";
+        const nextTitle = raw === "" ? null : raw;
+        writeAttr((attrs) => {
+          if ((attrs.title || null) === nextTitle) return attrs;
+          attrs.title = nextTitle;
+          return attrs;
+        });
+      };
       const scheduleTitleWrite = () => {
         if (syncingTitle) return;
         if (!editor.isEditable) return;
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;
-          const raw = titleEl.textContent || "";
-          const nextTitle = raw === "" ? null : raw;
-          writeAttr((attrs) => {
-            if ((attrs.title || null) === nextTitle) return attrs;
-            attrs.title = nextTitle;
-            return attrs;
-          });
+          commitTitleWrite();
         }, 250);
+      };
+      const flushTitleWrite = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitTitleWrite();
       };
       const onTitleInput = () => scheduleTitleWrite();
       const onTitleFocus = () => {
@@ -464,6 +473,7 @@ export const Card = Node.create({
       titleEl.addEventListener("focus", onTitleFocus);
       titleEl.addEventListener("blur", onTitleBlur);
       titleEl.addEventListener("keydown", onTitleKeydown);
+      dom.addEventListener("bp-flush-node", flushTitleWrite);
 
       // ── media control: read the picker's PARSED accessor (e.target.meta.url), with a
       // JSON-tolerant fallback (mediaUrlFromValue) over the bp-change STRING detail — the
@@ -542,6 +552,7 @@ export const Card = Node.create({
         },
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          dom.removeEventListener("bp-flush-node", flushTitleWrite);
           titleEl.removeEventListener("input", onTitleInput);
           titleEl.removeEventListener("focus", onTitleFocus);
           titleEl.removeEventListener("blur", onTitleBlur);

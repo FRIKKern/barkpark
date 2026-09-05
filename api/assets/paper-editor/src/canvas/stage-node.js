@@ -253,12 +253,19 @@ export const Stage = Node.create({
           commitNow();
         }, DEBOUNCE_MS);
       };
+      const flushPending = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitNow();
+      };
 
       kindInput.addEventListener("input", scheduleWrite);
       titleInput.addEventListener("input", scheduleWrite);
       detailInput.addEventListener("input", scheduleWrite);
       filesInput.addEventListener("input", scheduleWrite);
       srcCheckbox.addEventListener("change", commitNow);
+      dom.addEventListener("bp-flush-node", flushPending);
 
       return {
         dom,
@@ -279,6 +286,7 @@ export const Stage = Node.create({
           detailInput.removeEventListener("input", scheduleWrite);
           filesInput.removeEventListener("input", scheduleWrite);
           srcCheckbox.removeEventListener("change", commitNow);
+          dom.removeEventListener("bp-flush-node", flushPending);
         },
       };
     };

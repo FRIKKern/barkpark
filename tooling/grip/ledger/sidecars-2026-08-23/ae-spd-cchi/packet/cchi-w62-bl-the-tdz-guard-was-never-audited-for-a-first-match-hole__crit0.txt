@@ -1,0 +1,1 @@
+console-tdz-order-check.mjs is audited for a first-match-wins / set-then-single-read class analogous to the pin's, and the finding is stated either way — 'no such hole' is a valid, valuable result IF it is backed by the mutations that would have found one.

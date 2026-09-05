@@ -1,0 +1,1 @@
+finish_rollback/4's three-way target fallback is traced and its divergence risk is either closed or recorded with evidence

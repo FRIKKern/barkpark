@@ -1,0 +1,1 @@
+A reader reports build duration from console stage timestamps, explicitly excluding the flock queue wait, and states which of the two intervals it measured

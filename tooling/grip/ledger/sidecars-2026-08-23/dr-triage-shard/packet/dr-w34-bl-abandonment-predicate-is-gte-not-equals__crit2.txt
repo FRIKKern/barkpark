@@ -1,0 +1,1 @@
+Arm 3 (a deferred row at depth 11/bound 12 with a cause must NOT classify abandoned) reds when the predicate is swapped for `deferral_cause IS NOT NULL`; the count jump to ~1,665 is shown.

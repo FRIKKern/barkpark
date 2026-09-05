@@ -1,0 +1,1 @@
+The chosen remedy (commit vs bp with rev-fencing) is recorded with its cost - evidence: paste the decision and the measured churn or storage cost

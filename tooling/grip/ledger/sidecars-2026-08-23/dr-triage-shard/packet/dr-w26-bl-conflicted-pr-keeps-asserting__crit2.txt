@@ -1,0 +1,1 @@
+Mutation-proved: a PR made conflicting in a fixture is reported; a merely-behind PR is not.

@@ -1,0 +1,1 @@
+The disclosure states we have NO evidence the credential was accepted AND no instrument capable of distinguishing 'rejected' from 'accepted but unlogged'.

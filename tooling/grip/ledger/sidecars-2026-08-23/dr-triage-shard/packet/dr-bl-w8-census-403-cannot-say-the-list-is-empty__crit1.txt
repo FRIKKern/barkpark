@@ -1,0 +1,1 @@
+The forbidden error slug is untouched and all existing forbidden assertions still pass. Evidence: the suite run.

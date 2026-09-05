@@ -1,0 +1,1 @@
+No elapsed-millisecond figure from this run is presented as a latency floor - the PR/report says so explicitly and points at the filed quiet-host slice.

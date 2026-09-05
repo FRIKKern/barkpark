@@ -75,29 +75,37 @@ var nounBuiltins = []nounBuiltin{
 		Noun:    "task",
 		Verb:    "create",
 		Summary: "File a new task — injects the schema's required kind/lifecycle_status defaults.",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runTaskCreate(out, g, ctx, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskCreate(out, g, ctx, tail)
+		},
 	},
 	{
 		Noun:    "task",
 		Verb:    "frontier",
 		Summary: "The dispatch frontier: ready tasks whose blast radii do not collide.",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runTaskFrontier(out, g, ctx, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskFrontier(out, g, ctx, tail)
+		},
 	},
 	{
 		Noun:    "task",
 		Verb:    "lint",
 		Summary: "Advisory nudge: workable leaves carrying no authored area: label (always exits 0).",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runTaskLint(out, g, ctx, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskLint(out, g, ctx, tail)
+		},
 	},
 	{
 		Noun:    "task",
 		Verb:    "tui",
 		Summary: "Open the live portrait task board (the same reader as `bp tasks`).",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runTasksBoard(out, g, ctx, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTasksBoard(out, g, ctx, tail)
+		},
 	},
 	{
-		Noun:    "task",
-		Verb:    "next",
+		Noun:     "task",
+		Verb:     "next",
 		Summary:  "With --frontier: claim the top NON-COLLIDING ready pick (a bare `next` is the manifest verb).",
 		GateHint: "--frontier",
 		When:     func(g globals, tail []string) bool { return hasFlag(tail, "--frontier") },
@@ -110,6 +118,16 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun:     "token",
+		Verb:     "create",
+		Summary:  "With --permissions: mint public-read OR read (a bare `create` is the manifest verb, public-read only).",
+		GateHint: "--permissions",
+		When:     func(g globals, tail []string) bool { return tokenCreateGated(tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTokenCreate(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "server",
 		Verb:    "ls",
 		Summary: "List saved servers (the singular-noun spelling of `bp servers`).",
@@ -119,13 +137,17 @@ var nounBuiltins = []nounBuiltin{
 		Noun:    "mcp",
 		Verb:    "serve",
 		Summary: "Run a stdio Model-Context-Protocol server exposing Barkpark to MCP clients.",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runMCPServe(out, g, ctx, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runMCPServe(out, g, ctx, tail)
+		},
 	},
 	{
 		Noun:    "context",
 		Verb:    "pack",
 		Summary: "Pack files into an optical context bundle (PNG pages + a verbatim sidecar).",
-		Run:     func(out *writer, g globals, ctx manifest.Context, tail []string) int { return runContextPack(out, g, tail) },
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runContextPack(out, g, tail)
+		},
 	},
 }
 

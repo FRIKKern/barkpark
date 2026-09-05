@@ -1,0 +1,1 @@
+The alarm is episode-shaped (N rows / M sites within T minutes) and a test proves a single isolated row does NOT fire it while the measured 9-row/6-site/3-minute burst does.

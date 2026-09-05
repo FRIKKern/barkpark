@@ -1,0 +1,1 @@
+The destroy confirm names the external custom domain the plane cannot remove and tells the owner to remove their own A record

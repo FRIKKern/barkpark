@@ -1,0 +1,1 @@
+A guard ships with the fix and is proven able to lose by mutation. Evidence: the mutation run and the failing test name.

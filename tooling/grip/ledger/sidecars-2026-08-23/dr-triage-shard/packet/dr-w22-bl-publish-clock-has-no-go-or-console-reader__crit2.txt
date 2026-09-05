@@ -1,0 +1,1 @@
+The number rendered is per-PUBLISH or explicitly labelled per-DELIVERY, with the 5x fan-out stated

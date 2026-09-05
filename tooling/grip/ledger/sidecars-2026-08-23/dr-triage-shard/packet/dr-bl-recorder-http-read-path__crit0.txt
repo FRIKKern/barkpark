@@ -1,0 +1,1 @@
+A failed deployment's recorded build output is readable by DEPLOYMENT ID over HTTP, days later, whether or not the site has deployed since — proven end to end against a real recorded failure.

@@ -67,8 +67,12 @@ describe('createPatch', () => {
   })
 
   it('set() rejects forbidden system fields', () => {
-    expect(() => createPatch(config, 'p1', 'post').set({ _id: 'other' })).toThrow(BarkparkValidationError)
-    expect(() => createPatch(config, 'p1', 'post').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
+    expect(() => createPatch(config, 'p1', 'post').set({ _id: 'other' })).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createPatch(config, 'p1', 'post').set({ _rev: 'x' })).toThrow(
+      BarkparkValidationError,
+    )
   })
 
   it('setIfMissing() sends a patch.setIfMissing wire op (Phase-1B), composing with set', async () => {
@@ -92,7 +96,10 @@ describe('createPatch', () => {
     expect(seen?.setIfMissing).toEqual({ lang: 'en', region: 'EU' })
 
     // set + setIfMissing compose in one commit.
-    await createPatch(config, 'p2', 'post').set({ tier: 'pro' }).setIfMissing({ plan: 'basic' }).commit()
+    await createPatch(config, 'p2', 'post')
+      .set({ tier: 'pro' })
+      .setIfMissing({ plan: 'basic' })
+      .commit()
     expect(seen?.set).toEqual({ tier: 'pro' })
     expect(seen?.setIfMissing).toEqual({ plan: 'basic' })
   })
@@ -101,7 +108,9 @@ describe('createPatch', () => {
     expect(() =>
       createPatch(config, 'p1', 'post').setIfMissing([] as unknown as Record<string, unknown>),
     ).toThrow(BarkparkValidationError)
-    expect(() => createPatch(config, 'p1', 'post').setIfMissing({ _rev: 'x' })).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1', 'post').setIfMissing({ _rev: 'x' })).toThrow(
+      /system field/,
+    )
   })
 
   it('inc()/dec() send patch.inc/patch.dec wire ops (Phase-1B), composing with set', async () => {
@@ -130,16 +139,20 @@ describe('createPatch', () => {
     expect(seen?.inc).toEqual({ views: 1, hits: 5 })
 
     // set + inc + dec compose in one commit.
-    await createPatch(config, 'p2', 'post').set({ title: 'New' }).inc({ a: 2 }).dec({ b: 3 }).commit()
+    await createPatch(config, 'p2', 'post')
+      .set({ title: 'New' })
+      .inc({ a: 2 })
+      .dec({ b: 3 })
+      .commit()
     expect(seen?.set).toEqual({ title: 'New' })
     expect(seen?.inc).toEqual({ a: 2 })
     expect(seen?.dec).toEqual({ b: 3 })
   })
 
   it('inc()/dec() validate: non-object, system fields, and non-finite deltas throw', () => {
-    expect(() => createPatch(config, 'p1', 'post').inc(42 as unknown as Record<string, number>)).toThrow(
-      BarkparkValidationError,
-    )
+    expect(() =>
+      createPatch(config, 'p1', 'post').inc(42 as unknown as Record<string, number>),
+    ).toThrow(BarkparkValidationError)
     expect(() => createPatch(config, 'p1', 'post').inc({ _rev: 1 })).toThrow(/system field/)
     expect(() => createPatch(config, 'p1', 'post').dec({ x: Infinity })).toThrow(/finite/)
     expect(() => createPatch(config, 'p1', 'post').inc({ x: 'nope' as unknown as number })).toThrow(
@@ -184,7 +197,9 @@ describe('createPatch', () => {
   })
 
   it('insert / diffMatchPatch (still Phase 1A) throw helpful errors', () => {
-    expect(() => createPatch(config, 'p1', 'post').insert('after', 'tags[-1]', ['x'])).toThrow(/Phase 1A/)
+    expect(() => createPatch(config, 'p1', 'post').insert('after', 'tags[-1]', ['x'])).toThrow(
+      /Phase 1A/,
+    )
     expect(() => createPatch(config, 'p1', 'post').diffMatchPatch({ body: '@@ -1 +1 @@' })).toThrow(
       /patch\.diffMatchPatch.*Phase 1A/,
     )
@@ -218,15 +233,17 @@ describe('createPatch', () => {
   })
 
   it('append()/prepend() validate: non-array items, nested selectors, and system fields throw', () => {
-    expect(() => createPatch(config, 'p1', 'post').append('tags', 'x' as unknown as unknown[])).toThrow(
-      BarkparkValidationError,
-    )
+    expect(() =>
+      createPatch(config, 'p1', 'post').append('tags', 'x' as unknown as unknown[]),
+    ).toThrow(BarkparkValidationError)
     expect(() => createPatch(config, 'p1', 'post').append('obj.tags', ['x'])).toThrow(/top-level/)
     expect(() => createPatch(config, 'p1', 'post').prepend('_rev', ['x'])).toThrow(/system field/)
   })
 
   it('commit() without any set() throws BarkparkValidationError', async () => {
-    await expect(createPatch(config, 'p1', 'post').commit()).rejects.toThrow(BarkparkValidationError)
+    await expect(createPatch(config, 'p1', 'post').commit()).rejects.toThrow(
+      BarkparkValidationError,
+    )
   })
 
   it('commit({ ifMatch }) includes ifMatch in the mutation body', async () => {
@@ -284,9 +301,15 @@ describe('createPatch', () => {
       http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, ({ request }) => {
         keys.push(request.headers.get('idempotency-key'))
         calls += 1
-        // Fail the first attempt (retryable 500), succeed on the retry.
+        // Fail the first attempt, succeed on the retry. The code must be
+        // `internal_error`: that is the ONLY 5xx the narrowed policy repeats
+        // (RETRYABLE_SERVER_CODE in src/retry.ts). This fixture used to say
+        // `boom`, which worked only while any 5xx was retried.
         if (calls === 1) {
-          return HttpResponse.json({ error: { code: 'boom', message: 'transient' } }, { status: 500 })
+          return HttpResponse.json(
+            { error: { code: 'internal_error', message: 'transient' } },
+            { status: 500 },
+          )
         }
         const env: MutateEnvelope = {
           transactionId: TEST_TX_ID,

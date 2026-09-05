@@ -4,7 +4,7 @@ defmodule BarkparkWeb.WsBVisibilityTest do
   through the legacy `/api/documents/*` dump (HIGH-1) nor as a filter/order
   oracle on `/v1/data/query` (MEDIUM-4), and the query body itself redacts it.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
 

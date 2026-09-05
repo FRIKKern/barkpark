@@ -13,6 +13,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Access, Checkout, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
+  alias Barkpark.Media.WhereUsed
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
@@ -279,7 +280,13 @@ defmodule BarkparkWeb.V1.MediaController do
     opts =
       [
         limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-        offset: parse_int(params["offset"], 0),
+        # SAME ceiling as `MediaSearchParams.parse/1` — this action does not go
+        # through it, and it reaches the identical paginator: `query_files/2`
+        # tail-calls `Delivery.Search.search/2`, whose `paginate_ids/2` fetches
+        # `limit + offset + 20` rows into the BEAM before dropping `offset`.
+        # Derived by grepping every `parse_int(params["offset"]` site, not from
+        # the filing's list, which named only the SearchParams door.
+        offset: MediaSearchParams.clamp_offset(parse_int(params["offset"], 0)),
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
         q: blank_to_nil(params["q"])
@@ -296,17 +303,44 @@ defmodule BarkparkWeb.V1.MediaController do
 
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+    # `count` KEEPS ITS SHIPPED VALUE — the grand total — and that is deliberate.
+    # Re-pointing it at the page rows to match the document query path (§4,
+    # "`count` = page rows") would silently change the meaning of a live key for
+    # whichever consumer reads it correctly today, which is the same silent
+    # failure this row exists to end, aimed the other way. The ambiguity is
+    # closed ADDITIVELY instead: `total` and `hasMore` say what they mean on
+    # every /v1/media/* list, so no consumer ever has to know which of the two
+    # `count` conventions it just met. See task-3d7a770cf4ea11cd.
+    #
+    # `hasMore` is exact, not an inference from `count == limit`: on a last page
+    # that happens to be exactly `limit` rows, `offset + length(assets)` equals
+    # `total` and the answer is false. That is the same law #13616 gave the
+    # document query, and the shape `media.search` already had.
+    total_returned = length(assets)
+    has_more = opts[:offset] + total_returned < total
+
     json(conn, %{
-      result: %{
-        assets: assets,
-        count: total,
-        limit: opts[:limit],
-        offset: opts[:offset]
-      },
+      result:
+        %{
+          assets: assets,
+          count: total,
+          total: total,
+          hasMore: has_more,
+          limit: opts[:limit],
+          offset: opts[:offset]
+        }
+        |> maybe_next_offset(has_more, opts[:offset], total_returned),
       syncTags: ["bp:ds:#{dataset}:media"],
       ms: ms
     })
   end
+
+  # `nextOffset` only when a next page genuinely exists — an exhausted result
+  # set never hands back an offset onto an empty page.
+  defp maybe_next_offset(result, false, _offset, _returned), do: result
+
+  defp maybe_next_offset(result, true, offset, returned),
+    do: Map.put(result, :nextOffset, offset + returned)
 
   @doc """
   Single asset, gated by `Access.allowed?/4` at `:view`.
@@ -363,7 +397,14 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn) do
       case Media.upload(upload, dataset, scope_opts(conn)) do
         {:ok, file} ->
-          doc = Media.asset_doc_for_file(file, dataset)
+          # INLINE METADATA (task-57ee9fff4aae9217 #13). altText / caption /
+          # tags / title / description used to cost one extra PATCH per FIELD
+          # after the upload; a 816-asset import paid that four times over.
+          # The same allowlist the `update/2` action uses applies here —
+          # `Media.patch_asset_metadata/3` runs everything through
+          # `pick_metadata/1` (@metadata_fields), so a multipart part named
+          # `path` or `mimeType` still cannot touch a blob column.
+          doc = apply_upload_metadata(file, params, dataset)
 
           conn
           |> put_status(:created)
@@ -388,6 +429,50 @@ defmodule BarkparkWeb.V1.MediaController do
     |> put_status(:bad_request)
     |> json(%{error: Map.delete(env, :status)})
   end
+
+  # Patch the just-created `mediaAsset` doc with any inline metadata the
+  # multipart carried, and return the document the receipt should render.
+  #
+  # FAIL-SOFT ON PURPOSE: the BYTES are already persisted and the row is
+  # committed, so a metadata patch that fails must not turn a successful upload
+  # into an error the client reads as "nothing was stored" — it would retry and
+  # duplicate the blob. The receipt then renders the unpatched document, which
+  # states plainly that the metadata did not land.
+  defp apply_upload_metadata(file, params, dataset) do
+    case upload_metadata(params) do
+      metadata when map_size(metadata) == 0 ->
+        Media.asset_doc_for_file(file, dataset)
+
+      metadata ->
+        case Media.patch_asset_metadata(file, metadata, dataset) do
+          {:ok, doc} -> doc
+          _ -> Media.asset_doc_for_file(file, dataset)
+        end
+    end
+  end
+
+  # `metadata` as a nested object (JSON clients) or the flat multipart parts
+  # (`altText=…`, `tags=a,b,c`). `tags` arrives as ONE string over multipart —
+  # a comma-separated string is split, a repeated part already arrives as a
+  # list and is left alone.
+  defp upload_metadata(params) do
+    params
+    |> metadata_params()
+    |> Map.take(Media.metadata_fields())
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+    |> Map.new()
+    |> normalize_tags()
+  end
+
+  defp normalize_tags(%{"tags" => tags} = metadata) when is_binary(tags) do
+    Map.put(
+      metadata,
+      "tags",
+      tags |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    )
+  end
+
+  defp normalize_tags(metadata), do: metadata
 
   def update(conn, %{"dataset" => dataset, "id" => id} = params) do
     metadata = metadata_params(params)
@@ -446,11 +531,18 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
-  def delete(conn, %{"dataset" => dataset, "id" => id}) do
+  def delete(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+         # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed
+         # media as RAW `/media/files/...` URL STRINGS, invisible to every
+         # reference graph (`Relations.graph/3` walks mediaAsset<->mediaAsset
+         # edges only), so this door used to answer 200 while blanking a live
+         # page. Consult usage BEFORE the irreversible delete.
+         {:ok, override} <- refuse_if_referenced(conn, file, params),
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
       # This used to discard it and echo the `:id` path param. NOTE the trap the
@@ -458,12 +550,47 @@ defmodule BarkparkWeb.V1.MediaController do
       # at :403 by a PRE-WRITE `Media.get_file/2` read, so `file.filename` would
       # be store-SHAPED but not descended from the write. Every field below
       # comes off `deleted` — the delete's own return.
+      #
+      # `override` is nil unless the caller disarmed the where-used guard, so an
+      # ordinary delete's receipt is byte-for-byte what it always was and only a
+      # FORCED one grows `forced` + `referencedByCount`.
+      result = %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset}
+
       json(conn, %{
-        result: %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset},
+        result: Map.merge(result, override || %{}),
         syncTags: ["bp:ds:#{dataset}:media"]
       })
     else
       error -> error
+    end
+  end
+
+  # `:ok` to proceed, or a HALTED conn carrying the 409 census. Returning the
+  # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
+  # envelope reuses the public `conflict` code but carries a `details` census
+  # that no shared builder would know how to assemble.
+  #
+  # Returns `{:ok, override}` — `override` is `nil` on the unforced path and the
+  # witness receipt fields on the forced one (task-ef676cfc88e71fae). The forced
+  # branch used to return a bare `:ok` and skip the census, so an override left
+  # no trace anywhere: no log line, and a 200 indistinguishable from an unforced
+  # delete of an unreferenced blob.
+  defp refuse_if_referenced(conn, file, params) do
+    if WhereUsed.forced?(params) do
+      {:ok, WhereUsed.witness_forced_delete(conn, file)}
+    else
+      case WhereUsed.referrers(file) do
+        %{count: 0} ->
+          {:ok, nil}
+
+        census ->
+          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: env})
+          |> halt()
+      end
     end
   end
 

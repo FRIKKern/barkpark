@@ -1,0 +1,1 @@
+A fix ships on one of the three named options, and the reproduction above no longer leaves an open issue

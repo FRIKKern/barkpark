@@ -1,0 +1,1 @@
+'evicted', 'never recorded' and 'no such deployment' are THREE distinguishable responses on the wire, not one 404.

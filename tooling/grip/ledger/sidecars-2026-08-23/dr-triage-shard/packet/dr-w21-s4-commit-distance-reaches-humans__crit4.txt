@@ -1,0 +1,1 @@
+@update_states is still ~w(unknown current behind disabled) and no autoupdate gate is touched. `git diff` proves registry/barkpark.ex is unmodified by this slice.

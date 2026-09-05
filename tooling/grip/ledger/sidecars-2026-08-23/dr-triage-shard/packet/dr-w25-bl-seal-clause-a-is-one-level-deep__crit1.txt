@@ -1,0 +1,1 @@
+A reparent that moves residue under an in-roster sub-parent no longer reduces the reported orphan count without a stated depth. Prove by mutation: reparent a row and show the number the gauge prints.

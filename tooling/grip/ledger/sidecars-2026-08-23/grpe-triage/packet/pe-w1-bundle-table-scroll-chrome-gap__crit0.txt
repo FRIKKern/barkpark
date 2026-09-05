@@ -1,0 +1,1 @@
+assets/paper-editor/src/styles.css .bp-paper-editor-body .bp-table declares display/max-width/overflow-x byte-identical to the reader rule — evidence names the diff

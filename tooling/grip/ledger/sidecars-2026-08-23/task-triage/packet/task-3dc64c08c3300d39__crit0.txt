@@ -1,0 +1,1 @@
+FAIL FIRST: with the Default workspace absent, a test drives the REAL public GET /media/files/*path and proves it returns ANOTHER tenant workspace's bytes. The red is pasted before any fix — a structural trace is not a reproduction.

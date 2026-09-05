@@ -1,0 +1,22 @@
+{
+ "_fixture": "A reland_fetch.py artifact whose FETCH VERDICT is `infra` (a rotated token: the ledger answered 401 to an authenticated read) while the body still carries a perfectly scannable documents list — the same four documents as ledger-two-pages.json. Read on its own the list scans clean-and-useful (status ok, 1 finding on shipped.ex; asserted in section 3 against ledger-two-pages.json). The fetch verdict must WIN: reland_check.classify() has to report `infra` with 0 findings, and --strict must exit 2, because a fetch that never really happened cannot be re-read here as a clean scan. Neutering reland_check.py's `meta.get(\"status\") in (STATUS_INFRA, STATUS_SKIPPED)` branch turns this file into a green `ok` — which is exactly what section 9 reds on.",
+ "reland_fetch": {
+  "status": "infra",
+  "note": "ledger answered 401 WITH a token supplied — the token looks rotated; nothing was evaluated",
+  "pages": 1,
+  "page_size": 1000,
+  "docs": 4,
+  "total": 4,
+  "truncated": false,
+  "http": 401,
+  "auth": "token"
+ },
+ "result": {
+  "documents": [
+   {"doc_id": "fx-page1-a", "content": {"lifecycle_status": "done", "landed": {"files": ["a.ex"]}}},
+   {"doc_id": "fx-page1-b", "content": {"lifecycle_status": "done", "landed": {"files": ["b.ex"]}}},
+   {"doc_id": "fx-page1-c", "content": {"lifecycle_status": "done", "landed": {"files": ["c.ex"]}}},
+   {"doc_id": "fx-page2-a", "content": {"lifecycle_status": "done", "landed": {"files": ["shipped.ex"]}}}
+  ]
+ }
+}

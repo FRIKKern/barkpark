@@ -194,6 +194,139 @@ defmodule BarkparkWeb.Contract.ListenWorkspaceScopeTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # THE EMPTY-SCOPE SENTINEL (task-bb8f8ae87c44de51).
+  #
+  # `ScopeHelpers.scope_opts(%Plug.Conn{})` emits `:shared_only` when a REQUEST
+  # resolved no workspace. It means "the shared layer" (`workspace_id IS NULL`),
+  # never "every tenant". `ListenController.listen/2` used to compute its filter
+  # from a private `case conn.assigns[:current_workspace]` that flattened the
+  # sentinel to `nil` — so BOTH legs of the SSE stream went instance-wide for an
+  # unresolved caller.
+  #
+  # MUTATION-PROOF, replay leg: delete the `:shared_only` clause from
+  #   `EventLog.replay_since/4` (so the sentinel falls through to the
+  #   `_workspace_id -> []` catch-all) and the first test below goes RED on the
+  #   shared row being absent; change that clause's `is_nil(e.workspace_id)` to
+  #   the old unfiltered `true` and it goes RED naming A's and B's leaked docs.
+  # MUTATION-PROOF, live leg: delete the `forward_event?(_, :shared_only)`
+  #   clauses and the second test raises FunctionClauseError; relax the first to
+  #   `do: true` and it goes RED naming the leaked cross-tenant event.
+  # ---------------------------------------------------------------------------
+  describe ":shared_only sentinel — an unresolved REQUEST sees the SHARED layer only" do
+    setup do
+      # A SHARED-LAYER mutation_event: `workspace_id IS NULL`.
+      #
+      # Inserted directly, and that is the finding, not a shortcut:
+      # `Content.create_document/3` with NO scope opts does NOT produce a NULL
+      # row — it resolves the seeded Default workspace and stamps its id. So the
+      # only rows that carry a NULL `workspace_id` are exactly the ones the
+      # filing's reachability window names: pre-tenancy-backfill rows, and rows
+      # written while no Default is seeded. That is the population a
+      # `:shared_only` subscriber is entitled to, and the population the old nil
+      # arm widened past.
+      shared_doc_id = "drafts.shared-layer"
+
+      Barkpark.Repo.insert!(%Barkpark.Content.MutationEvent{
+        dataset: @dataset,
+        type: "post",
+        doc_id: shared_doc_id,
+        mutation: "update",
+        rev: "rev-shared",
+        document: %{"_id" => shared_doc_id, "_type" => "post", "title" => "S"},
+        workspace_id: nil,
+        project_id: nil,
+        inserted_at: DateTime.utc_now()
+      })
+
+      %{shared_doc_id: shared_doc_id}
+    end
+
+    test "replay: the shared row is returned and NEITHER tenant's event is", %{
+      shared_doc_id: shared_doc_id,
+      doc_a: doc_a,
+      doc_b: doc_b
+    } do
+      doc_ids =
+        ListenController.replay_since(@dataset, 0, :shared_only)
+        |> Enum.to_list()
+        |> Enum.map(& &1.doc_id)
+
+      assert shared_doc_id in doc_ids,
+             "the shared layer (workspace_id IS NULL) must still replay to an unresolved caller, got #{inspect(doc_ids)}"
+
+      refute doc_a.doc_id in doc_ids,
+             "CROSS-TENANT REPLAY: A's event (#{doc_a.doc_id}) reached a :shared_only subscriber"
+
+      refute doc_b.doc_id in doc_ids,
+             "CROSS-TENANT REPLAY: B's event (#{doc_b.doc_id}) reached a :shared_only subscriber"
+    end
+
+    test "live: a shared-layer event is forwarded, a tenant's event is DROPPED", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      doc_a: doc_a,
+      doc_b: doc_b
+    } do
+      shared_msg = %{doc_id: "drafts.shared-layer", workspace_id: nil, mutation: "update"}
+
+      assert ListenController.forward_event?(shared_msg, :shared_only) == true,
+             "a shared-layer (workspace_id IS NULL) event must reach a :shared_only subscriber"
+
+      refute ListenController.forward_event?(msg(doc_a, ws_a), :shared_only),
+             "CROSS-TENANT LIVE FORWARD: A's event reached a :shared_only subscriber"
+
+      refute ListenController.forward_event?(msg(doc_b, ws_b), :shared_only),
+             "CROSS-TENANT LIVE FORWARD: B's event reached a :shared_only subscriber"
+    end
+
+    test "the listener egress exclusion still beats the sentinel arm" do
+      # `type: "listener"` presence must not fan out on ANY leg, sentinel
+      # included (eventId 70357). The clause ordering in `forward_event?/2` is
+      # what makes this true; move the sentinel arm above it and this goes RED.
+      refute ListenController.forward_event?(
+               %{type: "listener", workspace_id: nil, doc_id: "l"},
+               :shared_only
+             ),
+             "listener presence leaked to a :shared_only subscriber"
+    end
+
+    test "the WIRE: a workspace-less request's scope_opts yields the sentinel, not nil", %{
+      conn: conn
+    } do
+      # This is the exact value `ListenController.listen/2` now passes to both
+      # legs: `Keyword.get(scope_opts(conn), :workspace_id)`. The old private
+      # `scope_workspace_id/1` returned `nil` here — the whole defect. That
+      # helper is now DELETED, so a revert cannot silently reintroduce it.
+      scope = BarkparkWeb.ScopeHelpers.scope_opts(conn)
+
+      assert Keyword.get(scope, :workspace_id) == :shared_only,
+             "a request that resolved no workspace must carry the empty-scope sentinel"
+
+      # ...and the controller passes it through UNFLATTENED. Re-introduce the
+      # old `:shared_only -> nil` collapse (in `stream_workspace_id/1` or by
+      # restoring the deleted `scope_workspace_id/1`) and this goes RED.
+      assert ListenController.stream_workspace_id(scope) == :shared_only,
+             "the SSE stream flattened the sentinel back to nil — both legs go instance-wide"
+
+      # A resolved workspace is passed through unchanged.
+      assert ListenController.stream_workspace_id(workspace_id: "ws-123") == "ws-123"
+
+      refute function_exported?(ListenController, :scope_workspace_id, 1)
+    end
+
+    test "an INTERNAL nil caller keeps the documented global read", %{
+      doc_a: doc_a,
+      doc_b: doc_b
+    } do
+      # The sentinel is ADDITIVE: only a REQUEST can produce it, so a literal
+      # `nil` (internal caller) must be untouched by this change.
+      doc_ids = ListenController.replay_since(@dataset, 0) |> Enum.map(& &1.doc_id)
+      assert doc_a.doc_id in doc_ids
+      assert doc_b.doc_id in doc_ids
+    end
+  end
+
   describe "Default-scoped listener vs another workspace's mutation" do
     test "Default workspace's stream does not forward another workspace's event", %{
       ws_b: ws_b

@@ -6,18 +6,14 @@
 #
 # See api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs.
 #
-# Phase 8 WI5 — the Phase 4-8 demo test (`phase8_e2e_test.exs`) is tagged
-# `:phase8_demo`. It composes the full pipeline (book → ONIX export →
-# Bokbasen submit → poll → :accepted → composite write) plus optional
-# WI3/WI4 assertions. WI3 (BookEditor sign-off badge) and WI4 (codelist
-# staleness) ship in parallel teams; their assertion blocks are tagged
-# `:requires_wi3` and `:requires_wi4` so this test stays green-on-default
-# until WI6 close-out flips the includes.
-#
-# Run the demo explicitly:
-#
-#     mix test --include phase8_demo
-#     mix test --include phase8_demo --include requires_wi3 --include requires_wi4
+# Phase 8 WI5 — the Phase 4-8 demo test (`phase8_e2e_test.exs`) USED to be
+# tagged `:phase8_demo`, with its WI3/WI4 assertion blocks behind
+# `:requires_wi3` / `:requires_wi4`, "until WI6 close-out flips the
+# includes". WI6 closed and nothing ever flipped them, so for months the
+# three describes issued no signal at all and silently rotted red. All
+# three tags are GONE as of the phase8 unpark: the demo now runs in the
+# default `mix test` lane like any other test. Do not re-park a test
+# behind a tag no CI step includes — a test that cannot run cannot fail.
 #
 # Goal barkpark-mgu — migration tests that drive `Ecto.Migrator.up/3` (and
 # the `apply_up/1` / `apply_down/1` paths sharing its `repo.query!` shape)
@@ -54,9 +50,6 @@
 ExUnit.start(
   exclude: [
     :bokbasen_integration,
-    :phase8_demo,
-    :requires_wi3,
-    :requires_wi4,
     :flaky,
     :boot_test,
     :plugin_routes,

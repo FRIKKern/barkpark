@@ -128,6 +128,30 @@ defmodule Barkpark.Tasks.Queue do
         where: d.type == "task",
         where: fragment("?->>'kind'", d.content) == "task",
         where: fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
+        # THE GHOST GATE (task-052f74f2cac22b76). `lifecycle_status` and
+        # `content.disposition` are written by SEPARATE verbs — close writes the
+        # lifecycle, stage writes the adjudication — and nothing makes the two
+        # atomic. A row can therefore carry `disposition: "closed"`, a
+        # `disposition_reason` explaining that the question is settled, and a
+        # lifecycle that never moved. Measured on the live ledger: one such row
+        # today, and the known control (task-38786b2edab15955) was handed out as
+        # a P0 seed ELEVEN DAYS after its fix merged, because the queue only ever
+        # read the lifecycle half.
+        #
+        # WHY THE READ SIDE AND NOT THE WRITE SIDE. The alternative — having the
+        # disposition write also advance the lifecycle — makes `bp task stage`
+        # able to CLOSE a row as a side effect of adjudicating it, which is a
+        # much larger power than that verb should have and is destructive when
+        # it is wrong. Excluding the row from the queue is non-destructive: the
+        # row keeps every field it had, a human can still read it, claim it by
+        # id and reopen it. It stops the harm (work handed out that somebody
+        # already settled) without letting an adjudication seal a lifecycle.
+        #
+        # An ABSENT disposition is not a closed one, so `IS DISTINCT FROM` is
+        # required rather than `!=`: on NULL, `!=` yields NULL, the predicate is
+        # not TRUE, and every row that never carried a disposition — 5,443 of
+        # them — would silently vanish from the queue.
+        where: fragment("?->>'disposition' IS DISTINCT FROM 'closed'", d.content),
         where: ^QueueGate.executable_query(),
         # (1) blocks-edge gate: no outbound `blocks` edge to a non-`done` target.
         #

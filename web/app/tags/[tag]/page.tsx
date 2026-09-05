@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { readerHref } from "@/lib/find";
 import { client } from "@/lib/barkpark-client";
 import {
   paperSlug,
@@ -81,7 +82,7 @@ async function TagListing({ tag }: { tag: string }) {
             return (
               <li key={paper._id}>
                 <Link
-                  href={`/d/paper/${paperSlug(paper)}`}
+                  href={readerHref("paper", paperSlug(paper))}
                   className="group -mx-3 flex flex-col gap-1.5 rounded-lg px-3 py-5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-900/60"
                 >
                   <span className="flex items-center gap-2 text-lg font-medium tracking-tight">

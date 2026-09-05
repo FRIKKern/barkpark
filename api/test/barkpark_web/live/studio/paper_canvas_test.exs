@@ -1843,14 +1843,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       }
     end
 
-    test "an unknown slot kind is a calm no-op (no op emitted, socket unchanged)" do
+    test "an unknown slot kind replies unsaved without changing the socket" do
       s0 = materialize_socket([%{"id" => "t", "role" => "title", "locked" => true}])
-      assert {:noreply, ^s0} = P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
+
+      assert {:reply, %{saved: false, request_id: nil}, ^s0} =
+               P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
     end
 
     test "a malformed payload is a safe no-op" do
       s0 = materialize_socket([])
-      assert {:noreply, ^s0} = P.paper_materialize_slot(%{}, s0)
+      assert {:reply, %{saved: false, request_id: nil}, ^s0} = P.paper_materialize_slot(%{}, s0)
     end
   end
 
@@ -1865,7 +1867,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     # DECLARATIONS match the reader byte-for-byte in BOTH editor sinks.
     @reader_css Path.expand("../../../../assets/paper-surface/paper-surface.css", __DIR__)
     @bundle_css Path.expand("../../../../assets/paper-editor/src/styles.css", __DIR__)
-    @heex_css Path.expand("../../../../lib/barkpark_web/layouts/root.html.heex", __DIR__)
+    # edit-on-the-link: the Studio editor's `.bp-canvas-*` rules moved out of
+    # root.html.heex's inline <style> into the shell stylesheet the layout now
+    # links (and the public reader links too). Same sink, new file.
+    @heex_css Path.expand(
+                "../../../../priv/static/assets/bp-paper-editor-shell.css",
+                __DIR__
+              )
 
     test ".bp-button + .bp-button--primary match the reader in BOTH editor sinks" do
       reader = File.read!(@reader_css)
@@ -1880,7 +1888,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert reader_btn =~ "border: var(--bp-rule-hairline) solid var(--paper-accent)"
       assert reader_primary =~ "background: var(--paper-accent)"
 
-      for {sink, path} <- [{"styles.css", @bundle_css}, {"root.html.heex", @heex_css}] do
+      for {sink, path} <- [{"styles.css", @bundle_css}, {"bp-paper-editor-shell.css", @heex_css}] do
         css = File.read!(path)
 
         assert button_decls(css, ".bp-canvas-action .bp-button") == reader_btn,

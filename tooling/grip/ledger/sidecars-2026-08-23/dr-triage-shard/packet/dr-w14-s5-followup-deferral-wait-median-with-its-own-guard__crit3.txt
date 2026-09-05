@@ -1,0 +1,1 @@
+GATE: CC=/usr/bin/clang CGO_ENABLED=0 go build ./... && go vet ./internal/cli/... && go test ./internal/cli/... ./internal/cloudclient/... green, output pasted

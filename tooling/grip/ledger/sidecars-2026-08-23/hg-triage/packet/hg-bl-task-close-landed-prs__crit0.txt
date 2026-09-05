@@ -1,0 +1,1 @@
+bp task close accepts --landed and sends it; client_close_payload_test.go is updated to pin the widened key set deliberately

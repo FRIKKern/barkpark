@@ -1,0 +1,105 @@
+# cron-overdue-probe — cron silence, made visible.
+#
+# WHY THIS EXISTS. Measured 2026-09-03 (task-86340d69fc2f36b8): GitHub Actions
+# cron on this repo is delivered every 2-5 hours or not at all. The claim sweep
+# (*/20) ran ZERO times in three hours; main-gate-watch (*/30) fired four times
+# in twelve; paper-readers did not run that day. Every one of those workflows is
+# a watch, and a watch that does not fire looks exactly like a watch with
+# nothing to report. This job reds when a critical-cadence workflow has produced
+# no run inside three times its own interval.
+#
+# WHY THE `push:` ARM IS THE POINT, not the schedule. A probe for cron silence
+# that can only be delivered by cron is a smoke detector wired to the fire. The
+# push arm fires it on every merge to main, which is the one trigger this repo
+# has measured as reliable. The hourly schedule is the second arm, and the
+# probe's own bound (90 minutes for a */30 workflow) is deliberately looser than
+# an hour so that neither arm alone produces a false red.
+#
+# WHY NO NAME IN HERE CAN ENTER THE REQUIRED SET. The probe job carries
+# `if: github.event_name != 'pull_request'`, so its name never renders on a PR
+# head the required-checks generator samples, and the pull_request trigger below
+# is paths-filtered besides (generator stage S4). That placement is deliberate
+# rather than incidental: this job reads the Actions API, so its verdict is only
+# ever as available as GitHub is.
+#
+# WHY THERE IS NO continue-on-error. Job-level `continue-on-error: true` renders
+# a red check run and launders the WORKFLOW RUN to success — and the run
+# conclusion is what notifications and `gh run list` read. Same argument as
+# breakglass-watch.yml and main-gate-watch.yml, which this file is modelled on.
+
+name: cron-overdue-probe
+
+on:
+  schedule:
+    # Hourly. The probe's own bound is 3x the watched interval (90 minutes for a
+    # */30 workflow), so an hourly delivery — even a jittery one — sees a real
+    # gap before the bound is a whole cycle stale.
+    - cron: "7 * * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned. Being paths-filtered also keeps every name in this file out of
+    # the required set.
+    paths:
+      - "scripts/cron-overdue-probe.sh"
+      - ".github/workflows/cron-overdue-probe.yml"
+
+permissions:
+  contents: read
+  # The probe asks the Actions API when each watched workflow last ran. Without
+  # this the read 403s and the probe reports UNKNOWN (exit 3) rather than
+  # guessing — correct, and useless. Grant it.
+  actions: read
+
+concurrency:
+  group: cron-overdue-probe-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on the main ref that self-cancels the probe dark,
+  # which is the exact failure mode — a run that leaves no verdict — this file
+  # was built to report.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  cron-overdue-probe:
+    name: Cron overdue probe
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The probe's own tripwire, first. If it stops being able to red on a
+      # faked six-hour gap, everything below is decoration — and this run says
+      # so before it says anything about cron.
+      - name: Prove the probe can red on a faked gap (--selftest)
+        run: bash scripts/cron-overdue-probe.sh --selftest
+
+      - name: Has every critical-cadence workflow fired inside 3x its interval?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/cron-overdue-probe.sh --repo "${{ github.repository }}" || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::A CRITICAL-CADENCE WORKFLOW IS SILENT past 3x its schedule interval (named above). GitHub cron is best-effort delivery and this is what its failure looks like: no red anywhere, because the watch never ran. The remedy is that workflow's push/dispatch fallback, never a re-run of this probe."; exit 1 ;;
+            2) echo "::error::THE TABLE AND THE TREE DISAGREE — a workflow carries a schedule: trigger with no classification line, or a critical cadence has no trigger fallback. An unclassified schedule is one nobody has decided about; classify it in scripts/cron-overdue-probe.sh."; exit 1 ;;
+            3) echo "::error::UNKNOWN — the Actions run list could not be read, so this probe does not know whether anything fired. That is not a pass."; exit 1 ;;
+            *) echo "::error::cron-overdue-probe.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+  cron-overdue-harness:
+    name: Cron overdue harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n scripts/cron-overdue-probe.sh
+      - name: Mutation proofs (--selftest)
+        run: bash scripts/cron-overdue-probe.sh --selftest

@@ -1,0 +1,1 @@
+A test ci-failure issue filed after the change actually LANDS in the owner's inbox — the mail path itself is verified, not inferred from watch state. Evidence: one line confirming receipt, and the issue number.

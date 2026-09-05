@@ -4,7 +4,11 @@ import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
-import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
+import {
+  resolveListings,
+  type Listing,
+  type ResolvedListings,
+} from "@/lib/listings-data";
 import { paperTags, type PaperTag } from "@/lib/paper-tags";
 
 /**
@@ -23,7 +27,9 @@ import { paperTags, type PaperTag } from "@/lib/paper-tags";
  * (the Phoenix origin marks responses `private, max-age=0`, so per-fetch
  * revalidate is a no-op), and — crucially — it NEVER throws. A hard upstream
  * failure degrades to the sample set so the landing always has something to map
- * rather than crashing the Server Component.
+ * rather than crashing the Server Component — but it no longer does so SILENTLY:
+ * `fetchListingsResult` returns the provenance (`source` / `substituted` /
+ * `notice`) so an operator can tell a broken deployment from a working one.
  */
 
 /** Cache tag for the listings Data Cache — `revalidateTag(LISTINGS_TAG)` busts it. */
@@ -171,17 +177,48 @@ const cachedListings = unstable_cache(rawListings, ["listings", DATASET, LISTING
   tags: [LISTINGS_TAG, bpAll()],
 });
 
+export type { ResolvedListings, ListingsSource } from "@/lib/listings-data";
+
 /**
- * Fetch the listings for the map landing. Never throws: with no `LISTINGS_TYPE`
- * configured, or on any upstream failure / empty result, it falls back to the
- * bundled sample set so the directory always renders a populated map.
+ * Fetch the listings for the map landing, WITH provenance. Never throws: with
+ * no `LISTINGS_TYPE` configured, or on any upstream failure / empty result, it
+ * falls back to the bundled sample set so the directory always renders a
+ * populated map.
+ *
+ * The fallback used to be silent (task-fe4648fa743ab0a6): a bare `catch`
+ * returned the bundled pins and a deployment with a BROKEN live source drew
+ * exactly the same map as a working one, with no log line to tell them apart.
+ * The degrade stays — a crashed Server Component is worse — but it now names
+ * itself. `resolveListings` (lib/listings-data.ts) owns the four-way decision
+ * and builds the operator-facing line; this function fetches and logs it.
+ */
+export async function fetchListingsResult(): Promise<ResolvedListings> {
+  if (!LISTINGS_TYPE) return resolveListings({ configured: false });
+
+  // Capture the failure instead of swallowing it: the CAUSE is the whole point
+  // of the log line below, and a bare `catch {}` threw it away.
+  let live: Listing[] | null = null;
+  let error: unknown;
+  try {
+    live = await cachedListings();
+  } catch (e) {
+    error = e;
+  }
+
+  const resolved = resolveListings({
+    configured: true,
+    sourceName: LISTINGS_TYPE,
+    live,
+    error,
+  });
+  if (resolved.notice) console.warn(resolved.notice);
+  return resolved;
+}
+
+/**
+ * The rows only — the shape callers that do not care about provenance keep.
+ * Behaviour is unchanged from before: never throws, always renderable.
  */
 export async function fetchListings(): Promise<Listing[]> {
-  if (!LISTINGS_TYPE) return SAMPLE_LISTINGS;
-  try {
-    const live = await cachedListings();
-    return live.length > 0 ? live : SAMPLE_LISTINGS;
-  } catch {
-    return SAMPLE_LISTINGS;
-  }
+  return (await fetchListingsResult()).listings;
 }

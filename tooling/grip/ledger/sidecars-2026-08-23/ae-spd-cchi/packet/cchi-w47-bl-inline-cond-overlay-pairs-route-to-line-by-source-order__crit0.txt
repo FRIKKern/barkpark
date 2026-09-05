@@ -1,0 +1,1 @@
+Each site's label is DERIVED, not pinned: the overlay resolves each derived line's enclosing route/function from router.ex (nearest preceding get/post/delete macro or defp) and pairs by THAT — or drops the labels entirely and prints derived lines with their enclosing-line text. A pin-and-check arm is refused (charter D528).

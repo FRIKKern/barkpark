@@ -29,12 +29,17 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, TenancyFixtures}
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.{Auth, Content, Repo, TenancyFixtures}
+  alias Barkpark.Content.Document
 
   @dataset "production"
   @type_name "flat-alias-post"
   @token_b "flat-alias-token-b"
   @token_default "flat-alias-token-default"
+  @write_token_b "flat-alias-write-token-b"
+  @write_token_default "flat-alias-write-token-default"
   @pipeline :api
 
   setup do
@@ -60,6 +65,27 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
 
     {:ok, _} =
       Auth.create_token(@token_default, "flat-alias-default", @dataset, ["read"], default_ws.id)
+
+    # The WRITE arm needs write-capable twins of the two read tokens above:
+    # `:require_write` gates /v1/data/mutate, so a read-only token 403s at the
+    # gate and never reaches the scope resolution this test is about.
+    {:ok, _} =
+      Auth.create_token(
+        @write_token_b,
+        "flat-alias-write-b",
+        @dataset,
+        ["read", "write"],
+        ws_b.id
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @write_token_default,
+        "flat-alias-write-default",
+        @dataset,
+        ["read", "write"],
+        default_ws.id
+      )
 
     %{default_ws: default_ws, default_scope: default_scope, ws_b: ws_b, scope_b: scope_b}
   end
@@ -165,6 +191,58 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
     end
   end
 
+  # ── The WRITE arm ─────────────────────────────────────────────────────────
+
+  describe "the flat alias WRITES into the TOKEN's workspace" do
+    # `arpss-flat-doc-mutate-default-scope-write`, ruling DERIVE-TOKEN-WORKSPACE
+    # (reads and writes together). The READ arm above is pinned; this is the
+    # write twin: a workspace-bound token POSTing the flat
+    # /v1/data/mutate/:dataset must have its document STAMPED with its own
+    # workspace, never with the seeded singleton Default.
+    #
+    # The assertion is on the STORED row, not the response: mutate answered 200
+    # while stamping Default, so a status assertion is vacuous here exactly as
+    # it is on the read arm.
+    test "a workspace-B token's create lands in B, not Default",
+         %{conn: conn, ws_b: ws_b, default_ws: default_ws} do
+      # Non-vacuity, part 1: the two workspaces are distinct and both non-nil,
+      # so "stamped B" and "stamped Default" are actually different outcomes.
+      assert is_binary(ws_b.id) and is_binary(default_ws.id)
+      refute ws_b.id == default_ws.id
+
+      resp = flat_create(conn, @write_token_b, "flat-write-b")
+
+      assert resp.status == 200, "flat write failed: #{resp.status} #{resp.resp_body}"
+
+      # Non-vacuity, part 2: the row EXISTS. A missing row would make any
+      # workspace assertion pass by vacuous pattern-match.
+      doc = stored!("flat-write-b")
+
+      assert doc.workspace_id == ws_b.id,
+             "the flat mutate stamped workspace #{inspect(doc.workspace_id)} on a token " <>
+               "bound to workspace B (#{ws_b.id}); the seeded Default Workspace is " <>
+               "#{default_ws.id} — a Default stamp is the missing DeriveWorkspaceFromToken " <>
+               "on `pipeline :api` (arpss-flat-doc-mutate-default-scope-write)"
+
+      refute doc.workspace_id == default_ws.id
+    end
+
+    test "CONTROL — a Default-bound token's flat create still lands in Default",
+         %{conn: conn, ws_b: ws_b, default_ws: default_ws} do
+      resp = flat_create(conn, @write_token_default, "flat-write-default")
+
+      assert resp.status == 200, "flat write failed: #{resp.status} #{resp.resp_body}"
+
+      doc = stored!("flat-write-default")
+
+      assert doc.workspace_id == default_ws.id,
+             "a Default-bound token must keep writing into the Default Workspace — a " <>
+               "single-tenant instance is byte-identical after the derivation"
+
+      refute doc.workspace_id == ws_b.id
+    end
+  end
+
   # ── Plug ORDER is the fix ─────────────────────────────────────────────────
 
   describe "plug ORDER is the fix — a reorder must go red" do
@@ -202,9 +280,18 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
             plugs = pipeline_plugs(name),
             "AssignDefaultScope" in plugs,
             Enum.any?(plugs, &(&1 in ~w(OptionalToken RequireToken RequireBearerOrSessionToken))),
-            derive = Enum.find_index(plugs, &(&1 == "DeriveWorkspaceFromToken")),
-            default = Enum.find_index(plugs, &(&1 == "AssignDefaultScope")),
-            is_nil(derive) or derive > default,
+            # FLAT only. A `/w/:ws/p/:project` pipeline runs ResolveWorkspace, so
+            # `:current_workspace` is already set from the PATH and the token
+            # derivation would be a no-op by design (that is why
+            # `:scoped_media_mutate` carries AssignDefaultScope with no derive).
+            "ResolveWorkspace" not in plugs,
+            # NOT `derive = Enum.find_index(...)` inline: a bare assignment in a
+            # comprehension is a FILTER on its own value, so `nil` (the plug is
+            # ABSENT — the exact defect) silently dropped the pipeline from the
+            # scan. Measured 2026-09-03: with DeriveWorkspaceFromToken deleted
+            # from `pipeline :api`, this census stayed GREEN while three
+            # behavioural tests red. The predicate below is a plain boolean.
+            derives_too_late?(plugs),
             do: {name, plugs}
 
       assert offenders == [],
@@ -243,10 +330,57 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
     |> Enum.map(fn [_, arg] -> arg |> String.trim() |> String.split(".") |> List.last() end)
   end
 
+  # True when a pipeline stamps the Default scope without having derived the
+  # token's own workspace FIRST — either the derivation is missing outright, or
+  # it runs after the fallback (where it is a no-op, because Default is set).
+  defp derives_too_late?(plugs) do
+    derive = Enum.find_index(plugs, &(&1 == "DeriveWorkspaceFromToken"))
+    default = Enum.find_index(plugs, &(&1 == "AssignDefaultScope"))
+
+    is_nil(derive) or derive > default
+  end
+
   defp index_of!(plugs, plug, pipeline) do
     case Enum.find_index(plugs, &(&1 == plug)) do
       nil -> flunk("pipeline :#{pipeline} no longer runs #{plug} — got #{inspect(plugs)}")
       i -> i
+    end
+  end
+
+  # ── write-arm helpers ─────────────────────────────────────────────────────
+
+  defp flat_create(conn, token, doc_id) do
+    body =
+      Jason.encode!(%{
+        "mutations" => [
+          %{"create" => %{"_id" => doc_id, "_type" => @type_name, "title" => doc_id}}
+        ]
+      })
+
+    conn |> authed(token) |> post("/v1/data/mutate/#{@dataset}", body)
+  end
+
+  # The stored row, read straight from the DB with NO tenancy scope, so the
+  # lookup cannot itself be the thing under test. `_id: "x"` is persisted as
+  # the draft `doc_id` "drafts.x"; accept both so a doc_id convention change
+  # reds on the workspace assertion rather than on a missing row.
+  defp stored!(doc_id) do
+    rows =
+      Repo.all(
+        from(d in Document,
+          where: d.type == ^@type_name and d.doc_id in ^[doc_id, "drafts." <> doc_id]
+        )
+      )
+
+    case rows do
+      [doc] ->
+        doc
+
+      other ->
+        flunk(
+          "expected exactly ONE stored #{@type_name} row for #{inspect(doc_id)}, got " <>
+            inspect(Enum.map(other, &{&1.doc_id, &1.workspace_id}))
+        )
     end
   end
 end

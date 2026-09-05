@@ -66,9 +66,15 @@ let head = 'NOT-READ';
 try { head = execFileSync('git', ['-C', repo, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch {}
 if (process.env.FAKE_HEAD) head = process.env.FAKE_HEAD;
 const bu = process.env.FAKE_BUNAVAIL ? ` b-unavailable=${process.env.FAKE_BUNAVAIL}` : '';
+// a= and c= default to PASS so every pre-existing case is byte-unchanged; the
+// ladder-only cases drive them to NOT-READ, which is what the real predicate
+// emits when it reads clause (b) and deliberately reads neither (a) nor (c).
+const clauseA = process.env.FAKE_A || 'PASS';
+const clauseC = process.env.FAKE_C || 'PASS';
+const rungs = process.env.FAKE_RUNGS ? ` b-rungs=${process.env.FAKE_RUNGS}` : '';
 console.log('=== SEAL PREDICATE — fixture stand-in ===');
 console.log('body line that must never survive a refusal: NO-SEAL a=FAIL b=FAIL');
-console.log(`VERDICT-TOKEN: SEAL-PREDICATE ${process.env.FAKE_VERDICT || 'SEAL'} a=PASS b=PASS c=PASS epic=fixture mode=live repo=${repo} head=${head}${bu}`);
+console.log(`VERDICT-TOKEN: SEAL-PREDICATE ${process.env.FAKE_VERDICT || 'SEAL'}${rungs} a=${clauseA} b=PASS c=${clauseC} epic=fixture mode=live repo=${repo} head=${head}${bu}`);
 process.exit(Number(process.env.FAKE_EXIT || '0'));
 EOF
 
@@ -149,6 +155,46 @@ expect_has  "a real NO SEAL is passed through untouched" "seal-run: VOUCHED — 
 
 OUT="$(FAKE_EXIT=2 bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
 expect_code "clean checkout, predicate exit 2 (infra fault)" 2 "$CODE"
+
+# ---------------------------------------------------------------------------
+section "A PARTIAL READING IS NOT A SEAL (task-5e2a9e6cb5b6fe74)"
+#
+# `--ladder-only` reads clause (b) and reads NEITHER clause (a) NOR bucket (c). It
+# exits 0 by design (charter D335: an instrument that reads and then exits 1 gets
+# wired into CI as a gate, and a gate is a verdict again), so the condition lives
+# entirely in the letters. Measured over origin/main at 185c07d034 BEFORE this arm
+# existed: the runner printed `seal-run: VOUCHED — SEAL (predicate exit 0)` one
+# line under a token reading `LADDER-ONLY … a=NOT-READ c=NOT-READ`. The predicate
+# had spent five numbered paragraphs saying no reader could quote that run as the
+# seal; the only sanctioned way to take a reading then quoted it as the seal.
+
+OUT="$(FAKE_VERDICT=LADDER-ONLY FAKE_A=NOT-READ FAKE_C=NOT-READ FAKE_RUNGS=rung1:2,rung2:4,rung3:0 \
+       bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "ladder-only reading still exits 0 (D335 — the condition is in the letters, never the code)" 0 "$CODE"
+expect_lacks "the runner's own lines never call a ladder-only reading a SEAL" "seal-run: VOUCHED — SEAL"
+expect_has  "it is named as what it is" "NOT A VERDICT — this is a PARTIAL READING (LADDER-ONLY)"
+expect_has  "it names the clauses that went unread, from the token" "a=NOT-READ c=NOT-READ"
+expect_has  "it reports what WAS read rather than withholding it" "b-rungs=rung1:2,rung2:4,rung3:0"
+expect_has  "the reading itself is still printed in full — it is quotable AS a rung tally" "SEAL PREDICATE — fixture stand-in"
+
+# THE CLAUSES, NOT THE MODE NAME. A future partial mode born under a new name must
+# not walk through: the guard must fire on the a=/c= evidence alone.
+OUT="$(FAKE_VERDICT=RUNG-CENSUS FAKE_A=NOT-READ FAKE_C=NOT-READ bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "an UNNAMED partial mode still exits 0" 0 "$CODE"
+expect_lacks "an unnamed partial mode is not laundered into a SEAL either" "seal-run: VOUCHED — SEAL"
+expect_has  "it is caught on the clause evidence and named by whatever the token called it" "PARTIAL READING (RUNG-CENSUS)"
+
+# ...and only one unread clause is enough. A verdict is a statement about (a), (b)
+# AND (c) together, so either half missing disqualifies the word SEAL.
+OUT="$(FAKE_C=NOT-READ bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_lacks "a token reading a=PASS but c=NOT-READ is not a SEAL" "seal-run: VOUCHED — SEAL"
+
+# NON-VACUITY. If the guard swallowed every exit 0, the assertions above would pass
+# for the wrong reason. A COMPLETE reading must still print the word.
+OUT="$(FAKE_EXIT=0 bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "a complete reading still exits 0" 0 "$CODE"
+expect_has  "a complete a=PASS b=PASS c=PASS reading is STILL vouched as a SEAL — the guard is not swallowing every 0" "seal-run: VOUCHED — SEAL (predicate exit 0)"
+expect_lacks "and a complete reading is not mislabelled a partial one" "PARTIAL READING"
 
 # ---------------------------------------------------------------------------
 # THE PREDICATE'S OWN REFUSAL (task-cfa85992568a4bdc). seal-predicate.mjs exits 3
@@ -432,6 +478,20 @@ mutate_run G-TOKENHEAD "$CLEAN" FAKE_HEAD=deadbeefdeadbeefdeadbeefdeadbeefdeadbe
 mutate_run G-BUNAVAIL "$CLEAN" FAKE_BUNAVAIL=6/6
 [ "$CODE" != "6" ] && ok "MUT:G-BUNAVAIL disabled -> the b-unavailable refusal is gone (exit $CODE)" \
                    || bad "MUT:G-BUNAVAIL disabled but the refusal still fired — the proof is vacuous"
+
+# G-PARTIAL is the one guard whose failure is invisible in the EXIT CODE — a
+# ladder-only reading exits 0 either way, by design. So the mutant is checked on
+# the BYTES, and the assertion is that neutralising it restores the exact defect
+# that was measured on origin/main: the word SEAL under an a=NOT-READ token.
+mutate_run G-PARTIAL "$CLEAN" FAKE_VERDICT=LADDER-ONLY FAKE_A=NOT-READ FAKE_C=NOT-READ
+if printf '%s' "$OUT" | grep -q "seal-run: VOUCHED — SEAL"; then
+  ok "MUT:G-PARTIAL disabled -> the ladder-only reading is laundered into a SEAL again (the pre-fix defect, reproduced)"
+else
+  bad "MUT:G-PARTIAL disabled but the reading was still not called a SEAL — the proof is vacuous, something else is suppressing it"
+fi
+printf '%s' "$OUT" | grep -q "PARTIAL READING" \
+  && bad "MUT:G-PARTIAL disabled but the partial-reading line still printed — the guard is not the thing that prints it" \
+  || ok "MUT:G-PARTIAL disabled -> the partial-reading line is gone, so that line is what the guard controls"
 
 # ---------------------------------------------------------------------------
 section "the fence — the runner never writes to the predicate"

@@ -1,0 +1,1 @@
+The gyldendal packet is PUBLISHED (the 409 dedup wall is the blocker, not the transaction), and the team 71069eaa token rotation is either done and stamped, or explicitly recorded as unverifiable from this principal. Evidence: the row states.

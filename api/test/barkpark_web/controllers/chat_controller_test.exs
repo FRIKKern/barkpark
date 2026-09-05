@@ -16,6 +16,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Auth
+  alias Barkpark.ChatHosts
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -25,6 +26,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.Tenancy
   alias Barkpark.Webhooks
   alias BarkparkWeb.ChatController
   alias BarkparkWeb.Studio.ClaudeChat
@@ -91,16 +93,9 @@ defmodule BarkparkWeb.ChatControllerTest do
     )
 
     on_exit(fn ->
-      # Reap any spawned runtimes so a live subprocess never leaks into the next test.
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
-      |> Enum.each(fn
-        {_, pid, _, _} when is_pid(pid) ->
-          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
-
-        _ ->
-          :ok
-      end)
+      # Reap any spawned runtimes so a live subprocess — and the node-global
+      # admission lease it holds — never leaks into the next test.
+      reap_runtimes()
 
       if prev,
         do: Application.put_env(:barkpark, :claude_chat, prev),
@@ -132,7 +127,7 @@ defmodule BarkparkWeb.ChatControllerTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
 
   # ── wave-session-card wire fixtures (wsc charter D3/D6/D9) ────────────────
 
@@ -216,7 +211,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       for {method, path} <- routes do
         conn =
           dispatch(
-            build_conn() |> put_req_header("content-type", "application/json"),
+            scoped_conn() |> put_req_header("content-type", "application/json"),
             method,
             path
           )
@@ -394,7 +389,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "unauthenticated stays 401 for BOTH malformed and absent ids (auth first)",
          %{} do
-      base = build_conn() |> put_req_header("content-type", "application/json")
+      base = scoped_conn() |> put_req_header("content-type", "application/json")
       assert dispatch(base, :get, "/v1/chat/sessions/not-a-uuid") |> json_response(401)
 
       assert dispatch(base, :get, "/v1/chat/sessions/#{Ecto.UUID.generate()}")
@@ -863,6 +858,163 @@ defmodule BarkparkWeb.ChatControllerTest do
       # the wave-12 read-tracking stamp is retired (herd — no read receipts)
       refute Map.has_key?(body, "last_visited_at")
     end
+  end
+
+  # ── the session's CONNECTION IDENTITY (chat-local-cloud-context-w3) ─────────
+  #
+  # `session_context_json/1` projects the facts a remote client cannot measure
+  # for itself — the execution host, the owning workspace, the cwd and the
+  # repository root — so the chat context band on every surface (the CLI's
+  # internal/chat/context.go, Studio's ContextIdentity, apps/mobile's
+  # ContextBand) reconciles against ONE server answer instead of three guesses.
+  #
+  # The obligation is HONESTY, not completeness: every nil below is a distinct,
+  # named fact, and a projection that collapsed two of them would let "I could
+  # not look" reach a phone as "you are not in a repo".
+  describe "GET /sessions/:id — the session's connection identity (chat-local-cloud-context-w3)" do
+    test "carries a context map naming host / execution_target / cwd / workspace / repo",
+         %{admin: a1, sid: sid} do
+      ctx =
+        json_conn(a1)
+        |> get("/v1/chat/sessions/#{sid}")
+        |> json_response(200)
+        |> Map.fetch!("context")
+
+      # The shape a client may rely on — every key present, always. An absent
+      # key and a nil value are the same thing to JSON but NOT to a decoder that
+      # has to tell "the server does not do this" from "the server measured
+      # nothing", so the projection always emits all six.
+      assert Enum.sort(Map.keys(ctx)) ==
+               ~w(cwd execution_target host repo_root repo_status workspace)
+
+      # No enrolled host holds a lease on this session, so the SERVER runs it.
+      # nil is the measurement the band paints as `(server-local)`; it is not a
+      # failure and must never be confused with one.
+      assert ctx["host"] == nil
+      assert ctx["execution_target"] == "managed"
+      assert ctx["cwd"] == StudioChat.get_session(sid).cwd
+    end
+
+    test "the repo root is MEASURED for a server-local cwd: a work tree, and a directory outside one",
+         %{admin: a1, sid: sid} do
+      root = Path.join(System.tmp_dir!(), "ctx-repo-#{System.unique_integer([:positive])}")
+      nested = Path.join([root, "a", "b"])
+      File.mkdir_p!(nested)
+      File.mkdir_p!(Path.join(root, ".git"))
+      on_exit(fn -> File.rm_rf(root) end)
+
+      # Inside a work tree, from a NESTED directory: the answer is the TOP, not
+      # the cwd — a band that echoed the cwd back would agree with itself on
+      # every path in the filesystem.
+      Repo.update!(Ecto.Changeset.change(StudioChat.get_session(sid), cwd: nested))
+      ctx = show_context(a1, sid)
+      assert ctx["repo_status"] == "set"
+      assert ctx["repo_root"] == Path.expand(root)
+
+      # Outside one: MEASURED and empty, which is a real answer ("you are
+      # chatting from outside a checkout") and renders `(not a git repo)`.
+      bare = Path.join(System.tmp_dir!(), "ctx-bare-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(bare)
+      on_exit(fn -> File.rm_rf(bare) end)
+      Repo.update!(Ecto.Changeset.change(StudioChat.get_session(sid), cwd: bare))
+      bare_ctx = show_context(a1, sid)
+
+      # NOT "unknown": collapsing these two is the exact confusion the band's
+      # typed absences exist to prevent.
+      assert bare_ctx["repo_status"] in ["not_a_repo", "set"]
+
+      if bare_ctx["repo_status"] == "not_a_repo" do
+        assert bare_ctx["repo_root"] == nil
+      else
+        # /tmp itself is inside a work tree on this machine — vanishingly odd,
+        # but assert the ONLY other honest answer rather than a flaky red.
+        assert is_binary(bare_ctx["repo_root"])
+      end
+    end
+
+    test "a registered-host session's repo root is UNKNOWN — the server never probes another machine's path",
+         %{admin: a1} do
+      %{host: host, sid: sid} = host_session!()
+      # A cwd that IS a work tree ON THIS SERVER. The point is that the answer
+      # is `unknown` ANYWAY: for a host-executed session that path names a
+      # directory on someone ELSE's machine, and probing our own filesystem for
+      # it would answer confidently and wrongly. This is the arm a lazier
+      # projection passes by accident and this one passes on purpose — which is
+      # why the cwd is deliberately resolvable here.
+      here = File.cwd!()
+
+      Repo.update!(
+        Ecto.Changeset.change(StudioChat.get_session(sid),
+          cwd: here,
+          execution_target: "registered_host",
+          execution_host_id: host.id
+        )
+      )
+
+      ctx = show_context(a1, sid)
+      assert ctx["repo_status"] == "unknown"
+      assert ctx["repo_root"] == nil
+      # The cwd still rides, so the band can name WHICH directory nobody could
+      # resolve — an unknown with no subject is not actionable.
+      assert ctx["cwd"] == here
+      assert ctx["execution_target"] == "registered_host"
+    end
+
+    test "the host is the LIVE LEASE holder's NAME, and the workspace is the session's own slug",
+         %{admin: a1} do
+      %{ws: ws, host: host, credential: credential, sid: sid, suffix: suffix} =
+        host_session!("studio-mini")
+
+      # BEFORE the lease: the server runs it.
+      assert show_context(a1, sid)["host"] == nil
+      # The session's OWN owner workspace — not the caller's, not a default.
+      assert show_context(a1, sid)["workspace"] == ws.slug
+
+      {:ok, _fence} =
+        ChatHosts.lease_and_enqueue(
+          host,
+          %Barkpark.StudioChat.Runtime.Command{
+            operation: :start,
+            provider: "claude",
+            session_id: sid,
+            idempotency_key: "ctx-cmd-#{suffix}",
+            payload: %{}
+          },
+          []
+        )
+
+      # AFTER: the NAME of the host holding the live lease. A name is the only
+      # part of a registered host safe to paint — never its id, never its
+      # credential, neither of which may appear anywhere in the projection.
+      ctx = show_context(a1, sid)
+      assert ctx["host"] == "studio-mini"
+      refute host.id in Map.values(ctx)
+      refute credential in Map.values(ctx)
+    end
+  end
+
+  defp show_context(admin, sid) do
+    json_conn(admin)
+    |> get("/v1/chat/sessions/#{sid}")
+    |> json_response(200)
+    |> Map.fetch!("context")
+  end
+
+  # A REAL enrolled chat host and a session owned by its workspace — the same
+  # mint path a registered host actually rides (chat_host_report_state_test's
+  # setup), because a hand-inserted row would prove the projection reads a table
+  # rather than that it reads the FENCE.
+  defp host_session!(name \\ "ctx-host") do
+    suffix = System.unique_integer([:positive])
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "ctx-#{suffix}", name: "Ctx #{suffix}"})
+    {:ok, %{enrollment_token: t}} = ChatHosts.issue_enrollment(ws.id, %{name: name})
+    {:ok, %{credential: credential}} = ChatHosts.enroll(t)
+    {:ok, host} = ChatHosts.authenticate(credential)
+
+    sid = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: sid, mode: "plan"}, {:workspace, ws.id})
+
+    %{ws: ws, host: host, credential: credential, sid: sid, suffix: suffix}
   end
 
   # ── observed runtime telemetry readout (wb-api-chat-observed-telemetry-readout) ──
@@ -1354,7 +1506,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   # The classification seam (ChatController.send_failure_response/2 — public
   # per the exit-reason-mapping convention): one assertion per allowlist leg.
   defp split(reason) do
-    conn = ChatController.send_failure_response(build_conn(), reason)
+    conn = ChatController.send_failure_response(scoped_conn(), reason)
 
     {conn.status, Jason.decode!(conn.resp_body)["error"],
      Plug.Conn.get_resp_header(conn, "retry-after")}
@@ -1413,6 +1565,11 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "E2E capacity: a full admission pool answers 503 runtime_capacity + Retry-After",
          %{admin: a1, sid: sid} do
+      # The pool is NODE-GLOBAL (a lease count over the shared RecorderRegistry),
+      # so a capacity-1 assertion is only meaningful from an empty pool. Drain it
+      # and WAIT for the count to actually reach zero — see `reap_runtimes/1`.
+      assert reap_runtimes() == 0
+
       prev = Application.get_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
 
       Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission,
@@ -2503,7 +2660,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   describe "GET /v1/chat/rollup" do
     test "auth runs first: missing bearer 401, non-admin reader 403", %{reader: reader} do
-      assert build_conn() |> get("/v1/chat/rollup") |> json_response(401)
+      assert scoped_conn() |> get("/v1/chat/rollup") |> json_response(401)
       assert json_conn(reader) |> get("/v1/chat/rollup") |> json_response(403)
     end
 
@@ -2563,4 +2720,43 @@ defmodule BarkparkWeb.ChatControllerTest do
   defp dispatch(conn, :get, path), do: get(conn, path)
   defp dispatch(conn, :post, path), do: post(conn, path, "")
   defp dispatch(conn, :patch, path), do: patch(conn, path, "")
+
+  # Terminate every live Recorder and WAIT until the admission pool reads empty.
+  #
+  # `DynamicSupervisor.terminate_child/2` returns once the Recorder process is
+  # dead, but the Recorder's admission lease lives in the shared
+  # `RecorderRegistry`, and a Registry drops a dead owner's entry ASYNCHRONOUSLY
+  # — its partition process has to handle the `:DOWN` first. On a loaded box that
+  # cleanup can land after the next test has already started, so a reaped
+  # runtime still counts against `RuntimeAdmission.active_count/1`. That is how
+  # push:main run 33957660630 failed the capacity-1 test in its OWN setup with
+  # `{:error, {:managed_runtime_capacity, 1}}` (task-ea91a85d198b36f8): the
+  # previous test's already-reaped Recorder still held the single slot.
+  # Returns the final lease count (0 when the pool actually drained).
+  defp reap_runtimes(tries \\ 200) do
+    Barkpark.StudioChat.RuntimeSupervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.each(fn
+      {_, pid, _, _} when is_pid(pid) ->
+        DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+      _ ->
+        :ok
+    end)
+
+    await_empty_pool(tries)
+  end
+
+  defp await_empty_pool(0), do: Barkpark.StudioChat.RuntimeAdmission.active_count()
+
+  defp await_empty_pool(tries) do
+    case Barkpark.StudioChat.RuntimeAdmission.active_count() do
+      0 ->
+        0
+
+      _ ->
+        Process.sleep(10)
+        await_empty_pool(tries - 1)
+    end
+  end
 end

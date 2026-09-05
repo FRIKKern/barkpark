@@ -1,0 +1,1 @@
+A grep for --admin across the memory directory returns no remaining prescription. Evidence: the grep output.

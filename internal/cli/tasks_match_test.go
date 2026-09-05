@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -519,9 +520,15 @@ func TestTaskWalksRequestTheRoutesMaxPageSize(t *testing.T) {
 		t.Fatalf("taskWalkPageSize = %d, want more than the generic walk's %d", taskWalkPageSize, defaultWalkPageSize)
 	}
 
+	// The suggestion walk runs pages CONCURRENTLY, so the handler is entered
+	// from several goroutines at once and the recorder needs a lock. Every page
+	// asks for the same limit, so which one lands first does not matter.
+	var mu sync.Mutex
 	var limits []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		limits = append(limits, r.URL.Query().Get("limit"))
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
 	}))
@@ -539,13 +546,18 @@ func TestTaskWalksRequestTheRoutesMaxPageSize(t *testing.T) {
 		t.Fatalf("--match asked for limit=%s, want %s (the route's own clamp plus the lookahead row)", limits[0], want)
 	}
 
+	mu.Lock()
 	limits = nil
+	mu.Unlock()
 	_, _ = taskPrefixSuggestion(nil, matchManifest(), manifest.Context{Server: srv.URL}, "cch-w57-s5")
-	if len(limits) == 0 {
+	mu.Lock()
+	got := append([]string(nil), limits...)
+	mu.Unlock()
+	if len(got) == 0 {
 		t.Fatal("the suggestion walk sent no request")
 	}
-	if limits[0] != strconv.Itoa(taskSuggestPageSize) {
-		t.Fatalf("the suggestion walk asked for limit=%s, want %d", limits[0], taskSuggestPageSize)
+	if got[0] != strconv.Itoa(taskSuggestPageSize) {
+		t.Fatalf("the suggestion walk asked for limit=%s, want %d", got[0], taskSuggestPageSize)
 	}
 }
 
@@ -600,15 +612,21 @@ func TestTaskLsMatch_StaysUnderTheRouteClampSoBoundariesStayVerified(t *testing.
 // perfectly correct in every unit test. This pins the projection so that
 // regression cannot come back silently.
 func TestTaskPrefixSuggestion_AsksForTheCheapProjection(t *testing.T) {
+	// Concurrent pages enter this handler at once; see the limit test above.
+	var mu sync.Mutex
 	var views []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		views = append(views, r.URL.Query().Get("view"))
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
 	}))
 	defer srv.Close()
 
 	_, _ = taskPrefixSuggestion(nil, matchManifest(), manifest.Context{Server: srv.URL}, "cch-w57-s5")
+	mu.Lock()
+	defer mu.Unlock()
 	if len(views) == 0 {
 		t.Fatal("the suggestion walk sent no request")
 	}

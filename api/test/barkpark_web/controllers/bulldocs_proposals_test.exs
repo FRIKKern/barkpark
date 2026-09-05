@@ -15,7 +15,7 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
        lands the proposed block on the published row with the provenance
        sidecar intact, and the Bulldocs extractor re-emits the edge from it.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

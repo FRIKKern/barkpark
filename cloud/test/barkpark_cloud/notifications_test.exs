@@ -367,6 +367,34 @@ defmodule BarkparkCloud.NotificationsTest do
   ## Transactional (always platform transport, regardless of per-team settings)
 
   describe "transactional email" do
+    test "cch-w52-s3: a transactional row records the PLATFORM carrier, and it is not a guess" do
+      team = team_fixture()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+
+      # A team that SELECTED smtp. Transactional mail rides the platform anyway
+      # — `Transactional` has no override seam — so the row must say `platform`,
+      # NOT the team's selection. A carrier derived from `settings.transport`
+      # would have written "team_smtp" here and been wrong.
+      {:ok, _} = Notifications.update_settings(team, %{"transport" => "smtp"})
+
+      {:ok, _} =
+        Notifications.deliver_invite(%{
+          team_id: team.id,
+          to: user.email,
+          url: "https://barkpark.cloud/invite/abc",
+          team_name: team.name
+        })
+
+      delivery = Repo.get_by!(Delivery, team_id: team.id, recipient: user.email)
+
+      assert delivery.kind == "transactional"
+
+      assert delivery.carrier == "platform",
+             "a transactional send on an smtp-selecting team recorded carrier " <>
+               "#{inspect(delivery.carrier)} — the row echoes the SELECTION instead of the mechanism"
+    end
+
     test "deliver_invite sends over the platform transport even when the team uses SMTP" do
       team = team_fixture()
       {:ok, _} = Notifications.ensure_settings(team)

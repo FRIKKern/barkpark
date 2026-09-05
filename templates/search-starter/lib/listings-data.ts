@@ -211,3 +211,119 @@ export const SAMPLE_LISTINGS: Listing[] = [
     tags: ["dog_friendly", "off_leash_area"],
   },
 ];
+
+/* ── sample-vs-live provenance (task-fe4648fa743ab0a6) ──────────────────────
+ *
+ * `lib/listings.ts` degrades to the sample rows above rather than throwing, so
+ * a broken upstream can never crash the Server Component that renders the map.
+ * That degrade is deliberate and stays. What could not stay is that it was
+ * SILENT: with `LISTINGS_TYPE` configured, any upstream failure rendered these
+ * bundled pins as though they were the operator's own listings — no error, no
+ * badge, and not one log line. A working deployment and a broken one drew the
+ * same map. A legitimately EMPTY live corpus was substituted the same way, so a
+ * correct empty state was indistinguishable from a populated one.
+ *
+ * This matters MORE here than in `web/`, where the same defect was already
+ * fixed: this file is the DISTRIBUTABLE artifact — every project scaffolded
+ * from the template inherits whatever honesty it ships with.
+ *
+ * The decision lives HERE, not in `listings.ts`, for one reason: this module is
+ * dependency-free (see the header above), so it loads under bare `node --test`
+ * and the shipped decision is tested directly (`lib/listings-source.test.ts`).
+ * `listings.ts` pulls in `server-only` + `next/cache` + `@/` aliases and cannot
+ * be imported by the test runner at all — testing it would mean a hand-kept
+ * mirror, and a mirror of a decision this load-bearing is worth less than the
+ * decision being importable.
+ */
+
+/** Where the rows the map is about to render actually came from. */
+export type ListingsSource =
+  /** Real rows from the configured source. */
+  | "live"
+  /** No `LISTINGS_TYPE` — the intended out-of-the-box template experience. */
+  | "sample:unconfigured"
+  /** A source IS configured, but the fetch failed. An operator must see this. */
+  | "sample:failed"
+  /** A source IS configured and healthy, but matched zero rows. */
+  | "sample:empty";
+
+export interface ResolvedListings {
+  /** The rows to render — never empty in the sample cases, never throws. */
+  listings: Listing[];
+  source: ListingsSource;
+  /**
+   * True when a CONFIGURED source was replaced by bundled sample rows. This is
+   * the one bit that matters to an operator: the map is showing placeholder
+   * pins, not their dataset. False out of the box, where samples ARE the
+   * intended content.
+   */
+  substituted: boolean;
+  /**
+   * The operator-facing line to log, present exactly when `substituted`. Built
+   * here rather than at the call site so the wording is under test.
+   */
+  notice?: string;
+}
+
+function errorReason(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return "unknown error";
+}
+
+/**
+ * Decide what the map renders, and say so out loud. Pure: no fetching, no env
+ * reads, no logging — the caller logs `notice` if present.
+ *
+ * The four cases are kept DISTINCT on purpose. Collapsing "no source
+ * configured" into the same outcome as "the configured source failed" is
+ * exactly the defect: the first is the template working as intended and must
+ * stay quiet, the second is a broken deployment and must not.
+ */
+export function resolveListings({
+  configured,
+  sourceName,
+  live,
+  error,
+  sample = SAMPLE_LISTINGS,
+}: {
+  configured: boolean;
+  /** `LISTINGS_TYPE`, echoed into the notice so the operator knows what failed. */
+  sourceName?: string;
+  live?: Listing[] | null;
+  error?: unknown;
+  sample?: Listing[];
+}): ResolvedListings {
+  if (!configured) {
+    // Out of the box. Samples are the product here, not a failure.
+    return { listings: sample, source: "sample:unconfigured", substituted: false };
+  }
+
+  const named = sourceName ? `LISTINGS_TYPE="${sourceName}"` : "LISTINGS_TYPE";
+
+  if (error !== undefined && error !== null) {
+    return {
+      listings: sample,
+      source: "sample:failed",
+      substituted: true,
+      notice:
+        `[listings] SERVING ${sample.length} BUNDLED SAMPLE LISTINGS INSTEAD OF LIVE DATA — ` +
+        `${named} is configured but the fetch failed: ${errorReason(error)}. ` +
+        `The map is showing placeholder pins, NOT your dataset.`,
+    };
+  }
+
+  if (!live || live.length === 0) {
+    return {
+      listings: sample,
+      source: "sample:empty",
+      substituted: true,
+      notice:
+        `[listings] SERVING ${sample.length} BUNDLED SAMPLE LISTINGS INSTEAD OF LIVE DATA — ` +
+        `${named} is configured and answered, but matched ZERO rows. ` +
+        `The map is showing placeholder pins, NOT your dataset.`,
+    };
+  }
+
+  return { listings: live, source: "live", substituted: false };
+}

@@ -10,6 +10,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
   """
   use Barkpark.DataCase, async: false
 
+  alias Barkpark.QueryCounter
+
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Repo
@@ -533,36 +535,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
     }
   end
 
-  # Collect every SQL statement the repo issues while `fun` runs — the only way
-  # to prove a table was never QUERIED (a manifest can only prove it was never
-  # PACKED, which a post-filter would also satisfy).
+  # Collect every SQL statement THIS measurement issues while `fun` runs — the
+  # only way to prove a table was never QUERIED (a manifest can only prove it
+  # was never PACKED, which a post-filter would also satisfy).
+  #
+  # LINEAGE-SCOPED, via the shared `Barkpark.QueryCounter`: an absence claim
+  # over a node-global capture is the most fragile shape there is — ANY
+  # background process touching the table inside the window refutes it. The
+  # capture now sees only this test process, anything it spawned, and any pid
+  # it named with `own/1`. See `Barkpark.QueryCounterTest`.
   defp capture_queries(fun) do
-    handler_id = "pds-query-capture-#{System.unique_integer([:positive])}"
-    test_pid = self()
-
-    :telemetry.attach(
-      handler_id,
-      [:barkpark, :repo, :query],
-      fn _event, _measurements, metadata, _config ->
-        send(test_pid, {:captured_query, metadata.query})
-      end,
-      nil
-    )
-
-    try do
-      result = fun.()
-      {result, drain_queries([])}
-    after
-      :telemetry.detach(handler_id)
-    end
-  end
-
-  defp drain_queries(acc) do
-    receive do
-      {:captured_query, sql} -> drain_queries([sql | acc])
-    after
-      0 -> Enum.reverse(acc)
-    end
+    QueryCounter.sql(fun)
   end
 
   defp insert_dataset!(project_id, slug) do

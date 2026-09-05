@@ -944,14 +944,26 @@ describe('PortableDoc — the type-keyed renderer', () => {
       })
     })
 
-    it('asciicast figcaption uses a plain color, not the var() the figure caption uses', () => {
-      const html = renderPortableDocument([
+    // Was: "asciicast figcaption uses a plain color, not the var() the figure
+    // caption uses" — a test whose whole purpose was to PIN a contrast bug. The
+    // Elixir asciicast emitter had drifted to a bare ink hex (2.97:1 on the dark
+    // ground) where the figure/diagram captions read `var(--paper-ink-soft, …)`,
+    // and this fork reproduced the drift so the DOM-shape comparator matched.
+    // papers/captions-floor routes all three through ONE `.bp-figcaption` class,
+    // so the assertion now runs the other way: NO caption carries inline style at
+    // all, and all three emitters produce the identical caption element.
+    it('every article figcaption is the one class, with no inline style', () => {
+      const asciicast = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
       ])
-      expect(html).toContain('color:#55635e')
-      expect(html).not.toContain(
-        "color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">rec",
-      )
+      const diagram = renderPortableDocument([
+        { type: 'diagram', source: 'graph TD; A-->B', caption: 'rec' },
+      ])
+      for (const html of [asciicast, diagram]) {
+        expect(html).toContain('<figcaption class="bp-figcaption">rec</figcaption>')
+        expect(html).not.toContain('<figcaption style=')
+        expect(html).not.toContain('#55635e')
+      }
     })
 
     // `poster` — the block's optional resting frame. Twin of

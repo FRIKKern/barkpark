@@ -1,0 +1,1 @@
+The effect is reported as a failure RATE with its volume beside it over a pinned window, never as an absolute deployment count.

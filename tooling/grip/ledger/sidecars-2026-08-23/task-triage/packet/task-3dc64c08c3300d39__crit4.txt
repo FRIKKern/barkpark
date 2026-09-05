@@ -1,0 +1,1 @@
+SIBLING SWEEP: every other read site reached through ScopeHelpers.scope_opts/1 on a pipeline that includes AssignDefaultScope is checked for the same evaporation, and each is either covered or filed. scope_opts fail-open is a KNOWN repeating class (PR #12826 fixed 15 routes) — one route is never the whole finding.

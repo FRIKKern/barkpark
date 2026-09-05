@@ -1,0 +1,1 @@
+If re-tiered, a test proves a read PAT gets 200 with rows and that the tier is asserted in router_ability_matrix_test.exs's @driven_routes so it cannot drift back silently

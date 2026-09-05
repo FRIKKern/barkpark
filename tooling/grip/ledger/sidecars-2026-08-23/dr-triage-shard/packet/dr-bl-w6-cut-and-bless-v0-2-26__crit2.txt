@@ -1,0 +1,1 @@
+At least one non-guerrilla box moves off `current`, autoupdates, and reports the new agent. Evidence: `/v1/barkparks` showing `update_state` transitioning, then `ls -l --time-style=+%F /usr/local/bin/barkpark-agent` on that box with a fresh mtime and `strings -a … | grep -c cpu_cores` >= 1.

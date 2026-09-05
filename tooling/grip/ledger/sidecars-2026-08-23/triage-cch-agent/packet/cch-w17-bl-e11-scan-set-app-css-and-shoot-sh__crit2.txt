@@ -1,0 +1,1 @@
+E11's failure text grows a CSS-side arm: a citation found in a .css file gets re-anchor advice that names a selector or rule block, not a JS function. Evidence: the message text and a driven example of it firing on an injected app.css citation.

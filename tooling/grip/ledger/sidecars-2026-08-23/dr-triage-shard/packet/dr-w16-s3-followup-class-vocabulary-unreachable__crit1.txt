@@ -1,0 +1,1 @@
+The @declared table in deploy_ledger_reachability_test.exs no longer carries those three UNREACHABLE rows, and the suite is green — set equality is what proves the decision landed

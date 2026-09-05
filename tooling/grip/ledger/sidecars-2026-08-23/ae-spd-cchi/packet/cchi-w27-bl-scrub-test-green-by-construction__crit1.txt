@@ -1,0 +1,1 @@
+A producer-level assertion exists for the one arm that IS live (:provision_failed), driving the actual dispatch rather than calling EventEmail.build/4 directly.

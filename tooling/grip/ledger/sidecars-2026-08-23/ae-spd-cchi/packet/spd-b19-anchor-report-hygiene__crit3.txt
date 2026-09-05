@@ -1,0 +1,1 @@
+Anchor criterion 5 is RESTATED to the per-PR ancestor form, and the restated text lists which PRs are LIVE and which are open with the reason.

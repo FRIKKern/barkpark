@@ -1,0 +1,1 @@
+The minimum sample is NOT lowered, and the PR body states why (a rate over a handful of rows trades a refusal that cannot lie for one that can)

@@ -1,0 +1,1 @@
+Each of absent-context-census, stale-verdict-watch and main-gate-watch either gains a carrier with its own distinct CI_FAILURE_KEY or is deleted — no third disposition. Evidence: the per-workflow decision and its diff.

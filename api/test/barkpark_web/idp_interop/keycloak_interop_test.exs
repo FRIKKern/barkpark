@@ -193,7 +193,7 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
     # 2. CONTROL — the IdP session is alive: a fresh AuthnRequest with the same
     #    cookies comes straight back with a SAMLResponse (no login form).
-    start2 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
+    start2 = scoped_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
 
     {:ok, sso} =
       Req.get(start2, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
@@ -202,7 +202,7 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
     # 3. Barkpark logout hands back the SP-initiated LogoutRequest URL.
     logout =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{token}")
       |> delete("/v1/auth/logout")
       |> json_response(200)
@@ -223,7 +223,7 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
     # 5. PROOF — the same cookies no longer SSO: a fresh AuthnRequest now shows
     #    the login form instead of an instant SAMLResponse.
-    start3 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
+    start3 = scoped_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
 
     {:ok, after_slo} =
       Req.get(start3, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)

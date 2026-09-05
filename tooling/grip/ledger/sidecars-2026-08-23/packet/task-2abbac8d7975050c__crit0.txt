@@ -1,0 +1,1 @@
+THE BLAST RADIUS IS STATED HONESTLY AND CITES THE ARTIFACT. The row (and any PR body it drives) quotes the collapse from the published tarball's own dist/index.mjs, obtained by `npm pack`, and states that preview.0 and preview.1 ship byte-identical Reference.tsx so no published version is free of it.

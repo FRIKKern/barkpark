@@ -1,0 +1,1 @@
+The inspector is sampled EVERY ANIMATION FRAME from document_start at viewport 1024 against the DEPLOYED sha, in a real browser, not inferred from the cascade. The harness is committed, not run ad hoc.

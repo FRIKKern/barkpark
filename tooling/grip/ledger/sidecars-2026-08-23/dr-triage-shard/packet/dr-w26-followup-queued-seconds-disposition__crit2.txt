@@ -1,0 +1,1 @@
+If it is a delete: the emission is gone, the register row says :deleted, and the census reds when the emission is re-added (mutation-proved)

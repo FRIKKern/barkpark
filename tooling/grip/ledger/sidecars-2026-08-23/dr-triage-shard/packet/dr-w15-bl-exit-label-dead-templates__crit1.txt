@@ -1,0 +1,1 @@
+Any retained template that is reachable by a real producer gets an assertion inside an EXISTING test file, never a new one

@@ -1,0 +1,1 @@
+A ruling is written on whether the paper editor should carry doc actions, naming what the paper branch deliberately excludes versus what it merely never received

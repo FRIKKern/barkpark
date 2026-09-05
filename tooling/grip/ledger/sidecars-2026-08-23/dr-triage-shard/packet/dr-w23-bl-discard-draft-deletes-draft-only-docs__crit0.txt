@@ -1,0 +1,1 @@
+`bp doc discard-draft` on a document whose published version does not exist REFUSES by default (non-zero exit, message naming the doc id and `bp doc restore-revision`), and only proceeds under an explicit destructive flag. Evidence: the refusal output and the flagged-success output, both pasted.

@@ -1,0 +1,1 @@
+The D177 bounded-scroller treatment is mirrored onto .cli-card .inst-life-cli .cli-chip / .cli-chip-code so a 110-char command is scrolled, not ellipsised — shown by the CSS diff and by naming the rule that previously applied text-overflow:ellipsis.

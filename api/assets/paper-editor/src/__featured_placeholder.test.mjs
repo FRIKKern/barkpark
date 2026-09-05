@@ -17,6 +17,7 @@ import {
   isEmptyPickerValue,
   imagePlaceholderModel,
   coercePickerValue,
+  canvasScope,
   IMAGE_PLACEHOLDER_LABEL,
   IMAGE_PLACEHOLDER_HINT,
 } from "./canvas/field-node.js";
@@ -47,6 +48,29 @@ check("isEmptyPickerValue: any real value is NOT empty", () => {
   assert.equal(isEmptyPickerValue("/media/files/hero.jpg"), false);
   assert.equal(isEmptyPickerValue("drafts.asset-abc"), false);
   assert.equal(isEmptyPickerValue("https://cdn.example/hero.png"), false);
+});
+
+check("canvasScope carries scoped picker confinement from the canvas host", () => {
+  const attrs = new Map([
+    ["data-dataset", "production"],
+    ["data-scope-prefix", "/w/acme/p/books"],
+    ["data-token", ""],
+    ["data-picker-browse", "false"],
+  ]);
+  const editor = {
+    options: {
+      element: {
+        closest: () => ({ getAttribute: (name) => attrs.get(name) ?? null }),
+      },
+    },
+  };
+
+  assert.deepEqual(canvasScope(editor), {
+    dataset: "production",
+    scopePrefix: "/w/acme/p/books",
+    token: "",
+    pickerBrowse: false,
+  });
 });
 
 // ── imagePlaceholderModel: the ghost frame shows ONLY for an asset-less image ───

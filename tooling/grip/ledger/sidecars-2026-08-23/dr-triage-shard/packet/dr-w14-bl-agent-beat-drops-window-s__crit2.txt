@@ -1,0 +1,1 @@
+GATE: CC=/usr/bin/clang go test ./internal/agent/... is green, output pasted

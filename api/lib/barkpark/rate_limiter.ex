@@ -232,6 +232,72 @@ defmodule Barkpark.RateLimiter do
   @doc false
   def __cas_spec__(current, replacement), do: [{current, [], [{:const, replacement}]}]
 
+  @scope_private_key :barkpark_rate_limit_scope
+
+  @doc """
+  THE ONE PLACE A RATE-LIMIT BUCKET KEY LEARNS THE PER-TEST SCOPE.
+
+  `:barkpark_rate_limiter` is a `:named_table` holding WHOLE-NODE state that no
+  Ecto sandbox owns, so every bucket key is shared by every test process in the
+  run. A key derived only from the client IP is therefore the SAME key in all of
+  them, and under `--max-cases 8` the suite bills its own parallel cases against
+  one budget and throttles itself. That is what reddened the required Elixir
+  gate on main at random: not a limiter bug and not a flaky test, but a bucket
+  key that cannot tell two tests apart.
+
+  `ConnCase.scoped_conn/0` stamps a per-test-process scope into
+  `conn.private[:#{@scope_private_key}]`. This function is the ONLY reader of
+  it. `BarkparkWeb.Plugs.RateLimit` had the suffix inlined in its own
+  `bucket_key/3` and was for a long time the only metered surface that honoured
+  it; the six other `check/2` call sites in the tree were scope-blind and shared
+  their buckets across the whole run. Now there is one definition and they all
+  call it.
+
+  PRODUCTION BEHAVIOUR IS BYTE-IDENTICAL. Nothing outside `test/` ever writes
+  `:#{@scope_private_key}` — it is a private key on a struct the client cannot
+  reach — so `test_scope/1` returns `nil` on every real request and this
+  function returns the key it was handed, unchanged and untouched. It is not a
+  looser limit, a bigger bucket or a disabled meter; it is a finer key, and only
+  in test.
+
+  Two shapes, because one metered surface is not a `Plug.Conn`:
+
+    * a `Plug.Conn` — the six controller/plug sites. Read from `conn.private`,
+      exactly the location `Plugs.RateLimit` already read.
+    * a plain map — `BarkparkWeb.UserSocket.connect/3`'s `connect_info`, which
+      is a socket handshake and has no conn at all. `Phoenix.ChannelTest`'s
+      `connect/3` passes `connect_info` through verbatim, so a socket test scopes
+      itself with `%{#{inspect(@scope_private_key)} => ConnCase.rate_limit_test_scope()}`.
+
+  The suffix shape matches what `Plugs.RateLimit.bucket_key/3` appended before
+  this function existed (`<key>:test:<scope>` for a string key), so no bucket
+  key on the already-scoped surface changes. Tuple keys — every one of the six
+  new sites uses one — grow a trailing `{:test, scope}` element instead, which
+  keeps the key a tuple and cannot collide with any unscoped key.
+  """
+  @spec scoped_key(Plug.Conn.t() | map() | any(), key) :: key when key: var
+  def scoped_key(source, key) do
+    case test_scope(source) do
+      nil -> key
+      scope -> append_scope(key, scope)
+    end
+  end
+
+  defp test_scope(%Plug.Conn{private: private}), do: binary_scope(private[@scope_private_key])
+  defp test_scope(%_{}), do: nil
+  defp test_scope(%{} = connect_info), do: binary_scope(Map.get(connect_info, @scope_private_key))
+  defp test_scope(_), do: nil
+
+  defp binary_scope(scope) when is_binary(scope), do: scope
+  defp binary_scope(_), do: nil
+
+  defp append_scope(key, scope) when is_binary(key), do: key <> ":test:" <> scope
+
+  defp append_scope(key, scope) when is_tuple(key),
+    do: Tuple.insert_at(key, tuple_size(key), {:test, scope})
+
+  defp append_scope(key, scope), do: {key, {:test, scope}}
+
   @doc """
   The client IP an IP-keyed bucket must key on, as a canonical string.
 

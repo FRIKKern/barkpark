@@ -66,7 +66,12 @@ func renderValuerefFixture(t *testing.T, fx valuerefFixture) string {
 			return ""
 		}
 	}
-	return ansi.Strip(testRegistry().RenderDoc(blocks, ctx))
+	stripped := ansi.Strip(testRegistry().RenderDoc(blocks, ctx))
+	// Shared blind-spot guard (unknown_block_guard_test.go): a golden diffed
+	// against Go's OWN render cannot see a fallback box that appears on BOTH
+	// sides. This is the one call that can.
+	assertNoUnknownBlock(t, "valueref/"+fx.Case, stripped)
+	return stripped
 }
 
 func TestValuerefGoldenFixtures(t *testing.T) {

@@ -1,0 +1,1 @@
+A journey is segmented as a run over (site_id ORDER BY inserted_at ASC) terminated by the next live/failed row — never by content_rev group. Evidence: the query and a test over a rev group containing multiple live rows.

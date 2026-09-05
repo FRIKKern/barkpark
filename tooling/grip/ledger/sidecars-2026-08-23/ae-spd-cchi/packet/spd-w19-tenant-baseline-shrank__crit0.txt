@@ -1,0 +1,1 @@
+The vanished baselined occurrence is IDENTIFIED by file:line (or by the commit that removed it), not merely re-baselined away.

@@ -1,0 +1,1 @@
+A NEW case sets V_CSSOM=REFUSED with R_CSSOM=failure and asserts BOTH the REFUSED-TO-MEASURE sentence AND exit 1, so the fail-closed property has a permanent guard rather than a one-off mutation matrix.

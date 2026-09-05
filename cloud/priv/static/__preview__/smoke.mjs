@@ -823,7 +823,16 @@ function bootScenario(name, opts) {
   // without a click having created the registry entry first — reading it off
   // `registry` alone answers undefined for every id the boot never touched,
   // which is indistinguishable from an element that booted visible.
-  return { registry, byId, hooks: captured.hooks, calls, fixtureState, resolveMe, localStorage, reloads };
+  // cch-w12-followup-login-fixture-gap: `location` joins the handed-back set for
+  // the same reason `localStorage` and `reloads` did — a capability no check
+  // could reach otherwise. A drive that signs OUT and back IN cannot stay on the
+  // screen it started on: submitAuth() sets `location.hash = "#overview"` before
+  // it re-renders, so any post-sign-in assertion about another view has to be
+  // able to navigate there. Paired with the already-exported `hooks.applyRoute`,
+  // that is a warm hash navigation — the same two lines the app's own
+  // hashchange listener runs, and pointedly NOT a reload (a reload kills every
+  // module variable, which would make every cache assertion vacuous).
+  return { registry, byId, hooks: captured.hooks, calls, fixtureState, resolveMe, localStorage, reloads, location };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -866,7 +875,10 @@ async function assertLateMeRepaintsTheRail() {
       "authority is still read at paint time only. Note the tab: reloadInstanceView() refuses #usage, so a seam " +
       "routed through it passes on Overview and fails here.");
   }
-  if (after.indexOf('data-life-verb="decommission"') === -1) {
+  // cch-w46-bl: the refused arm carries data-life-verb too now, so the LIVE
+  // oracle is the `data-life-name` companion only the mode==="live" branch of
+  // lifecycleActionHtml emits.
+  if (after.indexOf('data-life-verb="decommission" data-life-name=') === -1) {
     broken.push("the landed answer (an owner) did not restore the live destroy verb — the repaint fired but " +
       "painted the wrong model");
   }
@@ -879,6 +891,107 @@ async function assertLateMeRepaintsTheRail() {
     process.exit(1);
   }
 }
+// ── cch-w46-rv · THE SAME GUARD, PAST THE RAIL ───────────────────────────────
+// The guard above proved the CLI rail heals. It proved nothing about the other
+// six authority-decided controls on that screen, and cch-w45-s5 had already put
+// two of them there: the header's Attach domain (#inst-domain, inside
+// #inst-header-actions) and the Updates panel's Roll back ([data-rollback],
+// inside #inst-update-actions). On origin/main a late /v1/me left BOTH reading
+// "Checking capabilities…" against an answer the console already held — the
+// exact defect the rail guard exists to red, still open two-thirds of the way.
+//
+// TWO BOOTS, because the two surfaces do not co-render:
+//   * usage-quota — the tab reloadInstanceView() HARD-RETURNS on, and the tab
+//     the rail guard is pinned on for the same reason. The header renders on
+//     EVERY tab, so an Overview-only seam reds right here.
+//   * panel-overview — the Updates panel is an Overview-tab card and exists
+//     nowhere else, so its half has to be driven where it actually renders.
+// HOW A REGION IS READ IN THIS SHIM, and why it takes two lookups. The shim
+// models the DOM as a flat markup STRING per registry (#id) mount plus a
+// registry of id-addressed stubs. A region that app.js only ever emits INSIDE a
+// parent's innerHTML — like the header's actions strip — has no registry entry
+// until something writes through `$("#id").innerHTML`, so its stub reads "".
+// The repaint under test is exactly such a write. So: the region's own node
+// once it has been written, else the parent's markup FROM the region's opening
+// tag onward. The tail-slice is deliberate, not sloppy — it makes the
+// "the live hook is ABSENT before" half assert absence across everything that
+// follows the region, which is a strictly stronger claim than a bounded slice.
+function regionAfterOpen(boot, mountId, elId) {
+  const own = ((boot.registry.get(elId) || {}).innerHTML) || "";
+  if (own) return own;
+  const mount = (boot.byId(mountId).innerHTML) || "";
+  const at = mount.indexOf('id="' + elId + '"');
+  if (at === -1) return "";
+  const gt = mount.indexOf(">", at);
+  return gt === -1 ? "" : mount.slice(gt + 1);
+}
+
+async function assertLateMeRepaintsTheInstanceScreen() {
+  const broken = [];
+
+  // ── half 1: the header strip, on a tab reloadInstanceView refuses ─────────
+  const boot = bootScenario("usage-quota", { deferMe: true });
+  await flush();
+  const mountBefore = (boot.byId("instance-body").innerHTML) || "";
+  const stripBefore = regionAfterOpen(boot, "instance-body", "inst-header-actions");
+  boot.resolveMe();
+  await flush();
+  const stripAfter = regionAfterOpen(boot, "instance-body", "inst-header-actions");
+
+  if (mountBefore.indexOf('id="inst-header-actions"') === -1) {
+    broken.push("#inst-header-actions is not in the painted instance body — the header strip lost the id the " +
+      "repaint seam targets, so nothing below can be measured");
+  }
+  if (stripBefore.indexOf('id="inst-domain"') !== -1) {
+    broken.push("an UNKNOWN authority already emitted the LIVE Attach domain hook (id=\"inst-domain\") — the " +
+      "control is not fenced at all, and the after-assertion below would be vacuous");
+  }
+  if (stripBefore.indexOf("Checking capabilities") === -1) {
+    broken.push("the in-flight header strip carries no \"Checking capabilities…\" note, so there is no unknown " +
+      "arm to heal FROM — the scenario, the fence or the header moved");
+  }
+  if (stripAfter.indexOf('id="inst-domain"') === -1) {
+    broken.push("a /v1/me that answered LATE left the HEADER unhealed: no live Attach domain hook in " +
+      "#inst-header-actions with NO click. Note the tab — reloadInstanceView() refuses #usage, so a seam routed " +
+      "through it passes on Overview and fails here. Got: " + stripAfter.slice(0, 300));
+  }
+  if (stripAfter.indexOf("Checking capabilities") !== -1) {
+    broken.push("the repainted header still says \"Checking capabilities…\" about a read that already answered");
+  }
+
+  // ── half 2: the Updates panel's Roll back, on Overview ────────────────────
+  const ov = bootScenario("panel-overview", { deferMe: true });
+  await flush();
+  const ovMount = (ov.byId("instance-body").innerHTML) || "";
+  const upBefore = regionAfterOpen(ov, "instance-body", "inst-update-actions");
+  ov.resolveMe();
+  await flush();
+  const upAfter = regionAfterOpen(ov, "instance-body", "inst-update-actions");
+
+  if (ovMount.indexOf('id="inst-update-actions"') === -1) {
+    broken.push("#inst-update-actions is not in the painted instance body — the Updates panel's actions row lost " +
+      "the id the repaint seam targets");
+  }
+  if (upBefore.indexOf('data-rollback="1"') !== -1) {
+    broken.push("an UNKNOWN authority already emitted the LIVE Roll back hook (data-rollback) — the control is " +
+      "not fenced, so the after-assertion below would be vacuous");
+  }
+  if (upAfter.indexOf('data-rollback="1"') === -1) {
+    broken.push("a /v1/me that answered LATE left the Updates panel's Roll back unhealed — still the checking " +
+      "arm against an answer the console already holds. Got: " + upAfter.slice(0, 300));
+  }
+
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " late-/v1/me   — usage-tab header strip heals (#inst-domain: " +
+    (stripBefore.indexOf('id="inst-domain"') !== -1) + " → " + (stripAfter.indexOf('id="inst-domain"') !== -1) +
+    "), overview Updates row heals ([data-rollback]: " + (upBefore.indexOf('data-rollback="1"') !== -1) + " → " +
+    (upAfter.indexOf('data-rollback="1"') !== -1) + ")\n");
+  if (broken.length) {
+    process.stdout.write("\nlate-/v1/me instance-screen guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+
 // cch-w46-s7 — THIS CALL MOVED INTO main(). It used to fire at module top level,
 // which made `import("./smoke.mjs")` boot a scenario and leak its verdict line to
 // stdout (measured: 117 bytes). A module that runs a corpus on import cannot be a
@@ -1554,6 +1667,30 @@ const EXPECTATIONS = {
       assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
         "the local session survived the sign-out — clearSession() is the half that must happen even when the " +
         "revoke fails, and it did not happen at all");
+
+      // ── cch-w11-bl-unmodelled-delete-route-arms · THE FLAG ORACLE ─────────
+      // The two observables above are the WIRE and the LOCAL consequence. The
+      // third — the SERVER consequence — was unassertable until this wave,
+      // because DELETE /v1/auth/logout was UNMODELLED: it fell through to the
+      // terminal `/v1/` 200 {} at the bottom of scenarios.route(), so the leg
+      // above would have read one call and a cleared key against a fixture
+      // that answers 200 to any path at all — success against literally any
+      // server, which is exactly the founding sin this harness exists to kill.
+      //
+      // The arm now records the revocation on the per-boot state bag, and the
+      // READ GOES THROUGH IT: an authed read issued after the sign-out must
+      // answer the same 401 a logged-out scenario answers. REVERTING THE ARM
+      // (dropping the `state.loggedOut = true` write, or the gate that reads
+      // it) reds both assertions below — the /v1/me read falls back to the
+      // scenario's own 200.
+      assert.equal(ctx.state.loggedOut, true,
+        "DELETE /v1/auth/logout did not revoke anything the fixture can observe — the route is falling " +
+        "through to the terminal /v1/ catch-all again, and this whole leg is asserting against a 200 " +
+        "that any path would have earned");
+      const afterLogout = route("account-modal-revoke", "GET", "/v1/me", ctx.state);
+      assert.equal(afterLogout.status, 401,
+        "an authed read AFTER the sign-out must answer 401 — the revoked token is what the verb changed; " +
+        "got " + afterLogout.status);
     },
   },
   // ── cch-w23-bl-cruel-identity-own-scenario: THE CRUEL IDENTITY, AT REST ────
@@ -2571,6 +2708,142 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── cch-w50-s4: the two billing ACTORS the corpus had never held ────────────
+  // THE UNSUBSCRIBED OWNER — the actor renderPlanState routes to its UPSELL arm.
+  // Before this fixture, `plan-continue`, "Recommended", "Optimized for shipping
+  // to production" and "See more plan options" had ZERO hits in a rendered-DOM
+  // dump of the entire corpus: five of the committed scenarios rendered the plan
+  // card and every one of them was paid-or-member, so a render-layer guard over
+  // the upsell card could not lose. The envelope is the server's own —
+  // `subscription: null`, which is what web/router.ex answers for a team with no
+  // live subscription — never a synthesized {plan:"free"} the plane never mints.
+  "billing-free-owner": {
+    what: "the unsubscribed owner — the upsell plan card: Recommended badge, the tagline, the POST-s1 two-bullet set, the Continue CTA and the collapsed plan grid",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // The four markers that had no fixture at all until this one.
+      for (const needle of [
+        'id="plan-continue"',
+        '<span class="plan-rec">Recommended</span>',
+        "Optimized for shipping to production.",
+        'id="plan-more"',
+        "See more plan options",
+      ]) {
+        assert.ok(box.includes(needle), "the upsell card must render " + JSON.stringify(needle));
+      }
+      // The card is the RECOMMENDED tier by name, not the tier the actor is on
+      // (they are on none) — planFromSub would say "free"; this arm is
+      // catalogPlan(RECOMMENDED).
+      assert.ok(box.includes('<span class="plan-name">Supporter</span>'),
+        "the upsell card names the RECOMMENDED tier");
+      // cch-w50-s1's FINAL bullet set, positively: two bullets, and the two it
+      // deleted must not return. This is the whole reason this row is AFTER s1 —
+      // the fixture asserts the post-s1 manifest, never the pre-s1 four.
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "bullet 1 must render");
+      assert.ok(box.includes("Custom domains with automatic TLS"), "bullet 2 must render");
+      assert.ok(!/Daily backups/i.test(box), "the deleted backup bullet must not return on the upsell card");
+      assert.ok(!/(Priority|Standard) support/i.test(box), "the deleted support bullet must not return on the upsell card");
+      assert.equal((box.match(/<li><span class="ck">/g) || []).length, 2,
+        "the post-s1 manifest is exactly TWO bullets — a third would be an unbacked promise");
+      // The grid starts COLLAPSED under the CTA (renderPlanState hides it); the
+      // trial actor is the one that opens it. Two states of one element, and
+      // until now only the open one had a fixture.
+      assert.equal(reg.get("billing-tiers").hidden, true, "the upsell collapses the plan grid behind #plan-more");
+      // No subscription → nothing to manage and nothing to cancel; both owner
+      // sections stay retired even though this actor IS the owner. That is the
+      // discrimination the fixture buys: the sections are gated on a PAID PLAN,
+      // not on the role, and no scenario could show that before.
+      assert.equal(reg.get("billing-manage-section").hidden, true, "no paid plan → no Manage-billing section, owner or not");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no paid plan → nothing to cancel");
+      // GR20: the topbar chip is trial XOR past-due; an unsubscribed team is
+      // neither, so it mounts none.
+      assert.equal(reg.get("billing-chip").hidden, true, "an unsubscribed team mounts no topbar billing chip");
+    },
+  },
+  // THE SUPPORT++ OWNER — the third catalog tier rendering as a CURRENT plan.
+  // `grep support_plus` over scenarios.mjs returned NOTHING before this fixture:
+  // Support++ had only ever appeared as a tier CARD in the grid, never as the
+  // plan a team is actually on, so planName("support_plus") and the manage/cancel
+  // sections had never been driven through it.
+  "billing-support-plus": {
+    what: "the Support++ owner — the third tier as the CURRENT plan, with the active badge and both owner action sections live",
+    check(reg) {
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      assert.ok(box.includes(">Support++<"), "the current-plan card must name the Support++ tier");
+      assert.ok(!box.includes(">Supporter<"), "Support++ is not Supporter — planName must not fall back a tier");
+      // Not the upsell: an active paid plan takes renderCurrentPlan, so the
+      // upsell's own markers must be ABSENT here. This is the inverse pin that
+      // keeps the pair honest — one fixture per arm, each refusing the other's.
+      assert.ok(!box.includes('id="plan-continue"'), "an active paid plan must never render the upsell CTA");
+      assert.ok(!box.includes("Optimized for shipping to production"), "nor the upsell tagline");
+      // cch-w49-s1: the card states the tier and its features and NO ceiling —
+      // PLAN_CATALOG carries instances:10 for this tier and it must reach no DOM.
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
+      // Match the forbidden claim, not an unrelated 10 in the localized
+      // subscription timestamps rendered by this same card.
+      assert.ok(!/\b10\s+managed instances?\b/i.test(box), "the Support++ instance ceiling (10) is data, not rendered copy");
+      // The owner action sections a paid plan unlocks.
+      assert.equal(reg.get("billing-manage-section").hidden, false, "a paid plan shows the Manage-billing section");
+      assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "an owner may cancel a paid plan");
+      assert.ok((reg.get("billing-cancel").innerHTML || "").includes("Cancel plan"), "the Cancel-plan danger action renders");
+      // A healthy active sub shows NO topbar billing chip (trial XOR past-due).
+      assert.equal(reg.get("billing-chip").hidden, true, "an active paid plan mounts no topbar billing chip");
+    },
+  },
+
+  // ── cch-w49-s7 · THE CORPUS ASSERTION ─────────────────────────────────────
+  // THE OFFER THE SERVER CAN ONLY REFUSE. With the plane declaring
+  // `unconfigured`, Billing.checkout/2 answers {:error, :billing_not_configured}
+  // for every plan, so a Subscribe button here is an offer with no honest
+  // outcome. The assertion reads innerHTML STRINGS and NOT selectors: smoke's
+  // DOM shim is flat, so `querySelectorAll("[data-plan]")` here would match
+  // nothing and go green over a grid full of buttons — a selector-based version
+  // of this arm is vacuous BY CONSTRUCTION.
+  //
+  // NOT BUILT ON A #plan-more CLICK (charter D551): this actor's grid is open at
+  // first paint (renderTrial unhides it), so nothing is toggled — listeners
+  // accumulate on that button and an even number of clicks leaves it dead, which
+  // would make the assertion measure the toggle rather than the offer.
+  "billing-unconfigured": {
+    what: "the plane declares checkout UNCONFIGURED — the tier grid carries ZERO Subscribe offers and states the reason in curated copy",
+    check(reg) {
+      // The grid is OPEN (this is billing-trial's actor), so an empty-bytes
+      // pass is impossible: a grid that never painted would fail here first.
+      assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open — otherwise this arm proves nothing");
+      const grid = reg.get("billing-tiers").innerHTML || "";
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(grid.length > 0, "#billing-tiers rendered empty");
+      assert.ok(box.length > 0, "#billing-recommended rendered empty");
+      // NON-VACUITY: the cards themselves still render. Only the OFFER is gone.
+      for (const q of ["Free", "Supporter", "Support++"]) {
+        assert.ok(grid.includes(">" + q + "<"), "the tier card must still name " + JSON.stringify(q));
+      }
+      // THE ASSERTION. Zero offers, in BOTH regions, by rendered bytes.
+      for (const [name, html] of [["#billing-tiers", grid], ["#billing-recommended", box]]) {
+        assert.equal((html.match(/data-plan=/g) || []).length, 0,
+          name + " must carry ZERO [data-plan] under an unconfigured declaration");
+        assert.ok(!/Subscribe/.test(html),
+          name + " must carry no Subscribe affordance at all — omitted, never a disabled ghost");
+      }
+      // OMIT, NOT DISABLE: no ghost anywhere in the grid. The Free card and a
+      // current plan legitimately render `<button class="btn" disabled>`, so the
+      // pin is on the LABELS an offer would wear, not on the word "disabled".
+      assert.ok(!grid.includes("Subscribe unavailable"),
+        "the test-mode disclosure ghost is a DIFFERENT state and must not be borrowed for unconfigured");
+      // THE SENTENCE, and it is the curated string that already existed
+      // (ERRORS.billing_not_configured), not a mint.
+      assert.ok(grid.includes("Billing isn&#39;t set up on this deployment yet.") ||
+                grid.includes("Billing isn't set up on this deployment yet."),
+        "the grid must state WHY nothing is offered, in the curated copy");
+      // …and NOT the unverifiable sentence — the two states must not collapse.
+      assert.ok(!/could never activate/.test(grid),
+        "unconfigured must never borrow unverifiable's sentence: no card is charged in this state");
+    },
+  },
+
   // ── gr-p2 launch theater (GR18): /new journey + provisioning theater ────────
   "new-launch": {
     what: "/new signed-in — the template card + the one-field Launch step",
@@ -2930,7 +3203,8 @@ const EXPECTATIONS = {
       }
       assert.ok(card.includes("bills for as long as it exists"), "the foot renders the conduit's own pause sentence");
       assert.ok(!card.includes("archive it instead"), "the foot never prescribes archiving as a way to stop paying (cch-w55-s2)");
-      assert.ok(card.includes('data-life-verb="decommission"'), "the typed-confirm Decommission anchors the foot");
+      assert.ok(card.includes('data-life-verb="decommission" data-life-name='),
+        "the typed-confirm Decommission anchors the foot — LIVE, not the refused arm that now shares its identity");
       // The golden-path verify card fills its slot off the events feed
       // (no verify event in the fixture → the honest never-run invite).
       const vf = reg.get("instance-verify").innerHTML || "";
@@ -2970,25 +3244,66 @@ const EXPECTATIONS = {
       // exactly one hit per string, app.js itself), so the sheet was free to
       // promise an erasure the plane does not perform. This leg already renders
       // the REAL sheet into #modal-body; it just never read the words.
-      // The three residues asserted here are all MEASURED, not stylistic: the
-      // archive bundle has no delete path at all, DELETE /v1/barkparks/:id
-      // reaches no Billing function, and a customer-owned DNS record is never
-      // retracted. The FORBIDDEN half matters as much: no window and
-      // no number of days may appear, because there is no reaper to back one.
+      // The residues asserted here are all MEASURED, not stylistic: DELETE
+      // /v1/barkparks/:id reaches no Billing function, and a customer-owned DNS
+      // record is never retracted.
+      //
+      // cch-w54-bl FLIPPED THE ARCHIVE-BUNDLE HALF. This leg used to FORBID a
+      // window ("no number of days may appear, because there is no reaper to
+      // back one"). There is a reaper now — ArchiveStore.delete_bundle/2 driven
+      // by Workers.ArchiveRetentionWorker on "45 3 * * *" — so the assertion is
+      // inverted: the sheet MUST name the 30 days the worker actually applies,
+      // and must no longer claim the plane cannot delete a bundle. The number
+      // is pinned here and in the worker's own test against
+      // ArchiveRetentionWorker.retention_days(), so a window changed on one
+      // side reds on the other.
       const sheet = reg.get("modal-body").innerHTML || "";
       assert.ok(sheet.includes('class="cm-consequences"'),
         "the destroy sheet must render its consequence list; got: " + sheet.slice(0, 200));
       assert.ok(sheet.includes("Tears down the server for good"),
         "the live arm must still say plainly what it destroys; got: " + sheet.slice(0, 400));
-      assert.ok(sheet.includes("archive bundle") && sheet.includes("no way to delete it"),
-        "the sheet must disclose the archive bundle the control plane cannot delete");
+      assert.ok(sheet.includes("archive bundle") && sheet.includes("30 days"),
+        "the sheet must state the archive bundle's real 30-day retention window; got: " + sheet.slice(0, 600));
+      assert.ok(sheet.includes("its most recent bundle is kept"),
+        "the sheet must state the live-team carve-out the sweep actually applies");
+      assert.ok(!sheet.includes("no way to delete it"),
+        "the sheet still claims the plane cannot delete a bundle — delete_bundle/2 exists and runs daily");
       assert.ok(sheet.includes("Billing does not stop here"),
         "the sheet must stop implying the teardown cancels the subscription");
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(sheet),
-        "the sheet named a window in days — there is no reaper, and inventing one is the very defect this fixes: " +
-        sheet.slice(0, 400));
+      // The window may be named ONLY as the 30 days the reaper applies. Any
+      // OTHER duration is an invented promise again, so the negative half
+      // survives the flip rather than being dropped.
+      const windows = sheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(windows.length > 0, "the sheet named no retention window at all");
+      assert.ok(windows.every((w) => /^30\s*days$/i.test(w)),
+        "the sheet named a window the sweep does not apply: " + JSON.stringify(windows));
       assert.ok(sheet.includes("stays behind"),
         "the finality line must be about the row, with the residue named beside it");
+
+      // ── cch-archive-residue: THE NON-DETERMINATE ARM, ASSERTED ───────────
+      // Every sentence above is the BLANKET one, and it is correct HERE for a
+      // reason worth pinning: this scenario carries no `archives` fixture, so
+      // the instance route's one-shot GET /v1/archives falls to the harness
+      // catch-all and archivesModel reads it as an error. The console does NOT
+      // know whether this team holds a bundle — and an unresolved or failed
+      // read must never be rendered as an absence. Both halves are asserted so
+      // the branch cannot go vacuous by the store quietly resolving one day.
+      assert.equal(hooks.archiveStoreSnapshot().state, "failed",
+        "this leg proves the NON-determinate arm; the store answered '" +
+        hooks.archiveStoreSnapshot().state + "' instead, so the blanket assertions above prove nothing about it");
+      assert.equal(hooks.archiveResidueLines(hooks.archiveStoreSnapshot(), { name: bp.name }).length, 1,
+        "a failed store read must still push exactly the blanket residue sentence");
+      // …and the OTHER branch, so the conditional is a discriminator rather
+      // than a sentence that happens to always fire: a DETERMINATE empty read
+      // drops it, and a determinate loaded read narrows it to this box.
+      assert.equal(hooks.archiveResidueLines({ state: "loaded", rows: [] }, { name: bp.name }).length, 0,
+        "a team the store says holds NO bundles must not be told about a residue it does not have");
+      const withBundle = hooks.archiveResidueLines(
+        { state: "loaded", rows: [{ slug: bp.name, fqdn: bp.name + ".example", createdLabel: "2d ago" }] },
+        { name: bp.name });
+      assert.equal(withBundle.length, 2, "a team WITH a bundle keeps the blanket sentence and gains the per-instance one");
+      assert.ok(withBundle[1].includes("This instance has an archive bundle"),
+        "…and the destroy tier says whether THIS instance has one; got: " + withBundle[1]);
       // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
       // (derived, never typed), so the DNS sentence must be absent here…
       const inst = ctx.state.barkparks[0];
@@ -3042,8 +3357,13 @@ const EXPECTATIONS = {
       // character would be red for a reason that has nothing to do with the copy.
       assert.ok(extSheet.includes("repoint the record for you"),
         "and the console must admit it cannot fix that record for them; got: " + extSheet.slice(0, 500));
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(extSheet),
-        "the custom-host branch named a window in days; got: " + extSheet.slice(0, 500));
+      // cch-w54-bl: same flip as the branch above — the only duration this
+      // sheet may name is the 30 days ArchiveRetentionWorker actually applies,
+      // and the DNS sentence itself must still name none of its own (the
+      // record dangles indefinitely; there is no sweep for it).
+      const extWindows = extSheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(extWindows.every((w) => /^30\s*days$/i.test(w)),
+        "the custom-host branch named a window the plane does not apply: " + JSON.stringify(extWindows));
       // …and the PLATFORM side, whose zone the control plane does own end to end
       // (the attach modal accepts <name>.barkpark.cloud and nothing else), must
       // stay silent — the sentence is about a record we never held.
@@ -3081,7 +3401,22 @@ const EXPECTATIONS = {
       // And the live affordance is GONE: no click hook, no danger button. This
       // assertion names the attribute the mount binds on, so an added
       // `disabled` cannot slip past it the way a [^>]* window would.
-      assert.ok(!card.includes('data-life-verb="decommission"'), "no click hook is wired for a verb the server will refuse");
+      // cch-w46-bl: ONE VERB, ONE IDENTITY. The refused arm now carries the same
+      // data-life-verb as the live one, so the ABSENCE OF THE ATTRIBUTE is no
+      // longer the right question — and it was always a proxy for the question
+      // that actually matters, which is asked directly here instead: the only
+      // decommission control on this member's card is disabled, and pressing it
+      // dispatches NOTHING. That is a strictly stronger assertion than the
+      // string check it replaces (which a wired-but-attribute-renamed control
+      // would have passed).
+      const memberDecomm = reg.get("inst-lifecycle-actions").querySelectorAll('[data-life-verb="decommission"]');
+      assert.equal(memberDecomm.length, 1,
+        "the member's rail must carry exactly one decommission control — the disable-and-explain arm; got " + memberDecomm.length);
+      assert.equal(memberDecomm[0].disabled, true, "and it must be DISABLED");
+      assert.equal(memberDecomm[0].click(), 0,
+        "a member's decommission control dispatched a handler — the teardown is reachable");
+      assert.ok(!card.includes('data-life-verb="decommission" data-life-name='),
+        "no LIVE decommission is rendered for a verb the server will refuse");
       assert.ok(!card.includes("btn-danger"), "the destroy-tier styling goes with the destroy-tier affordance");
       // NOT a checking state: /v1/me answered, and it said member.
       assert.ok(!card.includes("Checking capabilities"), "an ANSWERED /v1/me is not a checking state");
@@ -3089,7 +3424,7 @@ const EXPECTATIONS = {
       // ── cch-w45-s5: and the rail is not the only place the screen was
       // selling this member a 403. Measured on the PRE-FIX tree by booting THIS
       // scenario: #instance-body carried a LIVE `id="inst-domain"` button and a
-      // LIVE `data-rollback="1"` button, both against require_primary_team_admin
+      // LIVE `data-rollback="1"` button, both against require_current_team_admin
       // routes, while every read the screen makes is `user`. Same remedy, same
       // sentence, same grammar — asserted on the BODY, not the CLI card.
       const body = (reg.get("instance-body") || {}).innerHTML || "";
@@ -3103,7 +3438,7 @@ const EXPECTATIONS = {
         "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
       // cch-w47-s2: FOUR, not two — the same screen was also offering this
       // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
-      // require_primary_team_admin). With bpBase carrying the CP's real policy
+      // require_current_team_admin). With bpBase carrying the CP's real policy
       // block, `autoupdateActions` offers Pause + Pin on this row, and
       // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
       // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.
@@ -3128,6 +3463,32 @@ const EXPECTATIONS = {
         "an ANSWERED /v1/me is not a checking state on the body either");
       assert.ok(!body.includes("data-me-retry"),
         "and an answered read offers no /v1/me retry — the exit belongs to the unknown arm alone");
+
+      // ── cch-w47-rv-bl: THE SENTENCE HAS ONE OWNER PER BUTTON GROUP ────────
+      // The five wrappers above are five CONTROLS, and until this slice each of
+      // them stated the refusal TWICE (a `title` and a visible span) — so this
+      // rendered screen said one sentence ten times, plus once more in the
+      // fleet-support card's control-less empty state. The count is asserted on
+      // the SAME bytes the wrapper count above reads, so the two cannot drift:
+      // controls stay five, sentences drop to one per strip plus that prose.
+      const w47RvBlSentence = "You need the admin role on this team — an admin on this team can grant it.";
+      assert.equal(countMatches(body, w47RvBlSentence), 3,
+        "the refusal must be stated once per button strip (#inst-header-actions, #inst-update-actions) plus " +
+        "the support card's control-less empty state — got " + countMatches(body, w47RvBlSentence));
+      // …AND NOT AT THE COST OF THE EXPLANATION. Every disabled control still
+      // names the refusal in its accessible description, and the id it names
+      // must resolve to a span that actually carries the sentence — an
+      // aria-describedby pointing at nothing is silence, and the count assertion
+      // above would certify it happily.
+      const w47RvBlPointers = [...body.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)].map((m) => m[1]);
+      assert.equal(w47RvBlPointers.length, 5,
+        "all five disabled controls must point at their strip's reason; got " + w47RvBlPointers.length);
+      for (const id of new Set(w47RvBlPointers)) {
+        assert.ok(body.includes('<span class="inst-life-reason" id="' + id + '">' + w47RvBlSentence + "</span>"),
+          'aria-describedby="' + id + '" resolves to no reason span carrying the server\'s sentence');
+      }
+      assert.ok(!/disabled[^>]*title="You need the admin role/.test(body),
+        "a grouped control kept its own title — that is the per-control repetition this slice deletes");
     },
   },
 
@@ -3836,7 +4197,7 @@ const EXPECTATIONS = {
       assert.ok(!html.includes('id="notif-status"'), "the loose #notif-status span is retired");
       assert.ok(!html.includes("notif-card"), "the superseded .notif-card is gone from this view");
       // Email section: transport seg (single-select) + its own save-row.
-      assert.ok(html.includes("Email delivery") && html.includes("notif-transport-seg"), "email section with the transport seg");
+      assert.ok(html.includes("Alert delivery") && html.includes("notif-transport-seg"), "alert-delivery section with the transport seg");
       assert.ok(html.includes('id="notif-email-save"'), "email section owns its save-row button");
       // Channels roster: 6 channels (email transport + 5 chat), configured honesty,
       // consequence sub-lines, its own save-row.
@@ -3909,7 +4270,7 @@ const EXPECTATIONS = {
     what: "first-run notifications — no channels configured, empty delivery log, honest defaults",
     check(reg) {
       const html = reg.get("notif-body").innerHTML || "";
-      assert.ok(html.includes("Email delivery") && html.includes("Event routing"), "the page still composes all sections");
+      assert.ok(html.includes("Alert delivery") && html.includes("Event routing"), "the page still composes all sections");
       assert.ok(html.includes("not configured"), "an untouched channel reads not-configured");
       const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
       assert.ok(log.includes("No notifications have been delivered yet"), "the empty log states the honest empty case");
@@ -4109,7 +4470,7 @@ const EXPECTATIONS = {
       assert.ok(html.includes("token-eye"), "a show/hide toggle is offered");
     },
   },
-  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // ── G-06 Members (Settings wave, phase 4) ─────────────────────────────────
   // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
   // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the roster at the
@@ -4309,81 +4670,6 @@ const EXPECTATIONS = {
         "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
     },
   },
-  // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
-  // secret + write-once chips, the sealed write-once note) + the add FORM.
-  "env-populated": {
-    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form — AND a real Delete click that shrinks the SERVER list 4→3",
-    async check(reg, hooks, ctx) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
-      assert.ok(body.includes("DATABASE_URL") && body.includes("STRIPE_SECRET_KEY") && body.includes("WORKER_TOKEN"), "every var key renders");
-      assert.ok(body.includes(">Secret<"), "a secret chip renders");
-      assert.ok(body.includes(">Write-once<"), "a write-once chip renders");
-      assert.ok(body.includes(">Team<") && body.includes(">Instance<"), "both scope chips render");
-      // The value is sealed forever — NEVER a reveal affordance anywhere.
-      assert.ok(!body.includes("Reveal") && !body.includes("Show value") && !body.includes("value=\"env"), "no reveal affordance — the value is sealed");
-      // The write-once row carries the honest sealed-and-unreplaceable note.
-      assert.ok(body.includes("Delete and recreate to change"), "the write-once row states it can't be changed in place");
-      // The admin add-var FORM section with its own save-row.
-      assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
-      assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
-
-      // ── cch-w10 LEG 4/5: DELETE A VARIABLE, CLICKED FOR REAL ──────────────
-      const rows = reg.get("env-body").querySelectorAll("[data-env-delete]");
-      assert.equal(rows.length, 4, "every admin row carries a wired Delete; got " + rows.length);
-      const varId = rows[0].getAttribute("data-env-delete");
-      const varKey = rows[0].getAttribute("data-key");
-      assert.equal(rows[0].click(), 1, "the row Delete dispatched no click handler — it is DEAD");
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 0,
-        "the row click must only open the confirm sheet — a sealed value must never go on a single click");
-      const sheet = reg.get("modal-body").innerHTML || "";
-      assert.ok(sheet.includes("Delete variable?") && sheet.includes(varKey),
-        "the sheet must name the variable; got: " + sheet.slice(0, 200));
-      assert.ok(sheet.includes("can&#39;t be recovered") || sheet.includes("can't be recovered"),
-        "the sheet must state the value is unrecoverable — the whole reason this verb needs a sheet");
-      const go = reg.get("env-delete-go");
-      assert.equal(go.click(), 1, "the sheet's Delete must be wired for \"click\"");
-      assert.equal(go.disabled, true, "the in-flight Delete must disable itself against a double-fire");
-      await ctx.settle();
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 1, "exactly one env-var DELETE on the wire");
-      assert.equal(ctx.state.envVars.length, 3,
-        "the server list must shrink by exactly one (4 → 3); got " + ctx.state.envVars.length);
-      assert.ok(!ctx.state.envVars.some((v) => v.id === varId), "and the deleted row is the one gone");
-      const after = reg.get("env-body").innerHTML || "";
-      // Anchored on the ROW markup, not a bare substring: the add-var form
-      // carries "DATABASE_URL" as its placeholder, so a naive includes() would
-      // have reported the deleted row as still present and sent the next reader
-      // hunting a bug that isn't there.
-      assert.ok(!after.includes('set-row-key">' + varKey + "<"),
-        "the deleted row must be gone from the repaint; got: " + after.slice(0, 300));
-      assert.equal(countMatches(after, 'class="set-row-key"'), 3, "three rows survive the refetch");
-      assert.ok(after.includes('set-row-key">STRIPE_SECRET_KEY<'), "and the survivors are still listed");
-    },
-  },
-  // The write-once 409 twin renders the same sealed note; the POST-collision copy
-  // itself is unit-pinned (envVarWriteFailureCopy) since the submit is click-driven.
-  "env-write-once-409": {
-    what: "Environment variables — the write-once row's sealed state (409 copy unit-pinned)",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("STRIPE_SECRET_KEY") && body.includes("Write-once"), "the write-once var renders");
-      assert.ok(body.includes("Delete and recreate to change"), "the sealed per-row note renders");
-    },
-  },
-  // Env-vars (member): read-only rows, NO add form, NO Delete (member-read law).
-  "env-member": {
-    what: "Environment variables (member) — read-only rows, no add form",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("DATABASE_URL"), "the rows still render for a member");
-      assert.ok(!body.includes("Add a variable") && !body.includes("set-save-row"), "a member sees no add form");
-      assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
-    },
-  },
-
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
   // The crown surface, states-complete: rolling / halted / bounced / unreadable.
   "operator-console": {
@@ -5039,6 +5325,144 @@ const EXPECTATIONS = {
         "…and it POSTs /retry exactly once — the primitive the note names in words");
     },
   },
+
+  // ── cch-w12-followup-login-fixture-gap · THE IDENTITY CHANGE, DRIVEN ────────
+  // THE SEAM. render()'s logged-out arm serves the sign-out click AND the 401
+  // auto-bounce, and NEITHER reloads — so every per-account cache standing in
+  // this module has to be dropped by that arm, in code, or the next account
+  // reads the previous one's data on a page that never blanked. Five clears sit
+  // there today (clearMe(), subCache, capCache, overviewData.*, and cch-w12-s1's
+  // activityActors/activityActorsTried), and until this scenario existed EVERY
+  // ONE of them was pinned by SOURCE SHAPE alone: this harness answered
+  // POST /v1/auth/login from one fixture, that fixture returned
+  // `two_factor_required`, and so no drive here had ever completed a sign-in at
+  // all. An account change could not be produced, so it could not be observed.
+  //
+  // WHY THE `activityActors` CLEAR IS THE ONE THIS DRIVES. It is the clear whose
+  // failure is LEGIBLE AS A SENTENCE rather than as a stale number: the Who axis
+  // renders the previous team's members BY NAME, on a screen belonging to
+  // somebody who has never met them. The two rosters are disjoint by
+  // construction (teamMembers vs teamMembersBeta share no user_id), so a `lin`
+  // chip after the switch has no innocent reading. The other four clears ride
+  // the same arm and the same drive; naming them one at a time is the follow-up
+  // this row's own criteria stopped at, deliberately.
+  //
+  // THE MUTATION THAT REDS IT (run it, do not take this comment's word):
+  // delete the two lines
+  //     activityActors = null;
+  //     activityActorsTried = false;
+  // from render()'s logged-out arm in cloud/priv/static/app.js. The latch stays
+  // burned, so ensureActivityActors() returns at its first line after the second
+  // sign-in, the second team's roster is NEVER FETCHED, and §5 below reds
+  // naming lin and rex.
+  "activity-identity-change": {
+    what: "THE IDENTITY ORACLE — a real sign-out and a real sign-in as ANOTHER TEAM, with no reload: the Activity Who axis names the new team's roster and NOT ONE of the previous team's members",
+    async check(reg, hooks, ctx) {
+      // ─ 1. identity one, on Activity: the Who axis caches ada / lin / rex ───
+      // A warm hash navigation, which is the ordering that matters: nothing
+      // here is a boot, so every read below is a read the module chose to make.
+      ctx.location.hash = "#activity";
+      hooks.applyRoute();
+      await ctx.settle();
+
+      const teamOne = SCENARIOS["activity-identity-change"].data.me.team.id;
+      assert.equal(ctx.countCalls("GET", "/v1/teams/" + teamOne + "/members"), 1,
+        "the first team's roster must be read exactly once on entering Activity — if it is 0 the Who axis " +
+        "below is degraded rather than cached, and the whole drive is vacuous");
+
+      const whoOf = () => {
+        const filters = (reg.get("activity-filters") || {}).innerHTML || "";
+        assert.ok(filters.includes("Who</span>"),
+          "#activity-filters carries no Who segment at all — the actor axis did not render, so nothing " +
+          "below is measuring the axis it names; got: " + JSON.stringify(filters.slice(0, 200)));
+        return filters.split("Who</span>")[1] || "";
+      };
+
+      // ANTI-VACUITY, AND IT IS THE LOAD-BEARING HALF. If the axis never held
+      // lin and rex, "the axis does not hold lin and rex" is true of a blank
+      // page and proves nothing about any cache.
+      const whoBefore = whoOf();
+      assert.ok(whoBefore.includes('data-actfilter="usr_lin"') && whoBefore.includes(">lin<"),
+        "the first team's roster never reached the Who axis, so there is no stale state for the sign-out " +
+        "to fail to clear; got: " + JSON.stringify(whoBefore.slice(0, 240)));
+      assert.ok(whoBefore.includes('data-actfilter="usr_rex"') && whoBefore.includes(">rex<"),
+        "rex is missing from the Who axis before the switch — same vacuity as above");
+
+      // ─ 2. SIGN OUT, by the control a person actually uses ─────────────────
+      assert.equal(reg.get("acct-btn").click(), 1, "#acct-btn must open the account modal");
+      await ctx.settle();
+      assert.ok((reg.get("modal-body").innerHTML || "").includes('id="modal-logout"'),
+        "the account modal painted no Sign out control — the registry auto-creates a node for any id, so " +
+        "the RENDER is what proves the control exists");
+      assert.ok(ctx.localStorage.getItem("bpcloud.session"),
+        "no session is held before the sign-out, so 'the session was cleared' would be vacuously true");
+      assert.equal(reg.get("modal-logout").click(), 1, "Sign out dispatched no click handler — it is DEAD");
+      await ctx.settle();
+
+      assert.equal(ctx.countCalls("DELETE", "/v1/auth/logout"), 1, "exactly one sign-out reached the wire");
+      assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
+        "clearSession() did not run, so render() never took its logged-out arm — the arm under test here");
+      assert.equal(ctx.state.loggedOut, true,
+        "the fixture did not observe the revocation, so the reads after it are not the reads of a signed-out " +
+        "browser and the sign-in below is not a sign-IN");
+
+      // ─ 3. SIGN IN AS THE OTHER TEAM, through the real form ────────────────
+      // NO RELOAD happens anywhere in this check, and that is the point: a
+      // reload destroys every module variable and would make every assertion
+      // below green by construction. Asserted, not assumed, at §6.
+      ctx.byId("auth-email").value = "zed@beta.io";
+      ctx.byId("auth-password").value = "hunter2hunter2";
+      ctx.byId("auth-team").value = "";
+      ctx.byId("auth-remember").checked = true;
+      const submitted = ctx.byId("auth-form").dispatchEvent({ type: "submit" });
+      assert.equal(submitted, 1,
+        "#auth-form has no \"submit\" handler — init() never wired submitAuth, and no sign-in can be driven");
+      await ctx.settle();
+
+      assert.ok(ctx.localStorage.getItem("bpcloud.session"),
+        "the successful login minted no local session — loginResponseKind() did not fold this 200 to " +
+        "\"session\", so nobody is signed in and the switch never happened");
+      assert.equal(ctx.state.secondIdentity, true,
+        "the fixture's login arm never recorded the account change — its success branch (status < 400) is " +
+        "the branch no committed scenario could reach before this one, and it is still unreached");
+
+      // ─ 4. back to Activity, warm ──────────────────────────────────────────
+      const teamTwo = SCENARIOS["activity-identity-change"].data.secondIdentity.me.team.id;
+      assert.notEqual(teamTwo, teamOne, "the two identities must belong to DIFFERENT teams or there is no switch");
+      ctx.location.hash = "#activity";
+      hooks.applyRoute();
+      await ctx.settle();
+
+      // ─ 5. THE ASSERTION ───────────────────────────────────────────────────
+      const whoAfter = whoOf();
+      assert.ok(!whoAfter.includes('data-actfilter="usr_lin"') && !whoAfter.includes(">lin<"),
+        "THE PREVIOUS TEAM'S MEMBER lin IS STILL ON THE WHO AXIS. The person now signed in has never met " +
+        "them: the sign-out did not drop `activityActors`, the members latch stayed burned, and the second " +
+        "team's roster was never read. Got: " + JSON.stringify(whoAfter.slice(0, 240)));
+      assert.ok(!whoAfter.includes('data-actfilter="usr_rex"') && !whoAfter.includes(">rex<"),
+        "the previous team's member rex is still on the Who axis; got: " + JSON.stringify(whoAfter.slice(0, 240)));
+      // The POSITIVE half — an axis that merely went blank would satisfy the two
+      // refusals above while being just as broken, so the new roster must be
+      // there, read from the new team, and the caller must be the new caller.
+      assert.equal(ctx.countCalls("GET", "/v1/teams/" + teamTwo + "/members"), 1,
+        "the SECOND team's roster was never fetched — ensureActivityActors() returned at its latch, which " +
+        "is exactly what the cleared `activityActorsTried` exists to prevent");
+      assert.ok(whoAfter.includes('data-actfilter="usr_qi"') && whoAfter.includes(">qi<"),
+        "the new team's member qi is absent from the Who axis — the axis is blank, not merely stale; got: " +
+        JSON.stringify(whoAfter.slice(0, 240)));
+      assert.ok(whoAfter.includes('data-actfilter="usr_zed"') && whoAfter.includes(">Just me<"),
+        "the new caller does not render as Just me — /v1/me is still answering the previous identity; got: " +
+        JSON.stringify(whoAfter.slice(0, 240)));
+
+      // ─ 6. …AND NOTHING RELOADED ───────────────────────────────────────────
+      // Without this the whole check could be certifying a page refresh, which
+      // clears every module variable for free and proves nothing about any of
+      // the five clears in render()'s logged-out arm.
+      assert.equal(ctx.reloads.length, 0,
+        "the app reloaded during this drive (" + ctx.reloads.length + " times) — a reload wipes every module " +
+        "variable, so every assertion above would hold on a console with no cache clearing at all");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
@@ -5096,7 +5520,7 @@ function armConfirmSheet(reg, resourceName) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, hooks, calls, fixtureState, localStorage } = bootScenario(name);
+  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads } = bootScenario(name);
   await flush();
 
   if (exp.check) {
@@ -5113,6 +5537,19 @@ async function runScenario(name) {
       // local consequence — clearSession() — and that consequence is invisible
       // in every innerHTML in the registry.
       localStorage,
+      // cch-w12-followup-login-fixture-gap: the sandbox's own `location`, so a
+      // check can navigate between views without a reload. See bootScenario.
+      location,
+      // …and the reload LEDGER beside it, so a check that claims "no reload
+      // happened" can prove it rather than assert it by omission.
+      reloads,
+      // `byId` is the SAME lookup app.js's $() makes, and it is here for the
+      // ids a check has to reach BEFORE the app has touched them: `registry`
+      // answers undefined for those, which is indistinguishable from an element
+      // that does not exist. The sign-in form is exactly that case — nothing in
+      // a logged-out render() writes to #auth-email, so it is absent from the
+      // registry until something types into it.
+      byId,
       // How many times METHOD PATH was requested — the wire assertion.
       countCalls(method, path) {
         return calls.filter((c) => c.method === method && c.path === path).length;
@@ -5507,6 +5944,7 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
 
 async function main() {
   await assertLateMeRepaintsTheRail();
+  await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
   if (!assertCensus()) {

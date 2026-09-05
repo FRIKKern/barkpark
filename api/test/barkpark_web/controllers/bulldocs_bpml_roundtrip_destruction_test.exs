@@ -15,7 +15,7 @@ defmodule BarkparkWeb.BulldocsBpmlRoundtripDestructionTest do
   destroyed. Nothing here touches a published paper: every fixture is a scratch
   slug created by the test.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures

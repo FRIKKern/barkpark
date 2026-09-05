@@ -1,0 +1,1 @@
+The sink decision (journald grep vs scrape vs durable table) is written down with its cost (evidence: the note or paper section)

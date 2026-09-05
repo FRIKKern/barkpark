@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 812237,
+      "bytes": 826032,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -74,24 +74,24 @@
       "proseCplSamples": 2,
       "captionCpl": null,
       "captionWidth": null,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1105.2,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 87.4,
+          "right": 1192.6,
+          "inkWidth": 1105.2,
           "inkOffCentre": 0
         }
       ],
@@ -129,13 +129,21 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        7
+        8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 3,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
@@ -160,7 +168,7 @@
           },
           {
             "px": 2,
-            "y": 1388.7,
+            "y": 1397.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -170,7 +178,7 @@
           },
           {
             "px": 2,
-            "y": 1867.5,
+            "y": 1799.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -180,7 +188,7 @@
           },
           {
             "px": 2,
-            "y": 2468.9,
+            "y": 2409.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -190,7 +198,7 @@
           },
           {
             "px": 2,
-            "y": 2950.6,
+            "y": 2900.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -206,7 +214,7 @@
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 879509,
+      "bytes": 901976,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -261,15 +269,15 @@
       "proseCplSamples": 2,
       "captionCpl": null,
       "captionWidth": null,
-      "evidenceBand": 1240,
+      "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
@@ -316,13 +324,21 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        8
+        9
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 3,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
@@ -347,7 +363,7 @@
           },
           {
             "px": 2,
-            "y": 1388.7,
+            "y": 1397.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -357,7 +373,7 @@
           },
           {
             "px": 2,
-            "y": 1781.1,
+            "y": 1799.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -367,7 +383,7 @@
           },
           {
             "px": 2,
-            "y": 2382.5,
+            "y": 2409.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -377,7 +393,7 @@
           },
           {
             "px": 2,
-            "y": 2864.2,
+            "y": 2900.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -393,7 +409,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 809215,
+      "bytes": 824159,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -448,24 +464,24 @@
       "proseCplSamples": 2,
       "captionCpl": null,
       "captionWidth": null,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1105.2,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 87.4,
+          "right": 1192.6,
+          "inkWidth": 1105.2,
           "inkOffCentre": 0
         }
       ],
@@ -503,13 +519,21 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        7
+        8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 3,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
@@ -534,7 +558,7 @@
           },
           {
             "px": 2,
-            "y": 1388.7,
+            "y": 1397.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -544,7 +568,7 @@
           },
           {
             "px": 2,
-            "y": 1867.5,
+            "y": 1799.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -554,7 +578,7 @@
           },
           {
             "px": 2,
-            "y": 2468.9,
+            "y": 2409.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -564,7 +588,7 @@
           },
           {
             "px": 2,
-            "y": 2950.6,
+            "y": 2900.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -580,7 +604,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 876891,
+      "bytes": 900066,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -635,15 +659,15 @@
       "proseCplSamples": 2,
       "captionCpl": null,
       "captionWidth": null,
-      "evidenceBand": 1240,
+      "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
@@ -690,13 +714,21 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        8
+        9
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 3,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
@@ -721,7 +753,7 @@
           },
           {
             "px": 2,
-            "y": 1388.7,
+            "y": 1397.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -731,7 +763,7 @@
           },
           {
             "px": 2,
-            "y": 1781.1,
+            "y": 1799.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -741,7 +773,7 @@
           },
           {
             "px": 2,
-            "y": 2382.5,
+            "y": 2409.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -751,7 +783,7 @@
           },
           {
             "px": 2,
-            "y": 2864.2,
+            "y": 2900.2,
             "width": 580,
             "parts": 1,
             "structural": true,

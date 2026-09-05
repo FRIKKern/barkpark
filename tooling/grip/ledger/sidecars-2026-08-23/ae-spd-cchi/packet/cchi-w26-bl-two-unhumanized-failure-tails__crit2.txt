@@ -1,0 +1,1 @@
+The timeline asymmetry (humanized failureDetail above unhumanized step rows) is either ruled acceptable with a written reason or filed as a defect with the person-facing consequence stated.

@@ -4,7 +4,7 @@ import type { LandingProvenance } from "@/components/graph-landing";
 import { MapLanding } from "@/components/map-landing";
 import { API_URL_CONFIGURED } from "@/lib/bp-env";
 import { corpusStatusMarker, fetchCorpusGraph } from "@/lib/graph";
-import { fetchListings } from "@/lib/listings";
+import { fetchListingsResult } from "@/lib/listings";
 import { buildIdentity } from "@/lib/markers";
 
 /**
@@ -54,27 +54,61 @@ export default async function FinderLanding() {
 
 /** The place-directory template demo: an interactive map of listings. */
 async function MapFinderLanding() {
-  const listings = await fetchListings();
+  // `substituted` is true ONLY when a live source was configured and then
+  // replaced by the bundled sample pins — a broken or empty upstream
+  // (task-fe4648fa743ab0a6). It is false out of the box, where the samples ARE
+  // the intended template content and a warning would be noise.
+  const { listings, substituted, source } = await fetchListingsResult();
   // bp-doc-id HEALTH marker (content-truth): the first listing's id proves the
   // SSR rendered a real content document. Empty corpus → empty marker → the
-  // deploy gate fails closed (a lost content link must not go live).
-  const docId = listings[0]?.id ?? "";
+  // deploy gate fails closed (a lost content link must not go live). A
+  // SUBSTITUTED read has no real document to point at — stamping a bundled
+  // sample id here is precisely the lie this task removed, and it would let a
+  // deploy with a dead `LISTINGS_TYPE` pass the gate on fake content.
+  const docId = substituted ? "" : (listings[0]?.id ?? "");
 
   return (
     <>
       <meta name="bp-doc-id" content={docId} />
+      {substituted && <meta name="bp-listings-source" content={source} />}
       {/* Desktop: the map fills the pane. The layout's <section> is a definite-
           height flex child, so `h-full` here resolves to a real pixel height —
           the canvas needs that to size itself (no layout shift). The <DesktopOnly>
           gate means the heavy Canvas2D map never even MOUNTS below `md` — CSS
           `hidden` alone would still run its client code on phones. */}
-      <div className="hidden h-full w-full md:block">
+      <div className="relative hidden h-full w-full md:block">
+        {substituted && <SampleListingsNotice source={source} />}
         <DesktopOnly>
           <MapLanding listings={listings} />
         </DesktopOnly>
       </div>
       {/* No mobile fallback here — see NO_MOBILE_FALLBACK in the module doc. */}
     </>
+  );
+}
+
+/**
+ * Says out loud that the map is drawing PLACEHOLDER pins, not the operator's
+ * dataset. Rendered only for `sample:failed` / `sample:empty` — never for the
+ * out-of-the-box `sample:unconfigured` case, where the sample rows are the
+ * product. Before this, a deployment with a broken `LISTINGS_TYPE` drew exactly
+ * the same map as a working one (task-fe4648fa743ab0a6).
+ */
+function SampleListingsNotice({ source }: { source: string }) {
+  const why =
+    source === "sample:empty"
+      ? "the configured source matched no rows"
+      : "the configured source could not be reached";
+
+  return (
+    <div
+      role="status"
+      className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center p-3"
+    >
+      <p className="pointer-events-auto rounded-full border border-amber-300/70 bg-amber-50/95 px-3 py-1 text-xs font-medium text-amber-900 shadow-sm backdrop-blur dark:border-amber-500/40 dark:bg-amber-950/90 dark:text-amber-200">
+        Showing sample listings — {why}. Check the server log for details.
+      </p>
+    </div>
   );
 }
 

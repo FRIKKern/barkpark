@@ -1,0 +1,1 @@
+The positive control is RE-DERIVED rather than inherited, since `cch-w58-followup` may have given `update_unavailable_reason` its first reader by then — state which field serves as the control and why.

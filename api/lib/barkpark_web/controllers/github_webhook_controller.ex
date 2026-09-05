@@ -188,6 +188,20 @@ defmodule BarkparkWeb.GithubWebhookController do
         # The merge-gate criterion (or several) flipped met on the resolved task.
         json(conn, %{ok: true, stamped: true, task: doc_id, criteria: indices})
 
+      {:ok, :unflagged_merge_gates, doc_id, indices} ->
+        # Nothing was stamped, and that is deliberate: the flag is the permit,
+        # because a prose-wide permit fabricates dones (close.ex
+        # reconcile_locked/4 carries the measurement). The criteria are NAMED
+        # rather than counted — a count says there is a problem, a list says
+        # where — so the strand is actionable instead of silent. 2xx: this is a
+        # reported no-write, not a failure.
+        json(conn, %{
+          ok: true,
+          reconciled: "unflagged_merge_gates",
+          task: doc_id,
+          criteria: indices
+        })
+
       {:ok, tag, doc_id} when tag in [:already_stamped, :no_marker, :no_guardable_marker] ->
         # Named idempotent / no-write outcomes: replayed event, unmarked legacy
         # gate, or an unguardable gate. All handled — 2xx, never a retry.

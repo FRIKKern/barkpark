@@ -1,0 +1,1 @@
+The PR body states that no human has yet received a coverage sentence — the clause landed 13h50m after the only four fleet_digest sends — so this slice's reach claim is about the NEXT 06:00Z tick. Evidence: the PR body line.

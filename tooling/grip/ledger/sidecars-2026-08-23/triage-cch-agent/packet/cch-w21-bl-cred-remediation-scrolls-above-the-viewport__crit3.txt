@@ -1,0 +1,1 @@
+THE FIXTURE IS CORRECTED to carry the longest real string rather than an invented shorter one.

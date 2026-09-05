@@ -4,10 +4,81 @@ defmodule Barkpark.Content.LabelSpine do
   field DSL structurally cannot express (authoring-excellence D2).
 
   `validate/1` is a **pure** function: given a document's `content` map it
-  returns `:ok` or `{:error, {:label_spine, details}}`. It is deliberately
-  **unmounted** this slice — nothing in the publish path calls it yet (the mount
-  is `ae-w1-publish-wall-mount`, S2). Adding it is a pure, behaviour-neutral
-  addition.
+  returns `:ok` or `{:error, {:label_spine, details}}`. It is mounted at the
+  publish wall (`Content.AuthoringWall.enforce/5`, the `label_gate`).
+
+  `validate_shape/1` is the **CREATE-time** half of the same rules — see the
+  next section.
+
+  ## Two mounts: shape at CREATE, the full spine at PUBLISH
+
+  The full `validate/1` runs at publish only. Drafts stay free: an unfinished
+  draft may legitimately carry no `description` and no `tags` at all, and the
+  wall is the point at which the document claims to be finished.
+
+  But a *malformed* spine is not an unfinished one, and refusing it only at
+  publish made the wall a **PARTIAL WRITE** (task-e89f4a9ed2f5ce0b, reproduced
+  2026-09-01): `bp task create --publish` committed the create half, then the
+  publish half 422'd `label_spine`, leaving an orphan `drafts.<id>` that no
+  published-first reader (`bp task ready`, the board, the epic roster) can see.
+  rc and a printed receipt both read as success, so an agent files a phantom and
+  moves on — the same `drafts.*` population a 2026-09-04 census counted.
+
+  So `validate_shape/1` runs on the CREATE path (`Content.Writer.
+  create_document/4`, the one chokepoint all four create-family verbs funnel
+  through) for `type:task`, BEFORE any row is persisted. It is the subset of
+  `validate/1` that can be judged on a document that is not claiming to be
+  finished:
+
+    * `tags` absent, or `[]` → `:ok`. Nothing has been asserted yet.
+    * `tags` present but not a list → refuse (a scalar is malformed, not
+      unfinished).
+    * every entry must be a `{tag, strength, rationale}` object with a legal
+      tag / strength / rationale; strengths distinct; no duplicate tag; at most 12
+      entries.
+    * `description` and the **minimum** tag count are NOT checked — those are
+      completeness rules, and enforcing them at birth would ban filing a draft.
+
+  ## RULING — the registry (`unknown_tag`) half stays PUBLISH-TIME
+
+  The second refusal the reproduction hit is `unknown_tag`
+  (`Content.TagRegistry.validate_publish/3`, E3): every `tags[].tag` must
+  resolve to a *published* `type:tag` document. It is deliberately NOT moved to
+  the create path, for three reasons:
+
+    1. **It is a judgement about mutable external state, not about the
+       document.** Shape is a static structural property of the content map —
+       true or false forever, and knowable with zero I/O. Registration is a
+       property of the *dataset's* vocabulary at an instant; a tag that is
+       unregistered when the row is filed may be registered before it is
+       published. Refusing the birth would ban the legitimate "file the row now,
+       curate the vocabulary later" order that `TagRegistry.seed_legacy_drafts/2`
+       exists to serve.
+    2. **It needs a database read, on a path whose failure mode is a 503.**
+       `registered_subset/3` issues `Repo.all/1` and `nearest_registered/2` runs
+       a `SET LOCAL` trgm probe inside its own transaction. There is no
+       `{:error, _}` arm — an unreadable registry RAISES
+       `DBConnection.ConnectionError`, which on the create path is caught by
+       `Writer.do_create_document/5`'s rescue and rendered 503
+       `storage_unavailable`. Mounting it pre-create therefore makes an
+       unreadable registry an availability cliff on *every task filing*
+       (fail-closed by construction, with no fail-open option that would not be
+       a silent bypass of E3 — which D25 says is NEVER exempted). The publish
+       path already tolerates that cost, because a publish is one deliberate act
+       rather than every birth.
+    3. **It does not manufacture the phantom.** The partial write this row is
+       about is created by the SHAPE refusal — that is the one the reproduction
+       hit first, and the one that fires on a create the caller believed was
+       well-formed. An `unknown_tag` refusal at publish leaves a draft whose
+       content is *correct*; the author's remedy is to register the tag and
+       publish the SAME draft, so that draft is not an orphan, it is work in
+       progress.
+
+  Fail-closed vs fail-open on an unreadable registry, stated: it stays
+  **fail-closed at publish** (the raise propagates; nothing swallows it into an
+  `:ok`) and is **not consulted at create** at all. The publish refusal's body
+  already names the exact unregistered tag(s) — `%{unknown: [name], suggestions:
+  %{name => [nearest]}}` — so the retry is exact.
 
   ## Why a dedicated module and not the field DSL
 
@@ -89,6 +160,45 @@ defmodule Barkpark.Content.LabelSpine do
   end
 
   @doc """
+  The SHAPE half of the spine — the CREATE-time gate (task-e89f4a9ed2f5ce0b).
+
+  Same rules, same `{:error, {:label_spine, details}}` tuple, same 422 through
+  `Content.Errors.build/1` — but only the subset that is judgeable on a document
+  that is not yet claiming to be finished. `description` and the MINIMUM tag
+  count are omitted on purpose: a draft with neither is unfinished, not
+  malformed, and drafts stay free. Absent or empty `tags` is `:ok` for the same
+  reason.
+
+  Pure: no I/O, no registry read (see the moduledoc's RULING on `unknown_tag`).
+  """
+  @spec validate_shape(map()) :: :ok | {:error, {:label_spine, details()}}
+  def validate_shape(content) when is_map(content) do
+    case get(content, "tags") do
+      nil ->
+        :ok
+
+      [] ->
+        :ok
+
+      tags when is_list(tags) ->
+        with :ok <- check_tag_max(tags),
+             :ok <- check_entries(tags),
+             :ok <- check_distinct_strengths(tags) do
+          check_no_duplicate_tags(tags)
+        end
+
+      _ ->
+        fail(
+          "tags",
+          "`tags` must be an array of {tag, strength, rationale} objects.",
+          "Provide tags as a JSON array of objects, not a scalar."
+        )
+    end
+  end
+
+  def validate_shape(_other), do: :ok
+
+  @doc """
   Derives the **main tag** — the tag with the maximum strength.
 
   Returns `{:ok, tag}` when the tags pass `validate/1`'s distinctness rule (so
@@ -158,25 +268,30 @@ defmodule Barkpark.Content.LabelSpine do
   end
 
   defp check_tag_count(tags) do
+    if length(tags) < @min_tags do
+      fail(
+        "tags",
+        "A published document needs at least #{@min_tags} tag.",
+        "Add at least #{@min_tags} weighted tag before publishing."
+      )
+    else
+      check_tag_max(tags)
+    end
+  end
+
+  # The MAXIMUM alone — the half `validate_shape/1` can enforce at birth. Too
+  # many tags is malformed at any stage; too few is merely unfinished.
+  defp check_tag_max(tags) do
     count = length(tags)
 
-    cond do
-      count < @min_tags ->
-        fail(
-          "tags",
-          "A published document needs at least #{@min_tags} tag.",
-          "Add at least #{@min_tags} weighted tag before publishing."
-        )
-
-      count > @max_tags ->
-        fail(
-          "tags",
-          "A document may carry at most #{@max_tags} tags (got #{count}).",
-          "Keep the #{@max_tags} strongest tags; drop the rest."
-        )
-
-      true ->
-        :ok
+    if count > @max_tags do
+      fail(
+        "tags",
+        "A document may carry at most #{@max_tags} tags (got #{count}).",
+        "Keep the #{@max_tags} strongest tags; drop the rest."
+      )
+    else
+      :ok
     end
   end
 

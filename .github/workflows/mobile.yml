@@ -63,7 +63,7 @@ on:
       - ".github/workflows/mobile.yml"
 
 concurrency:
-  group: mobile-${{ github.ref }}
+  group: mobile-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -75,15 +75,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       # Root-workspace install: apps/mobile is a member of the ROOT
       # pnpm-workspace.yaml (charter D2), so the lockfile lives at the repo

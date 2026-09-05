@@ -13,7 +13,7 @@
 // __atom_chrome / __divider_parity) locks the fix:
 //   1. code-node.js NO LONGER sets font-family / typography inline on the <pre>
 //      frame or the <textarea> (so the shared token can win).
-//   2. both CSS sinks (styles.css bundle + root.html.heex Studio inline) carry a
+//   2. both CSS sinks (styles.css bundle + bp-paper-editor-shell.css Studio sink) carry a
 //      token-bound `.bp-canvas-code-area` rule, byte-identical to each other,
 //      binding the SAME --bp-codeblock-*/--paper-* tokens the reader <pre> uses.
 //   3. the --bp-codeblock-* token family exists in the single source
@@ -45,7 +45,9 @@ function check(name, fn) {
 
 const codeNode = readSrc("canvas/code-node.js");
 const bundleCss = readSrc("styles.css");
-const heex = readRepo("api/lib/barkpark_web/layouts/root.html.heex");
+// The Studio sink: inline in root.html.heex until #16022 lifted it into a static
+// asset that both root.html.heex and the public paper reader load.
+const heex = readRepo("api/priv/static/assets/bp-paper-editor-shell.css");
 const surface = readRepo("api/assets/paper-surface/paper-surface.css");
 
 // ── 1. The inline font drift is GONE from the node-view source ────────────────
@@ -88,7 +90,7 @@ function areaDecls(css, label) {
 
 check(".bp-canvas-code-area rule exists in BOTH sinks and is byte-identical", () => {
   const inBundle = areaDecls(bundleCss, "styles.css bundle");
-  const inHeex = areaDecls(heex, "root.html.heex Studio inline");
+  const inHeex = areaDecls(heex, "bp-paper-editor-shell.css Studio sink");
   assert.deepEqual(
     inBundle,
     inHeex,
@@ -125,7 +127,6 @@ check("paper-surface.css defines a distinct --bp-codeblock-* family (not a --bp-
     "--bp-codeblock-pad:",
     "--bp-codeblock-margin:",
     "--bp-codeblock-radius:",
-    "--bp-codeblock-accent-w:",
   ]) {
     assert.ok(
       surface.includes(tok),
@@ -136,6 +137,16 @@ check("paper-surface.css defines a distinct --bp-codeblock-* family (not a --bp-
   // Guard against collapsing into the generic pre tokens (would regress the 14px
   // generic <pre> and the inline-code chip).
   assert.ok(surface.includes("--bp-pre-size: 14px"), "generic --bp-pre-size must stay 14px, untouched by S9.");
+  // task-ddb1e0ab09a62466: the 3px left bar is RETIRED. The token that sized it
+  // must not come back into the source, and the bundle's frame rule must not
+  // paint a border-left — the --paper-bg-deep slab on the --paper-bg page is the
+  // whole mark now, byte-identical with the reader <pre> and the Studio mirror.
+  // Keyed on the DECLARATION form (`name:`) — the retirement note in the source
+  // names the token in prose, and prose is not a token.
+  assert.ok(!surface.includes("--bp-codeblock-accent-w:"), "--bp-codeblock-accent-w is a dead token; do not re-add it.");
+  const frame = bundleCss.match(/\.bp-paper-editor-body pre\.bp-canvas-code\s*\{([^}]*)\}/);
+  assert.ok(frame, ".bp-paper-editor-body pre.bp-canvas-code frame rule missing from the bundle");
+  assert.ok(!frame[1].includes("border-left"), "pre.bp-canvas-code must not paint a border-left (the code bar was retired).");
 });
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

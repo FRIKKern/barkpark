@@ -1,0 +1,1 @@
+If a bound ships, D3's pinned-window law still holds — the census must not silently start reporting over a shorter window than it claims.

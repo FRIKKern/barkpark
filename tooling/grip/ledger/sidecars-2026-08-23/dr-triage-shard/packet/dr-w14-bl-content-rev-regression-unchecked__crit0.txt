@@ -1,0 +1,1 @@
+A query establishes whether content_rev has ever regressed on any site (a later row's projection describing less content than an earlier one), and the answer is recorded either way

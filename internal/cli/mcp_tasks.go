@@ -321,7 +321,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "lifecycle_status": {
       "type": "string",
-      "enum": ["done", "cancelled", "blocked"],
+      "enum": ` + closeLifecycleStatusEnumJSON + `,
       "description": "The done-signal. Default \"done\".",
       "default": "done"
     },
@@ -403,7 +403,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_create",
 		Title:       "Create a task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. NOTE: this MCP tool defaults publish TRUE, unlike the `bp task create` CLI which defaults it FALSE (draft-first) — reach for publish:false here only when you deliberately want a draft. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation. Give tags as weighted labels — each {tag, strength (integer 1-100), rationale}, all three required. Strengths must be DISTINCT with a single UNIQUE MAXIMUM (that top-weighted tag is the main tag). Bounds are HARD: 1-12 tags; the healthy advisory norm is 2-4. Once the authoring-excellence publish wall is live, a task that violates these rules is rejected at publish — so shape tags to the rules and this tool is the retry channel.",
+		Description: mcpTaskCreateDescription,
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -987,35 +987,59 @@ func mcpRunFor(status int, body []byte, err error, writes bool) *mcp.CallToolRes
 			if writes {
 				kind = "write receipt"
 			}
-			msg := fmt.Sprintf(
-				"unreadable %s: HTTP %d %s (%d bytes): %s\n  remedy: %s",
-				kind, status, reason, len(body), bodyPreview(body), hint,
-			)
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: clampMCPToolResult(msg)}},
-				IsError: true,
-			}
+			return mcpUnreadableResult(kind, status, body, reason, hint)
 		}
 	}
 	return mcpRun(status, body, err)
 }
 
+// mcpUnreadableResult renders ONE refusal sentence for a stated-success answer
+// that carries no honest statement: what kind of answer it was, the status, the
+// reason the discriminator named, the byte count, a preview, and the remedy.
+//
+// It is a RENDERER, never a verdict — every caller has already asked
+// mcpPoisonedReceipt (or, for a field the fence cannot see, named its own
+// reason). It is shared so a second refusing surface (mcp_chat.go's built-in
+// chat tools, which do not ride execManifestCommand and so never reach
+// mcpRunFor) prints the same sentence shape as the manifest dispatch instead of
+// growing a lookalike.
+func mcpUnreadableResult(kind string, status int, body []byte, reason, hint string) *mcp.CallToolResult {
+	msg := fmt.Sprintf(
+		"unreadable %s: HTTP %d %s (%d bytes): %s\n  remedy: %s",
+		kind, status, reason, len(body), bodyPreview(body), hint,
+	)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: clampMCPToolResult(msg)}},
+		IsError: true,
+	}
+}
+
 // mcpPoisonedReceipt names WHY a stated-success (< 400) body carries no honest
-// statement, reusing run.go's unexported discriminators — unreadableWriteReceipt
-// for a write, unreadableReadBody for a read — rather than re-deriving either
-// predicate. It returns ("", "") for every answer worth rendering, including
-// every honest empty those predicates already carve out, and for a declared
-// no-content status (204/205) with an empty body, which is a receipt, not
-// silence (mirroring screenWriteReceipt's own 204/205 exemption, run.go:486).
+// statement. It does NOT own either predicate.
+//
+// The WRITE arm is the shared fence itself: writeReceiptVerdict (run.go) is the
+// ONE function that turns a write response into a verdict, and the human CLI
+// render path (screenWriteReceipt) is its only other caller — so the MCP tool
+// result and the terminal cannot disagree about what a poisoned receipt is, and
+// a change to the fence lands on both surfaces or on neither. This function used
+// to re-implement the 204/205 declared-no-content arm beside it; that copy is
+// gone (pds-bl-mcp-exec-bypasses-write-fence c5).
+//
+// The READ arm still calls run.go's unreadableReadBody directly, and keeps its
+// own 204/205 exemption: an empty declared-no-content read is a receipt, not
+// silence, and no shared read-verdict function exists yet to hold it.
+//
+// It returns ("", "") for every answer worth rendering, including every honest
+// empty those predicates already carve out.
 func mcpPoisonedReceipt(status int, body []byte, writes bool) (reason, hint string) {
-	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
-		len(bytes.TrimSpace(body)) == 0 {
+	if writes {
+		if kind, r, h := writeReceiptVerdict(status, body); kind == writeReceiptPoisoned {
+			return r, h
+		}
 		return "", ""
 	}
-	if writes {
-		if r := unreadableWriteReceipt(body); r != "" {
-			return r, unreadableWriteReceiptHint
-		}
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(body)) == 0 {
 		return "", ""
 	}
 	r, contradiction := unreadableReadBody(body)
@@ -1067,3 +1091,9 @@ func mcpTextError(msg string) *mcp.CallToolResult {
 		IsError: true,
 	}
 }
+
+// mcpTaskCreateDescription is the task_create tool's description. It is a named
+// const, not an inline literal, so the test that asserts the CLI/MCP
+// publish-default asymmetry is documented AT BOTH SITES can read this half
+// (task-ede6e18e8c397ee0 c1). The CLI half lives in printTaskCreateHelp.
+const mcpTaskCreateDescription = "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. NOTE — THE PUBLISH-DEFAULT ASYMMETRY, DOCUMENTED AT BOTH SITES (`bp task create --help` carries the same paragraph): this MCP tool defaults publish TRUE, while the `bp task create` CLI defaults it FALSE (draft-first). Reach for publish:false here only when you deliberately want a draft, and remember that a draft is NOT on the board and NOT in `bp task ready` as a pair — unpublished rows filed through the draft-first door are the documented source of unclaimable drafts.task-N residue on the queue. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation. Give tags as weighted labels — each {tag, strength (integer 1-100), rationale}, all three required. Strengths must be DISTINCT with a single UNIQUE MAXIMUM (that top-weighted tag is the main tag). Bounds are HARD: 1-12 tags; the healthy advisory norm is 2-4. Once the authoring-excellence publish wall is live, a task that violates these rules is rejected at publish — so shape tags to the rules and this tool is the retry channel."

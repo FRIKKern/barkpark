@@ -1,0 +1,1 @@
+run_ci's else-branch in scripts/required-checks-verify.sh calls unapplied_spec_matches_reality() — the function already exists and is mutation-proven by section 8b — instead of printing four lines of prose about a committed reviewable state and never reading live protection.

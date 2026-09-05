@@ -1,0 +1,1 @@
+#10400 is rebased and its four failing table/exhaustiveness pins are RE-DERIVED on today's main (not ported from a base that predates #10519's rewrite of the same file); the green run is pasted.

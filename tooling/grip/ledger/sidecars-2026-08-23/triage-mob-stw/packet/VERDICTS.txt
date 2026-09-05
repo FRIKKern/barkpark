@@ -1,0 +1,24 @@
+CLOSE PACKET — mob-*/stw* open 0-met triage, 2026-08-23, against origin/main afe7f98c73096ac77a53ef5965814a764e4d646d.
+Grep self-test: known positive "Unmet criteria never block" = 1 hit in api/lib/barkpark/plugins/tasks.ex; impossible control "ZZQXIMPOSSIBLE9" = 0 hits.
+
+mob-rt-bl-seed-gen-sentinel — ALREADY-DONE. unmet crits 0,1,2.
+  Proof: apps/mobile/src/chat/reducer.ts:309 `export const HYDRATION_GEN = -1`; sessionStore.ts:253 dispatches `{type:'tailFetched', gen: HYDRATION_GEN, session}`; tests apps/mobile/__tests__/chatSendTruth.test.ts:252-269 drive the store through attach-mid-turn restart and assert the tail survives.
+  Landing commit (git log -S HYDRATION_GEN): c7a6759998 "fix(mobile): an unconfirmed send must not paint as delivered, and the seed GET must stop wiping a live tail (#6948)" — ancestor of origin/main. Crit2 (mobile gate) rode the merged PR.
+
+stw7-backlog-revoke-verify-tokens — SUPERSEDED. unmet crits 0,1,2.
+  Successor: stw10-backlog-revoke-public-read-class, whose description opens "Supersedes stw7-backlog-revoke-verify-tokens, whose premise is now known to be wrong in two ways" (24 tokens not 2; the bearer was never removed — it persists in 14 revisions rows + 1 documents row). The successor row is open on the same ledger.
+
+mob-bl-go-tail-cap-parity — DUPLICATE (flag only, do not cancel). unmet crits 0,1.
+  Absorbed verbatim into mob-lm-s7-go-residuals crit0 (same 262144 FREEZE cap in internal/chat/reduce.go). Work NOT landed: `grep -c 262144 internal/chat/reduce.go` = 0 on origin/main. Charter D43/D79: slices stamp criteria across residual rows, "which stay distinct".
+
+mob-bl-runtime-gen-advance-2 — DUPLICATE (flag only, do not cancel). unmet crits 0,1.
+  Absorbed into mob-lm-s7-go-residuals crits 1-3 (turn_started generation advance on both reducers). NOT landed: `grep -c turn_started internal/chat/reduce.go` = 0.
+
+mob-zb-bl-tui-board-thought-lanes — DUPLICATE (flag only, do not cancel). unmet crits 0,1,2.
+  Absorbed into mob-lm-s7-go-residuals crit5 (widen boardColumns). NOT landed: internal/pdrender/taskblocks.go:647 still `var boardColumns = []string{"open","ready","progress","blocked","done"}` (5 entries).
+
+mob-bl-streamtail-blank-line-law — DUPLICATE (flag only, do not cancel). unmet crits 0,1.
+  Absorbed into mob-lm-s8-elixir-pins crit0 (whitespace-only line as boundary via blank?/1). NOT landed: api/lib/barkpark/studio_chat/stream_tail.ex:295 still tests `line == ""` (strict byte-empty).
+
+mob-zb-bl-react-mrow-parity — DUPLICATE (flag only, do not cancel). unmet crits 0,1,2.
+  Charter D73(c/d) parks it TOGETHER with task-ce0b4827a6bff147 because that row's stated repair IS this row's change; co-scoped across js/** and the parity generator — whichever merges second reds the gate. Lifecycle already `considering`.

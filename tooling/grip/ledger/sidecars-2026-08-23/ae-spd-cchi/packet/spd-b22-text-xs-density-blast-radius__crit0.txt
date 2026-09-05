@@ -1,0 +1,1 @@
+All 98 text-xs call sites outside root.html.heex are enumerated by file and visually checked at 1440 and 900 after spd-s5 deploys

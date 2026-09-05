@@ -12,10 +12,23 @@
 //  question that actually matters: *did my authored rule survive into the
 //  CSSOM the browser built?*
 //
-//  It is a runnable INSTRUMENT, not a gate. It is deliberately NOT wired into
-//  any GitHub workflow (GR93(b)) — same shape as scripts/studio-desk-measure.mjs.
-//  It never gates the epic seal (GR93(c)); the re-shoot's PNGs remain the
-//  contractual visual evidence. If it proves flaky, that is the finding.
+//  WIRED INTO CI (cch-w22-s1-residue-modal-oracle-uninvoked). It runs as its
+//  OWN job, `modal-oracle` / "Modal CSSOM oracle (rendered)", in
+//  .github/workflows/console-harness.yml, modelled byte-for-byte on the
+//  `overflow-guard` job beside it: node 22, an explicit CHROME, and a 0/1/2/*
+//  case statement in which anything outside this file's vocabulary is
+//  UNINTERPRETABLE and therefore red. That job is an upstream `needs:` of
+//  `Console gate`, which is a REQUIRED context on `main` — so exit 1 and exit 2
+//  now BLOCK a merge, and both are read.
+//
+//  IT HAD BEEN UNWIRED ON PURPOSE (GR93(b)), AND THAT WAS A SHIP-TIME RULE, NOT
+//  A STANDING BAN. The sibling instrument settles the reading: cssom-parity.mjs
+//  carried this identical sentence and its header now says "It had been unwired
+//  on purpose (GR93(b)): a gate promoted before it is trusted is a gate that
+//  gets disabled. It has now survived a wave of real use." This one has had the
+//  same wave. GR93(c) is untouched and still holds: it never gates the epic
+//  seal; the re-shoot's PNGs remain the contractual visual evidence. If it
+//  proves flaky, that is the finding — and now it is a finding that reds.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  HONEST COVERAGE — THREE detectors, not four. Do not credit the fourth.
@@ -234,10 +247,20 @@ const REVEAL_OPEN_PROBE =
 // learns which face resolved — and NOT enforcement. Saying so here is the
 // difference between "three instruments are pinned" and "three instruments are
 // gated"; only the first is true.
+// PRINTED ON EVERY RUN, HEALTHY AND REFUSING. It used to read "this oracle is
+// invoked by ZERO CI jobs and ZERO scripts … so its exit 2 buys evidence for
+// whoever runs it by hand, not enforcement", which was TRUE when written and
+// became FALSE the moment the `modal-oracle` job landed. A banner that
+// contradicts a grep is the defect this epic exists to kill, so it is corrected
+// here rather than deleted: the reader still learns what the exit codes buy,
+// and now learns the true answer. Re-derive, do not trust:
+//   git grep -nE '(node|bash|sh) .*modal-oracle' -- .github/ scripts/ Makefile package.json
 const ORACLE_CI_SCOPE =
-  "font pin scope: this oracle is invoked by ZERO CI jobs and ZERO scripts " +
-  "(grep -rn 'modal-oracle' .github/workflows/ scripts/ → no hits), so its exit 2 " +
-  "buys evidence for whoever runs it by hand, not enforcement.";
+  "font pin scope: this oracle is invoked by the `modal-oracle` job in " +
+  ".github/workflows/console-harness.yml, an upstream `needs:` of the REQUIRED " +
+  "`Console gate` context — so exit 1 and exit 2 are both read there and both " +
+  "BLOCK a merge. A hand-run still buys the same evidence; it just is not the " +
+  "only reader any more.";
 
 // Viewport. 900px tall on purpose: it is shorter than the 9-session account
 // card, which is what makes assertion 3 meaningful.

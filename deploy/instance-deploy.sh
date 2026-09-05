@@ -464,7 +464,16 @@ else
   # is drift to discard, and this also subsumes the old `git checkout -- .` for
   # committed build artifacts. Divergence is surfaced (logged), not swallowed.
   log "git fetch origin main + reset --hard (post-merge hook suppressed — this script IS the deploy)"
-  git -c core.hooksPath=/dev/null fetch origin main || { log "fetch origin main failed"; exit 11; }
+  # GIT_TERMINAL_PROMPT=0: this runs over ssh with no tty, so a git that decides
+  # it needs a username would otherwise BLOCK on the prompt instead of failing.
+  # The failure arm names the git version because "could not read Username" is
+  # the symptom BOTH of a credential problem and of the protocol-v2 refusal seen
+  # on git 2.34.x boxes (deploy/cp-deploy.sh, PR #15634) — the message must say
+  # which reading is even possible, not leave the operator to guess.
+  GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null fetch origin main || {
+    log "fetch origin main failed — git $(git --version 2>&1 | awk '{print $3}'), protocol.version=$(git config --get protocol.version 2>/dev/null || echo 'unset/default'); a 'could not read Username' here can be the WIRE protocol, not credentials — retry with: git -c protocol.version=0 fetch origin main"
+    exit 11
+  }
   if ! git merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
     log "WARNING: box HEAD $(git rev-parse --short HEAD) has DIVERGED from origin/main (a commit was made on the box, or main was rewritten) — discarding local divergence and converging to origin/main"
   fi
@@ -619,7 +628,38 @@ set -a; . ./.env; set +a
 arm_caddy_maintenance() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping maintenance page"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping maintenance page"; return 0; }
-  if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then log "caddy maintenance page already armed"; return 0; fi
+  if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then
+    # ALREADY ARMED — but possibly in the PRE-SCOPING shape. A bare
+    # `handle_errors {` catches EVERY error the site raises, and a `file_server`
+    # miss inside an armed `handle_path /sites/<slug>/*` raises 404 as an ERROR.
+    # Measured on guerrilla: every miss on a spawned static site answered 503
+    # "Back in a moment" instead of 404 — the maintenance page swallowed the
+    # whole 4xx surface of every static site on the box. The block's own header
+    # comment asserted the opposite ("fires ONLY on errors Caddy itself raises
+    # (dial failure / gateway timeout)"); a file_server 404 IS such an error.
+    # Re-arming is not an option (the marker guard exists for a reason), so
+    # UPGRADE in place: scope the existing handler to the gateway statuses it was
+    # always meant to cover. Same backup + validate + revert contract as the arm.
+    if grep -qE '^[[:space:]]*handle_errors[[:space:]]*\{[[:space:]]*$' "$CADDYFILE"; then
+      local ubak; ubak="${CADDYFILE}.bak.maint-scope.$(date -u +%Y%m%d%H%M%S)"
+      cp -a "$CADDYFILE" "$ubak"
+      local utmp; utmp="$(mktemp)"
+      sed -E 's/^([[:space:]]*)handle_errors[[:space:]]*\{[[:space:]]*$/\1handle_errors 502 503 504 {/' "$CADDYFILE" > "$utmp" \
+        && mv "$utmp" "$CADDYFILE" || { rm -f "$utmp"; mv "$ubak" "$CADDYFILE"; log "could not rewrite $CADDYFILE to scope the maintenance handler — Caddy untouched"; return 0; }
+      chmod --reference="$ubak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+      chown --reference="$ubak" "$CADDYFILE" 2>/dev/null || true
+      if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+        rm -f "$ubak"
+        systemctl reload caddy 2>/dev/null || true
+        log "scoped the already-armed maintenance handler to 502/503/504 (a static-site miss now 404s instead of 503)"
+      else
+        mv "$ubak" "$CADDYFILE"
+        log "caddy validate rejected the maintenance-handler scoping — reverted, Caddy untouched"
+      fi
+      return 0
+    fi
+    log "caddy maintenance page already armed"; return 0
+  fi
   # Slot ports ONLY: the /mcp route (if armed first) carries its own
   # `reverse_proxy localhost:4010` line, which must never become the
   # insertion anchor.
@@ -628,7 +668,7 @@ arm_caddy_maintenance() {
     return 0
   fi
   local block; block="$(cat <<'MAINT'
-	handle_errors {
+	handle_errors 502 503 504 {
 		header Retry-After "15"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
@@ -1059,7 +1099,14 @@ systemctl disable --now barkpark >/dev/null 2>&1 || true
 # live on the new slot at this point.
 if [ -f /etc/barkpark/agent.token ]; then
   log "refreshing barkpark-agent (monitoring beat)"
-  if command -v go >/dev/null 2>&1 && go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent; then
+  # Build to a tmpdir and `install` (not `go build -o` straight onto the live
+  # path): install(1) unlinks first, so a RUNNING barkpark-agent never
+  # ETXTBSY-blocks its own refresh — the same idiom the barkpark-mcp block below
+  # already uses and explains (dr-w4-bl-agent-build-in-place-can-etxtbsy).
+  AGENT_TMPD="$(mktemp -d)"
+  if command -v go >/dev/null 2>&1 && go build -o "$AGENT_TMPD/barkpark-agent" ./cmd/barkpark-agent \
+     && install -m 0755 "$AGENT_TMPD/barkpark-agent" /usr/local/bin/barkpark-agent; then
+    rm -rf "$AGENT_TMPD"
     install -m 0644 "$APP/deploy/systemd/barkpark-agent.service" /etc/systemd/system/barkpark-agent.service
     systemctl daemon-reload
     # restart (not just enable --now): `--now` is `start`, a NO-OP on an
@@ -1084,6 +1131,7 @@ if [ -f /etc/barkpark/agent.token ]; then
       log "WARN: no /etc/barkpark/agent.health.token — req/s, p95 and 5xx stay UNMETERED on this box (written at provision time; see deploy/systemd/README.md to backfill)"
     fi
   else
+    rm -rf "$AGENT_TMPD"
     log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
   fi
 fi

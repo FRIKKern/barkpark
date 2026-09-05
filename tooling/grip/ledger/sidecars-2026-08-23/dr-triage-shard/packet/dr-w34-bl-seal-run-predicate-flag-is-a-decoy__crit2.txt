@@ -1,0 +1,1 @@
+If deleted, a run passing --predicate exits with a clear 'no such flag' rather than a misleading blob-drift refusal naming the wrong file.

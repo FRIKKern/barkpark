@@ -1,0 +1,1 @@
+The instance smoke can fail on an EMPTY catalog: a non-empty-body assertion is added, and a mutation against a server returning 200 with body `[]` REDS. Paste the mutated failure.

@@ -1,0 +1,1 @@
+A PR carrying a deliberate orphan-comment swallow is shown to be BLOCKED from merging (not merely red), or the human records an explicit decision to keep it advisory.

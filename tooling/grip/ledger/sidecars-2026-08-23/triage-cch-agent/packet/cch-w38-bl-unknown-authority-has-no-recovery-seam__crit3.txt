@@ -1,0 +1,1 @@
+cssom-heads.baseline does not move and no new CSS rule head is authored — the shipped .inst-life-note / .inst-life-disabled / btn-ghost grammar covers this.
