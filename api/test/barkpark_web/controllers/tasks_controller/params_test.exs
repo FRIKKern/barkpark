@@ -17,7 +17,12 @@ defmodule BarkparkWeb.TasksController.ParamsTest do
   describe "render_doc/2 :brief — labels" do
     defp brief(content) do
       Params.render_doc(
-        %Document{doc_id: "t1", title: "a task", content: content, updated_at: ~N[2026-09-05 10:00:00]},
+        %Document{
+          doc_id: "t1",
+          title: "a task",
+          content: content,
+          updated_at: ~N[2026-09-05 10:00:00]
+        },
         :brief
       )
     end

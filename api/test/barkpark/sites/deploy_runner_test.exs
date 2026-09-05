@@ -481,6 +481,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # deferral taxonomy matches the literal code, and the CLI keys its exit
       # code on it. The holder rides in ADDED FIELDS and the message TAIL.
       assert error["code"] == "box_at_capacity"
+
       assert error["message"] =~
                "the box is at its build capacity (1 of 1 build slots in use) — "
 
@@ -524,6 +525,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert %{"error" => error} = Jason.decode!(conn.resp_body)
 
       assert error["code"] == "box_at_capacity"
+
       assert error["message"] =~
                "the box is at its build capacity (1 of 1 build slots in use) — "
 
