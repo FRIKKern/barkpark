@@ -105,10 +105,8 @@ jobs:
           base="origin/${{ github.base_ref }}"
           git fetch -q origin "${{ github.base_ref }}" --depth=1 2>/dev/null || true
           changed=$(git -C .. diff --name-only "$base"...HEAD)
-          printf '%s
-' "$changed" | sed 's/^/  changed: /'
-          if printf '%s
-' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
+          printf '%s\n' "$changed" | sed 's/^/  changed: /'
+          if printf '%s\n' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
             echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (a file outside js/packages/* changed)"; exit 0
           fi
           f="--filter=...[$base] --filter=@barkpark/codegen --filter=@barkpark/core"
