@@ -201,6 +201,7 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
   # THE ANTI-INCONCLUSIVE GUARD, and the reason this run is not the w43 one: the
@@ -230,9 +231,14 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
   defp inner_change(view, slug, params) do
     assert_read_reach!(view, slug)
 
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok
@@ -338,7 +344,15 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
 
       # A batch reaches `paper_ops/2` WITHOUT passing through `paper_pane_op/2`,
       # so the seam is entered directly here — its own door is what answers.
-      out = Paper.paper_ops(socket_of(view), [append_op(@batch_block_id)])
+      socket = socket_of(view)
+
+      assert {:error, out} =
+               Paper.paper_ops(
+                 socket,
+                 [append_op(@batch_block_id)],
+                 Ecto.UUID.generate(),
+                 socket.assigns.paper_rev
+               )
 
       assert stored_block_ids(ws, proj, @other_slug) == ids_before
       refute @batch_block_id in stored_block_ids(ws, proj, @other_slug)
@@ -362,6 +376,7 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
       # `save_status` is untouched.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [append_op(@batch_block_id)]
       })
 
@@ -384,7 +399,16 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
       inner_change(view, @granted_slug, @legit)
       assert stored_value(ws, proj, @granted_slug) == @legit
 
-      out = Paper.paper_ops(socket_of(view), [append_op(@batch_block_id)])
+      socket = socket_of(view)
+
+      assert {:ok, out, _receipt, :applied} =
+               Paper.paper_ops(
+                 socket,
+                 [append_op(@batch_block_id)],
+                 Ecto.UUID.generate(),
+                 socket.assigns.paper_rev
+               )
+
       assert @batch_block_id in stored_block_ids(ws, proj, @granted_slug)
       assert out.assigns.save_status == "Auto-saved"
 

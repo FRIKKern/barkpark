@@ -265,6 +265,7 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
       view
       |> render_hook("paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => :sys.get_state(view.pid).socket.assigns.paper_rev,
         "ops" => [%{"op" => "insert-after", "afterId" => "b0", "block" => content_paragraph()}]
       })
 

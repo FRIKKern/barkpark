@@ -1258,7 +1258,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
 
-    case slug && Content.get_paper(slug, socket.assigns.dataset) do
+    case slug &&
+           Content.get_paper(slug, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
       %{content: content} = fresh when is_map(content) ->
         assign(socket, paper_doc: fresh, paper_rev: Map.get(content, "rev") || 0)
 

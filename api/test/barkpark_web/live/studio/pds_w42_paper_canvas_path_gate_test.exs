@@ -146,6 +146,15 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
+
+  defp paper_ops_params(view) do
+    %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "ops" => patch_ops()
+    }
+  end
 
   # The canvas really is the rendered editor for this paper — asserted before
   # every denial, so "the write did not land" can never mean "there was no
@@ -181,7 +190,7 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
     socket = socket_of(view)
     assert Caps.write_capable?(socket.assigns, Caps.derive(socket)) == true
 
-    render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
+    render_hook(view, "paper-ops", paper_ops_params(view))
 
     # Read back from the STORE. This is what a denied principal would have got
     # if either gate were missing.
@@ -200,7 +209,7 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
       assert_write_denied_socket!(view)
       assert_canvas_mounted!(view)
 
-      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
+      render_hook(view, "paper-ops", paper_ops_params(view))
 
       render(view)
 
@@ -227,7 +236,7 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
       before = socket_of(view).assigns[:save_status]
       assert before != "Read-only"
 
-      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => patch_ops()})
+      render_hook(view, "paper-ops", paper_ops_params(view))
 
       render(view)
 
@@ -257,7 +266,15 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
       # Straight at `Shared.paper_ops/2` with the SAME batch, as a `handle_info`
       # or an internal caller would arrive — no `:handle_event` hook on the
       # path. This is the second, independent gate: `write_denied?/1`.
-      out = Shared.paper_ops(socket_of(view), patch_ops())
+      socket = socket_of(view)
+
+      assert {:error, out} =
+               Shared.paper_ops(
+                 socket,
+                 patch_ops(),
+                 Ecto.UUID.generate(),
+                 socket.assigns.paper_rev
+               )
 
       # Its refusal shape, distinct from the socket gate's.
       assert out.assigns.save_status == "Read-only"
