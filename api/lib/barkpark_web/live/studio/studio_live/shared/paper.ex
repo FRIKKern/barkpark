@@ -28,6 +28,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
 
+  @server_minted_block :__server_minted_block__
+
   @doc false
   def paper_op(socket, op) do
     socket = failed_result(socket, op)
@@ -261,6 +263,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def paper_pane_op(socket, op) do
+    if is_binary(op["request_id"]) do
+      paper_pane_op_once(socket, op)
+    else
+      paper_pane_unidentified_op(socket, op)
+    end
+  end
+
+  defp paper_pane_op_once(socket, op) do
+    request_id = op["request_id"]
+    op = stable_request_op(op, request_id)
+
+    case paper_ops(
+           socket,
+           [Map.drop(op, ["if_rev", "request_id"])],
+           request_id,
+           op["if_rev"]
+         ) do
+      {:ok, socket, receipt, outcome} ->
+        assign(socket,
+          last_paper_save_result: %{
+            saved: true,
+            request_id: request_id,
+            replayed: outcome == :replayed,
+            rev: receipt.rev
+          }
+        )
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  defp paper_pane_unidentified_op(socket, op) do
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
     dataset = socket.assigns.dataset
@@ -290,7 +325,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         case Content.apply_paper_block_op(
                slug,
-               Map.drop(op, ["if_rev", "request_id"]),
+               Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
                dataset,
                BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
              ) do
@@ -1192,6 +1227,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     op
     |> Map.put("if_rev", meta["if_rev"])
     |> Map.put("request_id", meta["request_id"])
+  end
+
+  # Server-authored structural ops mint a block id before this shared seam.
+  # Derive that id from the retry-stable request id so the exact facade sees
+  # the same payload after a lost acknowledgement.
+  defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
+    op
+    |> Map.delete(@server_minted_block)
+    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+  end
+
+  defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
+
+  defp request_block_id(request_id) do
+    suffix =
+      request_id
+      |> then(&:crypto.hash(:sha256, &1))
+      |> binary_part(0, 9)
+      |> Base.url_encode64(padding: false)
+
+    "b-" <> suffix
   end
 
   # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).

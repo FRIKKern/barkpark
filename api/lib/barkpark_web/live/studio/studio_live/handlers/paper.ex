@@ -13,6 +13,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
 
+  @server_minted_block :__server_minted_block__
+
   def paper_toggle_edit(socket) do
     if socket.assigns[:editor_view] == :paper do
       next_edit_mode = !socket.assigns[:paper_edit_mode]
@@ -399,7 +401,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           %{"op" => "append-block", "block" => new}
       end
 
-    paper_reply(Shared.paper_op(socket, write_meta(op, params)))
+    paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
   end
 
   def paper_add_block(params, socket), do: failed_reply(socket, params)
@@ -430,7 +432,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               %{"op" => "append-block", "block" => block}
           end
 
-        paper_reply(Shared.paper_op(socket, write_meta(op, params)))
+        paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
     end
   end
 
@@ -472,7 +474,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       paper_reply(
         Shared.paper_op(
           socket,
-          write_meta(Shared.slash_insert_op(params["afterId"], new), params)
+          write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
         )
       )
     end
@@ -490,7 +492,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       |> Map.merge(Map.take(params, ["tone", "collapsible", "collapsed"]))
 
     paper_reply(
-      Shared.paper_op(socket, write_meta(Shared.slash_insert_op(params["afterId"], new), params))
+      Shared.paper_op(
+        socket,
+        write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
+      )
     )
   end
 
@@ -498,7 +503,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     new = Blocks.default_block(type, Blocks.new_block_id())
 
     paper_reply(
-      Shared.paper_op(socket, write_meta(Shared.slash_insert_op(params["afterId"], new), params))
+      Shared.paper_op(
+        socket,
+        write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
+      )
     )
   end
 
@@ -541,7 +549,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               |> Map.put("label", label)
 
             paper_reply(
-              Shared.paper_op(socket, write_meta(Shared.slash_insert_op(nil, new), params))
+              Shared.paper_op(
+                socket,
+                write_meta(server_minted_block(Shared.slash_insert_op(nil, new)), params)
+              )
             )
 
           _ ->
@@ -661,6 +672,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     |> Map.put("if_rev", params["if_rev"])
     |> Map.put("request_id", params["request_id"])
   end
+
+  defp server_minted_block(op), do: Map.put(op, @server_minted_block, true)
 
   @doc """
   Typeahead candidate search for the [[ wikilink autocomplete popup.

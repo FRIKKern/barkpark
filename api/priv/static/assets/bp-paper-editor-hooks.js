@@ -130,10 +130,20 @@
       let mutationActive = false;
       let mutationPaused = false;
       let conflict = null;
+      let pendingIdentity = null;
+      let reloadWhenClean = false;
       const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
       let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
+
+      const identityFor = (source) => {
+        const carrier = source?.closest?.("[data-paper-doc-key]");
+        return {
+          key: carrier?.dataset.paperDocKey || documentKey,
+          rev: bpPaperRevisionFrom(carrier),
+        };
+      };
 
       const captureHistoryPosition = () => {
         const currentPosition = bpPaperHistoryPosition(window.history.state);
@@ -143,6 +153,7 @@
       const recordFor = (source) => {
         let record = sources.get(source);
         if (!record) {
+          const identity = identityFor(source);
           record = {
             version: 0,
             active: 0,
@@ -151,6 +162,8 @@
             pending: null,
             authoredRev: undefined,
             mutationEntry: null,
+            documentKey: identity.key,
+            documentRevision: identity.rev,
           };
           sources.set(source, record);
         }
@@ -162,9 +175,14 @@
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
           const carrier = member.el.closest?.("[data-paper-doc-key]");
-          if (!documentKey && carrier?.dataset.paperDocKey) {
-            documentKey = carrier.dataset.paperDocKey;
-            confirmedRevision = bpPaperRevisionFrom(carrier);
+          const nextKey = carrier?.dataset.paperDocKey;
+          if (nextKey && nextKey !== documentKey) {
+            const nextIdentity = { key: nextKey, rev: bpPaperRevisionFrom(carrier) };
+            if (!coordinator.hasUnsaved() && !mutationQueue.length && !mutationActive) {
+              coordinator._resetIdentity(nextIdentity);
+            } else {
+              pendingIdentity = nextIdentity;
+            }
           }
           return coordinator;
         },
@@ -186,7 +204,11 @@
           if (!source) return;
           captureHistoryPosition();
           const record = recordFor(source);
-          if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
+          if (record.authoredRev === undefined) {
+            record.authoredRev = record.documentKey === documentKey
+              ? confirmedRevision
+              : record.documentRevision;
+          }
           record.version += 1;
           record.dirty = true;
         },
@@ -195,7 +217,11 @@
           captureHistoryPosition();
           const record = recordFor(source);
           if (!record.dirty) {
-            if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
+            if (record.authoredRev === undefined) {
+              record.authoredRev = record.documentKey === documentKey
+                ? confirmedRevision
+                : record.documentRevision;
+            }
             record.version += 1;
             record.dirty = true;
           }
@@ -267,11 +293,18 @@
           let entry = mutationById.get(requestId);
           if (!entry) {
             const record = recordFor(source);
-            if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
+            if (record.authoredRev === undefined) {
+              record.authoredRev = record.documentKey === documentKey
+                ? confirmedRevision
+                : record.documentRevision;
+            }
             entry = {
               source, requestId, payload, send, onResult,
+              documentKey: record.documentKey,
               authoredRev: record.authoredRev,
-              ifRev: mutationQueue.length ? undefined : record.authoredRev,
+              ifRev: mutationQueue.length || record.documentKey !== documentKey
+                ? undefined
+                : record.authoredRev,
               expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
               waiters: [],
             };
@@ -296,8 +329,20 @@
           coordinator._pumpMutations();
           return promise;
         },
-        observeRevision({ rev, requestId, apply }) {
+        observeRevision({ rev, requestId, apply, observedDocumentKey, source }) {
           if (rev == null) return false;
+          if (observedDocumentKey && observedDocumentKey !== documentKey) {
+            if (!coordinator._hasUnsavedForDocument(documentKey) && !mutationQueue.length) {
+              coordinator._resetIdentity({ key: observedDocumentKey, rev });
+              apply?.("external");
+              return true;
+            }
+            pendingIdentity = { key: observedDocumentKey, rev };
+            quarantinedEchoes.push({
+              rev, requestId, apply, documentKey: observedDocumentKey,
+            });
+            return false;
+          }
           if (requestId && ownRevisions.get(requestId) === rev) {
             apply?.(rev === confirmedRevision ? "own" : "own-stale");
             return true;
@@ -307,8 +352,10 @@
             return true;
           }
           if (mutationQueue.length || coordinator.hasUnsaved()) {
-            quarantinedEchoes.push({ rev, requestId, apply });
-            if (!mutationActive) coordinator._setConflict({ current_rev: rev });
+            quarantinedEchoes.push({ rev, requestId, apply, documentKey });
+            if (!mutationActive) coordinator._setConflict(
+              { current_rev: rev }, source, observedDocumentKey,
+            );
             return false;
           }
           confirmedRevision = rev;
@@ -320,6 +367,55 @@
       coordinator._resolveWaiters = (entry, saved) => {
         const waiters = entry.waiters.splice(0);
         waiters.forEach((resolve) => resolve(saved));
+      };
+      coordinator._hasUnsavedForDocument = (key) => {
+        for (const record of sources.values()) {
+          if (record.documentKey === key && (record.dirty || record.active > 0)) return true;
+        }
+        return false;
+      };
+      coordinator._resetIdentity = ({ key, rev }) => {
+        documentKey = key || null;
+        confirmedRevision = rev ?? null;
+        ownRevisions.clear();
+        quarantinedEchoes.length = 0;
+        conflict = null;
+        mutationPaused = false;
+        coordinator._renderConflict?.();
+      };
+      coordinator._maybeAdoptPendingIdentity = () => {
+        if (!pendingIdentity || coordinator._hasUnsavedForDocument(documentKey) ||
+            mutationQueue.some((entry) => entry.documentKey === documentKey)) return false;
+        const next = pendingIdentity;
+        pendingIdentity = null;
+        coordinator._resetIdentity(next);
+        return true;
+      };
+      coordinator._flushQuarantinedIfClean = () => {
+        if (mutationQueue.some((entry) => entry.documentKey === documentKey) ||
+            coordinator._hasUnsavedForDocument(documentKey)) return false;
+        const candidates = quarantinedEchoes.filter((echo) =>
+          !echo.documentKey || echo.documentKey === documentKey,
+        );
+        if (!candidates.length) return false;
+        const newest = candidates[candidates.length - 1];
+        const latest = candidates.filter((echo) => echo.rev === newest.rev);
+        for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
+          if (!quarantinedEchoes[i].documentKey ||
+              quarantinedEchoes[i].documentKey === documentKey) {
+            quarantinedEchoes.splice(i, 1);
+          }
+        }
+        confirmedRevision = newest.rev;
+        latest.forEach((echo) => echo.apply?.("external"));
+        return true;
+      };
+      coordinator._reloadIfClean = () => {
+        if (!reloadWhenClean || mutationActive || mutationQueue.length ||
+            coordinator.hasUnsaved()) return false;
+        reloadWhenClean = false;
+        window.location.reload();
+        return true;
       };
       coordinator._expireMutation = (entry) => {
         mutationPaused = true;
@@ -334,8 +430,13 @@
           composed: true,
         }));
       };
-      coordinator._setConflict = (reply) => {
-        conflict = { currentRev: reply?.current_rev, reply };
+      coordinator._setConflict = (reply, source, sourceDocumentKey) => {
+        conflict = {
+          currentRev: reply?.current_rev,
+          reply,
+          source: source || mutationQueue[0]?.source,
+          documentKey: sourceDocumentKey || mutationQueue[0]?.documentKey || documentKey,
+        };
         mutationPaused = true;
         coordinator._renderConflict();
       };
@@ -386,31 +487,55 @@
         return true;
       };
       coordinator._useLatest = () => {
-        const requiresReload = [...sources].some(([source, record]) =>
-          (record.dirty || record.active > 0) &&
-          !source.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]'),
+        const chosenSource = conflict?.source;
+        const chosenRecord = sources.get(chosenSource);
+        const requiresReload = Boolean(
+          chosenRecord &&
+          !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]'),
         );
         const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
-        const latest = quarantinedEchoes.filter((echo) => echo.rev === latestRevision);
-        mutationQueue.splice(0).forEach((entry) => {
+        const latest = quarantinedEchoes.filter((echo) =>
+          echo.rev === latestRevision &&
+          (!echo.documentKey || echo.documentKey === conflict?.documentKey),
+        );
+        for (let index = mutationQueue.length - 1; index >= 0; index--) {
+          const entry = mutationQueue[index];
+          if (entry.source !== chosenSource) continue;
+          mutationQueue.splice(index, 1);
           mutationById.delete(entry.requestId);
           entry.onResult?.(false, { discarded: true });
           coordinator._resolveWaiters(entry, false);
-        });
-        sources.clear();
+        }
+        sources.delete(chosenSource);
         conflict = null;
         mutationPaused = false;
         if (latestRevision != null) {
           confirmedRevision = latestRevision;
           latest.forEach((echo) => echo.apply?.("external-resync"));
         }
-        quarantinedEchoes.length = 0;
+        for (let index = quarantinedEchoes.length - 1; index >= 0; index--) {
+          const echo = quarantinedEchoes[index];
+          if (!echo.documentKey || echo.documentKey === documentKey) {
+            quarantinedEchoes.splice(index, 1);
+          }
+        }
+        mutationQueue.forEach((entry) => {
+          if (entry.documentKey === documentKey) entry.ifRev = undefined;
+        });
+        if (requiresReload) reloadWhenClean = true;
         coordinator._renderConflict();
-        if (requiresReload) window.location.reload();
+        coordinator._maybeAdoptPendingIdentity();
+        coordinator._pumpMutations();
+        coordinator._reloadIfClean();
       };
       coordinator._pumpMutations = () => {
         if (mutationActive || mutationPaused || conflict || !mutationQueue.length) return;
         const entry = mutationQueue[0];
+        if (entry.documentKey && entry.documentKey !== documentKey) {
+          if (coordinator._hasUnsavedForDocument(documentKey)) return;
+          coordinator._resetIdentity({ key: entry.documentKey, rev: entry.authoredRev });
+          pendingIdentity = null;
+        }
         if (Date.now() >= entry.expiresAt) {
           coordinator._expireMutation(entry);
           coordinator._resolveWaiters(entry, false);
@@ -442,12 +567,17 @@
             coordinator._resolveWaiters(entry, true);
             for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
               const echo = quarantinedEchoes[i];
-              if (echo.requestId === entry.requestId || echo.rev === confirmedRevision) {
+              if ((echo.requestId === entry.requestId || echo.rev === confirmedRevision) &&
+                  (!echo.documentKey || echo.documentKey === documentKey)) {
                 quarantinedEchoes.splice(i, 1);
                 echo.apply?.("own");
               }
             }
+            if (!coordinator._maybeAdoptPendingIdentity()) {
+              coordinator._flushQuarantinedIfClean();
+            }
             coordinator._pumpMutations();
+            coordinator._reloadIfClean();
           } else {
             entry.onResult?.(false, reply);
             mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
@@ -493,8 +623,8 @@
           ? { promise: coordinator.retryMutation(record.mutationEntry), entry: record.mutationEntry }
           : bpPaperMutation(driver, source, event, params, {
             target,
-            onResult: (saved) => {
-              if (saved) record.mutationEntry = null;
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) record.mutationEntry = null;
             },
           });
         record.mutationEntry = mutation.entry || record.mutationEntry;
@@ -751,8 +881,8 @@
         const pushOp = (op) => {
           let mutation;
           mutation = bpPaperMutation(this, this.el, "paper-op", op, {
-            onResult: (saved) => {
-              if (saved) this._mutationEntries = this._mutationEntries.filter(
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._mutationEntries = this._mutationEntries.filter(
                 (entry) => entry !== mutation.entry,
               );
             },
@@ -865,6 +995,8 @@
             rev: payload.rev,
             requestId: payload.request_id,
             apply,
+            observedDocumentKey: this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
+            source: this.el,
           }) || (payload.rev == null && apply("legacy"));
         };
         this.handleEvent("bp:block-update", this._onBlockUpdate);
@@ -1036,11 +1168,19 @@
           } else {
             mutation = bpPaperMutation(this, this.el, "paper-ops", { ops: entry.ops }, {
               requestId: entry.requestId,
-              onResult: (saved) => {
+              onResult: (saved, result) => {
                 this._sendingOps = false;
-                if (saved && this._opsQueue[0] === entry) this._opsQueue.shift();
+                if (result?.discarded) {
+                  this._opsQueue = this._opsQueue.filter((queued) => queued !== entry);
+                  this._opsFailed = false;
+                  return;
+                }
+                if (saved && this._opsQueue[0] === entry) {
+                  this._opsQueue.shift();
+                }
                 const canvas = this.el.querySelector("bp-paper-canvas");
-                if (entry.seq != null && typeof canvas?.acknowledgeOps === "function") {
+                if (entry.seq != null &&
+                    typeof canvas?.acknowledgeOps === "function") {
                   canvas.acknowledgeOps(entry.seq, saved);
                 }
                 if (saved) {
@@ -1131,6 +1271,8 @@
               rev: payload.rev,
               requestId: payload.request_id,
               apply,
+              observedDocumentKey: this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
+              source: this.el,
             }) || (payload.rev == null && apply("legacy"));
           });
         };
@@ -1253,8 +1395,8 @@
         const pushOp = (op) => {
           let mutation;
           mutation = bpPaperMutation(this, this.el, "paper-op", op, {
-            onResult: (saved) => {
-              if (saved) this._mutationEntries = this._mutationEntries.filter(
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._mutationEntries = this._mutationEntries.filter(
                 (entry) => entry !== mutation.entry,
               );
             },
@@ -1895,11 +2037,11 @@
             requestId,
             payload: params,
             send,
-            onResult: (saved) => {
-              if (saved) this._fieldMutationEntries = this._fieldMutationEntries.filter(
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._fieldMutationEntries = this._fieldMutationEntries.filter(
                 (entry) => entry !== mutation.entry,
               );
-              if (saved && this._formVersion === version) this._dirty = false;
+              if ((saved || result?.discarded) && this._formVersion === version) this._dirty = false;
             },
           });
           if (mutation.entry) this._fieldMutationEntries.push(mutation.entry);

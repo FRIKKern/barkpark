@@ -60,6 +60,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
+  @server_minted_block :__server_minted_block__
+
   # Every `paper-*` event Studio wires. Membership here means "an edit event":
   # refused for a socket without `:can_edit?`, whether or not the reader wires
   # a handler for it. Keep in sync with studio_live.ex's paper-* clauses.
@@ -157,17 +159,50 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # ── the ONE op path ─────────────────────────────────────────────────────────
 
   @doc """
-  Apply ONE `DocPatchOp` through `Content.apply_paper_block_op/4`, with the
-  socket's tenant scope. Same primitive, same result mapping as the Studio pane
+  Apply ONE `DocPatchOp` with the socket's tenant scope. Request-identified
+  writes use the exact-once batch facade with one op; the unidentified legacy
+  seam retains the single-op primitive. Result mapping matches the Studio pane
   (`Studio.StudioLive.Shared.Paper.paper_pane_op/2`).
   """
   def apply_op(socket, %{"op" => _} = op) do
     request_id = op["request_id"]
     socket = failed_save(socket, request_id)
 
+    if is_binary(request_id) do
+      apply_op_once(socket, op, request_id)
+    else
+      apply_unidentified_op(socket, op)
+    end
+  end
+
+  def apply_op(socket, op), do: failed_save(socket, is_map(op) && op["request_id"])
+
+  defp apply_op_once(socket, op, request_id) do
+    op = stable_request_op(op, request_id)
+
+    case apply_ops(
+           socket,
+           [Map.drop(op, ["if_rev", "request_id"])],
+           request_id,
+           op["if_rev"]
+         ) do
+      {:ok, socket, receipt, outcome} ->
+        assign(socket, :last_save_result, %{
+          saved: true,
+          request_id: request_id,
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        })
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  defp apply_unidentified_op(socket, op) do
     cond do
       not writable?(socket) ->
-        refuse_save(socket, request_id)
+        refuse_save(socket, nil)
 
       not is_binary(socket.assigns[:slug]) ->
         socket
@@ -180,15 +215,13 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
         socket.assigns.slug
         |> Content.apply_paper_block_op(
-          Map.drop(op, ["if_rev", "request_id"]),
+          Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
           socket.assigns[:dataset],
           ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
         )
-        |> handle_result(socket, request_id)
+        |> handle_result(socket, nil)
     end
   end
-
-  def apply_op(socket, op), do: failed_save(socket, is_map(op) && op["request_id"])
 
   @doc """
   Apply an ORDERED batch of ops atomically through
@@ -289,7 +322,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           %{"op" => "append-block", "block" => new}
       end
 
-    apply_op(socket, write_meta(op, params))
+    apply_op(socket, write_meta(server_minted_block(op), params))
   end
 
   def add_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])
@@ -385,7 +418,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
               %{"op" => "append-block", "block" => block}
           end
 
-        apply_op(socket, write_meta(op, params))
+        apply_op(socket, write_meta(server_minted_block(op), params))
     end
   end
 
@@ -402,7 +435,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       |> maybe_put_field_name(params)
       |> maybe_merge_callout_shortcut(type, params)
 
-    apply_op(socket, write_meta(Shared.slash_insert_op(params["afterId"], block), params))
+    apply_op(
+      socket,
+      write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], block)), params)
+    )
   end
 
   def slash_insert(socket, params),
@@ -591,6 +627,29 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     op
     |> Map.put("if_rev", params["if_rev"])
     |> Map.put("request_id", params["request_id"])
+  end
+
+  # Structural handlers mint block ids before they reach this seam. A lost
+  # acknowledgement rebuilds that op on retry, so bind the minted id to the
+  # stable request id before the exact-once facade fingerprints the payload.
+  defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
+    op
+    |> Map.delete(@server_minted_block)
+    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+  end
+
+  defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
+
+  defp server_minted_block(op), do: Map.put(op, @server_minted_block, true)
+
+  defp request_block_id(request_id) do
+    suffix =
+      request_id
+      |> then(&:crypto.hash(:sha256, &1))
+      |> binary_part(0, 9)
+      |> Base.url_encode64(padding: false)
+
+    "b-" <> suffix
   end
 
   defp constraint_flash(message) when is_binary(message),

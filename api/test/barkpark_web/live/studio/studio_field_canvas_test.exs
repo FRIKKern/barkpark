@@ -95,12 +95,13 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
     doc: doc
   } do
     id = DraftId.published_id(doc.doc_id)
-    {:ok, _view, html} = live(conn, studio_url(ws, proj, id))
+    {:ok, view, html} = live(conn, studio_url(ws, proj, id))
+    opened_doc = :sys.get_state(view.pid).socket.assigns.editor_doc
 
     assert html =~ ~s(data-test-id="field-canvas")
     assert html =~ ~s(data-field="description")
-    assert html =~ ~s(data-paper-doc-key="#{@dataset}:publication:#{id}")
-    assert html =~ ~s(data-document-rev="#{doc.rev}")
+    assert html =~ ~s(data-paper-doc-key="#{@dataset}:#{opened_doc.type}:#{opened_doc.doc_id}")
+    assert html =~ ~s(data-document-rev="#{opened_doc.rev}")
     assert html =~ ~r{data-canvas-blocks="[^"]*Seed[^"]*"}
     assert html =~ ~r{data-canvas-vocabulary="[^"]*blockquote[^"]*"}
     refute html =~ "bp-rt-wrap-description"

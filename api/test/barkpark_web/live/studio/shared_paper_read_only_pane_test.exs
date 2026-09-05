@@ -60,8 +60,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.PaperReadOnlyPaneTest do
     # Reaching the write path means calling Content, which needs a DB
     # connection this async, sandbox-less test never checked out. The raise IS
     # the evidence that the paper leg was not swallowed by the new guard.
-    assert_raise DBConnection.OwnershipError, fn -> Paper.paper_pane_op(paper_socket(), @op) end
-    assert_raise DBConnection.OwnershipError, fn -> Paper.paper_ops(paper_socket(), [@op]) end
+    assert_raise DBConnection.OwnershipError, fn ->
+      Paper.paper_pane_op(paper_socket(), Map.put(@op, "if_rev", 0))
+    end
+
+    assert_raise DBConnection.OwnershipError, fn ->
+      Paper.paper_ops(paper_socket(), [@op], Ecto.UUID.generate(), 0)
+    end
   end
 
   test "a pane with no editor_type (paper-only legacy assigns) is NOT treated as read-only" do

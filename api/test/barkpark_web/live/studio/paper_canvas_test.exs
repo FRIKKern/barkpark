@@ -1843,14 +1843,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       }
     end
 
-    test "an unknown slot kind is a calm no-op (no op emitted, socket unchanged)" do
+    test "an unknown slot kind replies unsaved without changing the socket" do
       s0 = materialize_socket([%{"id" => "t", "role" => "title", "locked" => true}])
-      assert {:noreply, ^s0} = P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
+
+      assert {:reply, %{saved: false, request_id: nil}, ^s0} =
+               P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
     end
 
     test "a malformed payload is a safe no-op" do
       s0 = materialize_socket([])
-      assert {:noreply, ^s0} = P.paper_materialize_slot(%{}, s0)
+      assert {:reply, %{saved: false, request_id: nil}, ^s0} = P.paper_materialize_slot(%{}, s0)
     end
   end
 
