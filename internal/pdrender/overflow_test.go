@@ -111,6 +111,8 @@ func TestTrueColorNoOverflow(t *testing.T) {
 			}
 			ctx := RenderCtx{Width: w, Theme: DarkTheme(), Profile: TrueColor}
 			out := reg.RenderDoc(blocks, ctx)
+			// Shared blind-spot guard (unknown_block_guard_test.go).
+			assertNoUnknownBlock(t, fx, ansi.Strip(out))
 			for i, line := range strings.Split(out, "\n") {
 				if wd := ansi.StringWidth(line); wd > w {
 					t.Errorf("TrueColor %s w%d: line %d visible width %d > %d: %q",

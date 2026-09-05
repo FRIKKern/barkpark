@@ -138,9 +138,7 @@ func TestSheetGoldenParityRender(t *testing.T) {
 	ctx := RenderCtx{Width: 200, Theme: DarkTheme(), Profile: NoColor}
 	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
 
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("sheet embed fell through to the unknown-block box:\n%s", out)
-	}
+	assertNoUnknownBlock(t, "sheet-golden-parity.json", out)
 
 	// The snapshot is small and Width 200 is generous — the grid must NOT
 	// report truncation (that note only appears for a position-cap clip).

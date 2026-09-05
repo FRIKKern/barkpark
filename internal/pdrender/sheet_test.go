@@ -205,9 +205,7 @@ func TestSheetEmbedBlock(t *testing.T) {
 	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
 	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
 
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("sheet embed fell through to the unknown-block box:\n%s", out)
-	}
+	assertNoUnknownBlock(t, "sheet embed snapshot", out)
 	// Head + every anchor value renders (merged range shows its anchor value).
 	for _, want := range []string{"METRIC", "Revenue", "1200", "3.5", "Active?", "TRUE"} {
 		if !strings.Contains(out, want) {

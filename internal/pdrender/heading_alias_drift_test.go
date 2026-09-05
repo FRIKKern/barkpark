@@ -39,9 +39,7 @@ func TestHeadingAliasesRenderTheLiveDriftedBlocks(t *testing.T) {
 	out := renderAliasBlock(t, Block{Type: "h1", Attrs: map[string]any{
 		"level": 1, "text": "The manifest goes brief",
 	}})
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("h1 still unknown-boxes: %q", out)
-	}
+	assertNoUnknownBlock(t, "heading alias h1", out)
 	// Level 1 is the only level that uppercases and draws a hairline rule, so it
 	// is what proves the level actually reached the heading renderer.
 	if !strings.Contains(out, "THE MANIFEST GOES BRIEF") {
@@ -101,9 +99,7 @@ func TestOrderedListAliasNumbersItsItems(t *testing.T) {
 			[]any{map[string]any{"type": "text", "value": "second point"}},
 		},
 	}})
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("ordered-list still unknown-boxes: %q", out)
-	}
+	assertNoUnknownBlock(t, "heading alias ordered-list", out)
 	for _, want := range []string{"1.", "2.", "first point", "second point"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ordered-list missing %q: %q", want, out)
