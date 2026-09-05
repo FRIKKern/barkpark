@@ -81,6 +81,8 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 
 **Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2).
 
+**`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
+
 ### Mutation kinds
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
