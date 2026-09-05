@@ -8,9 +8,14 @@ defmodule Barkpark.Tenancy.Workspace do
   Use `Barkpark.Tenancy.delete_workspace/1`. It is the canonical
   workspace-delete path and is the ONLY safe entry point:
 
-    * walks every `media_files` row and fires `Media.delete_file/1`
-      (blob removal from object storage + CDN purge + `:after_media_delete`
-      plugin hook) BEFORE the workspace row is deleted;
+    * walks every `media_files` row and fires
+      `Media.delete_file(id, workspace_id: ..., where_used: :cascade)` (blob
+      removal from object storage + CDN purge + `:after_media_delete` plugin
+      hook) BEFORE the workspace row is deleted. `:cascade` is the honest
+      policy here and not a shortcut: the workspace that owns the blob owns
+      every document that could reference it, and both are going away in the
+      same operation. `Media.delete_file/2` has NO default `:where_used`;
+      arity-1 no longer exists;
     * walks every `documents` row and fires `Content.delete_document/1`
       (`:before_delete` / `:after_delete` plugin hooks);
     * THEN `Repo.delete(workspace)`, letting Postgres CASCADE prune the

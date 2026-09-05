@@ -686,9 +686,7 @@ defmodule Barkpark.Media do
   connection without telling us, and even THAT may not escape as an unmatched
   tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
-  def delete_file(id, opts) when is_list(opts) do
-    _policy = where_used_policy!(opts)
-
+  def delete_file(id, opts \\ []) do
     case get_file(id, opts) do
       {:ok, file} ->
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
@@ -744,32 +742,6 @@ defmodule Barkpark.Media do
 
       error ->
         error
-    end
-  end
-
-  # The forced decision. `Keyword.fetch/2` (not `get/3`) is the whole point: a
-  # missing key is a RAISE at the call, not a silent `:cascade`. An unknown value
-  # raises too — `where_used: true` or `where_used: "guard"` from a hurried new
-  # caller must not read as "guarded".
-  defp where_used_policy!(opts) do
-    case Keyword.fetch(opts, :where_used) do
-      {:ok, policy} when policy in [:guard, :cascade] ->
-        policy
-
-      {:ok, other} ->
-        raise ArgumentError,
-              "Media.delete_file/2 got where_used: #{inspect(other)} — it must be " <>
-                ":guard (this call site consults Barkpark.Media.WhereUsed first) or " <>
-                ":cascade (the referring content is being torn down too)."
-
-      :error ->
-        raise ArgumentError,
-              "Media.delete_file/2 requires a :where_used policy and has NO default. " <>
-                "Pass where_used: :guard if this call site consults " <>
-                "Barkpark.Media.WhereUsed before deleting, or where_used: :cascade if " <>
-                "the referring content is being torn down in the same operation. " <>
-                "Deleting a blob a published document references blanks a live page " <>
-                "behind a 200 receipt, irreversibly."
     end
   end
 
