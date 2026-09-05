@@ -115,6 +115,24 @@ defmodule Barkpark.Content.Writer do
   @spec check_document_schema(String.t(), map(), String.t()) ::
           :ok | {:error, {:schema_validation_failed, map()}}
   def check_document_schema(type, attrs, dataset) when is_binary(type) and is_binary(dataset) do
+    enforce? = Barkpark.Content.Validation.enforce?(dataset)
+
+    # ADVISE with nobody collecting: the validation would cost a `get_schema`
+    # read to produce an advisory that `Warnings.put/3` then DROPS on the floor
+    # (the queue is only open when a controller called `reset/0`). That is the
+    # exact case `Warnings.listening?/0` exists for. NOT a fail-open — under
+    # ENFORCE the check always runs, and in ADVISE the skipped work has no
+    # observable output by construction.
+    if enforce? or Barkpark.Content.Warnings.listening?() do
+      do_check_document_schema(type, attrs, dataset, enforce?)
+    else
+      :ok
+    end
+  end
+
+  def check_document_schema(_type, _attrs, _dataset), do: :ok
+
+  defp do_check_document_schema(type, attrs, dataset, enforce?) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
 
@@ -123,7 +141,7 @@ defmodule Barkpark.Content.Writer do
         :ok
 
       {:error, errors} when is_map(errors) and map_size(errors) > 0 ->
-        if Barkpark.Content.Validation.enforce?(dataset) do
+        if enforce? do
           {:error, {:schema_validation_failed, errors}}
         else
           emit_schema_advisories(type, attrs, errors)
@@ -135,12 +153,10 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  def check_document_schema(_type, _attrs, _dataset), do: :ok
-
   # One advisory per offending FIELD, each naming the field and every rule it
-  # broke — the validator's own message text ("is required", "must be at least
-  # 3 characters", "does not match required format") is the rule name a caller
-  # can act on. Severity "warning" (the dedup wall's advise band), never an
+  # broke — the validator's own message text ("Required", "Must be at least 3
+  # characters", "Must be at most 80 characters", "Does not match required
+  # format") is the rule name a caller can act on. Severity "warning" (the dedup wall's advise band), never an
   # error: promotion is charter-forbidden (D5). `Warnings.put/3` drops silently
   # when no collector opened the queue, so a Studio LiveView calling the writer
   # directly never grows one.

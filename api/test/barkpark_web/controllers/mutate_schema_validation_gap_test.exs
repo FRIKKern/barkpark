@@ -132,7 +132,7 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       assert warning["message"] =~ "slug",
              "the advisory must name the offending FIELD, got #{inspect(warning["message"])}"
 
-      assert warning["message"] =~ "required",
+      assert String.downcase(warning["message"]) =~ "required",
              "the advisory must name the RULE it broke, got #{inspect(warning["message"])}"
 
       assert warning["message"] =~ type, "the advisory names the type it is about"
