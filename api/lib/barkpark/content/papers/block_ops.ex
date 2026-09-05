@@ -27,7 +27,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
-  alias Barkpark.Idempotency
+  alias Barkpark.Content.Papers.IdempotencyPort
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
@@ -817,9 +817,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
       key_hash = paper_ops_key_hash(doc, request_id, principal_key)
       exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
+      # Resolved ONCE, outside the transaction: claim and complete must reach
+      # the same store even if the binding is swapped mid-request.
+      idempotency = IdempotencyPort.impl()
 
       Repo.transaction(fn ->
-        case Idempotency.claim_exact(key_hash, exact_scope) do
+        case idempotency.claim_exact(key_hash, exact_scope) do
           :claimed ->
             maybe_after_idempotency_claim(opts)
 
@@ -829,7 +832,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
                   {:ok, receipt, effects} ->
                     maybe_before_idempotency_complete(opts)
 
-                    case Idempotency.complete_exact(key_hash, exact_scope, receipt) do
+                    case idempotency.complete_exact(key_hash, exact_scope, receipt) do
                       :ok -> {:applied, receipt, effects}
                       {:error, reason} -> Repo.rollback(reason)
                     end

@@ -82,6 +82,14 @@ config :barkpark, :mail,
 
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
+# The dedup implementation the paper block-op write path reaches through
+# `Barkpark.Content.Papers.IdempotencyPort`. The binding lives HERE, not as an
+# `Application.get_env/3` default inside content: a module literal written in
+# the content tree is an alias reference the compiler records as a dependency,
+# and that edge (content>idempotency) is exactly what the Boundary gate
+# rejects. An unbound port raises at first use rather than falling back.
+config :barkpark, Barkpark.Content.Papers.IdempotencyPort, Barkpark.Idempotency
+
 config :barkpark, :rate_limits,
   read_per_minute: 300,
   write_per_minute: 60,

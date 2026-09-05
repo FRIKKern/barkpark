@@ -30,6 +30,12 @@ defmodule Barkpark.Idempotency do
   reservation is retryable.
   """
 
+  # The dedup interface the paper block-op write path declares. Content is a
+  # KERNEL concept and must not be reached FROM by name, so it owns the
+  # behaviour and this feature implements it — feature→kernel, the allowed
+  # direction on the dependency gradient the Boundary gate enforces.
+  @behaviour Barkpark.Content.Papers.IdempotencyPort
+
   import Ecto.Query
   require Logger
   alias Barkpark.Repo
