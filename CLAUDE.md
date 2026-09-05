@@ -30,6 +30,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | API/SDK | HTTP API contract | `docs/api-v1.md` |
 | API/SDK | auth / tokens | `docs/auth.md` |
 | API/SDK | tenancy / workspace / project / dataset scoping | `docs/contracts/tenancy.md` |
+| API/SDK | query filter / sort / projection / expand limits | `docs/contracts/query-surface-limits.md` |
 | API/SDK | webhooks / cache revalidation | `docs/contracts/webhook-realtime.md` |
 | API/SDK | consume from JS / Next.js | `docs/cards/js-sdk.md` |
 | Plugins/ONIX | build or modify a plugin | `docs/cards/plugins.md` |

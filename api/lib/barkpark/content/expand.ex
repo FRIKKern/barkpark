@@ -170,8 +170,20 @@ defmodule Barkpark.Content.Expand do
       # published-then-draft fallback the per-ref path did with a SECOND Repo.one
       # costs no extra query. `published_only` suppresses the draft twins so a
       # read-share can never leak a draft (unchanged guarantee).
+      # A stored reference may spell the DRAFT twin (`drafts.<id>`) — a client
+      # that copied an `_id` it read under `?perspective=drafts` writes exactly
+      # that. Resolve every id THROUGH its published form so the published twin
+      # is always a candidate, then let `pick_ref_doc/4` prefer it.
       fetch_ids =
-        if published_only, do: ids, else: ids ++ Enum.map(ids, &("drafts." <> &1))
+        if published_only do
+          Enum.map(ids, &Content.published_id/1)
+        else
+          Enum.flat_map(ids, fn id ->
+            published = Content.published_id(id)
+            [published, Content.draft_id(published)]
+          end)
+        end
+        |> Enum.uniq()
 
       docs_map = Content.get_documents_by_ids(fetch_ids, dataset, query_opts)
 
@@ -188,10 +200,25 @@ defmodule Barkpark.Content.Expand do
   # `resolve_ref/6` had. `get_document/4` filtered `type == ref_type`; the
   # TYPELESS batch does not, so re-apply that guard (`typed_doc/2`): a doc_id
   # whose row is another type resolves to nil, byte-identical to the old path.
+  #
+  # IDENTITY (Gyldendal #30). The precedence is applied to the id's PUBLISHED
+  # form, not to the id as stored. A reference spelled `drafts.<id>` used to
+  # resolve LITERALLY to the draft row, so `?expand=` inlined a published
+  # document under a `drafts.`-prefixed `_id` and every reference-equality
+  # filter written against the published id silently matched nothing. Reading
+  # `Content.published_id/1` first makes the published twin win whenever one
+  # exists; a genuinely unpublished target still falls back to its draft and
+  # keeps its draft identity, which is the honest answer for a real draft.
+  # For a reference already spelled as the published id this is byte-identical.
   defp pick_ref_doc(docs_map, id, ref_type, published_only) do
-    case typed_doc(Map.get(docs_map, id), ref_type) do
-      nil when not published_only -> typed_doc(Map.get(docs_map, "drafts." <> id), ref_type)
-      doc -> doc
+    published = Content.published_id(id)
+
+    case typed_doc(Map.get(docs_map, published), ref_type) do
+      nil when not published_only ->
+        typed_doc(Map.get(docs_map, Content.draft_id(published)), ref_type)
+
+      doc ->
+        doc
     end
   end
 
