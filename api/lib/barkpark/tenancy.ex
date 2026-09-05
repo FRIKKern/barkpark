@@ -276,13 +276,28 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Workspace, slug: @default_slug)
   end
 
-  @doc "Returns the Default Project under the Default Workspace, or nil."
+  @doc """
+  Returns the Default Project under the Default Workspace, or nil.
+
+  ONE round-trip. This used to call `get_default_workspace/0` first and then
+  `Repo.get_by(Project, workspace_id: ws_id, ...)`, which cost two queries for
+  a single answer — and `Plugs.AssignDefaultScope` calls BOTH functions on
+  every flat `/v1/*` request, so the workspace lookup was issued twice per
+  request (three queries for two rows). The join asks the same question in one
+  statement: the project slugged `default` whose workspace is slugged
+  `default`. Identical result for every input, including the pre-backfill DB
+  where either row is absent and the answer stays `nil`.
+  """
   @spec get_default_project() :: Project.t() | nil
   def get_default_project do
-    case get_default_workspace() do
-      nil -> nil
-      %Workspace{id: ws_id} -> Repo.get_by(Project, workspace_id: ws_id, slug: @default_slug)
-    end
+    Repo.one(
+      from(p in Project,
+        join: w in Workspace,
+        on: w.id == p.workspace_id,
+        where: w.slug == ^@default_slug and p.slug == ^@default_slug,
+        select: p
+      )
+    )
   end
 
   @doc """
