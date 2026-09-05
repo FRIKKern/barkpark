@@ -241,3 +241,11 @@ config :barkpark, Barkpark.Sites.DeployRunner, runner_mode: :port
 # ArgumentError, MatchError …) re-raises instead; infra errors still degrade.
 # Off everywhere else — prod keeps its fail-closed refusal rather than a 500.
 config :barkpark, dedup_raise_on_code_errors: true
+
+# Default Workspace / Default Project cache (Barkpark.Tenancy.DefaultScopeCache).
+# OFF in test: the Ecto sandbox rolls every test back, so an entry that survived
+# one test would hand the next a `%Workspace{}` whose row no longer exists — an
+# order-dependent suite that fails somewhere far from the cause. Tests that
+# exercise the cache turn it on for their own duration
+# (test/barkpark_web/capabilities_no_db_test.exs).
+config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
