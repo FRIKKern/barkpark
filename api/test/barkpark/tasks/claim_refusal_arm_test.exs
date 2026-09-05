@@ -63,7 +63,14 @@ defmodule Barkpark.Tasks.ClaimRefusalArmTest do
 
     content =
       Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open", "priority" => 0},
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open",
+          "priority" => 0
+        },
         extra_content
       )
 

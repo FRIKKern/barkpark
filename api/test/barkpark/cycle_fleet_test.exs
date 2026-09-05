@@ -554,7 +554,17 @@ defmodule Barkpark.CycleFleetTest do
           dataset: "production",
           title: "Cycle teardown task",
           status: "draft",
-          content: %{"kind" => "task", "lifecycle_status" => "open"},
+          content: %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          },
           rev: Ecto.UUID.generate(),
           workspace_id: workspace.id,
           project_id: project.id,
@@ -635,7 +645,17 @@ defmodule Barkpark.CycleFleetTest do
           dataset: "production",
           title: "Project teardown task",
           status: "draft",
-          content: %{"kind" => "task", "lifecycle_status" => "open"},
+          content: %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          },
           rev: Ecto.UUID.generate(),
           workspace_id: workspace.id,
           project_id: project.id,
@@ -3035,7 +3055,17 @@ defmodule Barkpark.CycleFleetTest do
               dataset: "production",
               title: "Cycle lock mutation task",
               status: "draft",
-              content: %{"kind" => "task", "lifecycle_status" => "open"},
+              content: %{
+                "kind" => "task",
+                "acceptance_criteria" => [
+                  %{
+                    "criterion" => "the fixture states its bar",
+                    "met" => true,
+                    "evidence" => "fixture"
+                  }
+                ],
+                "lifecycle_status" => "open"
+              },
               rev: Ecto.UUID.generate(),
               workspace_id: workspace.id,
               project_id: project.id,
@@ -3136,7 +3166,17 @@ defmodule Barkpark.CycleFleetTest do
               %{
                 "doc_id" => "attempt-lock-task-#{suffix}",
                 "title" => "Attempt lock mutation task",
-                "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+                "content" => %{
+                  "kind" => "task",
+                  "acceptance_criteria" => [
+                    %{
+                      "criterion" => "the fixture states its bar",
+                      "met" => true,
+                      "evidence" => "fixture"
+                    }
+                  ],
+                  "lifecycle_status" => "open"
+                }
               },
               "production",
               scope

@@ -74,7 +74,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
-  alias Barkpark.Content.{Document, DraftId, Scope}
+  alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
   alias Barkpark.Tasks.Criteria
@@ -815,89 +815,10 @@ defmodule Barkpark.Tasks.Close do
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
 
-  # The container exemptions, plus the precondition: a row that HAS acceptance
-  # criteria is D289's business, never this gate's.
-  defp close_artifact_exempt?(%Document{content: content} = doc) do
-    content = content || %{}
-
-    has_criteria?(content) or not task_kind?(content) or container_label?(content) or
-      has_children?(doc)
-  end
-
-  defp has_criteria?(content) do
-    case Map.get(content, "acceptance_criteria") do
-      list when is_list(list) -> list != []
-      _ -> false
-    end
-  end
-
-  # `Validation.kinds/0` is `~w(task)` — "task" is the ONLY kind a validated row
-  # can carry, so an ABSENT `kind` is a task ("Everything is a task", schema.ex),
-  # not an exemption. Reading a missing key as exempt would make this gate
-  # vacuous over every legacy row, which is the population it exists for.
-  defp task_kind?(content) do
-    case Map.get(content, "kind") do
-      nil -> true
-      kind when is_binary(kind) -> String.downcase(String.trim(kind)) == "task"
-      _ -> false
-    end
-  end
-
-  # Label matching is SEGMENT-wise on `:`, not substring. TASK-SYSTEM.md §5's own
-  # vocabulary is `phase:<goal|design|decision|build|verify>` plus the bare
-  # `decision` gate label, so `decision`, `phase:goal` and `kind:decision` all
-  # exempt — while `proj:goalkeeper-rewrite` does NOT. A substring rule would
-  # hand that row a SILENT permit, and a silent permit is the failure mode this
-  # whole family of gates exists to end; a false refusal is loud and recoverable.
-  defp container_label?(content) do
-    content
-    |> Map.get("labels")
-    |> List.wrap()
-    |> Enum.any?(fn
-      label when is_binary(label) ->
-        label
-        |> String.split(":")
-        |> Enum.any?(&(String.downcase(String.trim(&1)) in ~w(decision goal)))
-
-      _ ->
-        false
-    end)
-  end
-
-  # Does anybody name this row as their parent? Same prefix-agnostic predicate
-  # `Params.maybe_filter_parent_id/2` and `batch_child_counts/2` match on
-  # (`regexp_replace(…, '^drafts\.', '')`), so this agrees with the `child_count`
-  # a reader sees on `bp task get <id>`. Scoped to the ROW'S OWN
-  # workspace/project/dataset — an unscoped existence check would let another
-  # tenant's child hand this row an exemption it did not earn.
-  #
-  # Deliberately the LAST predicate in `close_artifact_exempt?/1`: it is the only
-  # one that touches the DB, and `or` short-circuits, so a row with criteria, a
-  # non-task kind, or a container label never pays for it.
-  defp has_children?(%Document{doc_id: doc_id} = doc) when is_binary(doc_id) do
-    key = DraftId.published_id(doc_id)
-
-    from(d in Document,
-      where: d.type == "task",
-      where: d.dataset == ^doc.dataset,
-      where: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) == ^key
-    )
-    |> scope_children(doc)
-    |> Repo.exists?()
-  end
-
-  defp has_children?(_doc), do: false
-
-  defp scope_children(query, %Document{workspace_id: nil, project_id: nil}), do: query
-
-  defp scope_children(query, %Document{workspace_id: ws, project_id: nil}),
-    do: from(d in query, where: d.workspace_id == ^ws)
-
-  defp scope_children(query, %Document{workspace_id: nil, project_id: pr}),
-    do: from(d in query, where: d.project_id == ^pr)
-
-  defp scope_children(query, %Document{workspace_id: ws, project_id: pr}),
-    do: from(d in query, where: d.workspace_id == ^ws and d.project_id == ^pr)
+  # The container exemptions live in `Tasks.CriteriaExemption` — ONE definition,
+  # because the claim-time gate (task-9554c64bf51a0f81) consults the same
+  # question and two lists that must agree are a divergence waiting to happen.
+  defdelegate close_artifact_exempt?(doc), to: Barkpark.Tasks.CriteriaExemption, as: :exempt?
 
   # ── What counts as an artifact ───────────────────────────────────────────
   #

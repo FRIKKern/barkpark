@@ -56,7 +56,21 @@ defmodule BarkparkWeb.TasksLandedTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+          "content" =>
+            Map.merge(
+              %{
+                "kind" => "task",
+                "acceptance_criteria" => [
+                  %{
+                    "criterion" => "the fixture states its bar",
+                    "met" => true,
+                    "evidence" => "fixture"
+                  }
+                ],
+                "lifecycle_status" => "open"
+              },
+              content_extra
+            )
         },
         @dataset,
         scope

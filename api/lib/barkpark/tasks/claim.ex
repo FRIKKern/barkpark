@@ -21,6 +21,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias Barkpark.Tasks.CriteriaExemption
   alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
@@ -103,6 +104,7 @@ defmodule Barkpark.Tasks.Claim do
             else
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- check_ready_for_targeted_claim(doc),
+                   :ok <- check_criteria_stated(doc, opts),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
                 do_claim(doc, worker_id, resources, opts)
@@ -193,6 +195,49 @@ defmodule Barkpark.Tasks.Claim do
     case Repo.one(query) do
       nil -> {:error, :not_found}
       %Document{} = doc -> {:ok, doc}
+    end
+  end
+
+  # ── THE CLAIM-TIME CRITERIA DOOR (task-9554c64bf51a0f81) ─────────────────
+  #
+  # A row with zero acceptance criteria is one whose done state can be attested
+  # ONLY by artifact and never by criterion. The artifact says something
+  # landed; it cannot say what the row was FOR.
+  #
+  # The close door already refuses that (`check_close_artifact/5`), and by then
+  # it is too late BY CONSTRUCTION: the work is finished, so the criteria that
+  # would have defined success get written after the fact by whoever is trying
+  # to get the row shut, if they get written at all. At CLAIM time they still
+  # SHAPE the work. That is the whole argument for a second door, and it does
+  # not weaken the first.
+  #
+  # WHY A REFUSAL AND NOT A WARNING. The platform already ran that experiment:
+  # `Plugins.Tasks.warn_if_create_zero/1` is a soft `Logger.warning` on a
+  # zero-criteria task, it fired on 9 of 11 births and changed nothing, because
+  # its only reader is the server journal (close.ex records this verbatim). A
+  # second warning would be the same instrument aimed at the same blind spot.
+  # So this refuses in the same D288/D289 idiom the sibling gate uses: refuse
+  # UNLESS you say why on the record, never a wall.
+  #
+  # A RENEWAL IS NEVER REFUSED. This sits only in the non-renewal branch: a
+  # worker re-claiming a row it already holds is recovering a lease after a
+  # fence bump, and refusing that would strand live work behind a paperwork
+  # gate. The door belongs where work STARTS.
+  #
+  # The exemptions come from `Tasks.CriteriaExemption`, the same definition the
+  # close door reads, so the two cannot drift about what a container is.
+  defp check_criteria_stated(%Document{} = doc, opts) do
+    cond do
+      CriteriaExemption.exempt?(doc) -> :ok
+      override_given?(opts) -> :ok
+      true -> {:error, :criteria_unstated}
+    end
+  end
+
+  defp override_given?(opts) do
+    case Keyword.get(opts, :criteria_unstated_override) do
+      reason when is_binary(reason) -> String.trim(reason) != ""
+      _ -> false
     end
   end
 

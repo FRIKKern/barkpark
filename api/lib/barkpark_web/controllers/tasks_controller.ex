@@ -688,6 +688,11 @@ defmodule BarkparkWeb.TasksController do
           |> Params.put_opt(:caller_token_id, caller_token_id(conn))
           |> Keyword.merge(Params.execution_policy_opts(params))
           |> Keyword.merge(scope_opts(conn))
+          |> Params.put_opt(
+            :criteria_unstated_override,
+            params["criteria_unstated_override"] ||
+              get_in(params, ["set", "criteria_unstated_override"])
+          )
 
         # Snapshot the rail BEFORE the claim so rail_changed compares
         # observed_rail_rev against the rail the worker actually saw (not the
@@ -749,6 +754,20 @@ defmodule BarkparkWeb.TasksController do
             conn
             |> put_status(:conflict)
             |> json(not_ready_arm(pre_task, worker_id))
+
+          # task-9554c64bf51a0f81: the refusal must carry its own remedy. ~30
+          # agents drive this verb daily, and a refusal that does not say what
+          # to type costs every one of them a round trip — which is what turns a
+          # good gate into a resented one.
+          {:error, :criteria_unstated} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{
+              ok: false,
+              reason: "criteria_unstated",
+              task: doc_id,
+              message: Params.criteria_unstated_message(doc_id, worker_id)
+            })
 
           {:error, reason} ->
             conn

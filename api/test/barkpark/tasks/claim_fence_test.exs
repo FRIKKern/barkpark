@@ -45,7 +45,13 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
   end
 
   defp mk_task!(doc_id, scope) do
-    content = %{"kind" => "task", "lifecycle_status" => "open"}
+    content = %{
+      "kind" => "task",
+      "acceptance_criteria" => [
+        %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+      ],
+      "lifecycle_status" => "open"
+    }
 
     {:ok, doc} =
       Content.create_document(
