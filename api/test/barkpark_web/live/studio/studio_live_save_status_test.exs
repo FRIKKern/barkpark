@@ -116,7 +116,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       {:reply, %{saved: true}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
-          %{"block_id" => "b-intro", "text" => "Edited body."},
+          %{
+            "block_id" => "b-intro",
+            "text" => "Edited body.",
+            "if_rev" => socket.assigns.paper_rev
+          },
           socket
         )
 
@@ -132,7 +136,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       {:reply, %{saved: false}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
-          %{"block_id" => "b-intro", "text" => "Edited body."},
+          %{
+            "block_id" => "b-intro",
+            "text" => "Edited body.",
+            "if_rev" => socket.assigns.paper_rev
+          },
           socket
         )
 
@@ -148,6 +156,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       op = %{
         "op" => "patch-block",
         "id" => "b-intro",
+        "if_rev" => socket.assigns.paper_rev,
         "patch" => %{
           "content" => [%{"type" => "text", "value" => "Direct paper op."}]
         }
@@ -169,6 +178,52 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       assert stored_intro_text() == nil
     end
 
+    test "a stale Studio editor receives a correlated conflict and can explicitly rebase", %{
+      socket: socket
+    } do
+      initial_rev = socket.assigns.paper_rev
+
+      first = %{
+        "op" => "patch-block",
+        "id" => "b-intro",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "First Studio tab"}]},
+        "request_id" => "studio-first",
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply, %{saved: true, rev: committed_rev}, saved_socket} =
+               StudioLive.handle_event("paper-op", first, socket)
+
+      assert saved_socket.assigns.paper_rev == committed_rev
+
+      stale = %{
+        first
+        | "patch" => %{"content" => [%{"type" => "text", "value" => "Stale Studio tab"}]},
+          "request_id" => "studio-stale"
+      }
+
+      assert {:reply,
+              %{
+                saved: false,
+                request_id: "studio-stale",
+                conflict: true,
+                current_rev: ^committed_rev
+              }, conflicted_socket} = StudioLive.handle_event("paper-op", stale, socket)
+
+      assert stored_intro_text() == "First Studio tab"
+
+      rebased = %{
+        stale
+        | "request_id" => "studio-rebased",
+          "if_rev" => conflicted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true, request_id: "studio-rebased"}, _socket} =
+               StudioLive.handle_event("paper-op", rebased, conflicted_socket)
+
+      assert stored_intro_text() == "Stale Studio tab"
+    end
+
     test "paper-op and paper-block-autosave reject malformed payloads with saved false", %{
       socket: socket
     } do
@@ -181,6 +236,30 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       assert stored_intro_text() == "Original body."
     end
 
+    test "structural mutation handlers return correlated false for malformed payloads", %{
+      socket: socket
+    } do
+      for event <- [
+            "paper-edit-block",
+            "paper-add-block",
+            "paper-delete-block",
+            "paper-move-block",
+            "paper-move-block-to",
+            "paper-materialize-slot",
+            "paper-slash-insert",
+            "paper-callout-fold",
+            "paper-add-property",
+            "paper-unbind-property"
+          ] do
+        request_id = "malformed-#{event}"
+
+        assert {:reply, %{saved: false, request_id: ^request_id}, _socket} =
+                 StudioLive.handle_event(event, %{"request_id" => request_id}, socket)
+      end
+
+      assert stored_intro_text() == "Original body."
+    end
+
     test "a correlated component save persists and acknowledges its exact request", %{
       view: view
     } do
@@ -189,12 +268,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
         %{
           "op" => "patch-block",
           "id" => "b-intro",
+          "if_rev" => socket_of(view).assigns.paper_rev,
           "patch" => %{
             "content" => [%{"type" => "text", "value" => "Correlated Studio edit."}]
           }
         },
         "studio-field-accepted"
       })
+
+      render(view)
 
       assert_push_event(view, "bp:paper-field-save-result", %{
         request_id: "studio-field-accepted",
@@ -215,12 +297,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
         %{
           "op" => "patch-block",
           "id" => "b-intro",
+          "if_rev" => socket_of(view).assigns.paper_rev,
           "patch" => %{
             "content" => [%{"type" => "text", "value" => "Must not land."}]
           }
         },
         "studio-field-failed"
       })
+
+      render(view)
 
       assert_push_event(view, "bp:paper-field-save-result", %{
         request_id: "studio-field-failed",
@@ -237,6 +322,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
                  "paper-ops",
                  %{
                    "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
                    "ops" => [
                      %{
                        "op" => "patch-block",
@@ -269,6 +355,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
                  "paper-ops",
                  %{
                    "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
                    "ops" => [
                      %{
                        "op" => "patch-block",
@@ -332,6 +419,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
 
       params = %{
         "request_id" => request_id,
+        "if_rev" => socket.assigns.paper_rev,
         "ops" => [
           %{
             "op" => "append-block",
@@ -415,6 +503,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
                  "paper-ops",
                  %{
                    "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
                    "ops" => [
                      %{
                        "op" => "append-block",

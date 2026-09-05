@@ -1706,10 +1706,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-doc-beta-shell">
                   <.paper_block_editor
                     slug={@editor_doc.doc_id}
+                    doc_type={@editor_doc.type}
                     blocks={@editor_blocks}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
                     descriptors={beta_all_descriptors(@editor_schema, @editor_blocks)}
-                    paper_rev={0}
+                    document_rev={@editor_doc.rev}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
                     scope_prefix={Map.get(assigns, :scope_prefix, "")}

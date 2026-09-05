@@ -28,6 +28,15 @@ const calls = [];
 const replies = [];
 const settleNext = (reply, requestId) => {
   const pending = replies.shift();
+  if (Array.isArray(reply) && pending.payload?.request_id) {
+    reply = reply.map((result) => result?.value?.reply ? {
+      ...result,
+      value: { ...result.value, reply: {
+        ...result.value.reply,
+        request_id: requestId === undefined ? pending.payload.request_id : requestId,
+      } },
+    } : result);
+  }
   if (
     pending.payload?.request_id && !Array.isArray(reply) && reply != null &&
     typeof reply === 'object'
@@ -205,11 +214,11 @@ structuralEditor.innerHTML = '<div data-edit-block-id="a"><span data-drag-grip d
 window.document.querySelector('main').append(structuralEditor);
 const structuralCalls = [];
 const sortable = {...hooks.BarkparkPaperSortable, el:structuralEditor,
-  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({}); },
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id}); },
 };
 sortable.mounted();
 const contextMenu = {...hooks.BarkparkPaperContextMenu, el:structuralEditor.querySelector('#ctx-host'),
-  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({}); },
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id}); },
 };
 contextMenu.mounted();
 
@@ -261,7 +270,10 @@ assert.equal(nativeFallbackChanges, 0,
 calls.length = 0;
 click();
 assert.deepEqual(calls, ['paper-block-autosave']);
-assert.deepEqual(JSON.parse(JSON.stringify(replies[0].payload)), {block_id:'fallback-1', text:'Final fallback text'});
+assert.deepEqual(JSON.parse(JSON.stringify({
+  block_id: replies[0].payload.block_id,
+  text: replies[0].payload.text,
+})), {block_id:'fallback-1', text:'Final fallback text'});
 settleNext([{status:'fulfilled', value:{reply:{}}}]);
 await tick();
 assert.deepEqual(calls, ['paper-block-autosave'], 'fallback forms require explicit save acknowledgement');

@@ -979,6 +979,26 @@ class BpPaperCanvas extends HTMLElement {
     );
   }
 
+  // Explicit conflict resolution seam. Normal echoes never erase newer local
+  // edits; this path is reserved for the user's deliberate "Use latest" action.
+  resolveConflictWithServerBlocks(blocks) {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    this._inflightOps = null;
+    this._dirtyWhileInflight = false;
+    this._awaitingOwnEchoes = [];
+    this._clearPendingServerBlocks();
+    const next = Array.isArray(blocks) ? blocks : [];
+    this._blocks = deepCloneBlocks(next);
+    if (!this._editor) return;
+    this._programmaticApply = true;
+    try {
+      this._applyExternalContent(next);
+    } finally {
+      this._programmaticApply = false;
+    }
+  }
+
   _scheduleEmit() {
     if (!this._editable) return; // read mode emits no ops
     if (this._debounceTimer) clearTimeout(this._debounceTimer);

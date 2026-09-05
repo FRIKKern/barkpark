@@ -360,6 +360,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :dataset, :string, default: "production"
   attr :validation_errors, :map, default: %{}
   attr :parent_assigns, :map, default: %{}
+  attr :doc_key, :string, default: "doc"
+  attr :doc_type, :string, default: "document"
+  attr :document_rev, :string, default: nil
 
   def studio_field_renderer(assigns) do
     ~H"""
@@ -381,7 +384,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
-            doc_key={editor_doc_key(@parent_assigns)}
+            doc_key={@doc_key}
+            doc_type={@doc_type}
+            document_rev={@document_rev}
           />
         <% end %>
         <%= if onix = onix_element(@field) do %>
@@ -413,18 +418,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
-            doc_key={editor_doc_key(@parent_assigns)}
+            doc_key={@doc_key}
+            doc_type={@doc_type}
+            document_rev={@document_rev}
           />
         <% end %>
       </.editor_field>
     <% end %>
     """
   end
-
-  # The open document's id for keying per-field canvases (see FieldInputs
-  # `doc_key`); "doc" when no document is open (a render without one).
-  defp editor_doc_key(%{editor_doc: %{doc_id: id}}) when is_binary(id), do: id
-  defp editor_doc_key(_), do: "doc"
 
   # v2 structural field types own their own title via <fieldset><legend>.
   # Routing them through `editor_field` would render the same title twice
@@ -661,6 +663,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     dataset={@dataset}
                     validation_errors={@validation_errors}
                     parent_assigns={@parent_assigns}
+                    doc_key={@editor_doc.doc_id}
+                    doc_type={@editor_doc.type}
+                    document_rev={@editor_doc.rev}
                   />
                 <% end %>
               <% end %>

@@ -283,6 +283,15 @@ class BpPaperEditor extends HTMLElement {
     return Boolean(this._debounceTimer);
   }
 
+  // Explicit conflict resolution seam. The host calls this only after the user
+  // chooses "Use latest"; unlike a normal server echo it intentionally discards
+  // the pending local debounce before installing the authoritative block.
+  resolveConflictWithServerBlock(block) {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    this.block = block;
+  }
+
   // Read the initial block from the `block` JS property (object) first, then
   // fall back to a `data-block` attribute holding a JSON string.
   _readBlock() {

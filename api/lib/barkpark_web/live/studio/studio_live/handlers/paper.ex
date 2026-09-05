@@ -49,20 +49,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_edit_block(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
     patch = Blocks.build_block_patch(block, params)
-    {:noreply, Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})}
+
+    paper_reply(
+      Shared.paper_op(
+        socket,
+        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+      )
+    )
   end
+
+  def paper_edit_block(params, socket), do: failed_reply(socket, params)
 
   def paper_block_autosave(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
     patch = Blocks.build_block_patch(block, params)
 
     socket =
-      Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})
+      Shared.paper_op(
+        socket,
+        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+      )
 
-    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
+    paper_reply(socket)
   end
 
-  def paper_block_autosave(_params, socket), do: {:reply, %{saved: false}, socket}
+  def paper_block_autosave(params, socket), do: failed_reply(socket, params)
 
   # Persist a callout's native <details> fold state. The JS hook
   # (BarkparkCalloutFold) sends the post-toggle `collapsed` bool keyed by
@@ -73,13 +84,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_callout_fold(%{"block_id" => id} = params, socket) do
     collapsed = Map.get(params, "collapsed") == true
 
-    {:noreply,
-     Shared.paper_op(socket, %{
-       "op" => "patch-block",
-       "id" => id,
-       "patch" => %{"collapsed" => collapsed}
-     })}
+    paper_reply(
+      Shared.paper_op(
+        socket,
+        write_meta(
+          %{
+            "op" => "patch-block",
+            "id" => id,
+            "patch" => %{"collapsed" => collapsed}
+          },
+          params
+        )
+      )
+    )
   end
+
+  def paper_callout_fold(params, socket), do: failed_reply(socket, params)
 
   # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ────────────────
   #
@@ -250,7 +270,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   def paper_op(%{"op" => _} = op, socket) do
     socket = Shared.paper_op(socket, op)
-    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
+    paper_reply(socket)
   end
 
   def paper_op(_params, socket), do: {:reply, %{saved: false}, socket}
@@ -265,7 +285,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Shared.paper_ops(socket, ops, request_id) do
+    case Shared.paper_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
       {:ok, socket, receipt, outcome} ->
         {:reply,
          %{
@@ -276,7 +296,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
          }, socket}
 
       {:error, socket} ->
-        {:reply, %{saved: false, request_id: request_id}, socket}
+        reply = socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
+        {:reply, Map.put_new(reply, :request_id, request_id), socket}
     end
   end
 
@@ -378,8 +399,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           %{"op" => "append-block", "block" => new}
       end
 
-    {:noreply, Shared.paper_op(socket, op)}
+    paper_reply(Shared.paper_op(socket, write_meta(op, params)))
   end
+
+  def paper_add_block(params, socket), do: failed_reply(socket, params)
 
   @doc """
   pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
@@ -395,7 +418,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_materialize_slot(%{"kind" => kind} = params, socket) do
     case materialize_slot_block(kind) do
       nil ->
-        {:noreply, socket}
+        failed_reply(socket, params)
 
       block ->
         op =
@@ -407,11 +430,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               %{"op" => "append-block", "block" => block}
           end
 
-        {:noreply, Shared.paper_op(socket, op)}
+        paper_reply(Shared.paper_op(socket, write_meta(op, params)))
     end
   end
 
-  def paper_materialize_slot(_params, socket), do: {:noreply, socket}
+  def paper_materialize_slot(params, socket), do: failed_reply(socket, params)
 
   # The block a ghost slot materializes. Featured is a locked role:featured image
   # (the seeded featured block, now birthed on demand); ingress is an unlocked
@@ -440,10 +463,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_slash_insert(%{"type" => type, "fieldName" => fname} = params, socket)
       when is_binary(fname) and fname != "" do
     if Shared.expected_field_blocked?(socket, fname) do
-      {:noreply, put_flash(socket, :error, "That field is already at its limit.")}
+      socket
+      |> put_flash(:error, "That field is already at its limit.")
+      |> failed_reply(params)
     else
       new = Map.put(Blocks.default_block(type, Blocks.new_block_id()), "fieldName", fname)
-      {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(params["afterId"], new))}
+
+      paper_reply(
+        Shared.paper_op(
+          socket,
+          write_meta(Shared.slash_insert_op(params["afterId"], new), params)
+        )
+      )
     end
   end
 
@@ -458,35 +489,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       |> Blocks.default_block(id)
       |> Map.merge(Map.take(params, ["tone", "collapsible", "collapsed"]))
 
-    {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(params["afterId"], new))}
+    paper_reply(
+      Shared.paper_op(socket, write_meta(Shared.slash_insert_op(params["afterId"], new), params))
+    )
   end
 
   def paper_slash_insert(%{"type" => type} = params, socket) do
     new = Blocks.default_block(type, Blocks.new_block_id())
-    {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(params["afterId"], new))}
+
+    paper_reply(
+      Shared.paper_op(socket, write_meta(Shared.slash_insert_op(params["afterId"], new), params))
+    )
   end
 
-  def paper_delete_block(%{"id" => id}, socket) do
+  def paper_slash_insert(params, socket), do: failed_reply(socket, params)
+
+  def paper_delete_block(%{"id" => id} = params, socket) do
     # pdd-t2: a template-locked block can't be deleted. The controls are hidden
     # / disabled, so this only fires from a stale DOM or a crafted event — keep
     # it a calm no-op rather than a server-rejected op + error flash.
     if locked_block_id?(socket, id) do
-      {:noreply, socket}
+      failed_reply(socket, params)
     else
-      {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
+      paper_reply(
+        Shared.paper_op(socket, write_meta(%{"op" => "remove-block", "id" => id}, params))
+      )
     end
   end
+
+  def paper_delete_block(params, socket), do: failed_reply(socket, params)
 
   @doc """
   Bind an as-yet-unbound expected field: create a default block of the field's
   type, stamp its fieldName + label, and append — ONE op via Shared.paper_op
   (the paper_slash_insert pattern). projection.ex then re-projects content[name].
   """
-  def paper_add_property(%{"fieldName" => fname} = _params, socket)
+  def paper_add_property(%{"fieldName" => fname} = params, socket)
       when is_binary(fname) and fname != "" do
     cond do
       Shared.expected_field_blocked?(socket, fname) ->
-        {:noreply, put_flash(socket, :error, "That field is already at its limit.")}
+        socket
+        |> put_flash(:error, "That field is already at its limit.")
+        |> failed_reply(params)
 
       true ->
         case Enum.find(Shared.paper_all_descriptors(socket), fn d -> d.name == fname end) do
@@ -496,32 +540,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               |> Map.put("fieldName", fname)
               |> Map.put("label", label)
 
-            {:noreply, Shared.paper_op(socket, Shared.slash_insert_op(nil, new))}
+            paper_reply(
+              Shared.paper_op(socket, write_meta(Shared.slash_insert_op(nil, new), params))
+            )
 
           _ ->
-            {:noreply, put_flash(socket, :error, "Unknown property.")}
+            socket
+            |> put_flash(:error, "Unknown property.")
+            |> failed_reply(params)
         end
     end
   end
 
-  def paper_add_property(_params, socket), do: {:noreply, socket}
+  def paper_add_property(params, socket), do: failed_reply(socket, params)
 
   @doc """
   Unbind a property: patch-block clearing fieldName so the block becomes FREE
   (joins content["body"]). project/4 then drops the orphaned content[fieldName].
   """
-  def paper_unbind_property(%{"id" => id}, socket) when is_binary(id) and id != "" do
-    {:noreply,
-     Shared.paper_op(socket, %{
-       "op" => "patch-block",
-       "id" => id,
-       "patch" => %{"fieldName" => nil}
-     })}
+  def paper_unbind_property(%{"id" => id} = params, socket) when is_binary(id) and id != "" do
+    paper_reply(
+      Shared.paper_op(
+        socket,
+        write_meta(
+          %{
+            "op" => "patch-block",
+            "id" => id,
+            "patch" => %{"fieldName" => nil}
+          },
+          params
+        )
+      )
+    )
   end
 
-  def paper_unbind_property(_params, socket), do: {:noreply, socket}
+  def paper_unbind_property(params, socket), do: failed_reply(socket, params)
 
-  def paper_move_block(%{"id" => id, "dir" => dir}, socket) do
+  def paper_move_block(%{"id" => id, "dir" => dir} = params, socket) do
     # Match the displayed body order: the Properties panel renders FREE-only
     # blocks when it is active (Beta with expected fields); otherwise the body
     # shows ALL blocks (paper pane). Gate the same way so move-index never drifts.
@@ -532,8 +587,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
     idx = Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
 
-    {:noreply, Shared.paper_reorder(socket, blocks, idx, dir)}
+    paper_reply(Shared.paper_reorder(socket, blocks, idx, dir, params))
   end
+
+  def paper_move_block(params, socket), do: failed_reply(socket, params)
 
   def paper_move_block_to(%{"id" => id} = params, socket) do
     after_id =
@@ -553,7 +610,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
     cond do
       locked_block_id?(socket, id) ->
-        {:noreply, socket}
+        failed_reply(socket, params)
 
       locked_prefix != [] ->
         last_locked_id = locked_prefix |> List.last() |> Map.get("id")
@@ -565,20 +622,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
              do: last_locked_id,
              else: after_id
 
-        {:noreply,
-         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+        paper_reply(
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "move-block", "id" => id, "after" => after_id}, params)
+          )
+        )
 
       true ->
-        {:noreply,
-         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+        paper_reply(
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "move-block", "id" => id, "after" => after_id}, params)
+          )
+        )
     end
   end
+
+  def paper_move_block_to(params, socket), do: failed_reply(socket, params)
 
   # pdd-t2: whether the top-level block `id` is template-locked.
   defp locked_block_id?(socket, id) do
     socket
     |> Shared.paper_top_level_blocks()
     |> Enum.any?(fn b -> Map.get(b, "id") == id and Map.get(b, "locked") == true end)
+  end
+
+  defp paper_reply(socket),
+    do: {:reply, socket.assigns[:last_paper_save_result] || %{saved: false}, socket}
+
+  defp failed_reply(socket, params) do
+    request_id = if is_map(params), do: params["request_id"]
+    {:reply, %{saved: false, request_id: request_id}, socket}
+  end
+
+  defp write_meta(op, params) do
+    op
+    |> Map.put("if_rev", params["if_rev"])
+    |> Map.put("request_id", params["request_id"])
   end
 
   @doc """

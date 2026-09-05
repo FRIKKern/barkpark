@@ -294,14 +294,14 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   # parent so it can report the result after applying this exact operation.
   def handle_event(
         "inner-flush",
-        %{"request_id" => request_id, "values" => params},
+        %{"request_id" => request_id, "values" => params} = payload,
         socket
       )
       when is_map(params) do
     params = Map.drop(params, ["_target", "_csrf_token"])
     new_value = merge_change(socket.assigns.field_type, socket.assigns.value, params)
 
-    {:noreply, persist(socket, new_value, request_id)}
+    {:noreply, persist(socket, new_value, request_id, payload["if_rev"])}
   end
 
   # arrayOf structural op (add / remove / move_up / move_down) on THIS block's
@@ -320,7 +320,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
         _ -> list
       end
 
-    {:noreply, persist(socket, new_list, params["request_id"])}
+    {:noreply, persist(socket, new_list, params["request_id"], params["if_rev"])}
   end
 
   # Fall-through: a stale/forged phx event must not FunctionClauseError-crash
@@ -337,7 +337,9 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   # then notify the paper LiveView with a patch-block op carrying the new
   # value. The parent routes it through the canonical `paper_op/2` pipeline
   # (Content.apply_paper_block_op → persist + broadcast + re-sync).
-  defp persist(socket, new_value, request_id \\ nil) do
+  defp persist(socket, new_value, request_id \\ nil, if_rev \\ nil) do
+    if_rev = if_rev || socket.assigns[:if_rev]
+
     op = %{
       "op" => "patch-block",
       "id" => socket.assigns.block_id,
@@ -345,7 +347,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     }
 
     if request_id do
-      send(self(), {:paper_op, op, request_id})
+      send(self(), {:paper_op, Map.put(op, "if_rev", if_rev), request_id})
     else
       send(self(), {:paper_op, op})
     end

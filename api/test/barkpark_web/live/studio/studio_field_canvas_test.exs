@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
   alias Barkpark.Content.DraftId
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.StudioLive
 
   @dataset "production"
   @vocab %{
@@ -98,6 +99,8 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
 
     assert html =~ ~s(data-test-id="field-canvas")
     assert html =~ ~s(data-field="description")
+    assert html =~ ~s(data-paper-doc-key="#{@dataset}:publication:#{id}")
+    assert html =~ ~s(data-document-rev="#{doc.rev}")
     assert html =~ ~r{data-canvas-blocks="[^"]*Seed[^"]*"}
     assert html =~ ~r{data-canvas-vocabulary="[^"]*blockquote[^"]*"}
     refute html =~ "bp-rt-wrap-description"
@@ -115,6 +118,8 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
 
     render_hook(view, "field-block-ops", %{
       "field" => "description",
+      "request_id" => "field-canvas-save",
+      "if_rev" => current_document_rev(view),
       "ops" => [
         %{
           "op" => "append-block",
@@ -145,6 +150,8 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
     html =
       render_hook(view, "field-block-ops", %{
         "field" => "description",
+        "request_id" => "field-canvas-refused",
+        "if_rev" => current_document_rev(view),
         "ops" => [
           %{"op" => "append-block", "block" => %{"id" => "c", "type" => "code", "value" => "x"}}
         ]
@@ -157,4 +164,58 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
     {:ok, saved} = Content.get_document(DraftId.draft_id(id), "publication", @dataset, scope)
     assert [%{"id" => "p1"}] = saved.content["description"]["blocks"]
   end
+
+  test "a stale field canvas receives the current opaque revision and does not overwrite", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    doc: doc,
+    scope: scope
+  } do
+    id = DraftId.published_id(doc.doc_id)
+    {:ok, view, _html} = live(conn, studio_url(ws, proj, id))
+    stale_socket = :sys.get_state(view.pid).socket
+    initial_rev = stale_socket.assigns.editor_doc.rev
+
+    params = %{
+      "field" => "description",
+      "request_id" => "field-first",
+      "if_rev" => initial_rev,
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{"id" => "h-first", "type" => "heading", "level" => 2, "text" => "First"}
+        }
+      ]
+    }
+
+    assert {:reply, %{saved: true, rev: committed_rev}, _socket} =
+             StudioLive.handle_event("field-block-ops", params, stale_socket)
+
+    stale_params = %{
+      params
+      | "request_id" => "field-stale",
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{"id" => "h-stale", "type" => "heading", "level" => 2, "text" => "Stale"}
+          }
+        ]
+    }
+
+    assert {:reply,
+            %{
+              saved: false,
+              request_id: "field-stale",
+              conflict: true,
+              current_rev: ^committed_rev
+            }, _socket} = StudioLive.handle_event("field-block-ops", stale_params, stale_socket)
+
+    {:ok, saved} = Content.get_document(DraftId.draft_id(id), "publication", @dataset, scope)
+    ids = Enum.map(saved.content["description"]["blocks"], & &1["id"])
+    assert "h-first" in ids
+    refute "h-stale" in ids
+  end
+
+  defp current_document_rev(view), do: :sys.get_state(view.pid).socket.assigns.editor_doc.rev
 end

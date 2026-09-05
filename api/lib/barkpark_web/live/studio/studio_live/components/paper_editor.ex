@@ -100,6 +100,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # keeps the Beta document-editor call site (which passes none) unchanged.
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
+  attr(:document_rev, :string, default: nil)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
   attr(:scope_prefix, :string, default: "")
@@ -161,6 +162,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     assigns =
       assigns
+      |> assign(:paper_doc_key, "#{assigns.dataset}:#{assigns.doc_type}:#{assigns.slug}")
       |> assign(:bound_blocks, bound)
       |> assign(:free_blocks, free)
       |> assign(:last_index, length(free) - 1)
@@ -188,6 +190,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
       phx-hook="BarkparkPaperSortable"
+      data-paper-doc-key={@paper_doc_key}
+      data-paper-rev={@doc_type == "paper" && @paper_rev}
+      data-document-rev={@doc_type != "paper" && @document_rev}
     >
       <%!-- sup-w5 — server-truth write-halt mirror. `@paper_halt` is nil on a
             clean edit (nothing renders); a `{:error, {:halted, reason}}` write
@@ -231,6 +236,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         api_token_raw={@api_token_raw}
         scope_prefix={@scope_prefix}
         picker_browse={@picker_browse}
+        doc_type={@doc_type}
+        paper_rev={@paper_rev}
+        document_rev={@document_rev}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -271,6 +279,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 api_token_raw={@api_token_raw}
                 scope_prefix={@scope_prefix}
                 picker_browse={@picker_browse}
+                doc_key={@paper_doc_key}
+                paper_rev={@doc_type == "paper" && @paper_rev}
+                document_rev={@doc_type != "paper" && @document_rev}
               />
             <% {:seg, {:block, block, index}} -> %>
               <.edit_block
@@ -286,6 +297,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 scope_prefix={@scope_prefix}
                 picker_browse={@picker_browse}
                 task_previews={@task_previews}
+                doc_type={@doc_type}
+                paper_rev={@paper_rev}
+                document_rev={@document_rev}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -378,6 +392,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             api_token_raw={@api_token_raw}
             scope_prefix={@scope_prefix}
             picker_browse={@picker_browse}
+            doc_type={@doc_type}
+            paper_rev={@paper_rev}
+            document_rev={@document_rev}
           />
         </div>
       <% end %>
@@ -681,6 +698,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # additive. Rides to the canvas WC as data-constraints via the hook; the WC's
   # filterTransaction then vetoes a cardinality/relative-order violation calmly.
   attr(:constraints, :string, default: nil)
+  attr(:doc_key, :string, required: true)
+  attr(:paper_rev, :any, default: nil)
+  attr(:document_rev, :string, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
@@ -698,6 +718,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-picker-browse={@picker_browse && "true" || "false"}
       data-canvas-locked-tail={@locked_tail && "true"}
       data-canvas-constraints={@constraints}
+      data-paper-doc-key={@doc_key}
+      data-paper-rev={@paper_rev}
+      data-document-rev={@document_rev}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -777,6 +800,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # only a task-type block reads its own entry. Default keeps every other call
   # site (and every non-task block) byte-identical.
   attr(:task_previews, :map, default: %{})
+  attr(:doc_type, :string, default: "paper")
+  attr(:paper_rev, :integer, default: 0)
+  attr(:document_rev, :string, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -863,6 +889,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         api_token_raw={@api_token_raw}
         scope_prefix={@scope_prefix}
         picker_browse={@picker_browse}
+        doc_type={@doc_type}
+        paper_rev={@paper_rev}
+        document_rev={@document_rev}
       />
     </div>
     """
@@ -997,6 +1026,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:api_token_raw, :string, default: "")
   attr(:scope_prefix, :string, default: "")
   attr(:picker_browse, :boolean, default: true)
+  attr(:doc_type, :string, default: "paper")
+  attr(:paper_rev, :integer, default: 0)
+  attr(:document_rev, :string, default: nil)
 
   def properties_panel(assigns) do
     ~H"""
@@ -1029,6 +1061,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           api_token_raw={@api_token_raw}
           scope_prefix={@scope_prefix}
           picker_browse={@picker_browse}
+          doc_type={@doc_type}
+          paper_rev={@paper_rev}
+          document_rev={@document_rev}
         />
       </div>
 
@@ -1079,6 +1114,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:api_token_raw, :string, default: "")
   attr(:scope_prefix, :string, default: "")
   attr(:picker_browse, :boolean, default: true)
+  attr(:doc_type, :string, default: "paper")
+  attr(:paper_rev, :integer, default: 0)
+  attr(:document_rev, :string, default: nil)
 
   def paper_block_fields(assigns) do
     assigns =
@@ -1431,6 +1469,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           module={BarkparkWeb.Studio.PaperFieldBlock}
           id={"paper-fb-" <> @id}
           block={@block}
+          if_rev={if(@doc_type == "paper", do: @paper_rev, else: @document_rev)}
         />
 
       <% _ -> %>

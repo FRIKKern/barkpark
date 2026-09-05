@@ -312,13 +312,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # every accepted, refused, failed, and non-writing branch.
   def handle_info({:paper_op, %{"op" => _} = op, request_id}, socket)
       when is_binary(request_id) do
-    {:noreply, socket} = Lifecycle.paper_op(op, socket)
+    {:noreply, socket} = Lifecycle.paper_op(Map.put(op, "request_id", request_id), socket)
+
+    result = socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
 
     {:noreply,
-     push_event(socket, "bp:paper-field-save-result", %{
-       request_id: request_id,
-       saved: socket.assigns[:last_paper_save_ok?] == true
-     })}
+     push_event(
+       socket,
+       "bp:paper-field-save-result",
+       Map.put_new(result, :request_id, request_id)
+     )}
   end
 
   def handle_info({:paper_op, %{"op" => _} = op}, socket), do: Lifecycle.paper_op(op, socket)

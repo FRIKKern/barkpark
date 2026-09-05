@@ -30,18 +30,18 @@ function flush(wrapper) {
 }
 
 const dom = new JSDOM(`<!doctype html><body>
-  <div id="text" data-block-id="field-1" data-field-type="field-text">
+  <main><div id="text" data-block-id="field-1" data-field-type="field-text">
     <textarea>Before</textarea>
-  </div>
-  <div id="picker" data-block-id="field-2" data-field-type="field-image">
+  </div></main>
+  <main><div id="picker" data-block-id="field-2" data-field-type="field-image">
     <bp-media-picker></bp-media-picker>
-  </div>
-  <div id="image" data-block-id="image-1" data-field-type="image">
+  </div></main>
+  <main><div id="image" data-block-id="image-1" data-field-type="image">
     <bp-media-picker></bp-media-picker>
-  </div>
-  <div id="destroyed" data-block-id="field-3" data-field-type="field-string">
+  </div></main>
+  <main><div id="destroyed" data-block-id="field-3" data-field-type="field-string">
     <input value="Before">
-  </div>
+  </div></main>
 </body>`, { url: "http://localhost/" });
 const { window } = dom;
 const hooks = loadHooks(window);
@@ -55,7 +55,9 @@ function mount(id) {
     el,
     pushEvent: (name, payload) => {
       calls.push({ name, payload });
-      return new Promise((resolve, reject) => replies.push({ resolve, reject }));
+      return new Promise((resolve, reject) => replies.push({
+        resolve: (reply) => resolve({ ...reply, request_id: payload.request_id }), reject,
+      }));
     },
   };
   hook.mounted();
@@ -75,7 +77,14 @@ try {
 
   const firstWait = flush(text.el);
   assert.equal(text.calls.length, 1, "flush pushes the final native text immediately");
-  assert.deepEqual(JSON.parse(JSON.stringify(text.calls[0])), {
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    name: text.calls[0].name,
+    payload: {
+      op: text.calls[0].payload.op,
+      id: text.calls[0].payload.id,
+      patch: text.calls[0].payload.patch,
+    },
+  })), {
     name: "paper-op",
     payload: {
       op: "patch-block",
@@ -93,7 +102,11 @@ try {
   assert.deepEqual(await Promise.all(repeatWait), [false], "all waiters observe the refusal");
   const retryWait = flush(text.el);
   assert.equal(text.calls.length, 2, "the next View retries the failed field save");
-  assert.deepEqual(JSON.parse(JSON.stringify(text.calls[1].payload)), {
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    op: text.calls[1].payload.op,
+    id: text.calls[1].payload.id,
+    patch: text.calls[1].payload.patch,
+  })), {
     op: "patch-block",
     id: "field-1",
     patch: { value: "Final native text" },
@@ -128,7 +141,11 @@ try {
     bubbles: true,
     detail: { value: "ignored-envelope" },
   }));
-  assert.deepEqual(JSON.parse(JSON.stringify(image.calls[0].payload)), {
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    op: image.calls[0].payload.op,
+    id: image.calls[0].payload.id,
+    patch: image.calls[0].payload.patch,
+  })), {
     op: "patch-block",
     id: "image-1",
     patch: { src: "https://example.test/final.jpg", alt: "Final image" },

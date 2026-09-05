@@ -24,10 +24,72 @@
     "paper-move-block",
     "paper-move-block-to",
     "paper-unbind-property",
-    "inner-array-op",
   ]);
   const PAPER_STRUCTURAL_SUBMITS = new Set(["paper-add-block", "paper-add-property"]);
   const paperExitCoordinators = new WeakMap();
+
+  function bpPaperRequestId() {
+    try {
+      const crypto = window.crypto;
+      const requestId = crypto?.randomUUID?.();
+      if (typeof requestId === "string" && requestId !== "") return requestId;
+      if (typeof crypto?.getRandomValues !== "function") return null;
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+      return [
+        hex.slice(0, 4).join(""), hex.slice(4, 6).join(""),
+        hex.slice(6, 8).join(""), hex.slice(8, 10).join(""),
+        hex.slice(10, 16).join(""),
+      ].join("-");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function bpPaperRevisionFrom(el) {
+    if (!el) return null;
+    if (el.dataset.paperRev != null && /^\d+$/.test(el.dataset.paperRev)) {
+      return Number(el.dataset.paperRev);
+    }
+    if (typeof el.dataset.documentRev === "string" && el.dataset.documentRev !== "") {
+      return el.dataset.documentRev;
+    }
+    return null;
+  }
+
+  function bpPaperReplyFrom(results) {
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const replies = results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value?.reply);
+    return replies.length === results.length && replies.length === 1 ? replies[0] : null;
+  }
+
+  function bpPaperMutation(hook, source, event, payload, options = {}) {
+    const coordinator = hook._exitCoordinator;
+    const send = options.target == null
+      ? (wire) => hook.pushEvent(event, wire)
+      : (wire) => Promise.resolve(hook.pushEventTo(options.target, event, wire))
+        .then(bpPaperReplyFrom);
+    if (!coordinator) {
+      const requestId = bpPaperRequestId();
+      if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
+      return {
+        requestId,
+        promise: Promise.resolve(send({ ...payload, request_id: requestId }))
+          .then((reply) => reply?.saved === true && reply?.request_id === requestId)
+          .catch(() => false),
+      };
+    }
+    return coordinator.mutate(source, {
+      requestId: options.requestId,
+      payload,
+      send,
+      onResult: options.onResult,
+    });
+  }
 
   function bpPaperHistoryPosition(state) {
     if (Number.isFinite(state?.position)) return state.position;
@@ -35,6 +97,16 @@
     // entry has no position. Its own popstate handler treats that entry as 0.
     if (state?.backType === "patch" || state?.backType === "redirect") return 0;
     return null;
+  }
+
+  function bpPaperEventParams(el, base = {}) {
+    const params = { ...base };
+    for (const attr of el?.attributes || []) {
+      if (attr.name.startsWith("phx-value-")) {
+        params[attr.name.slice("phx-value-".length)] = attr.value;
+      }
+    }
+    return params;
   }
 
   function bpPaperExitCoordinator(hook) {
@@ -51,6 +123,17 @@
       let historyPhase = null;
       let historyDelta = null;
       let historySaveResult = null;
+      const mutationQueue = [];
+      const mutationById = new Map();
+      const ownRevisions = new Map();
+      const quarantinedEchoes = [];
+      let mutationActive = false;
+      let mutationPaused = false;
+      let conflict = null;
+      const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
+        main.querySelector("[data-paper-doc-key]");
+      let documentKey = initialCarrier?.dataset.paperDocKey || null;
+      let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
 
       const captureHistoryPosition = () => {
         const currentPosition = bpPaperHistoryPosition(window.history.state);
@@ -66,6 +149,8 @@
             dirty: false,
             timer: null,
             pending: null,
+            authoredRev: undefined,
+            mutationEntry: null,
           };
           sources.set(source, record);
         }
@@ -76,6 +161,11 @@
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
+          const carrier = member.el.closest?.("[data-paper-doc-key]");
+          if (!documentKey && carrier?.dataset.paperDocKey) {
+            documentKey = carrier.dataset.paperDocKey;
+            confirmedRevision = bpPaperRevisionFrom(carrier);
+          }
           return coordinator;
         },
         release(member) {
@@ -96,6 +186,7 @@
           if (!source) return;
           captureHistoryPosition();
           const record = recordFor(source);
+          if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
           record.version += 1;
           record.dirty = true;
         },
@@ -104,6 +195,7 @@
           captureHistoryPosition();
           const record = recordFor(source);
           if (!record.dirty) {
+            if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
             record.version += 1;
             record.dirty = true;
           }
@@ -168,6 +260,204 @@
             actionPending = false;
           }
         },
+        requestId: bpPaperRequestId,
+        mutate(source, { requestId, payload, send, onResult }) {
+          requestId ||= bpPaperRequestId();
+          if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
+          let entry = mutationById.get(requestId);
+          if (!entry) {
+            const record = recordFor(source);
+            if (record.authoredRev === undefined) record.authoredRev = confirmedRevision;
+            entry = {
+              source, requestId, payload, send, onResult,
+              authoredRev: record.authoredRev,
+              ifRev: mutationQueue.length ? undefined : record.authoredRev,
+              expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+              waiters: [],
+            };
+            mutationById.set(requestId, entry);
+            mutationQueue.push(entry);
+          }
+          const promise = new Promise((resolve) => entry.waiters.push(resolve));
+          mutationPaused = false;
+          coordinator._pumpMutations();
+          return { requestId: entry.requestId, promise, entry };
+        },
+        retryMutation(entry) {
+          if (!entry || mutationById.get(entry.requestId) !== entry || conflict) {
+            return Promise.resolve(false);
+          }
+          if (Date.now() >= entry.expiresAt) {
+            coordinator._expireMutation(entry);
+            return Promise.resolve(false);
+          }
+          const promise = new Promise((resolve) => entry.waiters.push(resolve));
+          mutationPaused = false;
+          coordinator._pumpMutations();
+          return promise;
+        },
+        observeRevision({ rev, requestId, apply }) {
+          if (rev == null) return false;
+          if (requestId && ownRevisions.get(requestId) === rev) {
+            apply?.(rev === confirmedRevision ? "own" : "own-stale");
+            return true;
+          }
+          if (rev === confirmedRevision && !coordinator.hasUnsaved()) {
+            apply?.("current");
+            return true;
+          }
+          if (mutationQueue.length || coordinator.hasUnsaved()) {
+            quarantinedEchoes.push({ rev, requestId, apply });
+            if (!mutationActive) coordinator._setConflict({ current_rev: rev });
+            return false;
+          }
+          confirmedRevision = rev;
+          apply?.("external");
+          return true;
+        },
+      };
+
+      coordinator._resolveWaiters = (entry, saved) => {
+        const waiters = entry.waiters.splice(0);
+        waiters.forEach((resolve) => resolve(saved));
+      };
+      coordinator._expireMutation = (entry) => {
+        mutationPaused = true;
+        const message = "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.";
+        const status = main.querySelector('[data-test-id="bp-paper-footer-save"][role="status"]');
+        if (status) status.textContent = message;
+        if (entry.expiryReported) return;
+        entry.expiryReported = true;
+        entry.source?.dispatchEvent?.(new CustomEvent("bp-error", {
+          detail: { code: "paper_mutation_retry_expired", error: message },
+          bubbles: true,
+          composed: true,
+        }));
+      };
+      coordinator._setConflict = (reply) => {
+        conflict = { currentRev: reply?.current_rev, reply };
+        mutationPaused = true;
+        coordinator._renderConflict();
+      };
+      coordinator._renderConflict = () => {
+        let banner = main.querySelector("[data-bp-paper-conflict]");
+        if (!conflict) {
+          banner?.remove();
+          return;
+        }
+        if (!banner) {
+          banner = document.createElement("div");
+          banner.dataset.bpPaperConflict = "true";
+          banner.setAttribute("role", "alert");
+          banner.innerHTML = '<span>Save paused — this document changed elsewhere. Your edits are still here.</span> <button type="button" data-action="review">Review</button> <button type="button" data-action="keep">Keep mine</button> <button type="button" data-action="latest">Use latest</button> <span data-conflict-detail hidden></span>';
+          const root = main.querySelector(".bp-paper-editor") || main;
+          root.prepend(banner);
+          banner.addEventListener("click", (event) => {
+            const action = event.target.closest?.("[data-action]")?.dataset.action;
+            if (action === "review") {
+              const detail = banner.querySelector("[data-conflict-detail]");
+              detail.hidden = false;
+              detail.textContent = `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+              main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
+                detail: { documentKey, conflict: conflict.reply }, bubbles: true,
+              }));
+            } else if (action === "keep") {
+              coordinator._keepMine();
+            } else if (action === "latest") {
+              coordinator._useLatest();
+            }
+          });
+        }
+      };
+      coordinator._keepMine = () => {
+        const head = mutationQueue[0];
+        if (!head || conflict?.currentRev == null) return false;
+        const replacementId = bpPaperRequestId();
+        if (!replacementId) return false;
+        mutationById.delete(head.requestId);
+        head.requestId = replacementId;
+        head.ifRev = conflict.currentRev;
+        mutationById.set(head.requestId, head);
+        confirmedRevision = conflict.currentRev;
+        conflict = null;
+        mutationPaused = false;
+        coordinator._renderConflict();
+        coordinator._pumpMutations();
+        return true;
+      };
+      coordinator._useLatest = () => {
+        const requiresReload = [...sources].some(([source, record]) =>
+          (record.dirty || record.active > 0) &&
+          !source.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]'),
+        );
+        const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
+        const latest = quarantinedEchoes.filter((echo) => echo.rev === latestRevision);
+        mutationQueue.splice(0).forEach((entry) => {
+          mutationById.delete(entry.requestId);
+          entry.onResult?.(false, { discarded: true });
+          coordinator._resolveWaiters(entry, false);
+        });
+        sources.clear();
+        conflict = null;
+        mutationPaused = false;
+        if (latestRevision != null) {
+          confirmedRevision = latestRevision;
+          latest.forEach((echo) => echo.apply?.("external-resync"));
+        }
+        quarantinedEchoes.length = 0;
+        coordinator._renderConflict();
+        if (requiresReload) window.location.reload();
+      };
+      coordinator._pumpMutations = () => {
+        if (mutationActive || mutationPaused || conflict || !mutationQueue.length) return;
+        const entry = mutationQueue[0];
+        if (Date.now() >= entry.expiresAt) {
+          coordinator._expireMutation(entry);
+          coordinator._resolveWaiters(entry, false);
+          return;
+        }
+        if (entry.ifRev === undefined) entry.ifRev = confirmedRevision;
+        const wire = { ...entry.payload, request_id: entry.requestId };
+        if (entry.ifRev != null) wire.if_rev = entry.ifRev;
+        const token = coordinator.beginSave(entry.source);
+        mutationActive = true;
+        let sent;
+        try {
+          sent = entry.send(wire);
+        } catch (_) {
+          sent = null;
+        }
+        Promise.resolve(sent).catch(() => null).then((reply) => {
+          const identityOK = reply?.request_id === entry.requestId;
+          const revOK = entry.ifRev == null || reply?.rev != null;
+          const saved = reply?.saved === true && identityOK && revOK;
+          mutationActive = false;
+          coordinator.finishSave(token, saved);
+          if (saved) {
+            confirmedRevision = reply.rev ?? confirmedRevision;
+            ownRevisions.set(entry.requestId, confirmedRevision);
+            mutationQueue.shift();
+            mutationById.delete(entry.requestId);
+            entry.onResult?.(true, reply);
+            coordinator._resolveWaiters(entry, true);
+            for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
+              const echo = quarantinedEchoes[i];
+              if (echo.requestId === entry.requestId || echo.rev === confirmedRevision) {
+                quarantinedEchoes.splice(i, 1);
+                echo.apply?.("own");
+              }
+            }
+            coordinator._pumpMutations();
+          } else {
+            entry.onResult?.(false, reply);
+            mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
+            if (reply?.conflict === true && reply?.request_id === entry.requestId) {
+              coordinator._setConflict(reply);
+            } else {
+              mutationPaused = true;
+            }
+          }
+        });
       };
 
       coordinator._onInput = (event) => {
@@ -176,6 +466,7 @@
           target.closest?.(PAPER_FLUSH_TARGETS) ||
           target.closest?.(".bp-paper-edit-form[phx-change]");
         if (!source || !main.contains(source)) return;
+        if (sources.get(source)?.active > 0) return;
         coordinator.markDirty(source);
         if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
           // Own the legacy form's debounce so the actual autosave reply clears
@@ -198,22 +489,17 @@
         const target = source.getAttribute("phx-target") || source;
         const params = Object.fromEntries(new FormData(source));
         const version = record.version;
-        const token = coordinator.beginSave(source);
-        let pushed;
-        try {
-          pushed = driver.pushEventTo(target, event, params);
-        } catch (error) {
-          pushed = Promise.reject(error);
-        }
-        const pending = Promise.resolve(pushed)
-          .then((results) =>
-            Array.isArray(results) && results.length > 0 && results.every((result) =>
-              result.status === "fulfilled" && result.value?.reply?.saved === true
-            )
-          )
-          .catch(() => false)
+        const mutation = record.mutationEntry
+          ? { promise: coordinator.retryMutation(record.mutationEntry), entry: record.mutationEntry }
+          : bpPaperMutation(driver, source, event, params, {
+            target,
+            onResult: (saved) => {
+              if (saved) record.mutationEntry = null;
+            },
+          });
+        record.mutationEntry = mutation.entry || record.mutationEntry;
+        const pending = mutation.promise
           .then((saved) => {
-            coordinator.finishSave(token, saved);
             return saved;
           })
           .finally(() => {
@@ -333,7 +619,10 @@
           if (target) replayTargets.delete(target);
           return;
         }
-        const structural = PAPER_STRUCTURAL_EVENTS.has(target.getAttribute("phx-click"));
+        const clickEvent = target.getAttribute("phx-click");
+        const structural = PAPER_STRUCTURAL_EVENTS.has(clickEvent) ||
+          (clickEvent === "inner-array-op" &&
+            !target.closest?.('[phx-hook="BarkparkFieldBridge"]'));
         const anchor = target.matches("a[href]");
         if (anchor) {
           const href = target.getAttribute("href");
@@ -341,9 +630,26 @@
               target.getAttribute("target") === "_blank") return;
         }
         if (!anchor && !structural) return;
-        if (!coordinator.hasUnsaved()) return;
+        if (anchor && !coordinator.hasUnsaved()) return;
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (structural) {
+          const driver = [...members].find((member) =>
+            typeof member.pushEventTo === "function" || typeof member.pushEvent === "function",
+          );
+          if (!driver) return;
+          const phxTarget = target.getAttribute("phx-target");
+          coordinator.run(() => bpPaperMutation(
+            driver,
+            target,
+            target.getAttribute("phx-click"),
+            bpPaperEventParams(target),
+            typeof driver.pushEventTo === "function"
+              ? { target: phxTarget || target }
+              : {},
+          ).promise);
+          return;
+        }
         coordinator.run(() => {
           replayTargets.add(target);
           target.click();
@@ -352,17 +658,26 @@
       coordinator._onSubmit = (event) => {
         const form = event.target;
         if (!PAPER_STRUCTURAL_SUBMITS.has(form?.getAttribute?.("phx-submit")) ||
-            replayTargets.has(form) || !coordinator.hasUnsaved()) {
+            replayTargets.has(form)) {
           if (replayTargets.has(form)) replayTargets.delete(form);
           return;
         }
         event.preventDefault();
         event.stopImmediatePropagation();
-        const submitter = event.submitter;
-        coordinator.run(() => {
-          replayTargets.add(form);
-          form.requestSubmit(submitter || undefined);
-        });
+        const driver = [...members].find((member) =>
+          typeof member.pushEventTo === "function" || typeof member.pushEvent === "function",
+        );
+        if (!driver) return;
+        const params = Object.fromEntries(new FormData(form, event.submitter || undefined));
+        coordinator.run(() => bpPaperMutation(
+          driver,
+          form,
+          form.getAttribute("phx-submit"),
+          bpPaperEventParams(event.submitter, params),
+          typeof driver.pushEventTo === "function"
+            ? { target: form.getAttribute("phx-target") || form }
+            : {},
+        ).promise);
       };
       document.addEventListener("input", coordinator._onInput);
       document.addEventListener("change", coordinator._onInput);
@@ -432,20 +747,21 @@
       mounted() {
         this._exitCoordinator = bpPaperExitCoordinator(this);
         this._pendingSaves = new Set();
-        this._retryOp = null;
+        this._mutationEntries = [];
         const pushOp = (op) => {
-          this._retryOp = op;
-          const saveToken = this._exitCoordinator?.beginSave(this.el);
-          const pending = this.pushEvent("paper-op", op)
-            .then((reply) => reply?.saved === true)
-            .catch(() => false)
-            .then((saved) => {
-              this._exitCoordinator?.finishSave(saveToken, saved);
-              if (saved && this._retryOp === op) this._retryOp = null;
-              return saved;
-            })
+          let mutation;
+          mutation = bpPaperMutation(this, this.el, "paper-op", op, {
+            onResult: (saved) => {
+              if (saved) this._mutationEntries = this._mutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+            },
+          });
+          if (mutation.entry) this._mutationEntries.push(mutation.entry);
+          const pending = mutation.promise
             .finally(() => this._pendingSaves.delete(pending));
           this._pendingSaves.add(pending);
+          return pending;
         };
         this._onOp = (e) => {
           this._exitCoordinator?.markDirty(this.el);
@@ -454,7 +770,13 @@
         this.el.addEventListener("bp-op", this._onOp);
         this._onFlushPending = (event) => {
           this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
-          if (!this._pendingSaves.size && this._retryOp) pushOp(this._retryOp);
+          if (!this._pendingSaves.size && this._mutationEntries.length) {
+            const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
+            if (retry) {
+              const pending = retry.finally(() => this._pendingSaves.delete(pending));
+              this._pendingSaves.add(pending);
+            }
+          }
           if (this._pendingSaves.size) {
             event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
           }
@@ -468,7 +790,7 @@
         // insert-after) through the SAME paper_op pipeline patch-block uses.
         this._onSlash = (e) => {
           bpRunPaperAction(this._exitCoordinator, () =>
-            this.pushEvent("paper-slash-insert", e.detail)
+            bpPaperMutation(this, this.el, "paper-slash-insert", e.detail).promise
           );
         };
         this.el.addEventListener("bp-slash-insert", this._onSlash);
@@ -531,7 +853,19 @@
           if (this.el.id !== `paper-ed-${payload.block_id}`) return; // not my block
           const wc = this.el.querySelector("bp-paper-editor");
           if (!wc) return;
-          wc.block = payload.block;
+          const apply = (mode) => {
+            if (mode === "external-resync" &&
+                typeof wc.resolveConflictWithServerBlock === "function") {
+              wc.resolveConflictWithServerBlock(payload.block);
+            } else {
+              wc.block = payload.block;
+            }
+          };
+          this._exitCoordinator?.observeRevision({
+            rev: payload.rev,
+            requestId: payload.request_id,
+            apply,
+          }) || (payload.rev == null && apply("legacy"));
         };
         this.handleEvent("bp:block-update", this._onBlockUpdate);
       },
@@ -655,27 +989,6 @@
         this._sendingOps = false;
         this._opsFailed = false;
         this._saveBridgeDestroyed = false;
-        const paperOpsRequestId = () => {
-          try {
-            const crypto = window.crypto;
-            const requestId = crypto?.randomUUID?.();
-            if (typeof requestId === "string" && requestId !== "") return requestId;
-            if (typeof crypto?.getRandomValues !== "function") return null;
-            const bytes = crypto.getRandomValues(new Uint8Array(16));
-            bytes[6] = (bytes[6] & 0x0f) | 0x40;
-            bytes[8] = (bytes[8] & 0x3f) | 0x80;
-            const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-            return [
-              hex.slice(0, 4).join(""),
-              hex.slice(4, 6).join(""),
-              hex.slice(6, 8).join(""),
-              hex.slice(8, 10).join(""),
-              hex.slice(10, 16).join(""),
-            ].join("-");
-          } catch (_) {
-            return null;
-          }
-        };
         const reportUnretryableOps = (entry, code, message) => {
           this._opsFailed = true;
           entry.unretryable = true;
@@ -713,36 +1026,35 @@
             );
             return;
           }
-          const saveToken = this._exitCoordinator?.beginSave(this.el);
           this._sendingOps = true;
-          const pending = this.pushEvent("paper-ops", {
-            ops: entry.ops,
-            request_id: entry.requestId,
-          })
-            .then((reply) =>
-              reply?.saved === true && reply?.request_id === entry.requestId
-            )
-            .catch(() => false)
+          let mutation;
+          if (entry.mutationEntry) {
+            mutation = {
+              entry: entry.mutationEntry,
+              promise: this._exitCoordinator.retryMutation(entry.mutationEntry),
+            };
+          } else {
+            mutation = bpPaperMutation(this, this.el, "paper-ops", { ops: entry.ops }, {
+              requestId: entry.requestId,
+              onResult: (saved) => {
+                this._sendingOps = false;
+                if (saved && this._opsQueue[0] === entry) this._opsQueue.shift();
+                const canvas = this.el.querySelector("bp-paper-canvas");
+                if (entry.seq != null && typeof canvas?.acknowledgeOps === "function") {
+                  canvas.acknowledgeOps(entry.seq, saved);
+                }
+                if (saved) {
+                  this._opsFailed = false;
+                  sendNextOps();
+                } else {
+                  this._opsFailed = true;
+                }
+              },
+            });
+            entry.mutationEntry = mutation.entry;
+          }
+          const pending = mutation.promise
             .then((saved) => {
-              this._sendingOps = false;
-              this._exitCoordinator?.finishSave(saveToken, saved);
-              if (saved && this._opsQueue[0] === entry) {
-                // Remove the acknowledged head before notifying the WC. That
-                // notification may synchronously emit the next dirty delta.
-                this._opsQueue.shift();
-              }
-              const canvas = this.el.querySelector("bp-paper-canvas");
-              if (entry.seq != null && typeof canvas?.acknowledgeOps === "function") {
-                canvas.acknowledgeOps(entry.seq, saved);
-              }
-              if (saved) {
-                sendNextOps();
-              } else {
-                // Retain the failed head and every later delta behind it. The
-                // next explicit View retries in order, so a later source-mode
-                // success can never erase an earlier unsatisfied rich batch.
-                this._opsFailed = true;
-              }
               return saved;
             })
             .finally(() => this._pendingSaves.delete(pending));
@@ -753,7 +1065,7 @@
           this._opsQueue.push({
             ops: e.detail.ops,
             seq: e.detail.seq,
-            requestId: paperOpsRequestId(),
+            requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
             expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
           });
           sendNextOps();
@@ -807,7 +1119,19 @@
             if (this.el.id !== `paper-canvas-${run.run_id}`) return; // not my run
             const wc = this.el.querySelector("bp-paper-canvas");
             if (!wc || typeof wc.applyServerBlocks !== "function") return;
-            wc.applyServerBlocks(run.blocks);
+            const apply = (mode) => {
+              if (mode === "external-resync" &&
+                  typeof wc.resolveConflictWithServerBlocks === "function") {
+                wc.resolveConflictWithServerBlocks(run.blocks);
+              } else {
+                wc.applyServerBlocks(run.blocks);
+              }
+            };
+            this._exitCoordinator?.observeRevision({
+              rev: payload.rev,
+              requestId: payload.request_id,
+              apply,
+            }) || (payload.rev == null && apply("legacy"));
           });
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
@@ -925,20 +1249,21 @@
         const fieldType = this.el.dataset.fieldType;
 
         this._pendingSaves = new Set();
-        this._retryOp = null;
+        this._mutationEntries = [];
         const pushOp = (op) => {
-          this._retryOp = op;
-          const saveToken = this._exitCoordinator?.beginSave(this.el);
-          const pending = this.pushEvent("paper-op", op)
-            .then((reply) => reply?.saved === true)
-            .catch(() => false)
-            .then((saved) => {
-              this._exitCoordinator?.finishSave(saveToken, saved);
-              if (saved && this._retryOp === op) this._retryOp = null;
-              return saved;
-            })
+          let mutation;
+          mutation = bpPaperMutation(this, this.el, "paper-op", op, {
+            onResult: (saved) => {
+              if (saved) this._mutationEntries = this._mutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+            },
+          });
+          if (mutation.entry) this._mutationEntries.push(mutation.entry);
+          const pending = mutation.promise
             .finally(() => this._pendingSaves.delete(pending));
           this._pendingSaves.add(pending);
+          return pending;
         };
         const push = (value) => pushOp({
           op: "patch-block",
@@ -958,7 +1283,13 @@
             this._t = null;
             this._sendPending?.();
           }
-          if (!this._pendingSaves.size && this._retryOp) pushOp(this._retryOp);
+          if (!this._pendingSaves.size && this._mutationEntries.length) {
+            const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
+            if (retry) {
+              const pending = retry.finally(() => this._pendingSaves.delete(pending));
+              this._pendingSaves.add(pending);
+            }
+          }
           if (this._pendingSaves.size) {
             event.detail.waitUntil(
               Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean))
@@ -1023,6 +1354,7 @@
         this._control = control;
 
         const send = () => {
+          this._exitCoordinator?.markDirty(this.el);
           let value;
           if (fieldType === "field-boolean") {
             value = control.checked;
@@ -1133,7 +1465,9 @@
           const draggedId = this._dragId;
           this._clearDrag();
           bpRunPaperAction(this._exitCoordinator, () =>
-            this.pushEvent("paper-move-block-to", { id: draggedId, "after-id": afterId })
+            bpPaperMutation(this, this.el, "paper-move-block-to", {
+              id: draggedId, "after-id": afterId,
+            }).promise
           );
         };
 
@@ -1371,11 +1705,17 @@
       bpPaperCtxMenuClose();
       const activate = () => {
         if (action === "move-up")
-          return ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "up" });
+          return bpPaperMutation(ctx, ctx.el, "paper-move-block", {
+            id: ctx.blockId, dir: "up",
+          }).promise;
         if (action === "move-down")
-          return ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
+          return bpPaperMutation(ctx, ctx.el, "paper-move-block", {
+            id: ctx.blockId, dir: "down",
+          }).promise;
         if (action === "delete")
-          return ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+          return bpPaperMutation(ctx, ctx.el, "paper-delete-block", {
+            id: ctx.blockId,
+          }).promise;
       };
       bpRunPaperAction(ctx.exitCoordinator, activate);
       // Restore focus to the block (same dance as the Escape path) so keyboard
@@ -1471,6 +1811,7 @@
         this._dirty = false;
         this._formVersion = 0;
         this._pendingSaves = new Set();
+        this._fieldMutationEntries = [];
         this._paperForm = this.el.matches("form[data-paper-field-flush]")
           ? this.el
           : this.el.closest("form[data-paper-field-flush]");
@@ -1489,7 +1830,7 @@
           this.el.addEventListener("change", this._onFormChange);
           this._onPaperFieldSaveResult = (payload) => {
             const request = payload && this._pendingRequests.get(payload.request_id);
-            if (request) request.finish(payload.saved === true);
+            if (request) request.finish(payload);
           };
           this._paperSaveResultRef = this.handleEvent(
             "bp:paper-field-save-result",
@@ -1503,22 +1844,22 @@
             // its parent write participates in the same correlated barrier.
             event.preventDefault();
             event.stopImmediatePropagation();
-            this._formVersion += 1;
-            const version = this._formVersion;
-            this._dirty = false;
             const params = { action: button.getAttribute("phx-value-action") };
             const index = button.getAttribute("phx-value-index");
             if (index != null) params.index = index;
-            this._pushCorrelated("inner-array-op", params, version);
+            bpRunPaperAction(this._exitCoordinator, () => {
+              this._formVersion += 1;
+              const version = this._formVersion;
+              this._dirty = false;
+              return this._pushCorrelated("inner-array-op", params, version);
+            });
           };
           this.el.addEventListener("click", this._onArrayOpClick, true);
         }
 
         this._trackSave = (save, version) => {
-          const saveToken = this._exitCoordinator?.beginSave(this.el);
           const pending = save
             .then((saved) => {
-              this._exitCoordinator?.finishSave(saveToken, saved);
               if (!saved && this._formVersion === version) this._dirty = true;
               return saved;
             })
@@ -1528,35 +1869,41 @@
         };
 
         this._pushCorrelated = (event, params, version) => {
-          window.__bpPaperFieldFlushSeq = (window.__bpPaperFieldFlushSeq || 0) + 1;
-          const requestId = `bp-field-${Date.now()}-${window.__bpPaperFieldFlushSeq}`;
-          params.request_id = requestId;
+          const requestId = this._exitCoordinator?.requestId() || bpPaperRequestId();
+          if (!requestId) return this._trackSave(Promise.resolve(false), version);
           const target = this.el.getAttribute("phx-target") || this.el;
-          const save = new Promise((resolve) => {
+          const send = (wire) => new Promise((resolve) => {
             let finished = false;
-            const finish = (saved) => {
+            const wireRequestId = wire.request_id;
+            const finish = (reply) => {
               if (finished) return;
               finished = true;
               clearTimeout(timeout);
-              this._pendingRequests.delete(requestId);
-              resolve(saved === true);
+              this._pendingRequests.delete(wireRequestId);
+              resolve(reply || null);
             };
-            const timeout = setTimeout(() => finish(false), 10000);
-            this._pendingRequests.set(requestId, { finish });
-            try {
-              Promise.resolve(this.pushEventTo(target, event, params))
-                .then((results) => {
-                  if (!Array.isArray(results) || results.length === 0 ||
-                      results.some((result) => result.status !== "fulfilled")) {
-                    finish(false);
-                  }
-                })
-                .catch(() => finish(false));
-            } catch (_err) {
-              finish(false);
-            }
+            const timeout = setTimeout(() => finish(null), 10000);
+            this._pendingRequests.set(wireRequestId, { finish });
+            Promise.resolve(this.pushEventTo(target, event, wire))
+              .then((results) => {
+                if (!Array.isArray(results) || results.length === 0 ||
+                    results.some((result) => result.status !== "fulfilled")) finish(null);
+              })
+              .catch(() => finish(null));
           });
-          return this._trackSave(save, version);
+          const mutation = this._exitCoordinator.mutate(this.el, {
+            requestId,
+            payload: params,
+            send,
+            onResult: (saved) => {
+              if (saved) this._fieldMutationEntries = this._fieldMutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+              if (saved && this._formVersion === version) this._dirty = false;
+            },
+          });
+          if (mutation.entry) this._fieldMutationEntries.push(mutation.entry);
+          return this._trackSave(mutation.promise, version);
         };
 
         this._pushForm = () => {
@@ -1575,11 +1922,8 @@
           if (this._ownsPaperForm) {
             return this._pushCorrelated("inner-flush", { values: params }, version);
           } else {
-            save = this.pushEventTo(target, event, params)
-              .then((results) => results.length > 0 && results.every((result) =>
-                result.status === "fulfilled" && result.value?.reply?.saved !== false
-              ))
-              .catch(() => false);
+            const mutation = bpPaperMutation(this, this.el, event, params, { target });
+            save = mutation.promise;
           }
 
           return this._trackSave(save, version);
@@ -1603,7 +1947,12 @@
           // A nested picker bridge mirrors its hidden input; the hook mounted
           // on the surrounding PaperFieldBlock form owns the correlated save.
           if (this._paperForm && !this._ownsPaperForm) return;
-          if (this._dirty) {
+          if (!this._pendingSaves.size && this._fieldMutationEntries.length) {
+            this._trackSave(
+              this._exitCoordinator.retryMutation(this._fieldMutationEntries[0]),
+              this._formVersion,
+            );
+          } else if (this._dirty) {
             this._dirty = false;
             this._pushForm();
           }

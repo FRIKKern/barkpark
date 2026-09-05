@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { JSDOM } from "jsdom";
 
 const hooksSource = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
-const dom = new JSDOM(`<!doctype html><body><main>
+const dom = new JSDOM(`<!doctype html><body><main data-paper-doc-key="production:beta:fields" data-document-rev="opaque-1">
   <form id="form" phx-change="inner-change" phx-target="17" phx-hook="BarkparkFieldBridge" data-paper-field-flush>
     <input id="native" name="title" value="Before">
     <input name="request_id" value="real-field-value">
@@ -30,6 +30,12 @@ const pushes = [];
 const replies = [];
 let saveResultHandler;
 let removedHandler;
+let documentRev = 1;
+const finishSave = (push, saved) => saveResultHandler({
+  request_id: push.payload.request_id,
+  saved,
+  ...(saved ? { rev: `opaque-${++documentRev}` } : {}),
+});
 const formBridge = {
   ...hooks.BarkparkFieldBridge,
   el: formEl,
@@ -73,7 +79,8 @@ try {
   assert.equal(pushes[0].payload.values.title, "Before");
   assert.equal(pushes[0].payload.values.value, "Final value");
   assert.equal(pushes[0].payload.values.request_id, "real-field-value", "field names cannot collide with the envelope");
-  assert.match(pushes[0].payload.request_id, /^bp-field-/);
+  assert.match(pushes[0].payload.request_id, /^[0-9a-f-]{36}$/i);
+  assert.equal(pushes[0].payload.if_rev, "opaque-1");
   assert.equal(firstWait.length, 1, "flush contributes the correlated parent result");
 
   const firstRequest = pushes[0].payload.request_id;
@@ -86,14 +93,15 @@ try {
   saveResultHandler({ request_id: "unrelated-save", saved: true });
   await Promise.resolve();
   assert.equal(firstSettled, false, "an unrelated successful save cannot release View");
-  saveResultHandler({ request_id: firstRequest, saved: false });
+  finishSave(pushes[0], false);
   assert.deepEqual(await Promise.all(firstWait), [false], "the matching failed persistence blocks View");
 
   const retryWait = flush(formEl);
   assert.equal(pushes.length, 2, "the next View retries the still-dirty form");
-  assert.notEqual(pushes[1].payload.request_id, firstRequest, "each attempt has a fresh correlation id");
+  assert.equal(pushes[1].payload.request_id, firstRequest, "a transport retry retains its correlation id");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[1].payload.request_id, saved: true });
+  assert.equal(pushes[1].payload.if_rev, "opaque-1");
+  finishSave(pushes[1], true);
   assert.deepEqual(await Promise.all(retryWait), [true]);
   assert.equal(flush(formEl).length, 0, "a confirmed form is a no-op on repeat flush");
 
@@ -106,7 +114,7 @@ try {
   const finalWait = flush(formEl);
   assert.equal(finalWait.length, 1, "a later View retries after transport failure");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[3].payload.request_id, saved: true });
+  finishSave(pushes[3], true);
   assert.deepEqual(await Promise.all(finalWait), [true]);
 
   const add = window.document.getElementById("add");
@@ -118,25 +126,24 @@ try {
   assert.equal(pushes[4].event, "inner-flush", "Studio saves the current field before array structure changes");
   assert.equal(pushes.length, 5, "the array operation waits for the field acknowledgement");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[4].payload.request_id, saved: true });
+  finishSave(pushes[4], true);
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(pushes[5].event, "inner-array-op");
   assert.equal(pushes[5].payload.action, "add_row");
   const structuralWait = flush(formEl);
   assert.equal(structuralWait.length, 1, "View waits for an in-flight structural write");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[5].payload.request_id, saved: false });
+  finishSave(pushes[5], false);
   assert.deepEqual(await Promise.all(structuralWait), [false]);
 
-  // The failed component retains its local value and re-renders that state in
-  // the form. A later View sends the complete current value, avoiding a second
-  // add/remove/move mutation.
+  // A refused structural write remains the FIFO head. A later View retries the
+  // exact request identity rather than minting a duplicate array operation.
   native.value = "After structural edit";
   const structuralRetry = flush(formEl);
-  assert.equal(pushes[6].event, "inner-flush");
-  assert.equal(pushes[6].payload.values.title, "After structural edit");
+  assert.equal(pushes[6].event, "inner-array-op");
+  assert.equal(pushes[6].payload.request_id, pushes[5].payload.request_id);
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[6].payload.request_id, saved: true });
+  finishSave(pushes[6], true);
   assert.deepEqual(await Promise.all(structuralRetry), [true]);
 
   formBridge.destroyed();

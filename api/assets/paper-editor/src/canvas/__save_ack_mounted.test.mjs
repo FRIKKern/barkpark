@@ -80,8 +80,11 @@ async function mount() {
   const hook = {...hooks.BarkparkPaperCanvas, el: wrapper,
     handleEvent: (name, fn) => handlers.set(name, fn),
     pushEvent: (name, payload) => {
-      if (name !== "paper-ops") return Promise.resolve({});
-      return new Promise((resolve, reject) => requests.push({payload, resolve, reject}));
+      if (name === "paper-ops") {
+        return new Promise((resolve, reject) => requests.push({payload, resolve, reject}));
+      }
+      if (name.startsWith("paper-") || name === "inner-array-op") actions.push(name);
+      return Promise.resolve({saved:true, request_id:payload.request_id});
     },
   };
   hook.mounted();

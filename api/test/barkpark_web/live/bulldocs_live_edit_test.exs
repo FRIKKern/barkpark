@@ -328,6 +328,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       assert editing =~ ~s(data-test-id="studio-paper-block-editor")
       assert editing =~ ~s(id="paper-editor-#{slug}")
+      assert editing =~ ~s(data-paper-doc-key="#{@dataset}:paper:#{slug}")
+      assert editing =~ ~s(data-paper-rev="#{assigns_of(view).paper_rev}")
       assert editing =~ ~s(data-test-id="paper-canvas-run")
       assert editing =~ ~s(<bp-paper-canvas)
       assert editing =~ ~s(data-canvas-picker-browse="true")
@@ -372,6 +374,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_hook(editor, "paper-op", %{
         "op" => "patch-block",
         "id" => "b-body",
+        "if_rev" => assigns_of(editor).paper_rev,
         "patch" => %{"content" => [%{"type" => "text", "value" => "Edited on the link"}]}
       })
 
@@ -405,6 +408,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
         %{
           "op" => "patch-block",
           "id" => "b-body",
+          "if_rev" => assigns_of(view).paper_rev,
           "patch" => %{
             "content" => [%{"type" => "text", "value" => "Correlated field save"}]
           }
@@ -426,6 +430,62 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       refute flash_of(view)["error"]
     end
 
+    test "two mounted editors reject stale writes and allow an explicit fresh rebase", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, first, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      {:ok, second, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(first, "paper-toggle-edit", %{})
+      render_click(second, "paper-toggle-edit", %{})
+
+      initial_rev = assigns_of(first).paper_rev
+      assert assigns_of(second).paper_rev == initial_rev
+      stale_socket = socket_of(second)
+
+      first_op = %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "First tab"}]},
+        "request_id" => "first-tab-write",
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply, %{saved: true, rev: committed_rev}, _first_socket} =
+               BulldocsLive.handle_event("paper-op", first_op, socket_of(first))
+
+      stale_different_block = %{
+        "op" => "patch-block",
+        "id" => "b-extra",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Stale tab"}]},
+        "request_id" => "stale-tab-write",
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply,
+              %{
+                saved: false,
+                request_id: "stale-tab-write",
+                conflict: true,
+                current_rev: ^committed_rev
+              }, conflicted_socket} =
+               BulldocsLive.handle_event("paper-op", stale_different_block, stale_socket)
+
+      assert block_text(slug, "b-body") == "First tab"
+      assert block_text(slug, "b-extra") == "Spare block"
+
+      fresh_rebase = %{
+        stale_different_block
+        | "request_id" => "rebased-tab-write",
+          "if_rev" => conflicted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true, request_id: "rebased-tab-write"}, _socket} =
+               BulldocsLive.handle_event("paper-op", fresh_rebase, conflicted_socket)
+
+      assert block_text(slug, "b-extra") == "Stale tab"
+    end
+
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{
       conn: conn,
       slug: slug
@@ -435,6 +495,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
         "ops" => [
           %{
             "op" => "patch-block",
@@ -477,6 +538,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
         "ops" => [
           %{
             "op" => "patch-block",
@@ -523,7 +585,13 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     } do
       {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
-      op = %{"op" => "patch-block", "id" => "b-body", "patch" => %{"text" => "Saved"}}
+
+      op = %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "patch" => %{"text" => "Saved"},
+        "if_rev" => assigns_of(view).paper_rev
+      }
 
       assert {:reply, %{saved: true}, saved_socket} =
                BulldocsLive.handle_event("paper-op", op, socket_of(view))
@@ -554,7 +622,11 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert {:reply, %{saved: true}, saved_socket} =
                BulldocsLive.handle_event(
                  "paper-block-autosave",
-                 %{"block_id" => "b-body", "text" => "Fallback saved"},
+                 %{
+                   "block_id" => "b-body",
+                   "text" => "Fallback saved",
+                   "if_rev" => assigns_of(view).paper_rev
+                 },
                  socket_of(view)
                )
 
@@ -575,7 +647,11 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert {:reply, %{saved: false}, rejected_socket} =
                BulldocsLive.handle_event(
                  "paper-block-autosave",
-                 %{"block_id" => "b-body", "text" => "Must not land"},
+                 %{
+                   "block_id" => "b-body",
+                   "text" => "Must not land",
+                   "if_rev" => saved_socket.assigns.paper_rev
+                 },
                  denied_socket
                )
 
@@ -596,6 +672,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       params = %{
         "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
         "ops" => [
           %{
             "op" => "append-block",
@@ -667,7 +744,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       render_hook(view, "paper-slash-insert", %{
         "type" => "heading",
-        "afterId" => "b-body"
+        "afterId" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev
       })
 
       blocks = stored_blocks(slug)
@@ -678,7 +756,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       render_hook(view, "paper-materialize-slot", %{
         "kind" => "ingress",
-        "after" => "b-head"
+        "after" => "b-head",
+        "if_rev" => assigns_of(view).paper_rev
       })
 
       materialized =
@@ -697,7 +776,10 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       before_ids = Enum.map(stored_blocks(slug), & &1["id"])
 
-      render_hook(view, "paper-add-block", %{"block-type" => "paragraph"})
+      render_hook(view, "paper-add-block", %{
+        "block-type" => "paragraph",
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       after_ids = Enum.map(stored_blocks(slug), & &1["id"])
       assert length(after_ids) == length(before_ids) + 1
@@ -705,7 +787,10 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       [new_id] = after_ids -- before_ids
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == after_ids
 
-      render_hook(view, "paper-delete-block", %{"id" => new_id})
+      render_hook(view, "paper-delete-block", %{
+        "id" => new_id,
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       assert Enum.map(stored_blocks(slug), & &1["id"]) == before_ids
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == before_ids
@@ -716,7 +801,11 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 
-      render_hook(view, "paper-move-block", %{"id" => "b-extra", "dir" => "up"})
+      render_hook(view, "paper-move-block", %{
+        "id" => "b-extra",
+        "dir" => "up",
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       assert Enum.map(stored_blocks(slug), & &1["id"]) == ["b-head", "b-extra", "b-body"]
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == ["b-head", "b-extra", "b-body"]
@@ -732,6 +821,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_hook(view, "paper-op", %{
         "op" => "patch-block",
         "id" => "missing-block",
+        "if_rev" => assigns_of(view).paper_rev,
         "patch" => %{"text" => "must not land"}
       })
 
@@ -745,6 +835,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_hook(view, "paper-op", %{
         "op" => "patch-block",
         "id" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev,
         "patch" => %{"content" => [%{"type" => "text", "value" => "Recovered"}]}
       })
 
@@ -768,6 +859,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
         %{
           "op" => "patch-block",
           "id" => "b-body",
+          "if_rev" => assigns_of(view).paper_rev,
           "patch" => %{"content" => [%{"type" => "text", "value" => "Nested saved"}]}
         }
       })

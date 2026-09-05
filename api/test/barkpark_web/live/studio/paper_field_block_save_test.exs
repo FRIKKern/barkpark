@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlockSaveTest do
     }
 
     assert {:ok, socket} =
-             PaperFieldBlock.update(%{id: "paper-fb-c-price", block: block}, socket())
+             PaperFieldBlock.update(%{id: "paper-fb-c-price", block: block, if_rev: 7}, socket())
 
     assert {:noreply, pending_socket} =
              PaperFieldBlock.handle_event(
@@ -34,7 +34,8 @@ defmodule BarkparkWeb.Studio.PaperFieldBlockSaveTest do
                       "id" => "c-price",
                       "patch" => %{
                         "value" => %{"amount" => "399", "request_id" => "real-field-value"}
-                      }
+                      },
+                      "if_rev" => 7
                     }, "field-request-1"}
 
     # A refused write renders the old persisted block. The component retains
@@ -76,7 +77,10 @@ defmodule BarkparkWeb.Studio.PaperFieldBlockSaveTest do
     }
 
     assert {:ok, socket} =
-             PaperFieldBlock.update(%{id: "paper-fb-c-keywords", block: block}, socket())
+             PaperFieldBlock.update(
+               %{id: "paper-fb-c-keywords", block: block, if_rev: 7},
+               socket()
+             )
 
     assert {:noreply, pending_socket} =
              PaperFieldBlock.handle_event(
@@ -89,7 +93,8 @@ defmodule BarkparkWeb.Studio.PaperFieldBlockSaveTest do
                     %{
                       "op" => "patch-block",
                       "id" => "c-keywords",
-                      "patch" => %{"value" => ["history", ""]}
+                      "patch" => %{"value" => ["history", ""]},
+                      "if_rev" => 7
                     }, "array-request-1"}
 
     assert {:ok, refused_socket} =

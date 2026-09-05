@@ -30,6 +30,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def paper_op(socket, op) do
+    socket = failed_result(socket, op)
+
     cond do
       socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta and
           socket.assigns[:editor_doc] != nil ->
@@ -278,20 +280,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         refuse_read_only_pane(socket)
 
       is_nil(slug) ->
-        assign(socket, last_paper_save_ok?: false)
+        failed_result(socket, op)
+
+      paper_revision(op["if_rev"]) == :error ->
+        failed_result(socket, op)
 
       true ->
+        {:ok, if_rev} = paper_revision(op["if_rev"])
+
         case Content.apply_paper_block_op(
                slug,
-               op,
+               Map.drop(op, ["if_rev", "request_id"]),
                dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
              ) do
-          {:ok, _result} ->
+          {:ok, result} ->
             socket
             |> resync_pane_after_op()
             |> assign(save_status: "Auto-saved")
             |> assign(last_paper_save_ok?: true)
+            |> assign(
+              last_paper_save_result: %{
+                saved: true,
+                request_id: op["request_id"],
+                rev: result.rev
+              }
+            )
             # A prior halt cleared: the next accepted edit dismisses the banner.
             |> assign(paper_halt: nil)
 
@@ -310,11 +324,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:error, {:halted, reason}} ->
             put_paper_halt(socket, reason)
 
+          {:error, :precondition_failed} ->
+            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(op["request_id"])
+
+            socket
+            |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
+            |> assign(
+              last_paper_save_result: %{
+                saved: false,
+                request_id: op["request_id"],
+                conflict: true,
+                current_rev: socket.assigns[:paper_rev]
+              }
+            )
+
           {:error, _reason} ->
             socket
             |> put_flash(:error, "Edit failed")
             |> assign(save_status: "Save failed")
             |> assign(last_paper_save_ok?: false)
+            |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
     end
   end
@@ -332,95 +362,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # empty batch — and a nil paper_doc — as a no-op so a stray event never writes.
   # Mirrors paper_pane_op/2's load (current paper_doc slug), apply (atomic fold),
   # persist (one Repo.update), and re-sync (sync_paper_edit_doc → View re-streams).
-  def paper_ops(socket, ops) when is_list(ops) and ops != [] do
-    paper = socket.assigns[:paper_doc]
-    slug = paper && paper.doc_id
-    dataset = socket.assigns.dataset
-
-    cond do
-      # pds-w42 — same principal gate as paper_pane_op/2, for the same reason
-      # the read-only-pane guard is duplicated here: a batch reaches this seam
-      # WITHOUT passing through paper_pane_op/2. See write_denied?/1.
-      write_denied?(socket) ->
-        refuse_write_denied(socket)
-
-      # pds-w44 — the batch path needs the target narrowing for the same reason
-      # it needs the principal gate: a canvas run reaches this seam WITHOUT
-      # passing through paper_pane_op/2. Same doc, same predicate.
-      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
-        refuse_outside_grant(socket)
-
-      # Same v1 read-only guard as paper_pane_op/2 — see its comment. The batch
-      # path needs its own: a canvas run reaches here without passing through
-      # paper_pane_op/2.
-      read_only_pane?(socket) ->
-        refuse_read_only_pane(socket)
-
-      is_nil(slug) ->
-        assign(socket, last_paper_save_ok?: false)
-
-      true ->
-        case Content.apply_paper_block_ops(
-               slug,
-               ops,
-               dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket)
-             ) do
-          {:ok, _result} ->
-            # Re-read the paper (apply_paper_block_ops returns only the batch
-            # receipt %{slug, op_count, rev, block_ids} — NOT the post-apply
-            # blocks), assigning the fresh paper_doc. The View pane re-streams off
-            # that, AND it carries the CONFIRMED blocks we echo back to the canvas.
-            socket
-            |> sync_paper_edit_doc()
-            |> push_canvas_echo()
-            |> push_task_previews()
-            |> push_block_renders()
-            # A LANDED batch must SAY it landed. The batch path used to assign
-            # save_status only on its three error branches, so the footer save
-            # region ([data-test-id="bp-paper-footer-save"], the page's only
-            # role="status" aria-live region) could say "Save failed" or nothing
-            # — never success. Measured on the deployed build: after a save the
-            # API proved persisted, that region was the EMPTY STRING for 25s
-            # while the footer counts moved. Same "Auto-saved" token the
-            # single-op path (paper_pane_op/2) already assigns — ONE vocabulary
-            # across both write seams, no third state and NO in-flight
-            # "Saving…" transient (charter D242 defers pending feedback).
-            |> assign(save_status: "Auto-saved")
-            |> assign(last_paper_save_ok?: true)
-            # A prior halt cleared: the next accepted batch dismisses the banner.
-            |> assign(paper_halt: nil)
-
-          # A constraint veto (pdd-t20) carries a human-readable reason —
-          # surface it so a calmly-rejected batch explains itself. Mark the
-          # save failed too, matching the single-op path — a rejected batch
-          # must never leave a stale "Auto-saved" on screen.
-          {:error, {:constraint, message, _op}} ->
-            socket
-            |> put_flash(:error, constraint_flash(message))
-            |> assign(save_status: "Save failed")
-            |> assign(last_paper_save_ok?: false)
-
-          # A lifecycle-hook HALT on the batch path. The batch branch never set
-          # save_status on error before — put_paper_halt/2 fixes that so a
-          # rejected canvas run reads "Save failed" just like the single-op
-          # path, and raises the server reason verbatim in the mirror banner.
-          {:error, {:halted, reason}} ->
-            put_paper_halt(socket, reason)
-
-          {:error, _reason} ->
-            socket
-            |> put_flash(:error, "Edit failed")
-            |> assign(save_status: "Save failed")
-            |> assign(last_paper_save_ok?: false)
-        end
+  def paper_ops(socket, ops) do
+    case paper_ops(socket, ops, nil, nil) do
+      {:ok, socket, _receipt, _outcome} -> socket
+      {:error, socket} -> socket
     end
   end
 
-  def paper_ops(socket, _ops), do: assign(socket, last_paper_save_ok?: false)
-
   @doc false
-  def paper_ops(socket, ops, request_id) do
+  def paper_ops(socket, ops, request_id), do: paper_ops(socket, ops, request_id, nil)
+
+  def paper_ops(socket, ops, request_id, supplied_rev) do
+    socket = failed_result(socket, %{"request_id" => request_id})
     {socket, revoked_token?} = refresh_replay_token(socket)
     paper = socket.assigns[:paper_doc]
     slug = paper && paper.doc_id
@@ -449,20 +402,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       not (is_binary(slug) and is_list(ops) and ops != []) ->
         {:error, assign(socket, save_status: "Save failed", last_paper_save_ok?: false)}
 
+      paper_revision(supplied_rev) == :error ->
+        {:error, failed_result(socket, %{"request_id" => request_id})}
+
       true ->
+        {:ok, if_rev} = paper_revision(supplied_rev)
+
         case Content.apply_paper_block_ops_once(
                slug,
                ops,
                dataset,
                request_id,
                replay_principal_key(socket),
-               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
              ) do
           {:ok, receipt, outcome} ->
             socket =
               socket
               |> sync_paper_edit_doc()
-              |> push_canvas_echo()
+              |> push_canvas_echo(request_id)
               |> push_task_previews()
               |> push_block_renders()
               |> assign(save_status: "Auto-saved")
@@ -470,6 +428,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               |> assign(paper_halt: nil)
 
             {:ok, socket, receipt, outcome}
+
+          {:error, :precondition_failed} ->
+            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
+
+            {:error,
+             socket
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+             |> assign(
+               last_paper_save_result: %{
+                 saved: false,
+                 request_id: request_id,
+                 conflict: true,
+                 current_rev: socket.assigns[:paper_rev]
+               }
+             )}
 
           {:error, {:constraint, message, _op}} ->
             {:error,
@@ -1022,7 +995,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # advances the canvas diff baseline so the NEXT batch is INCREMENTAL, not
   # cumulative-from-mount. No-op when the canvas flag is OFF (no canvas is mounted
   # to receive the event, but we also gate so the OFF path pushes nothing).
-  def push_canvas_echo(socket) do
+  def push_canvas_echo(socket, request_id \\ nil) do
     if PaperCanvas.paper_canvas_enabled?() do
       {slug, blocks} =
         case socket.assigns[:paper_doc] do
@@ -1045,7 +1018,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             []
         end)
 
-      push_event(socket, "bp:canvas-update", %{runs: runs})
+      rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
+      push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
     else
       socket
     end
@@ -1053,6 +1027,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def document_op(socket, op) do
+    socket = failed_result(socket, op)
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
@@ -1071,25 +1046,71 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       grant_target_denied?(socket, type, doc_field(doc, :doc_id)) ->
         refuse_outside_grant(socket)
 
+      not (is_binary(op["if_rev"]) and op["if_rev"] != "") ->
+        failed_result(socket, op)
+
       true ->
         case Content.apply_document_block_op(
                doc.doc_id,
                type,
-               op,
+               Map.drop(op, ["if_rev", "request_id"]),
                dataset,
-               Shared.hook_opts(socket)
+               Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
              ) do
           {:ok, _result} ->
             socket
             |> sync_editor_blocks()
             |> assign(last_paper_save_ok?: true)
+            |> then(fn saved ->
+              assign(saved,
+                last_paper_save_result: %{
+                  saved: true,
+                  request_id: op["request_id"],
+                  rev: doc_field(saved.assigns[:editor_doc], :rev)
+                }
+              )
+            end)
+
+          {:error, {:rev_mismatch, current_rev}} ->
+            socket
+            |> sync_editor_blocks()
+            |> assign(last_paper_save_ok?: false)
+            |> assign(
+              last_paper_save_result: %{
+                saved: false,
+                request_id: op["request_id"],
+                conflict: true,
+                current_rev: current_revision(current_rev)
+              }
+            )
 
           {:error, _reason} ->
             socket
             |> put_flash(:error, "Edit failed")
             |> assign(last_paper_save_ok?: false)
+            |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
     end
+  end
+
+  defp paper_revision(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp paper_revision(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp paper_revision(_), do: :error
+
+  defp current_revision(%{actual: actual}), do: actual
+  defp current_revision(current), do: current
+
+  defp failed_result(socket, op) do
+    socket
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
   end
 
   @doc false
@@ -1115,9 +1136,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
-  def paper_reorder(socket, _blocks, nil, _dir), do: socket
+  def paper_reorder(socket, blocks, idx, dir), do: paper_reorder(socket, blocks, idx, dir, %{})
 
-  def paper_reorder(socket, blocks, idx, "up") when idx > 0 do
+  def paper_reorder(socket, _blocks, nil, _dir, meta), do: failed_result(socket, meta)
+
+  def paper_reorder(socket, blocks, idx, "up", meta) when idx > 0 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx - 1)
 
@@ -1126,32 +1149,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # already hides/disables these controls; this guard keeps a stale click (or
     # a context-menu race) a calm no-op instead of a rejected op + error flash.
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_result(socket, meta)
     else
       after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
 
-      paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+      paper_op(
+        socket,
+        write_meta(
+          %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id},
+          meta
+        )
+      )
     end
   end
 
-  def paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
+  def paper_reorder(socket, blocks, idx, "down", meta) when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx + 1)
 
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_result(socket, meta)
     else
       anchor_id = Map.get(displaced, "id")
 
-      paper_op(socket, %{
-        "op" => "move-block",
-        "id" => Map.get(moved, "id"),
-        "after" => anchor_id
-      })
+      paper_op(
+        socket,
+        write_meta(
+          %{
+            "op" => "move-block",
+            "id" => Map.get(moved, "id"),
+            "after" => anchor_id
+          },
+          meta
+        )
+      )
     end
   end
 
-  def paper_reorder(socket, _blocks, _idx, _dir), do: socket
+  def paper_reorder(socket, _blocks, _idx, _dir, meta), do: failed_result(socket, meta)
+
+  defp write_meta(op, meta) do
+    op
+    |> Map.put("if_rev", meta["if_rev"])
+    |> Map.put("request_id", meta["request_id"])
+  end
 
   # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
@@ -1162,8 +1203,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     slug = paper && paper.doc_id
 
     case slug && Content.get_paper(slug, socket.assigns.dataset) do
-      %{} = fresh -> assign(socket, paper_doc: fresh)
-      _ -> socket
+      %{content: content} = fresh when is_map(content) ->
+        assign(socket, paper_doc: fresh, paper_rev: Map.get(content, "rev") || 0)
+
+      _ ->
+        socket
     end
   end
 

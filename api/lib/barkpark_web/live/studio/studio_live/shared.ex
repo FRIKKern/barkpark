@@ -53,7 +53,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket
 
       block ->
-        push_event(socket, "bp:block-update", %{block_id: block_id, block: block})
+        rev = get_in((paper && Map.get(paper, :content)) || %{}, ["rev"])
+        push_event(socket, "bp:block-update", %{block_id: block_id, block: block, rev: rev})
     end
   end
 
@@ -208,6 +209,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_ops(socket, ops, request_id), to: Paper
+  defdelegate paper_ops(socket, ops, request_id, if_rev), to: Paper
 
   @doc false
   defdelegate push_task_previews(socket), to: Paper
@@ -238,6 +240,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_reorder(socket, blocks, idx, dir), to: Paper
+  defdelegate paper_reorder(socket, blocks, idx, dir, meta), to: Paper
 
   @doc false
   defdelegate sync_paper_edit_doc(socket), to: Paper

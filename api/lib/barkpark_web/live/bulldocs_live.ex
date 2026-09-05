@@ -637,14 +637,14 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_event("paper-op", params, socket) do
     socket = Edit.apply_op(socket, params)
-    {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
   end
 
   def handle_event("paper-ops", params, socket) do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Edit.apply_ops(socket, ops, request_id) do
+    case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
       {:ok, socket, receipt, outcome} ->
         {:reply,
          %{
@@ -655,12 +655,13 @@ defmodule BarkparkWeb.BulldocsLive do
          }, socket}
 
       {:error, socket} ->
-        {:reply, %{saved: false, request_id: request_id}, socket}
+        reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
+        {:reply, Map.put_new(reply, :request_id, request_id), socket}
     end
   end
 
   def handle_event("paper-edit-block", params, socket),
-    do: {:noreply, Edit.edit_block(socket, params)}
+    do: paper_edit_reply(Edit.edit_block(socket, params))
 
   def handle_event("paper-block-autosave", params, socket) do
     socket =
@@ -668,32 +669,32 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(last_save_ok?: false, save_status: "Save failed")
       |> Edit.edit_block(params)
 
-    {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
   end
 
   def handle_event("paper-add-block", params, socket),
-    do: {:noreply, Edit.add_block(socket, params)}
+    do: paper_edit_reply(Edit.add_block(socket, params))
 
   def handle_event("paper-delete-block", params, socket),
-    do: {:noreply, Edit.delete_block(socket, params)}
+    do: paper_edit_reply(Edit.delete_block(socket, params))
 
   def handle_event("paper-move-block", params, socket),
-    do: {:noreply, Edit.move_block(socket, params)}
+    do: paper_edit_reply(Edit.move_block(socket, params))
 
   def handle_event("paper-move-block-to", params, socket),
-    do: {:noreply, Edit.move_block_to(socket, params)}
+    do: paper_edit_reply(Edit.move_block_to(socket, params))
 
   def handle_event("task-preview-refresh", _params, socket),
     do: {:noreply, Edit.refresh_canvas(socket)}
 
   def handle_event("paper-materialize-slot", params, socket),
-    do: {:noreply, Edit.materialize_slot(socket, params)}
+    do: paper_edit_reply(Edit.materialize_slot(socket, params))
 
   def handle_event("paper-slash-insert", params, socket),
-    do: {:noreply, Edit.slash_insert(socket, params)}
+    do: paper_edit_reply(Edit.slash_insert(socket, params))
 
   def handle_event("paper-callout-fold", params, socket),
-    do: {:noreply, Edit.callout_fold(socket, params)}
+    do: paper_edit_reply(Edit.callout_fold(socket, params))
 
   def handle_event("paper-wikilink-search", %{"query" => query}, socket) do
     if item_share_grant?(socket.assigns),
@@ -713,6 +714,9 @@ defmodule BarkparkWeb.BulldocsLive do
     Logger.warning("bulldocs: unhandled event #{inspect(event)}")
     {:noreply, socket}
   end
+
+  defp paper_edit_reply(socket),
+    do: {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
 
   # Shared body for accept/reject: record the decision event on the pending
   # branch (skip gracefully if there is no pending branch or no goal_id), ack
@@ -1080,15 +1084,16 @@ defmodule BarkparkWeb.BulldocsLive do
   # re-checks `can_edit?`, so a crafted message cannot bypass the reader gate.
   def handle_info({:paper_op, %{"op" => _} = op, request_id}, socket)
       when is_binary(request_id) do
-    socket = Edit.apply_op(socket, op)
+    socket = Edit.apply_op(socket, Map.put(op, "request_id", request_id))
+
+    result = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
 
     {:noreply,
-     push_event(socket, "bp:paper-field-save-result", %{
-       request_id: request_id,
-       saved:
-         socket.assigns[:can_edit?] == true and
-           socket.assigns[:last_save_ok?] == true
-     })}
+     push_event(
+       socket,
+       "bp:paper-field-save-result",
+       Map.put_new(result, :request_id, request_id)
+     )}
   end
 
   def handle_info({:paper_op, %{"op" => _} = op}, socket),
