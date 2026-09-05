@@ -185,13 +185,15 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       rendered = editor_html(open_editor(view))
 
       if File.exists?(@snapshot_path) do
-        baseline = File.read!(@snapshot_path)
+        # The snapshot is a text file; its final newline is not part of the DOM.
+        baseline = @snapshot_path |> File.read!() |> String.trim_trailing("\n")
 
-        assert rendered == baseline, """
-        FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
-        path must stay byte-identical. If this change is intentional, delete
-        #{@snapshot_path} and re-run to re-baseline.
-        """
+        assert rendered == baseline,
+               inspect(
+                 Enum.reject(String.myers_difference(baseline, rendered), fn {kind, _} ->
+                   kind == :eq
+                 end)
+               )
       else
         File.mkdir_p!(Path.dirname(@snapshot_path))
         File.write!(@snapshot_path, rendered)
