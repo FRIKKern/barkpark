@@ -43,7 +43,7 @@
 #
 # WHAT THE SPEC GATE'S RED ACTUALLY DOES — AND THE HEADER USED TO OVERSTATE IT
 #
-# Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
+# Until wave 53 this header called the spec-gate job a stop. It is not, and
 # saying so here was the epic's own defect class in the epic's own workflow.
 # `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
 # DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate),

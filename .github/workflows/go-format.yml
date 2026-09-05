@@ -4,10 +4,14 @@
 # so gofmt drift accumulated silently (12/117 files were dirty when this landed).
 # Unlike `mix format` (pinned across skewing Elixir versions, hence advisory),
 # gofmt is deterministic. The `gofmt` job below stays ADVISORY as a whole-tree
-# WARNING; the honest counter-ratchet is the `gofmt-ceiling` job — its OWN
-# BLOCKING job (never a step inside the advisory job, or continue-on-error would
+# WARNING; the honest counter-ratchet is the `gofmt-ceiling` job — a job of its
+# OWN (never a step inside the advisory job, or continue-on-error would
 # neutralise it too) that reds by name on any NEW off-roster gofmt drift and
-# fails closed on a vacuous/zero scan. See scripts/go-format-drift-ceiling.sh.
+# fails closed on a vacuous/zero scan. It reds its own check-run and cannot stop
+# a merge: its name is a committed S4 PATHS-FILTERED exclusion in
+# .github/required-checks.json, and the token in that name means blocking
+# WITHIN this workflow — see the annotation on its job key below.
+# See scripts/go-format-drift-ceiling.sh.
 name: Go format
 #
 # TRIGGERS. `pull_request` gates the change; `push: branches: [main]` measures

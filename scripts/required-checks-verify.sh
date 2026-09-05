@@ -1064,7 +1064,7 @@ BLOCKING_PROSE_CLAIM='(^|[^A-Za-z])BLOCKING([^A-Za-z]|$)|blocks the merge|must b
 # somebody can review. And the annotation is checked in BOTH directions —
 # putting it on a context that IS required reds, because that is the same lie
 # advisory_prose_check catches, wearing a machine-readable hat.
-BLOCKING_HEADER_UNRESOLVED_BASELINE=3
+BLOCKING_HEADER_UNRESOLVED_BASELINE=0
 
 # A job `name:` template as an anchored ERE — `${{ … }}` holes punched out
 # BEFORE metacharacters are escaped, so literal parens stay literal. Same
