@@ -8,12 +8,34 @@ name: architecture
 # cycle. Existing known debt is grandfathered by the baseline, so it never
 # breaks CI; only NEW debt does.
 #
-# ADVISORY AT FIRST (continue-on-error: true), matching the format-gate
-# precedent in ci.yml — the job reports the regression to the PR summary but
-# does not block the merge. Flip continue-on-error to false to make it a hard
-# gate once the signal has proven stable on real PRs.
+# RED ON REGRESSION, as of 2026-09-05 (task-6891e8f620c1bdea): a regression now
+# FAILS this workflow's own check-run. It was advisory (continue-on-error: true)
+# for its whole life, and the promotion path this header documented — "flip
+# continue-on-error to false" — is now taken.
+#
+# NOT A REQUIRED CONTEXT, and the difference matters: "Boundary gate" reds its
+# own PR check and is meant to be read as a stop sign, but it CANNOT stop a merge
+# by itself — it is NOT in the required set: .github/required-checks.json requires only Cloud gate / Console gate /
+# Elixir gate / "PR references an active task", and this change does not touch
+# that file or those four context names.
+#
+# WHAT MAKES THE RED HONEST AT ALL is tooling/concept-map/accepted-until-fixed.json:
+# today's tree carries real regressions, so a bare flip would have reddened every
+# PR for debt nobody on that PR added. That file names each tolerated identity
+# WITH THE bp TASK ROW THAT OWES THE FIX, and ci-boundary.mjs runs three arms
+# over it so the list decays instead of accumulating: anything unlisted still
+# reds; a listed row that is closed while its debt is still present reds; a
+# listed identity that has healed reds with "HEALED: delete entry X". An
+# unreadable ledger REFUSES (exit 2) rather than passing. It is a TRIPWIRE, not
+# an allowlist, and the durable fix is a SHORTER list — never a longer one.
 
 on:
+  # NO push: ARM HERE, and that is a KNOWN GAP, not an oversight. This workflow
+  # produces no main-scoped result and writes no main-scoped Actions cache (the
+  # devbuild cache block below records exactly that consequence: "no main-scoped
+  # entry is ever written and a branch can only ever restore its own"). Adding
+  # the arm is DEFERRED to task-33742276cf0a35b1, which owns CI trigger policy;
+  # this PR deliberately touches no trigger block.
   pull_request:
     paths:
       - "api/**"
@@ -33,10 +55,13 @@ concurrency:
 
 jobs:
   boundary-gate:
-    name: Boundary gate (advisory)
+    name: Boundary gate
     runs-on: ubuntu-latest
-    # Advisory at first — report, don't block. Matches ci.yml's format gate.
-    continue-on-error: true
+    # NO continue-on-error. It is gone from the job AND from every step, which is
+    # the whole point of this workflow's promotion: while it was set, the
+    # Boundary predicate selftest died on every run, "Run boundary gate" was
+    # SKIPPED in every run, and the corpse read as green for 1,404 runs
+    # (task-6891e8f620c1bdea). A gate that cannot red is not a gate.
 
     steps:
       - name: Checkout
@@ -335,7 +360,17 @@ jobs:
           key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
 
       - name: Run boundary gate
+        env:
+          # ARM (b) of the accepted-until-fixed tripwire reads each listed row's
+          # lifecycle off the ledger — the SAME door and the SAME secret
+          # scripts/pr-task-gate.sh reads (/v1/data/doc/<dataset>/task/<id>). A
+          # read it cannot complete is a REFUSAL (exit 2), never a green: an
+          # acceptance whose justification could not be checked is an allowlist.
+          # Fork PRs receive no secrets, so they refuse rather than pass.
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           # `set -euo pipefail` is LOAD-BEARING. Actions' unspecified-shell
           # default is `bash -e {0}` — WITHOUT pipefail — and the pipeline below
           # is this step's LAST command, so without pipefail the step's status is
@@ -356,7 +391,13 @@ jobs:
             echo ""
             echo "The never-worse gate, pointed at architecture. Fails on NEW"
             echo "feature→feature, kernel→feature, or cycle debt vs the committed"
-            echo "baseline. Advisory at first — does not block the merge."
+            echo "baseline."
+            echo ""
+            echo "NOT A REQUIRED CONTEXT: this check reds its own PR check-run, but"
+            echo "it cannot stop a merge by itself — it is not in"
+            echo "the required set (Cloud gate / Console gate / Elixir gate / PR"
+            echo "references an active task). Known debt is tolerated only by a"
+            echo "named, row-backed entry in tooling/concept-map/accepted-until-fixed.json."
             echo ""
             echo '```'
             if [ -s /tmp/boundary-gate.txt ]; then
