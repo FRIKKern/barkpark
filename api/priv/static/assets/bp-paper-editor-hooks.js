@@ -27,6 +27,63 @@
   ]);
   const PAPER_STRUCTURAL_SUBMITS = new Set(["paper-add-block", "paper-add-property"]);
   const paperExitCoordinators = new WeakMap();
+  const PAPER_HISTORY_POSITION = "__bpPaperHistoryPosition";
+
+  function bpPaperOwnedHistoryPosition(state) {
+    return Number.isFinite(state?.[PAPER_HISTORY_POSITION])
+      ? state[PAPER_HISTORY_POSITION]
+      : null;
+  }
+
+  function bpPaperPhoenixHistoryPosition(state) {
+    if (Number.isFinite(state?.position)) return state.position;
+    if (state?.backType === "patch" || state?.backType === "redirect") return 0;
+    return null;
+  }
+
+  function bpPaperHistoryStateWithPosition(state, position) {
+    if (state == null) return { [PAPER_HISTORY_POSITION]: position };
+    if (typeof state !== "object" || Array.isArray(state)) return state;
+    const prototype = Object.getPrototypeOf(state);
+    if (prototype !== null && prototype?.constructor?.name !== "Object") return state;
+    return { ...state, [PAPER_HISTORY_POSITION]: position };
+  }
+
+  // Loaded before LiveSocket: mark the current entry and every later History
+  // API entry without replacing state owned by Phoenix or another client.
+  // Entries created before this script remain unknowable on browsers without
+  // the Navigation API, so the popstate fallback never guesses their direction.
+  function bpPaperInstallHistoryMetadata() {
+    const history = window.history;
+    if (!history || history.__bpPaperHistoryInstalled) return;
+    const nativePushState = history.pushState.bind(history);
+    const nativeReplaceState = history.replaceState.bind(history);
+    let position = bpPaperOwnedHistoryPosition(history.state);
+    const navigationPosition = window.navigation?.currentEntry?.index;
+    if (position == null && Number.isFinite(navigationPosition)) position = navigationPosition;
+    if (position == null) position = bpPaperPhoenixHistoryPosition(history.state);
+    if (position == null) position = 0;
+    history.pushState = function (state, title, url) {
+      const current = bpPaperOwnedHistoryPosition(history.state) ??
+        bpPaperPhoenixHistoryPosition(history.state);
+      position = (current ?? position) + 1;
+      return nativePushState(bpPaperHistoryStateWithPosition(state, position), title, url);
+    };
+    history.replaceState = function (state, title, url) {
+      const current = bpPaperOwnedHistoryPosition(history.state) ??
+        bpPaperPhoenixHistoryPosition(history.state);
+      position = current ?? bpPaperPhoenixHistoryPosition(state) ?? position;
+      return nativeReplaceState(bpPaperHistoryStateWithPosition(state, position), title, url);
+    };
+    window.addEventListener("popstate", (event) => {
+      const next = bpPaperOwnedHistoryPosition(event.state) ??
+        bpPaperPhoenixHistoryPosition(event.state);
+      if (next != null) position = next;
+    });
+    Object.defineProperty(history, "__bpPaperHistoryInstalled", { value: true });
+  }
+
+  bpPaperInstallHistoryMetadata();
 
   function bpPaperRequestId() {
     try {
@@ -92,10 +149,12 @@
   }
 
   function bpPaperHistoryPosition(state) {
-    if (Number.isFinite(state?.position)) return state.position;
-    // LiveView stamps the entry it is leaving with backType, but the initial
-    // entry has no position. Its own popstate handler treats that entry as 0.
-    if (state?.backType === "patch" || state?.backType === "redirect") return 0;
+    const navigationPosition = window.navigation?.currentEntry?.index;
+    if (Number.isFinite(navigationPosition)) return navigationPosition;
+    const ownedPosition = bpPaperOwnedHistoryPosition(state);
+    if (ownedPosition != null) return ownedPosition;
+    const phoenixPosition = bpPaperPhoenixHistoryPosition(state);
+    if (phoenixPosition != null) return phoenixPosition;
     return null;
   }
 
@@ -123,6 +182,8 @@
       let historyPhase = null;
       let historyDelta = null;
       let historySaveResult = null;
+      let navigationReplayKey = null;
+      let navigationSave = null;
       const mutationQueue = [];
       const mutationById = new Map();
       const ownRevisions = new Map();
@@ -197,6 +258,7 @@
           window.removeEventListener("beforeunload", coordinator._onBeforeUnload);
           window.removeEventListener("popstate", coordinator._onPopState, true);
           window.removeEventListener("phx:navigate", coordinator._onNavigate);
+          window.navigation?.removeEventListener?.("navigate", coordinator._onNavigationApiNavigate);
           sources.forEach((record) => clearTimeout(record.timer));
           paperExitCoordinators.delete(main);
         },
@@ -661,6 +723,41 @@
         const currentPosition = bpPaperHistoryPosition(window.history.state);
         if (currentPosition != null) historyPosition = currentPosition;
       };
+      coordinator._onNavigationApiNavigate = (event) => {
+        if (event.navigationType !== "traverse") return;
+        const destinationKey = event.destination?.key;
+        if (navigationReplayKey && destinationKey === navigationReplayKey) {
+          navigationReplayKey = null;
+          return;
+        }
+        if (!coordinator.hasUnsaved() || !event.cancelable || !destinationKey ||
+            typeof window.navigation?.traverseTo !== "function") return;
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+        if (navigationSave) return;
+        navigationSave = coordinator.drain().then((saved) => {
+          navigationSave = null;
+          if (!saved) return false;
+          navigationReplayKey = destinationKey;
+          let result;
+          try {
+            result = window.navigation.traverseTo(destinationKey);
+          } catch (_) {
+            navigationReplayKey = null;
+            return false;
+          }
+          if (!result?.committed || !result?.finished) {
+            navigationReplayKey = null;
+            return false;
+          }
+          return Promise.all([result.committed, result.finished])
+            .then(() => true)
+            .catch(() => {
+              navigationReplayKey = null;
+              return false;
+            });
+        });
+      };
       const finishHistoryNavigation = () => {
         if (historyPhase !== "saving" || historySaveResult == null) return;
         if (historySaveResult) {
@@ -816,6 +913,7 @@
       window.addEventListener("beforeunload", coordinator._onBeforeUnload);
       window.addEventListener("popstate", coordinator._onPopState, true);
       window.addEventListener("phx:navigate", coordinator._onNavigate);
+      window.navigation?.addEventListener?.("navigate", coordinator._onNavigationApiNavigate);
       paperExitCoordinators.set(main, coordinator);
     }
     return coordinator.register(hook);

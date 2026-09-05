@@ -28,13 +28,85 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.CSS ||= { escape: (value) => String(value) };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
+const navigationEvents = new window.EventTarget();
+const navigationTraversals = [];
+const navigationResults = [];
+let navigationIndex;
+Object.defineProperty(window, "navigation", {
+  configurable: true,
+  value: {
+    addEventListener: navigationEvents.addEventListener.bind(navigationEvents),
+    removeEventListener: navigationEvents.removeEventListener.bind(navigationEvents),
+    get currentEntry() {
+      return Number.isFinite(navigationIndex) ? { index: navigationIndex } : null;
+    },
+    traverseTo: (key) => {
+      navigationTraversals.push(key);
+      return navigationResults.shift() || {
+        committed: Promise.resolve(),
+        finished: Promise.resolve(),
+      };
+    },
+  },
+});
 
 const { BpPaperCanvas, DEBOUNCE_MS } = await import("./index.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
+const hooksSource = readFileSync(
+  new URL("../../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url),
+  "utf8",
+);
+const seededDom = new JSDOM("<!doctype html>", { url:"http://localhost/studio/papers/seed-41" });
+seededDom.window.history.replaceState(
+  {position:41, type:"patch", id:"main"},
+  "",
+  "/studio/papers/seed-41",
+);
+vm.runInContext(hooksSource, vm.createContext({
+  window:seededDom.window,
+  document:seededDom.window.document,
+  customElements:seededDom.window.customElements,
+  CustomEvent:seededDom.window.CustomEvent,
+  FormData:seededDom.window.FormData,
+  setTimeout,
+  clearTimeout,
+}));
+seededDom.window.history.pushState(null, "", "/studio/papers/seed-42");
+assert.equal(seededDom.window.history.state.__bpPaperHistoryPosition, 42,
+  "an existing Phoenix position seeds the owned counter before fallback zero");
+seededDom.window.close();
+
 const context = vm.createContext({ window, document, customElements, CustomEvent,
   FormData: window.FormData, setTimeout, clearTimeout });
-vm.runInContext(readFileSync(new URL("../../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8"), context);
+assert.equal(window.history.state, null, "the browser starts with Phoenix's join sentinel");
+vm.runInContext(hooksSource, context);
+assert.equal(window.history.state, null,
+  "loading editor hooks must not consume Phoenix's null-state initialization sentinel");
+window.history.replaceState(
+  {position:41, type:"patch", id:"main", foreign:"kept"},
+  "",
+  "/studio/papers/owned-41",
+);
+assert.deepEqual(
+  {position:window.history.state.position, type:window.history.state.type,
+    id:window.history.state.id, foreign:window.history.state.foreign,
+    owned:window.history.state.__bpPaperHistoryPosition},
+  {position:41, type:"patch", id:"main", foreign:"kept", owned:41},
+  "Phoenix's initial replace establishes the owned counter without losing fields",
+);
+const foreignHistoryState = new Map([["foreign", 42]]);
+window.history.replaceState(foreignHistoryState, "", "/studio/papers/foreign-state");
+assert.ok(window.history.state instanceof Map,
+  "non-record foreign history state remains its original structured-clone type");
+assert.equal(window.history.state.get("foreign"), 42);
+assert.equal(window.history.state.__bpPaperHistoryPosition, undefined,
+  "non-record foreign history state remains unowned");
+window.history.replaceState(
+  {position:41, type:"patch", id:"main", foreign:"kept"},
+  "",
+  "/studio/papers/owned-41",
+);
 const hooks = window.BarkparkPaperEditorHooks;
 const paragraph = (id, value) => ({id, type: "paragraph", content: [{type: "text", value}]});
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -214,6 +286,114 @@ try {
   }
   structural.close();
 
+  // The owned counter starts from Phoenix's existing 41, then remains the
+  // traversal authority even when a later foreign field also says position.
+  window.history.replaceState(
+    {position:41, type:"patch", id:"main", foreign:"base"},
+    "",
+    "/studio/papers/owned-41",
+  );
+  window.history.pushState(null, "", "/studio/papers/owned-42");
+  assert.equal(window.history.state.__bpPaperHistoryPosition, 42,
+    "a null push is marked at Phoenix position + 1");
+  window.history.replaceState(
+    {position:999, type:"patch", id:"main", foreign:"preserved"},
+    "",
+    "/studio/papers/owned-42",
+  );
+  assert.equal(window.history.state.__bpPaperHistoryPosition, 42);
+  assert.equal(window.history.state.position, 999);
+  assert.equal(window.history.state.foreign, "preserved");
+  const ownedBack = await mount();
+  append(ownedBack.canvas, " before owned mixed-position back");
+  window.history.back();
+  await waitFor(() => ownedBack.requests.length === 1,
+    "owned position 42 should restore exactly one step before saving Back");
+  assert.equal(window.location.pathname, "/studio/papers/owned-42");
+  resolveSaved(ownedBack.requests[0], true);
+  await waitFor(() => window.location.pathname === "/studio/papers/owned-41",
+    "owned Back should replay exactly -1 after acknowledgement");
+  ownedBack.close();
+  const ownedForward = await mount();
+  append(ownedForward.canvas, " before owned mixed-position forward");
+  window.history.forward();
+  await waitFor(() => ownedForward.requests.length === 1,
+    "owned position 41 should restore exactly one step before saving Forward");
+  assert.equal(window.location.pathname, "/studio/papers/owned-41");
+  resolveSaved(ownedForward.requests[0], true);
+  await waitFor(() => window.location.pathname === "/studio/papers/owned-42",
+    "owned Forward should replay exactly +1 after acknowledgement");
+  ownedForward.close();
+
+  // The Navigation API fires before a traversal commits. Cancel it while dirty,
+  // then traverse to the exact destination key only after the save barrier.
+  const navigationBack = await mount();
+  append(navigationBack.canvas, " before Navigation API back");
+  const navigationBackEvent = new window.Event("navigate", { cancelable:true });
+  Object.defineProperties(navigationBackEvent, {
+    navigationType: { value:"traverse" },
+    destination: { value:{ key:"navigation-back", index:40 } },
+  });
+  navigationIndex = 41;
+  navigationEvents.dispatchEvent(navigationBackEvent);
+  assert.equal(navigationBackEvent.defaultPrevented, true);
+  assert.equal(navigationBack.requests.length, 1);
+  assert.deepEqual(navigationTraversals, [], "Navigation Back waits before delivery");
+  resolveSaved(navigationBack.requests[0], true);
+  await waitFor(() => navigationTraversals.at(-1) === "navigation-back",
+    "acknowledged Navigation Back should traverse to its exact key");
+  navigationBack.close();
+
+  const navigationForward = await mount();
+  append(navigationForward.canvas, " preserve on Navigation API forward refusal");
+  const navigationForwardEvent = new window.Event("navigate", { cancelable:true });
+  Object.defineProperties(navigationForwardEvent, {
+    navigationType: { value:"traverse" },
+    destination: { value:{ key:"navigation-forward", index:42 } },
+  });
+  navigationEvents.dispatchEvent(navigationForwardEvent);
+  assert.equal(navigationForwardEvent.defaultPrevented, true);
+  assert.equal(navigationForward.requests.length, 1);
+  resolveSaved(navigationForward.requests[0], false);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(navigationTraversals.includes("navigation-forward"), false,
+    "failed Navigation Forward remains cancelled");
+  assert.match(textOf(navigationForward.canvas), /preserve on Navigation API forward refusal/);
+  navigationForward.close();
+
+  const rejectedTraversal = await mount();
+  append(rejectedTraversal.canvas, " before rejected traversal");
+  navigationResults.push({
+    committed: Promise.resolve(),
+    finished: Promise.reject(new Error("traversal refused")),
+  });
+  const rejectedTraversalEvent = new window.Event("navigate", { cancelable:true });
+  Object.defineProperties(rejectedTraversalEvent, {
+    navigationType: { value:"traverse" },
+    destination: { value:{ key:"navigation-retry", index:40 } },
+  });
+  navigationEvents.dispatchEvent(rejectedTraversalEvent);
+  resolveSaved(rejectedTraversal.requests[0], true);
+  await waitFor(() => navigationTraversals.at(-1) === "navigation-retry",
+    "the rejected traversal should still have attempted its exact key");
+  await tick();
+  append(rejectedTraversal.canvas, " then retry safely");
+  const retryTraversalEvent = new window.Event("navigate", { cancelable:true });
+  Object.defineProperties(retryTraversalEvent, {
+    navigationType: { value:"traverse" },
+    destination: { value:{ key:"navigation-retry", index:40 } },
+  });
+  navigationEvents.dispatchEvent(retryTraversalEvent);
+  assert.equal(retryTraversalEvent.defaultPrevented, true,
+    "a rejected traversal clears replay state before the same destination retries");
+  assert.equal(rejectedTraversal.requests.length, 2,
+    "the subsequent traversal crosses a fresh save barrier");
+  resolveSaved(rejectedTraversal.requests[1], true);
+  await waitFor(() => navigationTraversals.filter(key => key === "navigation-retry").length === 2,
+    "a successful subsequent traversal should replay normally");
+  rejectedTraversal.close();
+  navigationIndex = undefined;
+
   window.history.replaceState({position:0, type:"patch", id:"main"}, "", "/studio/papers/native-a");
   const nativeBack = await mount();
   window.history.pushState({position:1, type:"patch", id:"main"}, "", "/studio/papers/native-b");
@@ -259,6 +439,47 @@ try {
   assert.equal(window.location.pathname, "/studio/papers/initial-a");
   window.removeEventListener("popstate", onDeliveredInitialBack);
   initialEntryBack.close();
+
+  // Entries created after the editor hooks load are owned even when callers
+  // supply null state. The marker preserves exact Back/Forward direction while
+  // leaving Phoenix's public position field absent.
+  window.history.replaceState(null, "", "/studio/papers/null-a");
+  window.history.pushState(null, "", "/studio/papers/null-b");
+  assert.equal(window.history.state.position, undefined);
+  const nullStateBack = await mount();
+  append(nullStateBack.canvas, " before null-state back");
+  let deliveredNullBacks = 0;
+  const onDeliveredNullBack = () => { deliveredNullBacks++; };
+  window.addEventListener("popstate", onDeliveredNullBack);
+  window.history.back();
+  await waitFor(() => nullStateBack.requests.length === 1,
+    "owned null-state Back should restore and flush before delivery");
+  assert.equal(window.location.pathname, "/studio/papers/null-b");
+  assert.equal(deliveredNullBacks, 0);
+  resolveSaved(nullStateBack.requests[0], true);
+  await waitFor(() => deliveredNullBacks === 1,
+    "owned null-state Back should replay after acknowledgement");
+  assert.equal(window.location.pathname, "/studio/papers/null-a");
+  window.removeEventListener("popstate", onDeliveredNullBack);
+  nullStateBack.close();
+
+  const nullStateForward = await mount();
+  append(nullStateForward.canvas, " preserve on null-state forward refusal");
+  let deliveredNullForwards = 0;
+  const onDeliveredNullForward = () => { deliveredNullForwards++; };
+  window.addEventListener("popstate", onDeliveredNullForward);
+  window.history.forward();
+  await waitFor(() => nullStateForward.requests.length === 1,
+    "owned null-state Forward should restore and flush before delivery");
+  assert.equal(window.location.pathname, "/studio/papers/null-a");
+  assert.equal(deliveredNullForwards, 0);
+  resolveSaved(nullStateForward.requests[0], false);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(window.location.pathname, "/studio/papers/null-a");
+  assert.equal(deliveredNullForwards, 0, "failed null-state Forward remains cancelled");
+  assert.match(textOf(nullStateForward.canvas), /preserve on null-state forward refusal/);
+  window.removeEventListener("popstate", onDeliveredNullForward);
+  nullStateForward.close();
 
   window.history.replaceState({position:0, type:"patch", id:"main"}, "", "/studio/papers/refused-a");
   window.history.pushState({position:1, type:"patch", id:"main"}, "", "/studio/papers/refused-b");
