@@ -633,12 +633,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
        rev}}` on the per-doc topic.
 
   Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
-  rev:}}` on success.
+  rev:}}` on success. When `opts[:if_rev]` is present, it must match the
+  paper's current streaming revision and the final row update is atomically
+  fenced; omitting it preserves the legacy last-write-wins contract.
   """
   def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
@@ -710,7 +714,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           "rev" => generate_rev()
         })
 
-      case Repo.update(changeset) do
+      case fenced_or_plain_paper_update(changeset, doc, opts) do
         {:ok, saved} ->
           frame = %{
             op_kind: op_kind,
