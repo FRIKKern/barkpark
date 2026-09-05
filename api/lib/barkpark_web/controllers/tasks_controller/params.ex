@@ -96,6 +96,16 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # perspective=drafts OR ?drafts=true → :drafts (token-gated, live extract).
   # Anything else → :published (the materialised default).
+  #
+  # DELIBERATELY NOT MERGED into `BarkparkWeb.AnonPerspective.parse/1` (the
+  # canonical lenient parser). Two real differences, either of which a collapse
+  # would silently destroy: this one takes the whole PARAMS MAP because it also
+  # honours the `?drafts=true` alias, and its value set is NARROWER — the graph
+  # surface declares `published | drafts`, with no `raw`. Merging would either
+  # drop a working alias or widen the graph route to a perspective its manifest
+  # entry does not offer. The strictness the fork used to cost is now bought
+  # separately: `graph_show/2` refuses an unsupported value through
+  # `BarkparkWeb.ReadPerspective` before this is reached.
   def parse_perspective(%{"perspective" => "drafts"}), do: :drafts
   def parse_perspective(%{"drafts" => v}) when v in ["true", "1", true], do: :drafts
   def parse_perspective(_), do: :published

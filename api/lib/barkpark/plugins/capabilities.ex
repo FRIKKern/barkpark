@@ -1740,7 +1740,11 @@ defmodule Barkpark.Plugins.Capabilities do
               "(e.g. title,slug) — a token-thrifty response shape. Already honored by the " <>
               "controller; declared here so agents can discover it."
           ),
-          flag("perspective", "string", "published (default) | drafts | raw.")
+          flag(
+            "perspective",
+            "string",
+            "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published."
+          )
         ],
         paginated: true,
         writes: false,
@@ -2616,7 +2620,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "perspective",
             "string",
-            "published (default) | drafts (live extract over the drafts corpus)."
+            "published (default) | drafts (live extract over the drafts corpus). raw is NOT offered on this route; any other value is a 400, never a silent downgrade to published."
           )
         ],
         writes: false,

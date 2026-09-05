@@ -12629,7 +12629,7 @@
             }
           },
           {
-            "description": "published (default) | drafts (live extract over the drafts corpus).",
+            "description": "published (default) | drafts (live extract over the drafts corpus). raw is NOT offered on this route; any other value is a 400, never a silent downgrade to published.",
             "in": "query",
             "name": "perspective",
             "required": false,
@@ -13620,7 +13620,7 @@
             }
           },
           {
-            "description": "published (default) | drafts | raw.",
+            "description": "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published.",
             "in": "query",
             "name": "perspective",
             "required": false,
@@ -14364,7 +14364,7 @@
             }
           },
           {
-            "description": "published (default) | drafts | raw.",
+            "description": "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published.",
             "in": "query",
             "name": "perspective",
             "required": false,
