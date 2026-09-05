@@ -3,6 +3,29 @@ defmodule BarkparkWeb.Studio.PaperFieldBlockSaveTest do
 
   alias BarkparkWeb.Studio.PaperFieldBlock
 
+  test "ordinary inner change carries the mounted revision without synthetic event params" do
+    block = %{
+      "id" => "c-price",
+      "type" => "composite",
+      "fields" => [%{"name" => "amount", "title" => "Amount", "type" => "string"}],
+      "value" => %{"amount" => "299"}
+    }
+
+    assert {:ok, socket} =
+             PaperFieldBlock.update(%{id: "paper-fb-c-price", block: block, if_rev: 7}, socket())
+
+    assert {:noreply, _pending_socket} =
+             PaperFieldBlock.handle_event("inner-change", %{"amount" => "399"}, socket)
+
+    assert_receive {:paper_op,
+                    %{
+                      "op" => "patch-block",
+                      "id" => "c-price",
+                      "patch" => %{"value" => %{"amount" => "399"}},
+                      "if_rev" => 7
+                    }}
+  end
+
   test "correlated form save preserves its draft until the parent echoes it" do
     block = %{
       "id" => "c-price",

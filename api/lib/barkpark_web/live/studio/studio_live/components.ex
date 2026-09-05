@@ -390,6 +390,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     doc_type={@doc_type}
                     html_backed={@html_backed_body}
                     repairable={@doc_type == Content.paper_type() and not @html_backed_body}
+                    if_rev={@paper_rev}
                     list_href={doc_list_href(@scope_prefix, @doc_type, @dataset)}
                   />
                 </article>
@@ -482,6 +483,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:doc_type, :string, required: true)
   attr(:repairable, :boolean, default: false)
   attr(:html_backed, :boolean, default: false)
+  attr(:if_rev, :integer, required: true)
   attr(:list_href, :string, required: true)
 
   def unrenderable_document_notice(assigns) do
@@ -515,6 +517,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           class="btn btn-primary btn-sm"
           phx-click="paper-add-block"
           phx-value-block-type="paragraph"
+          phx-value-if_rev={@if_rev}
           data-test-id="paper-unrenderable-start-body"
         >
           Start the body with a paragraph

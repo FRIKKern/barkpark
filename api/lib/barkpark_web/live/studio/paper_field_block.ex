@@ -349,7 +349,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     if request_id do
       send(self(), {:paper_op, Map.put(op, "if_rev", if_rev), request_id})
     else
-      send(self(), {:paper_op, op})
+      send(self(), {:paper_op, Map.put(op, "if_rev", if_rev)})
     end
 
     socket
