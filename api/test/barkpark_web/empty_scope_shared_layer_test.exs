@@ -293,10 +293,15 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       assert Keyword.get(opts, :workspace_id) == :shared_only,
              "the fixture is not exercising the sentinel — this arm would be vacuous"
 
-      assert {:error, :workspace_scope_required} =
-               Content.create_document("post", %{"_id" => "esl-write", "title" => "W"}, @ds, opts),
+      # Bound first, asserted on a BOOLEAN: `assert pattern = expr, "msg"` raises
+      # MatchError before assert/2 ever sees the message
+      # (scripts/unreachable-assert-message-check.sh).
+      result = Content.create_document("post", %{"_id" => "esl-write", "title" => "W"}, @ds, opts)
+
+      assert result == {:error, :workspace_scope_required},
              "an unscoped write from a principal that names no workspace must be a " <>
-               "NAMED refusal, never a silent write into the seeded Default"
+               "NAMED refusal, never a silent write into the seeded Default — got " <>
+               inspect(result)
 
       refute Repo.get_by(Document, doc_id: "drafts.esl-write") ||
                Repo.get_by(Document, doc_id: "esl-write"),
