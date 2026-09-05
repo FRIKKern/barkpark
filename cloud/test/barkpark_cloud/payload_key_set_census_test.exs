@@ -1676,7 +1676,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "domains" => 3,
     "email" => 3,
     "environment" => 4,
-    "error" => 8,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — the refusal envelope `decodeSelfUpdatePin/1` reads.
+    "error" => 9,
     "evidence" => 2,
     "failed" => 2,
     "failure_class" => 2,
@@ -1707,12 +1708,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "name" => 11,
     "never_covered" => 3,
     "next_cursor" => 2,
-    "ok" => 8,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
+    "ok" => 9,
     "oldest_pending_seconds" => 2,
     "p50" => 2,
     "p95" => 2,
     "pending" => 2,
-    "pinned_release" => 3,
+    # isu-backlog-cloud-update-trigger-verb: +2 in selfupdate.go — TWO sites: `decodeSelfUpdatePin/1` reads the field at BOTH positions it is known to ride (inside the error object, then at the envelope top level), mirroring the console's updateConflict().
+    "pinned_release" => 5,
     "population" => 2,
     "port" => 4,
     "pressure" => 2,
@@ -1761,7 +1764,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
     # field a reader BRANCHES on, so only this row can notice a site dying.
     "state" => 2,
-    "status" => 16,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
+    "status" => 17,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -1807,7 +1811,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # name on it instead of a floor that quietly means something else. (This also
   # corrects a fact in circulation: `client.go` has NOT been the whole corpus
   # since `deliveries.go` landed in W26 S3.)
-  @cloudclient_sources ~w(client.go deliveries.go)
+  # isu-backlog-cloud-update-trigger-verb: `selfupdate.go` is the THIRD non-test
+  # source — the client half of `bp cloud update <instance>`, the self-update
+  # TRIGGER the console has printed as a copy-pasteable chip with no backing verb.
+  # It moves this list and FOUR rows of the register below, and moves
+  # `@go_tag_pinned` NOT AT ALL: every tag it declares (`ok`, `status`, `error`,
+  # `pinned_release`) is already a NAME somewhere in the package, so all five new
+  # declarations ride free on the name union and land entirely in the SITE arm —
+  # which is the exact class of change `@go_tag_pinned` structurally cannot see,
+  # and the reason this register exists.
+  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
