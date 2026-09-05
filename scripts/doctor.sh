@@ -86,14 +86,14 @@ else
   skip "published stable cli release, jq, or origin/main ref unavailable — release-cadence check skipped"
 fi
 
-# ── 1c. Orphaned test databases ──────────────────────────────────────────────
-# Every lane runs `MIX_TEST_PARTITION=<lane> mix ecto.create`; nothing drops
-# them, so the count is MONOTONIC (314 measured 2026-08-24, task-1a7e52b811dabc3c).
+# ── 1c. Test database inventory and connection pressure ──────────────────────
+# Abandoned lane partitions can accumulate (314 measured 2026-08-24,
+# task-1a7e52b811dabc3c). This query counts all matching names, not proven orphans.
 # `make test` (scripts/test-partition-cleanup.sh) now drops a lane's own
 # partition on a clean exit; `make reap-test-dbs` sweeps by age for the lanes
 # that never reach one. Read-only here: this counts, it never drops.
 #
-# ORPHAN COUNT AND CONNECTION PRESSURE ARE TWO SEPARATE FACTS — do not fuse
+# DATABASE COUNT AND CONNECTION PRESSURE ARE TWO SEPARATE FACTS — do not fuse
 # them. An idle orphaned database holds ZERO connections (verified live
 # 2026-08-31: 182 orphans, 0 of them in pg_stat_activity); the connections in
 # use belong to whatever is ACTUALLY running right now (dev `phx.server`s,
