@@ -112,7 +112,13 @@ export interface BarkparkClientConfig extends BarkparkHooks {
   token?: string // Bearer for write + listen + admin surfaces
   useCdn?: boolean // reserved — guard rejects useCdn:true + perspective:'drafts'
   perspective?: Perspective // default 'published'
-  timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport)
+  timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport) — bounds ONE attempt
+  /** Overall budget (ms) per call, retries and backoff sleeps included.
+   *  Undefined (default) means unbounded. Set it when the caller has a real
+   *  global bound — a serverless route handler's budget, an `AbortSignal.timeout`
+   *  — and the retry loop will decline any retry that cannot finish inside it
+   *  rather than spending the remainder on a backoff sleep. */
+  deadlineMs?: number
   requestTagPrefix?: string // X-Barkpark-Request-Tag: <prefix>-<uuid> for observability; default 'bp', set '' to disable
   fetch?: typeof globalThis.fetch // user override (MSW, tracing)
 }
