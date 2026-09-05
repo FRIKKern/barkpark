@@ -44,6 +44,7 @@ defmodule BarkparkWeb.Studio.PaneBuilderDeskGroupParseParityTest do
   @suffix System.unique_integer([:positive])
   @flat "parse-parity-flat-#{@suffix}"
   @grouped "parse-parity-grouped-#{@suffix}"
+  @shadowed "parse-parity-shadowed-#{@suffix}"
 
   # The ONE type list, declared identically in both shapes — same node id, same
   # title, same type. Only its POSITION in the declaration differs.
@@ -208,6 +209,48 @@ defmodule BarkparkWeb.Studio.PaneBuilderDeskGroupParseParityTest do
 
       assert editor_identity(short) == editor_identity(canonical)
       assert editor_identity(short) == {"publication", "pub-a"}
+    end
+  end
+
+  describe "3. a desk node id that shadows a type name must not make the type unreachable" do
+    # The collision the two shapes above cannot show: a declared desk whose ROOT
+    # holds a group node whose `id` happens to equal a type name, while the type
+    # itself is listed under a DIFFERENT group. `resolve/4` sees the head name a
+    # root item (`root_has_segment?/2` matches a `:list` by id) and hands the
+    # walk the RAW path, so the walk drills the group, finds no child for the
+    # document tail and opens NOTHING — while the very same URL on the grouped
+    # desk above opens the document. That is #35a's "the same position means two
+    # different things", reached by desk-node id instead of by desk depth.
+    setup do
+      seed(@shadowed, [
+        %{
+          "kind" => "list",
+          "id" => "publication",
+          "title" => "Publications (a group, not the type list)",
+          "items" => []
+        },
+        %{"kind" => "list", "id" => "content", "title" => "Content", "items" => [@type_list]}
+      ])
+
+      :ok
+    end
+
+    test "/studio/publication/<id> still opens the document when a root group shadows the name" do
+      {_, editor} = PaneBuilder.build(@shadowed, ["publication", "pub-a"])
+
+      assert editor_identity(editor) == {"publication", "pub-a"},
+             "a root desk node named after the type made the type unreachable — the same " <>
+               "URL opens the document on every other desk shape"
+    end
+
+    test "the shadowing group itself still wins its own address — the retry never re-routes a working URL" do
+      {panes, editor} = PaneBuilder.build(@shadowed, ["publication"])
+
+      assert editor == nil, "a group drill opens no editor"
+
+      assert List.last(panes).title == "Publications (a group, not the type list)",
+             "/studio/publication must still open the DECLARED group: precedence is unchanged, " <>
+               "the retry only rescues a path that opened nothing"
     end
   end
 end
