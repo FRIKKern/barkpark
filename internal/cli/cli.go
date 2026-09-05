@@ -37,6 +37,17 @@ const (
 	exitConflict   = 6 // optimistic-concurrency / write-conflict / precondition
 	exitRateLimit  = 7 // throttled
 	exitServer     = 8 // server-side 5xx / internal_error
+	// exitAmbiguous is NOT a refusal. It means the request LEFT this process and
+	// the answer never came back intact, so the write may or may not have
+	// committed on the server. It exists because every other non-zero code here
+	// tells a retry wrapper something definite — "your request was wrong" (2/5),
+	// "the world moved, re-read and retry" (6), "the server broke, retry" (8) —
+	// and a blind retry is exactly the wrong move on THIS state: the first
+	// attempt's row is already on the ledger, so the retry is refused as a
+	// duplicate of a row nobody was ever told about (task-f81c88e2c54f8e57).
+	// The correct next move is a READ, and the process that exits 9 always
+	// prints which read to run.
+	exitAmbiguous = 9 // sent, answer lost — the write may or may not have landed
 )
 
 // taskVerbAliases maps the two common muscle-memory `bp task` verbs the manifest

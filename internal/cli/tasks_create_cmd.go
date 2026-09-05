@@ -130,7 +130,6 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 
 	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
 	if err != nil {
-		out.userErr("task create: %v", err)
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
 		// reached the server, or may have landed and the RESPONSE was what got
@@ -139,24 +138,33 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// supposed to hand one back. The sibling ledger verbs (stamp/close/pulse)
 		// answer a 5xx by re-reading the row at its known id; create has no id to
 		// re-read, so the remedy is a search on the title the caller supplied.
-		out.errf("  ambiguous: the task may or may not have been filed — the response never arrived, so no id came back to re-check. Search before retrying: bp search query %q", title)
-		return exitGeneric
+		//
+		// task-f81c88e2c54f8e57: this used to speak on stderr ONLY, so under
+		// `-o json` the whole event was invisible — empty stdout, exit 1, row on
+		// the ledger. renderAmbiguousWrite owns both channels and the distinct
+		// exit code now.
+		return renderAmbiguousWrite(out, ambiguousWrite{
+			class: ambiguityCreateAnswerLost, leg: "create", title: title,
+			detail: err.Error(),
+		})
 	}
 	if httpStatus < 200 || httpStatus >= 300 {
-		out.userErr("task create: %s", mutateErrorMessage(httpStatus, respBody))
 		if httpStatus >= 500 {
 			// 5xx: the server answered, but a 500-class response can still hide a
 			// write that committed before the failure — "a 5xx can hide a write
 			// that landed" is the same doctrine stamp/close/pulse already apply on
 			// their read-back branch. create has no id to re-read, so the remedy
 			// is the same title search as the transport-error branch.
-			out.errf("  ambiguous: the task may or may not have been filed despite the error — search before retrying: bp search query %q", title)
+			return renderAmbiguousWrite(out, ambiguousWrite{
+				class: ambiguityCreateServerFault, leg: "create", title: title,
+				detail: mutateErrorMessage(httpStatus, respBody),
+			})
 		}
 		// 4xx (validation/auth/not_found/conflict/…): the server REFUSED before
 		// any commit, so nothing landed and there is nothing to go hunting for —
 		// printing the ambiguity caveat here would send the operator searching
 		// for a write that was never attempted.
-		return exitGeneric
+		return renderTaskCreateRefusal(out, "create", httpStatus, respBody)
 	}
 	// THE AUTHORING ADVISORIES, WHICH THIS VERB USED TO DROP ON THE FLOOR.
 	// The mutate SUCCESS envelope may carry `warnings: [{code,severity,message}]`
@@ -180,8 +188,15 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// own discriminator plus a field check, not a status.
 	created, ok := firstMutationRecord(respBody)
 	if !ok {
-		out.userErr("task create: server returned no id")
-		return exitGeneric
+		// A 2xx WITH NO ID IS NOT A REFUSAL. The server accepted the mutation and
+		// said so; what is missing is the echo that would let this process name
+		// the row. Reporting it as a plain error told the caller "it failed" about
+		// a write that almost certainly succeeded — the same lie, one status code
+		// later. It is an ambiguity with a title handle, like the transport arm.
+		return renderAmbiguousWrite(out, ambiguousWrite{
+			class: ambiguityCreateResultUnreadable, leg: "create", title: title,
+			detail: "the mutate response carried no usable id",
+		})
 	}
 
 	// The server hands back a "drafts.<type>-<n>" id; the BARE published id (used
@@ -207,22 +222,38 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
 		if pErr != nil {
-			out.userErr("task create: created %s but publish failed: %v", draftID, pErr)
 			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
 			// may have LANDED and only the response was lost, so discarding here
 			// could throw away the draft twin of a row that is already on the
 			// board. The class is named instead (see taskCreateResidueClasses).
+			//
+			// Unlike the create leg, this one KNOWS the id — the create response
+			// named it seconds ago — so the caller gets `bp task get <id>` rather
+			// than a title search.
+			code := renderAmbiguousWrite(out, ambiguousWrite{
+				class: residuePublishAmbiguousTransport, leg: "publish", docID: bareID,
+				title: title, detail: pErr.Error(),
+			})
 			renderTaskCreateResidue(out, residuePublishAmbiguousTransport, draftID, bareID)
-			return exitGeneric
+			return code
 		}
 		if pStatus < 200 || pStatus >= 300 {
-			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
 			if pStatus >= 500 {
 				// Same ambiguity as the create path's 5xx arm: a server fault can
 				// hide a publish that committed before the failure. Not discarded.
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishAmbiguousServerFault, leg: "publish", docID: bareID,
+					title: title, detail: mutateErrorMessage(pStatus, pBody),
+				})
 				renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
-				return exitGeneric
+				return code
 			}
+			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
+			// A duplicate_of refusal on the PUBLISH leg names the incumbent, and
+			// after an ambiguous earlier attempt that incumbent is the caller's
+			// own row. Say so before the draft is discarded below, so the exit is
+			// a resume instruction and not a dead end.
+			renderDuplicateResume(out, incumbentTaskID(pBody))
 			// A 4xx IS a refusal: the server evaluated the wall (duplicate_of,
 			// invalid_epic_paper_quality, dedup_unavailable, a rule this binary
 			// predates) and committed nothing. The draft this run created seconds
@@ -239,9 +270,15 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// publish that did not produce a published twin cannot print one.
 		published, pok := firstMutationRecord(pBody)
 		if !pok {
-			out.userErr("task create: created %s but the publish response carried no result — the publish may or may not have landed; re-read with `bp task get %s`", bareID, bareID)
+			// The last of the six ambiguous arms, and the subtlest: a 2xx with no
+			// record. It already said the right sentence — it just said it on
+			// stderr only, at the same exit code as a definite refusal.
+			code := renderAmbiguousWrite(out, ambiguousWrite{
+				class: residuePublishResultUnreadable, leg: "publish", docID: bareID,
+				title: title, detail: "the publish response carried no result",
+			})
 			renderTaskCreateResidue(out, residuePublishResultUnreadable, draftID, bareID)
-			return exitGeneric
+			return code
 		}
 		record = published
 		// The publish mutation re-runs the same before_save gate, so it can raise
