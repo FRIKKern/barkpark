@@ -173,6 +173,9 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "tooling/gate-map/gate-map.mjs"
+      - "tooling/gate-map/gate-map.test.mjs"
+      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY (epic-cycle distribution w1-s6). The two scripts are
@@ -389,6 +392,9 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "tooling/gate-map/gate-map.mjs"
+      - "tooling/gate-map/gate-map.test.mjs"
+      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY — mirrors the pull_request list above, glob included.
@@ -672,6 +678,9 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses tooling/gate-map/gate-map.mjs
+          tooling-harnesses tooling/gate-map/gate-map.test.mjs
+          tooling-harnesses tooling/gate-map/gate-map.json
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
@@ -1318,6 +1327,17 @@ jobs:
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
         run: bash -n scripts/audit-paper-readers.sh
+      - name: "gate-map: the composed slice gate still finds __css_check over breakpoint-sweep.mjs"
+        # The wave-16 red this composer exists for. Its selftest is built to
+        # LOSE — a planted map entry, a removed instrument, and a narrowed scan
+        # set each red it — so a green here is evidence, not a tally. --verify
+        # runs first: a snapshot that stopped describing the tree is a REFUSAL
+        # (exit 3), because a composed gate off a stale map is a guess.
+        run: |
+          node --check tooling/gate-map/gate-map.mjs
+          node tooling/gate-map/gate-map.mjs --verify
+          node --test tooling/gate-map/gate-map.test.mjs
+
       - name: paper-reader audit fixture
         # paper-readers.yml executes audit-paper-readers.sh on every run; its
         # fixture harness — the only thing that proves the audit can report a
