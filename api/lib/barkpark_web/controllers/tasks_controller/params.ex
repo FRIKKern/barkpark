@@ -275,10 +275,34 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_unless(:status, doc.status, "published")
     |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
     |> put_brief_criteria(content)
+    |> put_brief_labels(content)
     |> put_brief_engagement(content)
     |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
+  end
+
+  # LABELS ON THE BRIEF CARD (task-14eac58b39fd3692), additive and pruned.
+  #
+  # The brief card is a deliberate payload diet, so a new key needs a reason
+  # this one has: WITHOUT labels the card cannot be reasoned about at all by
+  # the readers that matter. A row carrying `landed:pr-NNNNN@sha` looks
+  # identical on the wire to one that never shipped, so a lead reads met:false
+  # criteria as untouched work and dispatches a builder that comes back
+  # "already fixed" — the burn this row was filed for. Measured 2026-09-05:
+  # 21 of 1,658 rows in `bp task ready` carry a landed:pr-* label, nine of them
+  # at ZERO criteria met, and a census that filtered the ready card by label
+  # returned a confident 0 because the field could never be present.
+  #
+  # ADDITIVE BY CONSTRUCTION: absent or empty labels prune away, so every card
+  # that carried no labels is byte-identical to before. Labels are short tokens,
+  # not prose, so no truncation arm is needed and charter law 2's help[] line is
+  # unaffected.
+  defp put_brief_labels(map, content) do
+    case Map.get(content, "labels") do
+      [_ | _] = labels -> Map.put(map, :labels, labels)
+      _ -> map
+    end
   end
 
   # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
