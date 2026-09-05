@@ -54,6 +54,11 @@ jobs:
         working-directory: js
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PRs need the base ref's history so turbo can scope to `...[origin/<base>]`
+          # (task-4e377262789d8fd3). main keeps the shallow clone.
+          # Quoted on purpose: a bare 0 is FALSY in expressions, so `&& 0 || 1` always gave 1.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -83,8 +88,36 @@ jobs:
             turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-
             turbo-${{ runner.os }}-
 
+      # Scope (task-4e377262789d8fd3): on a PR, turbo runs build/test/lint/typecheck/size
+      # only for packages whose inputs changed since the base, plus their dependents
+      # (`...[origin/<base>]`). Two packages are ALWAYS in scope because later steps
+      # read their dist directly: @barkpark/codegen (drift gate) and @barkpark/core
+      # (workerd + browser proofs). A PR that touches anything outside js/packages/*
+      # (this workflow, turbo.json, the lockfile, tsconfig.base, web fixtures) runs
+      # the FULL graph, so a CI or infra change can never scope itself into a
+      # vacuous green. main always runs the full graph.
+      - name: Decide turbo scope
+        id: scope
+        run: |
+          set -f  # never let the shell glob `...[origin/<base>]`
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (push)"; exit 0
+          fi
+          base="origin/${{ github.base_ref }}"
+          changed=$(git -C .. diff --name-only "$base"...HEAD)
+          printf '%s\n' "$changed" | sed 's/^/  changed: /'
+          if printf '%s\n' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
+            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (a file outside js/packages/* changed)"; exit 0
+          fi
+          f="--filter=...[$base] --filter=@barkpark/codegen --filter=@barkpark/core"
+          echo "filter=$f" >> "$GITHUB_OUTPUT"
+          echo "scope: SCOPED $f"
+          pnpm exec turbo run test $f --dry-run=json | node -e '
+            let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);
+            const pk=[...new Set(j.tasks.map(t=>t.package))];console.log(`scope: ${pk.length} packages: ${pk.join(" ")}`)})'
+
       - name: Build
-        run: pnpm build
+        run: pnpm exec turbo run build ${{ steps.scope.outputs.filter }}
 
       # Drift gate: the committed generated types MUST equal a fresh regen from
       # the committed schema fixture. Network-free (`--from` reads the fixture —
@@ -130,7 +163,7 @@ jobs:
         # had been failing that way silently under continue-on-error, so no
         # coverage artifact ever existed. One blocking run, no coverage flag;
         # real coverage is its own row.
-        run: pnpm test
+        run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm
@@ -177,17 +210,17 @@ jobs:
           exit "$status"
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm exec turbo run lint ${{ steps.scope.outputs.filter }}
 
       - name: "Prettier format (ADVISORY — parity with gofmt + mix-format gates)"
         continue-on-error: true
         run: pnpm exec prettier --check "packages/*/src/**/*.{ts,tsx}"
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm exec turbo run typecheck ${{ steps.scope.outputs.filter }}
 
       - name: Bundle budget
-        run: pnpm size
+        run: pnpm exec turbo run size ${{ steps.scope.outputs.filter }}
 
       # ADVISORY (not blocking) until the ADR-002 conflict is decided:
       # webhook/ and draft-mode/ have imported node:crypto since their Phase 5
