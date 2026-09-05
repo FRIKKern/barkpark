@@ -1063,6 +1063,30 @@ defmodule BarkparkWeb.TasksController.Params do
   def parse_index_filters(params) when is_map(params), do: parse_route_filters(params, :index)
 
   @doc """
+  The claim-time criteria refusal, which has to TEACH rather than merely refuse.
+
+  About thirty agents drive `bp task claim` daily. A refusal that names no
+  remedy costs every one of them a round trip to find one, and that cost is
+  what turns a good gate into a resented one — so this names the row, states
+  what is missing, gives the exact command to fix it, and gives the override
+  verbatim rather than alluding to it.
+  """
+  @spec criteria_unstated_message(String.t(), String.t()) :: String.t()
+  def criteria_unstated_message(doc_id, worker_id) do
+    ~s|#{doc_id} states NO acceptance criteria, so nothing was claimed. A row with none | <>
+      ~s|can only ever be attested by artifact — the artifact says something landed, it cannot | <>
+      ~s|say what the row was FOR. The close door already refuses this, and by then it is too | <>
+      ~s|late: the criteria get written after the work, by whoever is trying to get the row | <>
+      ~s|shut. Write them now, while they still shape the work:\n| <>
+      ~s|  bp task create is not what you want here — patch the row you are about to claim:\n| <>
+      ~s|  bp doc patch task #{doc_id} --set 'acceptance_criteria:=[{"criterion":"<measurable, checkable>","met":false,"evidence":""}]' --yes\n| <>
+      ~s|  bp task claim #{doc_id} #{worker_id} --yes\n| <>
+      ~s|Containers are exempt already (a decision/goal label, a non-task kind, or a row with | <>
+      ~s|children), so if this IS a container, label it rather than overriding. To claim anyway, | <>
+      ~s|on the record: --set criteria_unstated_override="<why this row needs none>".|
+  end
+
+  @doc """
   The FLAT (top-level) query params `route` honours.
 
   One list, used both to enforce and to name — `flat:` in `@route_filters` is
