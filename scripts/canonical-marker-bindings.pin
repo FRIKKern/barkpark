@@ -35,6 +35,7 @@ preview-manifest	project
 published-paper-provenance-gate	gateNodes
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
+release-boot-plugin-census	take
 schema-resolution-for-redaction	get_schema_for_redaction
 scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for
