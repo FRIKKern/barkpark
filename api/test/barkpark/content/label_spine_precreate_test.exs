@@ -146,7 +146,13 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
       assert doc.doc_id == DraftId.draft_id(id)
       assert doc.status == "draft"
 
-      assert {:ok, ^doc} = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
+      # Re-read by id — NOT a `^doc` pin: `create_document/4` returns the struct
+      # it just inserted (associations unloaded, no preloads), so pinning the
+      # whole struct compares Ecto bookkeeping rather than the row.
+      assert {:ok, reread} = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
+      assert reread.id == doc.id
+      assert reread.status == "draft"
+      assert reread.content["tags"] == base_content(%{})["tags"]
     end
 
     test "DRAFTS STAY FREE — no tags and no description still lands", %{scope: scope} do
