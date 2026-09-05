@@ -274,7 +274,8 @@ defmodule Barkpark.Content.WriteScope do
   # for a WRITE, vacancy is REFUSAL, not an unowned row. Writing a nil-workspace
   # row would be publishing — `Content.Scope.scope_to_workspace_including_global/3`
   # is `workspace_id == ^ws or is_nil(...)`, so such a row is readable by other
-  # tenants through analytics.ex:49 and tag_registry.ex:332/:368. Refusal
+  # tenants through `Content.Analytics` and `Content.TagRegistry`, both of which
+  # read via that scope. Refusal
   # degrades to nothing existing; a shared-layer write degrades to everyone
   # holding it.
   defp resolve_write_scope(opts) do

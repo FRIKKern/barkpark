@@ -75,11 +75,13 @@ defmodule Barkpark.Content.Errors do
     # Per-workspace quota gate at the mutate seam (perfect-plan-build W1, D11).
     "workspace_suspended" =>
       "This workspace is suspended — no writes are accepted until an operator reinstates it. Contact your workspace admin; details.reason names why.",
-    "quota_exceeded" =>
-      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.",
     # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a, main 2026-09-05).
     "workspace_scope_required" =>
-      "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to."
+      "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to.",
+    # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
+    # anchors its hint-append on this exact comma-free tail.
+    "quota_exceeded" =>
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────

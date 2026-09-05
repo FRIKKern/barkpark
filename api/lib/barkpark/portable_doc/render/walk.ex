@@ -68,7 +68,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # compile-time edge into the Sheets PLUGIN namespace — same reason (and same
   # shape) as `@merge_area_cap` right above: PortableDoc render must compile with
   # the sheet plugin absent (fresh-install invariant), and a compile-time
-  # `Barkpark.Plugins.Sheets.Engine.error_values()` here would both break that
+  # `Barkpark.Plugins.Sheets.Engine.error_values/0` here would both break that
   # and force a walk recompile on every engine touch. The canonical owner stays
   # `Barkpark.Plugins.Sheets.Engine.error_values/0` (@canonical
   # engine-error-vocabulary); a drift-guard test (sheets_parity_test) asserts
