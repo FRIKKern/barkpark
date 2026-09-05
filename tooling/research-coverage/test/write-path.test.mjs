@@ -109,10 +109,20 @@ test("two concurrent `coverage.mjs record` runs with disjoint results BOTH survi
   // ledger path also means one shared lock, so the serialisation under test is
   // the real one.
   //
-  // B is launched only once A's lock file EXISTS, so B's acquisition attempt
-  // provably lands inside A's critical section. That is the exact shape that
-  // destroyed 200 entries before the fix; here it must cost a wait and nothing
-  // else.
+  // BOTH WRITERS ARE SPAWNED IN THE SAME TICK, deliberately, onto repos of the
+  // same size. An earlier version instead held B back until A's lock file
+  // appeared, on the theory that this pinned B's acquisition inside A's critical
+  // section. It did the opposite, twice over. `record` scans the whole repo
+  // BEFORE it touches the lock, so a B launched at the sight of A's lock reaches
+  // that lock a full scan AFTER A released it; and what overlap remained was A's
+  // runtime minus a constant launch cost (a fork plus a whole `node -e` spent
+  // reading a clock), so it shrank to nothing on a fast box. That is how run
+  // 33581989226 reddened main: A's record took 183ms there against 374-3543ms
+  // here, the constant ate the window, and the anti-vacuity guard below
+  // correctly refused a run in which A had already finished before B started.
+  // Starting together makes the overlap structural instead of incidental: equal
+  // work begun at the same instant puts the two critical sections within
+  // milliseconds of each other, and no box is fast enough to escape that.
   const shared = join(mkdtempSync(join(tmpdir(), "bp-coverage-shared-")), "research-ledger.json");
   const a = makeRepo(1500), b = makeRepo(1500);
   const mk = (from, to, tag) => {
@@ -123,25 +133,23 @@ test("two concurrent `coverage.mjs record` runs with disjoint results BOTH survi
   a.results("batch-A.json", mk(1, 200, "procA"));
   b.results("batch-B.json", mk(201, 400, "procB"));
 
-  const script = join(dirname(shared), "both.sh");
-  writeFileSync(script, [
-    'set -u',
-    'NODE="$1"; AROOT="$2"; ACD="$3"; BROOT="$4"; BCD="$5"; LEDGER="$6"; OUT="$7"',
-    'export BP_RESEARCH_LEDGER="$LEDGER"',
-    'ms() { "$NODE" -e "process.stdout.write(String(Date.now()))"; }',
-    'nap() { "$NODE" -e "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,$1)"; }',
-    '( a0=$(ms); cd "$AROOT" && "$NODE" "$ACD/coverage.mjs" record >/dev/null 2>&1; rc=$?; ' +
-      'echo "$a0 $(ms) $rc" > "$OUT/a.txt" ) &',
-    'PA=$!',
-    '# launch B only once A holds the lock, so B collides with A by construction',
-    'i=0',
-    'while [ ! -e "$LEDGER.lock" ] && [ "$i" -lt 400 ]; do nap 5; i=$((i+1)); done',
-    '( b0=$(ms); cd "$BROOT" && "$NODE" "$BCD/coverage.mjs" record >/dev/null 2>&1; rc=$?; ' +
-      'echo "$b0 $(ms) $rc" > "$OUT/b.txt" ) &',
-    'PB=$!',
-    'wait $PA; wait $PB',
+  // One runner process, so each writer's bracket is taken around the child spawn
+  // itself rather than around a separate clock-reading process.
+  const runner = join(dirname(shared), "both.mjs");
+  writeFileSync(runner, [
+    'import { spawn } from "node:child_process";',
+    'import { writeFileSync } from "node:fs";',
+    'const [aRoot, aCd, bRoot, bCd, ledger, out] = process.argv.slice(2);',
+    'const env = { ...process.env, BP_RESEARCH_LEDGER: ledger };',
+    'const go = (root, cd, tag) => new Promise((done) => {',
+    '  const t0 = Date.now();',
+    '  const p = spawn(process.execPath, [cd + "/coverage.mjs", "record"], { cwd: root, env, stdio: "ignore" });',
+    '  p.on("exit", (code) => done([tag, t0, Date.now(), code ?? 1]));',
+    '});',
+    'const rows = await Promise.all([go(aRoot, aCd, "a"), go(bRoot, bCd, "b")]);',
+    'for (const [tag, t0, t1, code] of rows) writeFileSync(`${out}/${tag}.txt`, `${t0} ${t1} ${code}`);',
   ].join("\n"));
-  execFileSync("sh", [script, process.execPath, a.root, a.cd, b.root, b.cd, shared, dirname(shared)],
+  execFileSync(process.execPath, [runner, a.root, a.cd, b.root, b.cd, shared, dirname(shared)],
     { encoding: "utf8" });
 
   const [aStart, aEnd, aRc] = readFileSync(join(dirname(shared), "a.txt"), "utf8").trim().split(/\s+/);
