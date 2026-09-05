@@ -4337,9 +4337,17 @@
       }).join("") + "</div>";
   }
 
-  // The email-delivery card. Admin: a buffered form (transport seg + from + SMTP)
-  // with its own save-row → PUT /settings. Member: a read-only definition list —
-  // no inputs, no save-row, no affordances (GR33 plain-member law).
+  // The alert-delivery card. Admin: a buffered form (the master switch + transport
+  // seg + from + SMTP) with its own save-row → PUT /settings. Member: a read-only
+  // definition list — no inputs, no save-row, no affordances (GR33 plain-member law).
+  //
+  // cch-notif-card-email-framing: the heading was "Email delivery" and the purpose
+  // sentence spoke only of email, while the card HOSTS `alerts_enabled` — the master
+  // switch for the whole rail. w32-s1 fixed the switch's own two labels and left the
+  // frame around them, so the surface still read "this is an email control". The
+  // heading and both purpose sentences now name what the card actually governs: the
+  // whole rail, plus the email-specific transport that lives here with it. The
+  // control, its id, its endpoint and its save button are unchanged.
   //
   // cch-w32-s1: the `alerts_enabled` switch was labelled "Email alerts" in BOTH
   // places this function renders it (the member <dd> and the admin checkbox),
@@ -4353,8 +4361,8 @@
     var transport = s.transport || "instance";
     if (!canManage) {
       return '<section class="set-section">' +
-        '<h3 class="set-h">Email delivery</h3>' +
-        '<p class="set-purpose">Your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<h3 class="set-h">Alert delivery</h3>' +
+        '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team\'s alert email. Only team admins can change these settings.</p>' +
         '<dl class="set-readonly">' +
           "<div><dt>All alerts (email and chat)</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
           "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
@@ -4370,8 +4378,8 @@
           '<input class="form-input" id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
       "</div>";
     return '<section class="set-section">' +
-      '<h3 class="set-h">Email delivery</h3>' +
-      '<p class="set-purpose">The transport your team\'s alert email is sent over, and who it comes from.</p>' +
+      '<h3 class="set-h">Alert delivery</h3>' +
+      '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and the transport your team\'s alert email is sent over, with who it comes from.</p>' +
       '<div class="field"><label class="set-toggle"><input type="checkbox" id="notif-alerts"' +
         (s.alerts_enabled !== false ? " checked" : "") + "> All alerts enabled (email and chat channels)</label></div>" +
       '<div class="field"><span class="label">Transport</span>' + notifTransportSegHtml(transport) + "</div>" +
@@ -4386,8 +4394,20 @@
   // One chat-channel row: a `.set-check` enable (name + configured tag + mandatory
   // consequence sub-line) plus the write-only credential fields for its shape, and
   // a "Send test" affordance only when the channel is enabled AND configured.
+  //
+  // cch-notif-card-email-framing: `ch.off` states only the OFF consequence, so a
+  // channel left ON read as live — including while `alerts_enabled` is false, where
+  // `enqueue_chat/3`'s `alerts_enabled: false` clause drops the event before any
+  // transport is picked. The row now carries a second, CONDITIONAL sub-line naming
+  // that override, rendered only for an enabled channel on a muted team: that is the
+  // exact cell where "on" and "receiving" come apart. The five per-channel `off`
+  // strings are untouched — the override is one sentence in one place, not a
+  // qualifier bolted onto each of them.
   function notifChannelRowHtml(s, ch) {
     var st = notifChannelState(s, ch.type);
+    var muted = st.enabled === true && !!s && s.alerts_enabled === false
+      ? '<span class="set-check-sub">On, but muted: the master alerts switch is off, so this channel receives nothing until alerts are enabled again.</span>'
+      : "";
     var tag = st.configured
       ? '<span class="set-cred-tag">configured</span>'
       : '<span class="set-cred-tag set-cred-tag--empty">not configured</span>';
@@ -4403,7 +4423,7 @@
       '<label class="set-check"><input type="checkbox" data-chan-enable data-channel="' + esc(ch.type) + '" data-initial="' +
         (st.enabled ? "1" : "0") + '"' + (st.enabled ? " checked" : "") + ">" +
         '<span class="set-check-main"><span class="set-check-name">' + esc(ch.label) + " " + tag + "</span>" +
-        '<span class="set-check-sub">' + esc(ch.off) + "</span></span></label>" +
+        '<span class="set-check-sub">' + esc(ch.off) + "</span>" + muted + "</span></label>" +
       '<div class="set-channel-creds">' + creds + test + "</div>" +
       "</div>";
   }
