@@ -277,6 +277,12 @@ class BpPaperEditor extends HTMLElement {
     return this._emitOp();
   }
 
+  // Synchronous host seam for navigation / beforeunload guards. The editor is
+  // dirty as soon as its debounce exists, before bp-op has been dispatched.
+  hasPendingChanges() {
+    return Boolean(this._debounceTimer);
+  }
+
   // Read the initial block from the `block` JS property (object) first, then
   // fall back to a `data-block` attribute holding a JSON string.
   _readBlock() {

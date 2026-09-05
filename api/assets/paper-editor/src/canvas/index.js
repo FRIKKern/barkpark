@@ -966,6 +966,19 @@ class BpPaperCanvas extends HTMLElement {
     return this._emitOps();
   }
 
+  // Synchronous host seam for navigation / beforeunload guards. A debounced
+  // transaction is unsaved before bp-canvas-ops exists; source-mode text and
+  // edits queued behind an acknowledgement must also survive an attempted exit.
+  hasPendingChanges() {
+    const sourceChanged =
+      this._mode === "source" && this._sourceEl &&
+      this._sourceEl.value !== this._sourceOriginalMd;
+    return Boolean(
+      sourceChanged || this._debounceTimer || this._inflightOps ||
+      this._dirtyWhileInflight
+    );
+  }
+
   _scheduleEmit() {
     if (!this._editable) return; // read mode emits no ops
     if (this._debounceTimer) clearTimeout(this._debounceTimer);

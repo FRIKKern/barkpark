@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 
-const dom = new JSDOM('<main><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
+const dom = new JSDOM('<main><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
 const { window } = dom;
 let nextRequestId = 0;
 Object.defineProperty(window, 'crypto', {configurable:true, value:{
@@ -13,7 +13,7 @@ let now = 1_000;
 class TestDate extends Date { static now() { return now; } }
 let upgrade;
 const context = vm.createContext({window, document: window.document, CustomEvent: window.CustomEvent,
-  FormData: window.FormData, Date: TestDate,
+  FormData: window.FormData, Date: TestDate, setTimeout, clearTimeout,
   customElements: { whenDefined: () => new Promise(resolve => { upgrade = resolve; }) }});
 vm.runInContext(readFileSync(new URL('../../../priv/static/assets/bp-paper-editor-hooks.js', import.meta.url), 'utf8'), context);
 const hooks = window.BarkparkPaperEditorHooks;
@@ -197,12 +197,67 @@ settleNext({saved:true});
 await tick();
 assert.deepEqual(calls, ['paper-ops','paper-ops','paper-toggle-edit']);
 
+// Drag/drop and the keyboard-equivalent context menu use the same barrier as
+// toolbar structural actions, so unsaved text lands before move/delete.
+const structuralEditor = window.document.createElement('div');
+structuralEditor.className = 'bp-paper-editor';
+structuralEditor.innerHTML = '<div data-edit-block-id="a"><span data-drag-grip draggable="true">A</span></div><div data-edit-block-id="b"><span data-drag-grip draggable="true">B</span></div><div id="ctx-host"></div>';
+window.document.querySelector('main').append(structuralEditor);
+const structuralCalls = [];
+const sortable = {...hooks.BarkparkPaperSortable, el:structuralEditor,
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({}); },
+};
+sortable.mounted();
+const contextMenu = {...hooks.BarkparkPaperContextMenu, el:structuralEditor.querySelector('#ctx-host'),
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({}); },
+};
+contextMenu.mounted();
+
+calls.length = 0;
+canvas.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {
+  bubbles:true,
+  detail:{ops:[{op:'patch-block',id:'before-drop',patch:{content:[]}}], seq:++nextSeq},
+}));
+const grip = structuralEditor.querySelector('[data-drag-grip]');
+const dragStart = new window.Event('dragstart', {bubbles:true,cancelable:true});
+Object.defineProperty(dragStart, 'dataTransfer', {value:{setData:()=>{}, effectAllowed:''}});
+grip.dispatchEvent(dragStart);
+const drop = new window.MouseEvent('drop', {bubbles:true,cancelable:true,clientY:0});
+Object.defineProperty(drop, 'dataTransfer', {value:{dropEffect:''}});
+structuralEditor.dispatchEvent(drop);
+assert.deepEqual(structuralCalls, [], 'drop does not move before the content acknowledgement');
+settleNext({saved:true});
+await tick();
+assert.equal(structuralCalls[0].name, 'paper-move-block-to');
+
+structuralCalls.length = 0;
+canvas.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {
+  bubbles:true,
+  detail:{ops:[{op:'patch-block',id:'before-context-delete',patch:{content:[]}}], seq:++nextSeq},
+}));
+const blockA = structuralEditor.querySelector('[data-edit-block-id="a"]');
+blockA.dispatchEvent(new window.MouseEvent('contextmenu', {
+  bubbles:true,cancelable:true,clientX:10,clientY:10,
+}));
+window.document.querySelector('#bp-paper-context-menu [data-action="delete"]').click();
+assert.deepEqual(structuralCalls, [], 'context delete waits behind unsaved content');
+settleNext({saved:true});
+await tick();
+assert.equal(structuralCalls[0].name, 'paper-delete-block');
+contextMenu.destroyed();
+sortable.destroyed();
+structuralEditor.remove();
+
 // Classic fallback forms have no per-form hook. The toggle tracks actual input,
 // snapshots only dirty forms, and waits for their existing phx-change event.
 canvas.flushPendingChanges = () => {};
 const fallbackText = window.document.querySelector('.bp-paper-edit-form textarea');
+let nativeFallbackChanges = 0;
+window.addEventListener('input', () => { nativeFallbackChanges += 1; });
 fallbackText.value = 'Final fallback text';
 fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.equal(nativeFallbackChanges, 0,
+  'owned fallback input does not also reach LiveView\'s window-level phx-change binding');
 calls.length = 0;
 click();
 assert.deepEqual(calls, ['paper-block-autosave']);
@@ -217,11 +272,27 @@ settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
 assert.deepEqual(calls, ['paper-block-autosave','paper-toggle-edit']);
 
+// The coordinator owns the legacy debounce. Its actual acknowledged autosave
+// clears dirty state, so a later exit does not send a duplicate block revision.
+calls.length = 0;
+fallbackText.value = 'Naturally autosaved fallback';
+fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+calls.length = 0;
+click();
+await tick();
+assert.deepEqual(calls, ['paper-toggle-edit'],
+  'an acknowledged fallback autosave is not duplicated at exit');
+
 // Keep the click lock until the toggle event itself is acknowledged. Otherwise
 // a fast second click can enqueue a reverse toggle before the first diff lands.
 delayedToggle = true;
 calls.length = 0;
 click();
+await Promise.resolve();
 assert.deepEqual(calls, ['paper-toggle-edit']);
 assert.equal(toggle.el.disabled, true);
 click();

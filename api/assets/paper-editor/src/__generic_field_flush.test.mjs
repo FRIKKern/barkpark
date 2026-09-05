@@ -5,7 +5,6 @@ import { JSDOM } from "jsdom";
 
 const hooksSource = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-hooks.js", import.meta.url), "utf8");
 const dom = new JSDOM(`<!doctype html><body><main>
-  <button phx-hook="BarkparkPaperEditToggle">View</button>
   <form id="form" phx-change="inner-change" phx-target="17" phx-hook="BarkparkFieldBridge" data-paper-field-flush>
     <input id="native" name="title" value="Before">
     <input name="request_id" value="real-field-value">
@@ -111,15 +110,22 @@ try {
   assert.deepEqual(await Promise.all(finalWait), [true]);
 
   const add = window.document.getElementById("add");
+  native.value = "Before array operation";
+  native.dispatchEvent(new window.Event("input", { bubbles: true }));
   const clickAllowed = add.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   assert.equal(clickAllowed, false, "the reader bridge owns structural clicks before LiveView delegation");
   assert.equal(delegatedReaderClicks, 0, "the ordinary delegated click cannot duplicate the correlated operation");
-  assert.equal(pushes[4].event, "inner-array-op");
-  assert.equal(pushes[4].payload.action, "add_row");
+  assert.equal(pushes[4].event, "inner-flush", "Studio saves the current field before array structure changes");
+  assert.equal(pushes.length, 5, "the array operation waits for the field acknowledgement");
+  replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
+  saveResultHandler({ request_id: pushes[4].payload.request_id, saved: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(pushes[5].event, "inner-array-op");
+  assert.equal(pushes[5].payload.action, "add_row");
   const structuralWait = flush(formEl);
   assert.equal(structuralWait.length, 1, "View waits for an in-flight structural write");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[4].payload.request_id, saved: false });
+  saveResultHandler({ request_id: pushes[5].payload.request_id, saved: false });
   assert.deepEqual(await Promise.all(structuralWait), [false]);
 
   // The failed component retains its local value and re-renders that state in
@@ -127,10 +133,10 @@ try {
   // add/remove/move mutation.
   native.value = "After structural edit";
   const structuralRetry = flush(formEl);
-  assert.equal(pushes[5].event, "inner-flush");
-  assert.equal(pushes[5].payload.values.title, "After structural edit");
+  assert.equal(pushes[6].event, "inner-flush");
+  assert.equal(pushes[6].payload.values.title, "After structural edit");
   replies.shift().resolve([{ status: "fulfilled", value: { reply: {} } }]);
-  saveResultHandler({ request_id: pushes[5].payload.request_id, saved: true });
+  saveResultHandler({ request_id: pushes[6].payload.request_id, saved: true });
   assert.deepEqual(await Promise.all(structuralRetry), [true]);
 
   formBridge.destroyed();

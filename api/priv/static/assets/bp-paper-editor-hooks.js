@@ -15,22 +15,382 @@
 (function () {
   const Hooks = {};
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  const PAPER_FLUSH_TARGETS =
+    '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +
+    '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]';
+  const PAPER_STRUCTURAL_EVENTS = new Set([
+    "paper-delete-block",
+    "paper-materialize-slot",
+    "paper-move-block",
+    "paper-move-block-to",
+    "paper-unbind-property",
+    "inner-array-op",
+  ]);
+  const PAPER_STRUCTURAL_SUBMITS = new Set(["paper-add-block", "paper-add-property"]);
+  const paperExitCoordinators = new WeakMap();
+
+  function bpPaperHistoryPosition(state) {
+    if (Number.isFinite(state?.position)) return state.position;
+    // LiveView stamps the entry it is leaving with backType, but the initial
+    // entry has no position. Its own popstate handler treats that entry as 0.
+    if (state?.backType === "patch" || state?.backType === "redirect") return 0;
+    return null;
+  }
+
+  function bpPaperExitCoordinator(hook) {
+    if (hook._bpPaperExitCoordinator) return hook._bpPaperExitCoordinator;
+    const main = hook.el.closest?.("main");
+    if (!main) return null;
+    let coordinator = paperExitCoordinators.get(main);
+    if (!coordinator) {
+      const sources = new Map();
+      const members = new Set();
+      const replayTargets = new WeakSet();
+      let actionPending = false;
+      let historyPosition = bpPaperHistoryPosition(window.history.state);
+      let historyPhase = null;
+      let historyDelta = null;
+      let historySaveResult = null;
+
+      const captureHistoryPosition = () => {
+        const currentPosition = bpPaperHistoryPosition(window.history.state);
+        if (currentPosition != null) historyPosition = currentPosition;
+      };
+
+      const recordFor = (source) => {
+        let record = sources.get(source);
+        if (!record) {
+          record = {
+            version: 0,
+            active: 0,
+            dirty: false,
+            timer: null,
+            pending: null,
+          };
+          sources.set(source, record);
+        }
+        return record;
+      };
+
+      coordinator = {
+        register(member) {
+          members.add(member);
+          member._bpPaperExitCoordinator = coordinator;
+          return coordinator;
+        },
+        release(member) {
+          members.delete(member);
+          member._bpPaperExitCoordinator = null;
+          if (members.size) return;
+          document.removeEventListener("input", coordinator._onInput);
+          document.removeEventListener("change", coordinator._onInput);
+          document.removeEventListener("click", coordinator._onClick, true);
+          document.removeEventListener("submit", coordinator._onSubmit, true);
+          window.removeEventListener("beforeunload", coordinator._onBeforeUnload);
+          window.removeEventListener("popstate", coordinator._onPopState, true);
+          window.removeEventListener("phx:navigate", coordinator._onNavigate);
+          sources.forEach((record) => clearTimeout(record.timer));
+          paperExitCoordinators.delete(main);
+        },
+        markDirty(source) {
+          if (!source) return;
+          captureHistoryPosition();
+          const record = recordFor(source);
+          record.version += 1;
+          record.dirty = true;
+        },
+        beginSave(source) {
+          if (!source) return null;
+          captureHistoryPosition();
+          const record = recordFor(source);
+          if (!record.dirty) {
+            record.version += 1;
+            record.dirty = true;
+          }
+          record.active += 1;
+          return { source, version: record.version };
+        },
+        finishSave(token, saved) {
+          if (!token) return;
+          const record = sources.get(token.source);
+          if (!record) return;
+          record.active = Math.max(0, record.active - 1);
+          if (saved === true && record.active === 0 && record.version === token.version) {
+            record.dirty = false;
+          }
+          if (!record.dirty && record.active === 0) sources.delete(token.source);
+        },
+        hasUnsaved() {
+          for (const record of sources.values()) {
+            if (record.dirty || record.active > 0) return true;
+          }
+          return [...main.querySelectorAll("bp-paper-canvas, bp-paper-editor")]
+            .some((editor) => editor.hasPendingChanges?.() === true);
+        },
+        async drain() {
+          while (main.isConnected) {
+            const pending = [];
+            main.querySelectorAll(PAPER_FLUSH_TARGETS).forEach((wrapper) => {
+              wrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
+                detail: { waitUntil: (promise) => pending.push(Promise.resolve(promise)) },
+              }));
+            });
+
+            const driver = [...members].find(
+              (member) => typeof member.pushEventTo === "function",
+            );
+            for (const [source, record] of [...sources]) {
+              if (
+                !record.dirty ||
+                !source.matches?.(".bp-paper-edit-form[phx-change]")
+              ) continue;
+              clearTimeout(record.timer);
+              record.timer = null;
+              pending.push(record.active > 0 && record.pending
+                ? record.pending
+                : coordinator._sendFallback(source, driver));
+            }
+
+            if (!pending.length) return !coordinator.hasUnsaved();
+            if (!(await Promise.all(pending)).every(Boolean)) return false;
+          }
+          return false;
+        },
+        async run(action) {
+          if (actionPending) return false;
+          actionPending = true;
+          try {
+            const saved = await coordinator.drain();
+            if (!saved) return false;
+            await action();
+            return true;
+          } finally {
+            actionPending = false;
+          }
+        },
+      };
+
+      coordinator._onInput = (event) => {
+        const target = event.target;
+        const source = target.closest?.("form[data-paper-field-flush]") ||
+          target.closest?.(PAPER_FLUSH_TARGETS) ||
+          target.closest?.(".bp-paper-edit-form[phx-change]");
+        if (!source || !main.contains(source)) return;
+        coordinator.markDirty(source);
+        if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
+          // Own the legacy form's debounce so the actual autosave reply clears
+          // the exit guard. Let target/form listeners run, but do not also let
+          // LiveView's window-level phx-change binding enqueue a duplicate.
+          event.stopPropagation();
+          coordinator._scheduleFallback(source);
+        }
+      };
+      coordinator._sendFallback = (source, driver = null) => {
+        const record = recordFor(source);
+        if (!record.dirty) return Promise.resolve(true);
+        if (record.active > 0) return record.pending || Promise.resolve(false);
+        driver ||= [...members].find((member) => typeof member.pushEventTo === "function");
+        if (!driver || !source.isConnected) return Promise.resolve(false);
+
+        clearTimeout(record.timer);
+        record.timer = null;
+        const event = source.getAttribute("phx-change");
+        const target = source.getAttribute("phx-target") || source;
+        const params = Object.fromEntries(new FormData(source));
+        const version = record.version;
+        const token = coordinator.beginSave(source);
+        let pushed;
+        try {
+          pushed = driver.pushEventTo(target, event, params);
+        } catch (error) {
+          pushed = Promise.reject(error);
+        }
+        const pending = Promise.resolve(pushed)
+          .then((results) =>
+            Array.isArray(results) && results.length > 0 && results.every((result) =>
+              result.status === "fulfilled" && result.value?.reply?.saved === true
+            )
+          )
+          .catch(() => false)
+          .then((saved) => {
+            coordinator.finishSave(token, saved);
+            return saved;
+          })
+          .finally(() => {
+            if (record.pending === pending) record.pending = null;
+            if (
+              source.isConnected && record.dirty && record.active === 0 &&
+              record.version !== version
+            ) coordinator._scheduleFallback(source);
+          });
+        record.pending = pending;
+        return pending;
+      };
+      coordinator._scheduleFallback = (source) => {
+        const record = recordFor(source);
+        clearTimeout(record.timer);
+        const rawDelay = source.getAttribute("phx-debounce");
+        const delay = /^\d+$/.test(rawDelay || "") ? Number(rawDelay) : 500;
+        record.timer = setTimeout(() => {
+          record.timer = null;
+          coordinator._sendFallback(source);
+        }, delay);
+      };
+      coordinator._onBeforeUnload = (event) => {
+        if (!coordinator.hasUnsaved()) return;
+        event.preventDefault();
+        event.returnValue = "";
+      };
+      coordinator._onNavigate = () => {
+        const currentPosition = bpPaperHistoryPosition(window.history.state);
+        if (currentPosition != null) historyPosition = currentPosition;
+      };
+      const finishHistoryNavigation = () => {
+        if (historyPhase !== "saving" || historySaveResult == null) return;
+        if (historySaveResult) {
+          historyPhase = "replay";
+          window.history.go(historyDelta);
+        } else {
+          historyPhase = null;
+          historyDelta = null;
+        }
+        historySaveResult = null;
+      };
+      coordinator._onPopState = (event) => {
+        const nextPosition = bpPaperHistoryPosition(event.state);
+        if (historyPhase === "restoring") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            window.history.go(historyPosition - nextPosition);
+            return;
+          }
+          historyPosition = nextPosition;
+          historyPhase = "saving";
+          historySaveResult = null;
+          coordinator.drain().then((saved) => {
+            historySaveResult = saved;
+            finishHistoryNavigation();
+          });
+          return;
+        }
+        if (historyPhase === "blocking") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            window.history.go(historyPosition - nextPosition);
+            return;
+          }
+          historyPosition = nextPosition;
+          historyPhase = "saving";
+          finishHistoryNavigation();
+          return;
+        }
+        if (historyPhase === "replay") {
+          historyPhase = null;
+          historyDelta = null;
+          historyPosition = nextPosition;
+          return;
+        }
+        if (historyPhase === "saving") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            historyPhase = "blocking";
+            window.history.go(historyPosition - nextPosition);
+          }
+          return;
+        }
+        if (!coordinator.hasUnsaved()) {
+          historyPosition = nextPosition;
+          return;
+        }
+        // Phoenix stamps monotonic positions in its history state. Restore the
+        // exact current entry before doing asynchronous work; once every save
+        // is acknowledged, replay the original Back/Forward delta exactly once.
+        if (
+          historyPosition != null && nextPosition != null &&
+          nextPosition !== historyPosition
+        ) {
+          event.stopImmediatePropagation();
+          historyDelta = nextPosition - historyPosition;
+          historySaveResult = null;
+          historyPhase = "restoring";
+          window.history.go(-historyDelta);
+        }
+      };
+      coordinator._onClick = (event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+            event.ctrlKey || event.shiftKey || event.altKey) return;
+        const target = event.target.closest?.("a[href], [phx-click]");
+        if (!target || replayTargets.has(target)) {
+          if (target) replayTargets.delete(target);
+          return;
+        }
+        const structural = PAPER_STRUCTURAL_EVENTS.has(target.getAttribute("phx-click"));
+        const anchor = target.matches("a[href]");
+        if (anchor) {
+          const href = target.getAttribute("href");
+          if (!href || href.startsWith("#") || target.hasAttribute("download") ||
+              target.getAttribute("target") === "_blank") return;
+        }
+        if (!anchor && !structural) return;
+        if (!coordinator.hasUnsaved()) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        coordinator.run(() => {
+          replayTargets.add(target);
+          target.click();
+        });
+      };
+      coordinator._onSubmit = (event) => {
+        const form = event.target;
+        if (!PAPER_STRUCTURAL_SUBMITS.has(form?.getAttribute?.("phx-submit")) ||
+            replayTargets.has(form) || !coordinator.hasUnsaved()) {
+          if (replayTargets.has(form)) replayTargets.delete(form);
+          return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const submitter = event.submitter;
+        coordinator.run(() => {
+          replayTargets.add(form);
+          form.requestSubmit(submitter || undefined);
+        });
+      };
+      document.addEventListener("input", coordinator._onInput);
+      document.addEventListener("change", coordinator._onInput);
+      document.addEventListener("click", coordinator._onClick, true);
+      document.addEventListener("submit", coordinator._onSubmit, true);
+      window.addEventListener("beforeunload", coordinator._onBeforeUnload);
+      window.addEventListener("popstate", coordinator._onPopState, true);
+      window.addEventListener("phx:navigate", coordinator._onNavigate);
+      paperExitCoordinators.set(main, coordinator);
+    }
+    return coordinator.register(hook);
+  }
+
+  function bpReleasePaperExitCoordinator(hook) {
+    hook._bpPaperExitCoordinator?.release(hook);
+  }
+
+  function bpRunPaperAction(coordinator, action) {
+    if (coordinator) return coordinator.run(action).catch(() => false);
+    return Promise.resolve().then(action).then(() => true).catch(() => false);
+  }
+
   // Finish local edits and wait for their save replies before unmounting the
   // editor. A refused save leaves the paper open with its server halt message.
   Hooks.BarkparkPaperEditToggle = {
     mounted() {
-      this._dirtyForms = new Set();
-      this._formVersions = new WeakMap();
       this._main = this.el.closest("main");
-      this._onFormInput = (event) => {
-        const form = event.target.closest?.(".bp-paper-edit-form[phx-change]");
-        if (form && this._main.contains(form)) {
-          this._formVersions.set(form, (this._formVersions.get(form) || 0) + 1);
-          this._dirtyForms.add(form);
-        }
-      };
-      this._main.addEventListener("input", this._onFormInput);
-      this._main.addEventListener("change", this._onFormInput);
+      this._exitCoordinator = bpPaperExitCoordinator(this);
       this._onClick = async (event) => {
         if (this.el.dataset.editing !== "true") return;
         event.preventDefault();
@@ -40,50 +400,13 @@
         this.el.disabled = true;
         this.el.setAttribute("aria-busy", "true");
         try {
-          // Input can continue while a previous save is in flight. Drain again
-          // after its acknowledgement before allowing the editor to unmount.
-          while (this.el.isConnected) {
-            const pending = [];
-            this._main.querySelectorAll('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], [phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]').forEach((wrapper) => {
-              wrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
-                detail: { waitUntil: (promise) => pending.push(promise) },
-              }));
-            });
-            const dirtyForms = [...this._dirtyForms];
-            dirtyForms.forEach((form) => {
-              this._dirtyForms.delete(form);
-              if (!form.isConnected) return;
-              const changeEvent = form.getAttribute("phx-change");
-              if (!changeEvent) return;
-              const target = form.getAttribute("phx-target") || form;
-              const params = Object.fromEntries(new FormData(form));
-              const version = this._formVersions.get(form) || 0;
-              pending.push(
-                this.pushEventTo(target, changeEvent, params)
-                  .then((results) => results.length > 0 && results.every((result) =>
-                    result.status === "fulfilled" && result.value?.reply?.saved === true
-                  ))
-                  .catch(() => false)
-                  .then((saved) => {
-                    if (
-                      !saved && form.isConnected &&
-                      this._formVersions.get(form) === version
-                    ) this._dirtyForms.add(form);
-                    return saved;
-                  })
-              );
-            });
-            if (pending.length === 0) {
-              try {
-                await this.pushEvent("paper-toggle-edit", {});
-              } catch (_) {
-                // A disconnected toggle is still editing; the finally block
-                // restores the button so the user can explicitly retry.
-              }
-              break;
-            }
-            if (!(await Promise.all(pending)).every(Boolean)) break;
-          }
+          await bpRunPaperAction(
+            this._exitCoordinator,
+            () => this.pushEvent("paper-toggle-edit", {}),
+          );
+        } catch (_) {
+          // A disconnected toggle is still editing; the finally block restores
+          // the button so the user can explicitly retry.
         } finally {
           this._saving = false;
           this.el.disabled = false;
@@ -94,8 +417,7 @@
     },
     destroyed() {
       this.el.removeEventListener("click", this._onClick, true);
-      this._main?.removeEventListener("input", this._onFormInput);
-      this._main?.removeEventListener("change", this._onFormInput);
+      bpReleasePaperExitCoordinator(this);
     },
   };
 
@@ -108,21 +430,27 @@
     // state, no echo back into the WC.
     Hooks.BarkparkPaperEditor = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         this._pendingSaves = new Set();
         this._retryOp = null;
         const pushOp = (op) => {
           this._retryOp = op;
+          const saveToken = this._exitCoordinator?.beginSave(this.el);
           const pending = this.pushEvent("paper-op", op)
             .then((reply) => reply?.saved === true)
             .catch(() => false)
             .then((saved) => {
+              this._exitCoordinator?.finishSave(saveToken, saved);
               if (saved && this._retryOp === op) this._retryOp = null;
               return saved;
             })
             .finally(() => this._pendingSaves.delete(pending));
           this._pendingSaves.add(pending);
         };
-        this._onOp = (e) => pushOp(e.detail);
+        this._onOp = (e) => {
+          this._exitCoordinator?.markDirty(this.el);
+          pushOp(e.detail);
+        };
         this.el.addEventListener("bp-op", this._onOp);
         this._onFlushPending = (event) => {
           this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
@@ -139,7 +467,9 @@
         // paper-slash-insert handler, which builds the block (default_block +
         // insert-after) through the SAME paper_op pipeline patch-block uses.
         this._onSlash = (e) => {
-          this.pushEvent("paper-slash-insert", e.detail);
+          bpRunPaperAction(this._exitCoordinator, () =>
+            this.pushEvent("paper-slash-insert", e.detail)
+          );
         };
         this.el.addEventListener("bp-slash-insert", this._onSlash);
 
@@ -209,6 +539,7 @@
         this.el.removeEventListener("bp-op", this._onOp);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-slash-insert", this._onSlash);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -226,6 +557,7 @@
     // hook is untouched (this is additive).
     Hooks.BarkparkPaperCanvas = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         // Seed the run into the element. Pre-upgrade-safe: assigning `el.blocks`
         // before the custom-element definition upgrades the node lands as a plain
         // own-property the element's connectedCallback reclaims (see the WC's
@@ -381,6 +713,7 @@
             );
             return;
           }
+          const saveToken = this._exitCoordinator?.beginSave(this.el);
           this._sendingOps = true;
           const pending = this.pushEvent("paper-ops", {
             ops: entry.ops,
@@ -392,6 +725,7 @@
             .catch(() => false)
             .then((saved) => {
               this._sendingOps = false;
+              this._exitCoordinator?.finishSave(saveToken, saved);
               if (saved && this._opsQueue[0] === entry) {
                 // Remove the acknowledged head before notifying the WC. That
                 // notification may synchronously emit the next dirty delta.
@@ -415,6 +749,7 @@
           this._pendingSaves.add(pending);
         };
         this._onCanvasOps = (e) => {
+          this._exitCoordinator?.markDirty(this.el);
           this._opsQueue.push({
             ops: e.detail.ops,
             seq: e.detail.seq,
@@ -571,6 +906,7 @@
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-ready", this._onCanvasReady);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -584,6 +920,7 @@
     // model, no client state, no echo back into the control.
     Hooks.BarkparkFieldBlockBridge = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         const blockId = this.el.dataset.blockId;
         const fieldType = this.el.dataset.fieldType;
 
@@ -591,10 +928,12 @@
         this._retryOp = null;
         const pushOp = (op) => {
           this._retryOp = op;
+          const saveToken = this._exitCoordinator?.beginSave(this.el);
           const pending = this.pushEvent("paper-op", op)
             .then((reply) => reply?.saved === true)
             .catch(() => false)
             .then((saved) => {
+              this._exitCoordinator?.finishSave(saveToken, saved);
               if (saved && this._retryOp === op) this._retryOp = null;
               return saved;
             })
@@ -636,6 +975,7 @@
         // event. Forward it straight through as a patch-block op.
         if (fieldType === "field-reference" || fieldType === "field-image") {
           this._onChange = (e) => {
+            this._exitCoordinator?.markDirty(this.el);
             push(e.detail && e.detail.value);
           };
           this.el.addEventListener("bp-change", this._onChange);
@@ -653,6 +993,7 @@
         // block is allowed by design (that IS how the featured image binds).
         if (fieldType === "image") {
           this._onChange = (e) => {
+            this._exitCoordinator?.markDirty(this.el);
             const meta = (e.target && e.target.meta) || {};
             let src = meta.url || "";
             if (!src) {
@@ -713,6 +1054,7 @@
       destroyed() {
         clearTimeout(this._t);
         this._t = null;
+        bpReleasePaperExitCoordinator(this);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         const fieldType = this.el.dataset.fieldType;
         // Picker blocks (field pickers + image content blocks) bind `bp-change`
@@ -741,6 +1083,7 @@
     // and the assign re-render redraws the Edit list.
     Hooks.BarkparkPaperSortable = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         this._dragId = null;
 
         const blockOf = (node) =>
@@ -789,7 +1132,9 @@
 
           const draggedId = this._dragId;
           this._clearDrag();
-          this.pushEvent("paper-move-block-to", { id: draggedId, "after-id": afterId });
+          bpRunPaperAction(this._exitCoordinator, () =>
+            this.pushEvent("paper-move-block-to", { id: draggedId, "after-id": afterId })
+          );
         };
 
         this._clearDrag = () => {
@@ -809,6 +1154,7 @@
         this.el.removeEventListener("dragover", this._onDragOver);
         this.el.removeEventListener("drop", this._onDrop);
         this.el.removeEventListener("dragend", this._onDragEnd);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -904,6 +1250,7 @@
         idx > 0 && blocks[idx - 1].dataset.blockLocked === "true";
       menu._ctx = {
         pushEvent: (ev, payload) => hook.pushEvent(ev, payload),
+        exitCoordinator: hook._exitCoordinator,
         blockId: block.dataset.editBlockId,
         canUp: idx > 0 && !locked && !prevLocked,
         canDown: idx >= 0 && idx < blocks.length - 1 && !locked,
@@ -1022,12 +1369,15 @@
       // Close first (drops the dismiss listeners) so activation and dismissal
       // never race, then push the same events the hover toolbar pushes.
       bpPaperCtxMenuClose();
-      if (action === "move-up")
-        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "up" });
-      else if (action === "move-down")
-        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
-      else if (action === "delete")
-        ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+      const activate = () => {
+        if (action === "move-up")
+          return ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "up" });
+        if (action === "move-down")
+          return ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
+        if (action === "delete")
+          return ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+      };
+      bpRunPaperAction(ctx.exitCoordinator, activate);
       // Restore focus to the block (same dance as the Escape path) so keyboard
       // users aren't stranded — skip for delete, whose block the patch removes.
       if (action !== "delete" && focusBack && document.contains(focusBack)) {
@@ -1039,6 +1389,7 @@
 
     Hooks.BarkparkPaperContextMenu = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         // The host is a hidden child of the editor; resolve the editor body it
         // lives in so `contextmenu` is scoped to this editor's blocks.
         this._body =
@@ -1101,6 +1452,7 @@
         // listeners are stranded when the editor is torn down.
         const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
         if (menu && menu._ownerEl === this.el) bpPaperCtxMenuClose();
+        bpReleasePaperExitCoordinator(this);
       },
     };
 
@@ -1115,6 +1467,7 @@
     // bp-document-preview / bp-json-inspector — no per-widget hook.
     Hooks.BarkparkFieldBridge = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         this._dirty = false;
         this._formVersion = 0;
         this._pendingSaves = new Set();
@@ -1127,6 +1480,7 @@
         const trackFormChange = () => {
           this._formVersion += 1;
           this._dirty = true;
+          this._exitCoordinator?.markDirty(this.el);
         };
         if (this._ownsPaperForm) {
           this._onFormInput = trackFormChange;
@@ -1145,15 +1499,8 @@
             const button = event.target.closest?.('[phx-click="inner-array-op"]');
             if (!button || !this.el.contains(button) || button.disabled) return;
 
-            // In reader edit mode, own the structural event so its parent write
-            // participates in the same correlated barrier as field changes.
-            // Studio has no Edit/View barrier, so its ordinary LiveView click
-            // binding remains untouched.
-            const toggle = this.el.closest("main")?.querySelector(
-              '[phx-hook="BarkparkPaperEditToggle"]',
-            );
-            if (!toggle) return;
-
+            // Own this structural event in both reader edit mode and Studio so
+            // its parent write participates in the same correlated barrier.
             event.preventDefault();
             event.stopImmediatePropagation();
             this._formVersion += 1;
@@ -1168,8 +1515,10 @@
         }
 
         this._trackSave = (save, version) => {
+          const saveToken = this._exitCoordinator?.beginSave(this.el);
           const pending = save
             .then((saved) => {
+              this._exitCoordinator?.finishSave(saveToken, saved);
               if (!saved && this._formVersion === version) this._dirty = true;
               return saved;
             })
@@ -1265,6 +1614,7 @@
         this.el.addEventListener("bp-flush-pending", this._onFlushPending);
       },
       destroyed() {
+        bpReleasePaperExitCoordinator(this);
         this.el.removeEventListener("bp-change", this._on);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         if (this._onFormInput) this.el.removeEventListener("input", this._onFormInput);
