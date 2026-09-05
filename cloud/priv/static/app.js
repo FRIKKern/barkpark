@@ -12409,10 +12409,25 @@
   // The tab is ABOUT the box, not served BY it — an unreachable box gets a
   // retry, never an infinite spinner; a too-old box gets the update chip; a
   // coded (or older uncoded 404) not-found says so plainly.
-  function webhookErrorHtml(resp, instance) {
+  //
+  // cch-w31-bl — `respStatus` is the RESPONSE status (r.status, which both call
+  // sites already had in scope one frame up and threw away). It is optional and
+  // reaches ONLY the terminal sentence: every coded branch below still wins, so
+  // a proxied upstream_error that carries a real instance fact still reads as
+  // that fact. What it fixes is the fall-through. `err.code` / `err.detail` are
+  // `undefined` on the FLAT string envelope the router's own handle_errors/2
+  // sends ({error:"server_error"}), so a CONTROL-PLANE crash — plus a
+  // bad_gateway slug and an empty HTML-502 body — missed every branch and told
+  // the operator "Something went wrong reaching this instance", naming a box
+  // this console never reached out to and never measured. That is the same
+  // structural defect webhookMutationError had (fixed in w31-s4, and the
+  // positive control for this row); this is its lexically adjacent sibling.
+  function webhookErrorHtml(resp, instance, respStatus) {
     resp = resp || {};
     var err = resp.error || {};
     var code = typeof err === "object" ? err.code : null;
+    // `status` is the UPSTREAM status the proxy relays inside the envelope —
+    // NOT respStatus, which is the control plane's own answer code.
     var status = typeof err === "object" ? err.status : null;
     var detail = typeof err === "object" && typeof err.detail === "string" ? err.detail : null;
     var title, body, retry = true, updateChip = false;
@@ -12441,7 +12456,14 @@
       body = "This endpoint no longer exists — it may have been deleted elsewhere.";
     } else {
       title = "Couldn't load webhooks";
-      body = detail || "Something went wrong reaching this instance.";
+      // Nothing above matched, so this envelope named no instance fact. Route
+      // the terminal sentence through the same 5xx/transport switch every other
+      // crash path uses; a real 4xx answer keeps the instance-shaped copy.
+      // `err` may be a flat slug string, which friendly() reads off `error`.
+      // (One line on purpose: the census guard in __app.test.mjs reads the LINE
+      // a blaming fallback sits on and demands faultCopy( on it.)
+      var flat = typeof err === "string" ? { error: err } : resp;
+      body = detail || faultCopy(respStatus, flat, "Something went wrong reaching this instance.");
     }
     return '<div class="wh-error empty-state"><h2>' + esc(title) + "</h2><p>" + esc(body) + "</p>" +
       (retry ? '<p><button class="btn btn-sm btn-primary" type="button" data-wh-retry>Retry</button></p>' : "") +
@@ -12589,7 +12611,7 @@
     api("GET", whPath(bp, "", ds)).then(function (r) {
       if (seq !== webhookLoadSeq) return; // a newer dataset load owns the list
       if (!r.ok) {
-        listBox.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        listBox.innerHTML = webhookErrorHtml(r.data, cliInstance(bp), r.status);
         var rt = listBox.querySelector("[data-wh-retry]");
         if (rt) rt.addEventListener("click", function () { loadWebhooks(root, bp, ds); });
         return;
@@ -12940,7 +12962,7 @@
     box.innerHTML = '<div class="loading">Loading deliveries&hellip;</div>';
     api("GET", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries", ds)).then(function (r) {
       if (!r.ok) {
-        box.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        box.innerHTML = webhookErrorHtml(r.data, cliInstance(bp), r.status);
         var rt = box.querySelector("[data-wh-retry]");
         if (rt) rt.addEventListener("click", function () { loadDeliveries(listBox, bp, ds, wh); });
         return;
