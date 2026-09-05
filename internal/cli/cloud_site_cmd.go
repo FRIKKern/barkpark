@@ -128,7 +128,11 @@ func siteCloudConfig(out *writer, action string) (*Config, bool) {
 		return nil, false
 	}
 	if !cfg.HasCloudToken() {
-		useError(out, "auth", "not logged in — run `bp login` to "+action, exitAuth)
+		// Both doors, because the refusal used to name only the interactive one:
+		// a CI job cannot run `bp login` (there is no device-code prompt to
+		// answer), and the env tier it CAN use went unmentioned in the very
+		// message that stopped it.
+		useError(out, "auth", "not logged in — run `bp login` to "+action+", or set "+CloudTokenEnv+" for a CI job", exitAuth)
 		return nil, false
 	}
 	return cfg, true

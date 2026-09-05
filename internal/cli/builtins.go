@@ -296,9 +296,16 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	cloudURL := ""
 	cloudTeam := ""
 	cloudSession := "none"
+	// WHICH tier the credential came from — the origin label only
+	// (env:BARKPARK_CLOUD_TOKEN | config:cloud_token), never a byte of the
+	// value. token_present says a credential exists; session says the plane
+	// adjudicated it; this says WHICH ONE was adjudicated, which is the fact a
+	// CI job needs when a deploy 401s while a stale config.json sits on the box.
+	cloudTokenSource := ""
 	var cloudLoggedIn any = false // true | false | nil (null = unverifiable)
 	if cfg, _ := LoadConfig(); cfg != nil && cfg.HasCloudToken() {
 		cloudTokenPresent = true
+		cloudTokenSource = cfg.CloudTokenSource()
 		cloudURL = strings.TrimSpace(cfg.CloudURL)
 		if cloudURL == "" {
 			cloudURL = cloudclient.DefaultBaseURL
@@ -327,6 +334,19 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		}
 	}
 
+	cloudBlock := map[string]any{
+		"logged_in":     cloudLoggedIn,
+		"token_present": cloudTokenPresent,
+		"session":       cloudSession,
+		"url":           cloudURL,
+		"team":          cloudTeam,
+	}
+	// Additive and CONDITIONAL: with no Cloud credential in either tier the
+	// block is byte-identical to what it always was.
+	if cloudTokenSource != "" {
+		cloudBlock["token_source"] = cloudTokenSource
+	}
+
 	payload := map[string]any{
 		"name":          name,
 		"server":        ctx.Server,
@@ -351,13 +371,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		// Cloud session block — presence + probe verdict + url + team, no token
 		// value. logged_in is a tri-state: null means the probe could not reach
 		// the plane, which is a different fact from false.
-		"cloud": map[string]any{
-			"logged_in":     cloudLoggedIn,
-			"token_present": cloudTokenPresent,
-			"session":       cloudSession,
-			"url":           cloudURL,
-			"team":          cloudTeam,
-		},
+		"cloud": cloudBlock,
 	}
 	// STRUCTURED PARITY with the human scope block. `workspace`/`project` alone
 	// carry the same lie the print used to: they say what was SET, not what a
@@ -442,13 +456,19 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	if cloudTeam != "" {
 		teamSuffix = fmt.Sprintf(" (team %s)", cloudTeam)
 	}
+	// The source rides on the three token-present arms only; the logged-out arm
+	// has no credential to attribute and keeps its exact former bytes.
+	sourceSuffix := ""
+	if cloudTokenSource != "" {
+		sourceSuffix = fmt.Sprintf(" [source %s]", cloudTokenSource)
+	}
 	switch cloudSession {
 	case "verified":
-		out.outf("cloud:     logged in to %s%s — session verified", cloudURL, teamSuffix)
+		out.outf("cloud:     logged in to %s%s — session verified%s", cloudURL, teamSuffix, sourceSuffix)
 	case "rejected":
-		out.outf("cloud:     token PRESENT but REJECTED by %s — the saved session is dead; run 'bp login'", cloudURL)
+		out.outf("cloud:     token PRESENT but REJECTED by %s — the saved session is dead; run 'bp login'%s", cloudURL, sourceSuffix)
 	case "unverified":
-		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session", cloudURL)
+		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session%s", cloudURL, sourceSuffix)
 	default:
 		out.outf("cloud:     not logged in — run 'bp login'")
 	}
