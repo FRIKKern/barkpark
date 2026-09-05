@@ -37,15 +37,15 @@ and is thin for anything that skips often.
 | `task-lease-renew.yml` | 308 | 0 | 0.27 | KEEP-CHEAP |
 | `go-format.yml` | 212 | 109 | 0.44 | KEEP-CHEAP |
 | `shell-harnesses.yml` | 193 | 382 | 0.33 | KEEP-CHEAP |
-| `twoslash.yml` | 53 | 0 | 1.45 | CANDIDATE |
+| `twoslash.yml` | 53 | 0 | 1.45 | MOVE (2026-09-05) |
 | `js-tests.yml` | 51 | 27 | 1.59 | CANDIDATE |
 | `typedoc.yml` | 51 | 26 | 0.92 | KEEP-CHEAP |
 | `mobile.yml` | 43 | 14 | 1.24 | CANDIDATE |
-| `grip-suite.yml` | 40 | 27 | 2.7 | CANDIDATE |
+| `grip-suite.yml` | 40 | 27 | 2.7 | MOVE (2026-09-05) |
 | `ci.yml` | 33 | 14 | 1.2 | CANDIDATE |
 | `search-template-gates.yml` | 33 | 0 | 0.18 | KEEP-CHEAP |
 | `sheet-grid-js.yml` | 33 | 12 | 0.0 | UNMEASURED |
-| `deploy-harnesses.yml` | 32 | 0 | 3.82 | CANDIDATE |
+| `deploy-harnesses.yml` | 32 | 0 | 3.82 | MOVE (2026-09-05) |
 | `paper-editor.yml` | 28 | 7 | 0.0 | UNMEASURED |
 | `crown-reconcile.yml` | 26 | 626 | 0.0 | UNMEASURED |
 | `pdrender-wasm.yml` | 23 | 10 | 0.47 | KEEP-CHEAP |
@@ -116,6 +116,18 @@ their silence.
 `reland-check` (2,188 runs) and `architecture` (1,402 runs) are both never-red in 14 days, not
 required, and carry no written rationale — they are the two strongest RETIRE-OR-MOVE candidates once
 `architecture` can see again.
+
+## MOVED 2026-09-05 (task-33742276cf0a35b1)
+
+Non-test CANDIDATEs leave the PR path; `js-tests`, `mobile`, `ci`, `search-starter-smoke`, `connectors`
+STAY (they test the code the PR touches). Watcher = the `Report main-push failure to a human` job
+(`file-ci-failure-issue.sh`, one idempotent issue per key; close it when main is green).
+
+| workflow | venue now | owner | issue key |
+|---|---|---|---|
+| `deploy-harnesses.yml` | push:main + nightly 03:20Z + dispatch | lead-gates | `deploy-harnesses-main` |
+| `grip-suite.yml` | push:main + nightly 03:25Z + dispatch (PR arm removed) | lead-gates | `grip-suite` |
+| `twoslash.yml` | push:main + nightly 03:30Z + dispatch | lead-gates | `twoslash-main` |
 
 ## The three that need words
 
