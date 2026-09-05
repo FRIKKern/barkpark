@@ -45,15 +45,46 @@ defmodule BarkparkWeb.MediaController do
   # RESIDUAL, stated rather than left implicit: a NEW flat read action added to
   # this controller fails open again until that boundary work lands. Route any
   # new read through `confine_one/2` or `confine_many/2`.
-  defp scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
+  #
+  # ── THE SENTINEL INVERTED THIS PREDICATE (task-5ca36b127acf9cbd) ────────────
+  #
+  # `not is_nil(...)` was written when an unresolved request produced NO
+  # `:workspace_id` key at all, so `nil` was the one and only way to say "this
+  # caller resolved no tenant". `ScopeHelpers.put_workspace_scope/3` later gave
+  # that state a NAME — `workspace_id: :shared_only` (task-3e2a70930c6df723,
+  # plugs/scope_helpers.ex:196) — and every HTTP conn on this controller's flat
+  # routes now carries the atom instead of the omission.
+  #
+  # `not is_nil(:shared_only)` is TRUE. So the predicate read the sentinel as
+  # "scope bound", and `confine_one/2` + `confine_many/2` NO-OPPED on exactly
+  # the request they were added to confine — the unresolved one. The guard did
+  # not merely stop helping; it reported the opposite of the truth.
+  #
+  # `is_binary/1` is the honest test, and it is the same guard the interpreters
+  # this class is about already use (`Content.Scope`, `Media.Delivery.Search`,
+  # `Media.Delivery.Retriever`): a workspace is BOUND when a UUID says which
+  # one. `nil` still means bound-by-absence for the internal callers that pass
+  # no scope at all — unchanged, because `is_binary(nil)` is false exactly as
+  # `not is_nil(nil)` was.
+  #
+  # NO EXPLOITABLE LEAK IS CLAIMED. Every read below narrows correctly on its
+  # own today: `Media.get_file/2` and `Media.list_files/2` both route the
+  # sentinel through `Content.Scope.scope_to_workspace_or_global/3`, which owns
+  # a `:shared_only` arm (`workspace_id IS NULL`). This layer is
+  # defence-in-depth, and the point of repairing it is that a fail-open SHAPE
+  # left in place is the thing the next reader trusts.
+  @doc false
+  def scope_bound?(opts), do: is_binary(Keyword.get(opts, :workspace_id))
 
-  defp confine_one(opts, %MediaFile{} = file) do
+  @doc false
+  def confine_one(opts, %MediaFile{} = file) do
     if scope_bound?(opts) or is_nil(file.workspace_id),
       do: {:ok, file},
       else: {:error, :not_found}
   end
 
-  defp confine_many(opts, files) do
+  @doc false
+  def confine_many(opts, files) do
     if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
   end
 
