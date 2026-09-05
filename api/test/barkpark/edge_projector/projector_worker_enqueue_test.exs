@@ -109,6 +109,70 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
     end
   end
 
+  describe "enqueue/2 — uniqueness across tenant scope" do
+    test "the same dataset and type in different workspaces or projects enqueue independently" do
+      suffix = System.unique_integer([:positive])
+      workspace_a = "ws-a-#{suffix}"
+      workspace_b = "ws-b-#{suffix}"
+      project_a = "project-a-#{suffix}"
+      project_b = "project-b-#{suffix}"
+
+      assert {:ok, _} =
+               ProjectorWorker.enqueue("production",
+                 types: ["paper"],
+                 workspace_id: workspace_a,
+                 project_id: project_a
+               )
+
+      assert {:ok, _} =
+               ProjectorWorker.enqueue("production",
+                 types: ["paper"],
+                 workspace_id: workspace_b,
+                 project_id: project_b
+               )
+
+      jobs =
+        all_enqueued(worker: ProjectorWorker)
+        |> Enum.filter(&(&1.args["workspace_id"] in [workspace_a, workspace_b]))
+
+      assert Enum.sort_by(Enum.map(jobs, & &1.args), & &1["workspace_id"]) ==
+               Enum.sort_by(
+                 [
+                   %{
+                     "op" => "rebuild",
+                     "perspective" => "published",
+                     "project_id" => project_a,
+                     "scope" => "production",
+                     "types" => ["paper"],
+                     "workspace_id" => workspace_a
+                   },
+                   %{
+                     "op" => "rebuild",
+                     "perspective" => "published",
+                     "project_id" => project_b,
+                     "scope" => "production",
+                     "types" => ["paper"],
+                     "workspace_id" => workspace_b
+                   }
+                 ],
+                 & &1["workspace_id"]
+               )
+    end
+
+    test "an identical full tenant scope still deduplicates" do
+      suffix = System.unique_integer([:positive])
+      workspace = "ws-#{suffix}"
+      opts = [types: ["paper"], workspace_id: workspace, project_id: "project-#{suffix}"]
+
+      assert {:ok, _} = ProjectorWorker.enqueue("production", opts)
+      assert {:ok, _} = ProjectorWorker.enqueue("production", opts)
+
+      assert [_only_one] =
+               all_enqueued(worker: ProjectorWorker)
+               |> Enum.filter(&(&1.args["workspace_id"] == workspace))
+    end
+  end
+
   describe "enqueue_upsert/3 — upsert op" do
     test "inserts an upsert job with op='upsert' and the given _id" do
       assert {:ok, _job} =
