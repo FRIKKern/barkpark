@@ -376,7 +376,18 @@ config :barkpark, Oban,
        # plugin), so this cron entry lives in the static crontab alongside the
        # webhook/audit sweepers and runs on the static `playground_ttl` queue
        # declared above. A no-op tick when no playground has expired.
-       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
+       # bl-api-task-create-idempotency C4 — GC for the `idempotency_keys`
+       # dedup store. `Idempotency.sweep/1` has existed since the table was
+       # created and, until this entry, was called by NOTHING outside its own
+       # test: the store was append-only in production, each row carrying a
+       # full cached response body. Hourly (not per-minute) because the TTL is
+       # 24h — an hour of lateness on a 24h expiry costs nothing, and the sweep
+       # is an index scan, not a recovery path. Runs on the static `default`
+       # queue alongside the webhook/audit sweepers; the worker bounds one tick
+       # by construction (`Idempotency.sweep_batch/1`), so a cold first pass
+       # over a long-unswept table cannot become one giant transaction.
+       {"17 * * * *", Barkpark.Idempotency.Sweeper}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`
