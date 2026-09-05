@@ -408,7 +408,17 @@ defmodule Barkpark.Tasks.FleetTest do
         %{
           "doc_id" => task_id,
           "title" => task_id,
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         scope

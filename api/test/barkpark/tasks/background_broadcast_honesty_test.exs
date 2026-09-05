@@ -85,7 +85,17 @@ defmodule Barkpark.Tasks.BackgroundBroadcastHonestyTest do
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(

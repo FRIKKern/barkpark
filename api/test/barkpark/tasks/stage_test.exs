@@ -43,7 +43,17 @@ defmodule Barkpark.Tasks.StageTest do
   end
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -649,7 +659,17 @@ defmodule Barkpark.Tasks.StageTest do
                  %{
                    "doc_id" => uniq("stage-junk-state"),
                    "title" => "junk",
-                   "content" => %{"kind" => "task", "lifecycle_status" => "marinating"}
+                   "content" => %{
+                     "kind" => "task",
+                     "acceptance_criteria" => [
+                       %{
+                         "criterion" => "the fixture states its bar",
+                         "met" => false,
+                         "evidence" => ""
+                       }
+                     ],
+                     "lifecycle_status" => "marinating"
+                   }
                  },
                  @dataset,
                  scope

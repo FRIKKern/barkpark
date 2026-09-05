@@ -118,7 +118,17 @@ defmodule BarkparkWeb.TasksControllerTest do
   # title = doc_id — too short for the truncation laws and too uniform for
   # the brief byte tripwires).
   defp mk_card_task!(doc_id, title, scope, content_extra) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -733,7 +743,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # This fixture is DELIBERATELY criteria-less — it exists to drive the
+          # close-time gates — so the claim-time criteria gate
+          # (task-9554c64bf51a0f81) is discharged on the record, which also
+          # exercises the override through the real HTTP path.
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       assert claim_resp.status == 200
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
@@ -771,7 +792,16 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-A"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # Criteria-less BY DESIGN — this fixture drives the close-time gates —
+          # so the claim-time gate is discharged on the record.
+          Jason.encode!(%{
+            worker_id: "worker-A",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
 
@@ -828,7 +858,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # This fixture is DELIBERATELY criteria-less — it exists to drive the
+          # close-time gates — so the claim-time criteria gate
+          # (task-9554c64bf51a0f81) is discharged on the record, which also
+          # exercises the override through the real HTTP path.
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
 
@@ -1176,7 +1217,13 @@ defmodule BarkparkWeb.TasksControllerTest do
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("close-foreign"), scope, %{"acceptance_criteria" => []})
 
-      claim_body = Jason.encode!(%{worker_id: "worker-A"})
+      # Criteria-less BY DESIGN — this fixture drives the close-time gates — so
+      # the claim-time gate is discharged on the record.
+      claim_body =
+        Jason.encode!(%{
+          worker_id: "worker-A",
+          criteria_unstated_override: "close-gate fixture: criteria are not what this test proves"
+        })
 
       claim_resp =
         conn |> authed() |> post("/v1/tasks/#{task.doc_id}/claim", claim_body)

@@ -28,7 +28,14 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
   end
 
   test "absent policy is compatible and version 1 rejects unsafe or unknown fields" do
-    base = %{"kind" => "task", "lifecycle_status" => "open"}
+    base = %{
+      "kind" => "task",
+      "acceptance_criteria" => [
+        %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+      ],
+      "lifecycle_status" => "open"
+    }
+
     assert :ok = Validation.validate_task_content(base)
 
     valid = %{
@@ -94,7 +101,14 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
   end
 
   test "work digest preserves absent parity and fences policy add/edit/remove" do
-    legacy = %{"kind" => "task", "lifecycle_status" => "open"}
+    legacy = %{
+      "kind" => "task",
+      "acceptance_criteria" => [
+        %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+      ],
+      "lifecycle_status" => "open"
+    }
+
     legacy_fields = WorkDigest.field_digests("task", legacy)
 
     assert Map.keys(legacy_fields) |> Enum.sort() ==
@@ -318,7 +332,17 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
   end
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
