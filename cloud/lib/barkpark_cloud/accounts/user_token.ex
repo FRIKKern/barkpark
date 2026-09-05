@@ -92,6 +92,17 @@ defmodule BarkparkCloud.Accounts.UserToken do
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
     field :last_used_at, :utc_datetime_usec
+    # cch-w30-bl — the PAT expiry warning's ONE-SHOT BUDGET. Stamped by
+    # `Workers.TokenExpiryWarningWorker` with an atomic
+    # `UPDATE … WHERE expiry_warned_at IS NULL`, so the daily cron mails the
+    # token's OWNER exactly once no matter how many passes see the same row.
+    #
+    # DELIBERATELY ABSENT FROM BOTH CHANGESETS. Nothing a client sends may set
+    # it: it is not a user preference, it is the worker's own claim ledger, and
+    # a castable stamp would let a mint request pre-burn the warning it is
+    # supposed to receive. The worker writes it through `Repo.update_all`, which
+    # does not run a changeset, so the omission costs nothing.
+    field :expiry_warned_at, :utc_datetime_usec
     # email-verification-recovery: the address a lifecycle token (confirm /
     # change_email) was issued FOR, and the per-token wrong-code counter that
     # backs the email-change brute-force lockout.

@@ -17998,12 +17998,23 @@ test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless
   // are. A row moves this number only together with its producer, because arm
   // (a) of the census below reds on an offer with nothing behind it.
   assert.equal((html.match(/set-matrix-cell/g) || []).length, 48, "8 events × 6 channels");
-  // STILL DEAD. `member_invited` and `token_expiring` have no producer, and
-  // token_expiring must never get the obvious one: dispatch_event/3 fans to
-  // team_member_emails/1 while a token belongs to ONE user.
+  // NOT OFFERED, FOR TWO DIFFERENT REASONS — and the difference matters.
+  //
+  // `member_invited` is still the original case: no producer at all.
+  //
+  // `token_expiring` is NOT. cch-w30-bl shipped its producer
+  // (workers/token_expiry_warning_worker.ex), and it STILL must not appear
+  // here, because it never travels the alert path: dispatch_event/3 fans to
+  // team_member_emails/1 while a PAT belongs to ONE user, so the warning rides
+  // the user-scoped transactional path (Notifications.deliver_token_expiring/3,
+  // team_id nil) instead. A team toggle governing a user-scoped fact is exactly
+  // the incoherence wave 30 dropped the column for. This row is therefore a
+  // PERMANENT absence, not a pending one — and the census below agrees by
+  // construction, since its producer arm reads `dispatch_event(` call sites and
+  // the worker deliberately has none.
   for (const dead of ["member_invited", "token_expiring"]) {
     assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
-      `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
+      `${dead} must not be offered as a toggle`);
   }
   // The seventh, drawn: the auto-deploy PREBUILT refusal
   // (Sites.AutoDeployWorker.refuse/1 → Notifications.dispatch_site_event).

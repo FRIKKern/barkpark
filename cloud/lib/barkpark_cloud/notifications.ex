@@ -321,6 +321,35 @@ defmodule BarkparkCloud.Notifications do
   end
 
   @doc """
+  cch-w30-bl — deliver the PAT expiry warning to the token's OWNER over the
+  PLATFORM transport, and record it as a USER-SCOPED row (`team_id` nil, kind
+  `"transactional"`), exactly like password-reset / verify / email-change-code.
+
+  THE RECIPIENT RULE LIVES HERE, IN THE SIGNATURE. This function takes ONE
+  address — the owner's — and there is no seam through which a second recipient
+  can enter. Contrast `dispatch_event/3` two hundred lines down, whose recipient
+  list is `team_member_emails(settings.team_id)` with no role predicate: a PAT
+  carries BOTH a `user_id` and a `team_id` and its `name` is user-chosen, so
+  routing this warning through the alert path would publish one member's
+  credential inventory and rotation schedule to their whole team. `token_expiring`
+  is therefore NOT on `@always_send` and NOT an `EmailSettings` toggle column
+  (wave 30 dropped that column for this reason); `dispatch_event/3` on it falls
+  through `event_enabled?/2`'s catch-all to `false` and sends nothing, which is
+  the structural half of the same rule.
+
+  The `team_id`-nil delivery row is also the privacy half of the receipt: a
+  team-scoped row would surface this token's existence in the team's delivery
+  log, which is the disclosure re-entering through the audit trail.
+  """
+  @spec deliver_token_expiring(String.t(), String.t(), DateTime.t()) ::
+          {:ok, term()} | {:error, term()}
+  def deliver_token_expiring(to, token_name, %DateTime{} = expires_at) when is_binary(to) do
+    result = Transactional.deliver_token_expiring(to, token_name, expires_at)
+    record_delivery(nil, to, "token_expiring", "transactional", result, @platform_carrier)
+    result
+  end
+
+  @doc """
   Send the settings page's test email, rate-limited to one per
   `#{@test_rate_limit_seconds}`s per team (Coolify `Email.php`'s 10s guard,
   enforced here via `last_test_sent_at`).
