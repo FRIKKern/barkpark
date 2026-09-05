@@ -189,6 +189,44 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
            ) == 0
   end
 
+  test "post-claim reload refuses a paper that moved outside the original tenant" do
+    ws = TenancyFixtures.create_workspace!()
+    project = TenancyFixtures.create_project!(ws)
+    other_ws = TenancyFixtures.create_workspace!()
+    other_project = TenancyFixtures.create_project!(other_ws)
+    {slug, paper} = seed_paper!(nil, workspace_id: ws.id, project_id: project.id)
+
+    assert {:error, :not_found} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [patch_text("Must not cross tenant")],
+               @dataset,
+               Ecto.UUID.generate(),
+               "user:tenant-reload",
+               workspace_id: ws.id,
+               project_id: project.id,
+               if_rev: paper_rev(paper),
+               after_idempotency_claim: fn ->
+                 paper
+                 |> Ecto.Changeset.change(
+                   workspace_id: other_ws.id,
+                   project_id: other_project.id
+                 )
+                 |> Repo.update!()
+               end
+             )
+
+    stored = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+    assert stored.id == paper.id
+    assert stored.content["rev"] == paper.content["rev"]
+    assert block_text(stored, "anchor") == "Seed"
+
+    assert Repo.aggregate(
+             from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%")),
+             :count
+           ) == 0
+  end
+
   test "concurrent callers sharing one request identity produce one write and one replay" do
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       ws = TenancyFixtures.create_workspace!()

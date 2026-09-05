@@ -823,8 +823,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           :claimed ->
             maybe_after_idempotency_claim(opts)
 
-            case Repo.get(Document, doc.id) do
-              %Document{} = current_doc ->
+            case get_block_op_paper(slug, dataset, opts) do
+              %Document{id: current_id} = current_doc when current_id == doc.id ->
                 case persist_paper_block_ops(current_doc, slug, ops, dataset, opts) do
                   {:ok, receipt, effects} ->
                     maybe_before_idempotency_complete(opts)
@@ -838,7 +838,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
                     Repo.rollback(reason)
                 end
 
-              nil ->
+              _ ->
                 Repo.rollback(:not_found)
             end
 
