@@ -55,6 +55,30 @@ defmodule Barkpark.Tasks.Edges do
   def add_dep(child_id, parent_id, kind \\ :blocks) do
     kind_str = normalize_kind(kind)
 
+    # TWIN-EDGE CANONICALISATION (task-85bba5cb33dbd59b).
+    #
+    # `task_edges` FKs reference `documents.id` — a PER-ROW uuid — so an edge
+    # binds to ONE twin. The ready query's twin-collapse axis then surfaces the
+    # PUBLISHED row, so a `blocks` edge filed onto the DRAFT twin's uuid did not
+    # gate the row anybody can actually claim: a blocker that silently does not
+    # block. `queue.ex` documents the gap and names this cure — "canonicalizing
+    # edge endpoints to the published uuid is the real fix".
+    #
+    # WHY THE WRITE PATH AND NOT THE READ. The read fix would mean joining both
+    # endpoints through doc_id/published_id inside the ready query, and that
+    # query's own moduledoc records what that costs when it goes wrong there: a
+    # CTE form that removed 1,320,188 rows by a join filter on a 12k corpus, and
+    # a `NOT EXISTS` the planner flattens into an anti-join priced at 25 ms on a
+    # custom plan and 2.5 s on the GENERIC plan pooled connections settle into.
+    # This path is COLD — once per edge — and normalising here leaves the hot
+    # query byte-identical.
+    #
+    # ONE CHOKEPOINT, verified rather than assumed: every task-edge writer
+    # reaches this function (`Tasks.add_dep/4` -> `Fence.add_dep/4` -> here).
+    # `Barkpark.Content.Edges` writes a DIFFERENT table.
+    child_id = canonical_endpoint(child_id)
+    parent_id = canonical_endpoint(parent_id)
+
     attrs = %{from_id: child_id, to_id: parent_id, kind: kind_str}
     changeset = Edge.changeset(%Edge{}, attrs)
 
@@ -201,5 +225,198 @@ defmodule Barkpark.Tasks.Edges do
         where: e.from_id == ^from_id and e.to_id == ^to_id and e.kind == ^kind
       )
     )
+  end
+
+  # Resolve a document uuid to its CANONICAL twin's uuid: if the row is a
+  # `drafts.<id>` shadow and a published `<id>` exists in the SAME scope
+  # (type + dataset + workspace + project), return the published row's uuid.
+  #
+  # Everything else is returned UNCHANGED — an unknown uuid, a row that is
+  # already published, and a draft with NO published twin. That last case is
+  # deliberate: an unpaired draft is admitted to the ready queue AS ITSELF
+  # (queue.ex axis 3 suppresses a draft only when a published twin exists), so
+  # its edges must keep binding to it or the blocker would vanish entirely.
+  defp canonical_endpoint(id) when is_binary(id) do
+    with %Document{doc_id: doc_id} = doc <- Repo.get(Document, id),
+         true <- String.starts_with?(doc_id, "drafts."),
+         published_id <- String.replace_prefix(doc_id, "drafts.", ""),
+         %Document{id: canonical} <- fetch_twin(doc, published_id) do
+      canonical
+    else
+      _ -> id
+    end
+  end
+
+  defp canonical_endpoint(id), do: id
+
+  # The twin lookup is scoped on every axis the uniqueness index carries, so a
+  # same-slug row in ANOTHER dataset or another tenant can never be adopted as
+  # this row's twin. `limit: 1` because `(doc_id, type, dataset_id)` is unique
+  # and a bare `Repo.one/1` here would raise on the one shape that is supposed
+  # to be impossible — the same fork that made `bp task claim` 500
+  # (task-ca05dd6a02a0b55f).
+  defp fetch_twin(%Document{} = doc, published_id) do
+    from(d in Document,
+      where:
+        d.doc_id == ^published_id and d.type == ^doc.type and
+          d.dataset == ^doc.dataset,
+      limit: 1
+    )
+    |> scope_twin(:workspace_id, doc.workspace_id)
+    |> scope_twin(:project_id, doc.project_id)
+    |> Repo.one()
+  end
+
+  defp scope_twin(query, field, nil),
+    do: from(d in query, where: is_nil(field(d, ^field)))
+
+  defp scope_twin(query, field, value),
+    do: from(d in query, where: field(d, ^field) == ^value)
+
+  @doc """
+  Re-point every existing `task_edges` endpoint that binds a DRAFT twin at the
+  PUBLISHED twin of the same slug, and return `%{from: {moved, deduped}, to:
+  {moved, deduped}}`.
+
+  `add_dep/3` canonicalises NEW edges; this repairs the ones written before it.
+  It lives HERE rather than inside the migration for two reasons: a migration
+  body needs a runner process and so cannot be driven from a test, and an
+  operator needs a re-runnable arm for edges written by an older release still
+  in flight. Migration
+  `20260905160000_backfill_twin_canonical_task_edges` is a thin caller.
+
+  IDEMPOTENT: after a run there are no draft-bound endpoints left with a
+  published twin, so a second run matches nothing.
+
+  COLLISIONS ARE DELETED, NOT UPDATED, and the ordering is the trick.
+  `task_edges` is unique on `(from_id, to_id, kind)`. If the canonical edge
+  already exists, re-pointing its draft-bound sibling onto the same triple would
+  violate that index and abort the whole run — so each side DELETEs the
+  redundant row FIRST and only then UPDATEs what remains. The deleted row is not
+  lost information; it is the same dependency stated twice.
+
+  SET-BASED, never per-row (slow-migration law): two DELETEs and two UPDATEs in
+  total, whatever the corpus size.
+  """
+  @spec backfill_twin_canonical_edges() :: %{
+          from: {integer(), integer()},
+          to: {integer(), integer()}
+        }
+  def backfill_twin_canonical_edges do
+    from_deduped = delete_colliding_from_edges()
+    from_moved = repoint_from_edges()
+    to_deduped = delete_colliding_to_edges()
+    to_moved = repoint_to_edges()
+
+    %{from: {from_moved, from_deduped}, to: {to_moved, to_deduped}}
+  end
+
+  # ── FOUR LITERAL STATEMENTS, NOT ONE INTERPOLATED PAIR ──────────────────
+  #
+  # An earlier shape built these from `side`/`other` variables interpolated
+  # into the SQL string. It was safe — both were internal column atoms, never
+  # caller input — but Sobelow's SQL.Query check cannot see that, and it read
+  # the interpolation as two NEW Low findings on `api/lib/barkpark/tasks/edges.ex`
+  # (`variable "side and side"`, `variable "side and side and other and other"`),
+  # which reddened the required Security gate.
+  #
+  # The fix is at the cause rather than a baseline waiver: `from_id` and `to_id`
+  # are a closed set of two, so the four statements are written out in full and
+  # NO variable reaches any SQL string. A waiver would have asked every future
+  # reader to re-derive that `side` is uninterpolatable; four literals ask
+  # nothing. The duplication is four lines of WHERE clause, which is cheaper
+  # than a fingerprint in a baseline file.
+  #
+  # THE SHARED PREDICATE, spelled once here and repeated verbatim below:
+  # `LIKE 'drafts.%'` confines the join to shadow rows; `substring(d.doc_id
+  # from 8)` strips the literal "drafts." (7 chars, so the remainder starts at
+  # 8); the join is scoped on every axis the `(doc_id, type, dataset_id)`
+  # uniqueness index carries, with `IS NOT DISTINCT FROM` so an untenanted row
+  # matches only another untenanted row — a looser join would silently move a
+  # blocker across a tenancy boundary, which is worse than the unenforced
+  # blocker being fixed. An UNPAIRED draft finds no published row and is left
+  # alone, which queue.ex axis 3 requires: it serves such a draft as itself, so
+  # its edges must keep pointing at it.
+
+  defp delete_colliding_from_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      DELETE FROM task_edges e
+      USING documents d, documents pub
+      WHERE e.from_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+        AND EXISTS (
+          SELECT 1 FROM task_edges c
+          WHERE c.from_id = pub.id
+            AND c.to_id = e.to_id
+            AND c.kind = e.kind
+        )
+      """)
+
+    n
+  end
+
+  defp delete_colliding_to_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      DELETE FROM task_edges e
+      USING documents d, documents pub
+      WHERE e.to_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+        AND EXISTS (
+          SELECT 1 FROM task_edges c
+          WHERE c.to_id = pub.id
+            AND c.from_id = e.from_id
+            AND c.kind = e.kind
+        )
+      """)
+
+    n
+  end
+
+  defp repoint_from_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      UPDATE task_edges e
+      SET from_id = pub.id
+      FROM documents d, documents pub
+      WHERE e.from_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+      """)
+
+    n
+  end
+
+  defp repoint_to_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      UPDATE task_edges e
+      SET to_id = pub.id
+      FROM documents d, documents pub
+      WHERE e.to_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+      """)
+
+    n
   end
 end

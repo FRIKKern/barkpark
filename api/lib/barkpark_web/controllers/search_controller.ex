@@ -4,12 +4,18 @@ defmodule BarkparkWeb.SearchController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SearchIntelligence}
   alias Barkpark.Search.{HitEnvelope, SurfaceConfigs, Synonyms}
-  alias BarkparkWeb.{AnonPerspective, SearchIntel}
+  alias BarkparkWeb.{AnonPerspective, ReadPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   require Logger
+
+  # The value set `/v1/data/search/:dataset` declares in
+  # `Barkpark.Plugins.Capabilities` ("published (default) | drafts | raw") and
+  # therefore in `docs/openapi.json`. Anything else is a 400, not a silent
+  # downgrade to published — see `BarkparkWeb.ReadPerspective`.
+  @search_perspectives ["published", "drafts", "raw"]
 
   @doc """
   Localhost fast-path search (Barkpark Cloud P4 / Move B). Identical surface to
@@ -41,7 +47,13 @@ defmodule BarkparkWeb.SearchController do
           [
             type: bin(params["type"]),
             types: parse_types(params["types"]),
-            perspective: parse_perspective(params["perspective"]),
+            # The loopback fast-path takes the param at face value (no token to
+            # clamp against) but through the SAME lenient parser every other
+            # non-declared reader uses — this used to be a byte-identical
+            # private copy of it. Not validated: `search_local/2` is the
+            # on-box route, absent from the manifest, so it has no declared
+            # enum to hold a caller to.
+            perspective: AnonPerspective.parse(params["perspective"]),
             limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
             offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
             engine: params["engine"] || "postgres",
@@ -87,6 +99,20 @@ defmodule BarkparkWeb.SearchController do
   defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   def search(conn, %{"dataset" => dataset} = params) do
+    # An unsupported `?perspective` is REFUSED here, not downgraded. This runs
+    # after the pipeline's auth/tenancy plugs (OptionalToken, and the scope
+    # resolution that 404s an unknown /w/:ws/p/:project mirror) and before any
+    # retrieval, so the 400 reports only on the caller's own input — it can
+    # never become an existence probe for a dataset or a tenant. Ordered ahead
+    # of the missing-`q` 400 only because both are pure input refusals; neither
+    # reveals anything the other does not.
+    case ReadPerspective.unsupported(params, @search_perspectives) do
+      nil -> do_search(conn, dataset, params)
+      bad -> ReadPerspective.refuse(conn, bad, @search_perspectives)
+    end
+  end
+
+  defp do_search(conn, dataset, params) do
     case bin(params["q"]) do
       nil ->
         missing_q(conn)
@@ -452,10 +478,6 @@ defmodule BarkparkWeb.SearchController do
     |> Ecto.Changeset.cast(%{}, [:from, :to])
     |> Ecto.Changeset.validate_required([:from, :to])
   end
-
-  defp parse_perspective("drafts"), do: :drafts
-  defp parse_perspective("raw"), do: :raw
-  defp parse_perspective(_), do: :published
 
   # Optional comma-separated allowlist restricting results + facets to a set of
   # document types (the finder passes its content types). nil = no restriction.

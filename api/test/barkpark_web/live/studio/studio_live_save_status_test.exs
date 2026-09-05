@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.Content
+  alias Barkpark.{Auth, Content}
   alias BarkparkWeb.Studio.StudioLive
 
   @dataset "production"
@@ -81,25 +81,46 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
   # asserting against a socket LiveView never builds. The mount gives the real
   # one; the seam-level precision of this suite (a direct `handle_event/3`, no
   # DOM in the way) is unchanged.
-  defp paper_socket(conn, paper) do
+  defp paper_view(conn, paper) do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{paper.doc_id}"))
 
-    :sys.get_state(view.pid).socket
+    view
+  end
+
+  defp socket_of(view), do: :sys.get_state(view.pid).socket
+
+  defp stored_intro_text do
+    case Content.get_public_paper(@slug, @dataset) do
+      %{content: %{"blocks" => [%{"content" => [%{"value" => value} | _]} | _]}} -> value
+      _ -> nil
+    end
+  end
+
+  defp stored_blocks do
+    case Content.get_public_paper(@slug, @dataset) do
+      %{content: %{"blocks" => blocks}} -> blocks
+      _ -> nil
+    end
   end
 
   describe "paper block autosave truthfulness (#8)" do
     setup %{conn: conn} do
       seed_paper_schema!()
       paper = seed_block_paper!()
-      {:ok, paper: paper, socket: paper_socket(conn, paper)}
+      view = paper_view(conn, paper)
+      {:ok, paper: paper, view: view, socket: socket_of(view)}
     end
 
     test "a clean edit reports Auto-saved", %{socket: socket} do
-      {:noreply, socket} =
+      {:reply, %{saved: true}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
-          %{"block_id" => "b-intro", "text" => "Edited body."},
+          %{
+            "block_id" => "b-intro",
+            "text" => "Edited body.",
+            "if_rev" => socket.assigns.paper_rev
+          },
           socket
         )
 
@@ -112,10 +133,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       # attempt hits the DB and comes back {:error, :not_found}.
       {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
 
-      {:noreply, socket} =
+      {:reply, %{saved: false}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
-          %{"block_id" => "b-intro", "text" => "Edited body."},
+          %{
+            "block_id" => "b-intro",
+            "text" => "Edited body.",
+            "if_rev" => socket.assigns.paper_rev
+          },
           socket
         )
 
@@ -123,6 +148,465 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       refute socket.assigns.save_status == "Auto-saved"
       assert socket.assigns.save_status == "Save failed"
       assert socket.assigns.flash["error"] == "Edit failed"
+    end
+
+    test "paper-op replies true after persistence and false after a rejected retry", %{
+      socket: socket
+    } do
+      op = %{
+        "op" => "patch-block",
+        "id" => "b-intro",
+        "if_rev" => socket.assigns.paper_rev,
+        "patch" => %{
+          "content" => [%{"type" => "text", "value" => "Direct paper op."}]
+        }
+      }
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               StudioLive.handle_event("paper-op", op, socket)
+
+      assert saved_socket.assigns.last_paper_save_ok? == true
+      assert stored_intro_text() == "Direct paper op."
+
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      assert {:reply, %{saved: false}, failed_socket} =
+               StudioLive.handle_event("paper-op", op, saved_socket)
+
+      assert failed_socket.assigns.last_paper_save_ok? == false
+      assert failed_socket.assigns.save_status == "Save failed"
+      assert stored_intro_text() == nil
+    end
+
+    test "a stale Studio editor receives a correlated conflict and can explicitly rebase", %{
+      socket: socket
+    } do
+      initial_rev = socket.assigns.paper_rev
+      first_request_id = Ecto.UUID.generate()
+      stale_request_id = Ecto.UUID.generate()
+      rebased_request_id = Ecto.UUID.generate()
+
+      first = %{
+        "op" => "patch-block",
+        "id" => "b-intro",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "First Studio tab"}]},
+        "request_id" => first_request_id,
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply, %{saved: true, rev: committed_rev}, saved_socket} =
+               StudioLive.handle_event("paper-op", first, socket)
+
+      assert saved_socket.assigns.paper_rev == committed_rev
+
+      stale = %{
+        first
+        | "patch" => %{"content" => [%{"type" => "text", "value" => "Stale Studio tab"}]},
+          "request_id" => stale_request_id
+      }
+
+      assert {:reply,
+              %{
+                saved: false,
+                request_id: ^stale_request_id,
+                conflict: true,
+                current_rev: ^committed_rev
+              }, conflicted_socket} = StudioLive.handle_event("paper-op", stale, socket)
+
+      assert stored_intro_text() == "First Studio tab"
+
+      rebased = %{
+        stale
+        | "request_id" => rebased_request_id,
+          "if_rev" => conflicted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true, request_id: ^rebased_request_id}, _socket} =
+               StudioLive.handle_event("paper-op", rebased, conflicted_socket)
+
+      assert stored_intro_text() == "Stale Studio tab"
+    end
+
+    test "paper-op and paper-block-autosave reject malformed payloads with saved false", %{
+      socket: socket
+    } do
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-op", %{}, socket)
+
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-block-autosave", %{}, socket)
+
+      assert stored_intro_text() == "Original body."
+    end
+
+    test "structural mutation handlers return correlated false for malformed payloads", %{
+      socket: socket
+    } do
+      for event <- [
+            "paper-edit-block",
+            "paper-add-block",
+            "paper-delete-block",
+            "paper-move-block",
+            "paper-move-block-to",
+            "paper-materialize-slot",
+            "paper-slash-insert",
+            "paper-callout-fold",
+            "paper-add-property",
+            "paper-unbind-property"
+          ] do
+        request_id = "malformed-#{event}"
+
+        assert {:reply, %{saved: false, request_id: ^request_id}, _socket} =
+                 StudioLive.handle_event(event, %{"request_id" => request_id}, socket)
+      end
+
+      assert stored_intro_text() == "Original body."
+    end
+
+    test "a correlated component save persists and acknowledges its exact request", %{
+      view: view
+    } do
+      request_id = Ecto.UUID.generate()
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "if_rev" => socket_of(view).assigns.paper_rev,
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Correlated Studio edit."}]
+          }
+        },
+        request_id
+      })
+
+      render(view)
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: ^request_id,
+        saved: true
+      })
+
+      assert stored_intro_text() == "Correlated Studio edit."
+      assert socket_of(view).assigns.last_paper_save_ok? == true
+    end
+
+    test "a failed correlated component save acknowledges false and keeps the row absent", %{
+      view: view
+    } do
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "if_rev" => socket_of(view).assigns.paper_rev,
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Must not land."}]
+          }
+        },
+        "studio-field-failed"
+      })
+
+      render(view)
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "studio-field-failed",
+        saved: false
+      })
+
+      assert stored_intro_text() == nil
+      assert socket_of(view).assigns.last_paper_save_ok? == false
+    end
+
+    test "paper-ops replies saved true only after the batch persisted", %{socket: socket} do
+      assert {:reply, %{saved: true}, socket} =
+               StudioLive.handle_event(
+                 "paper-ops",
+                 %{
+                   "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
+                   "ops" => [
+                     %{
+                       "op" => "patch-block",
+                       "id" => "b-intro",
+                       "patch" => %{
+                         "content" => [
+                           %{"type" => "text", "value" => "Acknowledged Studio batch."}
+                         ]
+                       }
+                     }
+                   ]
+                 },
+                 socket
+               )
+
+      assert socket.assigns.last_paper_save_ok? == true
+      assert stored_intro_text() == "Acknowledged Studio batch."
+    end
+
+    test "paper-ops replies saved false for a rejected batch, never stale success", %{
+      socket: socket
+    } do
+      # Prove the attempt resets its own result rather than inheriting a prior
+      # successful status from this socket.
+      socket = Phoenix.Component.assign(socket, :last_paper_save_ok?, true)
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      assert {:reply, %{saved: false}, socket} =
+               StudioLive.handle_event(
+                 "paper-ops",
+                 %{
+                   "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
+                   "ops" => [
+                     %{
+                       "op" => "patch-block",
+                       "id" => "b-intro",
+                       "patch" => %{
+                         "content" => [
+                           %{"type" => "text", "value" => "Rejected Studio batch."}
+                         ]
+                       }
+                     }
+                   ]
+                 },
+                 socket
+               )
+
+      assert socket.assigns.last_paper_save_ok? == false
+      assert socket.assigns.save_status == "Save failed"
+      assert stored_intro_text() == nil
+    end
+
+    test "paper-ops rejects malformed or empty payloads with saved false", %{socket: socket} do
+      valid_ops = [
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Must not land"}]
+          }
+        }
+      ]
+
+      invalid_payloads = [
+        %{"request_id" => Ecto.UUID.generate(), "ops" => []},
+        %{"ops" => valid_ops},
+        %{"request_id" => "not-a-uuid", "ops" => valid_ops},
+        %{}
+      ]
+
+      Enum.reduce(invalid_payloads, socket, fn params, current_socket ->
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 StudioLive.handle_event("paper-ops", params, current_socket)
+
+        rejected_socket
+      end)
+
+      assert stored_intro_text() == "Original body."
+    end
+
+    test "paper-ops replays once and a revoked token cannot retrieve the receipt", %{
+      conn: conn,
+      paper: paper
+    } do
+      raw = "studio-replay-writer-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "studio replay writer", @dataset, ["read", "write"])
+
+      conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+      socket = conn |> paper_view(paper) |> socket_of()
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "request_id" => request_id,
+        "if_rev" => socket.assigns.paper_rev,
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{
+              "id" => "studio-replay-once",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Studio once"}]
+            }
+          }
+        ]
+      }
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: false,
+                rev: committed_rev
+              }, committed_socket} = StudioLive.handle_event("paper-ops", params, socket)
+
+      committed_blocks = stored_blocks()
+      assert Enum.count(committed_blocks, &(&1["id"] == "studio-replay-once")) == 1
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: true,
+                rev: ^committed_rev
+              }, replayed_socket} =
+               StudioLive.handle_event("paper-ops", params, committed_socket)
+
+      assert stored_blocks() == committed_blocks
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               StudioLive.handle_event("paper-ops", params, replayed_socket)
+
+      assert denied_socket.assigns.last_paper_save_ok? == false
+      assert stored_blocks() == committed_blocks
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_again_socket} =
+               StudioLive.handle_event("paper-ops", params, denied_socket)
+
+      assert denied_again_socket.assigns.last_paper_save_ok? == false
+      assert stored_blocks() == committed_blocks
+
+      remounted_socket = conn |> paper_view(paper) |> socket_of()
+      assert remounted_socket.assigns.api_token_credential_present? == true
+      assert remounted_socket.assigns.api_token == nil
+      assert remounted_socket.assigns.api_token_raw == ""
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, reconnect_denied_socket} =
+               StudioLive.handle_event("paper-ops", params, remounted_socket)
+
+      assert reconnect_denied_socket.assigns.last_paper_save_ok? == false
+      assert stored_blocks() == committed_blocks
+    end
+
+    test "a lost structural acknowledgement replays once and revoked retries stay denied", %{
+      conn: conn,
+      paper: paper
+    } do
+      raw = "studio-structural-replay-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "studio structural replay", @dataset, ["read", "write"])
+
+      conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+      socket = conn |> paper_view(paper) |> socket_of()
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "block-type" => "paragraph",
+        "request_id" => request_id,
+        "if_rev" => socket.assigns.paper_rev
+      }
+
+      before = stored_blocks()
+
+      assert {:reply,
+              %{saved: true, request_id: ^request_id, replayed: false, rev: committed_rev},
+              committed_socket} = StudioLive.handle_event("paper-add-block", params, socket)
+
+      committed_blocks = stored_blocks()
+      assert length(committed_blocks) == length(before) + 1
+
+      assert {:reply,
+              %{saved: true, request_id: ^request_id, replayed: true, rev: ^committed_rev},
+              replayed_socket} =
+               StudioLive.handle_event("paper-add-block", params, committed_socket)
+
+      assert stored_blocks() == committed_blocks
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               StudioLive.handle_event("paper-add-block", params, replayed_socket)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, _denied_again_socket} =
+               StudioLive.handle_event("paper-add-block", params, denied_socket)
+
+      assert stored_blocks() == committed_blocks
+    end
+
+    test "a client-authored single insert keeps its wire block id for following ops", %{
+      socket: socket
+    } do
+      insert = %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => "studio-client-authored-id",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Inserted"}]
+        },
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true}, inserted_socket} =
+               StudioLive.handle_event("paper-op", insert, socket)
+
+      assert Enum.any?(stored_blocks(), &(&1["id"] == "studio-client-authored-id"))
+
+      patch = %{
+        "op" => "patch-block",
+        "id" => "studio-client-authored-id",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Patched"}]},
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => inserted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true}, _patched_socket} =
+               StudioLive.handle_event("paper-op", patch, inserted_socket)
+
+      assert Enum.any?(stored_blocks(), fn block ->
+               block["id"] == "studio-client-authored-id" and
+                 get_in(block, ["content", Access.at(0), "value"]) == "Patched"
+             end)
+    end
+
+    test "a failed dev-browser credential cannot become public-demo replay authority", %{
+      conn: conn,
+      paper: paper
+    } do
+      previous = Application.get_env(:barkpark, :dev_browser_token)
+      Application.put_env(:barkpark, :dev_browser_token, "invalid-dev-browser-token")
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :dev_browser_token, previous),
+          else: Application.delete_env(:barkpark, :dev_browser_token)
+      end)
+
+      socket = conn |> paper_view(paper) |> socket_of()
+      assert socket.assigns.api_token_credential_present? == true
+      assert socket.assigns.api_token == nil
+      before = stored_blocks()
+
+      assert {:reply, %{saved: false}, denied_socket} =
+               StudioLive.handle_event(
+                 "paper-ops",
+                 %{
+                   "request_id" => Ecto.UUID.generate(),
+                   "if_rev" => socket.assigns.paper_rev,
+                   "ops" => [
+                     %{
+                       "op" => "append-block",
+                       "block" => %{
+                         "id" => "invalid-dev-must-not-land",
+                         "type" => "paragraph",
+                         "content" => []
+                       }
+                     }
+                   ]
+                 },
+                 socket
+               )
+
+      assert denied_socket.assigns.last_paper_save_ok? == false
+      assert stored_blocks() == before
     end
   end
 

@@ -119,6 +119,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperWayOutTest do
       # BEFORE: the named state, and no editor.
       assert html =~ ~s(data-test-id="paper-unrenderable-notice")
       assert html =~ ~s(data-test-id="paper-unrenderable-start-body")
+      assert html =~ ~s(phx-value-if_rev="0")
       refute html =~ ~s(data-test-id="studio-paper-block-editor")
 
       after_html =

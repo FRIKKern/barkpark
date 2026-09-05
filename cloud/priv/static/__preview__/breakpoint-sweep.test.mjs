@@ -829,13 +829,52 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // `scenarioReport({scenarios: SCENARIOS})` against the merged tree and reading
   // what it printed — main had moved the census to 121/27/26/95 while this
   // branch was in flight, so the pre-rebase 117/25/24/93 was stale arithmetic.
-  assert.equal(r.total, 118);
+  // cch-w50-s4 moved it by TWO in ONE commit: `billing-free-owner` (the
+  // UNSUBSCRIBED owner — the first fixture ever to reach renderPlanState's
+  // upsell arm) and `billing-support-plus` (the first `support_plus` fixture the
+  // corpus has held at all). Total 118 -> 120, residue 94 -> 96. CELLS (25),
+  // distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: both land
+  // in the residue, not a cell, so no cell is added and no scenario changes
+  // which cell renders it; and `hash:#billing` already had five members, so two
+  // more cannot create a 14th family — a family is created only by a residue
+  // scenario whose `familyOf` is new, and both of these are `hash:#billing`.
+  // Every integer here was RE-DERIVED at THIS branch's merge base by running
+  // `scenarioReport({scenarios: SCENARIOS})` and reading the `>> scenarios`
+  // line, never carried from the filing — whose 110->112 / 85->87 / 26 cells /
+  // 25 distinct were all stale against a base that already measured
+  // 118/25/24/94.
+  // cch-w12-followup-login-fixture-gap moves it by ONE: `activity-identity-change`,
+  // the corpus's ONLY fixture that answers POST /v1/auth/login with a session —
+  // until it, route()'s own `status < 400` login branch was unreachable from
+  // every committed scenario and no drive in this harness had ever completed a
+  // sign-in. Total 120 -> 121, residue 96 -> 97. CELLS (25), distinctCovered
+  // (24) and families (13) are DELIBERATELY UNMOVED: it lands in the residue,
+  // not a cell, and its `familyOf` is `hash:#overview` — a family that already
+  // had eleven members, so it cannot create a 14th. Its deepLink is #overview
+  // and NOT #activity on purpose: `hash:#activity` is one of the two ZERO-residue
+  // families this file names by hand ("the two ZERO-residue families are named"),
+  // and a fixture landing there would silently retire that arm's subject. The
+  // Activity screen it ends on is reached by a warm hash navigation inside
+  // smoke.mjs, which is what the drive is measuring anyway.
+  // Both integers were RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on this
+  // branch and reading what it PRINTED, never by adding one.
+  // cch-w49-s7 moves it by ONE: `billing-unconfigured`, the corpus's first
+  // fixture to carry D554's `billing_capability` on the /v1/subscription 200 —
+  // so the first from which the console's consumption of that key can be
+  // asserted from rendered bytes rather than assumed. Total 121 -> 122, residue
+  // 97 -> 98. CELLS (25), distinctCovered (24) and families (13) are
+  // DELIBERATELY UNMOVED: it lands in the residue, not a cell, and its familyOf
+  // is `hash:#billing` — a family that already had seven members, so it cannot
+  // create a 14th. Both integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED, never by adding one to the line above.
+  assert.equal(r.total, 122);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 94, "94 is the RESIDUE, not the census");
+  assert.equal(r.residue, 98, "98 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 94, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 98, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

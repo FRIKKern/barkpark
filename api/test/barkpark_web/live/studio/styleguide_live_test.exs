@@ -362,8 +362,21 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
       refute root =~ ~s(<link href="https://fonts.googleapis.com),
              "the fonts.googleapis.com CDN stylesheet <link> must be removed (self-hosted Inter)"
 
-      refute root =~ ~s(rel="stylesheet"),
-             "no external stylesheet <link> should remain in the Studio root layout"
+      # edit-on-the-link: the layout links exactly ONE stylesheet now — the
+      # same-origin editor shell (/assets/bp-paper-editor-shell.css), lifted out
+      # of the inline <style> so the public paper reader can link the same bytes.
+      # The guard is about OFF-ORIGIN font/CSS CDNs, so it pins the whole list
+      # rather than refuting the attribute outright.
+      stylesheet_links =
+        ~r|<link[^>]*rel="stylesheet"[^>]*>|
+        |> Regex.scan(root)
+        |> List.flatten()
+
+      assert stylesheet_links == [
+               ~s(<link rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />)
+             ],
+             "the Studio root layout's only stylesheet <link> is the same-origin " <>
+               "editor shell; an external/CDN stylesheet must not come back"
     end
   end
 end

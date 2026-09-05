@@ -408,7 +408,17 @@ defmodule Barkpark.Tasks.FleetTest do
         %{
           "doc_id" => task_id,
           "title" => task_id,
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         scope
@@ -557,7 +567,7 @@ defmodule BarkparkWeb.FleetControllerTest do
     Process.sleep(2)
 
     second =
-      build_conn()
+      scoped_conn()
       |> authed()
       |> post("/v1/fleet/beat", %{"worker" => worker, "status" => "working"})
       |> json_response(200)
@@ -581,7 +591,7 @@ defmodule BarkparkWeb.FleetControllerTest do
       |> json_response(200)
 
     body =
-      build_conn()
+      scoped_conn()
       |> authed()
       |> get("/v1/fleet/roster")
       |> json_response(200)
@@ -647,6 +657,6 @@ defmodule BarkparkWeb.FleetControllerTest do
 
   test "fleet endpoints refuse an anonymous caller", %{conn: conn} do
     assert conn |> get("/v1/fleet/roster") |> response(401)
-    assert build_conn() |> post("/v1/fleet/beat", %{"worker" => "x"}) |> response(401)
+    assert scoped_conn() |> post("/v1/fleet/beat", %{"worker" => "x"}) |> response(401)
   end
 end

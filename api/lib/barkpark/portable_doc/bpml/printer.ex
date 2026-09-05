@@ -116,9 +116,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "stats"} = b, d) do
     items =
-      Enum.map(Map.get(b, "items", []), fn i ->
-        "#{pad(d + 1)}<stat#{attr_str(i, ["label", "value", "denom"])}>#{esc(Map.get(i, "body", ""))}</stat>"
-      end)
+      Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}#{stat_item(&1)}")
 
     wrap("stats", attr_str(b, ["id"]), items, d)
   end
@@ -210,6 +208,205 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("expandable", attrs, children, d)
   end
 
+  # ── the grid/widget tier (task-3b08cbd8a16ad48e criterion 1) ────────────────
+  #
+  # The kernel spelled 19 types while the renderer registered 79, so 294 of the
+  # 1006 block-bearing published papers (29.2%, census 2026-09-03) answered 422
+  # on `bp paper pull`. The eleven clauses below are the corpus's biggest
+  # unspellable types by PAPER count — paper-links 145, cards 43, terminal 32,
+  # action 28, pipeline 27, stat-grid 27, blockquote 24, toc 23, chart 17,
+  # lineage 6, bar-chart 2 — and they take that share to 8.4%.
+  #
+  # Every one follows the module's standing contract: ACCEPT every key spelling
+  # the RENDER side reads (`alias_get`), EMIT the canonical one, and REFUSE
+  # rather than drop a payload this spelling has no room for.
+
+  # `paper-links` — a curated list of sibling papers. The block's own copy
+  # (title/description) rides attributes; each ref's `description` is the long
+  # field, so it takes the element BODY. `featured` / `prefer_authored_copy`
+  # are booleans: they print as "true"/"false" and the parser coerces them back
+  # (`bool_attr`), so a pull/push round trip does not retype the stored ref.
+  defp block(%{"type" => "paper-links"} = b, d) do
+    refs =
+      Enum.map(alias_get(b, ["refs", "items"]) || [], fn r ->
+        "#{pad(d + 1)}<ref#{attr_str(r, ["slug", "title", "eyebrow", "meta", "reason", "featured", "prefer_authored_copy"])}>" <>
+          "#{esc(plain_alias(r, ["description"]) || "")}</ref>"
+      end)
+
+    wrap("paper-links", attr_str(b, ["id", "title", "description", "layout"]), refs, d)
+  end
+
+  # `cards` — the legacy card grid. An item's body is spelled `text` (299) or
+  # `body` (14); `text` is canonical, so the second print is byte-stable.
+  defp block(%{"type" => "cards"} = b, d) do
+    items =
+      Enum.map(Map.get(b, "items", []), fn i ->
+        "#{pad(d + 1)}<card#{attr_str(i, ["title", "tone", "href"])}>" <>
+          "#{esc(plain_alias(i, ["text", "body"]) || "")}</card>"
+      end)
+
+    wrap("cards", attr_str(b, ["id"]), items, d)
+  end
+
+  # `terminal` — a console transcript. Its body is a real BLOCK list (849
+  # paragraphs + 16 code blocks in the corpus), so it recurses through
+  # `block/2`: a child the kernel cannot spell still refuses, loudly. Body key
+  # read with the renderer's own preference (compose.ex `container_children`:
+  # "children" first, then "blocks"); the parser emits canonical "children".
+  defp block(%{"type" => "terminal"} = b, d) do
+    children = Enum.map(alias_get(b, ["children", "blocks"]) || [], &block(&1, d + 1))
+    wrap("terminal", attr_str(b, ["id", "title", "footer", "live"]), children, d)
+  end
+
+  # `action` — a call-to-action button. A leaf: label/href/priority, no body.
+  defp block(%{"type" => "action"} = b, d),
+    do: pad(d) <> "<action#{attr_str(b, ["id", "label", "href", "priority"])}/>"
+
+  # `pipeline` — ordered stage nodes. `detail` is the long field and takes the
+  # body; `source` is a boolean in 27 corpus nodes and a string ref in 1, and
+  # `bool_attr` reads "true"/"false" back as booleans and everything else as
+  # the string it was.
+  defp block(%{"type" => "pipeline"} = b, d) do
+    nodes =
+      Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
+        "#{pad(d + 1)}<node#{attr_str(n, ["title", "kind", "source", "files"])}>" <>
+          "#{esc(plain_alias(n, ["detail"]) || "")}</node>"
+      end)
+
+    wrap("pipeline", attr_str(b, ["id"]), nodes, d)
+  end
+
+  # `stat-grid` — the renderer's accepted alias of `stats` (compose.ex reads
+  # both through one clause), so it reuses the `<stat>` element. A
+  # `scale_profile` carries axis semantics this spelling has no room for: it
+  # REFUSES rather than print the grid without it.
+  defp block(%{"type" => "stat-grid"} = b, d) do
+    if Map.get(b, "scale_profile") not in [nil, %{}] do
+      raise(UnprintableError.new(:block, "stat-grid"))
+    end
+
+    items = Enum.map(alias_get(b, ["items", "stats"]) || [], &"#{pad(d + 1)}#{stat_item(&1)}")
+    wrap("stat-grid", attr_str(b, ["id"]), items, d)
+  end
+
+  # `blockquote` — an attributed quotation. Inline body read the way the
+  # renderer reads it (compose.ex `paragraph_inline`: `content`, else a bare
+  # `text` string), attribution under `cite`/`attribution`.
+  defp block(%{"type" => "blockquote"} = b, d) do
+    cite = plain_alias(b, ["cite", "attribution"])
+
+    pad(d) <>
+      "<blockquote#{attr_str(%{"id" => Map.get(b, "id"), "cite" => cite}, ["id", "cite"])}>" <>
+      inline(alias_get(b, ["content", "text"]) || []) <> "</blockquote>"
+  end
+
+  # `toc` — a table of contents. `level` is an integer and `numbered`/`depth`
+  # are an integer and a boolean; all three round-trip through the typed
+  # attribute coercions rather than as strings.
+  defp block(%{"type" => "toc"} = b, d) do
+    entries =
+      Enum.map(Map.get(b, "items", []), fn i ->
+        "#{pad(d + 1)}<entry#{attr_str(i, ["level", "anchor"])}>" <>
+          "#{esc(plain_alias(i, ["text", "title"]) || "")}</entry>"
+      end)
+
+    wrap("toc", attr_str(b, ["id", "depth", "numbered"]), entries, d)
+  end
+
+  # `bar-chart` — labelled bars. `value` is numeric and `values` (show the
+  # numbers) is a boolean.
+  defp block(%{"type" => "bar-chart"} = b, d) do
+    bars =
+      Enum.map(alias_get(b, ["bars", "items"]) || [], fn bar ->
+        "#{pad(d + 1)}<bar#{attr_str(bar, ["label", "value"])}/>"
+      end)
+
+    wrap("bar-chart", attr_str(b, ["id", "title", "values"]), bars, d)
+  end
+
+  # `lineage` — dated nodes on a line (the jarl figure family). `source` is
+  # THE KILDE LAW's provenance ref and is never dropped.
+  defp block(%{"type" => "lineage"} = b, d) do
+    nodes =
+      Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
+        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source"])}>" <>
+          "#{esc(plain_alias(n, ["body"]) || "")}</lineage-node>"
+      end)
+
+    wrap("lineage", attr_str(b, ["id"]), nodes, d)
+  end
+
+  # `card` — the composition-doctrine SPLIT of the `cards` grid: one standalone
+  # widget whose body is a map of NAMED SLOTS (title/body/action/media), each a
+  # block list. Slots print in KEY ORDER so the second print is byte-stable and
+  # no slot is ever dropped, whatever a future producer names it.
+  #
+  # Nested rather than top-level, this is the corpus's single biggest refusal —
+  # 133 of the 1006 block-bearing papers, invisible to a top-level type census
+  # because a `card` lives inside a grid `section`.
+  defp block(%{"type" => "card"} = b, d) do
+    slots =
+      (Map.get(b, "slots") || %{})
+      |> Enum.sort_by(fn {name, _} -> name end)
+      |> Enum.map(fn {name, blocks} ->
+        children = Enum.map(List.wrap(blocks), &block(&1, d + 2))
+        wrap("slot", attr_str(%{"name" => name}, ["name"]), children, d + 1)
+      end)
+
+    wrap("card", attr_str(b, ["id", "tone", "span"]), slots, d)
+  end
+
+  # `quote` — the pre-`blockquote` spelling agents authored through raw mutate
+  # (compose.ex renders it BY aliasing to blockquote). Same shape, own tag, so
+  # the stored `"type" => "quote"` survives a pull/push unchanged.
+  defp block(%{"type" => "quote"} = b, d) do
+    cite = plain_alias(b, ["cite", "attribution"])
+
+    pad(d) <>
+      "<quote#{attr_str(%{"id" => Map.get(b, "id"), "cite" => cite}, ["id", "cite"])}>" <>
+      inline(alias_get(b, ["content", "text"]) || []) <> "</quote>"
+  end
+
+  # `chart` — a line/area plot. The axis bounds and every series point are
+  # NUMBERS and print as numbers, so a pull/push does not retype them into
+  # strings. `xLabels` rides one comma-joined attribute (no corpus label holds
+  # a comma; one that did would be ambiguous on read, so it REFUSES).
+  #
+  # A chart carrying a live `query` (2 blocks) or `annotations` (2) refuses
+  # outright: a query resolves against data this printer cannot reach — the
+  # `valueref` precedent — and annotations are a second coordinate space this
+  # spelling has no element for. Printing either without its payload would be
+  # exactly the silent loss this module exists to refuse.
+  defp block(%{"type" => "chart"} = b, d) do
+    if Map.get(b, "query") not in [nil, %{}] or Map.get(b, "annotations") not in [nil, %{}] do
+      raise(UnprintableError.new(:block, "chart"))
+    end
+
+    axes = Map.get(b, "axes") || %{}
+    labels = Map.get(axes, "xLabels") || []
+
+    if Enum.any?(labels, &(is_binary(&1) and String.contains?(&1, ","))) do
+      raise(UnprintableError.new(:block, "chart"))
+    end
+
+    head = %{
+      "id" => Map.get(b, "id"),
+      "kind" => Map.get(b, "kind"),
+      "caption" => Map.get(b, "caption"),
+      "min" => Map.get(axes, "min"),
+      "max" => Map.get(axes, "max"),
+      "xlabels" => if(labels == [], do: nil, else: Enum.map_join(labels, ",", &to_string/1))
+    }
+
+    series =
+      Enum.map(Map.get(b, "series") || [], fn s ->
+        points = Enum.map_join(Map.get(s, "points") || [], ",", &esc(&1))
+        "#{pad(d + 1)}<series#{attr_str(s, ["label"])}>#{points}</series>"
+      end)
+
+    wrap("chart", attr_str(head, ["id", "kind", "caption", "min", "max", "xlabels"]), series, d)
+  end
+
   # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4
   # papers: barkpark-cli-reliability-wave-2026-07-22,
   # bp-cloud-build-doneset-audit-2026-08-18,
@@ -273,6 +470,26 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp note_item(s) when is_binary(s), do: "<note>#{esc(s)}</note>"
   defp note_item(_other), do: raise(UnprintableError.new(:block, "notes"))
 
+  # One `<stat>` element — a `stats` item and a `stat-grid` item are THE SAME
+  # shape (compose.ex renders both through one clause, `stat-grid` being the
+  # accepted alias), so they share one spelling.
+  #
+  # `caption` (4 items) and `note` (4) have NO place in this element and are
+  # not quietly dropped: the item refuses. Widening `<stat>`'s attribute row is
+  # a change to the published `/v1/capabilities` grammar contract (bpml.ex
+  # `vocabulary/0` — clients generate types off its digest), which is a
+  # deliberate decision someone should make on purpose, not a side effect of
+  # widening the kernel. Until then the honest answer is the typed refusal.
+  defp stat_item(%{} = i) do
+    if Map.get(i, "caption") in [nil, ""] and Map.get(i, "note") in [nil, ""] do
+      "<stat#{attr_str(i, ["label", "value", "denom"])}>#{esc(Map.get(i, "body", ""))}</stat>"
+    else
+      raise(UnprintableError.new(:block, "stat"))
+    end
+  end
+
+  defp stat_item(_other), do: raise(UnprintableError.new(:block, "stat-grid"))
+
   defp empty_content?(c), do: c in [nil, [], ""]
 
   # Byline items are canonically BARE STRINGS (parser `tag_text`). A map item
@@ -317,7 +534,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   #                  as three sibling `strong` nodes prints as one `<b>` too
   #                  (2 papers churned on exactly that until this pass existed).
   #   `inline_run/2` walks that flat list and opens each shared mark once.
-  defp inline(content), do: content |> expand([]) |> inline_run([])
+  # A ZERO-LENGTH run carries no characters, so the mark around it wraps
+  # nothing: `%{"marks" => ["strong"], "value" => ""}` printed `<b></b>`, the
+  # parser (correctly) returned no node for it, and the second print dropped
+  # the tag — the round trip churned on an untouched paper. The empty run is
+  # dropped HERE, where the canonical spelling is decided, not in the parser.
+  defp inline(content),
+    do: content |> expand([]) |> Enum.reject(&match?({_marks, ""}, &1)) |> inline_run([])
 
   # ── pass 1: every inline spelling → {marks, body} ───────────────────────────
 
@@ -388,7 +611,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # Only a TEXT node carries a `marks` list. A value that is not a list used to
   # reach `Enum.reverse/1` and escape as a raw 500; it takes the ONE typed
   # refusal instead.
-  defp node_marks(%{"marks" => marks}) when is_list(marks), do: marks
+  defp node_marks(%{"marks" => marks}) when is_list(marks), do: Enum.map(marks, &mark_name/1)
   defp node_marks(%{"marks" => nil}), do: []
   defp node_marks(%{"marks" => _other}), do: raise(UnprintableError.new(:mark, nil))
   defp node_marks(_n), do: []
@@ -433,11 +656,34 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       else: {group, tail}
   end
 
+  # A mark is spelled TWO ways in the corpus: a bare name ("strong" 1133,
+  # "code" 3771, "em" 53, "italic" 50) and a NODE-shaped map ({"type" =>
+  # "code"} 3578, {"type" => "bold"} 3005, {"type" => "italic"} 172). The map
+  # spelling reached `Enum.reverse/1`-shaped code as an opaque term and took
+  # the typed refusal, so 76 papers refused on a mark the renderer draws
+  # perfectly. A BARE map carrying only its type is that same mark; a map
+  # carrying anything else (a link mark's `href`/`attrs`) is a second payload
+  # this position has no room for and KEEPS refusing.
+  defp mark_name(m) when is_binary(m), do: m
+
+  defp mark_name(%{"type" => t} = m) when is_binary(t) do
+    if map_size(Map.delete(m, "type")) == 0,
+      do: t,
+      else: raise(UnprintableError.new(:mark, t))
+  end
+
+  defp mark_name(_other), do: raise(UnprintableError.new(:mark, nil))
+
   defp mark_tag("strong"), do: "b"
   defp mark_tag("em"), do: "i"
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
   defp mark_tag("strike"), do: "s"
+  # The corpus's HTML-ish aliases for the same two marks; the parser returns
+  # the canonical name, so a `bold` mark canonicalizes to `strong` on push the
+  # way an alias KEY canonicalizes (`alias_get`'s contract, one level down).
+  defp mark_tag("bold"), do: "b"
+  defp mark_tag("italic"), do: "i"
 
   defp mark_tag(other) when is_binary(other) or is_atom(other),
     do: raise(UnprintableError.new(:mark, other))

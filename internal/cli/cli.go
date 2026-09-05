@@ -37,6 +37,17 @@ const (
 	exitConflict   = 6 // optimistic-concurrency / write-conflict / precondition
 	exitRateLimit  = 7 // throttled
 	exitServer     = 8 // server-side 5xx / internal_error
+	// exitAmbiguous is NOT a refusal. It means the request LEFT this process and
+	// the answer never came back intact, so the write may or may not have
+	// committed on the server. It exists because every other non-zero code here
+	// tells a retry wrapper something definite — "your request was wrong" (2/5),
+	// "the world moved, re-read and retry" (6), "the server broke, retry" (8) —
+	// and a blind retry is exactly the wrong move on THIS state: the first
+	// attempt's row is already on the ledger, so the retry is refused as a
+	// duplicate of a row nobody was ever told about (task-f81c88e2c54f8e57).
+	// The correct next move is a READ, and the process that exits 9 always
+	// prints which read to run.
+	exitAmbiguous = 9 // sent, answer lost — the write may or may not have landed
 )
 
 // taskVerbAliases maps the two common muscle-memory `bp task` verbs the manifest
@@ -580,6 +591,25 @@ func Execute(args []string) int {
 		//   sole verb, or for an unknown noun — each of those falls through to the
 		//   precise error below, which names the corrected command when it can.
 		if n, nounOK := lookupNoun(tree, noun); nounOK {
+			// `bp search "<phrase>"` — the ONE noun whose verbless first token is
+			// a search phrase and not a mistyped verb. Checked BEFORE soleReadVerb
+			// so the behaviour is identical whether the server declares one verb
+			// for `search` or the thirteen the live one does. See searchPhraseVerb
+			// (usage.go) for why this is search-only and manifest-checked.
+			if q, inferable := searchPhraseVerb(n, noun, verb); inferable {
+				// AMBIGUITY IS NEVER SILENT: a single bareword that is also a
+				// near-typo of a real verb gets BOTH — the search runs (a refusal
+				// is what manufactured the false "nothing found"), and stderr says
+				// what was searched for and which verb it may have meant.
+				if near, isTypo := nearestSiblingVerb(n, verb); isTypo {
+					out.errf("note: searched `%s %s` for the phrase %q; if you meant the VERB, run `barkpark %s %s`",
+						noun, q.Verb, verb, noun, near)
+				} else {
+					out.errf("note: `%s` needs a verb — treating %q as a search phrase: running `barkpark %s %s %q`",
+						noun, verb, noun, q.Verb, verb)
+				}
+				return runCommand(out, g, ctx, m, *q, append([]string{verb}, tail...))
+			}
 			if sole, inferable := soleReadVerb(n, verb); inferable {
 				out.errf("note: `%s` has one verb — running `barkpark %s %s`", noun, noun, sole.Verb)
 				return runCommand(out, g, ctx, m, *sole, append([]string{verb}, tail...))

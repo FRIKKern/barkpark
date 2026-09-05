@@ -44,7 +44,7 @@
             current_project={assigns[:current_project]}
             current_dataset={assigns[:dataset]}
             menu={assigns[:scope_menu]}
-            can_create={assigns[:api_token] != nil}
+            can_create={BarkparkWeb.Studio.ScopeResolver.principal_from_assigns(assigns) != nil}
             create_open={assigns[:create_open]}
           />
         <% else %>

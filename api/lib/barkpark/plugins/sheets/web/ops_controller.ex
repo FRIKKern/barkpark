@@ -33,7 +33,10 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   when the body carries no `"ops"` list or the list exceeds the per-call
   batch bound (`Session.max_ops_per_call/0` — split and resend), 503 when
   the session died twice in a row (`session_restarting` — retry shortly); a
-  session that could not start at all answers 422 `session_start_failed`.
+  session that could not start at all answers 422 `session_start_failed`. A
+  request carrying a `request_id` answers 503 `replay_unavailable` (+
+  `retry-after`) when the exactly-once ring cannot be read at all — the batch
+  was NOT applied; retry.
 
   ## Exactly-once retry (`request_id`)
 
@@ -199,6 +202,27 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
           error: %{
             code: "session_restarting",
             message: "the sheet session is restarting — retry shortly"
+          }
+        })
+
+      # The exactly-once ring has no table to read, so the session refuses the
+      # batch rather than risk re-applying a non-idempotent op it can no longer
+      # recognise (Session.ReplayRing's fail-CLOSED backstop). NOTHING was
+      # applied and the SAME request succeeds once the ring is back — a
+      # server-side transient, exactly the class `:session_unavailable` is in,
+      # so it takes the same 503 + `retry-after` envelope. Rendering it through
+      # the catch-all made it a 422, which tells a client its request was wrong
+      # and stops the retry that would have fixed it.
+      {:error, :replay_unavailable} ->
+        conn
+        |> put_resp_header("retry-after", "2")
+        |> put_status(:service_unavailable)
+        |> json(%{
+          error: %{
+            code: "replay_unavailable",
+            message:
+              "the exactly-once replay ring is unavailable — the batch was NOT " <>
+                "applied; retry shortly"
           }
         })
 

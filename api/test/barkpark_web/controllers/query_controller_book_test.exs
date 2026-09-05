@@ -1,5 +1,5 @@
 defmodule BarkparkWeb.QueryControllerBookTest do
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
 

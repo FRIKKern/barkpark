@@ -34,8 +34,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
-      # clear the dirty flag + any stale concurrent-edit banner.
-      |> assign(editor_dirty: false, doc_conflict: false)
+      # clear the dirty flag, any stale concurrent-edit banner, and the
+      # touched-path set (`Handlers.Fields`) — a path touched on the previous
+      # document must not license folding an empty value on the next one.
+      |> assign(editor_dirty: false, doc_conflict: false, editor_touched_paths: MapSet.new())
 
     {:noreply, socket}
   end
@@ -144,9 +146,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, Shared.refetch_paper(socket)}
 
       true ->
+        # The write-capable arm of the third feed. `write_denied?` above decides
+        # WHICH SOURCE this socket is served; it does not decide whether the
+        # bytes are safe to `raw/1` — so this html gets the same scrub the two
+        # mount-side feeds now take, via the one copy in `Paper`. A frame is
+        # off-the-wire markup that lands straight in `raw(@paper_html)`, so
+        # leaving it unscrubbed would re-open on the broadcast exactly what the
+        # mount-side clamp closes.
         {:noreply,
          socket
-         |> assign(:paper_html, html)
+         |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
     end

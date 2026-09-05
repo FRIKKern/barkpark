@@ -1,6 +1,8 @@
 defmodule BarkparkWeb.Studio.ChatHostsLive do
   use BarkparkWeb, :live_view
 
+  import BarkparkWeb.Studio.PageScroll
+
   alias Barkpark.ChatHosts
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -88,6 +90,12 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <%!-- studio-shell child contract (BarkparkWeb.Studio.PageScroll): the
+          shell is height:100vh + overflow:hidden, so a bare centred column
+          here is CLIPPED and its tail is unreachable by any input. This
+          wrapper fills the shell and owns the scroll; the centred column
+          below is unchanged, so the reading measure is too. --%>
+    <.studio_page_scroll>
     <div class="mx-auto max-w-5xl space-y-6 p-6">
       <div>
         <h1 class="text-2xl font-semibold">Registered Chat hosts</h1>
@@ -127,6 +135,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
         </div>
       </div>
     </div>
+    </.studio_page_scroll>
     """
   end
 end

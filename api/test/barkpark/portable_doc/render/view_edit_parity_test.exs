@@ -79,10 +79,31 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # not on the wire. Red-before (mutation-proven, paper-links): changing
   # `text-underline-offset` to `0.19em` on `.bp-paper-surface a` alone reds §2
   # ("a.text-underline-offset: View=\"0.19em\" Edit=\"0.18em\"").
-  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
+  # `.bp-figcaption` (papers/captions-floor): the article <figcaption> used to be
+  # ~200 bytes of INLINE style repeated at three emit sites (figures.ex diagram +
+  # asciicast, compose.ex figure frame) — and the third copy had drifted to a bare
+  # ink hex where its siblings read `var(--paper-ink-soft, …)`, 2.97:1 on the dark
+  # ground. Inline styles are invisible to this gate; a class is not. The canvas
+  # mounts figures through the SAME reader producer, so the class lands on both
+  # surfaces and both editor copies carry the twin.
+  # Red-before (mutation-proven — see the PR): with `.bp-figcaption` on this list,
+  # deleting `line-height: 1.45;` from the root.html.heex mirror reds §2
+  # (".bp-figcaption.line-height: View=\"1.45\" Edit=nil"); off the list the same
+  # mutation ships GREEN through the whole portable_doc tree.
+  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
+               __DIR__
+             )
+
+  # The Studio editor's SHELL stylesheet. It used to sit inline in
+  # root.html.heex's <style>; edit-on-the-link lifted it into a static asset so
+  # the public paper reader can link the same bytes. Studio still loads exactly
+  # these rules (root.html.heex links it between its two <style> halves), so the
+  # Edit side of every §2/§5 comparison is root.html.heex PLUS this file.
+  @shell_css Path.expand(
+               "../../../../priv/static/assets/bp-paper-editor-shell.css",
                __DIR__
              )
 
@@ -142,7 +163,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   defp normalize_ws(s), do: String.replace(s, ~r/\s+/, " ")
 
   defp view_css, do: strip_comments(Stylesheet.css())
-  defp edit_css, do: strip_comments(File.read!(@root_heex))
+  # Studio's Edit surface is now two files: the layout's remaining inline rules
+  # plus the shell stylesheet it links. Concatenated in load order (the <link>
+  # sits between the halves, and no rule in the second half restyles the editor).
+  defp edit_css, do: strip_comments(File.read!(@root_heex) <> "\n" <> File.read!(@shell_css))
   defp bundle_css, do: strip_comments(File.read!(@bundle_css))
 
   # Drop `/* … */` comments so a comment's prose (which contains commas and the
@@ -436,7 +460,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `a` / `a:focus-visible` ride here too (paper-links wave): §2 gates the link
   # rule reader↔root only, so WITHOUT these the bundle copy could drift and the
   # embedded editor would lose the underline while Studio kept it.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
+  # `.bp-figcaption` rides here too: §2 gates it reader↔root only, so WITHOUT this
+  # entry a bundle-side drift on the caption would ship green — an embedded editor
+  # whose captions read in a different voice from the Studio canvas.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption)
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()

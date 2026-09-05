@@ -19,7 +19,7 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 10222131,
+      "bytes": 9959371,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -122,114 +122,114 @@
       "proseCplSamples": 19,
       "captionCpl": 68.4,
       "captionWidth": 453.5,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1085.9,
-          "inkOffCentre": 22.9
-        },
-        {
-          "kind": "bp-table",
-          "width": 1040,
-          "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         }
       ],
@@ -273,28 +273,36 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        7
+        8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 142,
+        "total": 148,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 131,
+          "1": 137,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2117.3,
+            "y": 2098.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -304,7 +312,7 @@
           },
           {
             "px": 2,
-            "y": 4217.2,
+            "y": 4207.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -314,7 +322,7 @@
           },
           {
             "px": 2,
-            "y": 6618.7,
+            "y": 6416.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -324,7 +332,7 @@
           },
           {
             "px": 2,
-            "y": 15352.6,
+            "y": 15456.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -334,7 +342,7 @@
           },
           {
             "px": 2,
-            "y": 18877.2,
+            "y": 18743,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -344,7 +352,7 @@
           },
           {
             "px": 2,
-            "y": 22020.7,
+            "y": 21616.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -354,7 +362,7 @@
           },
           {
             "px": 2,
-            "y": 23904.9,
+            "y": 23464.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -364,7 +372,7 @@
           },
           {
             "px": 2,
-            "y": 25401,
+            "y": 24825.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -374,7 +382,7 @@
           },
           {
             "px": 2,
-            "y": 26890.5,
+            "y": 26279.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -384,7 +392,7 @@
           },
           {
             "px": 2,
-            "y": 29191.6,
+            "y": 28630.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -394,7 +402,7 @@
           },
           {
             "px": 2,
-            "y": 30710.3,
+            "y": 30199.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -410,7 +418,7 @@
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 10857273,
+      "bytes": 10690966,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -513,114 +521,114 @@
       "proseCplSamples": 19,
       "captionCpl": 68.4,
       "captionWidth": 453.5,
-      "evidenceBand": 1240,
+      "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         }
       ],
@@ -664,22 +672,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        8
+        9
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 142,
+        "total": 148,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 131,
+          "1": 137,
           "2": 11
         },
         "heavyRules": [
@@ -695,7 +711,7 @@
           },
           {
             "px": 2,
-            "y": 4198.8,
+            "y": 4207.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -705,7 +721,7 @@
           },
           {
             "px": 2,
-            "y": 6369.9,
+            "y": 6359.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -715,7 +731,7 @@
           },
           {
             "px": 2,
-            "y": 14931,
+            "y": 15289.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -725,7 +741,7 @@
           },
           {
             "px": 2,
-            "y": 17850.9,
+            "y": 18263.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -735,7 +751,7 @@
           },
           {
             "px": 2,
-            "y": 20504.8,
+            "y": 20733.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -745,7 +761,7 @@
           },
           {
             "px": 2,
-            "y": 22245,
+            "y": 22408.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -755,7 +771,7 @@
           },
           {
             "px": 2,
-            "y": 23568.3,
+            "y": 23626,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -765,7 +781,7 @@
           },
           {
             "px": 2,
-            "y": 24913.8,
+            "y": 24964.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -775,7 +791,7 @@
           },
           {
             "px": 2,
-            "y": 27215,
+            "y": 27315.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -785,7 +801,7 @@
           },
           {
             "px": 2,
-            "y": 28733.7,
+            "y": 28884.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -801,7 +817,7 @@
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 9988231,
+      "bytes": 9877908,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -904,114 +920,114 @@
       "proseCplSamples": 19,
       "captionCpl": 68.4,
       "captionWidth": 453.5,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1085.9,
-          "inkOffCentre": 22.9
-        },
-        {
-          "kind": "bp-table",
-          "width": 1040,
-          "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         }
       ],
@@ -1055,413 +1071,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
-      },
-      "statTracks": [
-        7
-      ],
-      "statTracksNote": null,
-      "docOverflow": 0,
-      "clientWidth": 1280,
-      "rules": {
-        "total": 142,
-        "heavy": 11,
-        "structuralHeavy": 11,
-        "strayHeavy": 0,
-        "byWeight": {
-          "1": 131,
-          "2": 11
-        },
-        "heavyRules": [
-          {
-            "px": 2,
-            "y": 2117.3,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 4217.2,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 6618.7,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 15352.6,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 18877.2,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 22020.7,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 23904.9,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 25401,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 26890.5,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 29191.6,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 30710.3,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          }
-        ]
-      },
-      "blockedRequests": 3
-    },
-    {
-      "cell": "hobby-hardening-capstone__dark__1920",
-      "file": "hobby-hardening-capstone__dark__1920.jpeg",
-      "scale": 2,
-      "bytes": 10841965,
-      "wrapper": true,
-      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 27,
-      "sectionBeats": [
-        {
-          "kind": "heading",
-          "head": "The grand view",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "The corrected defect model",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "The proposed shape — three epics on the risk",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Ground truth — how the system works today",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Files likely to change — the consolidated pi",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Absorb, cite, defer — the ownership rulings",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Contradictions and resolutions",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Proof obligations — every done-claim can fai",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "Risks, unknowns, and the judgment calls",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "The recommendation and the first wave",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        },
-        {
-          "kind": "heading",
-          "head": "The paper stack — where to descend",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 2
-        }
-      ],
-      "nestedH2s": 0,
-      "doubledRules": [],
-      "columnWidth": 660,
-      "columnContentWidth": 580,
-      "maxWidth": "660px",
-      "proseCpl": 71.6,
-      "proseCplSamples": 19,
-      "captionCpl": 68.4,
-      "captionWidth": 453.5,
-      "evidenceBand": 1240,
-      "bandRows": [
-        {
-          "kind": "bp-stats",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "figure",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "figure",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "figure",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        },
-        {
-          "kind": "bp-table",
-          "width": 1240,
-          "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
-          "inkOffCentre": 0
-        }
-      ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
-      "toneSamples": {
-        ".bp-callout--info": {
-          "color": "rgb(157, 184, 255)",
-          "background": "rgb(23, 32, 50)",
-          "accent": "rgb(157, 184, 255)"
-        },
-        ".bp-callout--success": {
-          "color": "rgb(95, 207, 156)",
-          "background": "rgb(18, 36, 28)",
-          "accent": "rgb(95, 207, 156)"
-        },
-        ".bp-callout--warning": {
-          "color": "rgb(227, 182, 97)",
-          "background": "rgb(42, 34, 16)",
-          "accent": "rgb(227, 182, 97)"
-        },
-        ".bp-callout--danger": {
-          "absent": "not in this fixture"
-        },
-        ".bp-card--info": {
-          "color": "rgb(231, 237, 233)",
-          "background": "rgb(19, 29, 25)",
-          "accent": "rgb(96, 165, 250)"
-        },
-        ".bp-card--ok": {
-          "color": "rgb(231, 237, 233)",
-          "background": "rgb(19, 29, 25)",
-          "accent": "rgb(45, 212, 191)"
-        },
-        ".bp-card--warn": {
-          "absent": "not in this fixture"
-        },
-        ".bp-card--danger": {
-          "absent": "not in this fixture"
-        }
-      },
-      "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
         8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
-      "clientWidth": 1920,
+      "clientWidth": 1280,
       "rules": {
-        "total": 142,
+        "total": 148,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 131,
+          "1": 137,
           "2": 11
         },
         "heavyRules": [
@@ -1477,7 +1110,7 @@
           },
           {
             "px": 2,
-            "y": 4198.8,
+            "y": 4207.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1487,7 +1120,7 @@
           },
           {
             "px": 2,
-            "y": 6369.9,
+            "y": 6416.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1497,7 +1130,7 @@
           },
           {
             "px": 2,
-            "y": 14931,
+            "y": 15456.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1507,7 +1140,7 @@
           },
           {
             "px": 2,
-            "y": 17850.9,
+            "y": 18743,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1517,7 +1150,7 @@
           },
           {
             "px": 2,
-            "y": 20504.8,
+            "y": 21616.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1527,7 +1160,7 @@
           },
           {
             "px": 2,
-            "y": 22245,
+            "y": 23464.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1537,7 +1170,7 @@
           },
           {
             "px": 2,
-            "y": 23568.3,
+            "y": 24825.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1547,7 +1180,7 @@
           },
           {
             "px": 2,
-            "y": 24913.8,
+            "y": 26279.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1557,7 +1190,7 @@
           },
           {
             "px": 2,
-            "y": 27215,
+            "y": 28630.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1567,7 +1200,406 @@
           },
           {
             "px": 2,
-            "y": 28733.7,
+            "y": 30199.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "hobby-hardening-capstone__dark__1920",
+      "file": "hobby-hardening-capstone__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 10752767,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The grand view",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The corrected defect model",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The proposed shape — three epics on the risk",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Ground truth — how the system works today",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Files likely to change — the consolidated pi",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Absorb, cite, defer — the ownership rulings",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Contradictions and resolutions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Proof obligations — every done-claim can fai",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Risks, unknowns, and the judgment calls",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The recommendation and the first wave",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The paper stack — where to descend",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.6,
+      "proseCplSamples": 19,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1360,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(96, 165, 250)"
+        },
+        ".bp-card--ok": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(45, 212, 191)"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "36px",
+        "fontWeight": "400"
+      },
+      "statTracks": [
+        9
+      ],
+      "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 148,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 137,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2098.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4207.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6359.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 15289.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 18263.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 20733.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22408.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23626,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 24964.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 27315.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 28884.9,
             "width": 580,
             "parts": 1,
             "structural": true,

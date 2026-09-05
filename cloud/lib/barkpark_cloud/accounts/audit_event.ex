@@ -46,11 +46,16 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # producers were the three deleted `/v1/env-vars` routes, so leaving the verbs
   # declared would have reddened the vocabulary census as a third zero-producer
   # verb — a verb with no producer must leave the vocabulary too.
-  # Only `oauth.linked` and `email.verified` are still declared without a
-  # producer; both are named individually, with a MACHINE-CHECKED rationale
-  # (an anchor that must resolve plus a blocker that must stay absent), in
+  # `oauth.linked` LEFT that residue under
+  # cch-w53-bl-oauth-linked-needs-a-branch-reporting-return: its blocker was a
+  # bare `{:ok, user}` return that could not tell a LINK from a BIRTH, and once
+  # `Accounts.get_or_create_user_from_oauth/1` reported its branch the router's
+  # `audit_oauth_linked/4` could produce the verb on the `:linked` arm alone.
+  # Only `email.verified` is still declared without a producer; it is named
+  # individually, with a MACHINE-CHECKED rationale (an anchor that must resolve
+  # plus a blocker that must stay absent), in
   # test/barkpark_cloud/audit_vocabulary_census_test.exs's @producerless — which
-  # reds if a THIRD zero-producer verb joins them.
+  # reds if a SECOND zero-producer verb joins it.
   #
   # WIRE-VOCABULARY MAP (cch-w63-s8), so this epic does not ship the drift it
   # exists to stop. `barkpark.credentials_refused` is the AUDIT name for the fact

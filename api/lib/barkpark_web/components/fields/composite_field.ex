@@ -31,6 +31,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
   attr :readonly, :boolean, default: false
+  # Gyldendal parity E1.5 — `bare: true` renders ONLY the body (tabs + sub-
+  # fields), no fieldset/details frame of its own. `ArrayField` uses it for a
+  # composite ROW, whose collapsible frame + preview summary the array draws.
+  attr :bare, :boolean, default: false
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -43,56 +47,99 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
+      |> Map.put_new(:bare, false)
       |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
       |> Map.put(:depth, path_depth(path))
+      |> Map.put(:groups, groups_for(assigns.field))
+      |> Map.put(:tabs_id, "bp-obj-tabs-" <> sanitize_id("#{path}-#{assigns.field.name}"))
 
     ~H"""
-    <%= if @depth >= 2 do %>
-      <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
-        <summary class="bp-field-title"><%= @title %></summary>
-        <div class="bp-field-body">
-          <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
-            <div class="bp-subfield" data-subfield-name={sub.name}>
-              <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
-                <%= title_for(sub) %>
-              </label>
-              <%= if onix_el = onix_element(sub) do %>
-                <span class="bp-onix-hint" data-onix-element>
-                  ONIX: <code><%= onix_el %></code>
-                </span>
-              <% end %>
-              <%= render_subfield(assigns, sub) %>
-              <%= for err <- Map.get(@errors, sub.name, []) do %>
-                <span class="error" data-error-for={sub.name}><%= err %></span>
-              <% end %>
-            </div>
-          <% end %>
-        </div>
-      </details>
-    <% else %>
-      <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth}>
-        <legend class="bp-field-title"><%= @title %></legend>
-        <div class="bp-field-body">
-          <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
-            <div class="bp-subfield" data-subfield-name={sub.name}>
-              <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
-                <%= title_for(sub) %>
-              </label>
-              <%= if onix_el = onix_element(sub) do %>
-                <span class="bp-onix-hint" data-onix-element>
-                  ONIX: <code><%= onix_el %></code>
-                </span>
-              <% end %>
-              <%= render_subfield(assigns, sub) %>
-              <%= for err <- Map.get(@errors, sub.name, []) do %>
-                <span class="error" data-error-for={sub.name}><%= err %></span>
-              <% end %>
-            </div>
-          <% end %>
-        </div>
-      </fieldset>
+    <%= cond do %>
+      <% @bare -> %>
+        <.composite_body
+          field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+          tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+        />
+      <% @depth >= 2 -> %>
+        <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
+          <summary class="bp-field-title"><%= @title %></summary>
+          <p :if={@description} class="bp-field-description"><%= @description %></p>
+          <.composite_body
+            field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+            tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+          />
+        </details>
+      <% true -> %>
+        <fieldset class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth}>
+          <legend class="bp-field-title"><%= @title %></legend>
+          <p :if={@description} class="bp-field-description"><%= @description %></p>
+          <.composite_body
+            field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+            tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
+          />
+        </fieldset>
     <% end %>
+    """
+  end
+
+  # The subfields, optionally under Sanity-style OBJECT GROUPS (Gyldendal
+  # parity E1.5). A composite declaring `"groups": [{"name","title","default"?}]`
+  # renders a tab strip; each subfield with a `"group"` sits under its tab, a
+  # subfield without one is shown on every tab. The active tab is CLIENT
+  # state (the `BarkparkFieldGroups` hook toggles `hidden` and re-applies it
+  # after every LiveView patch), so switching tabs costs no round trip and an
+  # autosave never snaps the author back to the first tab. Every subfield
+  # stays in the DOM, so the form serialises the whole object regardless of
+  # which tab is showing.
+  attr :field, :map, required: true
+  attr :value, :map, required: true
+  attr :errors, :map, required: true
+  attr :subfields, :list, required: true
+  attr :groups, :list, required: true
+  attr :tabs_id, :string, required: true
+  attr :path, :string, required: true
+  attr :readonly, :boolean, required: true
+  attr :on_change, :string, default: nil
+  attr :plugin_name, :string, default: "core"
+
+  defp composite_body(assigns) do
+    ~H"""
+    <div
+      class="bp-field-body"
+      id={if @groups != [], do: @tabs_id, else: nil}
+      phx-hook={if @groups != [], do: "BarkparkFieldGroups", else: nil}
+      data-default-group={default_group(@groups)}
+    >
+      <div :if={@groups != []} class="bp-obj-tabs" role="tablist">
+        <button
+          :for={g <- @groups}
+          type="button"
+          class="bp-obj-tab"
+          role="tab"
+          data-group={g["name"]}
+          aria-selected={to_string(g["name"] == default_group(@groups))}
+        ><%= g["title"] || g["name"] %></button>
+      </div>
+      <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
+        <div class="bp-subfield" data-subfield-name={sub.name} data-group={subfield_group(sub)}>
+          <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
+            <%= title_for(sub) %>
+          </label>
+          <p :if={description_for(sub)} class="bp-field-description"><%= description_for(sub) %></p>
+          <%= if onix_el = onix_element(sub) do %>
+            <span class="bp-onix-hint" data-onix-element>
+              ONIX: <code><%= onix_el %></code>
+            </span>
+          <% end %>
+          <%= render_subfield(assigns, sub) %>
+          <%= for err <- Map.get(@errors, sub.name, []) do %>
+            <span class="error" data-error-for={sub.name}><%= err %></span>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
     """
   end
 
@@ -164,7 +211,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       options: select_options(sub)
     }
 
-    select_input(leaf_assigns)
+    # Gyldendal parity E1.5 — `"layout": "radio"` renders Sanity's radio list.
+    if Barkpark.Content.SelectOptions.radio?(sub),
+      do: radio_input(leaf_assigns),
+      else: select_input(leaf_assigns)
   end
 
   # Multiline `text` — distinct from single-line `string`. Renders <textarea>.
@@ -182,7 +232,37 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     textarea_input(leaf_assigns)
   end
 
-  # Fall-through for remaining v1 leaf types (string, slug, richText, image, …)
+  # Gyldendal parity E1 — an `image` SUBFIELD inside a composite renders the
+  # same picker a top-level image field does (hotspot / alt opt-ins included),
+  # bridged into the composite's own input name. Before this it fell through
+  # to a bare text input, so the twin's `cover` composite showed eight raw
+  # boxes where Sanity shows one image with a hotspot.
+  defp render_subfield(assigns, %{type: "image"} = sub) do
+    raw = get_value(assigns.value, sub.name, "")
+    value = if is_map(raw), do: Jason.encode!(raw), else: to_string(raw || "")
+    opts = Map.get(sub, :raw) || %{}
+
+    leaf_assigns = %{
+      input_name: child_path(assigns.path, sub.name),
+      input_id: input_id(assigns.path, assigns.field.name, sub.name),
+      value: value,
+      hotspot:
+        if(Map.get(opts, "hotspot") == true or get_in(opts, ["options", "hotspot"]) == true,
+          do: true,
+          else: nil
+        ),
+      alt:
+        if(Map.get(opts, "alt") == true or get_in(opts, ["options", "alt"]) == true,
+          do: true,
+          else: nil
+        ),
+      readonly: assigns.readonly
+    }
+
+    image_subfield_input(leaf_assigns)
+  end
+
+  # Fall-through for remaining v1 leaf types (string, slug, richText, …)
   defp render_subfield(assigns, sub) do
     leaf_assigns = %{
       field: sub,
@@ -196,15 +276,31 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     leaf_input(leaf_assigns)
   end
 
+  defp image_subfield_input(assigns) do
+    ~H"""
+    <div id={"bp-mp-wrap-#{@input_id}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-mp-hidden-#{@input_id}"} name={@input_name} value={@value} phx-debounce="500" />
+      <bp-media-picker
+        value={@value}
+        data-bridge-target={"bp-mp-hidden-#{@input_id}"}
+        hotspot={@hotspot}
+        alt={@alt}
+      ></bp-media-picker>
+    </div>
+    """
+  end
+
+  # A composite boolean renders the SAME labeled switch a top-level boolean
+  # does (FieldInputs) — the bare `.bp-input` checkbox stretched to a 32px
+  # box, the "giant checkmark" of the twin's feature card (Gyldendal E1.5).
   defp leaf_input(%{field: %{type: "boolean"}} = assigns) do
     assigns = Map.put(assigns, :checked, truthy?(assigns.value))
 
     ~H"""
-    <div class="bp-input-checkbox">
+    <label class="form-switch bp-input-checkbox">
       <input type="hidden" name={@input_name} value="false" />
       <input
         type="checkbox"
-        class="bp-input"
         id={@input_id}
         name={@input_name}
         value="true"
@@ -212,7 +308,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         phx-change={@on_change}
         disabled={@readonly}
       />
-    </div>
+      <span class="form-switch-track" aria-hidden="true"></span>
+      <span class="form-switch-state"><%= if @checked, do: "On", else: "Off" %></span>
+    </label>
     """
   end
 
@@ -323,6 +421,26 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     """
   end
 
+  defp radio_input(assigns) do
+    ~H"""
+    <div class="form-radio-group" role="radiogroup" id={@input_id}>
+      <%= for opt <- @options do %>
+        <label class="form-radio">
+          <input
+            type="radio"
+            name={@input_name}
+            value={opt.value}
+            checked={to_string(@value) == opt.value}
+            phx-change={@on_change}
+            disabled={@readonly}
+          />
+          <span><%= opt.label %></span>
+        </label>
+      <% end %>
+    </div>
+    """
+  end
+
   defp textarea_input(assigns) do
     ~H"""
     <textarea
@@ -338,23 +456,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   # Normalize `options` list (raw strings or `%{value, label}` maps) into
   # `[%{value, label}]` for select rendering.
-  defp select_options(%{options: opts}) when is_list(opts) do
-    Enum.map(opts, fn
-      %{"value" => v} = o ->
-        %{value: to_string(v), label: to_string(Map.get(o, "label", v))}
-
-      %{value: v} = o ->
-        %{value: to_string(v), label: to_string(Map.get(o, :label, v))}
-
-      v when is_binary(v) or is_atom(v) or is_number(v) ->
-        s = to_string(v)
-        %{value: s, label: s}
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
+  defp select_options(%{options: opts}) when is_list(opts),
+    do: Barkpark.Content.SelectOptions.normalize(opts)
 
   defp select_options(_), do: []
 
@@ -368,6 +471,31 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   defp title_for(%{title: t}) when is_binary(t) and t != "", do: t
   defp title_for(%{name: n}) when is_binary(n), do: humanize(n)
   defp title_for(_), do: ""
+
+  # Gyldendal parity E1.5 — Sanity-shaped render metadata read off the raw
+  # field map (`description`, `groups`, `group`); absent ⇒ nil/[] and the
+  # markup is byte-identical to before.
+  @doc false
+  def description_for(%{raw: %{"description" => d}}) when is_binary(d) and d != "", do: d
+  def description_for(%{"description" => d}) when is_binary(d) and d != "", do: d
+  def description_for(_), do: nil
+
+  defp groups_for(%{raw: %{"groups" => groups}}) when is_list(groups),
+    do: Enum.filter(groups, &(is_map(&1) and is_binary(&1["name"])))
+
+  defp groups_for(_), do: []
+
+  defp default_group([]), do: nil
+
+  defp default_group(groups) do
+    case Enum.find(groups, &(&1["default"] == true)) do
+      %{"name" => n} -> n
+      _ -> hd(groups)["name"]
+    end
+  end
+
+  defp subfield_group(%{raw: %{"group" => g}}) when is_binary(g), do: g
+  defp subfield_group(_), do: nil
 
   # Extracts the ONIX element name from a sub-field. Handles atom-keyed
   # `%Field{}` structs (post-adapter, the normal v2 path) and string-keyed

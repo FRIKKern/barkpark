@@ -294,8 +294,8 @@ const src = fs.readFileSync(APP, "utf8");
 
 const A_USER = "Auth.require_user";
 const A_TADMIN = "Auth.require_team_admin";
-const A_PTADMIN = "Auth.require_primary_team_admin";
-const A_PTOWNER = "Auth.require_primary_team_owner";
+const A_PTADMIN = "Auth.require_current_team_admin";
+const A_PTOWNER = "Auth.require_current_team_owner";
 const A_OPERATOR = "Auth.require_platform_operator";
 const A_USER_OR_PAT = "Auth.require_user_or_pat";
 const A_ABILITY = "Auth.require_ability";
@@ -377,16 +377,16 @@ const PIN = [
   { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
 
   // ── instance detail — the console's densest unpredicated cluster
-  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits data-life-verb only on the live arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
+  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
   { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "mountInstanceTimeline", "runVerifyNow"], "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): TWO offer sites, both now drawn by adminWriteControlHtml — the timeline's docked [data-tl-retry] and the verify note's [data-vf-reprovision] — so the mount hook is withheld on refuse and on unknown. Read THREE times because the two sites have three entries: instanceOverviewHtml threads loadInstance's answer, the SSE repaint lands in mountInstanceTimeline, and the no_admin_token note is painted from runVerifyNow" },
-  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml's removal-failed arm offers #inst-remove-retry only on a grant; refuse/unknown render the disabled control with no mount hook. Second call site on the same route as runDecommission's, and now fenced on the same band" },
-  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml offers the behind-box CTA #inst-update only on a grant. The modal buttons behind it (#update-go, #update-force) are POST-offer and stay unfenced by design — the same shape as rollbackInstance's confirm" },
-  { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook. cch-w48-s4 names the DECIDING function rather than the panel that hosts it: updatePanelHtml threads the answer through unchanged, and adminWriteControlHtml is where the data-rollback hook is withheld" },
-  { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook — again by way of adminWriteControlHtml, which is the function that actually decides" },
+  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "repaintInstanceAuthority"], "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml's removal-failed arm offers #inst-remove-retry only on a grant; refuse/unknown render the disabled control with no mount hook. Second call site on the same route as runDecommission's, and now fenced on the same band. cch-w46-rv: READ TWICE now — loadInstance decides at paint time and repaintInstanceAuthority re-decides from the SAME bp when a late /v1/me lands, so the control heals without a click on every tab (the runDecommission precedent, widened past #inst-lifecycle-actions to #inst-header-actions and #inst-update-actions)" },
+  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "repaintInstanceAuthority"], "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml offers the behind-box CTA #inst-update only on a grant. The modal buttons behind it (#update-go, #update-force) are POST-offer and stay unfenced by design — the same shape as rollbackInstance's confirm. cch-w46-rv: READ TWICE now — loadInstance decides at paint time and repaintInstanceAuthority re-decides from the SAME bp when a late /v1/me lands, so the control heals without a click on every tab (the runDecommission precedent, widened past #inst-lifecycle-actions to #inst-header-actions and #inst-update-actions)" },
+  { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "repaintInstanceAuthority"], "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook. cch-w48-s4 names the DECIDING function rather than the panel that hosts it: updatePanelHtml threads the answer through unchanged, and adminWriteControlHtml is where the data-rollback hook is withheld. cch-w46-rv: READ TWICE now — loadInstance decides at paint time and repaintInstanceAuthority re-decides from the SAME bp when a late /v1/me lands, so the control heals without a click on every tab (the runDecommission precedent, widened past #inst-lifecycle-actions to #inst-header-actions and #inst-update-actions)" },
+  { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "repaintInstanceAuthority"], "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook — again by way of adminWriteControlHtml, which is the function that actually decides. cch-w46-rv: READ TWICE now — loadInstance decides at paint time and repaintInstanceAuthority re-decides from the SAME bp when a late /v1/me lands, so the control heals without a click on every tab (the runDecommission precedent, widened past #inst-lifecycle-actions to #inst-header-actions and #inst-update-actions)" },
   { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "fleetSupportCardHtml"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: fleetSupportCardHtml OMITS #fleet-add-support unless authority === \"grant\" (D514 rules this add OMITTED rather than disabled-and-explained). Found BY HAND, not by (2i-4): its read is loadInstance, which sibling rows already claim — see LIMIT 1b. POST /v1/fleet/supports still refuses non-admin sessions inside a cond, so the overlay stays" },
   { fn: "submitAgentKey", verb: "POST", route: "/v1/barkparks/:*/agent-key", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED (PDF-D94, pdf-bl-console-key-custody): supportRowHtml renders the paste-a-key form + Deliver button on EVERY live support row — no authority threads into it, so a plain member sees the affordance and the route's inline cond refuses them with Auth.forbidden(required: admin, scope: team) (same disjunction as POST /v1/fleet/supports: PAT needs deploy, session needs team-admin). The instanceAdminAuthority band is already read one hop up (fleetSupportCardHtml takes `authority` for the ADD button) so the fence is one thread away — needs a row of its own; recording the truth here, not fixing it" },
   { fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: all four autoupdate controls (pause/resume/pin/unpin) are drawn by adminWriteControlHtml, which emits the data-au hook only when the answer is neither refuse nor unknown. Found BY HAND, not by (2i-4) — same shared read as rollbackInstance, see LIMIT 1b" },
+  { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "repaintInstanceAuthority"], "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: all four autoupdate controls (pause/resume/pin/unpin) are drawn by adminWriteControlHtml, which emits the data-au hook only when the answer is neither refuse nor unknown. Found BY HAND, not by (2i-4) — same shared read as rollbackInstance, see LIMIT 1b. cch-w46-rv: READ TWICE now — loadInstance decides at paint time and repaintInstanceAuthority re-decides from the SAME bp when a late /v1/me lands, so the control heals without a click on every tab (the runDecommission precedent, widened past #inst-lifecycle-actions to #inst-header-actions and #inst-update-actions)" },
 
   // ── operator console — the console's highest-privilege writes, and both of
   // ── them build their path from a constant (ruling (b)).
@@ -412,7 +412,7 @@ const PIN = [
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_primary_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
+  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_current_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
   // cch-w48-s2, pinned here in review: BOTH of these routes are reached ONLY
@@ -436,6 +436,7 @@ const PIN = [
 
   { fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
   { fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "bootEmailConfirm", verb: "POST", route: "/v1/auth/verify-email", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "cch-w53-bl-the-emailed-confirmation-link-has-no-client: pre-session by construction — the emailed single-use token IS the credential and the route takes no session, so a logged-out click must reach the same answer as a logged-in one. No predicate is possible or wanted: the console cannot know whether a token is live, and withholding the hop would recreate the dead flow this row closed" },
 
   // ── the /new flow (a second, parallel console surface)
   { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
@@ -1118,7 +1119,13 @@ if (unresolved.length) {
 // they called, so `total`, `elevated` and `predicated` each fall by exactly two
 // (both rows were elevated AND predicated on assignableRoles). `unpredicated`
 // does NOT move — neither row was in it.
-const EXPECT = { total: 79, elevated: 39, predicated: 34, unpredicated: 5 };
+// 79 → 80 (cch-w53-bl-the-emailed-confirmation-link-has-no-client): ONE new write
+// call site, bootEmailConfirm → POST /v1/auth/verify-email. The other three
+// numbers are UNCHANGED and that is the load-bearing part of this bump: the row
+// is pre-session, so it adds nothing to `elevated` and therefore nothing to
+// `predicated`/`unpredicated`. A bump that moved `unpredicated` would mean the
+// console had grown an affordance the server can refuse — this one did not.
+const EXPECT = { total: 80, elevated: 39, predicated: 34, unpredicated: 5 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -2173,6 +2180,274 @@ if (dupes.length) {
     `${byBand.size} band(s) — ` + [...byBand].map(([b, n]) => `${b} ×${n}`).join(", "));
   console.log("  The accounting is over READ SITES, not rows: rows share reads, so a row whose read a");
   console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
+}
+
+// (2l) THE NULL-PIN DECAY ARM — PLUMBING DERIVED BY EXECUTION (charter D428).
+//
+//      THE STRUCTURAL DEFECT IT CLOSES. (2g) is a filter over
+//      `PIN.filter((r) => r.predicate && !declaresFn(r.predicate))` — the
+//      `r.predicate &&` drops every `predicate: null` row BEFORE the check
+//      runs. So its decay is ONE-DIRECTIONAL BY CONSTRUCTION: a non-null pin
+//      that rots is caught, and a null pin that becomes FALSE — i.e. SOMEBODY
+//      SHIPS A GUARD, which is this epic's entire purpose — is invisible to it
+//      and to every other arm that keys on `predicate` being truthy. Every
+//      slice this epic merges made the census a little more false, silently.
+//      (2i) closed that in the fix direction for rows that pin a `fence`; this
+//      arm closes it for D428's seven WITHOUT trusting the pin at all, by
+//      going and asking the shipped code.
+//
+//      THE DERIVATION IS AN EXECUTION, NOT A GREP. app.js is booted in a vm
+//      exactly as __app.test.mjs boots it (document.readyState "loading", so
+//      init() never binds), its pure models are taken off __bpTestHook, and
+//      each of D428's seven verbs is rendered TWICE — once with the authority
+//      answer "grant" and once with "refuse". The row's own MOUNT HOOK (the
+//      attribute or id the wiring binds on) must be PRESENT on grant and
+//      WITHHELD on refuse. That answer is `derived_plumbed`, and the arm
+//      requires
+//
+//          derived_plumbed === (pin.predicate !== null)
+//
+//      in BOTH directions. It is the DISAGREEMENT that reds, never a column
+//      reaching N (charter D430).
+//
+//      THE FILING'S OWN MECHANISM WAS RE-DERIVED, AND HALF OF IT WAS FALSE.
+//      The row prescribed "check arity >= 3 and that it echoes `authority`".
+//      That holds for exactly one of the three models — lifecycleActionsModel
+//      takes (capPayload, bp, authority, authorityState) and echoes the answer
+//      back on the model. instanceHeaderHtml and updatePanelHtml both take
+//      (bp, authority): arity 2, authority plumbed as the LAST parameter, and
+//      neither echoes it as a field. An arity test would have manufactured six
+//      false reds against a console that is correctly fenced. Rendering the
+//      offer and reading the hook is the shape that survives contact, and it
+//      is strictly stronger: it measures whether the answer CHANGES THE OFFER.
+//
+//      THE ROW'S CITED LIVE RED IS ALSO STALE, AND SAYING SO IS THE POINT. It
+//      quotes a census printing `DELETE /v1/barkparks/:*  ELEVATED! NONE — a
+//      member can click it` for runDecommission. That row now pins the
+//      instanceAdminAuthority band with a fence, and the derivation agrees
+//      with it. So this arm is GREEN on arrival, as an anti-decay ratchet
+//      should be — its losability is proven by MUTATION in both directions
+//      (see the two mutations named in the slice's PR), not by a standing red.
+//
+//      ── LIMITS OF THIS ARM. TWO, AND THE NEXT READER INHERITS THEM ────────
+//
+//      LIMIT A — IT IS A RATCHET UNDER REVIEW DISCIPLINE, NOT A PROOF. A
+//      builder can still green it by writing `predicate: null` back onto a
+//      corrected row. That edit is self-incriminating — it declares a shipped
+//      guard gone — but it IS a string edit, and nothing here can stop it.
+//
+//      LIMIT B — IT DERIVES FROM THE MODEL ONLY AND CANNOT SEE A SEVERED
+//      MOUNT. A mount that passes a literal "grant" into the model renders the
+//      hook, passes this arm, and passes __app.test.mjs. Only smoke's
+//      panel-overview-member scenario — a real member actor, rendering the
+//      real page — catches that class. THE MEMBER-ACTOR SCENARIO STAYS THE
+//      FENCE for it; this arm is anti-decay bookkeeping beside it, never
+//      instead of it.
+//
+//      NOT RUN IN A FIXTURE MODE. The fixture files are hand-written call-site
+//      shapes, not a bootable console — executing one would prove nothing and
+//      throw. The argv override is honoured, so a mutation driver can still
+//      point this arm at a patched COPY of app.js.
+if (!FIXTURE_MODE) {
+  // The seven D428 names, and for each the model that decides its offer plus
+  // the mount hook the wiring binds on. `bp` is the smallest instance shape
+  // that reaches the offer at all — a fixture that does not reach it would
+  // report "withheld" for grant AND refuse, which is indistinguishable from a
+  // fence, so each probe is checked for reaching its own hook on grant first.
+  const LIVE_BOX = { id: "bp-1", name: "acme", host: "acme.example.com", provider: "hetzner", slug: "acme" };
+  const withBox = (over) => Object.assign({}, LIVE_BOX, over);
+
+  const D428_PROBES = [
+    // cch-w46-bl: the LIVE arm's own bytes, not the shared identity. See the
+    // pin's note above — a bare `data-life-verb` is now emitted by BOTH arms,
+    // so probing it would have reported a refused, disabled ghost as an offer.
+    { fn: "runDecommission", hook: 'data-life-verb="decommission" data-life-name=',
+      render: (h, a) => h.lifecycleActionRowHtml(h.lifecycleActionsModel(undefined, LIVE_BOX, a)),
+      needs: ["lifecycleActionRowHtml", "lifecycleActionsModel"] },
+    { fn: "removeInstance", hook: "inst-remove-retry",
+      render: (h, a) => h.instanceHeaderHtml(withBox({ deprovision_status: "failed" }), a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "updateInstance", hook: "inst-update",
+      render: (h, a) => h.instanceHeaderHtml(withBox({ update_state: "behind", update_latest_release: "1.2.3" }), a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "attachDomain", hook: "inst-domain",
+      render: (h, a) => h.instanceHeaderHtml(LIVE_BOX, a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "rollbackInstance", hook: "data-rollback",
+      render: (h, a) => h.updatePanelHtml(LIVE_BOX, a),
+      needs: ["updatePanelHtml"] },
+    { fn: "patchAutoupdate", hook: "data-au",
+      render: (h, a) => h.updatePanelHtml(withBox({ channel: "stable" }), a),
+      needs: ["updatePanelHtml"] },
+  ];
+
+  // THE SHORTER LIST, NOT THE LONGER ONE. D428 names SEVEN and this arm derives
+  // six. The seventh is named here with its reason rather than quietly absent,
+  // because an unexplained gap in a seven-row law is the same fail-open shape
+  // (2g) had. It is a RATCHET IN BOTH DIRECTIONS: adding an entry reds, and so
+  // does an entry that becomes derivable — export its model and this list must
+  // shrink in the same commit.
+  const D428_UNDERIVABLE = [
+    { fn: "retryInstance",
+      why: "its two offer sites are the timeline's docked retry and the verify note's reprovision " +
+           "control. Both are drawn by adminWriteControlHtml from inside DOM mounts that READ the " +
+           "band themselves rather than taking the answer as a parameter, so there is no authority " +
+           "argument to vary and nothing to render twice. adminWriteControlHtml — the function that " +
+           "actually withholds the hook — is the one that would make this derivable, and it is not " +
+           "on the hook. Export it and this entry moves into D428_PROBES.",
+      // The name whose ABSENCE from the hook is the reason. The two mounts ARE
+      // exported and deliberately not listed: exporting a mount changes nothing
+      // here, because a mount that reads the band internally still takes no
+      // answer to vary. It is the DECIDE function that unblocks this row.
+      absent_hooks: ["adminWriteControlHtml"] },
+  ];
+
+  const D428_SEVEN = D428_PROBES.map((p) => p.fn).concat(D428_UNDERIVABLE.map((p) => p.fn));
+  if (D428_SEVEN.length !== 7) {
+    die2([
+      "FAIL(2l): D428 names seven elevated lifecycle verbs and this arm accounts for " + D428_SEVEN.length + ".",
+      "  Derived and underivable together must sum to the charter's seven. A verb that left the",
+      "  charter leaves this arm in the same commit, with the charter row that removed it named.",
+    ]);
+  }
+
+  // Boot app.js the way __app.test.mjs does: `readyState: "loading"` keeps
+  // DOMContentLoaded from ever firing, so init() never binds and nothing here
+  // touches the network or a timer.
+  const hooks = {};
+  let bootError = null;
+  try {
+    const vm = (await import("node:vm")).default;
+    const noop = () => {};
+    const inertEl = {
+      addEventListener: noop, removeEventListener: noop, setAttribute: noop, removeAttribute: noop,
+      classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+      style: {}, hidden: false, value: "", innerHTML: "", textContent: "",
+      querySelector: () => null, querySelectorAll: () => [],
+    };
+    const storage = { getItem: () => null, setItem: noop, removeItem: noop };
+    const sandbox = {
+      __bpTestHook(h) { Object.assign(hooks, h); },
+      document: {
+        readyState: "loading",
+        addEventListener: noop, removeEventListener: noop,
+        querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+        createElement: () => ({ ...inertEl }),
+        documentElement: { ...inertEl, getAttribute: () => null },
+        body: { ...inertEl, appendChild: noop },
+      },
+      window: { addEventListener: noop, removeEventListener: noop, open: () => null,
+        matchMedia: () => ({ matches: false, addEventListener: noop }) },
+      location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+      localStorage: storage, sessionStorage: storage, navigator: {},
+      URL: URL, URLSearchParams: URLSearchParams,
+      fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+      EventSource: function () { return { addEventListener: noop, close: noop }; },
+      setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+      console,
+    };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox);
+  } catch (e) {
+    bootError = e;
+  }
+
+  if (bootError || !Object.keys(hooks).length) {
+    die2([
+      "FAIL(2l): app.js could not be executed, so authority plumbing cannot be DERIVED.",
+      "  This arm is the only thing in this census that asks the shipped code a question instead",
+      "  of reading a pin. A boot that throws is not a pass — it is the arm going blind, which is",
+      "  exactly the fail-open shape it exists to remove.",
+      "",
+      "  " + (bootError ? String(bootError.message).slice(0, 200) : "__bpTestHook was never called"),
+    ]);
+  }
+
+  const complaints = [];
+
+  for (const probe of D428_PROBES) {
+    const pin = PIN.filter((r) => r.fn === probe.fn)[0];
+    if (!pin) {
+      complaints.push(`  ${probe.fn} — D428 names this verb and no PIN row carries it.`);
+      continue;
+    }
+    const missing = probe.needs.filter((n) => typeof hooks[n] !== "function");
+    if (missing.length) {
+      complaints.push(
+        `  ${probe.fn} — its model(s) left __bpTestHook: ${missing.join(", ")}. The plumbing can no ` +
+        "longer be derived, so this arm cannot vouch for the row either way. Re-export, or move the " +
+        "row to D428_UNDERIVABLE with the reason.");
+      continue;
+    }
+
+    let onGrant, onRefuse, renderError = null;
+    try {
+      onGrant = String(probe.render(hooks, "grant"));
+      onRefuse = String(probe.render(hooks, "refuse"));
+    } catch (e) {
+      renderError = e;
+    }
+    if (renderError) {
+      complaints.push(`  ${probe.fn} — rendering its offer threw: ${String(renderError.message).slice(0, 160)}`);
+      continue;
+    }
+
+    // NON-VACUITY, FIRST. A fixture that no longer reaches the offer renders
+    // the hook on NEITHER answer, which reads exactly like a fence. Without
+    // this the whole arm could go quietly green on a shape change.
+    if (!onGrant.includes(probe.hook)) {
+      complaints.push(
+        `  ${probe.fn} — the probe never reached its own offer: the mount hook \`${probe.hook}\` is ` +
+        "absent even on `grant`. A probe that cannot render the control cannot tell a fence from a " +
+        "shape change, so this reds rather than passing. Fix the probe's instance fixture, or rename " +
+        "the hook here in the same commit the console renamed it.");
+      continue;
+    }
+
+    const derived_plumbed = !onRefuse.includes(probe.hook);
+    const pinned_predicated = pin.predicate !== null && pin.predicate !== undefined;
+
+    if (derived_plumbed !== pinned_predicated) {
+      complaints.push(
+        `  ${probe.fn} — DERIVED plumbed: ${derived_plumbed}, PIN predicated: ${pinned_predicated}. ` +
+        (derived_plumbed
+          ? `The console WITHHOLDS \`${probe.hook}\` on a refusal — the guard is SHIPPED — and the pin ` +
+            "still says this row has no predicate. This is the direction (2g) could never see: the " +
+            "row reads as an unguarded affordance over a console that guards it. Re-pin the row."
+          : `The console still emits \`${probe.hook}\` on a refusal — a refused member gets the mount ` +
+            "hook — and the pin claims a predicate. Either the fence was severed or the pin was " +
+            "always wishful. Restore the fence, or set the row's predicate to null and say why."));
+    }
+  }
+
+  for (const row of D428_UNDERIVABLE) {
+    const nowPresent = row.absent_hooks.filter((n) => typeof hooks[n] === "function");
+    if (nowPresent.length) {
+      complaints.push(
+        `  ${row.fn} — listed as UNDERIVABLE, but ${nowPresent.join(", ")} is on __bpTestHook now. The ` +
+        "reason this row was excused has stopped being true. Move it into D428_PROBES with a hook and " +
+        "a fixture; the excused list only ever gets SHORTER.");
+    }
+  }
+
+  if (complaints.length) {
+    die2([
+      "FAIL(2l): derived authority plumbing disagrees with the pin.",
+      "  Each line below is a DISAGREEMENT between what app.js does when it is handed a refusal and",
+      "  what the PIN row says about it. Neither side is privileged — read the console, then fix",
+      "  whichever half is lying.",
+      "",
+      ...complaints,
+    ]);
+  }
+
+  console.log("");
+  console.log(`(2l) authority plumbing DERIVED BY EXECUTION for ${D428_PROBES.length} of D428's seven: ` +
+    "each offer rendered on `grant` and on `refuse`, and the mount hook's presence agrees with the pin.");
+  console.log(`     ${D428_UNDERIVABLE.length} excused and named (${D428_UNDERIVABLE.map((r) => r.fn).join(", ")}) — that list only shrinks.`);
+  console.log("     LIMIT: the model only. A severed MOUNT passing a literal \"grant\" renders the hook and");
+  console.log("     passes here — smoke's member-actor scenario stays the fence for that class.");
 }
 
 // (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).

@@ -397,6 +397,79 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert m["documents"]["value"] == 15
     end
 
+    test "a per-dataset 401 names the CREDENTIAL, not \"unknown\"" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # The dataset LIST succeeds — so the failure that degrades documents is a
+      # per-DATASET one, the case the fan-out used to squash. staging's analytics
+      # read is refused 401: our admin credential was rejected for that dataset.
+      Fake.program(%{
+        @ds_path => ok_json(200, ~s({"datasets":[{"slug":"production"},{"slug":"staging"}]})),
+        analytics_path("production") => ok_json(200, ~s({"total_documents":10})),
+        analytics_path("staging") => ok_json(401, ~s({"error":"unauthorized"})),
+        webhooks_path("production") => ok_json(200, ~s({"webhooks":[]})),
+        webhooks_path("staging") => ok_json(200, ~s({"webhooks":[]}))
+      })
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      # Still no partial sum and no fake zero — the WHOLE meter degrades.
+      assert m["documents"]["value"] == "unmetered"
+
+      reason = m["documents"]["unavailable_reason"]
+
+      # RED before the fix: the reduce_while flattened every per-element failure
+      # to an unlisted :dataset_fetch_failed, which normalised to "unknown".
+      refute reason == "unknown", """
+      a per-dataset 401 rendered as the generic "the read failed" — the customer \
+      is told nothing they can act on.
+      """
+
+      # And it must not be blamed on the network: the box ANSWERED, it said no.
+      refute reason == "unreachable", """
+      a delivered 401 rendered as "we could not reach your box" — that sends a \
+      paying customer to debug their network for a credential problem.
+      """
+
+      assert reason == "unauthorized"
+
+      # The datasets meter, which read fine, is untouched by the degrade.
+      assert m["datasets"]["value"] == 2
+    end
+
+    test "per-dataset 401 / 5xx / bad shape are THREE documents meters, not one" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      list = ok_json(200, ~s({"datasets":[{"slug":"production"}]}))
+      wh = ok_json(200, ~s({"webhooks":[]}))
+
+      reasons =
+        for {expected, analytics} <- [
+              {"unauthorized", ok_json(401, ~s({"error":"nope"}))},
+              {"instance_error", ok_json(503, ~s({"error":"boom"}))},
+              {"bad_shape", ok_json(200, ~s({"not_total":true}))}
+            ] do
+          Fake.program(%{
+            @ds_path => list,
+            analytics_path("production") => analytics,
+            webhooks_path("production") => wh
+          })
+
+          m = meters(call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user)))
+          assert m["documents"]["value"] == "unmetered"
+          assert m["documents"]["unavailable_reason"] == expected
+          m["documents"]["unavailable_reason"]
+        end
+
+      assert length(Enum.uniq(reasons)) == 3, """
+      three distinct per-dataset failures collapsed to one word — the fan-out is \
+      squashing the reason its own per-dataset reads already minted.
+      """
+    end
+
     test "a garbage-shaped analytics body degrades documents (no guessed count)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

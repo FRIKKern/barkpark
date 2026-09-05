@@ -251,23 +251,12 @@ defmodule BarkparkWeb.Integration.DraftsIdDocClampTest do
         :ok = seed_docs!(scope)
       end
 
-      prior = Application.get_env(:barkpark, :shares)
-
-      Application.put_env(
-        :barkpark,
-        :shares,
-        Sharing.parse(
-          "#{read_ws.slug}/#{read_proj.slug}/#{@dataset}:docs:read;" <>
-            "#{edit_ws.slug}/#{edit_proj.slug}/#{@dataset}:docs:edit"
-        )
+      # arpss-w8: STORED rows, not a bare put_env — Sharing.refresh/0 rebuilds
+      # them. NOTE the ";" separator: Sharing.parse/1 never splits on ",".
+      Barkpark.SharingFixtures.plant_shares!(
+        "#{read_ws.slug}/#{read_proj.slug}/#{@dataset}:docs:read;" <>
+          "#{edit_ws.slug}/#{edit_proj.slug}/#{@dataset}:docs:edit"
       )
-
-      on_exit(fn ->
-        case prior do
-          nil -> Application.delete_env(:barkpark, :shares)
-          value -> Application.put_env(:barkpark, :shares, value)
-        end
-      end)
 
       %{
         read_ws: read_ws,

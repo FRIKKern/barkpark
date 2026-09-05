@@ -12,14 +12,14 @@ defmodule BarkparkWeb.AuthGdprTest do
   defp session_token(email) do
     {:ok, _u} = Accounts.register_user(%{email: email, password: @password})
 
-    build_conn()
+    scoped_conn()
     |> json_conn()
     |> post("/v1/auth/login", Jason.encode!(%{email: email, password: @password}))
     |> json_response(201)
     |> Map.fetch!("token")
   end
 
-  defp authed(token), do: build_conn() |> put_req_header("authorization", "Bearer #{token}")
+  defp authed(token), do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}")
 
   describe "GET /v1/auth/export" do
     test "returns the subject's own data bundle", %{conn: _conn} do
@@ -49,7 +49,7 @@ defmodule BarkparkWeb.AuthGdprTest do
       # the session is revoked → subsequent authed calls 401
       assert authed(token) |> get("/v1/auth/me") |> json_response(401)
       # the old password no longer logs in (PII scrubbed)
-      assert build_conn()
+      assert scoped_conn()
              |> json_conn()
              |> post(
                "/v1/auth/login",

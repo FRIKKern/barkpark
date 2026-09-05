@@ -26,6 +26,9 @@ defmodule Barkpark.Plugins.Github.MergeEvents do
     * `{:ok, :stamped, doc_id, [index]}` — merge-gate criterion(s) flipped met.
     * `{:ok, :already_stamped, doc_id}`  — already met: a replayed/duplicate
       merge event, or a lead already closed. No write, no double evidence.
+    * `{:ok, :unflagged_merge_gates, doc_id, [index]}` — nothing carries the
+      flag, but these criteria READ as merge gates. Nothing was stamped; the
+      indices are named so somebody can flag or stamp them deliberately.
     * `{:ok, :no_marker, doc_id}`        — the task carries NO `merge_gate:true`
       criterion. NAMED, never a text/position/index fallback — so an unmarked
       legacy gate is detectable rather than silently guessed.
@@ -65,6 +68,7 @@ defmodule Barkpark.Plugins.Github.MergeEvents do
 
   @type result ::
           {:ok, :stamped, String.t(), [non_neg_integer()]}
+          | {:ok, :unflagged_merge_gates, String.t(), [non_neg_integer()]}
           | {:ok, :already_stamped | :no_marker | :no_guardable_marker, String.t()}
           | :ignored
           | :no_trailer
@@ -120,6 +124,7 @@ defmodule Barkpark.Plugins.Github.MergeEvents do
                dataset: dataset
              ) do
           {:ok, :stamped, indices} -> {:ok, :stamped, doc_id, indices}
+          {:ok, :unflagged_merge_gates, ix} -> {:ok, :unflagged_merge_gates, doc_id, ix}
           {:ok, tag} -> {:ok, tag, doc_id}
           {:error, reason} -> {:error, reason}
         end

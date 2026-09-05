@@ -17,6 +17,7 @@ defmodule BarkparkWeb.ShareLinkStaticDriftTest do
   own verdict on the stored row so a fixture that failed to reach the intended
   population cannot pass silently.
   """
+  # sync: swaps node-global Application env (:barkpark, :shares) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures

@@ -29,7 +29,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.Notifications
-  alias BarkparkCloud.Notifications.Withhold
+  alias BarkparkCloud.Workers.DeploymentAlertWorker
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -94,21 +94,6 @@ defmodule BarkparkCloud.Registry do
   # "exceeded max" + "attempts" so `FailureCopy`'s generic retry clause already
   # renders it without a new clause over there.
   @spawn_refused_reason "exceeded max deploy start attempts — the deploy driver was never spawned (the control plane refused the child), so this build was never claimed; deploy again to retry"
-
-  # BATCHING POLICY for a mass reap. `Notifications.dispatch_event/3` is
-  # SYNCHRONOUS for email (cloud/ has no Oban for the mail path — only for chat),
-  # and this sweep runs every minute on the `maintenance` queue. A cluster-wide
-  # incident can fail hundreds of rows in one pass, which would become hundreds
-  # of blocking `Mailer.deliver` calls inside one cron tick — enough to hold the
-  # queue past the next tick and to trip any provider's rate limit.
-  #
-  # So the sweep alerts at most this many DEPLOYMENTS per tick and logs the
-  # remainder. The choice is deliberate: past ~25 simultaneous failures the
-  # person's problem is an incident, not N deployments, and the 26th email tells
-  # them nothing the first 25 did not. Nothing is lost — every reaped row is
-  # terminal in the console with its reason, which is the surface of record. The
-  # correct fix is an Oban-backed mail queue; when that lands this cap should go.
-  @reap_alert_cap 25
 
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
@@ -796,9 +781,34 @@ defmodule BarkparkCloud.Registry do
   LIVE managed box is not silently stranded; failed / never-provisioned rows are
   safe to remove outright (a failed provision already tore its half-built box
   down per the worker contract).
+
+  ssw8, SECOND DOOR (this row). Every site of this instance has its public-read
+  CONTENT TOKEN revoked on the box FIRST, exactly as `delete_site/1` does for one
+  site — because the FK cascade (`sites.barkpark_id` is `on_delete: :delete_all`)
+  removes those site rows in the same statement WITHOUT ever calling
+  `delete_site/1`. Before this, deleting an instance stranded one never-expiring
+  public-read credential per site on a box the control plane no longer tracks:
+  the same defect ssw8 measured, reached by a different door.
+
+  ORDER IS LOAD-BEARING for the same reason it is in `delete_site/1`: the site
+  rows ARE the pointers (`bootstrap_workspace`/`bootstrap_project` name the
+  scope, `slug` names the label), and after `Repo.delete/1` nothing in this
+  database can name what to revoke.
+
+  A box that cannot confirm the revoke does NOT block the delete — the CP row is
+  the truth — but it is never SILENT either: `revoke_barkpark_site_read_tokens/1`
+  logs a warning naming the box slug and every `site-read-<slug>` label that may
+  still be live, and `mix barkpark_cloud.site_read_tokens` finds them afterwards.
+  The return shape is unchanged on purpose (six router call sites); the
+  machine-readable report is available to any caller that wants it by calling
+  `revoke_barkpark_site_read_tokens/1` itself — which is what the DEPROVISION arm
+  does, so its outcomes land on the audit trail.
   """
   @spec delete_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
-  def delete_barkpark(%Barkpark{} = barkpark), do: Repo.delete(barkpark)
+  def delete_barkpark(%Barkpark{} = barkpark) do
+    _ = revoke_barkpark_site_read_tokens(barkpark)
+    Repo.delete(barkpark)
+  end
 
   @doc """
   Delete a Site row — the CP half of a site delete. Cascades the site's
@@ -2510,6 +2520,29 @@ defmodule BarkparkCloud.Registry do
   records the removal of one that never did. A refused audit insert rolls the
   delete back. Only the `:deleted` outcome writes: `:already_gone` deleted
   nothing, and a `:conflict` / `:stale_claim` never reached the row.
+
+  REVOKES FIRST (ssw8, this row). THE ARM THAT MATTERS: this is the path that
+  tears down a LIVE box, and a live box is where sites exist. It calls
+  `Repo.delete(bp)` DIRECTLY — it does not route through `delete_barkpark/1` —
+  so a revoke installed only there would miss it entirely. Every site's
+  public-read content token is revoked on the box BEFORE this function opens its
+  transaction, and the per-site outcomes ride the `barkpark.deleted` audit event
+  as `metadata["read_tokens"]` so a credential that could not be confirmed dead
+  is NAMED on the team's durable trail, not merely logged.
+
+  OUTSIDE THE TRANSACTION, DELIBERATELY. The revoke is an HTTP round-trip PER
+  SITE and the transaction below opens with a `FOR UPDATE` lock on the provision
+  job (`lock_provision_job/1`). Revoking inline would hold that row lock across
+  every one of those round-trips — including against a box that is down and only
+  answers on the client timeout. So the preflight re-reads the job UNLOCKED and
+  applies the same three refusals the locked body applies (missing job, terminal
+  `"failed"`, stale claim) before it calls a box at all: a call that is going to
+  be refused revokes nothing. The residual race is stated and accepted — between
+  the unlocked read and the lock, another worker could flip the job, in which
+  case a credential is revoked for an instance this call then declines to delete.
+  That costs a live site its public-read token (re-mintable) instead of holding a
+  lock across the network, and it can only happen in the window where two workers
+  are already fighting over one deprovision.
   """
   @spec succeed_deprovision_job(binary(), keyword()) ::
           {:ok, :deleted | :already_gone}
@@ -2522,6 +2555,11 @@ defmodule BarkparkCloud.Registry do
         {:ok, :already_gone}
 
       _uuid ->
+        # ssw8: the box calls happen HERE — before the transaction, so no
+        # `FOR UPDATE` lock is held across an HTTP round-trip. See the moduledoc
+        # above for the ordering law and the accepted residual race.
+        read_tokens = preflight_revoke_site_read_tokens(id, claim_token)
+
         # claim-fence (bp-c55): FOR UPDATE read + guard + delete in one transaction.
         # The terminal "failed" short-circuit runs BEFORE the token check.
         Repo.transaction(fn ->
@@ -2548,7 +2586,7 @@ defmodule BarkparkCloud.Registry do
 
                     case Repo.delete(bp) do
                       {:ok, _} ->
-                        case record_deprovision_audit(bp, site_slugs) do
+                        case record_deprovision_audit(bp, site_slugs, read_tokens) do
                           {:ok, _event} -> :deleted
                           {:error, cs} -> Repo.rollback(cs)
                         end
@@ -2560,6 +2598,29 @@ defmodule BarkparkCloud.Registry do
               end
           end
         end)
+    end
+  end
+
+  # The "nothing was revoked, and nothing needed to be" report — the shape
+  # `revoke_barkpark_site_read_tokens/1` returns, for the paths that never call a
+  # box. An EMPTY report and an ALL-`:ok` report are different facts, and the
+  # audit stamp downstream shows which one it got.
+  @empty_site_read_token_report %{ok: [], noop: [], error: []}
+
+  # ssw8 — the UNLOCKED preflight that revokes every site read token before the
+  # transaction opens. It mirrors the locked body's three refusals so a call that
+  # is about to be fenced out (`:conflict` / `:stale_claim`) or that has nothing
+  # to delete never touches a box. Returns the same report shape
+  # `revoke_barkpark_site_read_tokens/1` returns, so the audit stamp downstream
+  # takes one argument either way.
+  defp preflight_revoke_site_read_tokens(id, claim_token) do
+    with %ProvisionJob{} = job <- Repo.get(ProvisionJob, id),
+         false <- job.status == "failed",
+         false <- stale_claim?(job, claim_token),
+         %Barkpark{} = bp <- Repo.get(Barkpark, job.barkpark_id) do
+      revoke_barkpark_site_read_tokens(bp)
+    else
+      _ -> @empty_site_read_token_report
     end
   end
 
@@ -2586,7 +2647,7 @@ defmodule BarkparkCloud.Registry do
   # A rollback here is not theoretical politeness: a refused audit insert MUST
   # refuse the delete, or the register is back to recording fewer removals than
   # happened.
-  defp record_deprovision_audit(%Barkpark{} = bp, site_slugs) do
+  defp record_deprovision_audit(%Barkpark{} = bp, site_slugs, read_tokens) do
     BarkparkCloud.Accounts.record_audit(%{
       team_id: bp.team_id,
       actor_user_id: nil,
@@ -2597,7 +2658,16 @@ defmodule BarkparkCloud.Registry do
         "name" => bp.name,
         "host" => bp.host,
         "via" => "deprovision",
-        "sites" => site_slugs
+        "sites" => site_slugs,
+        # ssw8: what happened to each site's public-read credential on the way
+        # out. An `"error"` entry is a credential we could NOT confirm dead —
+        # named here because after this transaction nothing else in this database
+        # can name it. `mix barkpark_cloud.site_read_tokens` is the sweep.
+        "read_tokens" => %{
+          "ok" => read_tokens.ok,
+          "noop" => read_tokens.noop,
+          "error" => read_tokens.error
+        }
       }
     })
   end
@@ -3023,15 +3093,6 @@ defmodule BarkparkCloud.Registry do
   def max_deploy_claims do
     Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
   end
-
-  @doc """
-  How many `deployment_failed` alerts one reaper sweep may send. See
-  `@reap_alert_cap` for why a cap exists at all. Public so the suppression
-  branch can be DRIVEN by a test rather than asserted in a comment — a cap that
-  no fixture crosses is a person-facing suppression nothing measures.
-  """
-  @spec reap_alert_cap() :: pos_integer()
-  def reap_alert_cap, do: @reap_alert_cap
 
   ## Warm pool (dwb-10)
 
@@ -5856,6 +5917,362 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Revoke the public-read content token of EVERY site on `barkpark` — the
+  INSTANCE-level counterpart of `revoke_site_read_token/1`, and the reason it
+  exists is that nothing else ever runs.
+
+  `sites.barkpark_id` is `references(:barkparks, on_delete: :delete_all)`
+  (migration `20260627150000_create_sites.exs`), so removing an instance deletes
+  its sites IN THE DATABASE — `delete_site/1`, and with it the per-site revoke
+  ssw8 installed there, never executes. Both Barkpark-row deletes in this module
+  (`delete_barkpark/1` and `succeed_deprovision_job/2`) call this FIRST, while the
+  site rows still name what to revoke.
+
+  Best-effort per site, exactly like `revoke_site_read_token/1`: a box that is
+  down never blocks the delete. It is not silent either — a non-empty `:error`
+  list is logged as a warning naming the box slug and each `site-read-<slug>`
+  label that may still be live, which is the pointer the deleted rows can no
+  longer hold. `mix barkpark_cloud.site_read_tokens` is the sweep that finds them
+  afterwards.
+
+  Returns `%{ok: [slug], noop: [slug], error: [slug]}` — the per-site outcomes of
+  `revoke_site_read_token/1`, bucketed. `succeed_deprovision_job/2` stamps this
+  onto the `barkpark.deleted` audit event so the leftover is named on a durable
+  trail, not only in a log line.
+  """
+  @spec revoke_barkpark_site_read_tokens(Barkpark.t()) :: %{
+          ok: [String.t()],
+          noop: [String.t()],
+          error: [String.t()]
+        }
+  def revoke_barkpark_site_read_tokens(%Barkpark{} = barkpark) do
+    report =
+      barkpark
+      |> list_sites()
+      |> Enum.reduce(@empty_site_read_token_report, fn site, acc ->
+        Map.update!(acc, revoke_site_read_token(site), &[site.slug | &1])
+      end)
+      |> Map.new(fn {outcome, slugs} -> {outcome, Enum.reverse(slugs)} end)
+
+    if report.error != [] do
+      labels = Enum.map_join(report.error, ", ", &site_read_token_label/1)
+
+      Logger.warning(
+        "instance delete on #{barkpark.slug}: #{length(report.error)} site read token(s) " <>
+          "could not be confirmed revoked — #{labels} may still be live on the box, and the " <>
+          "site rows that named them are being deleted. Sweep with " <>
+          "`mix barkpark_cloud.site_read_tokens`."
+      )
+    end
+
+    report
+  end
+
+  ## ── The site read token's CEILING (task-b3e3ec0f433b217d) ─────────────────
+  ##
+  ## The block above gave the credential a DEATH (revoke on delete). It still had
+  ## no LIFETIME: a token minted at site creation and never touched again stayed
+  ## valid forever. Measured on guerrilla 2026-09-01: 18 live `site-read-*` rows,
+  ## `expires_at` set on ZERO of them, `revoked_at` set on ZERO of them in the
+  ## whole history of the fleet. Revoke-on-delete stops the population GROWING
+  ## through the delete door; it does not make any individual credential age out.
+  ##
+  ## WHY THE CEILING IS ENFORCED HERE AND NOT BY AN `expires_at` ON THE MINT.
+  ## The obvious fix — thread `:expires_at` into `mint_public_read_token/5` — does
+  ## not work today and would be WORSE than no ceiling at all. The credential is
+  ## a row in the INSTANCE's `api_tokens` table, minted over
+  ## `POST /w/:ws/p/:proj/v1/tokens`. That column exists
+  ## (`Barkpark.Auth.ApiToken`, `field :expires_at`) and the box's verify path
+  ## honours it — but `BarkparkWeb.TokenController.create/2` reads exactly three
+  ## params (`label`, `permissions`, `dataset`) and `Barkpark.Auth.create_token/5`
+  ## takes no expiry argument, so an `expires_at` sent in that body is SILENTLY
+  ## DROPPED. The control plane would then believe in a ceiling nothing enforces:
+  ## a false green of precisely the kind ssw8 exists to remove. Opening that door
+  ## is an `api/` change, filed separately; until it lands, the ceiling is a
+  ## control-plane POLICY over the box's own `inserted_at`, which the box already
+  ## returns on `GET /w/:ws/p/:proj/v1/tokens`.
+  ##
+  ## WHY A ROTATION AND NOT AN EXPIRY, EVEN AFTER THAT DOOR OPENS. A hard
+  ## box-side expiry on this credential makes a LIVE SITE GO DARK: the site build
+  ## is the only consumer, it runs unattended, and a rejected read token surfaces
+  ## downstream as `@site_read_token_rejected` — a broken build, not an alert.
+  ## So the ceiling is expressed as "past this age the credential is ROTATED",
+  ## and `rotate_site_read_token/1` mints the replacement BEFORE it revokes the
+  ## incumbent. There is no instant at which the site holds no live credential.
+
+  # ONE named default, and the only one. 90 days.
+  #
+  # Not 30 (`Accounts.UserToken.default_validity_days/0`, the HUMAN session/PAT
+  # horizon): this is an unattended machine credential, and a 30-day ceiling
+  # means ~12 rotations a year on a path with no human in it — every one of them
+  # a chance for the rotate to half-land and leave an orphan behind.
+  #
+  # Not 365: a year is how long a leaked read grant into a live published dataset
+  # would keep working, and the census that would catch it runs against a
+  # population where nothing has ever moved.
+  #
+  # 90 days is 3x the human horizon, so the sweep sees a token cross the line
+  # long before anything is urgent, and it is short enough that the whole live
+  # population turns over four times a year — which is what actually proves the
+  # rotate path still works.
+  @site_read_token_max_age_days 90
+
+  @doc """
+  The ONE site-read-token lifetime ceiling, in days. Read it; never re-type the
+  number — the census, the rotate decision and the operator sweep must all mean
+  the same 90 days or the tool reports a line the policy does not draw.
+  """
+  @spec site_read_token_max_age_days() :: pos_integer()
+  def site_read_token_max_age_days, do: @site_read_token_max_age_days
+
+  @doc """
+  The ceiling for one box token row, as `{expires_at, source}`.
+
+    * `{%DateTime{}, :box}`     — the BOX carries its own `expires_at`. Always
+      wins: it is the one the box's verify path actually enforces.
+    * `{%DateTime{}, :derived}` — no box expiry, but a readable `inserted_at`;
+      the ceiling is `inserted_at + #{@site_read_token_max_age_days} days`, the
+      control-plane policy above.
+    * `{nil, :unknown}`         — neither stamp is readable, so this credential
+      has NO ceiling anyone can compute. Reported as `unknown`, never as
+      "fine" — the same law the orphan sweep applies to an unreadable box.
+  """
+  @spec site_read_token_expires_at(map()) :: {DateTime.t() | nil, :box | :derived | :unknown}
+  def site_read_token_expires_at(token) when is_map(token) do
+    case parse_stamp(Map.get(token, "expires_at")) do
+      %DateTime{} = at ->
+        {at, :box}
+
+      nil ->
+        case parse_stamp(Map.get(token, "inserted_at")) do
+          %DateTime{} = at ->
+            {DateTime.add(at, @site_read_token_max_age_days * 24 * 3600, :second), :derived}
+
+          nil ->
+            {nil, :unknown}
+        end
+    end
+  end
+
+  # A box stamp is JSON: an ISO8601 string, or already a DateTime in a test
+  # fixture. Anything else (nil, a number, a malformed string) is NOT a date and
+  # must not silently become one.
+  defp parse_stamp(%DateTime{} = at), do: at
+
+  defp parse_stamp(stamp) when is_binary(stamp) do
+    case DateTime.from_iso8601(stamp) do
+      {:ok, at, _offset} -> at
+      _ -> nil
+    end
+  end
+
+  defp parse_stamp(_), do: nil
+
+  @doc """
+  Every LIVE `site-read-*` credential on `barkpark`, each with the ceiling above
+  and whether it has crossed it — the READ half of this row, and the superset of
+  `orphan_site_read_tokens/1` (an orphan is one census row with `orphan?: true`).
+
+  Returns `{:ok, rows}` where each row is
+
+      %{barkpark_slug:, workspace:, project:, id:, label:, site_slug:,
+        inserted_at:, last_used_at:, expires_at:, expiry_source:, expired?:,
+        orphan?:}
+
+  or `{:error, :no_scope}` / `{:error, :unreadable}` on exactly the terms
+  `orphan_site_read_tokens/1` states — "I could not look" is not "there are
+  none". `expired?` is FALSE when `expiry_source` is `:unknown`: an unknown
+  ceiling is not a crossed one, and the row carries the `:unknown` so the
+  operator surface can say so instead of implying a clean bill of health.
+
+  READ-ONLY. It rotates and revokes nothing.
+  """
+  @spec site_read_token_census(Barkpark.t()) ::
+          {:ok, [map()]} | {:error, :no_scope | :unreadable}
+  def site_read_token_census(%Barkpark{} = barkpark) do
+    site_read_token_scan(barkpark, fn barkpark, ws, proj, token, live_slugs ->
+      site_read_census_row(barkpark, ws, proj, token, live_slugs, DateTime.utc_now())
+    end)
+  end
+
+  # One box token row -> a census row, or nil when it is not a LIVE site-read
+  # credential. Three independent rejections, each of which has to be checked or
+  # the census reports a row that is fine: it is already revoked; it is not a
+  # site-read label at all; its id or label is not a readable string. Whether its
+  # slug still names a live site is NOT a rejection here — it is the `orphan?`
+  # flag, and `orphan_site_read_tokens/1` is this census filtered on it.
+  defp site_read_census_row(%Barkpark{} = barkpark, ws, proj, token, live_slugs, now)
+       when is_map(token) do
+    id = Map.get(token, "id")
+    label = Map.get(token, "label")
+
+    with true <- is_binary(id) and id != "",
+         true <- is_binary(label),
+         true <- is_nil(Map.get(token, "revoked_at")),
+         {:ok, slug} <- site_read_slug(label) do
+      {expires_at, source} = site_read_token_expires_at(token)
+
+      %{
+        barkpark_slug: barkpark.slug,
+        workspace: ws,
+        project: proj,
+        id: id,
+        label: label,
+        site_slug: slug,
+        inserted_at: Map.get(token, "inserted_at"),
+        last_used_at: Map.get(token, "last_used_at"),
+        expires_at: expires_at,
+        expiry_source: source,
+        expired?: not is_nil(expires_at) and DateTime.compare(now, expires_at) != :lt,
+        orphan?: not MapSet.member?(live_slugs, slug)
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp site_read_census_row(_bp, _ws, _proj, _token, _live_slugs, _now), do: nil
+
+  @doc """
+  Rotate `site`'s public-read content token: mint a replacement, persist it, then
+  revoke the incumbent — IN THAT ORDER, which is the whole point.
+
+  THE SITE NEVER GOES DARK. The build is the only consumer of this credential and
+  it runs unattended; a rejected token reaches a human as a broken build
+  (`@site_read_token_rejected`), not an alert. So there is no instant in this
+  function at which the site row names a credential the box will refuse:
+
+    1. read the incumbent's box-side id (an `:unknown` inventory aborts BEFORE
+       anything is minted — a rotate that cannot see what it replaces would
+       simply add a second live credential and call it success);
+    2. mint the replacement under the SAME `site_read_token_label/1` (both are
+       live for the width of steps 3-4 — deliberate, and why step 4 revokes by
+       ID, not by label);
+    3. persist it onto the site row through the NARROW
+       `Site.read_token_changeset/2` — if this fails the NEW token is revoked and
+       the site keeps its old, still-live one;
+    4. revoke the incumbent by the id from step 1.
+
+  Returns `{:ok, site, :ok}` on a full rotation, `{:ok, site, :error}` when the
+  new credential is live and persisted but the OLD one could not be confirmed
+  dead (the site works; an orphan is now on the box and
+  `mix barkpark_cloud.site_read_tokens` is how it is found), `{:ok, site, :none}`
+  when there was no incumbent to revoke, or `{:error, reason}` with nothing
+  changed.
+  """
+  @spec rotate_site_read_token(Site.t()) ::
+          {:ok, Site.t(), :ok | :error | :none}
+          | {:error, :noop | :unreadable | {:mint_failed, term()} | Ecto.Changeset.t()}
+  def rotate_site_read_token(%Site{} = site) do
+    with ws when is_binary(ws) and ws != "" <- site.bootstrap_workspace,
+         proj when is_binary(proj) and proj != "" <- site.bootstrap_project,
+         ds when is_binary(ds) and ds != "" <- site.bootstrap_dataset,
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      label = site_read_token_label(site)
+
+      case find_workspace_token(barkpark, ws, proj, label) do
+        :unknown -> {:error, :unreadable}
+        incumbent -> rotate_with_incumbent(barkpark, site, ws, proj, ds, label, incumbent)
+      end
+    else
+      _ -> {:error, :noop}
+    end
+  end
+
+  defp rotate_with_incumbent(barkpark, site, ws, proj, ds, label, incumbent) do
+    case mint_public_read_token(barkpark, ws, proj, ds, label) do
+      {:ok, plaintext} ->
+        changeset =
+          Site.read_token_changeset(site, %{read_token_encrypted: Vault.encrypt(plaintext)})
+
+        case Repo.update(changeset) do
+          {:ok, rotated} ->
+            {:ok, rotated, revoke_rotated_incumbent(barkpark, ws, proj, label, incumbent)}
+
+          {:error, changeset} ->
+            # The site still names its OLD, still-live credential, so the only
+            # thing that must not survive is the replacement we just minted.
+            _ = revoke_freshly_minted(barkpark, ws, proj, label, incumbent)
+            {:error, changeset}
+        end
+
+      {:error, reason} ->
+        {:error, {:mint_failed, reason}}
+    end
+  end
+
+  defp revoke_rotated_incumbent(_barkpark, _ws, _proj, _label, :absent), do: :none
+
+  defp revoke_rotated_incumbent(barkpark, ws, proj, label, {:ok, id}),
+    do: revoke_workspace_token(barkpark, ws, proj, id, label)
+
+  # Undo a mint whose persist failed. Re-reading the inventory by label is the
+  # only way to name the row we just created (the mint returns the plaintext, not
+  # an id) — and the incumbent's id is EXCLUDED so a failed rollback can never
+  # kill the credential the site is still using.
+  defp revoke_freshly_minted(barkpark, ws, proj, label, incumbent) do
+    keep = with {:ok, id} <- incumbent, do: id
+
+    case list_workspace_tokens(barkpark, ws, proj) do
+      {:ok, tokens} ->
+        tokens
+        |> Enum.filter(fn t ->
+          is_map(t) and Map.get(t, "label") == label and is_nil(Map.get(t, "revoked_at")) and
+            Map.get(t, "id") != keep
+        end)
+        |> Enum.each(&revoke_workspace_token(barkpark, ws, proj, Map.get(&1, "id"), label))
+
+      :unknown ->
+        Logger.warning(
+          "site read token rotate on #{barkpark.slug}: the replacement for #{label} was minted " <>
+            "but neither persisted nor revoked — it may be live on the box. Sweep with " <>
+            "`mix barkpark_cloud.site_read_tokens`."
+        )
+    end
+  end
+
+  # The scope walk shared by `orphan_site_read_tokens/1` and
+  # `site_read_token_census/1`. ONE definition of "which (workspace, project)
+  # pairs does this box serve content under" and ONE definition of unreadable, so
+  # the census and the orphan sweep can never disagree about what they looked at.
+  defp site_read_token_scan(%Barkpark{} = barkpark, row_fun) do
+    sites = list_sites(barkpark)
+    live_slugs = MapSet.new(sites, & &1.slug)
+
+    scopes =
+      [{barkpark.bootstrap_workspace, barkpark.bootstrap_project}]
+      |> Enum.concat(Enum.map(sites, &{&1.bootstrap_workspace, &1.bootstrap_project}))
+      |> Enum.filter(fn {ws, proj} ->
+        is_binary(ws) and ws != "" and is_binary(proj) and proj != ""
+      end)
+      |> Enum.uniq()
+
+    case scopes do
+      [] ->
+        {:error, :no_scope}
+
+      scopes ->
+        results =
+          Enum.map(scopes, fn {ws, proj} ->
+            {ws, proj, list_workspace_tokens(barkpark, ws, proj)}
+          end)
+
+        if Enum.all?(results, fn {_ws, _proj, r} -> r == :unknown end) do
+          {:error, :unreadable}
+        else
+          rows =
+            for {ws, proj, {:ok, tokens}} <- results,
+                token <- tokens,
+                row = row_fun.(barkpark, ws, proj, token, live_slugs),
+                row != nil,
+                do: row
+
+          {:ok, rows}
+        end
+    end
+  end
+
+  @doc """
   Revoke ONE workspace token on `barkpark` by its box-side id — the operator
   action behind the orphan sweep below. `:ok` only on a 2xx from the box.
 
@@ -5919,72 +6336,11 @@ defmodule BarkparkCloud.Registry do
   @spec orphan_site_read_tokens(Barkpark.t()) ::
           {:ok, [map()]} | {:error, :no_scope | :unreadable}
   def orphan_site_read_tokens(%Barkpark{} = barkpark) do
-    sites = list_sites(barkpark)
-    live_slugs = MapSet.new(sites, & &1.slug)
-
-    scopes =
-      [{barkpark.bootstrap_workspace, barkpark.bootstrap_project}]
-      |> Enum.concat(Enum.map(sites, &{&1.bootstrap_workspace, &1.bootstrap_project}))
-      |> Enum.filter(fn {ws, proj} ->
-        is_binary(ws) and ws != "" and is_binary(proj) and proj != ""
-      end)
-      |> Enum.uniq()
-
-    case scopes do
-      [] ->
-        {:error, :no_scope}
-
-      scopes ->
-        results =
-          Enum.map(scopes, fn {ws, proj} ->
-            {ws, proj, list_workspace_tokens(barkpark, ws, proj)}
-          end)
-
-        if Enum.all?(results, fn {_ws, _proj, r} -> r == :unknown end) do
-          {:error, :unreadable}
-        else
-          orphans =
-            for {ws, proj, {:ok, tokens}} <- results,
-                token <- tokens,
-                orphan = site_read_orphan(barkpark, ws, proj, token, live_slugs),
-                orphan != nil,
-                do: orphan
-
-          {:ok, orphans}
-        end
+    case site_read_token_census(barkpark) do
+      {:ok, rows} -> {:ok, Enum.filter(rows, & &1.orphan?)}
+      {:error, _reason} = error -> error
     end
   end
-
-  # One box token row -> an orphan record, or nil when it is not one. Three
-  # independent reasons a row is NOT an orphan, each of which has to be checked
-  # or the sweep reports a credential that is fine (and a human revokes it): it
-  # is already revoked; it is not a site-read label at all; its slug names a site
-  # that still exists.
-  defp site_read_orphan(%Barkpark{} = barkpark, ws, proj, token, live_slugs) when is_map(token) do
-    id = Map.get(token, "id")
-    label = Map.get(token, "label")
-
-    with true <- is_binary(id) and id != "",
-         true <- is_binary(label),
-         true <- is_nil(Map.get(token, "revoked_at")),
-         {:ok, slug} <- site_read_slug(label),
-         false <- MapSet.member?(live_slugs, slug) do
-      %{
-        barkpark_slug: barkpark.slug,
-        workspace: ws,
-        project: proj,
-        id: id,
-        label: label,
-        site_slug: slug,
-        inserted_at: Map.get(token, "inserted_at"),
-        last_used_at: Map.get(token, "last_used_at")
-      }
-    else
-      _ -> nil
-    end
-  end
-
-  defp site_read_orphan(_barkpark, _ws, _proj, _token, _live_slugs), do: nil
 
   # The INVERSE of `site_read_token_label/1`. Anchored at the front and requiring
   # a non-empty remainder, so a label that merely CONTAINS the prefix is not read
@@ -6404,17 +6760,47 @@ defmodule BarkparkCloud.Registry do
   constraint is the atomic backstop for a custom_host↔custom_host race
   (translated to the same `:taken`).
 
-  Returns `{:ok, %Barkpark{}}`, `{:error, :taken}`, or a validation
-  `{:error, %Ecto.Changeset{}}` for a malformed domain.
+  RE-ATTACH IS REFUSED, not overwritten
+  (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`).
+  A row that already carries a `custom_host` and is handed a DIFFERENT one gets
+  `{:error, {:already_attached, existing}}` before anything is written. Driven
+  2026-09-03 on pre-fix main: `POST .../domain host-a` → 202, then
+  `POST .../domain host-b` → 202, row flips to `host-b`, and
+  `domain_registered?("host-a")` goes `true → false` with `/v1/tls/ask` for
+  host-a flipping `200 → 404`. The A record the attach worker already published
+  for host-a survives that flip on a LIVE, still-billed box, and the control
+  plane no longer holds the host that would let anything find it again — an
+  orphan with no owner. There is NO detach verb on this surface to sequence
+  instead (`grep -rn detach_domain cloud/` is empty; `DELETE
+  /v1/sites/:id/domains` frees a SITE domain, a different surface), so the
+  honest fix is the refusal: it cannot strand a record, and it never has to
+  guess whether an unwritten teardown ran.
+
+  Re-attaching the SAME host is still `{:ok, _}` — that is the documented
+  recovery path after a failed attach job (`fail_attach_domain_job/3`), and it
+  strands nothing because there is no previous record to lose. Comparison is on
+  the CHANGESET-NORMALIZED host, so `" Host-A.Barkpark.Cloud. "` is recognised
+  as the host already on the row.
+
+  Returns `{:ok, %Barkpark{}}`, `{:error, {:already_attached, existing_host}}`,
+  `{:error, :taken}`, or a validation `{:error, %Ecto.Changeset{}}` for a
+  malformed domain.
   """
   @spec set_custom_host(Barkpark.t(), term()) ::
-          {:ok, Barkpark.t()} | {:error, :taken | Ecto.Changeset.t()}
+          {:ok, Barkpark.t()}
+          | {:error, :taken | {:already_attached, String.t()} | Ecto.Changeset.t()}
   def set_custom_host(%Barkpark{} = barkpark, domain) do
     changeset = Barkpark.custom_host_changeset(barkpark, %{custom_host: domain})
 
     cond do
       not changeset.valid? ->
         {:error, %{changeset | action: :update}}
+
+      # The re-attach gate. Ordered AFTER validation (a malformed domain is a
+      # syntax verdict whatever the row holds) and BEFORE the taken walk and
+      # the write, so no re-attach reaches `Repo.update/1`.
+      reattach_of_different_host?(barkpark, changeset) ->
+        {:error, {:already_attached, barkpark.custom_host}}
 
       custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark) ->
         {:error, :taken}
@@ -6423,6 +6809,17 @@ defmodule BarkparkCloud.Registry do
         changeset |> Repo.update() |> translate_custom_host_conflict()
     end
   end
+
+  # Does this write REPLACE a custom_host the row already holds? Both sides are
+  # normalized — the stored value by the changeset that wrote it, the incoming
+  # one by the changeset above — so the same host in a different spelling is a
+  # re-attach of ITSELF (allowed), not a replacement.
+  defp reattach_of_different_host?(%Barkpark{custom_host: existing}, changeset)
+       when is_binary(existing) and existing != "" do
+    Ecto.Changeset.fetch_field!(changeset, :custom_host) != existing
+  end
+
+  defp reattach_of_different_host?(%Barkpark{}, _changeset), do: false
 
   # Is `norm` (already normalized by the changeset) claimed anywhere else on
   # our boxes? Four surfaces, fail-closed OR: a Site's domains array, ANOTHER
@@ -6564,15 +6961,18 @@ defmodule BarkparkCloud.Registry do
 
   `self_id` (the /2 head; `/1` passes `nil` and excludes nobody) drops the
   asking row from the walk, so a row may attach the host it already answers on.
-  Two things this walk deliberately does NOT do, both pre-existing and owned
-  elsewhere: it adds no `custom_host IS NULL` gate, so a re-attach still
-  overwrites an existing `custom_host` and orphans that host's A record — the
-  class-level seam owned by
-  `cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`;
-  and a self-attach still runs the real persist-and-enqueue path
+  One thing this walk deliberately does NOT do, pre-existing and owned
+  elsewhere: a self-attach still runs the real persist-and-enqueue path
   (`persist_and_enqueue_domain`, `web/router.ex`), so it enqueues an
   attach_domain job and a DNS upsert — reasoned idempotent, not driven by a test
   here.
+
+  The re-attach orphan this note used to disclaim
+  (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`)
+  is CLOSED, and not here: `set_custom_host/2` refuses a write that would
+  replace a `custom_host` the row already holds
+  (`{:error, {:already_attached, existing}}`), so this walk never sees the
+  second host at all.
   """
   @spec provisioning_fqdn_claim(String.t()) :: :free | {:held, atom(), String.t()}
   def provisioning_fqdn_claim(host) when is_binary(host), do: provisioning_fqdn_claim(host, nil)
@@ -7997,7 +8397,8 @@ defmodule BarkparkCloud.Registry do
         {:error, :not_found}
 
       _uuid ->
-        # notifications (wave 28 S6): the dispatch is POST-transaction on purpose.
+        # notifications (wave 28 S6, extended to the success terminal by
+        # cch-w30-bl): the dispatch is POST-transaction on purpose.
         # `do_transition_deployment_fenced/4` runs the whole write inside
         # `Repo.transaction`, so a dispatch placed inside would email BEFORE
         # commit and phantom-email whenever a later clause rolls back. It is also
@@ -8005,9 +8406,14 @@ defmodule BarkparkCloud.Registry do
         # re-drives this same writer on every stage report and
         # `status_for_stage/2` carries "failed" forward unchanged, so failed →
         # failed rewrites are routine and must not re-alert.
+        #
+        # `dispatch_deployment_terminal/2` is SHARED with
+        # `transition_deployment_with_site_update/5` — the other writer that can
+        # land a terminal status — so neither terminal has a producer the other
+        # path is missing.
         case do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs) do
           {:ok, {prior_status, %Deployment{} = updated}} ->
-            maybe_dispatch_deployment_failed(prior_status, updated)
+            dispatch_deployment_terminal(prior_status, updated)
             {:ok, updated}
 
           {:error, reason} ->
@@ -8083,13 +8489,27 @@ defmodule BarkparkCloud.Registry do
         {:error, :not_found}
 
       _uuid ->
-        do_transition_deployment_with_site_update(
-          deployment_id,
-          worker_id,
-          observed_epoch,
-          deployment_attrs,
-          site_attrs
-        )
+        # cch-w30-bl: THE SUCCESS TERMINAL'S PRODUCER LIVES HERE, not only on the
+        # fenced writer beside it. `Sites.Deploy.settle_live/2` drives every
+        # static site build — the dominant path — through THIS function, and it
+        # had no post-transaction dispatch at all, so a `deployment_succeeded`
+        # producer bolted onto `transition_deployment_fenced/4` alone would have
+        # missed every one of them. Same post-commit discipline, same edge
+        # trigger, same helper.
+        case do_transition_deployment_with_site_update(
+               deployment_id,
+               worker_id,
+               observed_epoch,
+               deployment_attrs,
+               site_attrs
+             ) do
+          {:ok, {prior_status, %Deployment{} = updated}} ->
+            dispatch_deployment_terminal(prior_status, updated)
+            {:ok, updated}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -8124,7 +8544,10 @@ defmodule BarkparkCloud.Registry do
                    d |> Deployment.transition_changeset(deployment_attrs) |> Repo.update(),
                  {:ok, _site} <-
                    d.site |> Site.runtime_changeset(site_attrs) |> Repo.update() do
-              updated
+              # The PRIOR status rides out with the row, exactly as the simple
+              # fenced writer does it, so the public wrapper can edge-trigger.
+              # Unwrapped there — callers still see `{:ok, %Deployment{}}`.
+              {d.status, updated}
             else
               {:error, cs} -> Repo.rollback(cs)
             end
@@ -8574,6 +8997,66 @@ defmodule BarkparkCloud.Registry do
 
   defp failure_detail(reason), do: reason
 
+  # cch-w30-bl — THE ONE POST-COMMIT DISPATCH BOTH FENCED WRITERS CALL.
+  #
+  # A deployment reaches a TERMINAL status through two different writers:
+  # `transition_deployment_fenced/4` (the builder/agent route, and the route the
+  # API picks when `make_current` is false) and
+  # `transition_deployment_with_site_update/5` (the atomic live-pointer flip that
+  # `Sites.Deploy.settle_live/2` drives on every static site build). Wave 28's
+  # `deployment_failed` producer sat on the first one only, which was survivable
+  # because a failure never flips the live pointer and therefore never rides the
+  # second writer. The SUCCESS terminal is the mirror image: it rides the second
+  # writer almost exclusively. One helper, both call sites, so a future terminal
+  # cannot be added to one path and silently missed on the other.
+  #
+  # Both arms are EDGE-TRIGGERED on the PRIOR status, and that is not free:
+  # `Deployment.legal_transition?/2` is `to == from or to in @transitions[from]`,
+  # so a live → live rewrite is ACCEPTED. Without the guard a retried or
+  # duplicated terminal report re-alerts every time it lands.
+  defp dispatch_deployment_terminal(prior_status, %Deployment{} = updated) do
+    maybe_dispatch_deployment_failed(prior_status, updated)
+    maybe_dispatch_deployment_succeeded(prior_status, updated)
+    :ok
+  end
+
+  # cch-w30-bl: fire `:deployment_succeeded` only on the EDGE into `live`.
+  #
+  # THE TERMINAL IS "live", NOT "succeeded". `Deployment`'s status vocabulary is
+  # `queued building pushing live failed cancelled` — the event is named for what
+  # a person reads on a toggle, the guard is written against what the column
+  # holds, and conflating the two is how this producer stays unwritten.
+  defp maybe_dispatch_deployment_succeeded("live", _updated), do: :ok
+
+  defp maybe_dispatch_deployment_succeeded(_prior, %Deployment{status: "live"} = updated),
+    do: dispatch_deployment_succeeded(updated)
+
+  defp maybe_dispatch_deployment_succeeded(_prior, _updated), do: :ok
+
+  # Site-keyed for the same reason the failure is: a Deployment only
+  # `belongs_to :site`, and `Notifications.dispatch_site_event/3` resolves the
+  # team through the site, names the site in the alert, and never raises.
+  #
+  # THE PAYLOAD IS IDENTITY AND NOTHING ELSE. It deliberately does NOT carry the
+  # row's `detail` ("live at <url>"): only `Sites.Deploy.settle_live/2` writes
+  # that sentence, so on the agent route (`PUT` with `make_current: true`) the
+  # column still holds whatever the PUSHING stage left behind, and shipping it
+  # would put a stale in-flight note under a success headline. No duration
+  # either — `deployments` has no started_at/finished_at to subtract, the same
+  # ruling `deployment_identity/1` already documents for the failure alert.
+  #
+  # ONE LINE, AND THE LINE IS LOAD-BEARING. `__app.test.mjs`'s census matches its
+  # four producer idioms per SOURCE LINE, so a `dispatch_site_event(` wrapped
+  # across lines by the formatter is INVISIBLE to it — the guard would report
+  # this event as an orphaned console offer while the producer sat right here.
+  # Measured, not assumed: the multi-line form reds arm (a) with
+  # `['deployment_succeeded']`. The payload is bound first to keep the call
+  # inside the formatter's line budget.
+  defp dispatch_deployment_succeeded(%Deployment{} = deployment) do
+    payload = deployment_identity(deployment)
+    Notifications.dispatch_site_event(deployment.site_id, :deployment_succeeded, payload)
+  end
+
   # notifications (wave 28 S6): fire `:deployment_failed` only on the EDGE into
   # `failed`. `Sites.Deploy.record_stage/2` re-drives the fenced writer on every
   # stage report and `status_for_stage/2` carries "failed" forward unchanged, so
@@ -8606,10 +9089,22 @@ defmodule BarkparkCloud.Registry do
   # sites carry the full identity, the reaper carries the id its `select:`
   # already named. Nothing is synthesized to fill a gap.
   defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
-    payload = Map.put(identity, :detail, failure_reason || "")
-
-    Notifications.dispatch_site_event(site_id, :deployment_failed, payload)
+    Notifications.dispatch_site_event(
+      site_id,
+      :deployment_failed,
+      deployment_failed_payload(failure_reason, identity)
+    )
   end
+
+  # ONE payload shape for both producers. The synchronous sites hand this map
+  # straight to `dispatch_site_event/3`; the reaper puts it in an Oban arg, where
+  # JSON turns its keys into strings — which is why every reader of it
+  # (`Notifications.Render.deployment_identity/1`, `EventEmail`'s `name/1` and
+  # `detail/1`) reads each key under both an atom and a string. Building it in
+  # two places is how the inbox and the queue would start disagreeing about what
+  # a failed deployment is called.
+  defp deployment_failed_payload(failure_reason, identity) when is_map(identity),
+    do: Map.put(identity, :detail, failure_reason || "")
 
   # The deployment's own identity, and ONLY facts that are columns.
   #
@@ -8648,54 +9143,50 @@ defmodule BarkparkCloud.Registry do
   defp put_present(identity, _key, value) when value in [nil, ""], do: identity
   defp put_present(identity, key, value), do: Map.put(identity, key, value)
 
-  # The capped fan-out described at `@reap_alert_cap`.
+  # THE UNCAPPED FAN-OUT. There used to be a cap here (25 deployments per sweep,
+  # the rest logged and written as `suppressed` withhold rows) for exactly one
+  # reason: `Notifications.dispatch_event/3`'s email leg is SYNCHRONOUS, so a
+  # cluster-wide incident became hundreds of blocking `Mailer.deliver` calls
+  # inside one minute-ly cron tick.
+  #
+  # The send is no longer on this thread. Each reaped deployment becomes one
+  # `DeploymentAlertWorker` job and `Oban.insert_all/1` writes the whole sweep's
+  # jobs in ONE statement, so the tick's cost is flat in the number of failures
+  # and the mail spends the `default` queue's concurrency instead. With the
+  # reason for the ceiling gone the ceiling is gone with it — every owning team
+  # is alerted, including the 26th.
+  #
+  # `Withhold` keeps its `:reap_alert_cap` reason and label: rows written under
+  # the old policy are still on live delivery logs and must keep rendering.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
 
   defp dispatch_reaped_deployment_alerts(alerts) do
-    {send_now, dropped} = Enum.split(alerts, @reap_alert_cap)
-
-    Enum.each(send_now, fn {site_id, reason, identity} ->
-      dispatch_deployment_failed(site_id, reason, identity)
+    alerts
+    |> Enum.map(fn {site_id, reason, identity} ->
+      DeploymentAlertWorker.new(%{
+        site_id: site_id,
+        payload: deployment_failed_payload(reason, identity)
+      })
     end)
-
-    if dropped != [] do
-      # The Logger line stays — operators read logs during an incident — but it is
-      # no longer the ONLY trace. Wave 32 S2: the cap decided, on the owner's
-      # behalf, that they would not hear about their own failed deployment, and
-      # that decision is now a `suppressed` row on the delivery log they can read.
-      Logger.warning(
-        "reap_stale_deployments: #{length(dropped)} deployment_failed alerts suppressed " <>
-          "(cap #{@reap_alert_cap}/sweep); the rows are terminal in the console"
-      )
-
-      record_withheld_reap_alerts(dropped)
-    end
+    |> Oban.insert_all()
 
     :ok
-  end
+  rescue
+    # An alert must never break the sweep that triggered it — the four bulk
+    # passes have already COMMITTED by the time this runs, and a raise here would
+    # fail the reaper job so Oban re-drove a sweep that can no longer find those
+    # rows (they are terminal now), losing the alerts AND re-running the passes.
+    # Loud, named, and counted: an operator can see exactly how many alerts the
+    # enqueue lost. This is not routed through `Withhold` because a withhold row
+    # is itself a `Repo.insert`, and the branch we are in is the one where
+    # writing to this database just failed.
+    error ->
+      Logger.error(
+        "reap_stale_deployments: failed to enqueue #{length(alerts)} deployment_failed " <>
+          "alerts: #{Exception.message(error)}"
+      )
 
-  # Site → team is OURS to resolve (a Deployment only `belongs_to :site`), so the
-  # hop happens here and `Notifications.Withhold` receives an already-resolved
-  # team_id. One batched lookup, not one per dropped alert — a mass reap is
-  # exactly the moment not to fire N queries. A since-deleted site simply has no
-  # team and drops out of the map.
-  defp record_withheld_reap_alerts(dropped) do
-    site_ids = dropped |> Enum.map(fn {site_id, _reason, _identity} -> site_id end) |> Enum.uniq()
-
-    teams_by_site =
-      from(s in Site, where: s.id in ^site_ids, select: {s.id, s.team_id})
-      |> Repo.all()
-      |> Map.new()
-
-    Enum.each(dropped, fn {site_id, _reason, _identity} ->
-      case Map.get(teams_by_site, site_id) do
-        team_id when is_binary(team_id) ->
-          Withhold.record(team_id, "deployment_failed", :reap_alert_cap)
-
-        _absent ->
-          :ok
-      end
-    end)
+      :ok
   end
 
   # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes

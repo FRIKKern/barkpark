@@ -62,7 +62,40 @@ docker tag cloud-control_plane:latest cloud-control_plane:rollback 2>/dev/null \
 
 git checkout -- . 2>/dev/null || true
 log "git pull"
-git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+# protocol.version=0 IS LOAD-BEARING — do not delete it as cargo cult because you
+# cannot reproduce the failure from a modern box. THE OUTAGE IT ENDS (2026-09-02):
+# every control-plane deploy from ~15:22Z failed here, and barkpark-cp sat 49
+# commits behind (serving a5d8a53d; last good 12:33Z at fe8184d6) while the
+# CONTENT-INSTANCE job of the very same workflow run succeeded every time.
+#
+# THE SIGNATURE, verbatim from six consecutive runs' control-plane job:
+#     fatal: could not read Username for 'https://github.com': No such device or address
+#     fatal: expected flush after ref listing
+#
+# THE MEASUREMENT that names the culprit: barkpark-cp runs git 2.34.1 (Ubuntu
+# 22.04). From THAT box, with THAT remote and THOSE credentials (none — the repo
+# is public and this fetch is anonymous), protocol v2 fails as above while
+# protocol v0 AND v1 both succeed. Guerrilla runs git 2.43 and never failed,
+# which is exactly why the instance job stayed green through all six runs. So the
+# variable is the git version's protocol-v2 implementation, not the network, not
+# the token, and NOT repository visibility — the "could not read Username" line
+# reads like Past Mistake #9 (repo went private) and a sibling reader concluded
+# precisely that; the v0/v1-succeed-from-the-same-box measurement is what
+# separates the two. git 2.34.1's v2 ref-listing parse cannot survive GitHub's
+# current advertisement, and it misreports the parse failure as an auth prompt.
+#
+# v0 rather than v1: both were measured working, and v0 is git's own pre-2.26
+# default — the most-travelled server path there is, and the one value that
+# needs no version negotiation at all. v1 is v0 plus a version handshake that
+# exists mainly to exercise negotiation; it buys nothing here and takes the
+# rarer code path on both ends.
+#
+# The -c rides the pull the same way the hook-path pin above it does; git
+# exports it as GIT_CONFIG_PARAMETERS, so the `git fetch` that `git pull` forks
+# inherits it (measured: the fetch advertises v0, not `version 2`).
+# Remove this pin only once barkpark-cp's git is >= 2.43 AND you have re-run the
+# v2 fetch from the box and watched it succeed.
+git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main || { log "pull failed"; exit 11; }
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
 
@@ -386,9 +419,35 @@ if ! echo "$code" | grep -qE '^(200|301|302)$'; then
   abort_deploy; exit 14
 fi
 
-# ---- Drain, then retire the old slot. Its container is kept stopped for
-# instant manual rollback: flip the Caddyfile port back, reload caddy,
-# `docker start` it.
+# ---- Drain, then retire the old slot. Its container is kept stopped (and its
+# image is held by that stopped container, so no prune below can reclaim it) so
+# a human can roll back in seconds.
+#
+# ROLLBACK RECIPE — RECREATE, DO NOT `docker start` (gr-blk-cp-deploy-rollback-
+# stale-env). This comment used to read "flip the Caddyfile port back, reload
+# caddy, `docker start` it". `docker start` RESUMES an existing container
+# object: it replays the environment BAKED IN at the moment that container was
+# created and recomputes nothing. A slot that predates a cloud/.env change is
+# therefore brought back serving the OLD env — a variable added since (say
+# PLATFORM_ADMIN_EMAILS) is simply absent, silently, with no signal anywhere.
+# The AUTOMATED path never has this problem: :104 exports cloud/.env before
+# build and up, so the compose service config-hash changes when a variable does
+# and `up` RECREATES rather than reuses. The manual path must take the same
+# door. On the box, as root:
+#
+#   cd /opt/barkpark
+#   sed -i "s/localhost:<new port>/localhost:<old port>/g" /etc/caddy/Caddyfile
+#   caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+#   # The rollback image, saved at :59 before the pull. Both slots are
+#   # `image: cloud-control_plane:latest` in cloud/docker-compose.yml, so
+#   # without this retag the recreate would bring back the NEW code.
+#   docker tag cloud-control_plane:rollback cloud-control_plane:latest
+#   set -a; . cloud/.env; set +a          # the same export the deploy uses
+#   docker compose -f cloud/docker-compose.yml --profile blue --profile green \
+#     up -d --force-recreate --no-build control_plane_<old slot>
+#
+# `--force-recreate` is what makes the current cloud/.env reach the container;
+# `--no-build` keeps it a seconds-long operation on the image you just retagged.
 sleep 5
 for c in $(docker ps -q --filter "publish=$ACTIVE_PORT"); do
   log "stopping old slot container on :$ACTIVE_PORT ($c)"; docker stop -t 30 "$c"
@@ -401,7 +460,7 @@ done
 # prunes anything. `docker image prune -a` removes only images NO container
 # references — the new slot's image is held by its RUNNING container and the
 # rollback image is held by the just-stopped old-slot container (kept precisely
-# for instant `docker start` rollback), so both survive every prune by
+# for the recreate-based rollback recipe above), so both survive every prune by
 # construction. Build cache keeps a floor (fast rebuilds) instead of growing
 # forever. Non-fatal on purpose: the flip has already landed and been proven —
 # a prune hiccup must not turn a good deploy red.
@@ -448,13 +507,54 @@ else
 fi
 
 # Provisioner worker (cross-built by the runner; Go absent on this host).
+# The restart is a GATE, not a log line (dr-w20-bl-provisioner-restart-...).
+# This script is `set -uo pipefail` with NO -e, so `systemctl restart` used to
+# run with no `||` and no rc test, and the entire verdict was
+# `log "provisioner: $(systemctl is-active ...)"` — which PRINTS the word
+# `failed` and then falls through to `log DONE` and exit 0. Provisioning IS the
+# control plane's product: a dead worker is the "/new froze at Starting"
+# incident the control-url pin above was written to prevent, re-entering
+# through the door beside it. The outer deploy.yml smoke cannot see it either —
+# it only curls `/`.
+#
+# WHY THE VERDICT MOVES INSTEAD OF ONLY REPORTING (charter D327): D327's ruling
+# on the static engine's `|| true` is that a step whose result is discarded
+# must move the verdict, because a probe nobody acts on is indistinguishable
+# from no probe at all. So a provisioner that will not come back RED-s the run.
+#
+# WHY IT DOES NOT ROLL THE DEPLOY BACK: this block runs AFTER the flip has
+# landed, been publicly health-gated and the old slot retired. The web app is
+# proven live on the new slot; unwinding that here would trade a broken worker
+# for an outage. So the repair is scoped to the WORKER — restore the previous
+# binary and restart it, so the box is left running the last provisioner known
+# to boot — and then the script exits non-zero so CD goes red and a human
+# looks. The deploy of the app stands; the RUN does not claim success.
+PROV_INSTALL="${BARKPARK_PROVISIONER_BIN:-/usr/local/bin/barkpark-provisioner}"
+PROV_UNIT_NAME="${BARKPARK_PROVISIONER_UNIT_NAME:-barkpark-provisioner}"
+prov_state() { systemctl is-active "$PROV_UNIT_NAME" 2>/dev/null || true; }
 if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
   log "install provisioner"
-  cp /usr/local/bin/barkpark-provisioner "/usr/local/bin/barkpark-provisioner.bak" 2>/dev/null || true
-  install -m 0755 "$PROV_BIN" /usr/local/bin/barkpark-provisioner
-  systemctl restart barkpark-provisioner
+  cp "$PROV_INSTALL" "$PROV_INSTALL.bak" 2>/dev/null || true
+  install -m 0755 "$PROV_BIN" "$PROV_INSTALL"
+  restart_rc=0
+  systemctl restart "$PROV_UNIT_NAME" || restart_rc=$?
   sleep 3
-  log "provisioner: $(systemctl is-active barkpark-provisioner)"
+  state="$(prov_state)"
+  log "provisioner: $state (restart rc=$restart_rc)"
+  if [ "$restart_rc" != "0" ] || [ "$state" != "active" ]; then
+    log "PROVISIONER FAILED TO COME BACK (restart rc=$restart_rc, is-active=$state) — the control plane is serving but cannot PROVISION; restoring the previous binary"
+    if [ -f "$PROV_INSTALL.bak" ]; then
+      install -m 0755 "$PROV_INSTALL.bak" "$PROV_INSTALL"
+      systemctl restart "$PROV_UNIT_NAME" || true
+      sleep 3
+      log "provisioner after restoring the previous binary: $(prov_state)"
+    else
+      log "no $PROV_INSTALL.bak to restore — the worker is left as the new binary left it"
+    fi
+    log "control plane slot $TARGET IS LIVE and was NOT rolled back (the flip was proven before this step); failing the RUN so the dead provisioner cannot ride a green deploy"
+    systemctl status "$PROV_UNIT_NAME" --no-pager -n 30 2>&1 | sed 's/^/[provisioner] /' || true
+    exit 18
+  fi
 else
   log "no provisioner binary passed; leaving worker as-is"
 fi

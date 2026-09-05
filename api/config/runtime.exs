@@ -408,6 +408,26 @@ case System.get_env("BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS") do
     :ok
 end
 
+# Paper access-log retention override (edit-on-the-link slice 4). The default
+# (config.exs) is 90 days. Same positive-int-or-warn shape as the two leases
+# above; an operator with a stricter retention policy sets it without a rebuild.
+case System.get_env("BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 ->
+        config :barkpark, :paper_access_log_ttl_days, days
+
+      _ ->
+        IO.warn(
+          "BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see
@@ -604,8 +624,7 @@ for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
     ] do
   entries =
-    env_name
-    |> System.get_env("")
+    System.get_env(env_name, "")
     |> String.split(",")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
@@ -1322,4 +1341,33 @@ if config_env() == :dev do
     _ ->
       :ok
   end
+end
+
+# MUTATE-PATH SCHEMA VALIDATION — the per-dataset ENFORCE opt-in
+# (task-41a740fd6701ec28). See `Barkpark.Content.Validation`'s moduledoc for the
+# ruling and the migration story. Unset (the default everywhere) leaves the
+# compile-time `enforce_datasets: []` in place, so EVERY dataset advises and no
+# write is refused on schema grounds. Set to a comma-separated list of dataset
+# slugs to opt those datasets into 422 refusal, or to "all" for every dataset.
+#
+#   BARKPARK_SCHEMA_ENFORCE_DATASETS=production,staging
+#
+# Runtime, not compile-time, and deliberately: an operator opts a dataset in
+# (or backs it out again, if a clean-up run was optimistic) with a restart
+# rather than a deploy.
+case System.get_env("BARKPARK_SCHEMA_ENFORCE_DATASETS") do
+  "all" ->
+    config :barkpark, Barkpark.Content.Validation, enforce_datasets: :all
+
+  value when is_binary(value) and value != "" ->
+    slugs =
+      value
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    config :barkpark, Barkpark.Content.Validation, enforce_datasets: slugs
+
+  _ ->
+    :ok
 end

@@ -12,14 +12,22 @@ A PR targeting `main` must clear:
    architectural fit. Catches most defects but not all (see lessons-learned
    below).
 2. **`format` CI job** — `.github/workflows/elixir.yml`, runs
-   `mix format --check-formatted`. Currently **advisory** (`continue-on-error:
-   true`; the job is named "Format … advisory"). Its own dedicated, fast job
-   (~30s, no DB, no full compile) so drift is visible in <60s. It was split out
-   of the `mix-test` job to *become* a blocking gate once format drift is
-   cleared. Today a red `format` check still does not block merge, and it is the
-   only job on this list that genuinely cannot: it carries
-   `continue-on-error: true` and is deliberately absent from every required
-   aggregator's `needs:` (see §"Blocking, required, and the difference" below).
+   `mix format --check-formatted` through `scripts/format-check.sh`. Its own
+   dedicated, fast job (~30s, no DB, no full compile) so drift is visible in
+   <60s. **Blocking since task-e31b816b4b416db6, and DIFF-SCOPED**: it dropped
+   `continue-on-error` and joined `elixir-gate`'s `needs:`, so it blocks
+   transitively like every other upstream (SUBSUMED, below). What it enforces is
+   NOT "is the tree formatted" — it fails only when a file **the PR's own diff
+   touches** is unformatted (`scripts/format-diff-scope.sh`); inherited drift in
+   untouched files is printed and stays neutral, because a gate that reds
+   everyone over someone else's merge is the advisory-red problem with a merge
+   button attached. On `push:main` there is no PR diff, so nothing is
+   diff-scoped: the standing debt is printed and the job is green — main is
+   where the debt is VISIBLE, the PR that touches the file is where it is
+   enforced. The order matters and is guarded: `continue-on-error` had to go
+   BEFORE the job could enter `needs:`, because `needs.<job>.result` reads
+   `success` for a FAILED continue-on-error job
+   (`scripts/elixir-path-escape-check.test.sh`, `coe_in_needs`).
 3. **`mix-prod-compile` CI job** — same workflow, gated only by the `changes`
    dispatcher (`needs: [changes]` under the `mix-prod-compile:` job key in
    elixir.yml — there is **no** edge to `mix-test`; the "NO needs: mix-test"
@@ -224,8 +232,8 @@ is harmless:
   required aggregator declares upstream jobs in `needs:` and fails closed over
   their results, so a red upstream reds the required context and blocks the
   merge exactly as if it had been required itself. `Elixir gate` is
-  `needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]`
-  (the `elixir-gate` job's `needs:` line in elixir.yml), so all five block. Driven rather than read off the topology:
+  `needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, format]`
+  (the `elixir-gate` job's `needs:` line in elixir.yml), so all six block. Driven rather than read off the topology:
   its `Decide` body, extracted and run with every upstream `success`, exits 0;
   re-run with only the prod-compile result set to `failure` it exits 1; re-run
   with only the perf-bench result set to `failure` it exits 1, printing
@@ -237,13 +245,18 @@ is harmless:
   why `.github/required-checks.json` files each of them under **S3 SUBSUMED**,
   not as a claim that they are harmless.
 - **ADVISORY — structurally unable to block.** A job carrying
-  `continue-on-error: true` that no required aggregator lists in `needs:`. Here
-  that is `format`: a red `format` does not block merge, and PR #123 merged with
-  it red. The `continue-on-error` half alone is not enough — for such a job
+  `continue-on-error: true` that no required aggregator lists in `needs:`. Both
+  halves are load-bearing, and this is why: for a `continue-on-error` job
   `needs.<job>.result` reads `success` even when it failed, so an advisory job
   wired into an aggregator's `needs:` would launder its own red into a green
-  required context. `format` is deliberately kept out of that list for exactly
-  this reason (see the `elixir-gate` job's `needs:` comment block, which spells out why `format` is excluded). `plugin-node` is a third case again: blocking
+  required context. Today the class holds `reland-check`, `sobelow`,
+  `boundary-gate`, `lighthouse`, `gofmt` and `required-checks-drift` — a red run
+  of any of them cannot stop a merge. `format` **left this class on 2026-09-04**
+  (#15971): it dropped `continue-on-error` FIRST, precisely so the laundering
+  above could not happen, and only then joined `elixir-gate`'s `needs:`, where it
+  is now SUBSUMED like every other upstream (see
+  the `elixir-gate` job's `needs:` comment block, which now records that
+  `format` IS in `needs`, and item 2 above for the diff scope). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
@@ -811,15 +824,15 @@ The Studio shell is the single most gate-dense file in the repo — **four**
 of the steps above read it, and no card names them all, which is how a
 one-line CSS edit turns into three surprise reds:
 
-- **10 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
+- **12 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
   colour in Studio chrome; `var(--…)` only.
-- **9 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
+- **11 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
   colour literals per file against a frozen baseline in
   `design/exemptions.json` (`root.html.heex` is entry #1).
-- **6 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
+- **8 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
   mirror. When the surface legitimately changes, re-stamp it with
   `bash scripts/paper-editor-mirror-check.sh --write` in the same diff.
-- **11 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
+- **13 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
   scope/dataset Studio URL literal; build paths through
   `StudioLive.Paths`.
 

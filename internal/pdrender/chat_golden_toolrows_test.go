@@ -132,9 +132,7 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 			// whole point of promoting these rows to block types (Law 1).
 			out := reg.RenderDoc(blocks, ctx)
 			stripped := ansi.Strip(out)
-			if strings.Contains(stripped, "unknown block") {
-				t.Fatalf("variant %q fell through to the unknown-block box:\n%s", v.Name, stripped)
-			}
+			assertNoUnknownBlock(t, "chat toolrow variant "+v.Name, stripped)
 
 			// (3) Realization: every significant projection word appears in the
 			// render (whitespace-collapsed, case-insensitive per-word presence).

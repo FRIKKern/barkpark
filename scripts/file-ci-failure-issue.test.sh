@@ -361,5 +361,20 @@ want_loud      "unreachable API is LOUD"
 
 echo
 echo "---"
+# ── redaction: credential shapes never reach the public issue body ──────────
+run no-existing-issues CI_FAILURE_DETAIL="'step log: token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig BARKPARK_ADMIN_TOKEN=bp_supersecret_value_123 note: DB_PASSWORD=hunter22 harmless=keep-me'"
+want_exit "redaction: the create still succeeds" 0
+if grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab' "$BODY_FILE"; then bad "redaction: a GitHub token reached the body"; else ok "redaction: GitHub token masked"; fi
+if grep -q 'eyJhbGciOiJIUzI1NiJ9' "$BODY_FILE"; then bad "redaction: a Bearer value reached the body"; else ok "redaction: Bearer value masked"; fi
+if grep -q 'bp_supersecret_value_123' "$BODY_FILE"; then bad "redaction: BARKPARK_ADMIN_TOKEN value reached the body"; else ok "redaction: *_TOKEN= value masked"; fi
+if grep -q 'hunter22' "$BODY_FILE"; then bad "redaction: DB_PASSWORD value reached the body"; else ok "redaction: *_PASSWORD= value masked"; fi
+if grep -q 'BARKPARK_ADMIN_TOKEN=\[REDACTED\]' "$BODY_FILE" && grep -q 'harmless=keep-me' "$BODY_FILE"; then ok "redaction: the key survives, the value does not, and plain text is untouched"; else bad "redaction: key/plain-text handling wrong: $(grep -o 'BARKPARK_ADMIN_TOKEN[^ ]*' "$BODY_FILE" | head -1) / $(grep -c 'harmless=keep-me' "$BODY_FILE")"; fi
+# mutation: with redact() disabled the token MUST reach the body (proves the case can fail)
+mut="$work/subject-unredacted.sh"; sed 's/^detail="\$(printf .%s. "\$detail" | redact)"$/: # redaction disarmed for the mutation/' "$SCRIPT" > "$mut"
+if grep -q 'redaction disarmed' "$mut"; then
+  SAVE_SCRIPT="$SCRIPT"; SCRIPT="$mut"; run no-existing-issues CI_FAILURE_DETAIL="'token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab'"; SCRIPT="$SAVE_SCRIPT"
+  if grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab' "$BODY_FILE"; then ok "redaction mutation: without redact() the token reaches the body (the case can fail)"; else bad "redaction mutation: the disarmed subject still masked — the case is vacuous"; fi
+else bad "redaction mutation: could not disarm redact() in the subject copy"; fi
+
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]

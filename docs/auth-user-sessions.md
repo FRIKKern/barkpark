@@ -18,7 +18,11 @@ Emails are lower-cased on write; duplicates are rejected by a unique constraint.
 
 Email confirmation and password reset run through single-use, context-bound
 tokens (`build_email_token/2` with context `"confirm"` / `"reset"`): a confirm
-token cannot drive a reset, and consuming a token invalidates it.
+token cannot drive a reset, and consuming a token invalidates it. A consumed
+reset also revokes every live session of that user, and the JSON door reports
+the count: `POST /v1/auth/reset` answers `{ok: true, sessionsRevoked: n}`
+(`AuthController`, PDS-D503) — a receipt, not a promise; `n` is what the revoke
+actually stamped.
 
 ## Sessions
 

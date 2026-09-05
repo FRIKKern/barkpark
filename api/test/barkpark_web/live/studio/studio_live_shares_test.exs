@@ -269,6 +269,31 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       refute is_nil(revoked)
     end
 
+    # Edit-on-the-link slice 3 (task-8ac4f3918da1c433): the popover gained the
+    # second access level. Both buttons land on the SAME handler and the same
+    # `Links.create/1`; only `phx-value-access` differs.
+    test "the popover offers BOTH access levels and mints an edit link", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref-type" => "paper",
+        "ref-id" => "demo-paper",
+        "title" => "Demo Paper"
+      })
+
+      panel = render(view)
+      assert panel =~ "Create view link"
+      assert panel =~ "Create edit link"
+
+      ws = Barkpark.Tenancy.get_default_workspace()
+
+      render_hook(view, "item-share-create", %{"access" => "edit"})
+
+      assert [%{access: "edit"}] =
+               Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "demo-paper")
+    end
+
     test "the per-paper Share button targets item-share, NOT the section modal", %{conn: conn} do
       # Regression for the original complaint: pressing Share on a paper must open
       # the item popover, not "Network shares".

@@ -21,6 +21,17 @@
 # release bumps the literal, which moves R onto the release commit itself, so
 # the door is structurally SILENT on releases rather than silent by exception.
 #
+# DERIVING R REQUIRES REAL HISTORY, AND A SHALLOW CLONE IS REFUSED. The walk
+# compares each commit to its PARENT. On a shallow clone the walk hits the graft
+# boundary, `<c>^` does not resolve, and resolve_r hands back the boundary commit
+# itself — on `fetch-depth: 1` that is HEAD. R == ref makes exports(R) identical
+# to exports(HEAD) by construction, every package PASSES, and the run is
+# byte-plausible: a VACUOUS PASS, indistinguishable from a clean tree unless you
+# read the R column and notice every row carries the same sha. That is exactly
+# what elixir-nightly run 33717527961 emitted. A door that cannot derive R has
+# MEASURED NOTHING, so it exits 2 (ERROR) and names the missing runner
+# dependency, rather than descending to 0.
+#
 # WHAT THIS DOOR STRUCTURALLY CANNOT SEE
 # --------------------------------------
 # THE REQUIRED LEG READS THE exports MAP ONLY. A package that changes BEHAVIOUR
@@ -148,9 +159,39 @@ resolve_r() { # <ref> <path>
   printf '\n'
 }
 
+# TRUE when this repository's history is truncated (a `--depth` clone, or
+# actions/checkout's default fetch-depth: 1). Two independent reads: the
+# porcelain question, and the graft file in the COMMON dir (a linked worktree's
+# own git-dir never holds it). Either one answering yes is enough — a guard that
+# needs both would go dark on the older git that lacks the porcelain form.
+is_shallow_repo() {
+  [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ] && return 0
+  local common; common="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [ -n "$common" ] && [ -f "$common/shallow" ]
+}
+
 run_door() { # <ref>
   local ref="$1"
   local sha; sha="$(git rev-parse --verify -q "$ref^{commit}")" || die "not a commit: $ref"
+
+  # A REFUSAL TO MEASURE, PRINTED BEFORE ANY VERDICT CAN FORM. See the header:
+  # on truncated history R collapses onto the boundary commit and every package
+  # passes for a reason that has nothing to do with the published artifact.
+  if is_shallow_repo; then
+    printf 'pds-published-artifact-door — REF=%s (%s)\n\n' "$ref" "${sha:0:9}"
+    printf 'ERROR: shallow history — R cannot be derived; fetch-depth: 0 required\n'
+    printf '  R is the commit that last CHANGED a package version literal, found by walking\n'
+    printf '  git log from REF and comparing each commit to its PARENT. On a truncated\n'
+    printf '  history the walk hits the graft boundary, the parent does not resolve, and R\n'
+    printf '  collapses onto the boundary commit — on fetch-depth: 1 that is REF itself. Then\n'
+    printf '  exports(R) == exports(HEAD) for every package and the door PASSES having\n'
+    printf '  compared a tree against itself. This run measured NOTHING and says so.\n'
+    printf '  FIX THE VENUE: actions/checkout with `fetch-depth: 0`, or `git fetch\n'
+    printf '  --unshallow` locally, then re-run.\n'
+    printf '\nCOUNTS: enumerated 0, skipped 0, checked 0, REFUSALS 0, ERRORS 1\n'
+    printf 'VERDICT: ERROR\n'
+    return 2
+  fi
 
   local ignores
   ignores="$(ignore_list "$ref")" || die "reader failed on $CHANGESET_CONFIG at $ref — refusing to verdict with an ignore list born from a failed read"

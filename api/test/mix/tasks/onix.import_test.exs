@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Onix.ImportTest do
   use ExUnit.Case, async: true
 
+  alias Barkpark.Plugins.OnixEdit.Importer
   alias Mix.Tasks.Onix.Import
 
   # These tests pin the exit-code contract: mix onix.import must FAIL LOUDLY
@@ -42,6 +43,110 @@ defmodule Mix.Tasks.Onix.ImportTest do
       after
         File.rm(path)
       end
+    end
+  end
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3. Withdrawal notices (NotificationType 05 / DeletionText)
+  # ────────────────────────────────────────────────────────────────────────
+  #
+  # Before this branch, handle_product/3 created a draft for EVERY product
+  # unconditionally, so a withdrawn ISBN resurfaced as a new draft on every
+  # sync.
+
+  describe "withdrawal?/1 classification" do
+    test "NotificationType 05 is a withdrawal" do
+      assert Import.withdrawal?(%{"notificationType" => "05"})
+    end
+
+    test "a non-empty DeletionText is a withdrawal even without the 05 code" do
+      assert Import.withdrawal?(%{"notificationType" => "03", "deletionText" => "Out of print"})
+    end
+
+    test "the normal 03 notification is NOT a withdrawal" do
+      refute Import.withdrawal?(%{"notificationType" => "03"})
+      refute Import.withdrawal?(%{})
+    end
+
+    test "a whitespace-only DeletionText is NOT a withdrawal" do
+      refute Import.withdrawal?(%{"notificationType" => "03", "deletionText" => "   "})
+    end
+  end
+
+  describe "withdrawal notices parsed straight out of ONIX XML" do
+    defp withdrawal_xml(ref, inner) do
+      """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <ONIXMessage>
+        <Product>
+          <RecordReference>acme.example.com:#{ref}</RecordReference>
+          #{inner}
+        </Product>
+      </ONIXMessage>
+      """
+    end
+
+    test "a NotificationType=05 feed classifies as a withdrawal end to end" do
+      {:ok, %{products: [product]}} =
+        Importer.parse_feed(withdrawal_xml("wd-1", "<NotificationType>05</NotificationType>"))
+
+      assert product["notificationType"] == "05"
+      assert Import.withdrawal?(product)
+    end
+
+    test "a DeletionText feed classifies as a withdrawal end to end" do
+      xml =
+        withdrawal_xml(
+          "wd-2",
+          "<NotificationType>03</NotificationType><DeletionText>Withdrawn by publisher</DeletionText>"
+        )
+
+      {:ok, %{products: [product]}} = Importer.parse_feed(xml)
+
+      assert product["deletionText"] == "Withdrawn by publisher"
+      assert Import.withdrawal?(product)
+    end
+  end
+
+  describe "handle_product/3 --dry-run routing" do
+    test "a withdrawal prints 'would withdraw', NOT 'would create'" do
+      product = %{"_publishedId" => "wd-dry-1", "notificationType" => "05"}
+
+      output =
+        capture_shell(fn -> assert Import.handle_product(product, "production", true) == :ok end)
+
+      assert output =~ "would withdraw: wd-dry-1"
+      refute output =~ "would create"
+    end
+
+    test "a normal product still prints 'would create'" do
+      product = %{"_publishedId" => "ok-dry-1", "notificationType" => "03"}
+
+      output =
+        capture_shell(fn -> assert Import.handle_product(product, "production", true) == :ok end)
+
+      assert output =~ "would create: drafts.ok-dry-1"
+      refute output =~ "would withdraw"
+    end
+  end
+
+  defp capture_shell(fun) do
+    previous = Mix.shell()
+    Mix.shell(Mix.Shell.Process)
+
+    try do
+      fun.()
+      drain_shell([])
+    after
+      Mix.shell(previous)
+    end
+  end
+
+  defp drain_shell(acc) do
+    receive do
+      {:mix_shell, _kind, [message]} -> drain_shell([message | acc])
+    after
+      0 -> acc |> Enum.reverse() |> Enum.join("\n")
     end
   end
 end

@@ -17,7 +17,8 @@ if [ ${#SLUGS[@]} -eq 0 ]; then
   # omission is exactly how it drifted (found 2026-08-17, ledger
   # pe-w3-rig-fresh-pixels-drift-and-schema-gaps-2026-08-17.md). design-probe is
   # deliberately absent: it is AUTHORED (BPML, no published paper behind it) and
-  # has no live document to refresh from.
+  # has no live document to refresh from. So is stat-partial-row (authored JSON,
+  # the eleven-stat partial-row geometry — see its `_source`).
   SLUGS=(eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
          mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
          portabledoc-showcase)

@@ -22,7 +22,7 @@ defmodule BarkparkWeb.QueryOrderInvalidTest do
       raises instead of silently defaulting.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
 

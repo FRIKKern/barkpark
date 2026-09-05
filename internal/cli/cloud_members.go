@@ -60,7 +60,7 @@ func runCloudMembers(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to manage your team", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to manage your team, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	teamID := strings.TrimSpace(cfg.CloudTeam)

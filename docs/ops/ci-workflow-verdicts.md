@@ -37,15 +37,15 @@ and is thin for anything that skips often.
 | `task-lease-renew.yml` | 308 | 0 | 0.27 | KEEP-CHEAP |
 | `go-format.yml` | 212 | 109 | 0.44 | KEEP-CHEAP |
 | `shell-harnesses.yml` | 193 | 382 | 0.33 | KEEP-CHEAP |
-| `twoslash.yml` | 53 | 0 | 1.45 | CANDIDATE |
+| `twoslash.yml` | 53 | 0 | 1.45 | MOVE (2026-09-05) |
 | `js-tests.yml` | 51 | 27 | 1.59 | CANDIDATE |
 | `typedoc.yml` | 51 | 26 | 0.92 | KEEP-CHEAP |
 | `mobile.yml` | 43 | 14 | 1.24 | CANDIDATE |
-| `grip-suite.yml` | 40 | 27 | 2.7 | CANDIDATE |
+| `grip-suite.yml` | 40 | 27 | 2.7 | MOVE (2026-09-05) |
 | `ci.yml` | 33 | 14 | 1.2 | CANDIDATE |
 | `search-template-gates.yml` | 33 | 0 | 0.18 | KEEP-CHEAP |
 | `sheet-grid-js.yml` | 33 | 12 | 0.0 | UNMEASURED |
-| `deploy-harnesses.yml` | 32 | 0 | 3.82 | CANDIDATE |
+| `deploy-harnesses.yml` | 32 | 0 | 3.82 | MOVE (2026-09-05) |
 | `paper-editor.yml` | 28 | 7 | 0.0 | UNMEASURED |
 | `crown-reconcile.yml` | 26 | 626 | 0.0 | UNMEASURED |
 | `pdrender-wasm.yml` | 23 | 10 | 0.47 | KEEP-CHEAP |
@@ -68,6 +68,48 @@ and is thin for anything that skips often.
 | `studio-journey-smoke.yml` | 0 | 0 | 1.68 | DORMANT |
 | `vendored-assets.yml` | 0 | 0 | 0.28 | DORMANT |
 | `windows-smoke.yml` | 0 | 0 | 0.33 | DORMANT |
+
+## CORRECTED 2026-09-03 — `architecture` was GREEN AND BLIND
+
+The full correction (why a never-red tripwire whose selftest dies behind `continue-on-error` is disconnected, not quiet, and what was re-verdicted) is preserved verbatim in [ci-workflow-verdicts-history.md](ci-workflow-verdicts-history.md); the roster below carries the corrected verdict.
+
+## MOVED 2026-09-05 (task-33742276cf0a35b1)
+
+Non-test CANDIDATEs leave the PR path; `js-tests`, `mobile`, `ci`, `search-starter-smoke`, `connectors`
+STAY (they test the code the PR touches). Watcher = the `Report main-push failure to a human` job
+(`file-ci-failure-issue.sh`, one idempotent issue per key; close it when main is green).
+
+| workflow | venue now | owner | issue key |
+|---|---|---|---|
+| `deploy-harnesses.yml` | push:main + nightly 03:20Z + dispatch | lead-gates | `deploy-harnesses-main` |
+| `grip-suite.yml` | push:main + nightly 03:25Z + dispatch (PR arm removed) | lead-gates | `grip-suite` |
+| `twoslash.yml` | push:main + nightly 03:30Z + dispatch | lead-gates | `twoslash-main` |
+
+## ADDED 2026-09-05 (task-bc9fe6dc29d0b979) — `search-template-gates.yml` gains a main arm
+
+Not a move: the PR arm and its `paths:` list are unchanged. `search-template-gates.yml` was
+`pull_request`-only, so `gh run list --workflow=search-template-gates.yml --branch main` returned an
+EMPTY list — main was never measured, and #16174 merged at 12:20Z while `Vendored SDK freshness` was
+red, shipping a stale vendored `barkpark-core.tgz` to every scaffolded user. Trigger change
+authorised by main under task-33742276cf0a35b1.
+
+| workflow | venue now | owner | issue key |
+|---|---|---|---|
+| `search-template-gates.yml` | push:main (path-UNFILTERED) + the unchanged PR arm | lead-gates | `search-template-gates-main` |
+
+The main arm is deliberately path-unfiltered: the vendored tarballs are a FROZEN artifact that rots
+against a moving source tree, so a `paths:` filter would only move the vacuous green one hop, from
+"main is never measured" to "main is not measured when untouched". It stays ADVISORY — it reds its
+own check-run and cannot stop a merge. **If it is ever promoted to required, register an AGGREGATOR
+context, never one of the paths-filtered leaf job names**: a required context that emits no check run
+on a filtered-out PR waits for status forever.
+
+**Fence collision — the trigger and the remedy live in different trees.** `Vendored SDK freshness`
+fires on `js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
+`bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut `templates/*/vendor/*.tgz` and
+`templates/VENDOR-STAMP.json`. The SDK lane must run that script **in the same PR** as the
+js/packages change; a lane fenced out of `templates/**` cannot green this gate and will wrongly
+conclude the gate is broken.
 
 ## The three that need words
 

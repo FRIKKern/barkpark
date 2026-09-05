@@ -599,14 +599,20 @@ defmodule BarkparkCloud.FailureCopy do
       typed_refusal?(reason) ->
         reason
 
-      # dwb-webhook fail-fast interim: a GitHub push was recorded as a
-      # born-`failed` deployment because source builds need the GitHub App
-      # integration (gh-1, human-gated). Blocked-tone, names the workaround.
+      # dwb-webhook fail-fast: a GitHub push was recorded as a born-`failed`
+      # deployment. Source builds have since ARRIVED — the router's
+      # `github_build_available?/1` is a real repo-present predicate, so a push
+      # on a repo-backed site now mints a queued row the builder claims. The
+      # rows this clause speaks for are LEGACY: they were born failed before
+      # that flip, and no retro-build moves them. So the copy explains what
+      # happened and names the two ways forward (push again, or `bp deploy`) —
+      # it must never promise the capability as future, which it has not been
+      # since the predicate flip. Blocked-tone.
       # Checked FIRST — the raw reason is a known exact string; its output does
       # not re-match any clause (no "github push builds" token), so a second
       # client-side `failureCopy()` pass is idempotent.
       String.contains?(down, "github push builds") ->
-        "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
+        "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
 
       # site-spawner D28: the STATIC twin of "no build source". A content-bound
       # site builds from a Barkpark dataset, so its missing build source is a

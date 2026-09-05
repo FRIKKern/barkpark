@@ -40,9 +40,12 @@ defmodule BarkparkWeb.ShareLinkController do
     * `mint` — against the SCOPE's workspace (403). Ungated it minted a real
       `access: "edit"` credential INTO a foreign workspace.
     * `list` — against the SCOPE's workspace (403). Ungated it serialised
-      foreign rows through `link_json/1`, whose `url:` carries the PLAINTEXT
-      `/s/<token>` (see `Barkpark.Sharing.ShareLink` — the raw token IS stored),
-      i.e. it handed a stranger a LIVE credential, not merely metadata.
+      foreign rows through `link_json/1`, which then carried a `url:` holding
+      the PLAINTEXT `/s/<token>`, i.e. it handed a stranger a LIVE credential
+      rather than metadata. The credential half is now closed a second way and
+      structurally: the raw token no longer exists on the row and `link_json/1`
+      emits no `url:` at all (see `Barkpark.Sharing.ShareLink`). The gate stays
+      — a foreign admin must not read this workspace's link inventory either.
     * `revoke` — against the TARGET ROW's own workspace (404, byte-identical to
       a missing row).
 
@@ -64,7 +67,7 @@ defmodule BarkparkWeb.ShareLinkController do
   422 (item enumeration, whose loudest positive form is the 201 leak itself).
   Placing it before the query is also what makes the fix AUTHORIZE-BEFORE-
   SERIALIZE structurally: `link_json/1` is unreachable for a row the caller
-  cannot administer, so a foreign token is never rendered into a string at all —
+  cannot administer, so a foreign row is never rendered into a string at all —
   not hidden afterwards, not redacted afterwards.
 
   ## Denial-shape law — THE SHAPE FOLLOWS THE INPUT, NOT THE VERB
@@ -327,10 +330,29 @@ defmodule BarkparkWeb.ShareLinkController do
                response_content_disposition: disposition
              ) do
           {:file, full} ->
+            # ONE POLICY FOR BOTH BRANCHES (het-bl-sharelink-local-cache-policy).
+            # This branch used to set NO `cache-control` of its own, while its
+            # `{:redirect, url}` sibling below stated `private, max-age=0,
+            # must-revalidate` — so the same anonymous URL got its policy from
+            # whichever media backend happened to be configured. Deleting the
+            # line below does NOT produce a header-less response: the adapter
+            # default `max-age=0, private, must-revalidate` fills in (that is
+            # the exact RED the pin prints). Nearly the same meaning, a
+            # different string, and chosen by nobody — an UNSTATED policy on a
+            # public response is the class this epic exists to end. It is deliberately NOT routed
+            # through `Delivery.put_file_cache_headers/3` the way
+            # `MediaController.serve/2` is: that helper keys on the ASSET
+            # DOCUMENT's `bp_visibility` (`Access.visibility(doc)`), and no such
+            # doc is in scope here — this path resolves a bare `%MediaFile{}`
+            # row from the LINK's own scope. Even with one, `public` there means
+            # a 24h SHARED-cache store, and `/s/:token` is a bearer capability:
+            # a revoked link whose bytes sit in an intermediary keeps answering.
+            # So: the sibling's literal, verbatim, never a third string.
             conn
             |> put_resp_content_type(MediaFile.serve_content_type(mime))
             |> put_resp_header("x-content-type-options", "nosniff")
             |> put_resp_header("content-disposition", disposition)
+            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
             |> send_file(200, full)
 
           {:redirect, url} ->
@@ -395,12 +417,25 @@ defmodule BarkparkWeb.ShareLinkController do
 
   @doc "GET /v1/shares/links?scope=&kind=&ref_type=&ref_id= — list an item's links."
   def list(conn, params) do
-    with {:ok, {ws, proj, _dataset}} <- scope_triple(params["scope"]),
+    with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
-         %Tenancy.Project{} <- Tenancy.get_project(ws, proj),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params) do
-      links = Links.list_for(workspace.id, kind, ref_type, ref_id) |> Enum.map(&link_json/1)
+      # THE SCOPE PARAMETER IS THE ANSWER'S SCOPE. `project` and `dataset` were
+      # parsed and validated here and then DROPPED, so the listing filtered on
+      # workspace alone: a link minted for the same `ref_id` in a SIBLING
+      # project (or another dataset) of the same workspace came back under a
+      # scope that does not name it, each row carrying its live `/s/<token>`
+      # url. Not cross-tenant — the caller is a proven workspace admin — but
+      # the response contradicted its own request.
+      links =
+        Links.list_for(workspace.id, kind, ref_type, ref_id,
+          project_id: project.id,
+          dataset: dataset
+        )
+        |> Enum.map(&link_json/1)
+
       json(conn, %{links: links})
     else
       # Explicit, ahead of the catch-all — without it the denial is 422 and the
@@ -537,10 +572,13 @@ defmodule BarkparkWeb.ShareLinkController do
       access: l.access,
       dataset: l.dataset,
       label: l.label,
-      # the STABLE, re-copyable link (P7 UX) on the advertised share host (tunnel
-      # / LAN / domain). Present whenever the raw token was stored; `token_hash`
-      # (the secret-at-rest digest) is never exposed.
-      url: l.token && share_url(l.token),
+      # NO `url:` KEY, and none is possible. The raw token was retired from the
+      # table (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02), so
+      # a listed row holds only its SHA256 digest and this serializer cannot
+      # reconstruct `/s/<token>` from it. The mint 201 below is the ONE place a
+      # raw token — and therefore a URL — is returned. A caller that needs the
+      # URL again revokes and mints a new link. The key is DROPPED rather than
+      # emitted as nil so `url` names a value that is always real when present.
       expires_at: l.expires_at,
       revoked_at: l.revoked_at,
       inserted_at: Map.get(l, :inserted_at)

@@ -246,6 +246,6 @@ defmodule BarkparkCloud.RegistryBarkparkQuotaRaceTest do
     assert {:error, %Ecto.Changeset{} = cs} =
              Registry.register_barkpark(team, %{name: "Two", slug: "dup-slug"})
 
-    assert "already has a Barkpark with this slug" in errors_on(cs).team_id
+    assert "is already taken by another Barkpark on this team" in errors_on(cs).slug
   end
 end

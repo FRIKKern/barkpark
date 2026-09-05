@@ -24,7 +24,7 @@ defmodule BarkparkWeb.StudioRedirectPathShapeTest do
   These tests pin the shape guard on both arms, and the positive controls
   pin that a real glob tail still rewrites exactly as before.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.TenancyFixtures
 

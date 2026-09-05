@@ -118,6 +118,36 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
       assert Inline.compose_inline(node, false) == %{"kind" => "PdTag", "name" => "elixir"}
     end
 
+    test "chip node emits PdChip with tone, strong, text and note" do
+      node = %{
+        "type" => "chip",
+        "tone" => "danger",
+        "strong" => true,
+        "text" => "Grusomt",
+        "note" => "kun SaaS"
+      }
+
+      assert Inline.compose_inline(node, false) == %{
+               "kind" => "PdChip",
+               "tone" => "danger",
+               "strong" => true,
+               "text" => "Grusomt",
+               "note" => "kun SaaS"
+             }
+    end
+
+    test "chip node degrades non-string fields to empty and non-true strong to false" do
+      node = %{"type" => "chip", "tone" => 7, "strong" => "yes", "text" => nil}
+
+      assert Inline.compose_inline(node, false) == %{
+               "kind" => "PdChip",
+               "tone" => "",
+               "strong" => false,
+               "text" => "",
+               "note" => ""
+             }
+    end
+
     test "wikilink node emits PdWikilink without alias when absent" do
       node = %{"type" => "wikilink", "target" => "SomePage", "children" => []}
       result = Inline.compose_inline(node, false)

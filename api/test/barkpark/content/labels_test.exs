@@ -109,14 +109,24 @@ defmodule Barkpark.Content.LabelsTest do
       assert is_function(opts.ref_resolver, 2)
     end
 
-    test "non-article style produces same map as render_opts without :style key" do
+    # task-1d095b61a47bf057 INVERTED these two. They used to assert the absence
+    # of `:style` on the fallback clause — i.e. they PINNED the defect: a
+    # style-less opts map lets `Render.render_block/2`'s
+    # `Map.get(opts, :style, :email)` default decide, so every non-article
+    # paper's `body_html` was inline-stamped EMAIL HTML on a SCREEN surface.
+    # The fallback now names `:article` too. The email surface is unaffected —
+    # `bulldocs_email_controller.ex:39` passes `style: :email` by name and never
+    # calls this function.
+    test "non-article style ALSO names :style => :article (never the email default)" do
       opts = Labels.paper_render_opts("production", "email")
-      refute Map.has_key?(opts, :style)
+      assert opts.style == :article
+      assert is_function(opts.ref_resolver, 2)
     end
 
-    test "nil style produces same map as render_opts without :style key" do
+    test "nil style ALSO names :style => :article (never the email default)" do
       opts = Labels.paper_render_opts("production", nil)
-      refute Map.has_key?(opts, :style)
+      assert opts.style == :article
+      assert is_function(opts.ref_resolver, 2)
     end
   end
 end

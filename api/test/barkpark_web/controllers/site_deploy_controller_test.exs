@@ -130,7 +130,7 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
     deadline = deadline || System.monotonic_time(:millisecond) + 15_000
 
     body =
-      build_conn()
+      scoped_conn()
       |> admin_conn()
       |> get("/v1/admin/site-deploy", %{"slug" => slug})
       |> json_response(200)

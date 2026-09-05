@@ -20,7 +20,7 @@ on:
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
   # PR runs.
-  group: sdk-tests-${{ github.ref }}
+  group: sdk-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -37,6 +37,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/package-lock.json
 
       - name: Install
         run: npm ci

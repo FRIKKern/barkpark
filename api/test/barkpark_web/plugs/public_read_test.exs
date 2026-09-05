@@ -250,4 +250,65 @@ defmodule BarkparkWeb.Plugs.PublicReadTest do
     assert conn.status == 403
     assert decode(conn)["error"]["code"] == "forbidden"
   end
+
+  describe "the ?drafts alias cannot slip past the perspective gate (C1)" do
+    # THE BYPASS: `allowed_perspective?/1` read ONLY `conn.params["perspective"]`,
+    # while `TasksController.Params.parse_perspective/1` — the parser the graph
+    # surface actually honours — ALSO maps `?drafts=true|1` to `:drafts`. One
+    # gate, two parsers: a caller that spelled the request `?drafts=true` was
+    # measured as `:published` by the plug and as `:drafts` by the controller.
+    #
+    # MUTATION PROOF: drop the `Params.parse_perspective(...) == :published`
+    # conjunct from `allowed_perspective?/1` and the arms below red; the
+    # `?perspective=raw` arm above stays green, which is why BOTH conjuncts are
+    # kept (`raw` parses to `:published`, so only the literal check refuses it).
+    for value <- ["true", "1"] do
+      test "public-read ?drafts=#{value} is refused exactly like ?perspective=drafts" do
+        conn =
+          build_conn(:get, "/v1/data/query/production/post?drafts=#{unquote(value)}")
+          |> run(public_read_token())
+
+        assert conn.halted
+        assert conn.status == 403
+
+        assert decode(conn)["error"]["message"] == "perspective not allowed",
+               "the ?drafts alias was refused for the WRONG reason — the perspective " <>
+                 "gate must be what stops it, not a downstream schema check"
+      end
+    end
+
+    test "the alias is refused on the graph corpus route too (the one graph path public-read reaches)" do
+      conn = build_conn(:get, "/v1/graph?drafts=true") |> run(public_read_token())
+
+      assert conn.halted
+      assert conn.status == 403
+      assert decode(conn)["error"]["message"] == "perspective not allowed"
+    end
+
+    test "a MIXED read+public-read token is clamped by the alias gate as well" do
+      conn =
+        build_conn(:get, "/v1/data/query/production/post?drafts=true") |> run(mixed_token())
+
+      assert conn.halted
+      assert conn.status == 403
+    end
+
+    test "a NON-truthy ?drafts value is not over-clamped — the corpus read still passes" do
+      # `parse_perspective/1` only honours "true"/"1"; anything else is
+      # `:published`, and the gate must agree rather than refusing on the mere
+      # PRESENCE of the key.
+      for value <- ["false", "0", "yes", ""] do
+        conn = build_conn(:get, "/v1/graph?drafts=#{value}") |> run(public_read_token())
+
+        refute conn.halted,
+               "?drafts=#{value} was refused — the gate is keyed on the key's PRESENCE, " <>
+                 "not on what the controller's parser actually reads"
+      end
+    end
+
+    test "a non-public-read token is UNAFFECTED by the alias gate (the plug only clamps that tier)" do
+      conn = build_conn(:get, "/v1/graph?drafts=true") |> run(admin_token())
+      refute conn.halted
+    end
+  end
 end

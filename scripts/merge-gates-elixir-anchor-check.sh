@@ -163,7 +163,7 @@ done <<'ANCHORS'
 the `mix-prod-compile:` job key|^  mix-prod-compile:|the mix-prod-compile job key
 the "NO needs: mix-test"|^ *# NO `needs: mix-test`\.|the "NO needs: mix-test" comment
 the `elixir-gate` job's `needs:` line|^  elixir-gate:|the elixir-gate job key
-the `elixir-gate` job's `needs:` comment block|^ *#.*`format` is NOT in `needs`|the "format is NOT in needs" comment
+the `elixir-gate` job's `needs:` comment block|^ *#.*`format` IS in `needs`|the "format IS in needs" comment
 ANCHORS
 
 if [ "$ROWS_WALKED" -ne "$ROWS_EXPECTED" ]; then

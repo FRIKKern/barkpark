@@ -86,7 +86,24 @@ func loadManifestUncached(g globals, ctx manifest.Context) (*manifest.Manifest, 
 		BaseURL: ctx.Server,
 		Token:   ctx.Token,
 	})
-	cache := manifest.NewCache("")
+	// THE WIRING THIS ROW IS ABOUT. The on-disk cache already existed and was
+	// already ETag-validated — but it was built with NO fresh window, so every
+	// invocation still issued a CONDITIONAL GET and a 304 is still a request.
+	// That is why GET /v1/capabilities measured 166,039 requests over 5.04 days
+	// on guerrilla, 32% of everything the box served. NewCacheWithTTL gives the
+	// entry a fresh window (manifest.DefaultManifestTTL, 60s, argued there), so
+	// consecutive invocations inside one minute make ZERO capabilities requests
+	// between them.
+	//
+	// --no-cache passes a nil cache, which manifest.Fetch documents as "no
+	// caching": an unconditional GET, and no Store afterwards — the read AND
+	// the write bypassed, which is what makes the flag usable as a diagnostic.
+	// It also forgoes the offline/429/5xx fallback the cache doubles as; that
+	// is the correct trade for a flag whose entire purpose is "ask the server".
+	var cache *manifest.Cache
+	if !g.noCache {
+		cache = manifest.NewCacheWithTTL("", manifest.DefaultManifestTTL)
+	}
 	m, err := manifest.Fetch(client, cache)
 	if err != nil {
 		// First run (no config, no BARKPARK_* env): the failure is almost always

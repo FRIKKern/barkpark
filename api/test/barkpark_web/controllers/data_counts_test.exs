@@ -17,7 +17,7 @@ defmodule BarkparkWeb.DataCountsTest do
     * Auth is existence-hiding — an anonymous caller gets 404, never a census
       of the tenant's private types.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
 

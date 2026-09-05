@@ -227,9 +227,38 @@ config :barkpark, Barkpark.StudioChat,
 # Sync.PushWorker `enabled?` gate. (Auth is lazy and stays boot-started.)
 config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
 
+# The StudioChat BlockedSweeper runs a DB-touching sweep in `init/1` and re-arms
+# it every 60s. Boot-started under test, that tick fires from a process that owns
+# no ExUnit sandbox connection, so every tick raises ownership and logs a warning
+# on an exact 60s period for the whole `mix test` run (CI run 33720395852:
+# 05:51:06.88, 05:52:06.88, 05:53:06.88, 05:58:06.89, 06:03:06.90). Pure noise in
+# every CI log, and a foreign statement inside every telemetry-counting test's
+# window. Keep the boot-started singleton dormant in test — the sweeper's own
+# tests drive the pure `sweep(now)` directly, and a test that WANTS the process
+# starts its own instance via `start_supervised/1` under the sandbox owner.
+# Same shape as the DrainWorker gate above. Defaults ON, so dev/prod are
+# unaffected (`Barkpark.StudioChat.Supervisor.children/0` proves it).
+config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false
+
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process
 # Port lifecycle in test: `:auto` would flip to the systemd transient-unit path
 # on any host where `systemd-run` happens to resolve (some Linux CI images),
 # making the stub-command tests host-dependent. The unit-path tests opt into
 # `:systemd` explicitly with a stubbed launcher + is-active probe.
 config :barkpark, Barkpark.Sites.DeployRunner, runner_mode: :port
+
+# Content.DedupWall candidate-fetch TRIPWIRE. The wall's rescue answers a
+# database outage and a bug in the wall itself with the same `{:degraded, …}`;
+# that laundered a live FunctionClauseError in `maybe_filter_dataset/2` into a
+# green 25-test suite. In test, a CODE-class error (FunctionClauseError,
+# ArgumentError, MatchError …) re-raises instead; infra errors still degrade.
+# Off everywhere else — prod keeps its fail-closed refusal rather than a 500.
+config :barkpark, dedup_raise_on_code_errors: true
+
+# Default Workspace / Default Project cache (Barkpark.Tenancy.DefaultScopeCache).
+# OFF in test: the Ecto sandbox rolls every test back, so an entry that survived
+# one test would hand the next a `%Workspace{}` whose row no longer exists — an
+# order-dependent suite that fails somewhere far from the cause. Tests that
+# exercise the cache turn it on for their own duration
+# (test/barkpark_web/capabilities_no_db_test.exs).
+config :barkpark, tenancy_default_scope_cache_ttl_ms: 0

@@ -263,7 +263,26 @@ const HOOKS = [
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
   { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
-  { key: "button.btn.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member", source: "same band as the row above" },
+  // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
+  // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
+  // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
+  // NO hook at all, so the same verb had one identity when it was offered
+  // (`data-life-verb`) and another when it was refused (its class list, shared with every
+  // small button in the tree). The console now gives the refused arm the SAME
+  // `data-life-verb` as the live one — one verb, ONE identity, offered or refused — so
+  // the stable identity this table pins is `button.btn.btn-sm[data-life-verb]`.
+  //
+  // NOT AN ALLOWLIST WIDENING: the row count is unchanged (the old key is REPLACED, not
+  // kept beside the new one), so a control that stops carrying the attribute reds here as
+  // a DEAD ROW rather than being absorbed by a surviving generic key. That is also what
+  // ends the flap the filing measured — reverting decommission's guard used to make
+  // `button.btn` stop matching and red as a dead row, which was noise about the class
+  // list rather than signal about the fence.
+  //
+  // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
+  // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
+  // PR. The two rows differing is the honest state of the tree today, not an oversight.
+  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
 ];
 const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
 
@@ -384,7 +403,36 @@ const PIN_MEMBER_SCENARIOS = 9;
 // reading what it PRINTED (9 member actor(s), 118 committed), never by
 // subtracting — main had moved the corpus to 121 while this branch was in
 // flight, so the pre-rebase 117 was a stale arithmetic.
-const PIN_TOTAL_SCENARIOS = 118;
+// 118 -> 120, and the member slice STAYS at 9 (cch-w50-s4): `billing-free-owner`
+// and `billing-support-plus` are the two billing ACTORS the corpus had never
+// held — the unsubscribed OWNER renderPlanState routes to the upsell card, and
+// the first `support_plus` fixture in the file. Both are OWNERS, so the member
+// slice is unmoved and PIN_MEMBER_SCENARIOS stays at 9 — the case the note above
+// forbids bumping. This pin is the SIXTH census integer the pair moves, and the
+// filing named only five: it names no file this row was scoped to, and this
+// sweep refused by name (`the committed corpus grew to 120 scenario(s), pinned
+// at 118`) before it was written. 120 was RE-DERIVED by RUNNING this sweep and
+// reading what it PRINTED, never by adding 2 to a number in a brief.
+// 120 -> 121 (cch-w12-followup-login-fixture-gap): `activity-identity-change` is
+// the corpus's first and only successful-login fixture — the one that lets a
+// drive COMPLETE a sign-in, so render()'s logged-out arm can be entered and left
+// with an account change across it. Its actor is the same OWNER
+// `me("Acme Inc", …)` the rest of the corpus carries (and its second identity is
+// an owner too), so the member slice is unmoved and PIN_MEMBER_SCENARIOS stays
+// at 9 — the case the note above forbids bumping. 121 was RE-DERIVED by RUNNING
+// this sweep and reading what it PRINTED ("the committed corpus grew to 121
+// scenario(s), pinned at 120"), never by adding one.
+// 121 -> 122 (cch-w49-s7): `billing-unconfigured` is the corpus's first fixture
+// to carry D554's `billing_capability` on the /v1/subscription 200, so the first
+// from which the console's consumption of that key can be measured from rendered
+// bytes. Its actor is `billing-trial`'s OWNER (`me("Ada's Lab", …)`) with ONE
+// field added, so the member slice is unmoved and PIN_MEMBER_SCENARIOS stays at
+// 9 — the case the note above forbids bumping. And it cannot widen the member
+// axis by construction: renderBilling returns at the owner fence before any grid
+// paints, so a member never reaches the code this fixture drives. 122 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 122 scenario(s), pinned at 121"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 122;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

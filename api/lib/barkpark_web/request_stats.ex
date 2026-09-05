@@ -55,8 +55,9 @@ defmodule BarkparkWeb.RequestStats do
   **BLINDNESS — two traffic shapes this meter can NEVER see** (documented
   non-classes, not bugs):
 
-    * `static_served` — `Plug.Static` (endpoint.ex:56) halts BEFORE
-      `Plug.Telemetry` (endpoint.ex:75), so a served static file emits ZERO
+    * `static_served` — `Plug.Static` (endpoint.ex, `plug Plug.Static`) halts
+      BEFORE `Plug.Telemetry` (endpoint.ex, `plug Plug.Telemetry`), so a
+      served static file emits ZERO
       stop events. Static hits are structurally invisible here (L1-proven on
       the live box: static 200s moved nothing).
     * `lv_connected` — LiveView socket dispatch precedes all user plugs; even a
@@ -78,7 +79,11 @@ defmodule BarkparkWeb.RequestStats do
       Bare `:browser` runs none, and LV identity resolves on the socket — so
       `lv_dead`/`browser` honestly report `auth_unknown` for nearly all
       traffic, by design. A signed-in browser session's dead render is
-      `auth_unknown`, and no anon counter may move for it. Pipelines that
+      `auth_unknown` UNLESS the LiveView's own `on_mount` resolves the session
+      token and assigns `:api_token` (Studio via `LiveAuth.:fetch_api_token`,
+      the paper reader via `BarkparkWeb.PaperViewer`) — the dead render copies
+      socket assigns onto the conn, so that sample reads `authed`. Either way
+      no anon counter may move for it. Pipelines that
       resolve OTHER principals (`:scim`, `:ingest`, `:ticket_key`,
       `:api_preview`, user sessions) are deliberately NOT in the allowlist:
       their callers may be authenticated without `:api_token`, so counting

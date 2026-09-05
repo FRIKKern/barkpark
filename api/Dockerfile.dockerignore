@@ -24,6 +24,10 @@ js
 web
 cloud
 tooling
+# api/Dockerfile COPYs tooling/pds (e0280b12f, 2026-09-02): the blanket `tooling`
+# above hid it from the context and every compose-smoke build failed with
+# '"/tooling/pds": not found' for 15 h. Negations must follow the exclusion.
+!tooling/pds
 docs-site
 obsidian_example
 IndxData

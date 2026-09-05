@@ -20,7 +20,7 @@ defmodule BarkparkWeb.EnvelopeGlobalSchemaRedactionTest do
   co-resident and schemaless rows guard against over-redaction and legacy
   schemaless=public parity respectively.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Repo, Tenancy}
   alias Barkpark.Content.SchemaDefinition

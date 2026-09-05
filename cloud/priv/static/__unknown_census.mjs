@@ -126,6 +126,19 @@ const EXPECT = [
   { f: "loadArchives", p: '"/v1/archives"', v: "guarded",
     proof: [/archivesModel\(r\.data, instanceAdminAuthority\(\)\)/],
     why: "archivesModel owns the honest error + Retry arm (route bodies both 200 and 502)" },
+  // cch-w51-bl / cch-archive-residue: the instance route's one-shot store read.
+  // `sanctioned` and not `guarded`: a failure here collapses into the state the
+  // module already starts in — "unknown" — and every consumer of that state is
+  // the UNNARROWED one (the decommission sheet keeps its blanket residue
+  // sentence, the Archive/Resurrect chips render with no caveat). Nothing is
+  // blanked, nothing is faked, and no error surface exists to guard: the read
+  // narrows copy when it lands and is silent when it does not. The proof pins
+  // the projection itself, because the failure mode that matters is not an
+  // unhandled error — it is somebody making a determinate state out of a read
+  // that did not answer.
+  { f: "ensureArchiveStore", p: '"/v1/archives"', v: "sanctioned",
+    proof: [/archiveStore = archiveStoreFromModel\(archivesModel\(r\.data\)\)/],
+    why: "a failed read stays 'unknown', which is exactly the blanket/uncaveated copy the surfaces already ship" },
   { f: "loadOverview", p: '"/v1/barkparks"', v: "guarded",
     proof: [/markRefreshStale\(\)/],
     why: "full-load failure paints the error state; a background failure marks staleness, never blanks" },
@@ -158,10 +171,10 @@ const EXPECT = [
     proof: [/!r\.ok/],
     why: "cch-w34-s1: hoisted arm — 'No sites yet' may only describe a 200" },
   { f: "loadWebhooks", p: 'whPath(bp, "", ds)', v: "guarded",
-    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\)\)/],
+    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\), r\.status\)/],
     why: "failure paints webhookErrorHtml + Retry" },
   { f: "loadDeliveries", p: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries", ds)', v: "guarded",
-    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\)\)/],
+    proof: [/webhookErrorHtml\(r\.data, cliInstance\(bp\), r\.status\)/],
     why: "failure paints webhookErrorHtml + Retry" },
   { f: "loadTimeline", p: '"/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=100"', v: "guarded",
     proof: [/Couldn\\'t load the timeline/],
@@ -201,15 +214,38 @@ const EXPECT = [
     proof: [/inviteLandingState\(pr\.status, preview, me/],
     fileProof: [/previewStatus >= 200 && previewStatus < 300 \? "invalid" : "check_failed"/],
     why: "cch-w67-s4: only a 404/empty-200 reads 'invalid'; a failed preview read lands check_failed and keeps the parked token" },
-  { f: "loadInvite", p: '"/v1/me"', v: "sanctioned",
-    proof: [/var me = res\[1\]\.ok \? res\[1\]\.data : null/],
-    why: "me only refines already_member/wrong-account context; the invite preview is the authority on this surface" },
+  { f: "loadInvite", p: '"/v1/me"', v: "guarded",
+    proof: [/absorbMe\(res\[1\]\)/, /inviteLandingState\(pr\.status, preview, me, Date\.now\(\), meState\(\)\)/],
+    fileProof: [/meBand !== undefined && meBand !== "loaded"\) return "check_failed"/],
+    why: "cch-w43-bl: PROMOTED from sanctioned. The old sanction said me only REFINES the landing — but a failed read then read as 'you are not already a member' and sold a Join button for a team the person may already be in. The read now goes through the ONE absorb, and its band decides: anything but loaded lands check_failed, which keeps the parked token and offers the re-check" },
   { f: "showAuthInviteBanner", p: '"/v1/invitations/" + encodeURIComponent(token)', v: "guarded",
     proof: [/r\.status === 404 \|\| r\.ok/, /We couldn't check your invitation just now/],
     why: "cch-w67-s4: only a determinate dead answer consumes the parked token; a transient failure keeps it and says so" },
-  { f: "mountLaunchCatalog", p: '"/v1/providers/" + encodeURIComponent(kind) + "/catalog"', v: "guarded",
+  // cch-w45-bl: the fetch half of mountLaunchCatalog, split out when the
+  // capability gate landed in front of it. Same read, same verdict, same proof.
+  { f: "mountLaunchCatalogFetch", p: '"/v1/providers/" + encodeURIComponent(kind) + "/catalog"', v: "guarded",
     proof: [/catalogViewState\(r\)/],
     why: "catalogViewState's error state renders the couldn't-load card + Retry" },
+  // cch-w45-bl: the conduit read the two catalog mounts now consult BEFORE
+  // fetching. `sanctioned` and not `guarded`: a failure caches `null`, which
+  // catalogCapability reads as "unknown", and "unknown" is not a refusal — every
+  // mount then proceeds on exactly the path it walks today, error arms included.
+  // Nothing is blanked and nothing is claimed; the read NARROWS (it can skip a
+  // request that cannot succeed) and is silent when it does not land.
+  { f: "withProviderCapabilities", p: '"/v1/providers/capabilities"', v: "sanctioned",
+    proof: [/providerCapsCache\.payload = r && r\.ok && r\.data \? r\.data : null/],
+    fileProof: [/if \(caps\.catalog !== false\) return \{ state: "unknown", reason: "" \};/],
+    why: "a failed read caches null → catalogCapability answers 'unknown' → the mount fetches exactly as it does today" },
+  // cch-w48-bl: the site screen's one-shot GitHub-readiness read. `sanctioned`:
+  // a failure changes NOTHING the console had already decided — the band starts
+  // at "unknown" and stays there, and githubReadinessFrom refuses to turn any
+  // non-200 (or a 200 without the boolean) into a configuration claim. What the
+  // unknown band then does — withhold the button, keep the repo chip — is the
+  // module's fail-closed policy, not an error surface this read owes a Retry.
+  { f: "ensureGithubReadiness", p: '"/v1/github/installation"', v: "sanctioned",
+    proof: [/var next = githubReadinessFrom\(r\);/],
+    fileProof: [/if \(!r \|\| !r\.ok \|\| !r\.data \|\| typeof r\.data !== "object"\) return "unknown";/],
+    why: "only a 200 carrying the boolean moves the band; every failure class stays 'unknown', which withholds rather than claims" },
   { f: "loadMe", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
     why: "cch-w36-s3: the failed arm records the fault so meState() reads 'failed', and re-enters every dependent view fail-closed" },
@@ -241,6 +277,18 @@ const EXPECT = [
   { f: "newAskLaunchAuthority", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
     why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed)" },
+  // cch-w49-s7 — /new's ONLY read of the plane's billing declaration. SANCTIONED,
+  // not guarded: the absence of an answer is the ANSWER this screen already
+  // commits to. capCache is LEFT UNTOUCHED on a non-200, billingCheckoutCapability
+  // then reads "unknown", and unknown is FAIL-OPEN — the CTAs stand, exactly as
+  // they stood before the read existed. That is safe only because the SERVER is
+  // the gate (Billing.checkout/2 refuses :unconfigured/:unverifiable pre-flight,
+  // #10509), so a failed read costs a refused click and never a charged card.
+  // The proof pins the fail-open MECHANISM: strip the early return and the
+  // absence starts writing the cache.
+  { f: "newAskCheckoutCapability", p: '"/v1/subscription"', v: "sanctioned",
+    proof: [/if \(!r\.ok \|\| !r\.data \|\| !r\.data\.billing_capability\) return;/],
+    why: "an unread capability stays unknown, and unknown leaves every CTA standing — the server refuses the POST" },
   { f: "renderNewPricing", p: '"/v1/me"', v: "sanctioned",
     proof: [/if \(resolved !== "blocked"\) return;/],
     why: "a failed read leaves the CTAs standing — unknown is not refused (comment at site); the checkout POST is the enforcer" },

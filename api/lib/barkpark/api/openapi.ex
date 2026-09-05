@@ -175,8 +175,58 @@ defmodule Barkpark.Api.OpenApi do
       |> Enum.reject(fn item -> Map.get(item, "name") in placeholders end)
       |> Enum.map(&query_param/1)
 
-    path_params ++ query_params
+    idempotency_param(template, method) ++ path_params ++ query_params
   end
+
+  # ── Idempotency-Key ────────────────────────────────────────────────────────
+  #
+  # DECLARED, because an undeclared dedup door is a door nobody uses. The
+  # `Idempotency-Key` header is server-honoured ONLY where
+  # `BarkparkWeb.Plugs.Idempotency` is actually mounted — the two mutate routes,
+  # via `pipeline :idempotent` (router.ex) and `pipeline :scoped_mutate`
+  # (router.ex). Advertising it on every write would be a LIE: a POST to a route
+  # without the plug accepts the header and silently dedups nothing, which is
+  # strictly worse than not offering it, because the caller then trusts a retry
+  # that double-applies.
+  #
+  # So the allowlist below mirrors the router, not the method. If you mount the
+  # plug on another pipeline, add its path template here — and if you REMOVE it
+  # from one, remove the template, or the spec starts promising dedup the server
+  # does not do. `openapi_idempotent_routes_test.exs` re-derives this list from
+  # router.ex and reds on either drift.
+  @idempotent_templates ["/v1/data/mutate/:dataset"]
+
+  defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
+    # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
+    # template) rides `:scoped_mutate`, which mounts the same plug — so both
+    # spellings of an allowlisted route get the header.
+    if Enum.any?(@idempotent_templates, &String.ends_with?(template, &1)) do
+      [
+        %{
+          "name" => "Idempotency-Key",
+          "in" => "header",
+          "required" => false,
+          "description" =>
+            "Opaque client-generated key that makes this write safe to retry. " <>
+              "The FIRST request carrying a given key executes; a later request with " <>
+              "the same key replays that original response byte-for-byte (with " <>
+              "`Idempotency-Replay: true`) instead of applying the mutation again — so " <>
+              "a client whose request timed out can retry without double-filing. A " <>
+              "concurrent request holding the same key is refused 409 " <>
+              "`idempotency_key_in_use`; the handler never runs twice. Keys are scoped " <>
+              "to the presenting token AND the request path, so two tenants cannot " <>
+              "collide on one key, and they expire after 24h. Generate ONE key per " <>
+              "logical operation and reuse it across that operation's retries — a fresh " <>
+              "key per attempt is exactly the double-write this header prevents.",
+          "schema" => %{"type" => "string"}
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  defp idempotency_param(_template, _method), do: []
 
   defp path_placeholders(template) do
     Regex.scan(~r/:([a-zA-Z_][a-zA-Z0-9_]*)/, template)
@@ -270,13 +320,42 @@ defmodule Barkpark.Api.OpenApi do
     |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
   end
 
+  # Per-command 200 bodies that are NOT a Document. The default below points every
+  # command at `#/components/schemas/Document`, which is right for the data API
+  # and wrong for the handful of auth verbs that answer a receipt. pds-w36 c0:
+  # POST /v1/auth/reset answers `{ok, sessionsRevoked}` (auth_controller.ex
+  # renders the ok flag beside `sessionsRevoked: sessions_revoked`) and the spec
+  # promised a Document — so the JS SDK and docs/auth-user-sessions.md carried a
+  # field the manifest never declared. Keyed by command id; add a row when a
+  # verb answers a receipt shape, never widen the default.
+  @receipt_schemas %{
+    "auth.reset" => %{
+      "type" => "object",
+      "required" => ["ok", "sessionsRevoked"],
+      "properties" => %{
+        "ok" => %{"type" => "boolean", "enum" => [true]},
+        "sessionsRevoked" => %{
+          "type" => "integer",
+          "minimum" => 0,
+          "description" =>
+            "Count of the user's OTHER sessions revoked by this reset (the current one stays live)."
+        }
+      },
+      "additionalProperties" => false
+    }
+  }
+
   defp success_response(cmd) do
+    schema =
+      case Map.fetch(@receipt_schemas, Map.get(cmd, "id")) do
+        {:ok, receipt} -> receipt
+        :error -> %{"$ref" => "#/components/schemas/Document"}
+      end
+
     %{
       "description" =>
         if(Map.get(cmd, "writes", false), do: "Mutation applied.", else: "Success."),
-      "content" => %{
-        "application/json" => %{"schema" => %{"$ref" => "#/components/schemas/Document"}}
-      }
+      "content" => %{"application/json" => %{"schema" => schema}}
     }
   end
 

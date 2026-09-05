@@ -87,7 +87,7 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
 
   defp upload(raw, sid, bytes) do
     json_conn(raw)
@@ -232,7 +232,7 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
       end
 
       # An anonymous caller never gets past RequireToken either.
-      assert build_conn() |> get(att["url"]) |> json_response(401)
+      assert scoped_conn() |> get(att["url"]) |> json_response(401)
     end
 
     test "a `chat` token with NO workspace binding is 403'd — it cannot be confined",

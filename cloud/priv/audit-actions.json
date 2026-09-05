@@ -226,8 +226,8 @@
     {
       "verb": "oauth.linked",
       "label": null,
-      "reason_code": "no-producer",
-      "reason": "Declared but produced by NOTHING in cloud/lib: the OAuth callback cannot tell a LINK from a BIRTH, so no row is written. Excused by name in @producerless (cloud/test/barkpark_cloud/audit_vocabulary_census_test.exs) with an anchor that must resolve and a blocker that must stay absent. A label here would name a category the feed can never show."
+      "reason_code": "d582-copy-not-written",
+      "reason": "NOW PRODUCED (cch-w53-bl-oauth-linked-needs-a-branch-reporting-return): Accounts.get_or_create_user_from_oauth/1 reports its branch, and router.ex's audit_oauth_linked/4 writes the row on the :linked arm alone — a first-ever OAuth signup writes none. Its @producerless entry is deleted. Unlabelled only because the copy is not written; renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
     },
     {
       "verb": "email.verified",

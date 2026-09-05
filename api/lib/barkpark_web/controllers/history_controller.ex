@@ -17,8 +17,7 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   def show(conn, %{"dataset" => dataset, "id" => id}) do
-    with :ok <- validate_uuid(id),
-         {:ok, rev} <- Content.get_revision(id, dataset, scope_opts(conn)) do
+    with {:ok, rev} <- resolve_revision(id, dataset, scope_opts(conn)) do
       # WS-B (revision-detail leak): the stored snapshot `rev.content` is raw
       # plaintext — a non-encrypted `private` / `owner_only` / `readable_by`
       # field lives there in the clear. Route it through the Envelope redaction
@@ -81,6 +80,26 @@ defmodule BarkparkWeb.HistoryController do
     if Regex.match?(@uuid_regex, id), do: :ok, else: {:error, :invalid_uuid}
   end
 
+  # [rev-hash-has-no-read] `GET /v1/data/revision/:dataset/:id` accepts EITHER a
+  # revision UUID or a document `_rev` hash. The envelope publishes `"_rev"` on
+  # every read and acceptance criteria cite it, but the hash previously resolved
+  # to nothing: this path 404'd every non-UUID before it ever reached a lookup.
+  #
+  # Surfacing it HERE — rather than on a new route — is deliberate: the read is
+  # already reachable, already token-gated, and already carries the dataset /
+  # workspace / grant scoping, so an existing CLI verb starts resolving `_rev`
+  # with no new surface to secure. The two id shapes are disjoint (a `_rev` hash
+  # is not UUID-shaped), so a UUID caller's behaviour is byte-identical.
+  #
+  # `get_revision_by_rev/3` applies the SAME scope clauses as `get_revision/3`,
+  # so this is a new key on the existing read, never a wider one.
+  defp resolve_revision(id, dataset, opts) do
+    case validate_uuid(id) do
+      :ok -> Content.get_revision(id, dataset, opts)
+      {:error, :invalid_uuid} -> Content.get_revision_by_rev(id, dataset, opts)
+    end
+  end
+
   defp not_found(conn, message) do
     env =
       {:error, :not_found}
@@ -96,7 +115,18 @@ defmodule BarkparkWeb.HistoryController do
     %{
       id: rev.id,
       action: rev.action,
+      # [rev-hash-has-no-read] The document `_rev` this entry captured — the
+      # same hash the envelope publishes. Surfacing it in the LISTING is what
+      # lets a seal citing a `_rev` be matched to its history entry by eye;
+      # without it a caller holding a hash had nothing to compare against.
+      # NULL on history written before the column existed.
+      rev: rev.rev,
       actor_user_id: rev.actor_user_id,
+      # Edit-on-the-link slice 4: WHO, with the kind that makes the id
+      # readable. NULL on history written before the columns existed.
+      actor_kind: rev.actor_kind,
+      actor_id: rev.actor_id,
+      actor_label: rev.actor_label,
       title: rev.title,
       status: rev.status,
       timestamp: rev.inserted_at
@@ -110,7 +140,11 @@ defmodule BarkparkWeb.HistoryController do
       type: rev.type,
       dataset: rev.dataset,
       action: rev.action,
+      rev: rev.rev,
       actor_user_id: rev.actor_user_id,
+      actor_kind: rev.actor_kind,
+      actor_id: rev.actor_id,
+      actor_label: rev.actor_label,
       title: rev.title,
       status: rev.status,
       # `owner_id` is unknown for a stored snapshot (revisions carry none), so an

@@ -103,7 +103,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-meta-${{ github.ref }}
+  group: pr-meta-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # never cancel a main run — a cancelled run on main leaves no verdict at all,
   # which reads identically to a clean one.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

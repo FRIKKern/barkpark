@@ -870,7 +870,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
     lead_html = if lead == "", do: "", else: lead <> " · "
 
     counts =
-      ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
+      ~s|<div class="text-dim" style="font-size: 12px; margin-bottom: 4px;">| <>
         lead_html <>
         ~s|<span style="color: var(--ok);">+#{added}</span> | <>
         ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
@@ -881,7 +881,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
           diff_section_rows_html(head) <>
-          ~s|<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
+          ~s|<div class="text-dim" style="font-size: 12px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
           ~s|</summary>#{diff_section_rows_html(rest)}</details>|
       else
         diff_section_rows_html(head)
@@ -915,7 +915,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
       if legend == "",
         do: "",
         else:
-          ~s|<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">#{escape_html(legend)}</div>|
+          ~s|<div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">#{escape_html(legend)}</div>|
 
     ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
       rows <> legend_html <> ~s|</div>|
@@ -973,7 +973,11 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # The D78 annotation markers with their evergreen token colors. The glyph is
   # the semantic carrier; color is never load-bearing (the legend row
   # disambiguates locally).
-  @filetree_markers [{" ● ", "var(--ok)"}, {" ○ ", "var(--fg-dim)"}, {" ✕ ", "var(--danger)"}]
+  @filetree_markers [
+    {" ● ", "var(--ok)"},
+    {" ○ ", "var(--paper-ink-soft)"},
+    {" ✕ ", "var(--danger)"}
+  ]
 
   defp filetree_row_html(line) do
     case split_filetree_note(line) do

@@ -41,9 +41,11 @@
 // inline below so there is no runtime dependency on `./find` at all.
 import type { FindHit } from "./find";
 
-/** Local mirror of `readerHref` (see `lib/find.ts`) — duplicated here so the
- * seed helpers stay zero-runtime-dep. The path is the same `/d/<type>/<slug>`
- * unified detail route. Keep these two in lockstep. */
+/** Local mirror of `readerHref` (see `lib/find.ts`) — the ONE call site that
+ * cannot route through the helper, because importing `./find` at RUNTIME would
+ * break this module's zero-runtime-dep contract (the `import type` above is
+ * stripped at load time; a value import is not). The path and the encoding must
+ * therefore stay byte-identical to `readerHref`. Keep these two in lockstep. */
 function readerHrefForSeed(type: string, slug: string): string {
   return `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
 }

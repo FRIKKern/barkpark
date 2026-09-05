@@ -56,7 +56,7 @@ TPL_RETRY_TEST="templates/search-starter/lib/retry-after.test.ts"
 # counts so ordinary churn does not trip them, and far above zero.
 MIN_WEB_LIB_FILES=30
 MIN_TPL_LIB_FILES=20
-MIN_INVARIANT_PROBES=12
+MIN_INVARIANT_PROBES=14
 
 # ── THE INVARIANT LIST ───────────────────────────────────────────────────────
 # ID|TREE|STATUS|OWNER|TITLE
@@ -76,17 +76,23 @@ INV-5|web|debt|task-b84842fb6982e799|popular-query chips are CURATED (a filter o
 INV-5|template|enforced|task-b84842fb6982e799|popular-query chips are CURATED (a filter over the pool), not merely capped
 INV-6|web|enforced|PR #14006|the Retry-After ceiling is pinned by VALUE — its test bounds the constant against a numeric LITERAL, never only against itself
 INV-6|template|enforced|PR #14006|the Retry-After ceiling is pinned by VALUE — its test bounds the constant against a numeric LITERAL, never only against itself
+INV-7|web|enforced|task-2811a42a66c7b649|a TYPE 404 (BarkparkNotFoundError, which only the slug-query leg can raise) lands in the ERROR bucket with a message NAMING the type — never in the absent bucket
+INV-7|template|enforced|task-3771c96a4b554eeb|a TYPE 404 (BarkparkNotFoundError, which only the slug-query leg can raise) lands in the ERROR bucket with a message NAMING the type — never in the absent bucket
 "
 
 # ── INV-1 RATCHET LEDGER ─────────────────────────────────────────────────────
-# PATH|COUNT — unencoded `/d/${…}/${…}` builders known on main 2026-09-02,
-# owned by task-8bc560183cd37bf7 (which pays BOTH trees). MORE than the recorded
-# count, or ANY unencoded builder in a file absent from this ledger, is a RED.
-# FEWER is the fix landing: the guard says PROMOTABLE and passes.
+# PATH|COUNT — unencoded `/d/${…}/${…}` builders still tolerated. MORE than the
+# recorded count, or ANY unencoded builder in a file absent from this ledger, is
+# a RED. FEWER is the fix landing: the guard says PROMOTABLE and passes.
+#
+# RATCHETED TO EMPTY 2026-09-05 by task-8bc560183cd37bf7 (PR #16133), which paid
+# the debt in BOTH trees. The three entries that used to live here —
+# web/lib/find.ts|2, templates/search-starter/lib/find.ts|2 and
+# templates/search-starter/lib/prefix-seed.ts|1 — are now zero: every builder in
+# both lib trees routes through readerHref. An empty ledger means the strictest
+# reading of INV-1 is live, so ANY new unencoded builder anywhere in either lib
+# tree reds immediately. Do not re-add an entry to quiet a red; fix the builder.
 INV1_LEDGER="
-web/lib/find.ts|2
-templates/search-starter/lib/find.ts|2
-templates/search-starter/lib/prefix-seed.ts|1
 "
 
 # ── THE EXEMPTION LIST ───────────────────────────────────────────────────────
@@ -184,6 +190,18 @@ has_code_in_tree() {
   return 1
 }
 
+# has_code_flat <root> <relpath> <extended-regex> — 0 when the file exists and
+# its COMMENT-STRIPPED source, with every whitespace run squashed to one space,
+# matches. INV-7's assertion spans four lines (an `if` and its `return`), and
+# both trees' prose QUOTES the two bucket shapes verbatim while explaining them,
+# so a probe that read raw bytes would match the explanation and pass on a
+# reverted implementation. Same lesson as INV-6's strip_comments.
+has_code_flat() {
+  [ -f "$1/$2" ] || return 1
+  _flat="$(strip_comments "$1/$2" | tr '\n' ' ' | tr -s '[:space:]' ' ')"
+  grep -Eq -- "$3" <<< "$_flat"
+}
+
 # ── the probes ───────────────────────────────────────────────────────────────
 # Each prints nothing and returns 0 (property holds) or 1 (violated). A probe
 # that cannot even find its subject returns 1: an unmeasurable invariant is a
@@ -275,6 +293,27 @@ probe_inv6() {  # the ceiling is bounded against a numeric LITERAL
   grep -Eq 'MAX_RETRY_AFTER_MS[[:space:]]*[,<][[:space:]]*[0-9][0-9_]*|[0-9][0-9_]+[[:space:]]*,[[:space:]]*MAX_RETRY_AFTER_MS' <<< "$_flat"
 }
 
+# INV-7: the TYPE-404 bucket, asserted in BOTH trees so they cannot drift apart
+# on the property they were paired for. Three parts, each killing one mutant:
+#   a. the named message exists and INTERPOLATES the type   (drop-the-type)
+#   b. the NotFound branch returns it, not `error: null`    (collapse-the-buckets)
+#   c. no NotFound branch returns the absent shape          (belt and braces)
+# Part (b) is the whole invariant: `{ doc: null, error: null }` there is exactly
+# the ruling this pair used to disagree on (web said absent, the template said
+# misconfigured), and the disagreement was invisible to INV-3, which only asks
+# that TWO buckets exist and that classification is code-keyed — never WHICH
+# bucket a TYPE 404 lands in.
+probe_inv7() {  # <root> <tree>
+  _root="$1"; _f="$(lib_dir "$2")/doc-absence.ts"
+  has_code_flat "$_root" "$_f" 'export function unknownTypeMessage\(type: string\)' || return 1
+  has_code_flat "$_root" "$_f" 'Unknown document type "\$\{type\}"' || return 1
+  has_code_flat "$_root" "$_f" \
+    'isBarkparkError\([^)]*"BarkparkNotFoundError"\)\) \{ return \{ doc: null, error: unknownTypeMessage\(type\) \};' || return 1
+  if has_code_flat "$_root" "$_f" \
+    '"BarkparkNotFoundError"\)\) \{ return \{ doc: null, error: null'; then return 1; fi
+  return 0
+}
+
 # subject <id> <tree> — the file a finding should NAME.
 subject() {
   case "$1" in
@@ -284,6 +323,7 @@ subject() {
     INV-4) echo "$(lib_dir "$2")/graph.ts" ;;
     INV-5) echo "$(lib_dir "$2")/find.ts" ;;
     INV-6) retry_test "$2" ;;
+    INV-7) echo "$(lib_dir "$2")/doc-absence.ts" ;;
   esac
 }
 
@@ -295,6 +335,7 @@ run_probe() {  # <root> <id> <tree>
     INV-4) probe_inv4 "$1" "$3" ;;
     INV-5) probe_inv5 "$1" "$3" ;;
     INV-6) probe_inv6 "$1" "$3" ;;
+    INV-7) probe_inv7 "$1" "$3" ;;
     *) return 1 ;;
   esac
 }
@@ -404,12 +445,47 @@ if [ "${1:-}" = "--selftest" ]; then
 
   echo
   echo "[2] PLANT INV-3: swap the template's code-keyed test for \`instanceof\`"
+  echo "     (the classification moved get-document.ts -> doc-absence.ts in #15762;"
+  echo "      this plant's anchor moved with it, and \`mutated\` is what caught that)"
   perl -0pi -e 's/isBarkparkError\(err, "BarkparkNotFoundError"\)/err instanceof BarkparkNotFoundError/' \
-    "$tmp/$TPL_LIB/get-document.ts"
-  mutated "$TPL_LIB/get-document.ts" || true
-  expect "INV-3 template" 1 "FAIL|INV-3|template|$TPL_LIB/get-document.ts"
-  cp "$REPO_ROOT/$TPL_LIB/get-document.ts" "$tmp/$TPL_LIB/get-document.ts"
+    "$tmp/$TPL_LIB/doc-absence.ts"
+  mutated "$TPL_LIB/doc-absence.ts" || true
+  # TWO reds, and that is correct: INV-3 bans `instanceof` anywhere in the lib
+  # dir, and INV-7 pins the NotFound branch to the code-keyed predicate that
+  # produces the named message. One plant, two invariants — asserting 1 here
+  # would be asserting that INV-7 is blind to it.
+  # INV-3 ranges over the whole lib dir (has_code_in_tree), so it NAMES its
+  # subject file, get-document.ts, even though the violation is one module over.
+  expect "INV-3 template" 2 "FAIL|INV-3|template|$TPL_LIB/get-document.ts"
+  if ! grep -Fq "FAIL|INV-7|template|$TPL_LIB/doc-absence.ts" <<< "$(run_checks "$tmp")"; then
+    echo "  SELFTEST FAIL  the instanceof plant did not also red INV-7"
+    fails=$((fails + 1))
+  else
+    echo "  ok   INV-3 template -> the same plant also reds INV-7, naming doc-absence.ts"
+  fi
+  cp "$REPO_ROOT/$TPL_LIB/doc-absence.ts" "$tmp/$TPL_LIB/doc-absence.ts"
   expect "INV-3 restored" 0 ""
+
+  echo
+  echo "[2b] PLANT INV-7: flip WEB back to the pre-#15762 ruling (TYPE 404 = absent)"
+  echo "     — the exact divergence INV-3 could not see: two buckets still exist"
+  echo "       and classification is still code-keyed, only the VERDICT moved."
+  perl -0pi -e 's/return \{ doc: null, error: unknownTypeMessage\(type\) \};/return { doc: null, error: null };/' \
+    "$tmp/$WEB_LIB/doc-absence.ts"
+  mutated "$WEB_LIB/doc-absence.ts" || true
+  expect "INV-7 web" 1 "FAIL|INV-7|web|$WEB_LIB/doc-absence.ts"
+  cp "$REPO_ROOT/$WEB_LIB/doc-absence.ts" "$tmp/$WEB_LIB/doc-absence.ts"
+  expect "INV-7 restored" 0 ""
+
+  echo
+  echo "[2c] PLANT INV-7 the other way: flip the TEMPLATE, proving the probe is"
+  echo "     symmetric and not merely pinned to whichever tree it was written in"
+  perl -0pi -e 's/return \{ doc: null, error: unknownTypeMessage\(type\) \};/return { doc: null, error: null };/' \
+    "$tmp/$TPL_LIB/doc-absence.ts"
+  mutated "$TPL_LIB/doc-absence.ts" || true
+  expect "INV-7 template" 1 "FAIL|INV-7|template|$TPL_LIB/doc-absence.ts"
+  cp "$REPO_ROOT/$TPL_LIB/doc-absence.ts" "$tmp/$TPL_LIB/doc-absence.ts"
+  expect "INV-7 restored" 0 ""
 
   echo
   echo "[3] PLANT INV-1: a NEW unencoded /d/ builder in an unledgered web file"
@@ -421,12 +497,12 @@ if [ "${1:-}" = "--selftest" ]; then
   expect "INV-1 restored" 0 ""
 
   echo
-  echo "[3b] PLANT INV-1 RATCHET: a THIRD unencoded builder in a LEDGERED file"
-  echo "     (web/lib/find.ts is recorded at 2 — the ratchet must red on 3, not on 2)"
+  echo "[3b] PLANT INV-1 RATCHET: an unencoded builder in a LEDGER-TRACKED file"
+  echo "     (web/lib/find.ts is at 0 since the ledger was ratcheted empty — one reds)"
   printf '\nexport const planted = (t: string, s: string) => `/d/${t}/${s}`;\n' \
     >> "$tmp/$WEB_LIB/find.ts"
   mutated "$WEB_LIB/find.ts" || true
-  expect "INV-1 ratchet" 1 "ledger allows 2"
+  expect "INV-1 ratchet" 1 "ledger allows 0"
   cp "$REPO_ROOT/$WEB_LIB/find.ts" "$tmp/$WEB_LIB/find.ts"
   expect "INV-1 ratchet restored" 0 ""
 
@@ -490,7 +566,7 @@ if [ "${1:-}" = "--selftest" ]; then
     echo "SELFTEST FAIL: $fails assertion(s) failed"
     exit 1
   fi
-  echo "SELFTEST PASS: $probes probes; 5 planted violations reported RED and NAMED,"
+  echo "SELFTEST PASS: $probes probes; 7 planted violations reported RED and NAMED,"
   echo "               an exempt file's identical violation stayed green, a paid debt"
   echo "               reported PROMOTABLE (never red), and an empty tree tripped the floor."
   exit 0

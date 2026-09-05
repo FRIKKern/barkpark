@@ -160,7 +160,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # registry is unaffected. The REMOVE half here is confined WITH the add half
   # — the ruling names declare AND remove — so the two are at parity again,
   # both refusing.
-  defp target_workspace_admits?(socket, ws_slug) do
+  #
+  # PUBLIC, and called from the READ half too (task-87c43ffa0be7ad95).
+  # `Shared.load_share_rows/1` filtered foreign scopes with
+  # `instance_declare_authority?/1` — the bare global `admin` bit — which
+  # `Caps.admin?/1`'s token arm already requires to open the panel at all, so
+  # that filter admitted every scope for every token principal that could see
+  # the listing. The panel LISTED what these two write halves refuse to let you
+  # TOUCH. The read half now asks THIS function, not a second copy of it, so
+  # what the panel shows and what it performs cannot drift again.
+  def target_workspace_admits?(socket, ws_slug) do
     if mounted_workspace?(socket, ws_slug) do
       true
     else

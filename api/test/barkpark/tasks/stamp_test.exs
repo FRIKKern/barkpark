@@ -1210,4 +1210,428 @@ defmodule Barkpark.Tasks.StampTest do
       assert msg =~ "not two"
     end
   end
+
+  # ─── (8) THE POST-CLOSE ATTEMPT — task-d68754135a6a9f66 ──────────────────
+  #
+  # THE MEASURED DEFECT. A closer who has legitimately verified something about
+  # a SEALED row had no sanctioned per-criterion write: every stamp came back
+  # `not_in_progress:done`, so they reached for a raw /v1/data/mutate that
+  # pastes ONE evidence string across every remaining criterion. Roughly 43-57
+  # tasks and 95-130 criteria carry that shape, and one row confesses it in its
+  # own evidence blob ("stamp failed on already-closed task, criteria corrected
+  # via mutate").
+  #
+  # THE CURE, AND ITS EXACT BOUNDARY. `--miss` — and ONLY `--miss` — is admitted
+  # on a terminal row, on the withdrawal's observed_rev fence. Each of these
+  # tests can lose:
+  #   * delete the terminal-miss authorize clause and the landing test reds;
+  #   * widen the exemption to `--met` and the refusal test reds;
+  #   * remove the met-pinning line in Internal.apply_entry_update and the
+  #     malformed-met test reds;
+  #   * let the attempt path write evidence and the byte-identity test reds;
+  #   * drop the observed_rev CAS and both refusal tests red.
+
+  alias Barkpark.Tasks.WorkDigest
+
+  # A task closed into `status`, with whatever criteria the case needs. Returns
+  # {task, closed_doc} — the closed doc carries the rev an annotator must pin.
+  defp closed_task!(scope, criteria, status \\ "done") do
+    doc_id = uniq("stamp-postclose")
+    task = mk_task!(doc_id, scope, %{"acceptance_criteria" => criteria})
+    {_claimed, epoch} = claim!(doc_id, "closer", scope)
+
+    {:ok, closed} =
+      Close.close(task.id, "closer",
+        observed_epoch: epoch,
+        lifecycle_status: status,
+        criteria_override: "closing with criteria unproven on purpose"
+      )
+
+    assert closed.content["lifecycle_status"] == status
+    {task, closed}
+  end
+
+  defp attempts_of(task_id, index) do
+    task_id |> criteria_of() |> Enum.at(index) |> Map.get("attempts")
+  end
+
+  describe "stamp/3 — --miss on a DONE row (the sanctioned post-close instrument)" do
+    test "the attempt lands with the rev the caller read, and --met on the SAME row is still refused",
+         %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria())
+
+      # THE REFUSAL FIRST — bound then asserted on a boolean, because
+      # `assert pattern = expr, msg` would raise MatchError before assert/2
+      # ever sees the message (scripts/unreachable-assert-message-check).
+      met_on_sealed =
+        Stamp.stamp(task.id, "reconciler",
+          observed_epoch: 0,
+          criterion: 0,
+          criterion_text: "gate passes",
+          observed_rev: closed.rev,
+          outcome: {:met, "verified CI-green + merged after the close"}
+        )
+
+      assert met_on_sealed == {:error, {:not_in_progress, "done"}},
+             "the seal still refuses a RAISE even WITH the rev — only the attempt shape is exempt"
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "reconciler",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "post-close read: the gate log is gone, this stays unproven"}
+               )
+
+      row = Enum.at(doc.content["acceptance_criteria"], 0)
+      assert [attempt] = row["attempts"]
+      assert attempt["note"] == "post-close read: the gate log is gone, this stays unproven"
+      assert attempt["worker"] == "reconciler"
+      assert {:ok, _, _} = DateTime.from_iso8601(attempt["ts"])
+
+      # The seal itself is untouched: still done, same close_reason, same claim
+      # receipt. An attempt records an observation ABOUT the verdict, never the
+      # verdict.
+      assert doc.content["lifecycle_status"] == "done"
+      assert doc.content["close_reason"] == closed.content["close_reason"]
+      assert doc.content["claim"] == closed.content["claim"]
+    end
+
+    test "a CANCELLED row behaves exactly like a done one — the label does not change the harm",
+         %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria(), "cancelled")
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "reconciler",
+                 observed_epoch: 0,
+                 criterion: 1,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "cancelled before this was attempted"}
+               )
+
+      assert [%{"note" => "cancelled before this was attempted"}] = attempts_of(task.id, 1)
+
+      met_on_cancelled =
+        Stamp.stamp(task.id, "reconciler",
+          observed_epoch: 0,
+          criterion: 1,
+          criterion_text: "docs updated",
+          observed_rev: closed.rev,
+          outcome: {:met, "no"}
+        )
+
+      assert met_on_cancelled == {:error, {:not_in_progress, "cancelled"}}
+    end
+
+    test "an OPEN row is NOT admitted — it can still be claimed, so nothing is missing there",
+         %{scope: scope} do
+      doc_id = uniq("stamp-postclose-open")
+      task = mk_task!(doc_id, scope)
+      open_doc = Repo.get!(Document, task.id)
+
+      miss_on_open =
+        Stamp.stamp(task.id, "reconciler",
+          observed_epoch: 0,
+          criterion: 0,
+          observed_rev: open_doc.rev,
+          outcome: {:miss, "not sealed, so claim it"}
+        )
+
+      assert miss_on_open == {:error, {:not_in_progress, "open"}},
+             "the exemption is TERMINAL-only; widening it to open would skip the claim entirely"
+
+      assert attempts_of(task.id, 0) == nil
+    end
+  end
+
+  describe "stamp/3 — the post-close attempt CANNOT flip a lock (criterion 2 of the row)" do
+    test "a stored met=TRUE stays true", %{scope: scope} do
+      criteria = [
+        %{"criterion" => "gate passes", "met" => true, "evidence" => "42 green on abc123"},
+        %{"criterion" => "docs updated", "met" => false, "evidence" => ""}
+      ]
+
+      {task, closed} = closed_task!(scope, criteria)
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "re-read post-close; the run link 404s now"}
+               )
+
+      row = Enum.at(doc.content["acceptance_criteria"], 0)
+
+      assert row["met"] == true,
+             "an attempt PINS met to its stored value — it may not LOWER a sealed verdict either"
+
+      assert length(row["attempts"]) == 1
+    end
+
+    test "a stored met=FALSE stays false", %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria())
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 1,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "still unproven after the close"}
+               )
+
+      row = Enum.at(doc.content["acceptance_criteria"], 1)
+
+      assert row["met"] == false,
+             "the merge default met->true is never inherited (D8's proven lock-flipping footgun)"
+    end
+
+    test "an ABSENT/malformed met normalises to FALSE, never to true", %{scope: scope} do
+      # The case that makes the pinning line load-bearing: with the line
+      # removed, a stored met=true and a stored met=false both survive
+      # untouched, and only THIS row can tell you the guard is gone.
+      criteria = [
+        %{"criterion" => "no met key at all", "evidence" => "prose only"},
+        %{"criterion" => "met is a string", "met" => "true", "evidence" => ""}
+      ]
+
+      {task, closed} = closed_task!(scope, criteria)
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "absent met"}
+               )
+
+      assert Enum.at(doc.content["acceptance_criteria"], 0)["met"] == false,
+             "an absent met normalises to FALSE — a post-close attempt may not manufacture a done"
+
+      fresh = Repo.get!(Document, task.id)
+
+      assert {:ok, doc2} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 1,
+                 observed_rev: fresh.rev,
+                 outcome: {:miss, "string met"}
+               )
+
+      assert Enum.at(doc2.content["acceptance_criteria"], 1)["met"] == false,
+             ~s|a stored "true" STRING is not a met — only the boolean true is|
+    end
+  end
+
+  describe "stamp/3 — a post-close attempt leaves evidence and criterion text BYTE-unchanged" do
+    test "every criterion's evidence and text survive the attempt byte for byte", %{scope: scope} do
+      criteria = [
+        %{"criterion" => "gate passes", "met" => true, "evidence" => "42 green on abc123"},
+        %{"criterion" => "docs updated", "met" => false, "evidence" => "half-written note"},
+        %{"criterion" => "  spacing  and  ünicode  ", "met" => false, "evidence" => "…ok"}
+      ]
+
+      {task, closed} = closed_task!(scope, criteria)
+      before_rows = criteria_of(task.id)
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome:
+                   {:miss, "an attempt writes NO evidence — that is the whole safety argument"}
+               )
+
+      after_rows = criteria_of(task.id)
+
+      # BYTE identity, asserted directly and per field. Evidence overwriting on
+      # the met path is exactly what makes the met path unsafe after close, so
+      # the attempt path is held to the opposite standard explicitly rather
+      # than by reading apply_entry_update.
+      assert Enum.map(before_rows, & &1["evidence"]) == Enum.map(after_rows, & &1["evidence"])
+      assert Enum.map(before_rows, & &1["criterion"]) == Enum.map(after_rows, & &1["criterion"])
+
+      # And the untouched neighbours are whole-map identical — no key gained,
+      # no key lost, only index 0 grew an attempts list.
+      assert Enum.at(before_rows, 1) == Enum.at(after_rows, 1)
+      assert Enum.at(before_rows, 2) == Enum.at(after_rows, 2)
+
+      assert Map.delete(Enum.at(after_rows, 0), "attempts") == Enum.at(before_rows, 0)
+    end
+
+    test "(c) close's work-digest fence is UNAFFECTED — asserted, not assumed", %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria())
+      before_doc = Repo.get!(Document, task.id)
+      before_digests = WorkDigest.field_digests(before_doc.title, before_doc.content)
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "post-close annotation"}
+               )
+
+      after_doc = Repo.get!(Document, task.id)
+
+      # D5 already reduces acceptance_criteria to its criterion TEXTS before
+      # hashing, so an appended attempt is invisible to the digest. That is a
+      # PROPERTY, so it is tested rather than inherited from a comment.
+      assert WorkDigest.field_digests(after_doc.title, after_doc.content) == before_digests
+
+      assert WorkDigest.changed_fields(before_digests, after_doc.title, after_doc.content) == [],
+             "a post-close attempt is not a work-definition edit and must not read as one"
+    end
+  end
+
+  describe "stamp/3 — the post-close attempt's fence and its event" do
+    test "no --observed-rev → :observed_rev_required, and nothing is written", %{scope: scope} do
+      {task, _closed} = closed_task!(scope, default_criteria())
+
+      assert {:error, :observed_rev_required} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 outcome: {:miss, "no rev pinned"}
+               )
+
+      assert attempts_of(task.id, 0) == nil
+    end
+
+    test "a stale --observed-rev → :stale_claim: you cannot annotate a row you did not read",
+         %{scope: scope} do
+      {task, _closed} = closed_task!(scope, default_criteria())
+
+      assert {:error, :stale_claim} =
+               Stamp.stamp(task.id, "sweeper",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: "not-the-rev-you-read",
+                 outcome: {:miss, "stale"}
+               )
+
+      assert attempts_of(task.id, 0) == nil
+    end
+
+    test "the worker id is NOT checked against the closed row's claim receipt", %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria())
+
+      # The row's receipt names "closer". A holder test here would force the
+      # annotator to type that id — impersonating them to record an observation
+      # about their row. Liveness picks the arm, exactly as D745 decided.
+      assert closed.content["claim"]["worker"] == "closer"
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "somebody-entirely-else",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 observed_rev: closed.rev,
+                 outcome: {:miss, "signed by whoever actually looked"}
+               )
+
+      assert [%{"worker" => "somebody-entirely-else"}] = attempts_of(task.id, 0)
+    end
+
+    test "(d) the event carries post_close=true so boards do not render it as live progress",
+         %{scope: scope} do
+      {task, closed} = closed_task!(scope, default_criteria())
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "sweeper",
+          observed_epoch: 0,
+          criterion: 0,
+          observed_rev: closed.rev,
+          outcome: {:miss, "annotated after close"}
+        )
+
+      payload =
+        task.doc_id
+        |> criterion_events()
+        |> List.last()
+        |> Map.get(:document)
+        |> Map.get("criterion_stamp")
+
+      assert payload["result"] == "miss"
+      assert payload["post_close"] == true
+      assert payload["worker"] == "sweeper"
+      assert payload["index"] == 0
+    end
+
+    test "a MID-CLAIM miss carries NO post_close marker — the flag discriminates", %{scope: scope} do
+      doc_id = uniq("stamp-midclaim-marker")
+      task = mk_task!(doc_id, scope)
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "w",
+          observed_epoch: epoch,
+          criterion: 0,
+          outcome: {:miss, "live progress"}
+        )
+
+      payload =
+        task.doc_id
+        |> criterion_events()
+        |> List.last()
+        |> Map.get(:document)
+        |> Map.get("criterion_stamp")
+
+      assert payload["result"] == "miss"
+
+      assert Map.get(payload, "post_close") == nil,
+             "a marker present on BOTH shapes would discriminate nothing"
+    end
+
+    test "(b) the attempts bound stays SHARED at 5 across mid-claim and post-close attempts",
+         %{scope: scope} do
+      doc_id = uniq("stamp-bound")
+      task = mk_task!(doc_id, scope)
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      for n <- 1..4 do
+        {:ok, _} =
+          Stamp.stamp(task.id, "w",
+            observed_epoch: epoch,
+            criterion: 0,
+            outcome: {:miss, "mid-claim #{n}"}
+          )
+      end
+
+      {:ok, closed} =
+        Close.close(task.id, "w",
+          observed_epoch: epoch,
+          lifecycle_status: "done",
+          criteria_override: "closing unproven"
+        )
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "sweeper",
+          observed_epoch: 0,
+          criterion: 0,
+          observed_rev: closed.rev,
+          outcome: {:miss, "post-close 5"}
+        )
+
+      notes = task.id |> attempts_of(0) |> Enum.map(& &1["note"])
+      assert notes == ["mid-claim 1", "mid-claim 2", "mid-claim 3", "mid-claim 4", "post-close 5"]
+
+      # The 6th evicts the OLDEST — one shared FIFO of 5, deliberately: a
+      # separate post-close bucket is a second list every board must learn, and
+      # evicting a builder's five real attempts would take five separate
+      # post-close sweeps over this one criterion.
+      fresh = Repo.get!(Document, task.id)
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "sweeper",
+          observed_epoch: 0,
+          criterion: 0,
+          observed_rev: fresh.rev,
+          outcome: {:miss, "post-close 6"}
+        )
+
+      assert task.id |> attempts_of(0) |> Enum.map(& &1["note"]) ==
+               ["mid-claim 2", "mid-claim 3", "mid-claim 4", "post-close 5", "post-close 6"]
+    end
+  end
 end

@@ -94,8 +94,8 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
     "Auth.require_user_or_pat",
     "Auth.require_team_admin",
     "Auth.require_team_role",
-    "Auth.require_primary_team_admin",
-    "Auth.require_primary_team_owner",
+    "Auth.require_current_team_admin",
+    "Auth.require_current_team_owner",
     "Auth.require_platform_operator",
     "Auth.require_ability",
     "with_team_role",
@@ -216,8 +216,16 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # each fall by exactly one and nothing changed class; machine and public are
   # untouched. No `side_effecting_get?/1` clause is owed or released: the deleted
   # route was a pure `Registry.list_env_vars/1` read.
-  @baseline_total 67
-  @baseline_session 47
+  # 2026-09-03: 68 / 48 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/teams/:id/tokens`,
+  # the team-admin PAT list (cch-w30-followup-team-pat-visibility). RULED NOT
+  # SIDE-EFFECTING: the handler is `with_team_role/3` (a membership read) plus
+  # `Accounts.list_team_personal_access_tokens/1`, one `Repo.all` with a preload —
+  # a bare HEAD mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. It is session-gated like every other
+  # `/v1/teams/:id/*` route, so `total` and `session` each rise by exactly one;
+  # machine and public are untouched.
+  @baseline_total 68
+  @baseline_session 48
   @baseline_machine 8
   @baseline_public 12
 

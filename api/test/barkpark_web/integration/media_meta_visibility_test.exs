@@ -90,10 +90,10 @@ defmodule BarkparkWeb.Integration.MediaMetaVisibilityTest do
       make_private!(conn, id)
 
       # The bytes are already refused for this caller…
-      assert build_conn() |> get(created["result"]["originalUrl"]) |> Map.get(:status) == 403
+      assert scoped_conn() |> get(created["result"]["originalUrl"]) |> Map.get(:status) == 403
 
       # …and the metadata must be refused the same way — no filename/path/size peek.
-      meta = get(build_conn(), "/media/#{id}/meta")
+      meta = get(scoped_conn(), "/media/#{id}/meta")
       assert meta.status == 403
 
       body = json_response(meta, 403)
@@ -111,7 +111,7 @@ defmodule BarkparkWeb.Integration.MediaMetaVisibilityTest do
       make_private!(conn, id)
 
       body =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> get("/media/#{id}/meta")
         |> json_response(200)
@@ -128,7 +128,7 @@ defmodule BarkparkWeb.Integration.MediaMetaVisibilityTest do
       id = created["result"]["id"]
 
       body =
-        build_conn()
+        scoped_conn()
         |> get("/media/#{id}/meta")
         |> json_response(200)
 

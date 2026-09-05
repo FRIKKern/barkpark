@@ -84,8 +84,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
       before_count = Content.paper_blocks(@slug, @dataset) |> length()
 
       view
-      |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => type})
-      |> render_submit()
+      |> element(~s([data-test-id="paper-add-block"]))
+      |> render_submit(wire_params(view, %{"block-type" => type}))
 
       blocks = Content.paper_blocks(@slug, @dataset)
       assert length(blocks) == before_count + 1
@@ -100,5 +100,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
 
       assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
     end
+  end
+
+  defp wire_params(view, params) do
+    Map.merge(params, %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => :sys.get_state(view.pid).socket.assigns.paper_rev
+    })
   end
 end

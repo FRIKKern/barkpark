@@ -103,6 +103,7 @@ defmodule BarkparkWeb.PluginScopeSession do
 
   alias Barkpark.Sharing
   alias Barkpark.Sharing.Links
+  alias BarkparkWeb.PaperViewer
 
   @session_ws_id "scoped_workspace_id"
   @session_ws_slug "scoped_workspace_slug"
@@ -115,6 +116,15 @@ defmodule BarkparkWeb.PluginScopeSession do
   # can re-resolve it (revocation + expiry are enforced inside that query).
   @session_share_public "scoped_share_public"
   @session_share_token "scoped_share_token"
+
+  # The ITEM LINK's own access level ("read" / "edit") as it stood at dead
+  # render. Recorded so `BarkparkWeb.PaperViewer` can intersect it with the
+  # LIVE row on every mount (slice 3, task-8ac4f3918da1c433) rather than trust
+  # either half alone. It is NOT the enforcement point and never widens
+  # anything: this hook still confines on the re-resolved token, and a session
+  # claiming "edit" for a link since revoked or downgraded resolves to a
+  # read-only viewer.
+  @session_share_access "scoped_share_access"
 
   # The paper reader route carries no `/d/:dataset` segment, so the scoped
   # surface is the production dataset — the same default RequireShareScope
@@ -181,11 +191,34 @@ defmodule BarkparkWeb.PluginScopeSession do
       acc = Map.put(acc, @session_share_public, true)
 
       case share_query_token(conn) do
-        raw when is_binary(raw) -> Map.put(acc, @session_share_token, raw)
-        nil -> acc
+        raw when is_binary(raw) ->
+          acc
+          |> Map.put(@session_share_token, raw)
+          |> Map.put(@session_share_access, link_access_string(raw))
+
+        nil ->
+          acc
       end
     else
       acc
+    end
+  end
+
+  # THE LINK's access, not `conn.assigns[:share_access]`.
+  #
+  # Those two are the same value only when the ITEM arm is what granted. On a
+  # scope that is ALSO section-shared, `RequireShareScope`'s cond reaches
+  # `grant_if_resolvable/4` first and grades the SECTION ("read"), and the
+  # `?share=` token is never consulted — recording that grade here would
+  # silently void an edit link on every section-shared scope.
+  #
+  # A STRING, not an atom: the session is a signed cookie and a string
+  # round-trips with no atom-creation question. Anything that does not resolve
+  # to an `access: "edit"` row records "read" — fail-closed.
+  defp link_access_string(raw) do
+    case Links.resolve(raw) do
+      {:ok, %{access: "edit"}} -> "edit"
+      _ -> "read"
     end
   end
 
@@ -305,6 +338,7 @@ defmodule BarkparkWeb.PluginScopeSession do
 
     case confine_item_share(params, session, socket) do
       {:cont, socket} ->
+        socket = PaperViewer.refresh_share_capability(socket, session)
         Process.send_after(self(), @share_liveness_msg, @share_liveness_interval_ms)
         {:halt, socket}
 

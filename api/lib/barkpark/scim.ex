@@ -80,6 +80,33 @@ defmodule Barkpark.Scim do
 
   def resolve_org(_), do: nil
 
+  @doc """
+  Resolve a raw SCIM bearer to its `Barkpark.Scim.Token` id, or nil.
+
+  The IDENTITY of the credential, where `resolve_org/1` gives its TENANT. Used
+  by `BarkparkWeb.Plugs.RateLimit` to key a SCIM caller's bucket on a verified
+  token id rather than on the raw header (a bucket the caller can choose is not
+  a limit). Deliberately NOT the org id: two tokens minted for one org are two
+  integrations and get two budgets, exactly as two api_tokens do.
+
+  Same `token_hash` + not-revoked WHERE as `resolve_org/1`, minus its
+  Organization join — a token row whose org has been deleted is still a
+  credential this server minted, and bucketing it on its own id is right even
+  though it can no longer authenticate.
+  """
+  @spec resolve_token_id(binary()) :: binary() | nil
+  def resolve_token_id(raw) when is_binary(raw) do
+    hash = Token.hash_token(raw)
+
+    Repo.one(
+      from t in Token,
+        where: t.token_hash == ^hash and is_nil(t.revoked_at),
+        select: t.id
+    )
+  end
+
+  def resolve_token_id(_), do: nil
+
   # ── Provision / deprovision ────────────────────────────────────────────────
 
   @doc """

@@ -15,7 +15,7 @@ defmodule BarkparkWeb.StudioRedirectRefererTest do
   unparseable, or non-member Referer all fall back to the pre-existing
   first-membership behavior.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo

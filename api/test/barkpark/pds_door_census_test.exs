@@ -292,7 +292,13 @@ defmodule Barkpark.PdsDoorCensusTest do
       out
       |> String.split("\n")
       |> Enum.flat_map(fn line ->
-        case Regex.run(~r/^\s+(pds-\S+)\s+\S+\s+\S+\s+THROUGH\s/, line) do
+        # THE COLUMN PRINTS REPO-RELATIVE PATHS SINCE THE DENOMINATOR REACHED
+        # tooling/pds (wave 49), so the row no longer begins at `pds-`. The
+        # optional directory prefix is OUTSIDE the capture: what is compared
+        # against the summary list is still the BASENAME, which is what both
+        # ledgers are keyed by. This makes the parser match MORE rows than it
+        # did, never fewer — an unprefixed `pds-…` row still matches.
+        case Regex.run(~r/^\s+(?:\S*\/)?(pds-\S+)\s+\S+\s+\S+\s+THROUGH\s/, line) do
           [_, name] -> [name]
           nil -> []
         end
@@ -350,7 +356,7 @@ defmodule Barkpark.PdsDoorCensusTest do
     price_rows =
       out
       |> String.split("\n")
-      |> Enum.filter(&String.match?(&1, ~r/^\s+pds-\S+\s+\S+\s+\S+\s+PRICE\s/))
+      |> Enum.filter(&String.match?(&1, ~r/^\s+(?:\S*\/)?pds-\S+\s+\S+\s+\S+\s+PRICE\s/))
 
     assert length(price_rows) >= 2,
            "fewer than two PRICE rows in the column. PDS-D648's unit ruling is only worth " <>
@@ -370,7 +376,7 @@ defmodule Barkpark.PdsDoorCensusTest do
 
     assert Enum.filter(
              [orphan_price_line],
-             &String.match?(&1, ~r/^\s+pds-\S+\s+\S+\s+\S+\s+PRICE\s/)
+             &String.match?(&1, ~r/^\s+(?:\S*\/)?pds-\S+\s+\S+\s+\S+\s+PRICE\s/)
            ) ==
              [],
            "the ORPHANED PRICE error line is captured by this test's own PRICE-row filter, so " <>
@@ -447,6 +453,10 @@ defmodule Barkpark.PdsDoorCensusTest do
             "THROUGH a required gate",
             "IN-BEAM-REQUIRED",
             "DEAD-DECLARATION",
+            # DECLARED IN PDS_DOOR_COMPUTED_BANDS BY WAVE 49, so it is summed
+            # here: a band the census prints and this sum ignores would make
+            # ACCOUNTED FOR disagree with its own lines by exactly that band.
+            "LIBRARY-MODULE",
             "UNDISPOSED",
             "ERROR rows"
           ],

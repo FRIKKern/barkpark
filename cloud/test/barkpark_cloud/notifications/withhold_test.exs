@@ -732,8 +732,11 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   # their own filed backlog task, `cch-w32-bl-receipt-loss-branches-have-no-trace`,
   # which needs a trace of its own class — this row does not silently duplicate it.
   @receipt_loss %{
-    {:record_delivery, 5, :nil_shape} =>
-      "record_delivery/5's `{:error, changeset}` arm: the email send returned, " <>
+    # cch-w52-s3 widened this to /6 (the carrier the send actually used rides in
+    # as the sixth argument). The BRANCH is unchanged — same `{:error, changeset}`
+    # arm, same class, same owner — so this row is re-keyed rather than re-judged.
+    {:record_delivery, 6, :nil_shape} =>
+      "record_delivery/6's `{:error, changeset}` arm: the email send returned, " <>
         "the row did not write. Logger-only; owned by cch-w32-bl-receipt-loss-*.",
     {:log_chat_delivery, 6, :nil_shape} =>
       "log_chat_delivery/6's `{:error, changeset}` arm: the chat POST returned, " <>
