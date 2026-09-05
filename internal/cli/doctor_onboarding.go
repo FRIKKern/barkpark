@@ -844,7 +844,7 @@ func cliDetail(c onbCLICheck) string {
 
 func cloudDetail(s onbCloudSession) string {
 	if !s.Present {
-		return "not logged in — run `bp login` for a Cloud session"
+		return "not logged in — run `bp login` for a Cloud session, or set BARKPARK_CLOUD_TOKEN for a CI job"
 	}
 	if s.Team != "" {
 		return "logged in to " + s.URL + " (team " + s.Team + ")"

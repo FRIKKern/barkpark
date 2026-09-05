@@ -75,22 +75,30 @@ func runDoctor(out *writer, args []string) int {
 
 	report, gateErr := setup.RunHealthGate(base, token, doctorGateOpts(base, token))
 
+	// WHICH Cloud credential this doctor run used — the origin label only, never
+	// the value. A CI job whose deploy 401s can now read the tier off the same
+	// receipt that reports the cloud-sites probe, instead of guessing whether
+	// BARKPARK_CLOUD_TOKEN or a stale config.json session was in play. Empty
+	// (no token in either tier) prints and serialises NOTHING, so every
+	// no-cloud-token receipt stays byte-identical to what it was before.
+	cloudSource := doctorCloudTokenSource()
+
 	switch out.output {
 	case "json":
-		out.renderJSON(doctorJSON(target, base, report))
+		out.renderJSON(doctorJSON(target, base, report, cloudSource))
 		if report.OK {
 			return exitOK
 		}
 		return exitGeneric
 	case "yaml":
-		out.renderYAML(toGeneric(doctorJSON(target, base, report)))
+		out.renderYAML(toGeneric(doctorJSON(target, base, report, cloudSource)))
 		if report.OK {
 			return exitOK
 		}
 		return exitGeneric
 	}
 
-	renderDoctorReport(out, target, base, report)
+	renderDoctorReport(out, target, base, report, cloudSource)
 	// The gate returns a non-nil error iff not every check passed; doctor's exit
 	// follows report.OK so it is non-zero whenever any check failed.
 	_ = gateErr
@@ -148,8 +156,11 @@ func resolveDoctorTarget(out *writer, name, urlOverride, tokenOverride string) (
 // rather than folded into ✓ because an operator reading a green doctor needs to
 // know which conditions it declined to look at. "all N checks passed" is only
 // printed when N probes actually ran.
-func renderDoctorReport(out *writer, target, base string, report setup.HealthReport) {
+func renderDoctorReport(out *writer, target, base string, report setup.HealthReport, cloudSource string) {
 	out.outf("bp doctor — %s (%s)", target, base)
+	if cloudSource != "" {
+		out.outf("  cloud token source: %s", cloudSource)
+	}
 	for _, c := range report.Checks {
 		mark := "✗"
 		switch c.Effective() {
@@ -182,7 +193,7 @@ func renderDoctorReport(out *writer, target, base string, report setup.HealthRep
 // `pass` keeps its historical two-state meaning for existing scripts; `status`
 // and the top-level `skipped` list are the additive channel that distinguishes
 // a probe that FAILED from one that never ran.
-func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
+func doctorJSON(target, base string, report setup.HealthReport, cloudSource string) map[string]any {
 	checks := make([]map[string]any, 0, len(report.Checks))
 	for _, c := range report.Checks {
 		checks = append(checks, map[string]any{
@@ -192,7 +203,7 @@ func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
 			"detail": c.Detail,
 		})
 	}
-	return map[string]any{
+	m := map[string]any{
 		"ok":       report.OK,
 		"target":   target,
 		"base_url": base,
@@ -200,6 +211,24 @@ func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
 		"failures": report.Failures(),
 		"skipped":  report.Skipped(),
 	}
+	// Additive and CONDITIONAL: the key appears only when a Cloud credential is
+	// actually in scope, so a self-hosted doctor envelope is unchanged.
+	if cloudSource != "" {
+		m["cloud"] = map[string]any{"token_source": cloudSource}
+	}
+	return m
+}
+
+// doctorCloudTokenSource names the tier the active Cloud credential came from
+// (env:BARKPARK_CLOUD_TOKEN | config:cloud_token), or "" when there is none.
+// It goes through the RESOLVER, so a CI job that exports the env var — and has
+// no config.json at all — reads its own tier back instead of an empty receipt.
+func doctorCloudTokenSource() string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return ""
+	}
+	return cfg.CloudTokenSource()
 }
 
 // doctorNoTarget emits the clean miss path when no target resolves — a JSON/YAML
