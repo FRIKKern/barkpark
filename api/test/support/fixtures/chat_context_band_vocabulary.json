@@ -1,0 +1,31 @@
+{
+  "_note": [
+    "THE CHAT CONTEXT BAND VOCABULARY LOCK (task-b6b9a4424d653937). ONE fixture,",
+    "read by BOTH surfaces' tests:",
+    "  Elixir — api/test/barkpark/studio_chat/context_identity_vocabulary_test.exs",
+    "           against Barkpark.StudioChat.ContextIdentity's unset_marker/0,",
+    "           unknown_marker/0, no_repo_marker/0, server_local_marker/0 and",
+    "           field_names/0.",
+    "  Mobile — apps/mobile/__tests__/chatContextVocabulary.test.ts against",
+    "           apps/mobile/src/chat/context.ts's ABSENT_UNSET, ABSENT_UNKNOWN,",
+    "           ABSENT_NO_REPO, ABSENT_SERVER_LOCAL and CONTEXT_FIELD_NAMES.",
+    "Before this file the two surfaces hand-maintained the same vocabulary twice",
+    "and nothing failed when one moved: a marker reworded on one surface only, or",
+    "the six fields reordered on one surface only, shipped two different bands",
+    "describing the same session. Both sides were well tested INTERNALLY, which is",
+    "not the same as being held equal.",
+    "The Elixir source (api/lib/barkpark/studio_chat/context_identity.ex) is",
+    "CANONICAL. Change it, change this file, and the mobile suite reds until",
+    "context.ts follows — and vice versa. Edit this file BEFORE either surface.",
+    "'field_names' is ORDERED: the band paints in this order, so a reorder is a",
+    "visible defect on one surface only and both tests compare it as a LIST, never",
+    "as a set."
+  ],
+  "markers": {
+    "unset": "(not set)",
+    "unknown": "(unknown)",
+    "no_repo": "(not a git repo)",
+    "server_local": "(server-local)"
+  },
+  "field_names": ["host", "server", "workspace", "project", "dataset", "repo"]
+}
