@@ -128,8 +128,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     before_count = Content.paper_blocks(@slug, @dataset) |> length()
 
     view
-    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => "paragraph"})
-    |> render_submit()
+    |> element(~s([data-test-id="paper-add-block"]))
+    |> render_submit(wire_params(view, %{"block-type" => "paragraph"}))
 
     blocks = Content.paper_blocks(@slug, @dataset)
     assert length(blocks) == before_count + 1
@@ -148,7 +148,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
 
     view
     |> element(~s([data-edit-block-id="p-second"] [data-test-id="paper-delete-block"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"id" => "p-second"}))
 
     ids = Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"])
     refute "p-second" in ids
@@ -293,11 +293,15 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
 
     # 4) A stale ▲ on the first unlocked block (its button is disabled in the
     #    DOM) is a calm no-op — it would displace the locked featured image.
-    render_click(view, "paper-move-block", %{"id" => "lk-body2", "dir" => "up"})
+    render_click(
+      view,
+      "paper-move-block",
+      wire_params(view, %{"id" => "lk-body2", "dir" => "up"})
+    )
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 5) A stale delete on a locked block is a calm no-op.
-    render_click(view, "paper-delete-block", %{"id" => "lk-featured"})
+    render_click(view, "paper-delete-block", wire_params(view, %{"id" => "lk-featured"}))
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 6) The guards are surgical: unlocked blocks still reorder below the prefix.
@@ -321,7 +325,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     # Move p-second up one slot → h-1, p-second, p-intro.
     view
     |> element(~s([data-edit-block-id="p-second"] button[phx-value-dir="up"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"id" => "p-second", "dir" => "up"}))
 
     assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
              ["h-1", "p-second", "p-intro"]
@@ -329,7 +333,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     # Move h-1 down one slot → p-second, h-1, p-intro.
     view
     |> element(~s([data-edit-block-id="h-1"] button[phx-value-dir="down"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"id" => "h-1", "dir" => "down"}))
 
     assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
              ["p-second", "h-1", "p-intro"]
@@ -388,7 +392,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
 
     view
     |> element(~s([data-edit-block-id="p-second"] button[phx-value-dir="up"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"id" => "p-second", "dir" => "up"}))
 
     moved = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
 
