@@ -4195,7 +4195,7 @@ const EXPECTATIONS = {
       assert.ok(!html.includes('id="notif-status"'), "the loose #notif-status span is retired");
       assert.ok(!html.includes("notif-card"), "the superseded .notif-card is gone from this view");
       // Email section: transport seg (single-select) + its own save-row.
-      assert.ok(html.includes("Email delivery") && html.includes("notif-transport-seg"), "email section with the transport seg");
+      assert.ok(html.includes("Alert delivery") && html.includes("notif-transport-seg"), "alert-delivery section with the transport seg");
       assert.ok(html.includes('id="notif-email-save"'), "email section owns its save-row button");
       // Channels roster: 6 channels (email transport + 5 chat), configured honesty,
       // consequence sub-lines, its own save-row.
@@ -4268,7 +4268,7 @@ const EXPECTATIONS = {
     what: "first-run notifications — no channels configured, empty delivery log, honest defaults",
     check(reg) {
       const html = reg.get("notif-body").innerHTML || "";
-      assert.ok(html.includes("Email delivery") && html.includes("Event routing"), "the page still composes all sections");
+      assert.ok(html.includes("Alert delivery") && html.includes("Event routing"), "the page still composes all sections");
       assert.ok(html.includes("not configured"), "an untouched channel reads not-configured");
       const log = (reg.get("notif-deliveries-body") || {}).innerHTML || "";
       assert.ok(log.includes("No notifications have been delivered yet"), "the empty log states the honest empty case");

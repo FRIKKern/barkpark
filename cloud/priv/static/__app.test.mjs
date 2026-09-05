@@ -18378,6 +18378,86 @@ test("cch-w32-s1: the alerts switch is described as governing email AND chat, in
     "a muted team's box is not");
 });
 
+// ── cch-notif-card-email-framing: the FRAME around the master switch ─────────
+//
+// w32-s1 corrected the switch's own two labels and stopped there. The card that
+// HOSTS `alerts_enabled` was still headed "Email delivery" over an email-only
+// purpose sentence, so the whole-rail switch sat inside an email-scoped frame —
+// the label said one thing, the card said another. Criterion 1 of the row: the
+// heading/purpose around `alerts_enabled` names the whole rail. Pinned in both
+// directions and in BOTH renderings, so a half-fix (admin corrected, member
+// left, or the reverse) reds.
+test("cch-notif-card-email-framing: the card hosting alerts_enabled names the whole rail, not just email", () => {
+  const s = { transport: "smtp", alerts_enabled: true, from_address: "a@acme.com" };
+
+  for (const [who, html] of [["admin", hooks.notifEmailSectionHtml(s, true)],
+                             ["member", hooks.notifEmailSectionHtml(s, false)]]) {
+    assert.match(html, /<h3 class="set-h">Alert delivery<\/h3>/,
+      who + ": the heading names alert delivery, not email delivery");
+    assert.doesNotMatch(html, /<h3 class="set-h">Email delivery<\/h3>/,
+      who + ": the email-scoped heading is the defect — it must not survive");
+    assert.match(html, /class="set-purpose">[^<]*master switch for every alert[^<]*email and chat channels alike/,
+      who + ": the purpose sentence names the rail the switch actually governs");
+  }
+
+  // The card still OWNS the email-specific settings it always did — the fix is a
+  // reframe, not a relocation, and a heading that dropped email would be its own
+  // lie about a card carrying the transport seg and the from address.
+  const admin = hooks.notifEmailSectionHtml(s, true);
+  assert.match(admin, /notif-transport-seg/, "the transport seg still lives in this card");
+  assert.match(admin, /id="notif-from-addr"/, "so does the from address");
+  assert.match(admin, /id="notif-alerts"/, "and the switch itself is unmoved, same id, same save-row");
+  assert.match(admin, /id="notif-email-save"/);
+});
+
+// ── cch-notif-card-email-framing: ON is not RECEIVING while alerts are muted ─
+//
+// Criterion 2. Each channel's mandatory sub-line states only the OFF consequence
+// ("Off = Discord stops receiving routed events."), so a channel left ON read as
+// live — including on a team whose master switch is off, where `enqueue_chat/3`
+// drops the event before a transport is ever picked. The row now carries a second
+// sub-line naming that override, and ONLY in the cell where "on" and "receiving"
+// come apart: an enabled channel on a muted team.
+test("cch-notif-card-email-framing: an enabled channel on a muted team says so", () => {
+  const discord = { type: "discord", label: "Discord", off: "Off = Discord stops receiving routed events.",
+    fields: [{ k: "url", label: "Webhook URL", ph: "https://discord.com/api/webhooks/…" }] };
+  const on = [{ type: "discord", enabled: true, configured: true }];
+
+  const muted = hooks.notifChannelRowHtml({ alerts_enabled: false, channels: on }, discord);
+  assert.match(muted, /On, but muted: the master alerts switch is off, so this channel receives nothing until alerts are enabled again\./,
+    "the override the server actually performs is stated on the row");
+  // The box is still checked — the copy tells the truth ABOUT the state, it does
+  // not fake the state. That is the whole distinction this row exists to draw.
+  assert.match(muted, /data-chan-enable[^>]* checked/, "the channel really is on; only the reading changed");
+  assert.match(muted, /Off = Discord stops receiving routed events\./,
+    "the mandatory OFF consequence sub-line survives beside it");
+
+  // The three cells where the line would be noise or a lie.
+  const live = hooks.notifChannelRowHtml({ alerts_enabled: true, channels: on }, discord);
+  assert.doesNotMatch(live, /but muted/, "an enabled channel on an un-muted team is genuinely live");
+
+  const unknown = hooks.notifChannelRowHtml({ channels: on }, discord);
+  assert.doesNotMatch(unknown, /but muted/,
+    "a settings payload that never says alerts_enabled is not evidence of a mute");
+
+  const offChannel = hooks.notifChannelRowHtml(
+    { alerts_enabled: false, channels: [{ type: "discord", enabled: false, configured: true }] }, discord);
+  assert.doesNotMatch(offChannel, /but muted/,
+    "an OFF channel already reads as not receiving — the override line would be noise");
+});
+
+// The section that composes those rows renders the override through the real
+// builder, not just the row helper — the path a muted admin actually sees.
+test("cch-notif-card-email-framing: the chat-channels section carries the override for every enabled channel", () => {
+  const s = { alerts_enabled: false, channels: [
+    { type: "discord", enabled: true, configured: true },
+    { type: "slack", enabled: false, configured: false },
+  ] };
+  const html = hooks.notifChannelsSectionHtml(s);
+  const hits = (html.match(/On, but muted: the master alerts switch is off/g) || []).length;
+  assert.equal(hits, 1, "exactly the one enabled channel carries the override line");
+});
+
 // ── cch-w32-s1: the test button stops answering yes when the answer is no ────
 //
 // `sendChatTest` said "Test queued / Sent to <type>." on ANY 2xx. The server
@@ -18542,7 +18622,7 @@ test("cch-w40-bl: the always-send `test` row stops claiming a fan-out it cannot 
 test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
   const s = { transport: "instance", channels: [], event_routes: {}, chat_default_on: [] };
   const admin = hooks.notifPageHtml(s, { canManage: true });
-  for (const needle of ["Email delivery", "Chat channels", "Event routing", "Delivery log"]) {
+  for (const needle of ["Alert delivery", "Chat channels", "Event routing", "Delivery log"]) {
     assert.ok(admin.includes(needle), "admin page includes " + needle);
   }
   const member = hooks.notifPageHtml(s, { canManage: false });
