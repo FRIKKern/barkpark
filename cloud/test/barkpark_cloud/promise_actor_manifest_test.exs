@@ -326,8 +326,9 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # sentences, nothing in @register claimed them, and the ADD arm reds until
     # a row exists. That is the direction working the first time it ran.
 
-    # "We'll remind you 3 days and 1 day before the trial ends." (app.js:18679,
-    # and the alerts-unknown variant at :18684). A SECOND promise on the same
+    # "We'll remind you 3 days and 1 day before the trial ends." (the trial-reminder
+    # copy in cloud/priv/static/app.js, plus its alerts-unknown variant — a built
+    # asset, so cited by sentence, not by line). A SECOND promise on the same
     # `trial` reason, and it is not the teardown: the act promised is a piece of
     # MAIL, on a day before the one the teardown row pins. Its effect is the
     # per-team notice STAMP, which is the whole budget for that warning — an
@@ -355,8 +356,9 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
       effect: {:absent, :no_trigger_stamped}
     },
 
-    # "expires in 4m 30s" on /activate (app.js:24928, both the with-minutes and
-    # the sub-minute arm). The device-activation code's TTL. Its clock is
+    # "expires in 4m 30s" on /activate (the activation-expiry copy in the built
+    # cloud/priv/static/app.js — cited by sentence, not line — both the
+    # with-minutes and the sub-minute arm). The device-activation code's TTL. Its clock is
     # IN-BAND, not the per-minute `DeviceAuthReaper` cron: that worker is
     # hygiene by its own moduledoc ("Correctness never depends on it running")
     # and every DeviceAuth query carries `expires_at > now`, so labelling the
