@@ -67,6 +67,27 @@ defmodule BarkparkWeb.QueryExpandPublishedIdentityTest do
 
     {:ok, _} = Content.publish_document("po_pub", "post", @dataset)
 
+    # PUBLISHED author that ALSO carries a live draft edit — publish deletes the
+    # draft, so a second `create_document` re-creates `drafts.au_both` beside the
+    # published `au_both`. This is the state the field report describes: the
+    # document IS published, and the reference spells its draft twin.
+    {:ok, _} =
+      Content.create_document("author", %{"_id" => "au_both", "title" => "Cy"}, @dataset)
+
+    {:ok, _} = Content.publish_document("au_both", "author", @dataset)
+
+    {:ok, _} =
+      Content.create_document("author", %{"_id" => "au_both", "title" => "Cy edited"}, @dataset)
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "po_both", "title" => "Gamma", "author" => "drafts.au_both"},
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document("po_both", "post", @dataset)
+
     # The post that references the genuine draft — the negative arm.
     {:ok, _} =
       Content.create_document(
@@ -118,6 +139,28 @@ defmodule BarkparkWeb.QueryExpandPublishedIdentityTest do
 
     assert author["_id"] == "au_pub",
            "expanded reference carried DRAFT identity: #{inspect(author["_id"])}"
+  end
+
+  test "published context, target has BOTH rows: the inlined _id is the PUBLISHED id",
+       %{conn: conn, raw: raw} do
+    body =
+      conn
+      |> authed(raw)
+      |> get("/v1/data/query/#{@dataset}/post?expand=author&perspective=published&filter[title]=Gamma")
+      |> json_response(200)
+
+    author = body["result"]["documents"] |> hd() |> Map.get("author")
+
+    assert is_map(author), "author should have expanded, got: #{inspect(author)}"
+
+    # THE FILED SYMPTOM, literally. Pre-fix this reads "drafts.au_both" — the
+    # draft row won because the reference spelled it, even though `au_both` is
+    # published and is the id every consumer filters on.
+    assert author["_id"] == "au_both",
+           "expanded reference carried DRAFT identity: #{inspect(author["_id"])}"
+
+    assert author["_draft"] == false
+    assert author["_publishedId"] == "au_both"
   end
 
   test "NEGATIVE ARM: a genuine draft still expands as a draft", %{conn: conn, raw: raw} do

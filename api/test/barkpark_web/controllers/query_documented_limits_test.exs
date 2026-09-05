@@ -56,7 +56,7 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
           "visibility" => "public",
           "fields" => [
             %{"name" => "title", "type" => "string"},
-            %{"name" => "status", "type" => "string"},
+            %{"name" => "state", "type" => "string"},
             %{"name" => "meta", "type" => "object"},
             %{"name" => "author", "type" => "reference", "refType" => "author"},
             %{
@@ -80,19 +80,19 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
     end
 
     posts = [
-      {"po1", "Alpha", "published", "au1", ["tg1", "tg2"], %{"seo" => "s1", "slug" => "alpha"}},
-      {"po2", "Alpha", "draftish", "au2", ["tg2"], %{"seo" => "s2", "slug" => "beta"}},
-      {"po3", "Beta", "published", "au2", ["tg1"], %{"seo" => "s3", "slug" => "gamma"}}
+      {"po1", "Alpha", "live", "au1", ["tg1", "tg2"], %{"seo" => "s1", "slug" => "alpha"}},
+      {"po2", "Alpha", "held", "au2", ["tg2"], %{"seo" => "s2", "slug" => "beta"}},
+      {"po3", "Beta", "live", "au2", ["tg1"], %{"seo" => "s3", "slug" => "gamma"}}
     ]
 
-    for {id, title, status, author, tags, meta} <- posts do
+    for {id, title, state, author, tags, meta} <- posts do
       {:ok, _} =
         Content.create_document(
           "post",
           %{
             "_id" => id,
             "title" => title,
-            "status" => status,
+            "state" => state,
             "author" => author,
             "tags" => tags,
             "meta" => meta
@@ -120,7 +120,7 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
   describe "LIMIT 1 — \"one filter clause per query\"" do
     test "DOES NOT HOLD: two bracketed filter fields AND-compose", %{conn: conn, raw: raw} do
       body =
-        query(conn, raw, "filter[title]=Alpha&filter[status]=published&perspective=published")
+        query(conn, raw, "filter[title]=Alpha&filter[state]=live&perspective=published")
         |> json_response(200)
 
       assert ids(body) == ["po1"]
@@ -131,7 +131,7 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
         query(
           conn,
           raw,
-          "filter[]=title%3DAlpha&filter[]=status%3Dpublished&perspective=published"
+          "filter[]=title%3DAlpha&filter[]=state%3Dlive&perspective=published"
         )
         |> json_response(200)
 
