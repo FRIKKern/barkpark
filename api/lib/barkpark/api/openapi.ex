@@ -320,13 +320,42 @@ defmodule Barkpark.Api.OpenApi do
     |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
   end
 
+  # Per-command 200 bodies that are NOT a Document. The default below points every
+  # command at `#/components/schemas/Document`, which is right for the data API
+  # and wrong for the handful of auth verbs that answer a receipt. pds-w36 c0:
+  # POST /v1/auth/reset answers `{ok, sessionsRevoked}` (auth_controller.ex
+  # renders the ok flag beside `sessionsRevoked: sessions_revoked`) and the spec
+  # promised a Document — so the JS SDK and docs/auth-user-sessions.md carried a
+  # field the manifest never declared. Keyed by command id; add a row when a
+  # verb answers a receipt shape, never widen the default.
+  @receipt_schemas %{
+    "auth.reset" => %{
+      "type" => "object",
+      "required" => ["ok", "sessionsRevoked"],
+      "properties" => %{
+        "ok" => %{"type" => "boolean", "enum" => [true]},
+        "sessionsRevoked" => %{
+          "type" => "integer",
+          "minimum" => 0,
+          "description" =>
+            "Count of the user's OTHER sessions revoked by this reset (the current one stays live)."
+        }
+      },
+      "additionalProperties" => false
+    }
+  }
+
   defp success_response(cmd) do
+    schema =
+      case Map.fetch(@receipt_schemas, Map.get(cmd, "id")) do
+        {:ok, receipt} -> receipt
+        :error -> %{"$ref" => "#/components/schemas/Document"}
+      end
+
     %{
       "description" =>
         if(Map.get(cmd, "writes", false), do: "Mutation applied.", else: "Success."),
-      "content" => %{
-        "application/json" => %{"schema" => %{"$ref" => "#/components/schemas/Document"}}
-      }
+      "content" => %{"application/json" => %{"schema" => schema}}
     }
   end
 

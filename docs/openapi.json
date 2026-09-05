@@ -10578,7 +10578,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "sessionsRevoked": {
+                      "description": "Count of the user's OTHER sessions revoked by this reset (the current one stays live).",
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "sessionsRevoked"
+                  ],
+                  "type": "object"
                 }
               }
             },
