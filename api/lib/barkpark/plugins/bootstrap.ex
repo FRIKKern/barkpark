@@ -129,18 +129,35 @@ defmodule Barkpark.Plugins.Bootstrap do
   emitted schema. Public so the plugin admin LV can call it directly for
   one plugin without re-walking the whole registry.
 
-  Records the result into `RunStatus` under `:bootstrap`.
+  Records the result into `RunStatus` under `:bootstrap`, and the schema type
+  names it installed under `:schemas` — the pair
+  `Barkpark.Plugins.Census.take/1` reads to report which plugins actually
+  registered in a booted image.
   """
   @spec install_for_plugin(map(), {binary() | nil, binary() | nil}) ::
           {:ok, non_neg_integer()} | {:error, term()}
   def install_for_plugin(plugin, scope \\ {nil, nil})
 
   def install_for_plugin(%{name: name, module: module}, scope) do
-    result = do_install_for_plugin(name, module, scope)
+    {result, installed} = do_install_for_plugin(name, module, scope)
     RunStatus.record(:bootstrap, name, result)
+    RunStatus.record(:schemas, name, installed)
     result
   end
 
+  # Returns `{result, installed}` where `result` is the caller-facing
+  # `{:ok, count} | {:error, reason}` (UNCHANGED — public contract) and
+  # `installed` is the census payload:
+  # `%{names: [schema_type_name], detail: :installed | :module_not_loaded |
+  # :no_callback}`.
+  #
+  # WHY THE NAMES ARE RECORDED SEPARATELY. The `{:ok, count}` result cannot
+  # distinguish a plugin that installed the RIGHT two schemas from one that
+  # installed two wrong ones, and `{:ok, 0}` from an unloadable module reads
+  # identically to `{:ok, 0}` from a plugin that legitimately declares none —
+  # which is exactly the silent death `Barkpark.Plugins.Census` exists to
+  # expose. The degradation behaviour itself is deliberately untouched here:
+  # this records what happened, it does not change what happens.
   defp do_install_for_plugin(name, module, scope) do
     cond do
       not Code.ensure_loaded?(module) ->
@@ -148,33 +165,48 @@ defmodule Barkpark.Plugins.Bootstrap do
           "Plugins.Bootstrap: plugin #{inspect(name)} module #{inspect(module)} failed to load — skipping"
         )
 
-        {:ok, 0}
+        {{:ok, 0}, %{names: [], detail: :module_not_loaded}}
 
       not function_exported?(module, :register_schemas, 1) ->
-        {:ok, 0}
+        {{:ok, 0}, %{names: [], detail: :no_callback}}
 
       true ->
         try do
           schemas = module.register_schemas([])
-          upsert_schemas(name, schemas, scope)
+
+          case upsert_schemas(name, schemas, scope) do
+            {:ok, names} ->
+              {{:ok, length(names)}, %{names: names, detail: :installed}}
+
+            {:error, reason, names} ->
+              {{:error, reason}, %{names: names, detail: :installed}}
+          end
         rescue
           e ->
             Logger.error(
               "Plugins.Bootstrap: plugin #{inspect(name)} (#{inspect(module)}) raised in register_schemas/1: #{Exception.message(e)}"
             )
 
-            {:error, {:raised, Exception.message(e)}}
+            {{:error, {:raised, Exception.message(e)}}, %{names: [], detail: :installed}}
         end
     end
   end
 
+  # `{:ok, names}` or `{:error, reason, names_installed_before_the_halt}` —
+  # the names are what the census reports; the count the caller sees is
+  # `length(names)`, identical to the pre-census counter.
   defp upsert_schemas(plugin_name, schemas, scope) when is_list(schemas) do
-    Enum.reduce_while(schemas, {:ok, 0}, fn schema, {:ok, n} ->
+    schemas
+    |> Enum.reduce_while({:ok, []}, fn schema, {:ok, acc} ->
       case upsert_one(plugin_name, schema, scope) do
-        :ok -> {:cont, {:ok, n + 1}}
-        {:error, reason} -> {:halt, {:error, reason}}
+        :ok -> {:cont, {:ok, [schema_type_name(schema) | acc]}}
+        {:error, reason} -> {:halt, {:error, reason, Enum.reverse(acc)}}
       end
     end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      {:error, reason, names} -> {:error, reason, names}
+    end
   end
 
   defp upsert_schemas(plugin_name, other, _scope) do
@@ -182,8 +214,11 @@ defmodule Barkpark.Plugins.Bootstrap do
       "Plugins.Bootstrap: plugin #{inspect(plugin_name)} returned non-list from register_schemas/1: #{inspect(other)}"
     )
 
-    {:error, {:invalid_return, other}}
+    {:error, {:invalid_return, other}, []}
   end
+
+  defp schema_type_name(%SchemaDefinition{name: name}) when is_binary(name), do: name
+  defp schema_type_name(other), do: inspect(other)
 
   defp upsert_one(plugin_name, %SchemaDefinition{} = schema, scope) do
     # Normalise to a fully string-keyed map BEFORE handing to
