@@ -6869,3 +6869,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .detail-title-row .status-pill-dot { margin-top: 5.5px; }
 .instance-card-head .status-pill-detail,
 .detail-title-row .status-pill-detail { overflow: visible; text-overflow: clip; }
+
+/* MUTATION PROOF — throwaway, do not merge. A later override the authored
+   rule cannot see: source-reading tests still read `overflow-y: auto` at the
+   authored rule; only the CSSOM knows the cascade resolved to `visible`. */
+.modal-root { overflow-y: visible; }
