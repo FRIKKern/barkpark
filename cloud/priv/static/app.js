@@ -17931,6 +17931,101 @@
     return billingCanManage(me.role) ? "owner" : "blocked";
   }
 
+  // cch-w49-s7 — THE CONSUMER FOR THE DECLARATION #10509 SHIPPED. D554 puts
+  // `billing_capability` on GET /v1/subscription — `{checkout, plans}`, BOTH
+  // computed by CALLING the context (checkout_capability/0, priced_plans/0) —
+  // and until this slice the console read exactly ONE field of it (`checkout`,
+  // for cch-w50-bl's test-mode disclosure) and NEVER `plans`. So on a deploy
+  // whose Stripe prices are absent, or whose webhook signing secret is missing,
+  // or whose catalog is only HALF priced, priced Subscribe buttons stood on the
+  // money screen and the person found out AFTER the click, in a toast — the
+  // fourteenth unread flag, on the one screen aimed at the one role that can act.
+  //
+  // A NEW SIBLING, NEVER A WIDENING (D439). billingIsOwner()/billingCanManage()
+  // stay two-valued booleans about the CALLER; this is a many-valued fact about
+  // the DEPLOY. Folding one into the other would make `if (billingIsOwner())`
+  // true for a capability STRING, which is the exact fail-open D439 forbids —
+  // and this key cannot over-state anything about the caller, because it is
+  // deploy config and not authority.
+  //
+  // FIVE-VALUED, NOT FOUR. The filing specified
+  // unknown|available|unconfigured|unverifiable. cch-w50-bl has since added
+  // `test_mode` to Billing.checkout_capability/0 AND to the wire, so a
+  // four-valued reader would fold a real wire value into "unknown" and quietly
+  // re-offer the very button that slice disabled. It is carried by name.
+  function billingCheckoutCapability(payload) {
+    var cap = payload && typeof payload === "object" ? payload.billing_capability : null;
+    if (!cap || typeof cap !== "object") return "unknown";
+    var checkout = cap.checkout;
+    return checkout === "available" || checkout === "unconfigured" ||
+      checkout === "unverifiable" || checkout === "test_mode"
+      ? checkout
+      : "unknown";
+  }
+
+  // May a checkout CTA be rendered for `plan` at all?
+  //
+  // UNKNOWN IS FAIL-OPEN, and it is safe ONLY because THE SERVER IS THE GATE:
+  // Billing.checkout/2 consults checkout_capability/0 BEFORE
+  // create_checkout_session/3 is ever called and refuses
+  // :unconfigured/:unverifiable with {:error, :billing_not_configured} and
+  // :test_mode with {:error, :billing_test_mode} (#10509 and cch-w50-bl, both
+  // on main — proven ancestors of this branch). A cold cache, an older payload
+  // or a failed read therefore costs a REFUSED CLICK, never a charged card,
+  // while hiding the CTA on a capability nobody told us about would refuse a
+  // real owner on a working deploy. It is renderNewPricing's committed
+  // precedent, one contract over: "a failed read leaves the CTAs standing
+  // (unknown, not refused)".
+  //
+  // test_mode KEEPS ITS EXISTING DISCLOSURE GHOST (cch-w50-bl). That card is
+  // already labelled, already UNWIRED (no data-plan, so renderTiers binds no
+  // handler) and already carries the server's own sentence. This function
+  // answers true there and tierCardHtml's test-mode arm — which runs first —
+  // renders it, so this slice neither widens nor restructures merged bytes.
+  function billingPlanOffered(plan, payload) {
+    var cap = billingCheckoutCapability(payload);
+    if (cap === "unknown" || cap === "test_mode") return true;
+    if (cap !== "available") return false;
+    var plans = payload.billing_capability.plans;
+    // PARTIAL WIRING IS THE POINT: `available` means SOME plan is priced, never
+    // that THIS one is. priced_plans/0 lists exactly the plans whose price id
+    // resolved, so a paid tier missing from it can only ever answer plan_invalid
+    // — and "That plan can't be checked out." blames the person for the deploy.
+    // A declaration with no readable list is a shape we were not told about:
+    // unknown, not a refusal.
+    if (!Array.isArray(plans)) return true;
+    return plans.indexOf(plan) !== -1;
+  }
+
+  // The one sentence `unverifiable` gets, and it is NOT `unconfigured`'s.
+  // unconfigured is HARMLESS — no plan has a price, checkout/2 can only refuse,
+  // no card is ever touched. unverifiable is the DANGEROUS one: prices resolve,
+  // a REAL hosted session would open, the card IS charged, and verify_webhook/2
+  // answers {:error, :no_secret} forever, so activation can never land.
+  // Collapsing the two into "Billing isn't set up on this deployment yet." tells
+  // a person the deploy is merely unfinished when what it actually is, is unable
+  // to honour money it can take. Past/present tense: it promises no fix and
+  // dates nothing.
+  var BILLING_UNVERIFIABLE_COPY =
+    "This deployment can't confirm a completed payment, so a card would be charged and the plan could never activate. No plan is offered here.";
+
+  // The sentence that replaces the omitted CTA. OMIT, NEVER DISABLE-AND-EXPLAIN
+  // (D428 scopes disable-and-explain to seven instance-lifecycle verbs and keeps
+  // billing in the OMIT set; Subscribe is not one of the seven). The two
+  // whole-deploy states reuse curated copy that already exists rather than
+  // minting a string; only the PARTIAL case names tiers, because only there is
+  // the fact per-tier. Returns "" when nothing was withheld.
+  function billingOmissionCopy(capability, omitted) {
+    if (capability === "unconfigured") return ERRORS.billing_not_configured;
+    if (capability === "unverifiable") return BILLING_UNVERIFIABLE_COPY;
+    if (!omitted || !omitted.length) return "";
+    var names = omitted.length === 1
+      ? omitted[0]
+      : omitted.slice(0, -1).join(", ") + " and " + omitted[omitted.length - 1];
+    return names + (omitted.length === 1 ? " isn't" : " aren't") +
+      " set up for checkout on this deployment yet.";
+  }
+
   // cch-w49-s1: the tier states its NAME, its note and its CTA — and no price.
   // There is no amount anywhere server-side for it to state (see PLAN_CATALOG);
   // the real figure arrives on Stripe's own checkout page, which is the first
@@ -17951,11 +18046,26 @@
   // GR36 plain-member law). BOTH arms state the same thing, and neither states
   // a price: the blocked arm used to quote two figures while withholding the
   // button, which is the money claim without even the affordance behind it.
-  function launchPlanGridHtml(authority) {
+  // cch-w49-s7 — AND THE CAPABILITY RIDES THE SAME OMIT FORK, not a second
+  // mechanism. `payload` is GET /v1/subscription's body (the dashboard's cached
+  // one, or /new's own conditional read); absent, billingCheckoutCapability
+  // answers "unknown" and every CTA stands exactly as it did before this slice.
+  // The omission sentence sits beside LAUNCH_OWNER_ONLY_COPY's, OUTSIDE
+  // `.new-tiers`, for the same reason that one does: the grid is a grid.
+  function launchPlanGridHtml(authority, payload) {
     var withCta = authority !== "blocked";
-    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; })
-      .map(function (t) { return launchPlanTierHtml(t, withCta); }).join("");
+    var capability = billingCheckoutCapability(payload);
+    var paid = PLAN_CATALOG.filter(function (t) { return !t.free; });
+    var offered = {};
+    paid.forEach(function (t) { offered[t.plan] = billingPlanOffered(t.plan, payload); });
+    var omitted = withCta
+      ? paid.filter(function (t) { return !offered[t.plan]; }).map(function (t) { return t.name; })
+      : [];
+    var tiers = paid
+      .map(function (t) { return launchPlanTierHtml(t, withCta && offered[t.plan]); }).join("");
+    var capNote = omitted.length ? billingOmissionCopy(capability, omitted) : "";
     return (withCta ? "" : '<p class="dim">' + esc(LAUNCH_OWNER_ONLY_COPY) + "</p>") +
+      (capNote ? '<p class="dim">' + esc(capNote) + "</p>" : "") +
       '<div class="new-tiers">' + tiers + "</div>";
   }
 
@@ -17975,7 +18085,7 @@
       : "Your free trial isn't available — pick a plan to launch " + esc(name) + ". Cancel anytime.";
     var inner = hero +
       '<p class="dim launch-plan-lead">' + lead + "</p>" +
-      launchPlanGridHtml(authority) +
+      launchPlanGridHtml(authority, { billing_capability: capCache }) +
       '<button class="btn btn-ghost btn-block launch-plan-back" type="button">Back</button>';
     container.innerHTML = launchFlowShell(inner, opts);
     container.querySelectorAll(".new-plan").forEach(function (b) {
@@ -18812,7 +18922,15 @@
   // cache, an older payload) renders exactly what it rendered before, and the
   // server still refuses the POST — this card is the disclosure, never the
   // enforcement.
-  function tierCardHtml(t, active, subscribed, capability, trialDays) {
+  //
+  // cch-w49-s7 — `offered` is the SIXTH argument and the one that kills the
+  // offer: false means this plan's capability is declared un-checkout-able (the
+  // whole deploy, or just this tier's price id) and NO button is rendered at
+  // all. OPTIONAL, exactly like `trialDays` above: an absent value is not
+  // evidence of a refusal, so a 5-arg call renders what a 5-arg call rendered
+  // before. The reason is stated ONCE above the grid by renderTiers, never as a
+  // disabled ghost per card — D428 keeps billing in the OMIT set.
+  function tierCardHtml(t, active, subscribed, capability, trialDays, offered) {
     var isCurrent = t.plan === active;
     var testMode = capability === "test_mode";
     var btn;
@@ -18854,6 +18972,13 @@
       // renderTiers binds no click handler at all, so there is no path from
       // this card to a checkout the plane would only refuse.
       btn = '<button class="btn" disabled>Subscribe unavailable</button>';
+    } else if (offered === false) {
+      // OMIT, NEVER DISABLE. Not a ghost, not a label — NOTHING. A disabled
+      // Subscribe is still an offer with its hand withdrawn, and D428 reserves
+      // disable-and-explain for the seven instance-lifecycle verbs; Subscribe is
+      // not one of them and billing is expressly in the OMIT set. The sentence
+      // renderTiers puts above the grid is where the fact is stated.
+      btn = "";
     } else {
       btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
     }
@@ -18891,7 +19016,27 @@
     var trialDays = subCache && typeof subCache.trial_days_remaining === "number"
       ? subCache.trial_days_remaining
       : null;
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability, trialDays); }).join("");
+    // cch-w49-s7 — the plane's declaration, consulted BEFORE the offer is
+    // painted. Only a tier that would actually render a Subscribe can be
+    // "omitted": a current plan, a subscribed team's portal button and the Free
+    // card were never offers, so counting them would put a sentence on a screen
+    // that withheld nothing.
+    var payload = { billing_capability: capCache };
+    var offers = {};
+    PLAN_CATALOG.forEach(function (t) { offers[t.plan] = billingPlanOffered(t.plan, payload); });
+    var omitted = PLAN_CATALOG.filter(function (t) {
+      return !t.free && !subscribed && t.plan !== active && !offers[t.plan];
+    }).map(function (t) { return t.name; });
+    var omitNote = omitted.length ? billingOmissionCopy(capability, omitted) : "";
+    // The note is a FULL-WIDTH row of the tier grid (.tier-omit-note spans every
+    // track). #billing-tiers IS the grid — an unspanned <p> here would take a
+    // 230px column beside the cards, which is the geometry the 230px floor and
+    // the tier-floor render gate measure.
+    grid.innerHTML =
+      (omitNote ? '<p class="dim tier-omit-note">' + esc(omitNote) + "</p>" : "") +
+      PLAN_CATALOG.map(function (t) {
+        return tierCardHtml(t, active, subscribed, capability, trialDays, offers[t.plan]);
+      }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -22127,10 +22272,41 @@
   // once, and re-renders if the answer is "not the owner". Until that answer
   // lands the authority is "unknown" and the CTAs stand — an unknown role must
   // never be rendered as a refusal.
+  // cch-w49-s7 — /new READS /v1/me AND NOT /v1/subscription, so the plane's
+  // pre-hoc billing declaration never reached this screen at all and its plan
+  // grid could offer a Subscribe the server can only refuse. ONE conditional
+  // GET, asked at most once per document, in the SAME shape the two reads above
+  // already commit to: absorb, then repaint ONLY while this step is still the
+  // one mounted and no checkout is in flight, so a late answer can never clobber
+  // another step or destroy an "Opening checkout…" button mid-request.
+  //
+  // A FAILED READ CHANGES NOTHING (unknown, not refused) — capCache is LEFT
+  // UNTOUCHED on a non-200, exactly as loadSubscription leaves it, because an
+  // unknown capability must never read as a known one.
+  //
+  // The repaint passes `authority` through rather than dropping it: calling
+  // renderNewPricing(tpl) again would re-enter the `if (!authority)` arm and
+  // fire a SECOND /v1/me.
+  var newPricingCapAsked = false;
+
+  function newAskCheckoutCapability(tpl, authority) {
+    if (newPricingCapAsked || capCache) return;
+    newPricingCapAsked = true;
+    api("GET", "/v1/subscription").then(function (r) {
+      if (!r.ok || !r.data || !r.data.billing_capability) return;
+      capCache = r.data.billing_capability;
+      var body = $("#new-body");
+      if (!body || typeof body.querySelector !== "function") return;
+      if (!body.querySelector(".new-pricing")) return;
+      if (body.querySelector(".new-plan[disabled]")) return;
+      renderNewPricing(tpl, authority);
+    });
+  }
+
   function renderNewPricing(tpl, authority) {
     var known = authority || "unknown";
     var blocked = known === "blocked";
-    var tiers = launchPlanGridHtml(known);
+    var tiers = launchPlanGridHtml(known, { billing_capability: capCache });
     newSetBody(newPanel(newTemplateHead(tpl) +
       '<div class="new-pricing"><h2>' +
         esc(blocked ? "A paid plan is needed to launch" : "Choose a plan to launch") + "</h2>" +
@@ -22158,6 +22334,7 @@
         renderNewPricing(tpl, resolved);
       });
     }
+    newAskCheckoutCapability(tpl, known);
     document.querySelectorAll(".new-plan").forEach(function (b) {
       var label = b.textContent; // "Choose <Tier>" — restored after an error
       b.addEventListener("click", function () {
@@ -27560,6 +27737,13 @@
       tierCardHtml: tierCardHtml,
       checkoutCapability: checkoutCapability,
       testModeDisclosure: TEST_MODE_DISCLOSURE,
+      // cch-w49-s7 — the pure capability sibling and its two consequences. Kept
+      // BESIDE checkoutCapability rather than replacing it: that one is a cache
+      // read for the disclosure string, this one is a fact about the payload.
+      billingCheckoutCapability: billingCheckoutCapability,
+      billingPlanOffered: billingPlanOffered,
+      billingOmissionCopy: billingOmissionCopy,
+      billingUnverifiableCopy: BILLING_UNVERIFIABLE_COPY,
       billingChipModel: billingChipModel,
       billingPortalFlag: billingPortalFlag,
       // gr-p2 launch theater (GR18): the price-before-charge fold — pure model

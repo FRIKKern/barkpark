@@ -1532,6 +1532,12 @@ select.form-input {
 .plan-more { display: block; text-align: center; margin: 14px 0 0; font-size: 13px; color: var(--muted-text); cursor: pointer; }
 .plan-more:hover { color: var(--text); }
 #billing-tiers { margin-top: 24px; }
+/* cch-w49-s7 — the sentence that replaces an omitted Subscribe. #billing-tiers
+   IS the grid, so an unspanned <p> would take a whole 230px track beside the
+   cards; 1 / -1 makes it a full-width row above them instead, which is the only
+   placement that leaves the tier tracks (and the 230px floor the tier-floor
+   render gate measures) exactly as they were. */
+.tier-omit-note { grid-column: 1 / -1; margin: 0; }
 
 /* ============================================= WELCOME RUNWAY + LAUNCH FLOW (A4)
    The empty-fleet first-run: a centred welcome hero + the launch form, and the

@@ -422,7 +422,17 @@ const PIN_MEMBER_SCENARIOS = 9;
 // at 9 — the case the note above forbids bumping. 121 was RE-DERIVED by RUNNING
 // this sweep and reading what it PRINTED ("the committed corpus grew to 121
 // scenario(s), pinned at 120"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 121;
+// 121 -> 122 (cch-w49-s7): `billing-unconfigured` is the corpus's first fixture
+// to carry D554's `billing_capability` on the /v1/subscription 200, so the first
+// from which the console's consumption of that key can be measured from rendered
+// bytes. Its actor is `billing-trial`'s OWNER (`me("Ada's Lab", …)`) with ONE
+// field added, so the member slice is unmoved and PIN_MEMBER_SCENARIOS stays at
+// 9 — the case the note above forbids bumping. And it cannot widen the member
+// axis by construction: renderBilling returns at the owner fence before any grid
+// paints, so a member never reaches the code this fixture drives. 122 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 122 scenario(s), pinned at 121"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 122;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
