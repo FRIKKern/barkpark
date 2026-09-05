@@ -1,6 +1,6 @@
 {
-  "population": 386,
-  "mapped": 378,
+  "population": 387,
+  "mapped": 379,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -399,6 +399,22 @@
           "kind": "file",
           "p": "api/assets/paper-surface/paper-surface.css",
           "evidence": "api/assets/paper-editor/src/__narrow_title_guards.test.mjs:42"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__nested_canvas_context.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__nested_canvas_context.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__nested_canvas_context.test.mjs:7"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__nested_canvas_context.test.mjs:7"
         }
       ]
     },

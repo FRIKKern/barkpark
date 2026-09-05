@@ -25,7 +25,11 @@
     "paper-move-block-to",
     "paper-unbind-property",
   ]);
-  const PAPER_STRUCTURAL_SUBMITS = new Set(["paper-add-block", "paper-add-property"]);
+  const PAPER_STRUCTURAL_SUBMITS = new Set([
+    "paper-add-block",
+    "paper-add-property",
+    "paper-edit-block",
+  ]);
   const paperExitCoordinators = new WeakMap();
   const PAPER_HISTORY_POSITION = "__bpPaperHistoryPosition";
 
@@ -1219,6 +1223,28 @@
         this._sendingOps = false;
         this._opsFailed = false;
         this._saveBridgeDestroyed = false;
+        const captureContainerContext = () => {
+          const containerId = this.el.dataset.paperContainerId;
+          const hasLegacyRunMarker = this.el.dataset.paperContainerRun != null;
+          if (containerId == null && !hasLegacyRunMarker) return { wire: {}, invalid: false };
+          const confirmedBlocks = this.el.querySelector("bp-paper-canvas")?.blocks;
+          const runIds = Array.isArray(confirmedBlocks)
+            ? confirmedBlocks.map((block) => block?.id)
+            : [];
+          const validIds = runIds.length > 0 && runIds.every((id) =>
+            typeof id === "string" && id.trim() !== ""
+          ) && new Set(runIds).size === runIds.length;
+          if (!containerId?.trim() || !validIds) {
+            return { wire: {}, invalid: true };
+          }
+          return {
+            wire: {
+              container_id: containerId,
+              container_run_ids: Object.freeze([...runIds]),
+            },
+            invalid: false,
+          };
+        };
         const reportUnretryableOps = (entry, code, message) => {
           this._opsFailed = true;
           entry.unretryable = true;
@@ -1240,6 +1266,14 @@
             this._opsFailed || !this._opsQueue.length
           ) return;
           const entry = this._opsQueue[0];
+          if (entry.invalidContainerContext) {
+            reportUnretryableOps(
+              entry,
+              "paper_ops_container_context_invalid",
+              "Save paused: this nested editor lost its document position. Your edits are still here; copy them before reloading.",
+            );
+            return;
+          }
           if (!entry.requestId) {
             reportUnretryableOps(
               entry,
@@ -1264,7 +1298,10 @@
               promise: this._exitCoordinator.retryMutation(entry.mutationEntry),
             };
           } else {
-            mutation = bpPaperMutation(this, this.el, "paper-ops", { ops: entry.ops }, {
+            mutation = bpPaperMutation(this, this.el, "paper-ops", {
+              ops: entry.ops,
+              ...entry.containerContext,
+            }, {
               requestId: entry.requestId,
               onResult: (saved, result) => {
                 this._sendingOps = false;
@@ -1300,9 +1337,12 @@
         };
         this._onCanvasOps = (e) => {
           this._exitCoordinator?.markDirty(this.el);
+          const containerContext = captureContainerContext();
           this._opsQueue.push({
             ops: e.detail.ops,
             seq: e.detail.seq,
+            containerContext: containerContext.wire,
+            invalidContainerContext: containerContext.invalid,
             requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
             expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
           });

@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
+  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   # t9 — the task block types whose boundary widget paints a LIVE preview
@@ -238,6 +239,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_type={@doc_type}
         paper_rev={@paper_rev}
         document_rev={@document_rev}
+        root_slug={@slug}
+        doc_key={@paper_doc_key}
+        canvas_enabled={@canvas_on?}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -299,6 +303,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 doc_type={@doc_type}
                 paper_rev={@paper_rev}
                 document_rev={@document_rev}
+                root_slug={@slug}
+                doc_key={@paper_doc_key}
+                canvas_enabled={@canvas_on?}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -394,6 +401,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             doc_type={@doc_type}
             paper_rev={@paper_rev}
             document_rev={@document_rev}
+            root_slug={@slug}
+            doc_key={@paper_doc_key}
+            canvas_enabled={@canvas_on?}
           />
         </div>
       <% end %>
@@ -700,6 +710,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_key, :string, required: true)
   attr(:paper_rev, :any, default: nil)
   attr(:document_rev, :string, default: nil)
+  attr(:container_id, :string, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
@@ -720,6 +731,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-doc-key={@doc_key}
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}
+      data-paper-container-id={@container_id}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -802,6 +814,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
 
   def edit_block(assigns) do
     ~H"""
@@ -891,6 +906,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_type={@doc_type}
         paper_rev={@paper_rev}
         document_rev={@document_rev}
+        root_slug={@root_slug}
+        doc_key={@doc_key}
+        canvas_enabled={@canvas_enabled}
       />
     </div>
     """
@@ -1028,6 +1046,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
 
   def properties_panel(assigns) do
     ~H"""
@@ -1063,6 +1084,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           doc_type={@doc_type}
           paper_rev={@paper_rev}
           document_rev={@document_rev}
+          root_slug={@root_slug}
+          doc_key={@doc_key}
+          canvas_enabled={@canvas_enabled}
         />
       </div>
 
@@ -1131,10 +1155,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
 
   def paper_block_fields(assigns) do
     assigns =
-      assign(assigns, id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
+      assigns
+      |> assign(id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
+      |> assign(
+        :expandable_segments,
+        if(Map.get(assigns.block, "type") == "expandable" and assigns.canvas_enabled,
+          do:
+            assigns.block
+            |> Blocks.container_children()
+            |> PaperCanvas.partition_runs()
+            |> PaperCanvas.with_run_ordinals(),
+          else: []
+        )
+      )
 
     ~H"""
     <%= case @type do %>
@@ -1282,6 +1321,206 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value={Map.get(@block, "title", "")}
             data-test-id="paper-field-title"
           />
+        </form>
+      <% "paper-links" -> %>
+        <form
+          id={"paper-links-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-links-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <input type="hidden" name="ref-count" value={length(Map.get(@block, "refs", []))} />
+          <label class="bp-paper-edit-fieldlabel">
+            Title
+            <input type="text" name="title" class="bp-paper-edit-text"
+                   value={Map.get(@block, "title", "")} />
+          </label>
+          <label class="bp-paper-edit-fieldlabel">
+            Description
+            <textarea name="description" class="bp-paper-edit-textarea" rows="2"><%= Map.get(@block, "description", "") %></textarea>
+          </label>
+          <label class="bp-paper-edit-fieldlabel">
+            Layout
+            <input type="text" name="layout" class="bp-paper-edit-text"
+                   value={Map.get(@block, "layout", "")} />
+          </label>
+
+          <fieldset
+            :for={{ref, index} <- Enum.with_index(Map.get(@block, "refs", []))}
+            class="bp-paper-edit-form"
+            data-test-id="paper-link-ref-row"
+            data-ref-index={index}
+          >
+            <legend>Reference <%= index + 1 %></legend>
+            <label class="bp-paper-edit-fieldlabel">
+              Slug
+              <input type="text" name={"ref-#{index}-slug"} class="bp-paper-edit-text"
+                     value={Blocks.paper_link_ref_value(ref, "slug") || ""} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Authored title
+              <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
+                     value={Blocks.paper_link_ref_value(ref, "title") || ""} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Authored description
+              <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Eyebrow
+              <input type="text" name={"ref-#{index}-eyebrow"} class="bp-paper-edit-text"
+                     value={Blocks.paper_link_ref_value(ref, "eyebrow") || ""} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Meta
+              <input type="text" name={"ref-#{index}-meta"} class="bp-paper-edit-text"
+                     value={Blocks.paper_link_ref_value(ref, "meta") || ""} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Reason
+              <textarea name={"ref-#{index}-reason"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "reason") || "" %></textarea>
+            </label>
+            <label class="bp-paper-edit-check">
+              <input type="checkbox" name={"ref-#{index}-prefer-authored-copy"} value="true"
+                     checked={Blocks.paper_link_ref_value(ref, "prefer_authored_copy") == true} />
+              Prefer authored copy
+            </label>
+            <button type="submit" name="ref-action" value={"remove:#{index}"}
+                    class="btn btn-destructive btn-sm" data-test-id="paper-link-remove-ref">
+              Remove reference
+            </button>
+          </fieldset>
+
+          <button type="submit" name="ref-action" value="add" class="btn btn-ghost btn-sm"
+                  data-test-id="paper-link-add-ref">Add reference</button>
+        </form>
+      <% "expandable" -> %>
+        <div class="bp-paper-edit-form" data-test-id="paper-expandable-editor">
+          <form
+            id={"expandable-form-" <> @id}
+            class="bp-paper-edit-form"
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+            <label class="bp-paper-edit-fieldlabel">
+              Summary
+              <input type="text" name="summary" class="bp-paper-edit-text"
+                     value={Map.get(@block, "summary", "")} />
+            </label>
+            <label class="bp-paper-edit-check">
+              <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
+              Open by default
+            </label>
+          </form>
+
+          <div :if={@canvas_enabled} class="bp-paper-edit-form"
+               data-test-id="paper-expandable-children">
+            <%= for segment <- @expandable_segments do %>
+              <%= case segment do %>
+                <% {:run, run_blocks, ordinal} -> %>
+                  <.canvas_run
+                    slug={PaperCanvas.expandable_run_slug(@root_slug, @id)}
+                    run_blocks={run_blocks}
+                    run_ordinal={ordinal}
+                    dataset={@dataset}
+                    api_token_raw={@api_token_raw}
+                    scope_prefix={@scope_prefix}
+                    picker_browse={@picker_browse}
+                    doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                    paper_rev={@doc_type == "paper" && @paper_rev}
+                    document_rev={@doc_type != "paper" && @document_rev}
+                    container_id={@id}
+                  />
+                <% {:block, child} -> %>
+                  <div class="bp-paper-edit-form" data-nested-block-id={Map.get(child, "id")}
+                       data-block-type={Map.get(child, "type")}>
+                    <span class="bp-paper-edit-kind"><%= Map.get(child, "type") %></span>
+                    <.paper_block_fields
+                      block={child}
+                      dataset={@dataset}
+                      api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix}
+                      picker_browse={@picker_browse}
+                      doc_type={@doc_type}
+                      paper_rev={@paper_rev}
+                      document_rev={@document_rev}
+                      root_slug={@root_slug}
+                      doc_key={@doc_key}
+                      canvas_enabled={@canvas_enabled}
+                    />
+                  </div>
+              <% end %>
+            <% end %>
+          </div>
+          <div :if={!@canvas_enabled} class="bp-paper-edit-form" data-test-id="paper-expandable-children">
+            <div :for={child <- Blocks.container_children(@block)} class="bp-paper-edit-form"
+                 data-nested-block-id={Map.get(child, "id")} data-block-type={Map.get(child, "type")}>
+              <span class="bp-paper-edit-kind"><%= Map.get(child, "type") %></span>
+              <.paper_block_fields
+                block={child}
+                dataset={@dataset}
+                api_token_raw={@api_token_raw}
+                scope_prefix={@scope_prefix}
+                picker_browse={@picker_browse}
+                doc_type={@doc_type}
+                paper_rev={@paper_rev}
+                document_rev={@document_rev}
+                root_slug={@root_slug}
+                doc_key={@doc_key}
+                canvas_enabled={false}
+              />
+            </div>
+          </div>
+        </div>
+      <% "bar-chart" -> %>
+        <form
+          id={"bar-chart-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-bar-chart-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <input type="hidden" name="bar-count" value={length(Map.get(@block, "bars", []))} />
+          <label class="bp-paper-edit-fieldlabel">
+            Title
+            <input type="text" name="title" class="bp-paper-edit-text"
+                   value={Map.get(@block, "title", "")} />
+          </label>
+          <label class="bp-paper-edit-fieldlabel">
+            Maximum
+            <input type="number" name="max" class="bp-paper-edit-text" step="any"
+                   value={Map.get(@block, "max", "")} />
+          </label>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="values" value="true" checked={Map.get(@block, "values") == true} />
+            Show values
+          </label>
+          <div :for={{bar, index} <- Enum.with_index(Map.get(@block, "bars", []))}
+               class="bp-paper-edit-form" data-test-id="paper-bar-chart-row" data-bar-index={index}>
+            <label class="bp-paper-edit-fieldlabel">
+              Label
+              <input type="text" name={"bar-#{index}-label"} class="bp-paper-edit-text"
+                     value={Map.get(bar, "label", "")} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Value
+              <input type="number" name={"bar-#{index}-value"} class="bp-paper-edit-text" step="any"
+                     value={Map.get(bar, "value", 0)} />
+            </label>
+            <button type="submit" name="bar-action" value={"remove:#{index}"}
+                    class="btn btn-destructive btn-sm" data-test-id="paper-bar-chart-remove">
+              Remove bar
+            </button>
+          </div>
+          <button type="submit" name="bar-action" value="add" class="btn btn-ghost btn-sm"
+                  data-test-id="paper-bar-chart-add">Add bar</button>
         </form>
       <% "divider" -> %>
         <p class="bp-paper-edit-readonly">— divider —</p>

@@ -212,6 +212,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   defdelegate paper_ops(socket, ops, request_id), to: Paper
   defdelegate paper_ops(socket, ops, request_id, if_rev), to: Paper
+  defdelegate paper_ops(socket, ops, request_id, if_rev, context), to: Paper
 
   @doc false
   defdelegate push_task_previews(socket), to: Paper

@@ -1011,8 +1011,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       # The ONLY difference is the edit bar; the article body is byte-identical.
       assert anon_article(anon_html) == anon_article(writer_html)
-      refute anon_html =~ "paper-edit-bar"
-      assert writer_html =~ "paper-edit-bar"
+
+      assert anon_html
+             |> LazyHTML.from_document()
+             |> LazyHTML.query("#paper-edit-bar")
+             |> Enum.count() == 0
+
+      assert writer_html
+             |> LazyHTML.from_document()
+             |> LazyHTML.query("#paper-edit-bar")
+             |> Enum.count() == 1
     end
   end
 

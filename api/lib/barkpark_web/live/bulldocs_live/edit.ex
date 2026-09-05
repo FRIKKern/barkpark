@@ -255,6 +255,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Apply one request-identified canvas batch exactly once."
   def apply_ops(socket, ops, request_id, supplied_rev) do
+    apply_ops(socket, ops, request_id, supplied_rev, {:ok, nil})
+  end
+
+  def apply_ops(socket, ops, request_id, supplied_rev, context_result) do
     paper = socket.assigns[:paper_doc]
     workspace_id = doc_field(paper, :workspace_id)
     slug = socket.assigns[:slug]
@@ -270,8 +274,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       revision(supplied_rev) == :error ->
         {:error, failed_save(socket, request_id)}
 
+      not match?({:ok, _context}, context_result) ->
+        {:error, failed_save(socket, request_id)}
+
       true ->
         {:ok, if_rev} = revision(supplied_rev)
+        {:ok, context} = context_result
+
+        opts =
+          ScopeHelpers.scope_opts(socket) ++
+            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
 
         case Content.apply_paper_block_ops_once(
                slug,
@@ -279,7 +291,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
                socket.assigns[:dataset],
                request_id,
                replay_principal_key(assigns),
-               ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+               opts
              ) do
           {:ok, receipt, outcome} ->
             socket =

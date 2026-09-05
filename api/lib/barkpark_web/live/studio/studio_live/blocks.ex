@@ -99,6 +99,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     put_if_present(%{}, "title", params["title"])
   end
 
+  def build_block_patch(%{"type" => "paper-links"} = block, params) do
+    %{}
+    |> put_optional_patch(params, "title")
+    |> put_optional_patch(params, "description")
+    |> put_optional_patch(params, "layout")
+    |> put_paper_link_refs(block, params)
+  end
+
+  def build_block_patch(%{"type" => "expandable"}, params) do
+    %{}
+    |> put_param(params, "summary", "")
+    |> Map.put("open", parse_bool(params["open"]))
+  end
+
+  def build_block_patch(%{"type" => "bar-chart"} = block, params) do
+    %{}
+    |> put_optional_number(params, "max")
+    |> put_optional_patch(params, "title")
+    |> Map.put("values", parse_bool(params["values"]))
+    |> put_bar_chart_bars(block, params)
+  end
+
   # Unknown / non-editable block type (image, table, divider) → no-op patch.
   def build_block_patch(_block, _params), do: %{}
 
@@ -117,6 +139,191 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     do: Map.put(patch, "content", text_to_inline(text))
 
   defp put_inline_text_if_present(patch, _params), do: patch
+
+  defp put_paper_link_refs(patch, block, %{"ref-count" => count} = params) do
+    refs = Map.get(block, "refs", [])
+
+    submitted_refs =
+      count
+      |> submitted_indices(length(refs))
+      |> Enum.map(fn index ->
+        refs
+        |> Enum.at(index, "")
+        |> paper_link_ref_from_params(params, index)
+      end)
+      |> apply_ref_action(params["ref-action"])
+
+    Map.put(patch, "refs", submitted_refs)
+  end
+
+  defp put_paper_link_refs(patch, _block, _params), do: patch
+
+  defp paper_link_ref_from_params(original, params, index) do
+    prefix = "ref-#{index}-"
+    row_submitted? = Enum.any?(Map.keys(params), &String.starts_with?(&1, prefix))
+
+    if row_submitted? do
+      slug = params[prefix <> "slug"] || paper_link_ref_field(original, "slug") || ""
+      optional = ~w(title description eyebrow meta reason)
+
+      authored =
+        Enum.reduce(optional, paper_link_ref_map(original, slug), fn field, ref ->
+          put_optional_param(ref, params, prefix <> field, field)
+        end)
+        |> Map.put("slug", slug)
+
+      prefer_authored? = parse_bool(params[prefix <> "prefer-authored-copy"])
+
+      if is_binary(original) and not prefer_authored? and
+           Enum.all?(optional, &(not Map.has_key?(authored, &1))) do
+        slug
+      else
+        Map.put(authored, "prefer_authored_copy", prefer_authored?)
+      end
+    else
+      original
+    end
+  end
+
+  defp paper_link_ref_map(ref, _slug) when is_map(ref), do: ref
+  defp paper_link_ref_map(_ref, slug), do: %{"slug" => slug}
+
+  defp paper_link_ref_field(ref, "slug") when is_binary(ref), do: ref
+  defp paper_link_ref_field(ref, key) when is_map(ref), do: Map.get(ref, key)
+  defp paper_link_ref_field(_ref, _key), do: nil
+
+  defp apply_ref_action(refs, "add"), do: refs ++ [""]
+
+  defp apply_ref_action(refs, "remove:" <> index) do
+    delete_at_valid_index(refs, index)
+  end
+
+  defp apply_ref_action(refs, _action), do: refs
+
+  defp put_bar_chart_bars(patch, block, %{"bar-count" => count} = params) do
+    bars = Map.get(block, "bars", [])
+
+    submitted_bars =
+      count
+      |> submitted_indices(length(bars))
+      |> Enum.map(fn index ->
+        prefix = "bar-#{index}-"
+        original = Enum.at(bars, index, %{})
+
+        original
+        |> ensure_map()
+        |> put_param(params, prefix <> "label", "", "label")
+        |> put_number_param(params, prefix <> "value", 0, "value")
+      end)
+      |> apply_bar_action(params["bar-action"])
+
+    Map.put(patch, "bars", submitted_bars)
+  end
+
+  defp put_bar_chart_bars(patch, _block, _params), do: patch
+
+  defp apply_bar_action(bars, "add"), do: bars ++ [%{"label" => "", "value" => 0}]
+
+  defp apply_bar_action(bars, "remove:" <> index) do
+    delete_at_valid_index(bars, index)
+  end
+
+  defp apply_bar_action(bars, _action), do: bars
+
+  defp submitted_indices(count, existing_count) do
+    case count |> to_int(0) |> max(0) |> min(existing_count) do
+      0 -> []
+      count -> 0..(count - 1)
+    end
+  end
+
+  defp delete_at_valid_index(items, index) do
+    case Integer.parse(index) do
+      {index, ""} when index >= 0 and index < length(items) -> List.delete_at(items, index)
+      _ -> items
+    end
+  end
+
+  defp ensure_map(value) when is_map(value), do: value
+  defp ensure_map(_value), do: %{}
+
+  defp put_param(map, params, param, default) do
+    if Map.has_key?(params, param), do: Map.put(map, param, params[param] || default), else: map
+  end
+
+  defp put_param(map, params, param, default, key) do
+    if Map.has_key?(params, param), do: Map.put(map, key, params[param] || default), else: map
+  end
+
+  defp put_number_param(map, params, param, default, key) do
+    if Map.has_key?(params, param) do
+      Map.put(map, key, parse_number(params[param], default))
+    else
+      map
+    end
+  end
+
+  defp put_optional_number(map, params, key) do
+    if Map.has_key?(params, key) do
+      case params[key] do
+        value when value in [nil, ""] -> Map.put(map, key, nil)
+        value -> Map.put(map, key, parse_number(value, Map.get(map, key)))
+      end
+    else
+      map
+    end
+  end
+
+  defp parse_number(value, _default) when is_integer(value) or is_float(value), do: value
+
+  defp parse_number(value, default) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, ""} ->
+        number
+
+      _ ->
+        case Float.parse(value) do
+          {number, ""} -> number
+          _ -> default
+        end
+    end
+  end
+
+  defp parse_number(_value, default), do: default
+
+  defp put_optional_patch(map, params, key) do
+    if Map.has_key?(params, key) do
+      case params[key] do
+        value when is_binary(value) ->
+          case String.trim(value) do
+            "" -> Map.put(map, key, nil)
+            trimmed -> Map.put(map, key, trimmed)
+          end
+
+        _ ->
+          Map.put(map, key, nil)
+      end
+    else
+      map
+    end
+  end
+
+  defp put_optional_param(map, params, param, key) do
+    if Map.has_key?(params, param) do
+      case params[param] do
+        value when is_binary(value) ->
+          case String.trim(value) do
+            "" -> Map.delete(map, key)
+            trimmed -> Map.put(map, key, trimmed)
+          end
+
+        _ ->
+          Map.delete(map, key)
+      end
+    else
+      map
+    end
+  end
 
   @doc false
   def put_if_present(map, _key, nil), do: map
@@ -188,20 +395,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     "b-" <> (:crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false))
   end
 
-  # Find a block by id anywhere in the tree (recurses sections), so a control
-  # nested inside a section still resolves its block.
+  # Find a block by id anywhere in the tree (recurses section / expandable
+  # containers), so a nested control still resolves its block.
   @doc false
   def find_paper_block(blocks, id) when is_list(blocks) do
     Enum.find_value(blocks, fn b ->
       cond do
-        Map.get(b, "id") == id -> b
-        Map.get(b, "type") == "section" -> find_paper_block(Map.get(b, "blocks", []), id)
-        true -> nil
+        Map.get(b, "id") == id ->
+          b
+
+        Map.get(b, "type") in ["section", "expandable"] ->
+          find_paper_block(container_children(b), id)
+
+        true ->
+          nil
       end
     end)
   end
 
   def find_paper_block(_blocks, _id), do: nil
+
+  @doc false
+  def container_children(%{"type" => "expandable", "children" => children})
+      when is_list(children),
+      do: children
+
+  def container_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  def container_children(_block), do: []
+
+  @doc false
+  def canvas_run_context(params) when is_map(params) do
+    case {Map.fetch(params, "container_id"), Map.fetch(params, "container_run_ids")} do
+      {:error, :error} ->
+        {:ok, nil}
+
+      {{:ok, id}, {:ok, ids}} when is_binary(id) and is_list(ids) ->
+        id = String.trim(id)
+
+        valid_ids? =
+          ids != [] and Enum.all?(ids, &(is_binary(&1) and String.trim(&1) != "")) and
+            Enum.uniq(ids) == ids
+
+        if id != "" and valid_ids? do
+          {:ok, %{container_id: id, container_run_ids: ids}}
+        else
+          {:error, :invalid_container_context}
+        end
+
+      _ ->
+        {:error, :invalid_container_context}
+    end
+  end
+
+  def canvas_run_context(_params), do: {:error, :invalid_container_context}
+
+  @doc false
+  def paper_link_ref_value(ref, "slug") when is_binary(ref), do: ref
+  def paper_link_ref_value(ref, key) when is_map(ref), do: Map.get(ref, key)
+  def paper_link_ref_value(_ref, _key), do: nil
 
   @doc false
   # A fresh block of `type` with sensible empty defaults, in the EXACT shape

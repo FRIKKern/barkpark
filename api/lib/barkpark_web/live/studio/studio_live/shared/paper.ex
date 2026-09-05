@@ -407,7 +407,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def paper_ops(socket, ops, request_id), do: paper_ops(socket, ops, request_id, nil)
 
-  def paper_ops(socket, ops, request_id, supplied_rev) do
+  def paper_ops(socket, ops, request_id, supplied_rev),
+    do: paper_ops(socket, ops, request_id, supplied_rev, {:ok, nil})
+
+  def paper_ops(socket, ops, request_id, supplied_rev, context_result) do
     socket = failed_result(socket, %{"request_id" => request_id})
     {socket, revoked_token?} = refresh_replay_token(socket)
     paper = socket.assigns[:paper_doc]
@@ -440,8 +443,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       paper_revision(supplied_rev) == :error ->
         {:error, failed_result(socket, %{"request_id" => request_id})}
 
+      not match?({:ok, _context}, context_result) ->
+        {:error, failed_result(socket, %{"request_id" => request_id})}
+
       true ->
         {:ok, if_rev} = paper_revision(supplied_rev)
+        {:ok, context} = context_result
+
+        opts =
+          BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
+            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
 
         case Content.apply_paper_block_ops_once(
                slug,
@@ -449,7 +460,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
                dataset,
                request_id,
                replay_principal_key(socket),
-               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+               opts
              ) do
           {:ok, receipt, outcome} ->
             socket =
@@ -893,10 +904,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def push_block_renders(socket) do
     if PaperCanvas.paper_canvas_enabled?() do
       blocks = paper_top_level_blocks(socket)
-      previews = Map.new(task_previews(blocks, socket), &{&1["block_id"], &1})
+      render_blocks = expandable_render_blocks(blocks)
+      previews = Map.new(task_previews(render_blocks, socket), &{&1["block_id"], &1})
 
       fleet_renders =
-        blocks
+        render_blocks
         |> Enum.filter(&fleet_block?/1)
         |> Enum.map(fn block ->
           %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
@@ -906,7 +918,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
       # hole finds it with ZERO hook change). Concatenated with the fleet renders.
       figure_renders =
-        blocks
+        render_blocks
         |> Enum.filter(&figure_block?/1)
         |> Enum.map(&figure_render/1)
 
@@ -1041,17 +1053,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {nil, []}
         end
 
-      runs =
-        blocks
-        |> PaperCanvas.partition_runs()
-        |> PaperCanvas.with_run_ordinals()
-        |> Enum.flat_map(fn
-          {:run, run_blocks, ordinal} ->
-            [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
-
-          {:block, _block} ->
-            []
-        end)
+      runs = canvas_echo_runs(slug, blocks)
 
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
       push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
@@ -1059,6 +1061,57 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       socket
     end
   end
+
+  @doc false
+  def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
+    run_entries(slug, blocks) ++ nested_canvas_echo_runs(slug, blocks)
+  end
+
+  def canvas_echo_runs(_slug, _blocks), do: []
+
+  defp run_entries(slug, blocks) do
+    blocks
+    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.with_run_ordinals()
+    |> Enum.flat_map(fn
+      {:run, run_blocks, ordinal} ->
+        [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
+
+      {:block, _block} ->
+        []
+    end)
+  end
+
+  defp nested_canvas_echo_runs(root_slug, blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => "expandable", "id" => id} = block when is_binary(id) ->
+        children = expandable_children(block)
+
+        run_entries(PaperCanvas.expandable_run_slug(root_slug, id), children) ++
+          nested_canvas_echo_runs(root_slug, children)
+
+      _ ->
+        []
+    end)
+  end
+
+  @doc false
+  def expandable_render_blocks(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => "expandable"} = block ->
+        children = expandable_children(block)
+        [block | expandable_render_blocks(children)]
+
+      block ->
+        [block]
+    end)
+  end
+
+  def expandable_render_blocks(_blocks), do: []
+
+  defp expandable_children(%{"children" => children}) when is_list(children), do: children
+  defp expandable_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp expandable_children(_block), do: []
 
   @doc false
   def document_op(socket, op) do

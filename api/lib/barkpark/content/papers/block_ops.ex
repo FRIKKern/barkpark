@@ -39,6 +39,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   }
 
   alias Barkpark.Content.Papers
+  alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
@@ -788,7 +789,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
-    with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
+    with {:ok, opts} <- normalize_canvas_run_opts(opts),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
       run_paper_batch_effects(effects, dataset, opts)
       {:ok, receipt}
@@ -825,6 +827,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
       key_hash = paper_ops_key_hash(doc, request_id, principal_key)
       exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
@@ -891,7 +894,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
+         {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
          # when it would hollow out a non-hollow paper.
@@ -1004,6 +1007,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_paper_ops_principal(_), do: {:error, :missing_principal}
 
+  defp normalize_canvas_run_opts(opts) when is_list(opts) do
+    context = Keyword.get(opts, :canvas_run_context)
+
+    with {:ok, normalized} <- CanvasRunContext.normalize(context),
+         :ok <- require_canvas_run_revision(normalized, Keyword.get(opts, :if_rev)) do
+      if is_nil(normalized) do
+        {:ok, Keyword.delete(opts, :canvas_run_context)}
+      else
+        {:ok, Keyword.put(opts, :canvas_run_context, normalized)}
+      end
+    end
+  end
+
+  defp require_canvas_run_revision(nil, _if_rev), do: :ok
+  defp require_canvas_run_revision(_context, if_rev) when is_integer(if_rev), do: :ok
+  defp require_canvas_run_revision(_context, _if_rev), do: {:error, :invalid_canvas_run_context}
+
   # Internal contention seam: the unboxed two-connection regression pauses the
   # winning transaction after INSERT so the losing INSERT is forced to observe
   # a genuinely in-flight Postgres uniqueness conflict. No host passes it.
@@ -1039,7 +1059,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp paper_ops_payload_fingerprint(ops, opts) do
-    {ops, Keyword.get(opts, :if_rev)}
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> {ops, Keyword.get(opts, :if_rev)}
+      context -> {ops, Keyword.get(opts, :if_rev), context}
+    end
     |> deterministic_hash()
   end
 
@@ -1149,13 +1172,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # collecting the affected block id per op against the post-op state. Halts on
   # the first failure (returning that op's tagged error) so a partial batch is
   # never persisted. Affected ids are de-duped while preserving first-seen order.
-  defp fold_paper_ops(blocks, ops) do
+  defp fold_paper_ops_in_context(blocks, ops, opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil ->
+        fold_paper_ops(blocks, ops)
+
+      context ->
+        CanvasRunContext.map_run(blocks, context, fn run_blocks ->
+          fold_paper_ops(run_blocks, ops, [])
+        end)
+    end
+  end
+
+  defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
     # every op of the atomic fold, so a batch op that breaks a cardinality /
     # relative-order rule halts the fold exactly like a locked-block op (the
     # paper stays UNCHANGED). Same declaration set as the single-op path.
-    constraints = Papers.Template.paper_declarations()
-
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
       # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
       # once after it. Two defects share this one root — the batch used to read
@@ -2053,8 +2086,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
     block = Map.put(block, "id", id)
 
     block =
-      case Map.get(block, "blocks") do
-        children when is_list(children) ->
+      case block do
+        %{"type" => "expandable", "children" => children} when is_list(children) ->
+          Map.put(block, "children", ensure_block_ids(children, id))
+
+        %{"blocks" => children} when is_list(children) ->
           Map.put(block, "blocks", ensure_block_ids(children, id))
 
         _ ->

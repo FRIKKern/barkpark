@@ -107,6 +107,122 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
     assert block_text(stored, "anchor") == "First"
   end
 
+  test "a nested expandable run applies once and replays after the run changed" do
+    {slug, paper} = seed_nested_paper!()
+    request_id = Ecto.UUID.generate()
+    if_rev = paper_rev(paper)
+    context = %{container_id: "details", container_run_ids: ["nested-a", "nested-b"]}
+
+    ops = [
+      %{"op" => "patch-block", "id" => "nested-a", "patch" => %{"text" => "Changed"}},
+      %{
+        "op" => "append-block",
+        "block" => %{"id" => "nested-new", "type" => "paragraph", "text" => "New"}
+      }
+    ]
+
+    assert {:ok, receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               @dataset,
+               request_id,
+               "user:nested-run",
+               if_rev: if_rev,
+               canvas_run_context: context
+             )
+
+    assert Enum.map(expandable_children(Content.get_paper(slug)), & &1["id"]) ==
+             ["nested-a", "nested-b", "nested-new"]
+
+    assert {:ok, ^receipt, :replayed} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               @dataset,
+               request_id,
+               "user:nested-run",
+               if_rev: if_rev,
+               canvas_run_context: context
+             )
+
+    assert Enum.count(expandable_children(Content.get_paper(slug)), &(&1["id"] == "nested-new")) ==
+             1
+  end
+
+  test "nested run context is fingerprinted and cannot target or mint ids outside its boundary" do
+    {slug, paper} = seed_nested_paper!()
+    if_rev = paper_rev(paper)
+    context = %{container_id: "details", container_run_ids: ["nested-a", "nested-b"]}
+    request_id = Ecto.UUID.generate()
+
+    assert {:error, {:block_not_found, "outside", "patch-block"}} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [%{"op" => "patch-block", "id" => "outside", "patch" => %{"text" => "Escape"}}],
+               @dataset,
+               request_id,
+               "user:nested-escape",
+               if_rev: if_rev,
+               canvas_run_context: context
+             )
+
+    assert {:error, :canvas_run_id_collision} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [
+                 %{
+                   "op" => "append-block",
+                   "block" => %{"id" => "outside", "type" => "paragraph", "text" => "Collision"}
+                 }
+               ],
+               @dataset,
+               Ecto.UUID.generate(),
+               "user:nested-collision",
+               if_rev: if_rev,
+               canvas_run_context: context
+             )
+
+    patch = %{"op" => "patch-block", "id" => "nested-a", "patch" => %{"text" => "Applied"}}
+
+    assert {:ok, _receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [patch],
+               @dataset,
+               request_id,
+               "user:nested-escape",
+               if_rev: if_rev,
+               canvas_run_context: context
+             )
+
+    assert {:error, :idempotency_payload_mismatch} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [patch],
+               @dataset,
+               request_id,
+               "user:nested-escape",
+               if_rev: if_rev,
+               canvas_run_context: %{context | container_run_ids: ["nested-a"]}
+             )
+  end
+
+  test "nested run context requires an integer revision fence" do
+    {slug, _paper} = seed_nested_paper!()
+    context = %{container_id: "details", container_run_ids: ["nested-a", "nested-b"]}
+
+    assert {:error, :invalid_canvas_run_context} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [patch_text("No fence")],
+               @dataset,
+               Ecto.UUID.generate(),
+               "user:nested-no-fence",
+               canvas_run_context: context
+             )
+  end
+
   test "a receipt-completion failure rolls back the document write and its claim" do
     {slug, _paper} = seed_paper!()
     request_id = Ecto.UUID.generate()
@@ -423,6 +539,37 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
 
     {:ok, paper} = Content.upsert_paper(attrs)
     {slug, paper}
+  end
+
+  defp seed_nested_paper! do
+    slug = "paper-nested-replay-#{System.unique_integer([:positive])}"
+
+    attrs =
+      Barkpark.LabelFixtures.paper_attrs(%{
+        slug: slug,
+        blocks: [
+          %{
+            "id" => "details",
+            "type" => "expandable",
+            "summary" => "Details",
+            "children" => [
+              %{"id" => "nested-a", "type" => "paragraph", "text" => "A"},
+              %{"id" => "nested-b", "type" => "paragraph", "text" => "B"}
+            ],
+            "blocks" => [%{"id" => "hidden", "type" => "paragraph", "text" => "Hidden"}]
+          },
+          %{"id" => "outside", "type" => "paragraph", "text" => "Outside"}
+        ]
+      })
+
+    {:ok, paper} = Content.upsert_paper(attrs)
+    {slug, paper}
+  end
+
+  defp expandable_children(paper) do
+    paper.content["blocks"]
+    |> Enum.find(&(&1["id"] == "details"))
+    |> Map.fetch!("children")
   end
 
   defp patch_text(text),

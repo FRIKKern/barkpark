@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 
-const dom = new JSDOM('<main><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
+const dom = new JSDOM('<main data-paper-doc-key="production:paper:probe" data-paper-rev="7"><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
 const { window } = dom;
 let nextRequestId = 0;
 Object.defineProperty(window, 'crypto', {configurable:true, value:{
@@ -34,6 +34,10 @@ const settleNext = (reply, requestId) => {
       value: { ...result.value, reply: {
         ...result.value.reply,
         request_id: requestId === undefined ? pending.payload.request_id : requestId,
+        ...(pending.payload.if_rev != null && result.value.reply.saved === true &&
+          result.value.reply.rev == null
+          ? {rev: Number(pending.payload.if_rev) + 1}
+          : {}),
       } },
     } : result);
   }
@@ -41,7 +45,13 @@ const settleNext = (reply, requestId) => {
     pending.payload?.request_id && !Array.isArray(reply) && reply != null &&
     typeof reply === 'object'
   ) {
-    reply = {...reply, request_id: requestId === undefined ? pending.payload.request_id : requestId};
+    reply = {
+      ...reply,
+      request_id: requestId === undefined ? pending.payload.request_id : requestId,
+      ...(pending.payload.if_rev != null && reply.saved === true && reply.rev == null
+        ? {rev: Number(pending.payload.if_rev) + 1}
+        : {}),
+    };
   }
   pending.resolve(reply);
   return pending;
@@ -50,7 +60,7 @@ const bridge = { ...hooks.BarkparkPaperCanvas, el: wrapper,
   handleEvent: (name, handler) => handlers.set(name, handler),
   pushEvent: (name, payload) => {
     calls.push(name);
-    if (name !== 'paper-ops') return Promise.resolve({});
+    if (name !== 'paper-ops' && name !== 'paper-edit-block') return Promise.resolve({});
     return new Promise((resolve, reject) => replies.push({resolve, reject, payload}));
   },
 };
@@ -214,11 +224,11 @@ structuralEditor.innerHTML = '<div data-edit-block-id="a"><span data-drag-grip d
 window.document.querySelector('main').append(structuralEditor);
 const structuralCalls = [];
 const sortable = {...hooks.BarkparkPaperSortable, el:structuralEditor,
-  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id}); },
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id,rev:payload.if_rev + 1}); },
 };
 sortable.mounted();
 const contextMenu = {...hooks.BarkparkPaperContextMenu, el:structuralEditor.querySelector('#ctx-host'),
-  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id}); },
+  pushEvent: (name, payload) => { structuralCalls.push({name, payload}); return Promise.resolve({saved:true,request_id:payload.request_id,rev:payload.if_rev + 1}); },
 };
 contextMenu.mounted();
 
@@ -256,6 +266,37 @@ assert.equal(structuralCalls[0].name, 'paper-delete-block');
 contextMenu.destroyed();
 sortable.destroyed();
 structuralEditor.remove();
+
+// Typed reference/bar Add and Remove submits are structural mutations too.
+// They must wait for pending content, preserve the clicked submitter, and use
+// the revision acknowledged by that content save exactly once.
+for (const [actionName, actionValue, contentRev, actionRev] of [
+  ['ref-action', 'add', 40, 41],
+  ['bar-action', 'remove', 42, 43],
+]) {
+  const form = window.document.createElement('form');
+  form.setAttribute('phx-submit', 'paper-edit-block');
+  form.innerHTML = `<input name="block_id" value="typed-1"><button type="submit" name="${actionName}" value="${actionValue}">Change</button>`;
+  window.document.querySelector('main').append(form);
+  calls.length = 0;
+  canvas.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {
+    bubbles:true,
+    detail:{ops:[{op:'patch-block',id:`before-${actionName}`,patch:{content:[]}}], seq:++nextSeq},
+  }));
+  form.querySelector('button').click();
+  assert.deepEqual(calls, ['paper-ops'], `${actionName} must wait for pending content`);
+
+  settleNext({saved:true, rev:contentRev});
+  await tick();
+  assert.deepEqual(calls, ['paper-ops', 'paper-edit-block']);
+  assert.equal(replies[0].payload[actionName], actionValue);
+  assert.equal(replies[0].payload.if_rev, contentRev);
+  assert.equal(calls.filter((name) => name === 'paper-edit-block').length, 1);
+
+  settleNext({saved:true, rev:actionRev});
+  await tick();
+  form.remove();
+}
 
 // Classic fallback forms have no per-form hook. The toggle tracks actual input,
 // snapshots only dirty forms, and waits for their existing phx-change event.
@@ -375,7 +416,7 @@ const fallbackUuidBridge = {...hooks.BarkparkPaperCanvas, el:fallbackUuidWrapper
   pushEvent: (name, payload) => {
     if (name !== 'paper-ops') return Promise.resolve({});
     fallbackUuidPushes.push(payload);
-    return Promise.resolve({saved:true, request_id:payload.request_id});
+    return Promise.resolve({saved:true, request_id:payload.request_id, rev:payload.if_rev + 1});
   },
 };
 fallbackUuidBridge.mounted();

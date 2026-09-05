@@ -56,6 +56,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.PaperViewer
+  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandlers
   alias BarkparkWeb.Studio.StudioLive.Paths
 
@@ -644,7 +645,9 @@ defmodule BarkparkWeb.BulldocsLive do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
+    context = if is_map(params), do: Blocks.canvas_run_context(params), else: {:error, :invalid}
+
+    case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do
       {:ok, socket, receipt, outcome} ->
         {:reply,
          %{

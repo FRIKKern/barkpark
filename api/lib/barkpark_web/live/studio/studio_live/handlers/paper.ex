@@ -287,7 +287,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Shared.paper_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
+    context = if is_map(params), do: Blocks.canvas_run_context(params), else: {:error, :invalid}
+
+    case Shared.paper_ops(
+           socket,
+           ops,
+           request_id,
+           is_map(params) && params["if_rev"],
+           context
+         ) do
       {:ok, socket, receipt, outcome} ->
         {:reply,
          %{

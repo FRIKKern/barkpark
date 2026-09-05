@@ -460,6 +460,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       when is_binary(slug) and is_integer(ordinal) and ordinal >= 0,
       do: slug <> "-run-" <> Integer.to_string(ordinal)
 
+  @doc false
+  @spec expandable_run_slug(String.t(), String.t()) :: String.t()
+  def expandable_run_slug(slug, expandable_id)
+      when is_binary(slug) and is_binary(expandable_id),
+      do: slug <> "-expandable-" <> expandable_id
+
   @doc """
   Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL
   (0, 1, 2 … over runs in document order). `{:block, _}` boundaries pass through

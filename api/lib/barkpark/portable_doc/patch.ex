@@ -20,7 +20,8 @@ defmodule Barkpark.PortableDoc.Patch do
       %{"version" => 1, "title" => "…", "blocks" => [block, …]}
 
   and a block is `%{"id" => "…", "type" => "…", …}`. A `section` block nests
-  the tree under its own `"blocks"` key.
+  the tree under its own `"blocks"` key; an `expandable` uses `"children"`
+  (with `"blocks"` retained as a compatibility alias).
 
   ## The six ops
 
@@ -36,8 +37,8 @@ defmodule Barkpark.PortableDoc.Patch do
   | `move-block`    | `"id"`, `"after"`    | Move the block `id` to just after `after` (or to the front when `after` is `null`). |
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
-  `replace-block`, and `remove-block` recurse into `section` children at any
-  depth. `append-block` is top-level only.
+  `replace-block`, and `remove-block` recurse into `section` and `expandable`
+  children at any depth. `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -231,9 +232,13 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp apply_to_blocks(blocks, %{"op" => "replace-block", "id" => id, "block" => block}) do
-    case transform_at_id(blocks, id, fn _target -> [block] end) do
-      nil -> {:error, {:block_not_found, id, "replace-block"}}
-      new_blocks -> {:ok, new_blocks}
+    if locked_at_id?(blocks, id) do
+      {:error, {:locked_block, id, "replace-block"}}
+    else
+      case transform_at_id(blocks, id, fn _target -> [block] end) do
+        nil -> {:error, {:block_not_found, id, "replace-block"}}
+        new_blocks -> {:ok, new_blocks}
+      end
     end
   end
 
@@ -402,20 +407,25 @@ defmodule Barkpark.PortableDoc.Patch do
     end)
   end
 
-  # True when the TOP-LEVEL block with `id` is template-locked (locks are a
-  # top-level template concept; section children are never seeded locked).
+  # True when the block with `id` is template-locked. Templates seed locks at
+  # the top level, but raw/legacy documents can carry locked nested children;
+  # once those children are addressable they must retain the same remove /
+  # replace protection.
   defp locked_at_id?(blocks, id) do
-    Enum.any?(blocks, fn b -> block_id(b) == id and Map.get(b, "locked") == true end)
+    Enum.any?(blocks, fn block ->
+      (block_id(block) == id and Map.get(block, "locked") == true) or
+        (child_container(block) != nil and locked_at_id?(child_blocks(block), id))
+    end)
   end
 
-  # ── id resolution & structural transform (recurses sections) ───────────────
+  # ── id resolution & structural transform (recurses containers) ─────────────
 
-  # True when `id` names any block anywhere in `blocks` (recurses sections).
+  # True when `id` names any block anywhere in `blocks` (recurses containers).
   defp id_exists?(blocks, id) do
     Enum.any?(blocks, fn block ->
       cond do
         block_id(block) == id -> true
-        section?(block) -> id_exists?(Map.get(block, "blocks", []), id)
+        child_container(block) != nil -> id_exists?(child_blocks(block), id)
         true -> false
       end
     end)
@@ -442,14 +452,14 @@ defmodule Barkpark.PortableDoc.Patch do
       block_id(block) == id ->
         Enum.reverse(acc) ++ fun.(block) ++ rest
 
-      section?(block) ->
-        case transform_at_id(Map.get(block, "blocks", []), id, fun) do
+      child_container(block) != nil ->
+        case transform_at_id(child_blocks(block), id, fun) do
           nil ->
             transform_at_id(rest, id, fun, [block | acc])
 
           nested_blocks ->
-            next_section = Map.put(block, "blocks", nested_blocks)
-            Enum.reverse([next_section | acc]) ++ rest
+            next_container = Map.put(block, child_container(block), nested_blocks)
+            Enum.reverse([next_container | acc]) ++ rest
         end
 
       true ->
@@ -473,14 +483,14 @@ defmodule Barkpark.PortableDoc.Patch do
         {replacement, flag} = fun.(block)
         {Enum.reverse(acc) ++ replacement ++ rest, flag}
 
-      section?(block) ->
-        case transform_with_flag(Map.get(block, "blocks", []), id, fun) do
+      child_container(block) != nil ->
+        case transform_with_flag(child_blocks(block), id, fun) do
           {nil, _} ->
             transform_with_flag(rest, id, fun, [block | acc])
 
           {nested_blocks, flag} ->
-            next_section = Map.put(block, "blocks", nested_blocks)
-            {Enum.reverse([next_section | acc]) ++ rest, flag}
+            next_container = Map.put(block, child_container(block), nested_blocks)
+            {Enum.reverse([next_container | acc]) ++ rest, flag}
         end
 
       true ->
@@ -489,6 +499,24 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   # ── small helpers ──────────────────────────────────────────────────────────
+
+  defp child_container(%{"type" => "section", "blocks" => blocks}) when is_list(blocks),
+    do: "blocks"
+
+  defp child_container(%{"type" => "expandable", "children" => children}) when is_list(children),
+    do: "children"
+
+  defp child_container(%{"type" => "expandable", "blocks" => blocks}) when is_list(blocks),
+    do: "blocks"
+
+  defp child_container(_block), do: nil
+
+  defp child_blocks(block) do
+    case child_container(block) do
+      nil -> []
+      key -> Map.get(block, key, [])
+    end
+  end
 
   # Shallow / replace-by-key merge of `patch` over `target`, then re-pin `id`
   # and `type` so a patch can never mutate the block's identity or kind.
@@ -500,8 +528,6 @@ defmodule Barkpark.PortableDoc.Patch do
     |> Map.put("id", Map.get(target, "id"))
     |> Map.put("type", Map.get(target, "type"))
   end
-
-  defp section?(block), do: Map.get(block, "type") == "section"
 
   defp block_id(block), do: Map.get(block, "id")
 
