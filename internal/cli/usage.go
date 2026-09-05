@@ -256,6 +256,19 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("")
 		out.errf("search: --match <substring>  case-insensitive over doc_id and title, walks every page")
 	}
+	// `doc mutate` is the ONE command whose whole payload is a free-form batch
+	// the manifest cannot describe: its flags are --file/--quiet, and the shape
+	// of a mutation lives only in the server's apply_one clauses. Without this
+	// block the caller's next move after a `malformed` 400 is to open
+	// mutations.ex — which is exactly what was reported (#18). The list and its
+	// derivation live in mutate_shapes.go, guarded against server drift by
+	// TestMutateHelpNamesEveryServerMutationClause.
+	if cmd.ID == docMutateCommandID {
+		out.errf("")
+		for _, line := range mutateShapeLines() {
+			out.errf("%s", line)
+		}
+	}
 	if cmd.Writes {
 		out.errf("")
 		out.errf("write globals: --dry-run (print the request, don't send) · --yes (skip the prod confirmation)")
