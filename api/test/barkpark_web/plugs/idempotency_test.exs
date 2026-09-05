@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
 
   alias BarkparkWeb.Plugs.Idempotency, as: Plug
   alias Barkpark.{Auth, Idempotency, Repo}
+  alias Barkpark.Repo.IdempotencyStore
 
   setup do
     {:ok, token} = Auth.create_token("idem-test-token", "test", "dev", ["read", "write"])
@@ -165,7 +166,7 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
     # Simulate a crashed reservation: a pending row older than the pending TTL.
     old = DateTime.add(DateTime.utc_now(), -1 * (pending_ttl() + 5), :second)
 
-    Repo.insert_all(Idempotency.Key, [
+    Repo.insert_all(IdempotencyStore.Key, [
       %{
         key_hash: hash,
         scope: "mutation",
@@ -186,7 +187,7 @@ defmodule BarkparkWeb.Plugs.IdempotencyTest do
   test "a FRESH pending reservation is NOT reclaimed (still 409)", %{token: token} do
     hash = Idempotency.hash_key("fresh-pending", token.id, "POST", "/v1/data/mutate/production")
 
-    Repo.insert_all(Idempotency.Key, [
+    Repo.insert_all(IdempotencyStore.Key, [
       %{
         key_hash: hash,
         scope: "mutation",

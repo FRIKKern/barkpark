@@ -126,6 +126,7 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
 
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
@@ -145,9 +146,14 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
   # BEFORE the message is processed and reports a false "no write". The
   # trailing `render/1` forces the parent to drain its mailbox first.
   defp inner_change(view, params) do
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok
@@ -178,6 +184,8 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
       # ROUTE A — the CONTROL, straight at the LiveView. The socket-level Caps
       # hook sees `paper-op` and halts it.
       render_hook(view, "paper-op", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "op" => "patch-block",
         "id" => @block_id,
         "patch" => %{"value" => %{"amount" => "299", "currency" => "USD"}}
@@ -217,6 +225,35 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
       assert after_component_event == %{"amount" => "299", "currency" => "NOK"}
     end
 
+    test "a correlated component flush is refused and acknowledges the matching request", %{
+      conn: conn
+    } do
+      System.delete_env("BARKPARK_PAPER_CANVAS")
+      slug = "pds-w42-correlated"
+      create_paper!(slug)
+
+      view = open!(conn, @readonly, slug)
+      assert_write_denied_socket!(view)
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => @block_id,
+          "patch" => %{"value" => %{"amount" => "1", "currency" => "USD"}}
+        },
+        "studio-denied-field-request"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "studio-denied-field-request",
+        saved: false
+      })
+
+      assert flash_error(view) == "You don't have access to do that."
+      assert stored_value(slug) == %{"amount" => "299", "currency" => "NOK"}
+    end
+
     test "the batch (canvas ops) write seam is refused for the same principal", %{conn: conn} do
       System.delete_env("BARKPARK_PAPER_CANVAS")
       slug = "pds-w42-batch"
@@ -230,13 +267,18 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
       # or an internal caller would.
       socket = socket_of(view)
 
-      BarkparkWeb.Studio.StudioLive.Shared.paper_ops(socket, [
-        %{
-          "op" => "patch-block",
-          "id" => @block_id,
-          "patch" => %{"value" => %{"amount" => "1", "currency" => "USD"}}
-        }
-      ])
+      BarkparkWeb.Studio.StudioLive.Shared.paper_ops(
+        socket,
+        [
+          %{
+            "op" => "patch-block",
+            "id" => @block_id,
+            "patch" => %{"value" => %{"amount" => "1", "currency" => "USD"}}
+          }
+        ],
+        Ecto.UUID.generate(),
+        socket.assigns.paper_rev
+      )
 
       assert stored_value(slug) == %{"amount" => "299", "currency" => "NOK"}
     end

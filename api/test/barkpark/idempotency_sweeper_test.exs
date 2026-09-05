@@ -17,7 +17,7 @@ defmodule Barkpark.Idempotency.SweeperTest do
   import Ecto.Query
 
   alias Barkpark.Idempotency
-  alias Barkpark.Idempotency.Key
+  alias Barkpark.Repo.IdempotencyStore.Key
   alias Barkpark.Idempotency.Sweeper
   alias Barkpark.Repo
 

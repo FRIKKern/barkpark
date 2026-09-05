@@ -85,7 +85,13 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
     @form %{"title" => ""}
     defp shell(schema, form \\ @form) do
       render_component(&StudioComponents.studio_editor_shell/1, %{
-        editor_doc: %{doc_id: "frontpage", title: nil, status: "published"},
+        editor_doc: %{
+          doc_id: "frontpage",
+          type: schema.name,
+          rev: 1,
+          title: nil,
+          status: "published"
+        },
         editor_schema: schema,
         editor_form: form,
         editor_is_draft: false,
@@ -164,7 +170,13 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
 
       html =
         render_component(&StudioComponents.studio_editor_shell/1, %{
-          editor_doc: %{doc_id: "frontpage", title: nil, status: "published"},
+          editor_doc: %{
+            doc_id: "frontpage",
+            type: schema.name,
+            rev: 1,
+            title: nil,
+            status: "published"
+          },
           editor_schema: schema,
           editor_form: %{},
           editor_is_draft: false,

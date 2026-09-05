@@ -28,6 +28,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content}
+  alias Barkpark.Sharing.Links
+  alias BarkparkWeb.BulldocsLive
   alias BarkparkWeb.BulldocsLive.Edit
 
   @dataset "production"
@@ -61,6 +63,15 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
   ]
 
   setup %{conn: conn} do
+    previous_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+    on_exit(fn ->
+      if previous_canvas,
+        do: System.put_env("BARKPARK_PAPER_CANVAS", previous_canvas),
+        else: System.delete_env("BARKPARK_PAPER_CANVAS")
+    end)
+
     {default_ws, default_proj} = ensure_default_scope!()
     slug = "eol-edit-#{System.unique_integer([:positive])}"
     seed_block_paper!(slug)
@@ -101,6 +112,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
   end
 
   defp assigns_of(view), do: :sys.get_state(view.pid).socket.assigns
+  defp socket_of(view), do: :sys.get_state(view.pid).socket
 
   defp flash_of(view), do: assigns_of(view).flash || %{}
 
@@ -192,6 +204,26 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       end
     end
 
+    test "a crafted nested-component paper_op message is refused by the write seam", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "hijacked"}]}
+        }
+      })
+
+      render(view)
+      assert flash_of(view)["error"] == Edit.denial()
+      assert block_text(slug, "b-body") == "Original body text"
+    end
+
     test "the reader's OWN events keep working — the gate is not a blanket paper-* block",
          %{conn: conn, slug: slug} do
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
@@ -232,6 +264,51 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       refute render(view) =~ "studio-paper-block-editor"
     end
+
+    test "a forged correlated component message acknowledges refusal as unsaved", %{
+      conn: conn,
+      slug: slug
+    } do
+      raw = "eol-reader-field-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "eol field reader", @dataset, ["read"])
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+      before = stored_blocks(slug)
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Denied"}]}
+        },
+        "denied-field-request"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "denied-field-request",
+        saved: false
+      })
+
+      assert stored_blocks(slug) == before
+      assert flash_of(view)["error"] == Edit.denial()
+    end
+  end
+
+  describe "item-share confinement" do
+    test "canvas autocomplete never widens a one-paper share into dataset discovery" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          viewer: %{kind: :user, id: "signed-in-outsider"},
+          paper_share_grant: %{grant: :item}
+        }
+      }
+
+      assert {:reply, %{results: []}, ^socket} =
+               BulldocsLive.handle_event("paper-wikilink-search", %{"query" => "secret"}, socket)
+
+      assert {:reply, %{results: []}, ^socket} =
+               BulldocsLive.handle_event("paper-tag-search", %{"query" => "secret"}, socket)
+    end
   end
 
   describe "criterion 1 — a member holding write edits on the link" do
@@ -243,6 +320,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       assert assigns_of(view).can_edit? == true
       assert html =~ ~s(id="paper-edit-toggle")
+      assert html =~ ~s(phx-hook="BarkparkPaperEditToggle")
+      assert html =~ ~s(data-editing="false")
       assert toggle_label(html) == "Edit"
       refute html =~ "studio-paper-block-editor"
 
@@ -250,6 +329,12 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       assert editing =~ ~s(data-test-id="studio-paper-block-editor")
       assert editing =~ ~s(id="paper-editor-#{slug}")
+      assert editing =~ ~s(data-paper-doc-key="#{@dataset}:paper:#{slug}")
+      assert editing =~ ~s(data-paper-rev="#{assigns_of(view).paper_rev}")
+      assert editing =~ ~s(data-test-id="paper-canvas-run")
+      assert editing =~ ~s(<bp-paper-canvas)
+      assert editing =~ ~s(data-canvas-picker-browse="true")
+      assert editing =~ ~s(data-editing="true")
       assert assigns_of(view).editing? == true
       # The toggle now reads View.
       assert toggle_label(editing) == "View"
@@ -259,6 +344,21 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       refute viewing =~ "studio-paper-block-editor"
       assert viewing =~ "Original body text"
       assert assigns_of(view).editing? == false
+    end
+
+    test "the scoped reader carries its workspace and project prefix into the canvas", %{
+      conn: conn,
+      slug: slug,
+      default_ws: ws,
+      default_proj: proj
+    } do
+      {:ok, view, _html} =
+        live(writer_conn(conn), "/w/#{ws.slug}/p/#{proj.slug}/papers/#{slug}")
+
+      editing = render_click(view, "paper-toggle-edit", %{})
+
+      assert editing =~ ~s(data-canvas-scope-prefix="/w/#{ws.slug}/p/#{proj.slug}")
+      assert editing =~ ~s(data-canvas-picker-browse="true")
     end
 
     test "a paper-op patch-block on a paragraph persists AND a second anonymous tab sees it live",
@@ -275,6 +375,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_hook(editor, "paper-op", %{
         "op" => "patch-block",
         "id" => "b-body",
+        "if_rev" => assigns_of(editor).paper_rev,
         "patch" => %{"content" => [%{"type" => "text", "value" => "Edited on the link"}]}
       })
 
@@ -296,6 +397,100 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert render(reader) =~ ~s(id="paper-sentinel")
     end
 
+    test "a correlated component paper_op persists and acknowledges the exact save", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "if_rev" => assigns_of(view).paper_rev,
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Correlated field save"}]
+          }
+        },
+        request_id
+      })
+
+      # Synchronize with the handler before asserting its asynchronously pushed reply.
+      render(view)
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: ^request_id,
+        saved: true
+      })
+
+      assert block_text(slug, "b-body") == "Correlated field save"
+      assert assigns_of(view).save_status == "Auto-saved"
+      assert assigns_of(view).last_save_ok? == true
+      refute flash_of(view)["error"]
+    end
+
+    test "two mounted editors reject stale writes and allow an explicit fresh rebase", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, first, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      {:ok, second, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(first, "paper-toggle-edit", %{})
+      render_click(second, "paper-toggle-edit", %{})
+
+      initial_rev = assigns_of(first).paper_rev
+      assert assigns_of(second).paper_rev == initial_rev
+      stale_socket = socket_of(second)
+      first_request_id = Ecto.UUID.generate()
+      stale_request_id = Ecto.UUID.generate()
+      rebased_request_id = Ecto.UUID.generate()
+
+      first_op = %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "First tab"}]},
+        "request_id" => first_request_id,
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply, %{saved: true, rev: committed_rev}, _first_socket} =
+               BulldocsLive.handle_event("paper-op", first_op, socket_of(first))
+
+      stale_different_block = %{
+        "op" => "patch-block",
+        "id" => "b-extra",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Stale tab"}]},
+        "request_id" => stale_request_id,
+        "if_rev" => initial_rev
+      }
+
+      assert {:reply,
+              %{
+                saved: false,
+                request_id: ^stale_request_id,
+                conflict: true,
+                current_rev: ^committed_rev
+              }, conflicted_socket} =
+               BulldocsLive.handle_event("paper-op", stale_different_block, stale_socket)
+
+      assert block_text(slug, "b-body") == "First tab"
+      assert block_text(slug, "b-extra") == "Spare block"
+
+      fresh_rebase = %{
+        stale_different_block
+        | "request_id" => rebased_request_id,
+          "if_rev" => conflicted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true, request_id: ^rebased_request_id}, _socket} =
+               BulldocsLive.handle_event("paper-op", fresh_rebase, conflicted_socket)
+
+      assert block_text(slug, "b-extra") == "Stale tab"
+    end
+
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{
       conn: conn,
       slug: slug
@@ -304,6 +499,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       render_click(view, "paper-toggle-edit", %{})
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
         "ops" => [
           %{
             "op" => "patch-block",
@@ -322,6 +519,385 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-extra") == "Batch extra"
       assert assigns_of(view).save_status == "Auto-saved"
       refute flash_of(view)["error"]
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+      assert [%{run_id: run_id, blocks: echoed}] = runs
+      assert run_id == "#{slug}-run-0"
+
+      assert Enum.find(echoed, &(&1["id"] == "b-body"))["content"] == [
+               %{"type" => "text", "value" => "Batch body"}
+             ]
+
+      {:ok, reloaded, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      reload_html = render_click(reloaded, "paper-toggle-edit", %{})
+      assert reload_html =~ "Batch body"
+      assert reload_html =~ ~s(data-test-id="paper-canvas-run")
+    end
+
+    test "paper-ops invalid payloads reject a prior successful save without mutating", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "b-body",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Saved first"}]}
+          }
+        ]
+      })
+
+      assert assigns_of(view).last_save_ok? == true
+      assert block_text(slug, "b-body") == "Saved first"
+      before = stored_blocks(slug)
+
+      valid_ops = [
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Must not land"}]}
+        }
+      ]
+
+      invalid_payloads = [
+        %{"request_id" => Ecto.UUID.generate(), "ops" => []},
+        %{"request_id" => Ecto.UUID.generate(), "ops" => "not-a-list"},
+        %{"ops" => valid_ops},
+        %{"request_id" => "not-a-uuid", "ops" => valid_ops},
+        %{}
+      ]
+
+      Enum.reduce(invalid_payloads, socket_of(view), fn params, socket ->
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-ops", params, socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+        rejected_socket
+      end)
+    end
+
+    test "single-op rejection cannot reuse an earlier successful acknowledgement", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      op = %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "patch" => %{"text" => "Saved"},
+        "if_rev" => assigns_of(view).paper_rev
+      }
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               BulldocsLive.handle_event("paper-op", op, socket_of(view))
+
+      before = stored_blocks(slug)
+
+      for {params, socket} <- [
+            {%{}, saved_socket},
+            {op, Phoenix.Component.assign(saved_socket, :can_edit?, false)},
+            {op, Phoenix.Component.assign(saved_socket, :slug, nil)}
+          ] do
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-op", params, socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+      end
+    end
+
+    test "fallback autosave acknowledges only the current successful write", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               BulldocsLive.handle_event(
+                 "paper-block-autosave",
+                 %{
+                   "block_id" => "b-body",
+                   "text" => "Fallback saved",
+                   "if_rev" => assigns_of(view).paper_rev
+                 },
+                 socket_of(view)
+               )
+
+      assert block_text(slug, "b-body") == "Fallback saved"
+      before = stored_blocks(slug)
+
+      for params <- [%{}, %{"block_id" => nil}] do
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-block-autosave", params, saved_socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+      end
+
+      denied_socket = Phoenix.Component.assign(saved_socket, :can_edit?, false)
+
+      assert {:reply, %{saved: false}, rejected_socket} =
+               BulldocsLive.handle_event(
+                 "paper-block-autosave",
+                 %{
+                   "block_id" => "b-body",
+                   "text" => "Must not land",
+                   "if_rev" => saved_socket.assigns.paper_rev
+                 },
+                 denied_socket
+               )
+
+      assert rejected_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == before
+    end
+
+    test "paper-ops replays one committed request and reauthorizes before replay", %{
+      conn: conn,
+      slug: slug
+    } do
+      raw = "eol-replay-writer-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "eol replay writer", @dataset, ["read", "write"])
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{
+              "id" => "replay-once",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Only once"}]
+            }
+          }
+        ]
+      }
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: false,
+                rev: committed_rev
+              }, committed_socket} =
+               BulldocsLive.handle_event("paper-ops", params, socket_of(view))
+
+      committed_blocks = stored_blocks(slug)
+      assert Enum.count(committed_blocks, &(&1["id"] == "replay-once")) == 1
+
+      assert {:reply,
+              %{
+                saved: true,
+                request_id: ^request_id,
+                replayed: true,
+                rev: ^committed_rev
+              }, replayed_socket} =
+               BulldocsLive.handle_event("paper-ops", params, committed_socket)
+
+      assert stored_blocks(slug) == committed_blocks
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               BulldocsLive.handle_event("paper-ops", params, replayed_socket)
+
+      assert denied_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == committed_blocks
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_again_socket} =
+               BulldocsLive.handle_event("paper-ops", params, denied_socket)
+
+      assert denied_again_socket.assigns.last_save_ok? == false
+      assert stored_blocks(slug) == committed_blocks
+    end
+
+    test "a lost structural acknowledgement replays once and revoked retries stay denied", %{
+      conn: conn,
+      slug: slug
+    } do
+      raw = "eol-structural-replay-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "eol structural replay", @dataset, ["read", "write"])
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "block-type" => "paragraph",
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev
+      }
+
+      before = stored_blocks(slug)
+
+      assert {:reply,
+              %{saved: true, request_id: ^request_id, replayed: false, rev: committed_rev},
+              committed_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, socket_of(view))
+
+      committed_blocks = stored_blocks(slug)
+      assert length(committed_blocks) == length(before) + 1
+
+      assert {:reply,
+              %{saved: true, request_id: ^request_id, replayed: true, rev: ^committed_rev},
+              replayed_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, committed_socket)
+
+      assert stored_blocks(slug) == committed_blocks
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, replayed_socket)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, _denied_again_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, denied_socket)
+
+      assert stored_blocks(slug) == committed_blocks
+    end
+
+    test "a client-authored single insert keeps its wire block id for following ops", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      insert = %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => "client-authored-id",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Inserted"}]
+        },
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev
+      }
+
+      assert {:reply, %{saved: true}, inserted_socket} =
+               BulldocsLive.handle_event("paper-op", insert, socket_of(view))
+
+      assert block_text(slug, "client-authored-id") == "Inserted"
+
+      patch = %{
+        "op" => "patch-block",
+        "id" => "client-authored-id",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Patched"}]},
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => inserted_socket.assigns.paper_rev
+      }
+
+      assert {:reply, %{saved: true}, _patched_socket} =
+               BulldocsLive.handle_event("paper-op", patch, inserted_socket)
+
+      assert block_text(slug, "client-authored-id") == "Patched"
+    end
+
+    test "a revoked edit link cannot retrieve a structural receipt on repeated retry", %{
+      conn: conn,
+      slug: slug,
+      default_ws: ws,
+      default_proj: proj
+    } do
+      {:ok, {raw, link}} =
+        Links.create(%{
+          workspace_id: ws.id,
+          project_id: proj.id,
+          dataset: @dataset,
+          kind: "doc",
+          ref_type: "paper",
+          ref_id: slug,
+          access: "edit"
+        })
+
+      path = "/w/#{ws.slug}/p/#{proj.slug}/papers/#{slug}?share=#{raw}"
+      {:ok, view, _html} = live(conn, path)
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      params = %{
+        "block-type" => "paragraph",
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev
+      }
+
+      assert {:reply, %{saved: true}, committed_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, socket_of(view))
+
+      committed_blocks = stored_blocks(slug)
+      {:ok, _revoked} = Links.revoke(link.id)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, denied_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, committed_socket)
+
+      assert {:reply, %{saved: false, request_id: ^request_id}, _denied_again_socket} =
+               BulldocsLive.handle_event("paper-add-block", params, denied_socket)
+
+      assert stored_blocks(slug) == committed_blocks
+    end
+
+    test "canvas readiness refresh pushes the shared display channels", %{conn: conn, slug: slug} do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      assert_push_event(view, "bp:task-preview", %{previews: []})
+      assert_push_event(view, "bp:block-html", %{renders: []})
+
+      render_hook(view, "task-preview-refresh", %{})
+      assert_push_event(view, "bp:task-preview", %{previews: []})
+      assert_push_event(view, "bp:block-html", %{renders: []})
+    end
+
+    test "slash insertion and ghost materialization persist through reader canvas events", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      render_hook(view, "paper-slash-insert", %{
+        "type" => "heading",
+        "afterId" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev
+      })
+
+      blocks = stored_blocks(slug)
+      body_index = Enum.find_index(blocks, &(&1["id"] == "b-body"))
+      inserted = Enum.at(blocks, body_index + 1)
+      assert inserted["type"] == "heading"
+      assert String.starts_with?(inserted["id"], "b-")
+
+      render_hook(view, "paper-materialize-slot", %{
+        "kind" => "ingress",
+        "after" => "b-head",
+        "if_rev" => assigns_of(view).paper_rev
+      })
+
+      materialized =
+        slug
+        |> stored_blocks()
+        |> Enum.find(&(&1["role"] == "ingress"))
+
+      assert materialized["type"] == "paragraph"
+      assert materialized["content"] == []
+      assert assigns_of(view).save_status == "Auto-saved"
     end
 
     test "paper-add-block then paper-delete-block round-trips", %{conn: conn, slug: slug} do
@@ -330,7 +906,10 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
       before_ids = Enum.map(stored_blocks(slug), & &1["id"])
 
-      render_hook(view, "paper-add-block", %{"block-type" => "paragraph"})
+      render_hook(view, "paper-add-block", %{
+        "block-type" => "paragraph",
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       after_ids = Enum.map(stored_blocks(slug), & &1["id"])
       assert length(after_ids) == length(before_ids) + 1
@@ -338,7 +917,10 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       [new_id] = after_ids -- before_ids
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == after_ids
 
-      render_hook(view, "paper-delete-block", %{"id" => new_id})
+      render_hook(view, "paper-delete-block", %{
+        "id" => new_id,
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       assert Enum.map(stored_blocks(slug), & &1["id"]) == before_ids
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == before_ids
@@ -349,10 +931,73 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 
-      render_hook(view, "paper-move-block", %{"id" => "b-extra", "dir" => "up"})
+      render_hook(view, "paper-move-block", %{
+        "id" => "b-extra",
+        "dir" => "up",
+        "if_rev" => assigns_of(view).paper_rev
+      })
 
       assert Enum.map(stored_blocks(slug), & &1["id"]) == ["b-head", "b-extra", "b-body"]
       assert Enum.map(assigns_of(view).edit_blocks, & &1["id"]) == ["b-head", "b-extra", "b-body"]
+    end
+
+    test "a rejected canvas save reports failure and the server keeps edit mode open", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      render_hook(view, "paper-op", %{
+        "op" => "patch-block",
+        "id" => "missing-block",
+        "if_rev" => assigns_of(view).paper_rev,
+        "patch" => %{"text" => "must not land"}
+      })
+
+      assert assigns_of(view).last_save_ok? == false
+      assert assigns_of(view).save_status == "Save failed"
+
+      still_editing = render_click(view, "paper-toggle-edit", %{})
+      assert assigns_of(view).editing? == true
+      assert still_editing =~ ~s(data-test-id="studio-paper-block-editor")
+
+      render_hook(view, "paper-op", %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev,
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Recovered"}]}
+      })
+
+      assert assigns_of(view).last_save_ok? == true
+      assert assigns_of(view).save_status == "Auto-saved"
+
+      viewing = render_click(view, "paper-toggle-edit", %{})
+      assert assigns_of(view).editing? == false
+      assert viewing =~ "Recovered"
+    end
+
+    test "nested PaperFieldBlock messages persist through the reader parent", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "if_rev" => assigns_of(view).paper_rev,
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Nested saved"}]}
+        }
+      })
+
+      render(view)
+      assert block_text(slug, "b-body") == "Nested saved"
+      assert assigns_of(view).last_save_ok? == true
+      assert assigns_of(view).save_status == "Auto-saved"
     end
   end
 

@@ -2781,7 +2781,9 @@ const EXPECTATIONS = {
       // cch-w49-s1: the card states the tier and its features and NO ceiling —
       // PLAN_CATALOG carries instances:10 for this tier and it must reach no DOM.
       assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
-      assert.ok(!/\b10\b/.test(box), "the Support++ instance ceiling (10) is data, not copy — it must reach no DOM");
+      // Match the forbidden claim, not an unrelated 10 in the localized
+      // subscription timestamps rendered by this same card.
+      assert.ok(!/\b10\s+managed instances?\b/i.test(box), "the Support++ instance ceiling (10) is data, not rendered copy");
       // The owner action sections a paid plan unlocks.
       assert.equal(reg.get("billing-manage-section").hidden, false, "a paid plan shows the Manage-billing section");
       assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");

@@ -5469,32 +5469,6 @@
       }
     };
 
-    // BarkparkFieldBridge — generic LV↔WC bridge (Task #11 WI4).
-    // Mounted on a wrapper div containing a hidden <input> + a bp-*
-    // custom element. Listens for bubbled `bp-change` events, mirrors
-    // detail.value into the hidden input identified by the WC's
-    // data-bridge-target, and dispatches a synthetic `input` event so
-    // Phoenix's existing phx-change="autosave" debounce + form
-    // serialise + push round-trip fires exactly as for native inputs.
-    // Reusable for future bp-media-picker / bp-reference-picker /
-    // bp-document-preview / bp-json-inspector — no per-widget hook.
-    Hooks.BarkparkFieldBridge = {
-      mounted() {
-        this._on = (e) => {
-          const targetId = e.target.dataset.bridgeTarget;
-          if (!targetId) return;
-          const input = document.getElementById(targetId);
-          if (!input) return;
-          input.value = e.detail.value;
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        };
-        this.el.addEventListener("bp-change", this._on);
-      },
-      destroyed() {
-        this.el.removeEventListener("bp-change", this._on);
-      }
-    };
-
     // BarkparkFieldGroups — Sanity-style OBJECT GROUPS inside a composite
     // (Gyldendal parity E1.5). Mounted on the composite body that carries a
     // `.bp-obj-tabs` strip and `[data-group]` subfields. The active group is

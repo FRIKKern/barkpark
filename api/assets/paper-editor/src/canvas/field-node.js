@@ -597,11 +597,18 @@ export const Field = Node.create({
           commitNow();
         }
       };
+      const flushPending = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitNow();
+      };
 
       // Mirror BarkparkFieldBlockBridge's event binding: string/slug/text on
       // `input` (debounced); boolean/select/datetime/color on `change`.
       const eventName = DEBOUNCED_FIELD_TYPES.has(fieldType) ? "input" : "change";
       control.addEventListener(eventName, scheduleWrite);
+      dom.addEventListener("bp-flush-node", flushPending);
 
       return {
         dom,
@@ -633,6 +640,7 @@ export const Field = Node.create({
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
           control.removeEventListener(eventName, scheduleWrite);
+          dom.removeEventListener("bp-flush-node", flushPending);
         },
       };
     };
@@ -675,6 +683,35 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   labelEl.className = "bp-canvas-field-label";
   labelEl.textContent = (node.attrs && node.attrs.label) || "";
 
+  const value = node.attrs && node.attrs.value;
+
+  // An item-share edit grant authorizes writes to this one paper, not dataset
+  // discovery. Keep the already-stored value visible, but do not mount either
+  // picker WC (both issue independent HTTP browse requests when upgraded).
+  if (!scope.pickerBrowse) {
+    const current = document.createElement("output");
+    current.className = "bp-canvas-field-control bp-paper-picker-current";
+    current.setAttribute("data-test-id", "paper-picker-current");
+    current.textContent = value == null ? "" : String(value);
+    dom.appendChild(labelEl);
+    dom.appendChild(current);
+
+    return {
+      dom,
+      update(updatedNode) {
+        if (!isPickerFieldType(updatedNode.attrs && updatedNode.attrs.bpType)) return false;
+        node = updatedNode;
+        applyLockCue(dom, node);
+        labelEl.textContent = (node.attrs && node.attrs.label) || "";
+        const next = node.attrs && node.attrs.value;
+        current.textContent = next == null ? "" : String(next);
+        return true;
+      },
+      stopEvent: () => true,
+      ignoreMutation: () => true,
+    };
+  }
+
   // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
   // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
   // EXACTLY (value / dataset / data-token / ref-type / scope-prefix).
@@ -683,7 +720,6 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   picker.setAttribute("contenteditable", "false");
   picker.setAttribute("data-test-id", "paper-field-" + fieldType);
 
-  const value = node.attrs && node.attrs.value;
   picker.setAttribute("value", value == null ? "" : String(value));
 
   // dataset precedence: block-pinned attr wins, else the canvas-host dataset (the same
@@ -885,7 +921,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
 // "bp-paper-canvas"). All optional — a missing host or missing attr yields "" so the
 // picker keeps its own defaults (dataset="production", no token → upload disabled).
 export function canvasScope(editor) {
-  const empty = { dataset: "", scopePrefix: "", token: "" };
+  const empty = { dataset: "", scopePrefix: "", token: "", pickerBrowse: true };
   try {
     const mount = editor && editor.options && editor.options.element;
     if (!mount || typeof mount.closest !== "function") return empty;
@@ -895,6 +931,7 @@ export function canvasScope(editor) {
       dataset: host.getAttribute("data-dataset") || "",
       scopePrefix: host.getAttribute("data-scope-prefix") || "",
       token: host.getAttribute("data-token") || "",
+      pickerBrowse: host.getAttribute("data-picker-browse") !== "false",
     };
   } catch (_e) {
     return empty;

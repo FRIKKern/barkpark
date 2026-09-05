@@ -33,31 +33,40 @@ defmodule Barkpark.Idempotency do
   import Ecto.Query
   require Logger
   alias Barkpark.Repo
+  alias Barkpark.Repo.IdempotencyStore
+  alias Barkpark.Repo.IdempotencyStore.Key
 
   @default_ttl_seconds 86_400
   @default_pending_ttl_seconds 60
   # Upper bound on rows one `sweep_batch/1` statement removes.
   @default_sweep_batch_limit 5_000
 
-  defmodule Key do
-    use Ecto.Schema
-
-    @primary_key {:key_hash, :string, autogenerate: false}
-
-    schema "idempotency_keys" do
-      field :scope, :string
-      # "pending" = reservation held, handler executing; "completed" = response cached.
-      field :state, :string, default: "pending"
-      field :status_code, :integer
-      field :response_body, :string
-      field :response_headers, :map, default: %{}
-      field :inserted_at, :utc_datetime_usec
-    end
-  end
-
   def hash_key(raw_key, token_id, method, path) do
     material = "#{raw_key}|#{token_id}|#{method}|#{path}"
     :crypto.hash(:sha256, material) |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  Claim an idempotency row whose payload identity is carried by `scope`.
+
+  Unlike `claim/2`, this transaction-bound variant never reclaims a pending
+  row: its caller inserts the claim, performs the mutation, and completes the
+  row in one database transaction. A rollback removes all three together.
+  Reusing the same key with a different scope fails closed.
+  """
+  def claim_exact(hash, scope) when is_binary(hash) and is_binary(scope) do
+    IdempotencyStore.claim_exact(hash, scope)
+  end
+
+  @doc """
+  Complete one exact pending claim with a JSON receipt.
+
+  The scope and pending-state predicates are load-bearing: completing a row
+  claimed for another payload, or overwriting an existing replay, is refused.
+  """
+  def complete_exact(hash, scope, receipt)
+      when is_binary(hash) and is_binary(scope) and is_map(receipt) do
+    IdempotencyStore.complete_exact(hash, scope, receipt)
   end
 
   @doc """

@@ -14,6 +14,955 @@
 
 (function () {
   const Hooks = {};
+  const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  const PAPER_FLUSH_TARGETS =
+    '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +
+    '[phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]';
+  const PAPER_STRUCTURAL_EVENTS = new Set([
+    "paper-delete-block",
+    "paper-materialize-slot",
+    "paper-move-block",
+    "paper-move-block-to",
+    "paper-unbind-property",
+  ]);
+  const PAPER_STRUCTURAL_SUBMITS = new Set(["paper-add-block", "paper-add-property"]);
+  const paperExitCoordinators = new WeakMap();
+  const PAPER_HISTORY_POSITION = "__bpPaperHistoryPosition";
+
+  function bpPaperOwnedHistoryPosition(state) {
+    return Number.isFinite(state?.[PAPER_HISTORY_POSITION])
+      ? state[PAPER_HISTORY_POSITION]
+      : null;
+  }
+
+  function bpPaperPhoenixHistoryPosition(state) {
+    if (Number.isFinite(state?.position)) return state.position;
+    if (state?.backType === "patch" || state?.backType === "redirect") return 0;
+    return null;
+  }
+
+  function bpPaperHistoryStateWithPosition(state, position) {
+    if (state == null) return { [PAPER_HISTORY_POSITION]: position };
+    if (typeof state !== "object" || Array.isArray(state)) return state;
+    const prototype = Object.getPrototypeOf(state);
+    if (prototype !== null && prototype?.constructor?.name !== "Object") return state;
+    return { ...state, [PAPER_HISTORY_POSITION]: position };
+  }
+
+  // Loaded before LiveSocket: mark the current entry and every later History
+  // API entry without replacing state owned by Phoenix or another client.
+  // Entries created before this script remain unknowable on browsers without
+  // the Navigation API, so the popstate fallback never guesses their direction.
+  function bpPaperInstallHistoryMetadata() {
+    const history = window.history;
+    if (!history || history.__bpPaperHistoryInstalled) return;
+    const nativePushState = history.pushState.bind(history);
+    const nativeReplaceState = history.replaceState.bind(history);
+    let position = bpPaperOwnedHistoryPosition(history.state);
+    const navigationPosition = window.navigation?.currentEntry?.index;
+    if (position == null && Number.isFinite(navigationPosition)) position = navigationPosition;
+    if (position == null) position = bpPaperPhoenixHistoryPosition(history.state);
+    if (position == null) position = 0;
+    history.pushState = function (state, title, url) {
+      const current = bpPaperOwnedHistoryPosition(history.state) ??
+        bpPaperPhoenixHistoryPosition(history.state);
+      position = (current ?? position) + 1;
+      return nativePushState(bpPaperHistoryStateWithPosition(state, position), title, url);
+    };
+    history.replaceState = function (state, title, url) {
+      const current = bpPaperOwnedHistoryPosition(history.state) ??
+        bpPaperPhoenixHistoryPosition(history.state);
+      position = current ?? bpPaperPhoenixHistoryPosition(state) ?? position;
+      return nativeReplaceState(bpPaperHistoryStateWithPosition(state, position), title, url);
+    };
+    window.addEventListener("popstate", (event) => {
+      const next = bpPaperOwnedHistoryPosition(event.state) ??
+        bpPaperPhoenixHistoryPosition(event.state);
+      if (next != null) position = next;
+    });
+    Object.defineProperty(history, "__bpPaperHistoryInstalled", { value: true });
+  }
+
+  bpPaperInstallHistoryMetadata();
+
+  function bpPaperRequestId() {
+    try {
+      const crypto = window.crypto;
+      const requestId = crypto?.randomUUID?.();
+      if (typeof requestId === "string" && requestId !== "") return requestId;
+      if (typeof crypto?.getRandomValues !== "function") return null;
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+      return [
+        hex.slice(0, 4).join(""), hex.slice(4, 6).join(""),
+        hex.slice(6, 8).join(""), hex.slice(8, 10).join(""),
+        hex.slice(10, 16).join(""),
+      ].join("-");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function bpPaperRevisionFrom(el) {
+    if (!el) return null;
+    if (el.dataset.paperRev != null && /^\d+$/.test(el.dataset.paperRev)) {
+      return Number(el.dataset.paperRev);
+    }
+    if (typeof el.dataset.documentRev === "string" && el.dataset.documentRev !== "") {
+      return el.dataset.documentRev;
+    }
+    return null;
+  }
+
+  function bpPaperReplyFrom(results) {
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const replies = results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value?.reply);
+    return replies.length === results.length && replies.length === 1 ? replies[0] : null;
+  }
+
+  function bpPaperMutation(hook, source, event, payload, options = {}) {
+    const coordinator = hook._exitCoordinator;
+    const send = options.target == null
+      ? (wire) => hook.pushEvent(event, wire)
+      : (wire) => Promise.resolve(hook.pushEventTo(options.target, event, wire))
+        .then(bpPaperReplyFrom);
+    if (!coordinator) {
+      const requestId = bpPaperRequestId();
+      if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
+      return {
+        requestId,
+        promise: Promise.resolve(send({ ...payload, request_id: requestId }))
+          .then((reply) => reply?.saved === true && reply?.request_id === requestId)
+          .catch(() => false),
+      };
+    }
+    return coordinator.mutate(source, {
+      requestId: options.requestId,
+      payload,
+      send,
+      onResult: options.onResult,
+    });
+  }
+
+  function bpPaperHistoryPosition(state) {
+    const navigationPosition = window.navigation?.currentEntry?.index;
+    if (Number.isFinite(navigationPosition)) return navigationPosition;
+    const ownedPosition = bpPaperOwnedHistoryPosition(state);
+    if (ownedPosition != null) return ownedPosition;
+    const phoenixPosition = bpPaperPhoenixHistoryPosition(state);
+    if (phoenixPosition != null) return phoenixPosition;
+    return null;
+  }
+
+  function bpPaperEventParams(el, base = {}) {
+    const params = { ...base };
+    for (const attr of el?.attributes || []) {
+      if (attr.name.startsWith("phx-value-")) {
+        params[attr.name.slice("phx-value-".length)] = attr.value;
+      }
+    }
+    return params;
+  }
+
+  function bpPaperExitCoordinator(hook) {
+    if (hook._bpPaperExitCoordinator) return hook._bpPaperExitCoordinator;
+    const main = hook.el.closest?.("main");
+    if (!main) return null;
+    let coordinator = paperExitCoordinators.get(main);
+    if (!coordinator) {
+      const sources = new Map();
+      const members = new Set();
+      const replayTargets = new WeakSet();
+      let actionPending = false;
+      let historyPosition = bpPaperHistoryPosition(window.history.state);
+      let historyPhase = null;
+      let historyDelta = null;
+      let historySaveResult = null;
+      let navigationReplayKey = null;
+      let navigationSave = null;
+      const mutationQueue = [];
+      const mutationById = new Map();
+      const ownRevisions = new Map();
+      const quarantinedEchoes = [];
+      let mutationActive = false;
+      let mutationPaused = false;
+      let conflict = null;
+      let pendingIdentity = null;
+      let reloadWhenClean = false;
+      const initialCarrier = hook.el.closest?.("[data-paper-doc-key]") ||
+        main.querySelector("[data-paper-doc-key]");
+      let documentKey = initialCarrier?.dataset.paperDocKey || null;
+      let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
+
+      const identityFor = (source) => {
+        const carrier = source?.closest?.("[data-paper-doc-key]");
+        return {
+          key: carrier?.dataset.paperDocKey || documentKey,
+          rev: bpPaperRevisionFrom(carrier),
+        };
+      };
+
+      const captureHistoryPosition = () => {
+        const currentPosition = bpPaperHistoryPosition(window.history.state);
+        if (currentPosition != null) historyPosition = currentPosition;
+      };
+
+      const recordFor = (source) => {
+        let record = sources.get(source);
+        if (!record) {
+          const identity = identityFor(source);
+          record = {
+            version: 0,
+            active: 0,
+            dirty: false,
+            timer: null,
+            pending: null,
+            authoredRev: undefined,
+            mutationEntry: null,
+            documentKey: identity.key,
+            documentRevision: identity.rev,
+          };
+          sources.set(source, record);
+        }
+        return record;
+      };
+
+      coordinator = {
+        register(member) {
+          members.add(member);
+          member._bpPaperExitCoordinator = coordinator;
+          const carrier = member.el.closest?.("[data-paper-doc-key]");
+          const nextKey = carrier?.dataset.paperDocKey;
+          if (nextKey && nextKey !== documentKey) {
+            const nextIdentity = { key: nextKey, rev: bpPaperRevisionFrom(carrier) };
+            if (!coordinator.hasUnsaved() && !mutationQueue.length && !mutationActive) {
+              coordinator._resetIdentity(nextIdentity);
+            } else {
+              pendingIdentity = nextIdentity;
+            }
+          }
+          return coordinator;
+        },
+        release(member) {
+          members.delete(member);
+          member._bpPaperExitCoordinator = null;
+          if (members.size) return;
+          document.removeEventListener("input", coordinator._onInput);
+          document.removeEventListener("change", coordinator._onInput);
+          document.removeEventListener("click", coordinator._onClick, true);
+          document.removeEventListener("submit", coordinator._onSubmit, true);
+          window.removeEventListener("beforeunload", coordinator._onBeforeUnload);
+          window.removeEventListener("popstate", coordinator._onPopState, true);
+          window.removeEventListener("phx:navigate", coordinator._onNavigate);
+          window.navigation?.removeEventListener?.("navigate", coordinator._onNavigationApiNavigate);
+          sources.forEach((record) => clearTimeout(record.timer));
+          paperExitCoordinators.delete(main);
+        },
+        markDirty(source) {
+          if (!source) return;
+          captureHistoryPosition();
+          const record = recordFor(source);
+          if (record.authoredRev === undefined) {
+            record.authoredRev = record.documentKey === documentKey
+              ? confirmedRevision
+              : record.documentRevision;
+          }
+          record.version += 1;
+          record.dirty = true;
+        },
+        beginSave(source) {
+          if (!source) return null;
+          captureHistoryPosition();
+          const record = recordFor(source);
+          if (!record.dirty) {
+            if (record.authoredRev === undefined) {
+              record.authoredRev = record.documentKey === documentKey
+                ? confirmedRevision
+                : record.documentRevision;
+            }
+            record.version += 1;
+            record.dirty = true;
+          }
+          record.active += 1;
+          return { source, version: record.version };
+        },
+        finishSave(token, saved) {
+          if (!token) return;
+          const record = sources.get(token.source);
+          if (!record) return;
+          record.active = Math.max(0, record.active - 1);
+          if (saved === true && record.active === 0 && record.version === token.version) {
+            record.dirty = false;
+          }
+          if (!record.dirty && record.active === 0) sources.delete(token.source);
+        },
+        hasUnsaved() {
+          for (const record of sources.values()) {
+            if (record.dirty || record.active > 0) return true;
+          }
+          return [...main.querySelectorAll("bp-paper-canvas, bp-paper-editor")]
+            .some((editor) => editor.hasPendingChanges?.() === true);
+        },
+        async drain() {
+          while (main.isConnected) {
+            const pending = [];
+            main.querySelectorAll(PAPER_FLUSH_TARGETS).forEach((wrapper) => {
+              wrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
+                detail: { waitUntil: (promise) => pending.push(Promise.resolve(promise)) },
+              }));
+            });
+
+            const driver = [...members].find(
+              (member) => typeof member.pushEventTo === "function",
+            );
+            for (const [source, record] of [...sources]) {
+              if (
+                !record.dirty ||
+                !source.matches?.(".bp-paper-edit-form[phx-change]")
+              ) continue;
+              clearTimeout(record.timer);
+              record.timer = null;
+              pending.push(record.active > 0 && record.pending
+                ? record.pending
+                : coordinator._sendFallback(source, driver));
+            }
+
+            if (!pending.length) return !coordinator.hasUnsaved();
+            if (!(await Promise.all(pending)).every(Boolean)) return false;
+          }
+          return false;
+        },
+        async run(action) {
+          if (actionPending) return false;
+          actionPending = true;
+          try {
+            const saved = await coordinator.drain();
+            if (!saved) return false;
+            await action();
+            return true;
+          } finally {
+            actionPending = false;
+          }
+        },
+        requestId: bpPaperRequestId,
+        mutate(source, { requestId, payload, send, onResult }) {
+          requestId ||= bpPaperRequestId();
+          if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
+          let entry = mutationById.get(requestId);
+          if (!entry) {
+            const record = recordFor(source);
+            if (record.authoredRev === undefined) {
+              record.authoredRev = record.documentKey === documentKey
+                ? confirmedRevision
+                : record.documentRevision;
+            }
+            entry = {
+              source, requestId, payload, send, onResult,
+              documentKey: record.documentKey,
+              authoredRev: record.authoredRev,
+              ifRev: mutationQueue.length || record.documentKey !== documentKey
+                ? undefined
+                : record.authoredRev,
+              expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+              waiters: [],
+            };
+            mutationById.set(requestId, entry);
+            mutationQueue.push(entry);
+          }
+          const promise = new Promise((resolve) => entry.waiters.push(resolve));
+          mutationPaused = false;
+          coordinator._pumpMutations();
+          return { requestId: entry.requestId, promise, entry };
+        },
+        retryMutation(entry) {
+          if (!entry || mutationById.get(entry.requestId) !== entry || conflict) {
+            return Promise.resolve(false);
+          }
+          if (Date.now() >= entry.expiresAt) {
+            coordinator._expireMutation(entry);
+            return Promise.resolve(false);
+          }
+          const promise = new Promise((resolve) => entry.waiters.push(resolve));
+          mutationPaused = false;
+          coordinator._pumpMutations();
+          return promise;
+        },
+        observeRevision({ rev, requestId, apply, observedDocumentKey, source }) {
+          if (rev == null) return false;
+          if (observedDocumentKey && observedDocumentKey !== documentKey) {
+            if (!coordinator._hasUnsavedForDocument(documentKey) && !mutationQueue.length) {
+              coordinator._resetIdentity({ key: observedDocumentKey, rev });
+              apply?.("external");
+              return true;
+            }
+            pendingIdentity = { key: observedDocumentKey, rev };
+            quarantinedEchoes.push({
+              rev, requestId, apply, documentKey: observedDocumentKey,
+            });
+            return false;
+          }
+          if (requestId && ownRevisions.get(requestId) === rev) {
+            apply?.(rev === confirmedRevision ? "own" : "own-stale");
+            return true;
+          }
+          if (rev === confirmedRevision && !coordinator.hasUnsaved()) {
+            apply?.("current");
+            return true;
+          }
+          if (mutationQueue.length || coordinator.hasUnsaved()) {
+            quarantinedEchoes.push({ rev, requestId, apply, documentKey });
+            if (!mutationActive) coordinator._setConflict(
+              { current_rev: rev }, source, observedDocumentKey,
+            );
+            return false;
+          }
+          confirmedRevision = rev;
+          apply?.("external");
+          return true;
+        },
+      };
+
+      coordinator._resolveWaiters = (entry, saved) => {
+        const waiters = entry.waiters.splice(0);
+        waiters.forEach((resolve) => resolve(saved));
+      };
+      coordinator._hasUnsavedForDocument = (key) => {
+        for (const record of sources.values()) {
+          if (record.documentKey === key && (record.dirty || record.active > 0)) return true;
+        }
+        return false;
+      };
+      coordinator._resetIdentity = ({ key, rev }) => {
+        documentKey = key || null;
+        confirmedRevision = rev ?? null;
+        ownRevisions.clear();
+        quarantinedEchoes.length = 0;
+        conflict = null;
+        mutationPaused = false;
+        coordinator._renderConflict?.();
+      };
+      coordinator._maybeAdoptPendingIdentity = () => {
+        if (!pendingIdentity || coordinator._hasUnsavedForDocument(documentKey) ||
+            mutationQueue.some((entry) => entry.documentKey === documentKey)) return false;
+        const next = pendingIdentity;
+        pendingIdentity = null;
+        coordinator._resetIdentity(next);
+        return true;
+      };
+      coordinator._flushQuarantinedIfClean = () => {
+        if (mutationQueue.some((entry) => entry.documentKey === documentKey) ||
+            coordinator._hasUnsavedForDocument(documentKey)) return false;
+        const candidates = quarantinedEchoes.filter((echo) =>
+          !echo.documentKey || echo.documentKey === documentKey,
+        );
+        if (!candidates.length) return false;
+        const newest = candidates[candidates.length - 1];
+        const latest = candidates.filter((echo) => echo.rev === newest.rev);
+        for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
+          if (!quarantinedEchoes[i].documentKey ||
+              quarantinedEchoes[i].documentKey === documentKey) {
+            quarantinedEchoes.splice(i, 1);
+          }
+        }
+        confirmedRevision = newest.rev;
+        latest.forEach((echo) => echo.apply?.("external"));
+        return true;
+      };
+      coordinator._reloadIfClean = () => {
+        if (!reloadWhenClean || mutationActive || mutationQueue.length ||
+            coordinator.hasUnsaved()) return false;
+        reloadWhenClean = false;
+        window.location.reload();
+        return true;
+      };
+      coordinator._expireMutation = (entry) => {
+        mutationPaused = true;
+        const message = "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.";
+        const status = main.querySelector('[data-test-id="bp-paper-footer-save"][role="status"]');
+        if (status) status.textContent = message;
+        if (entry.expiryReported) return;
+        entry.expiryReported = true;
+        entry.source?.dispatchEvent?.(new CustomEvent("bp-error", {
+          detail: { code: "paper_mutation_retry_expired", error: message },
+          bubbles: true,
+          composed: true,
+        }));
+      };
+      coordinator._setConflict = (reply, source, sourceDocumentKey) => {
+        conflict = {
+          currentRev: reply?.current_rev,
+          reply,
+          source: source || mutationQueue[0]?.source,
+          documentKey: sourceDocumentKey || mutationQueue[0]?.documentKey || documentKey,
+        };
+        mutationPaused = true;
+        coordinator._renderConflict();
+      };
+      coordinator._renderConflict = () => {
+        let banner = main.querySelector("[data-bp-paper-conflict]");
+        if (!conflict) {
+          banner?.remove();
+          return;
+        }
+        if (!banner) {
+          banner = document.createElement("div");
+          banner.dataset.bpPaperConflict = "true";
+          banner.setAttribute("role", "alert");
+          banner.innerHTML = '<span>Save paused — this document changed elsewhere. Your edits are still here.</span> <button type="button" data-action="review">Review</button> <button type="button" data-action="keep">Keep mine</button> <button type="button" data-action="latest">Use latest</button> <span data-conflict-detail hidden></span>';
+          const root = main.querySelector(".bp-paper-editor") || main;
+          root.prepend(banner);
+          banner.addEventListener("click", (event) => {
+            const action = event.target.closest?.("[data-action]")?.dataset.action;
+            if (action === "review") {
+              const detail = banner.querySelector("[data-conflict-detail]");
+              detail.hidden = false;
+              detail.textContent = `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+              main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
+                detail: { documentKey, conflict: conflict.reply }, bubbles: true,
+              }));
+            } else if (action === "keep") {
+              coordinator._keepMine();
+            } else if (action === "latest") {
+              coordinator._useLatest();
+            }
+          });
+        }
+      };
+      coordinator._keepMine = () => {
+        const head = mutationQueue[0];
+        if (!head || conflict?.currentRev == null) return false;
+        const replacementId = bpPaperRequestId();
+        if (!replacementId) return false;
+        mutationById.delete(head.requestId);
+        head.requestId = replacementId;
+        head.ifRev = conflict.currentRev;
+        mutationById.set(head.requestId, head);
+        confirmedRevision = conflict.currentRev;
+        conflict = null;
+        mutationPaused = false;
+        coordinator._renderConflict();
+        coordinator._pumpMutations();
+        return true;
+      };
+      coordinator._useLatest = () => {
+        const chosenSource = conflict?.source;
+        const chosenRecord = sources.get(chosenSource);
+        const requiresReload = Boolean(
+          chosenRecord &&
+          !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]'),
+        );
+        const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
+        const latest = quarantinedEchoes.filter((echo) =>
+          echo.rev === latestRevision &&
+          (!echo.documentKey || echo.documentKey === conflict?.documentKey),
+        );
+        for (let index = mutationQueue.length - 1; index >= 0; index--) {
+          const entry = mutationQueue[index];
+          if (entry.source !== chosenSource) continue;
+          mutationQueue.splice(index, 1);
+          mutationById.delete(entry.requestId);
+          entry.onResult?.(false, { discarded: true });
+          coordinator._resolveWaiters(entry, false);
+        }
+        sources.delete(chosenSource);
+        conflict = null;
+        mutationPaused = false;
+        if (latestRevision != null) {
+          confirmedRevision = latestRevision;
+          latest.forEach((echo) => echo.apply?.("external-resync"));
+        }
+        for (let index = quarantinedEchoes.length - 1; index >= 0; index--) {
+          const echo = quarantinedEchoes[index];
+          if (!echo.documentKey || echo.documentKey === documentKey) {
+            quarantinedEchoes.splice(index, 1);
+          }
+        }
+        mutationQueue.forEach((entry) => {
+          if (entry.documentKey === documentKey) entry.ifRev = undefined;
+        });
+        if (requiresReload) reloadWhenClean = true;
+        coordinator._renderConflict();
+        coordinator._maybeAdoptPendingIdentity();
+        coordinator._pumpMutations();
+        coordinator._reloadIfClean();
+      };
+      coordinator._pumpMutations = () => {
+        if (mutationActive || mutationPaused || conflict || !mutationQueue.length) return;
+        const entry = mutationQueue[0];
+        if (entry.documentKey && entry.documentKey !== documentKey) {
+          if (coordinator._hasUnsavedForDocument(documentKey)) return;
+          coordinator._resetIdentity({ key: entry.documentKey, rev: entry.authoredRev });
+          pendingIdentity = null;
+        }
+        if (Date.now() >= entry.expiresAt) {
+          coordinator._expireMutation(entry);
+          coordinator._resolveWaiters(entry, false);
+          return;
+        }
+        if (entry.ifRev === undefined) entry.ifRev = confirmedRevision;
+        const wire = { ...entry.payload, request_id: entry.requestId };
+        if (entry.ifRev != null) wire.if_rev = entry.ifRev;
+        const token = coordinator.beginSave(entry.source);
+        mutationActive = true;
+        let sent;
+        try {
+          sent = entry.send(wire);
+        } catch (_) {
+          sent = null;
+        }
+        Promise.resolve(sent).catch(() => null).then((reply) => {
+          const identityOK = reply?.request_id === entry.requestId;
+          const revOK = entry.ifRev == null || reply?.rev != null;
+          const saved = reply?.saved === true && identityOK && revOK;
+          mutationActive = false;
+          coordinator.finishSave(token, saved);
+          if (saved) {
+            confirmedRevision = reply.rev ?? confirmedRevision;
+            ownRevisions.set(entry.requestId, confirmedRevision);
+            mutationQueue.shift();
+            mutationById.delete(entry.requestId);
+            entry.onResult?.(true, reply);
+            coordinator._resolveWaiters(entry, true);
+            for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
+              const echo = quarantinedEchoes[i];
+              if ((echo.requestId === entry.requestId || echo.rev === confirmedRevision) &&
+                  (!echo.documentKey || echo.documentKey === documentKey)) {
+                quarantinedEchoes.splice(i, 1);
+                echo.apply?.("own");
+              }
+            }
+            if (!coordinator._maybeAdoptPendingIdentity()) {
+              coordinator._flushQuarantinedIfClean();
+            }
+            coordinator._pumpMutations();
+            coordinator._reloadIfClean();
+          } else {
+            entry.onResult?.(false, reply);
+            mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
+            if (reply?.conflict === true && reply?.request_id === entry.requestId) {
+              coordinator._setConflict(reply);
+            } else {
+              mutationPaused = true;
+            }
+          }
+        });
+      };
+
+      coordinator._onInput = (event) => {
+        const target = event.target;
+        const source = target.closest?.("form[data-paper-field-flush]") ||
+          target.closest?.(PAPER_FLUSH_TARGETS) ||
+          target.closest?.(".bp-paper-edit-form[phx-change]");
+        if (!source || !main.contains(source)) return;
+        if (sources.get(source)?.active > 0) return;
+        coordinator.markDirty(source);
+        if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
+          // Own the legacy form's debounce so the actual autosave reply clears
+          // the exit guard. Let target/form listeners run, but do not also let
+          // LiveView's window-level phx-change binding enqueue a duplicate.
+          event.stopPropagation();
+          coordinator._scheduleFallback(source);
+        }
+      };
+      coordinator._sendFallback = (source, driver = null) => {
+        const record = recordFor(source);
+        if (!record.dirty) return Promise.resolve(true);
+        if (record.active > 0) return record.pending || Promise.resolve(false);
+        driver ||= [...members].find((member) => typeof member.pushEventTo === "function");
+        if (!driver || !source.isConnected) return Promise.resolve(false);
+
+        clearTimeout(record.timer);
+        record.timer = null;
+        const event = source.getAttribute("phx-change");
+        const target = source.getAttribute("phx-target") || source;
+        const params = Object.fromEntries(new FormData(source));
+        const version = record.version;
+        const mutation = record.mutationEntry
+          ? { promise: coordinator.retryMutation(record.mutationEntry), entry: record.mutationEntry }
+          : bpPaperMutation(driver, source, event, params, {
+            target,
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) record.mutationEntry = null;
+            },
+          });
+        record.mutationEntry = mutation.entry || record.mutationEntry;
+        const pending = mutation.promise
+          .then((saved) => {
+            return saved;
+          })
+          .finally(() => {
+            if (record.pending === pending) record.pending = null;
+            if (
+              source.isConnected && record.dirty && record.active === 0 &&
+              record.version !== version
+            ) coordinator._scheduleFallback(source);
+          });
+        record.pending = pending;
+        return pending;
+      };
+      coordinator._scheduleFallback = (source) => {
+        const record = recordFor(source);
+        clearTimeout(record.timer);
+        const rawDelay = source.getAttribute("phx-debounce");
+        const delay = /^\d+$/.test(rawDelay || "") ? Number(rawDelay) : 500;
+        record.timer = setTimeout(() => {
+          record.timer = null;
+          coordinator._sendFallback(source);
+        }, delay);
+      };
+      coordinator._onBeforeUnload = (event) => {
+        if (!coordinator.hasUnsaved()) return;
+        event.preventDefault();
+        event.returnValue = "";
+      };
+      coordinator._onNavigate = () => {
+        const currentPosition = bpPaperHistoryPosition(window.history.state);
+        if (currentPosition != null) historyPosition = currentPosition;
+      };
+      coordinator._onNavigationApiNavigate = (event) => {
+        if (event.navigationType !== "traverse") return;
+        const destinationKey = event.destination?.key;
+        if (navigationReplayKey && destinationKey === navigationReplayKey) {
+          navigationReplayKey = null;
+          return;
+        }
+        if (!coordinator.hasUnsaved() || !event.cancelable || !destinationKey ||
+            typeof window.navigation?.traverseTo !== "function") return;
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+        if (navigationSave) return;
+        navigationSave = coordinator.drain().then((saved) => {
+          navigationSave = null;
+          if (!saved) return false;
+          navigationReplayKey = destinationKey;
+          let result;
+          try {
+            result = window.navigation.traverseTo(destinationKey);
+          } catch (_) {
+            navigationReplayKey = null;
+            return false;
+          }
+          if (!result?.committed || !result?.finished) {
+            navigationReplayKey = null;
+            return false;
+          }
+          return Promise.all([result.committed, result.finished])
+            .then(() => true)
+            .catch(() => {
+              navigationReplayKey = null;
+              return false;
+            });
+        });
+      };
+      const finishHistoryNavigation = () => {
+        if (historyPhase !== "saving" || historySaveResult == null) return;
+        if (historySaveResult) {
+          historyPhase = "replay";
+          window.history.go(historyDelta);
+        } else {
+          historyPhase = null;
+          historyDelta = null;
+        }
+        historySaveResult = null;
+      };
+      coordinator._onPopState = (event) => {
+        const nextPosition = bpPaperHistoryPosition(event.state);
+        if (historyPhase === "restoring") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            window.history.go(historyPosition - nextPosition);
+            return;
+          }
+          historyPosition = nextPosition;
+          historyPhase = "saving";
+          historySaveResult = null;
+          coordinator.drain().then((saved) => {
+            historySaveResult = saved;
+            finishHistoryNavigation();
+          });
+          return;
+        }
+        if (historyPhase === "blocking") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            window.history.go(historyPosition - nextPosition);
+            return;
+          }
+          historyPosition = nextPosition;
+          historyPhase = "saving";
+          finishHistoryNavigation();
+          return;
+        }
+        if (historyPhase === "replay") {
+          historyPhase = null;
+          historyDelta = null;
+          historyPosition = nextPosition;
+          return;
+        }
+        if (historyPhase === "saving") {
+          event.stopImmediatePropagation();
+          if (
+            historyPosition != null && nextPosition != null &&
+            nextPosition !== historyPosition
+          ) {
+            historyPhase = "blocking";
+            window.history.go(historyPosition - nextPosition);
+          }
+          return;
+        }
+        if (!coordinator.hasUnsaved()) {
+          historyPosition = nextPosition;
+          return;
+        }
+        // Phoenix stamps monotonic positions in its history state. Restore the
+        // exact current entry before doing asynchronous work; once every save
+        // is acknowledged, replay the original Back/Forward delta exactly once.
+        if (
+          historyPosition != null && nextPosition != null &&
+          nextPosition !== historyPosition
+        ) {
+          event.stopImmediatePropagation();
+          historyDelta = nextPosition - historyPosition;
+          historySaveResult = null;
+          historyPhase = "restoring";
+          window.history.go(-historyDelta);
+        }
+      };
+      coordinator._onClick = (event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+            event.ctrlKey || event.shiftKey || event.altKey) return;
+        const target = event.target.closest?.("a[href], [phx-click]");
+        if (!target || replayTargets.has(target)) {
+          if (target) replayTargets.delete(target);
+          return;
+        }
+        const clickEvent = target.getAttribute("phx-click");
+        const structural = PAPER_STRUCTURAL_EVENTS.has(clickEvent) ||
+          (clickEvent === "inner-array-op" &&
+            !target.closest?.('[phx-hook="BarkparkFieldBridge"]'));
+        const anchor = target.matches("a[href]");
+        if (anchor) {
+          const href = target.getAttribute("href");
+          if (!href || href.startsWith("#") || target.hasAttribute("download") ||
+              target.getAttribute("target") === "_blank") return;
+        }
+        if (!anchor && !structural) return;
+        if (anchor && !coordinator.hasUnsaved()) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (structural) {
+          const driver = [...members].find((member) =>
+            typeof member.pushEventTo === "function" || typeof member.pushEvent === "function",
+          );
+          if (!driver) return;
+          const phxTarget = target.getAttribute("phx-target");
+          coordinator.run(() => bpPaperMutation(
+            driver,
+            target,
+            target.getAttribute("phx-click"),
+            bpPaperEventParams(target),
+            typeof driver.pushEventTo === "function"
+              ? { target: phxTarget || target }
+              : {},
+          ).promise);
+          return;
+        }
+        coordinator.run(() => {
+          replayTargets.add(target);
+          target.click();
+        });
+      };
+      coordinator._onSubmit = (event) => {
+        const form = event.target;
+        if (!PAPER_STRUCTURAL_SUBMITS.has(form?.getAttribute?.("phx-submit")) ||
+            replayTargets.has(form)) {
+          if (replayTargets.has(form)) replayTargets.delete(form);
+          return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const driver = [...members].find((member) =>
+          typeof member.pushEventTo === "function" || typeof member.pushEvent === "function",
+        );
+        if (!driver) return;
+        const params = Object.fromEntries(new FormData(form, event.submitter || undefined));
+        coordinator.run(() => bpPaperMutation(
+          driver,
+          form,
+          form.getAttribute("phx-submit"),
+          bpPaperEventParams(event.submitter, params),
+          typeof driver.pushEventTo === "function"
+            ? { target: form.getAttribute("phx-target") || form }
+            : {},
+        ).promise);
+      };
+      document.addEventListener("input", coordinator._onInput);
+      document.addEventListener("change", coordinator._onInput);
+      document.addEventListener("click", coordinator._onClick, true);
+      document.addEventListener("submit", coordinator._onSubmit, true);
+      window.addEventListener("beforeunload", coordinator._onBeforeUnload);
+      window.addEventListener("popstate", coordinator._onPopState, true);
+      window.addEventListener("phx:navigate", coordinator._onNavigate);
+      window.navigation?.addEventListener?.("navigate", coordinator._onNavigationApiNavigate);
+      paperExitCoordinators.set(main, coordinator);
+    }
+    return coordinator.register(hook);
+  }
+
+  function bpReleasePaperExitCoordinator(hook) {
+    hook._bpPaperExitCoordinator?.release(hook);
+  }
+
+  function bpRunPaperAction(coordinator, action) {
+    if (coordinator) return coordinator.run(action).catch(() => false);
+    return Promise.resolve().then(action).then(() => true).catch(() => false);
+  }
+
+  // Finish local edits and wait for their save replies before unmounting the
+  // editor. A refused save leaves the paper open with its server halt message.
+  Hooks.BarkparkPaperEditToggle = {
+    mounted() {
+      this._main = this.el.closest("main");
+      this._exitCoordinator = bpPaperExitCoordinator(this);
+      this._onClick = async (event) => {
+        if (this.el.dataset.editing !== "true") return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (this._saving) return;
+        this._saving = true;
+        this.el.disabled = true;
+        this.el.setAttribute("aria-busy", "true");
+        try {
+          await bpRunPaperAction(
+            this._exitCoordinator,
+            () => this.pushEvent("paper-toggle-edit", {}),
+          );
+        } catch (_) {
+          // A disconnected toggle is still editing; the finally block restores
+          // the button so the user can explicitly retry.
+        } finally {
+          this._saving = false;
+          this.el.disabled = false;
+          this.el.removeAttribute("aria-busy");
+        }
+      };
+      this.el.addEventListener("click", this._onClick, true);
+    },
+    destroyed() {
+      this.el.removeEventListener("click", this._onClick, true);
+      bpReleasePaperExitCoordinator(this);
+    },
+  };
 
     // BarkparkPaperEditor — LV↔WC bridge for the per-block paper editor
     // (<bp-paper-editor>). Mounted on the phx-update="ignore" wrapper that
@@ -24,10 +973,43 @@
     // state, no echo back into the WC.
     Hooks.BarkparkPaperEditor = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
+        this._pendingSaves = new Set();
+        this._mutationEntries = [];
+        const pushOp = (op) => {
+          let mutation;
+          mutation = bpPaperMutation(this, this.el, "paper-op", op, {
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._mutationEntries = this._mutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+            },
+          });
+          if (mutation.entry) this._mutationEntries.push(mutation.entry);
+          const pending = mutation.promise
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+          return pending;
+        };
         this._onOp = (e) => {
-          this.pushEvent("paper-op", e.detail);
+          this._exitCoordinator?.markDirty(this.el);
+          pushOp(e.detail);
         };
         this.el.addEventListener("bp-op", this._onOp);
+        this._onFlushPending = (event) => {
+          this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
+          if (!this._pendingSaves.size && this._mutationEntries.length) {
+            const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
+            if (retry) {
+              const pending = retry.finally(() => this._pendingSaves.delete(pending));
+              this._pendingSaves.add(pending);
+            }
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // Slash menu (P3.3): the WC emits a bubbling/composed `bp-slash-insert`
         // CustomEvent {detail:{type, afterId}} when the user picks a block type
@@ -35,7 +1017,9 @@
         // paper-slash-insert handler, which builds the block (default_block +
         // insert-after) through the SAME paper_op pipeline patch-block uses.
         this._onSlash = (e) => {
-          this.pushEvent("paper-slash-insert", e.detail);
+          bpRunPaperAction(this._exitCoordinator, () =>
+            bpPaperMutation(this, this.el, "paper-slash-insert", e.detail).promise
+          );
         };
         this.el.addEventListener("bp-slash-insert", this._onSlash);
 
@@ -97,13 +1081,29 @@
           if (this.el.id !== `paper-ed-${payload.block_id}`) return; // not my block
           const wc = this.el.querySelector("bp-paper-editor");
           if (!wc) return;
-          wc.block = payload.block;
+          const apply = (mode) => {
+            if (mode === "external-resync" &&
+                typeof wc.resolveConflictWithServerBlock === "function") {
+              wc.resolveConflictWithServerBlock(payload.block);
+            } else {
+              wc.block = payload.block;
+            }
+          };
+          this._exitCoordinator?.observeRevision({
+            rev: payload.rev,
+            requestId: payload.request_id,
+            apply,
+            observedDocumentKey: this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
+            source: this.el,
+          }) || (payload.rev == null && apply("legacy"));
         };
         this.handleEvent("bp:block-update", this._onBlockUpdate);
       },
       destroyed() {
         this.el.removeEventListener("bp-op", this._onOp);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-slash-insert", this._onSlash);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -121,6 +1121,7 @@
     // hook is untouched (this is additive).
     Hooks.BarkparkPaperCanvas = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         // Seed the run into the element. Pre-upgrade-safe: assigning `el.blocks`
         // before the custom-element definition upgrades the node lands as a plain
         // own-property the element's connectedCallback reclaims (see the WC's
@@ -140,18 +1141,19 @@
         // riding this run mounts its client-side picker WC (bp-media-picker /
         // bp-reference-picker) inside a canvas node-view; the node-view reads the
         // dataset + bearer token off the <bp-paper-canvas> HOST element (data-dataset
-        // / data-token) — the SAME scope the per-block picker render uses
-        // (dataset + data-token={@api_token_raw}). Stamp them from the wrapper's
-        // data-canvas-dataset / data-canvas-token so the picker fetches / uploads
-        // exactly as it does in the per-block path. (scope-prefix is intentionally
-        // unset — the per-block picker render omits it too, defaulting to the flat
-        // surface.) A run with no picker carries them harmlessly.
+        // / data-token / data-scope-prefix) — the SAME scope the per-block picker
+        // render uses. Item-share-only editors carry data-picker-browse=false so
+        // they retain the current value without gaining a dataset browser.
         const seedScope = (el) => {
           if (!el) return;
           const ds = this.el.dataset.canvasDataset;
           const tok = this.el.dataset.canvasToken;
+          const prefix = this.el.dataset.canvasScopePrefix;
+          const pickerBrowse = this.el.dataset.canvasPickerBrowse;
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
+          if (prefix != null) el.setAttribute("data-scope-prefix", prefix);
+          if (pickerBrowse != null) el.setAttribute("data-picker-browse", pickerBrowse);
           // pdd-t2: the block AFTER this run in the full document is template-
           // locked (e.g. the featured image right after the title run). The WC's
           // filterTransaction reads data-locked-tail LIVE and vetoes any run
@@ -167,6 +1169,7 @@
           if (constraints != null) el.setAttribute("data-constraints", constraints);
         };
         const wc = this.el.querySelector("bp-paper-canvas");
+        if (wc) wc.acknowledgedSaves = true;
         seedScope(wc);
         seedBlocks(wc);
 
@@ -200,19 +1203,129 @@
         customElements.whenDefined("bp-paper-canvas").then(() => {
           const el = this.el.querySelector("bp-paper-canvas");
           if (el) {
+            el.acknowledgedSaves = true;
             seedScope(el);
             seedBlocks(el);
             wireWikilinkSource(el);
             wireTagSource(el);
+            this._repaintFleet?.();
           }
         });
 
         // Outbound: the canvas's debounced op batch → the server's paper-ops
         // handler. detail is {ops:[…]}; forward it verbatim.
+        this._pendingSaves = new Set();
+        this._opsQueue = [];
+        this._sendingOps = false;
+        this._opsFailed = false;
+        this._saveBridgeDestroyed = false;
+        const reportUnretryableOps = (entry, code, message) => {
+          this._opsFailed = true;
+          entry.unretryable = true;
+          const status = this.el.closest("main")?.querySelector(
+            '[data-test-id="bp-paper-footer-save"][role="status"]',
+          );
+          if (status) status.textContent = message;
+          if (entry.errorReported) return;
+          entry.errorReported = true;
+          this.el.dispatchEvent(new CustomEvent("bp-error", {
+            detail: { code, error: message },
+            bubbles: true,
+            composed: true,
+          }));
+        };
+        const sendNextOps = () => {
+          if (
+            this._saveBridgeDestroyed || this._sendingOps ||
+            this._opsFailed || !this._opsQueue.length
+          ) return;
+          const entry = this._opsQueue[0];
+          if (!entry.requestId) {
+            reportUnretryableOps(
+              entry,
+              "paper_ops_request_id_unavailable",
+              "Save paused: this browser cannot create a safe retry ID. Your edits are still here.",
+            );
+            return;
+          }
+          if (Date.now() >= entry.expiresAt) {
+            reportUnretryableOps(
+              entry,
+              "paper_ops_retry_expired",
+              "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.",
+            );
+            return;
+          }
+          this._sendingOps = true;
+          let mutation;
+          if (entry.mutationEntry) {
+            mutation = {
+              entry: entry.mutationEntry,
+              promise: this._exitCoordinator.retryMutation(entry.mutationEntry),
+            };
+          } else {
+            mutation = bpPaperMutation(this, this.el, "paper-ops", { ops: entry.ops }, {
+              requestId: entry.requestId,
+              onResult: (saved, result) => {
+                this._sendingOps = false;
+                if (result?.discarded) {
+                  this._opsQueue = this._opsQueue.filter((queued) => queued !== entry);
+                  this._opsFailed = false;
+                  return;
+                }
+                if (saved && this._opsQueue[0] === entry) {
+                  this._opsQueue.shift();
+                }
+                const canvas = this.el.querySelector("bp-paper-canvas");
+                if (entry.seq != null &&
+                    typeof canvas?.acknowledgeOps === "function") {
+                  canvas.acknowledgeOps(entry.seq, saved);
+                }
+                if (saved) {
+                  this._opsFailed = false;
+                  sendNextOps();
+                } else {
+                  this._opsFailed = true;
+                }
+              },
+            });
+            entry.mutationEntry = mutation.entry;
+          }
+          const pending = mutation.promise
+            .then((saved) => {
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+        };
         this._onCanvasOps = (e) => {
-          this.pushEvent("paper-ops", e.detail);
+          this._exitCoordinator?.markDirty(this.el);
+          this._opsQueue.push({
+            ops: e.detail.ops,
+            seq: e.detail.seq,
+            requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
+            expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+          });
+          sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+        this._onFlushPending = (event) => {
+          const wc = this.el.querySelector("bp-paper-canvas");
+          wc?.flushPendingChanges?.();
+          if (this._opsFailed && !this._sendingOps) {
+            this._opsFailed = false;
+            sendNextOps();
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          } else if (this._opsQueue.length) {
+            // An expired batch (or a browser without secure UUID support) is
+            // intentionally retained. Keep View mounted so the local document
+            // remains available to copy or recover instead of silently losing it.
+            event.detail.waitUntil(Promise.resolve(false));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // Inbound bridge (S4a): the echo-driven baseline advance — the
         // bp:block-update successor for the continuous canvas. After the server
@@ -244,7 +1357,21 @@
             if (this.el.id !== `paper-canvas-${run.run_id}`) return; // not my run
             const wc = this.el.querySelector("bp-paper-canvas");
             if (!wc || typeof wc.applyServerBlocks !== "function") return;
-            wc.applyServerBlocks(run.blocks);
+            const apply = (mode) => {
+              if (mode === "external-resync" &&
+                  typeof wc.resolveConflictWithServerBlocks === "function") {
+                wc.resolveConflictWithServerBlocks(run.blocks);
+              } else {
+                wc.applyServerBlocks(run.blocks);
+              }
+            };
+            this._exitCoordinator?.observeRevision({
+              rev: payload.rev,
+              requestId: payload.request_id,
+              apply,
+              observedDocumentKey: this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
+              source: this.el,
+            }) || (payload.rev == null && apply("legacy"));
           });
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
@@ -315,6 +1442,11 @@
           );
         };
 
+        // A deferred custom-element upgrade can mount the paint holes AFTER
+        // the server reply. Replay the cached HTML as soon as they exist.
+        this._onCanvasReady = () => this._repaintFleet();
+        this.el.addEventListener("bp-ready", this._onCanvasReady);
+
         // Request the initial preview once the hook (and its listener above) is
         // mounted, so the live rows land even if the server's setup-time push
         // raced ahead of this handler's registration. Guarded to run-0 so a
@@ -333,7 +1465,12 @@
         if (typeof this._repaintFleet === "function") this._repaintFleet();
       },
       destroyed() {
+        this._saveBridgeDestroyed = true;
+        this._opsQueue = [];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
+        this.el.removeEventListener("bp-ready", this._onCanvasReady);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -347,16 +1484,59 @@
     // model, no client state, no echo back into the control.
     Hooks.BarkparkFieldBlockBridge = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         const blockId = this.el.dataset.blockId;
         const fieldType = this.el.dataset.fieldType;
 
-        const push = (value) => {
-          this.pushEvent("paper-op", {
-            op: "patch-block",
-            id: blockId,
-            patch: { value: value }
+        this._pendingSaves = new Set();
+        this._mutationEntries = [];
+        const pushOp = (op) => {
+          let mutation;
+          mutation = bpPaperMutation(this, this.el, "paper-op", op, {
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._mutationEntries = this._mutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+            },
           });
+          if (mutation.entry) this._mutationEntries.push(mutation.entry);
+          const pending = mutation.promise
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+          return pending;
         };
+        const push = (value) => pushOp({
+          op: "patch-block",
+          id: blockId,
+          patch: { value: value }
+        });
+
+        // The edit→view boundary dispatches this while the wrapper is still
+        // connected. Commit any native text input still inside the 300 ms timer,
+        // then contribute every in-flight save reply to the toggle's wait set.
+        // Repeated flushes are safe: consuming `_t` before send means the same
+        // local edit is never pushed twice, while a newly typed value schedules a
+        // fresh timer for the toggle's next drain pass.
+        this._onFlushPending = (event) => {
+          if (this._t) {
+            clearTimeout(this._t);
+            this._t = null;
+            this._sendPending?.();
+          }
+          if (!this._pendingSaves.size && this._mutationEntries.length) {
+            const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
+            if (retry) {
+              const pending = retry.finally(() => this._pendingSaves.delete(pending));
+              this._pendingSaves.add(pending);
+            }
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(
+              Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean))
+            );
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // PICKER field blocks (field-reference / field-image, P2.2) are driven
         // by a bp-* Web Component (bp-reference-picker / bp-media-picker) that
@@ -366,6 +1546,7 @@
         // event. Forward it straight through as a patch-block op.
         if (fieldType === "field-reference" || fieldType === "field-image") {
           this._onChange = (e) => {
+            this._exitCoordinator?.markDirty(this.el);
             push(e.detail && e.detail.value);
           };
           this.el.addEventListener("bp-change", this._onChange);
@@ -383,6 +1564,7 @@
         // block is allowed by design (that IS how the featured image binds).
         if (fieldType === "image") {
           this._onChange = (e) => {
+            this._exitCoordinator?.markDirty(this.el);
             const meta = (e.target && e.target.meta) || {};
             let src = meta.url || "";
             if (!src) {
@@ -396,7 +1578,7 @@
                 src = raw;
               }
             }
-            this.pushEvent("paper-op", {
+            pushOp({
               op: "patch-block",
               id: blockId,
               patch: { src: src, alt: meta.alt || "" }
@@ -412,6 +1594,7 @@
         this._control = control;
 
         const send = () => {
+          this._exitCoordinator?.markDirty(this.el);
           let value;
           if (fieldType === "field-boolean") {
             value = control.checked;
@@ -420,6 +1603,7 @@
           }
           push(value);
         };
+        this._sendPending = send;
 
         // datetime / color / select / boolean commit on `change`; free-text
         // (string / slug / text) debounce on `input` so we don't flood the
@@ -428,7 +1612,10 @@
         if (debounced) {
           this._onInput = () => {
             clearTimeout(this._t);
-            this._t = setTimeout(send, 300);
+            this._t = setTimeout(() => {
+              this._t = null;
+              send();
+            }, 300);
           };
           control.addEventListener("input", this._onInput);
         } else {
@@ -438,6 +1625,9 @@
       },
       destroyed() {
         clearTimeout(this._t);
+        this._t = null;
+        bpReleasePaperExitCoordinator(this);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         const fieldType = this.el.dataset.fieldType;
         // Picker blocks (field pickers + image content blocks) bind `bp-change`
         // on the wrapper (this.el); leaf blocks bind input/change on the inner
@@ -465,6 +1655,7 @@
     // and the assign re-render redraws the Edit list.
     Hooks.BarkparkPaperSortable = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         this._dragId = null;
 
         const blockOf = (node) =>
@@ -513,7 +1704,11 @@
 
           const draggedId = this._dragId;
           this._clearDrag();
-          this.pushEvent("paper-move-block-to", { id: draggedId, "after-id": afterId });
+          bpRunPaperAction(this._exitCoordinator, () =>
+            bpPaperMutation(this, this.el, "paper-move-block-to", {
+              id: draggedId, "after-id": afterId,
+            }).promise
+          );
         };
 
         this._clearDrag = () => {
@@ -533,6 +1728,7 @@
         this.el.removeEventListener("dragover", this._onDragOver);
         this.el.removeEventListener("drop", this._onDrop);
         this.el.removeEventListener("dragend", this._onDragEnd);
+        bpReleasePaperExitCoordinator(this);
       }
     };
 
@@ -628,6 +1824,7 @@
         idx > 0 && blocks[idx - 1].dataset.blockLocked === "true";
       menu._ctx = {
         pushEvent: (ev, payload) => hook.pushEvent(ev, payload),
+        exitCoordinator: hook._exitCoordinator,
         blockId: block.dataset.editBlockId,
         canUp: idx > 0 && !locked && !prevLocked,
         canDown: idx >= 0 && idx < blocks.length - 1 && !locked,
@@ -746,12 +1943,21 @@
       // Close first (drops the dismiss listeners) so activation and dismissal
       // never race, then push the same events the hover toolbar pushes.
       bpPaperCtxMenuClose();
-      if (action === "move-up")
-        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "up" });
-      else if (action === "move-down")
-        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
-      else if (action === "delete")
-        ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+      const activate = () => {
+        if (action === "move-up")
+          return bpPaperMutation(ctx, ctx.el, "paper-move-block", {
+            id: ctx.blockId, dir: "up",
+          }).promise;
+        if (action === "move-down")
+          return bpPaperMutation(ctx, ctx.el, "paper-move-block", {
+            id: ctx.blockId, dir: "down",
+          }).promise;
+        if (action === "delete")
+          return bpPaperMutation(ctx, ctx.el, "paper-delete-block", {
+            id: ctx.blockId,
+          }).promise;
+      };
+      bpRunPaperAction(ctx.exitCoordinator, activate);
       // Restore focus to the block (same dance as the Escape path) so keyboard
       // users aren't stranded — skip for delete, whose block the patch removes.
       if (action !== "delete" && focusBack && document.contains(focusBack)) {
@@ -763,6 +1969,7 @@
 
     Hooks.BarkparkPaperContextMenu = {
       mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
         // The host is a hidden child of the editor; resolve the editor body it
         // lives in so `contextmenu` is scoped to this editor's blocks.
         this._body =
@@ -825,8 +2032,190 @@
         // listeners are stranded when the editor is torn down.
         const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
         if (menu && menu._ownerEl === this.el) bpPaperCtxMenuClose();
+        bpReleasePaperExitCoordinator(this);
       },
     };
+
+    // BarkparkFieldBridge — generic LV↔WC bridge (Task #11 WI4).
+    // Mounted on a wrapper div containing a hidden <input> + a bp-*
+    // custom element. Listens for bubbled `bp-change` events, mirrors
+    // detail.value into the hidden input identified by the WC's
+    // data-bridge-target, and dispatches a synthetic `input` event so
+    // Phoenix's existing phx-change="autosave" debounce + form
+    // serialise + push round-trip fires exactly as for native inputs.
+    // Reusable for future bp-media-picker / bp-reference-picker /
+    // bp-document-preview / bp-json-inspector — no per-widget hook.
+    Hooks.BarkparkFieldBridge = {
+      mounted() {
+        this._exitCoordinator = bpPaperExitCoordinator(this);
+        this._dirty = false;
+        this._formVersion = 0;
+        this._pendingSaves = new Set();
+        this._fieldMutationEntries = [];
+        this._paperForm = this.el.matches("form[data-paper-field-flush]")
+          ? this.el
+          : this.el.closest("form[data-paper-field-flush]");
+        this._ownsPaperForm = this._paperForm === this.el;
+        this._pendingRequests = new Map();
+
+        const trackFormChange = () => {
+          this._formVersion += 1;
+          this._dirty = true;
+          this._exitCoordinator?.markDirty(this.el);
+        };
+        if (this._ownsPaperForm) {
+          this._onFormInput = trackFormChange;
+          this._onFormChange = trackFormChange;
+          this.el.addEventListener("input", this._onFormInput);
+          this.el.addEventListener("change", this._onFormChange);
+          this._onPaperFieldSaveResult = (payload) => {
+            const request = payload && this._pendingRequests.get(payload.request_id);
+            if (request) request.finish(payload);
+          };
+          this._paperSaveResultRef = this.handleEvent(
+            "bp:paper-field-save-result",
+            this._onPaperFieldSaveResult,
+          );
+          this._onArrayOpClick = (event) => {
+            const button = event.target.closest?.('[phx-click="inner-array-op"]');
+            if (!button || !this.el.contains(button) || button.disabled) return;
+
+            // Own this structural event in both reader edit mode and Studio so
+            // its parent write participates in the same correlated barrier.
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const params = { action: button.getAttribute("phx-value-action") };
+            const index = button.getAttribute("phx-value-index");
+            if (index != null) params.index = index;
+            bpRunPaperAction(this._exitCoordinator, () => {
+              this._formVersion += 1;
+              const version = this._formVersion;
+              this._dirty = false;
+              return this._pushCorrelated("inner-array-op", params, version);
+            });
+          };
+          this.el.addEventListener("click", this._onArrayOpClick, true);
+        }
+
+        this._trackSave = (save, version) => {
+          const pending = save
+            .then((saved) => {
+              if (!saved && this._formVersion === version) this._dirty = true;
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+          return pending;
+        };
+
+        this._pushCorrelated = (event, params, version) => {
+          const requestId = this._exitCoordinator?.requestId() || bpPaperRequestId();
+          if (!requestId) return this._trackSave(Promise.resolve(false), version);
+          const target = this.el.getAttribute("phx-target") || this.el;
+          const send = (wire) => new Promise((resolve) => {
+            let finished = false;
+            const wireRequestId = wire.request_id;
+            const finish = (reply) => {
+              if (finished) return;
+              finished = true;
+              clearTimeout(timeout);
+              this._pendingRequests.delete(wireRequestId);
+              resolve(reply || null);
+            };
+            const timeout = setTimeout(() => finish(null), 10000);
+            this._pendingRequests.set(wireRequestId, { finish });
+            Promise.resolve(this.pushEventTo(target, event, wire))
+              .then((results) => {
+                if (!Array.isArray(results) || results.length === 0 ||
+                    results.some((result) => result.status !== "fulfilled")) finish(null);
+              })
+              .catch(() => finish(null));
+          });
+          const mutation = this._exitCoordinator.mutate(this.el, {
+            requestId,
+            payload: params,
+            send,
+            onResult: (saved, result) => {
+              if (saved || result?.discarded) this._fieldMutationEntries = this._fieldMutationEntries.filter(
+                (entry) => entry !== mutation.entry,
+              );
+              if ((saved || result?.discarded) && this._formVersion === version) this._dirty = false;
+            },
+          });
+          if (mutation.entry) this._fieldMutationEntries.push(mutation.entry);
+          return this._trackSave(mutation.promise, version);
+        };
+
+        this._pushForm = () => {
+          const input = this._bridgeInput;
+          const form = this._ownsPaperForm ? this._paperForm : input && input.form;
+          const event = form &&
+            ((input && input.getAttribute("phx-change")) || form.getAttribute("phx-change"));
+          if (!form || !event) return null;
+
+          const params = Object.fromEntries(new FormData(form));
+          const version = this._formVersion;
+          const target = (input && input.getAttribute("phx-target")) ||
+            form.getAttribute("phx-target") || form;
+
+          let save;
+          if (this._ownsPaperForm) {
+            return this._pushCorrelated("inner-flush", { values: params }, version);
+          } else {
+            const mutation = bpPaperMutation(this, this.el, event, params, { target });
+            save = mutation.promise;
+          }
+
+          return this._trackSave(save, version);
+        };
+        this._on = (e) => {
+          const nearestBridge = e.target.closest &&
+            e.target.closest('[phx-hook="BarkparkFieldBridge"]');
+          if (nearestBridge && nearestBridge !== this.el) return;
+          const targetId = e.target.dataset.bridgeTarget;
+          if (!targetId) return;
+          const input = document.getElementById(targetId);
+          if (!input) return;
+          this._bridgeInput = input;
+          this._formVersion += 1;
+          this._dirty = true;
+          input.value = e.detail.value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        this.el.addEventListener("bp-change", this._on);
+        this._onFlushPending = (event) => {
+          // A nested picker bridge mirrors its hidden input; the hook mounted
+          // on the surrounding PaperFieldBlock form owns the correlated save.
+          if (this._paperForm && !this._ownsPaperForm) return;
+          if (!this._pendingSaves.size && this._fieldMutationEntries.length) {
+            this._trackSave(
+              this._exitCoordinator.retryMutation(this._fieldMutationEntries[0]),
+              this._formVersion,
+            );
+          } else if (this._dirty) {
+            this._dirty = false;
+            this._pushForm();
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
+      },
+      destroyed() {
+        bpReleasePaperExitCoordinator(this);
+        this.el.removeEventListener("bp-change", this._on);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
+        if (this._onFormInput) this.el.removeEventListener("input", this._onFormInput);
+        if (this._onFormChange) this.el.removeEventListener("change", this._onFormChange);
+        if (this._onArrayOpClick) this.el.removeEventListener("click", this._onArrayOpClick, true);
+        if (this._paperSaveResultRef != null && typeof this.removeHandleEvent === "function") {
+          this.removeHandleEvent(this._paperSaveResultRef);
+        }
+        this._pendingRequests.forEach((request) => request.finish(false));
+      }
+    };
+
 
   window.BarkparkPaperEditorHooks = Hooks;
 })();

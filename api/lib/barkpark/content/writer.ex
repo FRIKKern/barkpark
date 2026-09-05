@@ -513,10 +513,15 @@ defmodule Barkpark.Content.Writer do
               end
           end
 
-        result
-        |> WriteScope.fire_after(:after_save, payload)
-        |> Sheets.tap_sheet_writethrough()
+        finish_deferred_after_save(result, payload)
     end
+  end
+
+  @doc false
+  def finish_deferred_after_save(result, payload) when is_map(payload) do
+    result
+    |> WriteScope.fire_after(:after_save, payload)
+    |> Sheets.tap_sheet_writethrough()
   end
 
   @doc """
@@ -988,11 +993,31 @@ defmodule Barkpark.Content.Writer do
               end
           end
 
-        result
-        |> WriteScope.fire_after(:after_save, payload)
-        |> Sheets.tap_sheet_writethrough()
+        if Keyword.get(opts, :defer_after_save, false) do
+          defer_after_save(result, payload)
+        else
+          finish_deferred_after_save(result, payload)
+        end
     end
   end
+
+  @doc false
+  def take_deferred_after_save do
+    Process.delete(:barkpark_deferred_after_save)
+  end
+
+  @doc false
+  def clear_deferred_after_save do
+    Process.delete(:barkpark_deferred_after_save)
+    :ok
+  end
+
+  defp defer_after_save({:ok, %Document{}} = result, payload) do
+    Process.put(:barkpark_deferred_after_save, {result, payload})
+    result
+  end
+
+  defp defer_after_save(result, _payload), do: result
 
   # ── The Writer-seam transition gate (task-lifecycle-visibility, D7b + D21) ─
   #

@@ -419,6 +419,14 @@ class BpPaperCanvas extends HTMLElement {
     // NEXT diff is INCREMENTAL (bounded op size over a long session) rather than
     // cumulative-from-mount. See applyServerBlocks below.
     this._blocks = [];
+    // Save bridge state. Only one canvas batch is emitted at a time. New edits
+    // made before its acknowledgement remain live and are diffed immediately
+    // after success from the acknowledged after-snapshot.
+    this._inflightOps = null;
+    this._awaitingOwnEchoes = [];
+    this._dirtyWhileInflight = false;
+    this._opsSeq = 0;
+    this._acknowledgedSaves = false;
     this._editable = true;
     // S4a: a queued external-edit echo deferred because the editor was FOCUSED
     // or composing (IME) when it arrived — applied on blur / compositionend so a
@@ -498,6 +506,7 @@ class BpPaperCanvas extends HTMLElement {
     // shadowing the prototype accessor. Delete + re-assign so it flows back through
     // the real setter. Mirrors ../index.js.
     this._upgradeProperty("blocks");
+    this._upgradeProperty("acknowledgedSaves");
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
 
@@ -930,6 +939,66 @@ class BpPaperCanvas extends HTMLElement {
     }
   }
 
+  // Synchronously commit any user input that is still local to the Web Component.
+  // Hosts call this before replacing edit mode with reader mode, then wait for the
+  // resulting bp-canvas-ops acknowledgement before pushing the mode toggle.
+  //
+  // Returns true only when this call dispatched a non-empty operation batch. The
+  // pending debounce/source state is consumed before dispatch, so an immediate
+  // repeated call is a no-op even while the server echo is still in flight.
+  flushPendingChanges() {
+    if (!this._editor || !this._editable) return false;
+
+    if (this._mode === "source") {
+      return this._exitSourceMode();
+    }
+
+    // Node-view controls (code, captions, field inputs, and component editors)
+    // debounce their own attributes before they reach ProseMirror. Commit those
+    // islands first; their transactions schedule the canvas batch below.
+    this.querySelectorAll("[data-bp-type]").forEach((node) => {
+      node.dispatchEvent(new CustomEvent("bp-flush-node"));
+    });
+
+    if (!this._debounceTimer) return false;
+    clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    return this._emitOps();
+  }
+
+  // Synchronous host seam for navigation / beforeunload guards. A debounced
+  // transaction is unsaved before bp-canvas-ops exists; source-mode text and
+  // edits queued behind an acknowledgement must also survive an attempted exit.
+  hasPendingChanges() {
+    const sourceChanged =
+      this._mode === "source" && this._sourceEl &&
+      this._sourceEl.value !== this._sourceOriginalMd;
+    return Boolean(
+      sourceChanged || this._debounceTimer || this._inflightOps ||
+      this._dirtyWhileInflight
+    );
+  }
+
+  // Explicit conflict resolution seam. Normal echoes never erase newer local
+  // edits; this path is reserved for the user's deliberate "Use latest" action.
+  resolveConflictWithServerBlocks(blocks) {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    this._inflightOps = null;
+    this._dirtyWhileInflight = false;
+    this._awaitingOwnEchoes = [];
+    this._clearPendingServerBlocks();
+    const next = Array.isArray(blocks) ? blocks : [];
+    this._blocks = deepCloneBlocks(next);
+    if (!this._editor) return;
+    this._programmaticApply = true;
+    try {
+      this._applyExternalContent(next);
+    } finally {
+      this._programmaticApply = false;
+    }
+  }
+
   _scheduleEmit() {
     if (!this._editable) return; // read mode emits no ops
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
@@ -943,34 +1012,73 @@ class BpPaperCanvas extends HTMLElement {
   // emit the ordered op array S0 produces. The diff is runToOps VERBATIM — the
   // canvas is a thin shell over S0's PURE projector/op-mapper.
   //
-  // S4a: this._blocks is now ECHO-ADVANCED — applyServerBlocks() resets it to the
-  // server-confirmed blocks after each batch lands. So this diff is INCREMENTAL
-  // (only the ops since the last confirmation), NOT cumulative-from-mount. We do
-  // NOT advance this._blocks HERE (at emit time): the batch we send is still
-  // unconfirmed, and the server's atomic id-keyed fold tolerates a re-send if a
-  // batch crosses an echo in flight. The baseline only advances on the echo.
+  // `_blocks` advances when the bridge acknowledges the one in-flight batch, so
+  // the next dispatch is incremental even if its server echo arrives later.
   _emitOps() {
-    if (!this._editor) return;
+    if (!this._editor) return false;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
-    const ops = runToOps(this._blocks, nextDoc);
-    this._dispatchOps(ops);
+    const nextBlocks = docToBlocks(nextDoc);
+    const stableDoc = runToTiptap(nextBlocks);
+
+    // runToOps mints ids for null-id nodes. Materialize those ids in the live
+    // document before another edit can diff, otherwise each cumulative diff
+    // invents a different id for the same inserted paragraph.
+    this._stampMaterializedIds(stableDoc);
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+
+    if (this._inflightOps) {
+      this._dirtyWhileInflight = true;
+      return false;
+    }
+
+    const ops = runToOps(this._blocks, stableDoc, { preserveNewIds: true });
+    return this._dispatchOps(ops, nextBlocks);
   }
 
-  // Dispatch an op array as the bp-canvas-ops the LiveView hook folds. Factored out
-  // of _emitOps so the source-mode edited exit can emit its OWN diff (runToOps(L0,L1))
-  // directly — the SAME wire shape the debounced path uses — without re-running
-  // _emitOps (which diffs from this._blocks/C and would re-emit the in-flight
-  // pre-source edits L0−C as duplicate structural ops). A zero-length array is a
-  // no-op (a no-edit toggle emits nothing).
-  _dispatchOps(ops) {
-    if (!ops || !ops.length) return;
+  // Dispatch one op array for the LiveView hook to fold and retain its after-state
+  // until the hook acknowledges the exact sequence. A zero-length array is a no-op.
+  _dispatchOps(ops, nextBlocks = null) {
+    if (!ops || !ops.length) return false;
+    const seq = this._acknowledgedSaves ? ++this._opsSeq : undefined;
+    if (this._acknowledgedSaves) {
+      this._inflightOps = {
+        seq,
+        ops,
+        afterBlocks: deepCloneBlocks(nextBlocks || this._blocks),
+        echoSeen: false,
+      };
+    }
     this.dispatchEvent(
       new CustomEvent("bp-canvas-ops", {
-        detail: { ops },
+        detail: seq == null ? { ops } : { ops, seq },
         bubbles: true,
         composed: true,
       }),
     );
+    return true;
+  }
+
+  // Called by the LiveView bridge after the exact `paper-ops` request settles.
+  // Failure retains the batch so the bridge can retry it byte-for-byte. Success
+  // advances the local baseline and releases any edits made while it was pending.
+  acknowledgeOps(seq, saved) {
+    if (!this._acknowledgedSaves) return false;
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    if (saved !== true) return false;
+
+    this._blocks = deepCloneBlocks(current.afterBlocks);
+    if (!current.echoSeen) {
+      this._awaitingOwnEchoes.push(deepCloneBlocks(current.afterBlocks));
+    }
+    this._inflightOps = null;
+    const dirty = this._dirtyWhileInflight;
+    this._dirtyWhileInflight = false;
+    if (dirty) this._emitOps();
+    return true;
   }
 
   // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
@@ -1696,16 +1804,9 @@ class BpPaperCanvas extends HTMLElement {
   _enterSourceMode() {
     if (this._mode === "source" || !this._editor || !this._mount) return;
 
-    // Flush any pending debounced emit FIRST so the live doc's just-typed edits are
-    // EMITTED normally (they ride to the server and echo back to advance this._blocks
-    // on their own clock). This does NOT change the baseline we capture below — the
-    // baseline comes from the LIVE doc, not this._blocks — it only ensures the
-    // pre-source edits are in flight rather than stuck behind the debounce.
-    if (this._debounceTimer) {
-      clearTimeout(this._debounceTimer);
-      this._debounceTimer = null;
-      this._emitOps();
-    }
+    // Commit both node-view inputs and the outer batch before capturing source.
+    // Otherwise an immediate source toggle serializes stale code/caption attrs.
+    this.flushPendingChanges();
 
     // Close any open popup — in source mode the textarea owns input, so a lingering
     // [[ / # / slash / palette popup would float over a now-hidden editor.
@@ -1807,6 +1908,7 @@ class BpPaperCanvas extends HTMLElement {
   //            source) advance it normally on their own clock.
   // Either way the textarea + its listener are torn down and the rich editor reshown.
   _exitSourceMode() {
+    let emitted = false;
     if (this._mode === "source" && this._sourceEl) {
       const md = this._sourceEl.value;
       const edited = md !== this._sourceOriginalMd;
@@ -1853,13 +1955,13 @@ class BpPaperCanvas extends HTMLElement {
           })
           .run();
 
-        // (2) Dispatch ONLY the source-mode diff (L0 → L1). The pre-source edits
-        // (L0−C) are already in flight; this emits exactly what the user changed in
-        // the textarea — an unchanged block → no op; a changed heading → ONE
-        // patch-block (against its L0 id); an added/removed block → insert/remove,
-        // survivors untouched. A no-edit-equivalent reflow (md changed but blocks
-        // identical) → ZERO ops. this._blocks (C) is NOT advanced here.
-        this._dispatchOps(runToOps(L0, L1Doc));
+        // (2) Feed the new live document through the normal one-in-flight path.
+        // If an earlier rich batch is pending, source changes wait behind it and
+        // are diffed from that batch's acknowledged after-state.
+        // Use the normal one-in-flight path. If a rich batch is still pending,
+        // this marks the source result dirty and emits its incremental delta only
+        // after that earlier batch is acknowledged.
+        emitted = this._emitOps();
       }
       // else NO EDIT: the rich editor was never touched — the live doc, the diff
       // baseline, and the caret are exactly as they were. ZERO ops by construction.
@@ -1881,6 +1983,7 @@ class BpPaperCanvas extends HTMLElement {
       // external apply is the last word.
       this._flushPendingServerBlocks();
     }
+    return emitted;
   }
 
   // Grow the source textarea to fit its content (no internal scroll). Best-effort —
@@ -1944,6 +2047,26 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return;
     const next = Array.isArray(blocks) ? blocks : [];
 
+    // An echo can confirm an earlier local snapshot while the user has already
+    // edited beyond it. Recognize that snapshot as our own and advance only the
+    // confirmed baseline; replacing the live doc here would erase the newer edit.
+    if (this._inflightOps && reconcileServerEcho(
+      next,
+      runToTiptap(this._inflightOps.afterBlocks).content || [],
+    ).ownEcho) {
+      this._inflightOps.echoSeen = true;
+      this._clearPendingServerBlocks();
+      return;
+    }
+    const awaitingIndex = this._awaitingOwnEchoes.findIndex((snapshot) =>
+      reconcileServerEcho(next, runToTiptap(snapshot).content || []).ownEcho
+    );
+    if (awaitingIndex !== -1) {
+      this._awaitingOwnEchoes.splice(0, awaitingIndex + 1);
+      this._clearPendingServerBlocks();
+      return;
+    }
+
     // The match check, id-tolerant. reconcileServerEcho compares the confirmed
     // blocks to the LIVE top-level nodes, treating a live bpId:null as a wildcard
     // for the server id at that index (the NEW-block case), and returns the
@@ -1953,8 +2076,16 @@ class BpPaperCanvas extends HTMLElement {
     const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
     const { ownEcho, idWrites } = reconcileServerEcho(next, liveContent);
 
-    // Baseline reset — ALWAYS. This is the whole point of the echo: the next
-    // diff is incremental from the server-confirmed state, own-echo or not.
+    // A genuinely external echo cannot safely replace local content while one
+    // or more emitted snapshots are still awaiting confirmation. Defer it; a
+    // later own echo carries the server's newest folded state and supersedes it.
+    if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) {
+      this._queueServerBlocks(next);
+      return;
+    }
+
+    // No local save state remains, so this server run is authoritative for the
+    // next diff whether it is an own echo or an external update.
     this._blocks = next;
 
     if (ownEcho) {
@@ -2016,6 +2147,42 @@ class BpPaperCanvas extends HTMLElement {
     if (!mutated) return;
     // Attr-only change → no content change → selection maps through → caret
     // does NOT move. addToHistory:false keeps it out of undo.
+    tr.setMeta("addToHistory", false);
+    view.dispatch(tr);
+  }
+
+  // Stamp every id minted by docToBlocks back into the corresponding live PM
+  // node, including editable descendants inside section/container nodes. The
+  // stable projection has the same preorder shape as the live document; text
+  // nodes participate in the walk so positions cannot drift between siblings.
+  _stampMaterializedIds(stableDoc) {
+    if (!this._editor || !stableDoc) return;
+    const stableNodes = [];
+    const collect = (nodes) => {
+      for (const node of nodes || []) {
+        stableNodes.push(node);
+        collect(node.content);
+      }
+    };
+    collect(stableDoc.content);
+
+    const { state, view } = this._editor;
+    const tr = state.tr;
+    let index = 0;
+    let mutated = false;
+    state.doc.descendants((node, pos) => {
+      const stable = stableNodes[index++];
+      const stableId = stable?.attrs?.bpId;
+      if (!node.isText && node.attrs?.bpId == null && stableId != null) {
+        tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          bpId: stableId,
+          bpType: node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType,
+        });
+        mutated = true;
+      }
+    });
+    if (!mutated) return;
     tr.setMeta("addToHistory", false);
     view.dispatch(tr);
   }
@@ -2086,6 +2253,7 @@ class BpPaperCanvas extends HTMLElement {
     // Still mid-composition or still in source mode? Wait for the real release.
     if (this._editor && this._editor.view && this._editor.view.composing) return;
     if (this._mode === "source") return;
+    if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) return;
     const pending = this._pendingServerBlocks;
     this._clearPendingServerBlocks();
     if (pending) this._applyExternalContent(pending);
@@ -2122,6 +2290,9 @@ class BpPaperCanvas extends HTMLElement {
   // re-project the whole run into the live editor and reset the diff baseline.
   set blocks(value) {
     this._blocks = Array.isArray(value) ? value : [];
+    this._inflightOps = null;
+    this._awaitingOwnEchoes = [];
+    this._dirtyWhileInflight = false;
     if (this._editor) {
       this._programmaticApply = true;
       try {
@@ -2134,6 +2305,16 @@ class BpPaperCanvas extends HTMLElement {
 
   get blocks() {
     return this._blocks;
+  }
+
+  // Hosts with an acknowledged persistence bridge opt into ordered, one-at-a-
+  // time emission. Vanilla consumers retain the historical fire-and-echo API.
+  set acknowledgedSaves(value) {
+    this._acknowledgedSaves = value === true;
+  }
+
+  get acknowledgedSaves() {
+    return this._acknowledgedSaves;
   }
 }
 

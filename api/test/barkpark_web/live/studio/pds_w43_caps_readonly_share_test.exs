@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures
 
-  alias Barkpark.{Accounts, Content, Sharing}
+  alias Barkpark.{Accounts, Content}
   alias BarkparkWeb.Studio.Caps
 
   @dataset "production"
@@ -178,6 +178,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
   # The component event, THEN a round-trip on the parent. `persist/2` does
@@ -198,9 +199,14 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   defp inner_change(view, params) do
     assert_editor_rendered!(view)
 
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok

@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
     ~s(src="/assets/bp-paper-editor.bundle.js"),
     ~s(src="/assets/bp-media-picker.js"),
     ~s(src="/assets/bp-reference-picker.js"),
+    ~s(src="/assets/bp-rich-text-editor.js"),
     ~s(src="/assets/bp-paper-editor-hooks.js"),
     "window.BP_PAPER_EDITOR_NO_INJECT = true"
   ]

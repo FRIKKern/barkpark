@@ -112,6 +112,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     open_editor(view)
 
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "f-str",
       "patch" => %{"value" => "Solveig"}
@@ -133,6 +135,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     # The bridge sends a real JS boolean; assert the bool path. Also assert the
     # patch.ex coercion guard turns a stringy "true" into a real boolean.
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "f-bool",
       "patch" => %{"value" => true}
@@ -142,6 +146,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     assert block["value"] === true
 
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "f-bool",
       "patch" => %{"value" => "false"}
@@ -190,6 +196,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     # into a patch-block op pushed as `paper-op`. Simulate that wire — the op
     # arrives JSON-decoded with string keys, exactly as the handler accepts it.
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "f-ref",
       "patch" => %{"value" => "a2"}
@@ -212,6 +220,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     # The bp-media-picker emits the same `bp-change` event carrying the image
     # URL string; the bridge forwards it as a patch-block op.
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "f-img",
       "patch" => %{"value" => "/media/cover.png"}
@@ -374,6 +384,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     # The bridge reads the picker WC's parsed meta and patches a PLAIN URL into
     # `src` (never the JSON asset-ref envelope the field path stores in `value`).
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "tpl-featured",
       "patch" => %{"src" => "/media/files/2026/07/hero.jpg", "alt" => "Hero"}
@@ -401,6 +413,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     open_editor(view)
 
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "tpl-featured",
       "patch" => %{"src" => "/media/files/2026/07/hero.jpg", "alt" => "Hero"}
@@ -409,6 +423,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     # The WC's Remove emits value "" → the bridge patches src:"" — the public
     # /papers render skips the block again (compose.ex image clause).
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "tpl-featured",
       "patch" => %{"src" => "", "alt" => ""}
@@ -422,4 +438,6 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     assert block["locked"] == true
     assert Barkpark.PortableDoc.Render.render_block(block) == ""
   end
+
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
 end

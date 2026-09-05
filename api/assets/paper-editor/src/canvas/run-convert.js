@@ -3087,7 +3087,7 @@ export function docToBlocks(doc) {
 //   3. moves permute the running list — now exactly nextSeq's id SET in some
 //      order — into nextSeq ORDER. An already-correct subsequence emits nothing.
 //   4. interior patches mutate surviving prose content in place (order-free).
-export function runToOps(prevBlocks, nextDoc) {
+export function runToOps(prevBlocks, nextDoc, options = {}) {
   const prev = prevBlocks || [];
   const nextNodes = (nextDoc && nextDoc.content) || [];
 
@@ -3115,6 +3115,7 @@ export function runToOps(prevBlocks, nextDoc) {
   // tree.
   const taken = new Set();
   walkBlockIds(prev, taken);
+  const claimedNewIds = new Set();
 
   // Classify each node into its canvas KIND + resolved bpType via the SHARED
   // classifyNode (the same path docToBlocks uses), then resolve the id HERE: a
@@ -3125,7 +3126,13 @@ export function runToOps(prevBlocks, nextDoc) {
   const nextSeq = nextNodes.map((node) => {
     const bpId = node.attrs && node.attrs.bpId;
     const existing = bpId != null && prevIndex.has(bpId);
-    const id = existing ? bpId : mintId(taken);
+    const preservedNew = options.preserveNewIds === true && bpId != null &&
+      !taken.has(bpId) && !claimedNewIds.has(bpId);
+    const id = existing || preservedNew ? bpId : mintId(taken);
+    if (preservedNew) {
+      taken.add(id);
+      claimedNewIds.add(id);
+    }
     return { ...classifyNode(node), id, isNew: !existing };
   });
 

@@ -742,9 +742,49 @@ defmodule Barkpark.Content do
   def apply_paper_block_ops(slug, ops, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.apply_paper_block_ops(slug, ops, dataset, opts)
 
+  @doc "Apply one request-identified paper-op batch once within bounded replay retention, owning its transaction boundary. See `Content.Papers.BlockOps`."
+  def apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      ),
+      do:
+        Papers.BlockOps.apply_paper_block_ops_once(
+          slug,
+          ops,
+          dataset,
+          request_id,
+          principal_key,
+          opts
+        )
+
   @doc "Apply a single portable-doc op to any Expectation-bearing document. See `Content.Papers`."
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
+
+  @doc "Request-identified exact-once document block op; see `Content.Papers`."
+  def apply_document_block_op_once(
+        doc_id,
+        type,
+        op,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      ),
+      do:
+        Papers.apply_document_block_op_once(
+          doc_id,
+          type,
+          op,
+          dataset,
+          request_id,
+          principal_key,
+          opts
+        )
 
   @doc "Field-scoped block ops for a `richText` field with `editor: blocks` — see `Papers.apply_field_block_ops/6`."
   def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),

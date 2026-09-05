@@ -61,6 +61,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # navigation remounts it instead of transplanting the `phx-update="ignore"`
   # wrapper across documents (paper_canvas.ex bug #1c).
   attr :doc_key, :string, default: "doc"
+  attr :doc_type, :string, default: "document"
+  attr :document_rev, :string, default: nil
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
@@ -161,6 +163,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
       class="bp-paper-edit-canvas bp-field-canvas"
       data-field={@n}
       data-doc-key={@doc_key}
+      data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@doc_key}"}
+      data-document-rev={@document_rev}
       data-canvas-blocks={@blocks_json}
       data-canvas-vocabulary={@vocab_json}
       data-canvas-dataset={@dataset}

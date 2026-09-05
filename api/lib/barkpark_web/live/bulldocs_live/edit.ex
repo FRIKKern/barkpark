@@ -32,18 +32,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   re-check `can_edit?` anyway (`writable?/1`), so a future caller that reaches
   them without the hook still cannot write.
 
-  ## Refused for now
+  ## Canvas contract
 
-  The gate covers the full Studio `paper-*` roster, but the reader WIRES only
-  the MVP set: `paper-toggle-edit`, `paper-op`, `paper-ops`, `paper-edit-block`,
-  `paper-block-autosave`, `paper-add-block`, `paper-delete-block`,
-  `paper-move-block`, `paper-move-block-to`. The rest
-  (`paper-materialize-slot`, `paper-slash-insert`, `paper-wikilink-search`,
-  `paper-tag-search`, `paper-add-property`, `paper-unbind-property`,
-  `paper-callout-fold`, `paper-valueref-inspect`, `paper-publish`) are listed
-  so a denied socket is refused identically, and fall into the reader's calm
-  unhandled-event log for a permitted one — they read Studio pane assigns
-  (`:paper_doc`, `:editor_view`, an Expectation) the reader does not carry.
+  The reader carries the fetched paper as `:paper_doc`, allowing it to reuse
+  Studio's continuous-canvas echo, task-preview, and server-rendered block paint
+  helpers without a second protocol. It wires slash insertion, optional-slot
+  materialization, callout folding, and scoped wikilink/tag autocomplete in
+  addition to the core op events. Item-share editors receive empty autocomplete
+  results because their grant binds one paper and does not grant dataset-wide
+  discovery. Events that require Studio-only pane/schema state remain gated and
+  fall through as calm no-ops for a permitted reader.
 
   ## State
 
@@ -56,9 +54,13 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
-  alias Barkpark.Content
+  alias Barkpark.{Auth, Content}
+  alias BarkparkWeb.PaperViewer
   alias BarkparkWeb.ScopeHelpers
-  alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
+
+  @server_minted_block :__server_minted_block__
 
   # Every `paper-*` event Studio wires. Membership here means "an edit event":
   # refused for a socket without `:can_edit?`, whether or not the reader wires
@@ -73,6 +75,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-delete-block
     paper-move-block
     paper-move-block-to
+    task-preview-refresh
     paper-materialize-slot
     paper-slash-insert
     paper-wikilink-search
@@ -104,8 +107,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     socket
     |> assign(:editing?, false)
     |> assign(:edit_blocks, blocks_of(paper))
+    |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
     |> assign(:save_status, "")
+    |> assign(:last_save_ok?, true)
     |> assign(:paper_halt, nil)
     |> assign(:task_previews, %{})
   end
@@ -135,44 +140,88 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   the stored blocks, not on a buffer that a broadcast may have left behind.
   """
   def toggle(socket) do
-    if writable?(socket) do
-      editing? = socket.assigns[:editing?] != true
+    cond do
+      not writable?(socket) ->
+        refuse(socket)
 
-      socket = assign(socket, :editing?, editing?)
+      socket.assigns[:editing?] == true and
+          (is_binary(socket.assigns[:paper_halt]) or socket.assigns[:last_save_ok?] == false) ->
+        socket
 
-      if editing?, do: sync(socket), else: socket
-    else
-      refuse(socket)
+      true ->
+        editing? = socket.assigns[:editing?] != true
+        socket = assign(socket, :editing?, editing?)
+
+        if editing?, do: socket |> sync() |> refresh_canvas(), else: socket
     end
   end
 
   # ── the ONE op path ─────────────────────────────────────────────────────────
 
   @doc """
-  Apply ONE `DocPatchOp` through `Content.apply_paper_block_op/4`, with the
-  socket's tenant scope. Same primitive, same result mapping as the Studio pane
+  Apply ONE `DocPatchOp` with the socket's tenant scope. Request-identified
+  writes use the exact-once batch facade with one op; the unidentified legacy
+  seam retains the single-op primitive. Result mapping matches the Studio pane
   (`Studio.StudioLive.Shared.Paper.paper_pane_op/2`).
   """
   def apply_op(socket, %{"op" => _} = op) do
+    request_id = op["request_id"]
+    socket = failed_save(socket, request_id)
+
+    if is_binary(request_id) do
+      apply_op_once(socket, op, request_id)
+    else
+      apply_unidentified_op(socket, op)
+    end
+  end
+
+  def apply_op(socket, op), do: failed_save(socket, is_map(op) && op["request_id"])
+
+  defp apply_op_once(socket, op, request_id) do
+    op = stable_request_op(op, request_id)
+
+    case apply_ops(
+           socket,
+           [Map.drop(op, ["if_rev", "request_id"])],
+           request_id,
+           op["if_rev"]
+         ) do
+      {:ok, socket, receipt, outcome} ->
+        assign(socket, :last_save_result, %{
+          saved: true,
+          request_id: request_id,
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        })
+
+      {:error, socket} ->
+        socket
+    end
+  end
+
+  defp apply_unidentified_op(socket, op) do
     cond do
       not writable?(socket) ->
-        refuse(socket)
+        refuse_save(socket, nil)
 
       not is_binary(socket.assigns[:slug]) ->
         socket
 
+      revision(op["if_rev"]) == :error ->
+        socket
+
       true ->
+        {:ok, if_rev} = revision(op["if_rev"])
+
         socket.assigns.slug
         |> Content.apply_paper_block_op(
-          op,
+          Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
           socket.assigns[:dataset],
-          ScopeHelpers.scope_opts(socket)
+          ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
         )
-        |> handle_result(socket)
+        |> handle_result(socket, nil)
     end
   end
-
-  def apply_op(socket, _op), do: socket
 
   @doc """
   Apply an ORDERED batch of ops atomically through
@@ -198,7 +247,56 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     end
   end
 
-  def apply_ops(socket, _ops), do: socket
+  def apply_ops(socket, _ops) do
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+  end
+
+  @doc "Apply one request-identified canvas batch exactly once."
+  def apply_ops(socket, ops, request_id, supplied_rev) do
+    paper = socket.assigns[:paper_doc]
+    workspace_id = doc_field(paper, :workspace_id)
+    slug = socket.assigns[:slug]
+    assigns = fresh_authorization_assigns(socket.assigns)
+
+    cond do
+      not PaperViewer.can_edit?(assigns, workspace_id, slug) ->
+        {:error, refuse_save(socket, request_id)}
+
+      not (is_binary(slug) and is_list(ops) and ops != []) ->
+        {:error, failed_save(socket, request_id)}
+
+      revision(supplied_rev) == :error ->
+        {:error, failed_save(socket, request_id)}
+
+      true ->
+        {:ok, if_rev} = revision(supplied_rev)
+
+        case Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               socket.assigns[:dataset],
+               request_id,
+               replay_principal_key(assigns),
+               ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+             ) do
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> sync()
+              |> reconcile_canvas(request_id)
+              |> assign(:save_status, "Auto-saved")
+              |> assign(:last_save_ok?, true)
+              |> assign(:paper_halt, nil)
+
+            {:ok, socket, receipt, outcome}
+
+          {:error, reason} ->
+            {:error, handle_result({:error, reason}, socket, request_id)}
+        end
+    end
+  end
 
   # ── the MVP editor events, each mapping to exactly ONE op ───────────────────
 
@@ -206,10 +304,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def edit_block(socket, %{"block_id" => id} = params) when is_binary(id) do
     patch = Blocks.build_block_patch(block_by_id(socket, id), params)
 
-    apply_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})
+    apply_op(socket, write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params))
   end
 
-  def edit_block(socket, _params), do: socket
+  def edit_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])
 
   @doc "The `+ Add block` form → `insert-after` when anchored, else `append-block`."
   def add_block(socket, %{"block-type" => type} = params) when is_binary(type) do
@@ -224,35 +322,36 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           %{"op" => "append-block", "block" => new}
       end
 
-    apply_op(socket, op)
+    apply_op(socket, write_meta(server_minted_block(op), params))
   end
 
-  def add_block(socket, _params), do: socket
+  def add_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])
 
   @doc """
   Delete one block → a `remove-block` op. A template-locked block is a calm
   no-op (its control is hidden; only a stale DOM or a crafted event gets here),
   mirroring the Studio handler rather than emitting a server-rejected op.
   """
-  def delete_block(socket, %{"id" => id}) when is_binary(id) do
+  def delete_block(socket, %{"id" => id} = params) when is_binary(id) do
     if locked_block_id?(socket, id) do
-      socket
+      failed_save(socket, params["request_id"])
     else
-      apply_op(socket, %{"op" => "remove-block", "id" => id})
+      apply_op(socket, write_meta(%{"op" => "remove-block", "id" => id}, params))
     end
   end
 
-  def delete_block(socket, _params), do: socket
+  def delete_block(socket, params),
+    do: failed_save(socket, is_map(params) && params["request_id"])
 
   @doc "The ▲/▼ controls → a top-level `move-block` op."
-  def move_block(socket, %{"id" => id, "dir" => dir}) when is_binary(id) do
+  def move_block(socket, %{"id" => id, "dir" => dir} = params) when is_binary(id) do
     blocks = socket.assigns[:edit_blocks] || []
     idx = Enum.find_index(blocks, fn b -> Map.get(b, "id") == id end)
 
-    reorder(socket, blocks, idx, dir)
+    reorder(socket, blocks, idx, dir, params)
   end
 
-  def move_block(socket, _params), do: socket
+  def move_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])
 
   @doc """
   Drag-and-drop → the same `move-block` op the ▲/▼ buttons emit. A locked block
@@ -266,13 +365,102 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       end
 
     if locked_block_id?(socket, id) do
-      socket
+      failed_save(socket, params["request_id"])
     else
-      apply_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})
+      apply_op(
+        socket,
+        write_meta(%{"op" => "move-block", "id" => id, "after" => after_id}, params)
+      )
     end
   end
 
-  def move_block_to(socket, _params), do: socket
+  def move_block_to(socket, params),
+    do: failed_save(socket, is_map(params) && params["request_id"])
+
+  @doc "Refresh the canvas' display-only task previews and server-rendered block HTML."
+  def refresh_canvas(socket) do
+    if writable?(socket) do
+      socket
+      |> Shared.push_task_previews()
+      |> Shared.push_block_renders()
+      |> then(fn refreshed ->
+        assign(refreshed, :task_previews, socket_task_previews(refreshed))
+      end)
+    else
+      refuse(socket)
+    end
+  end
+
+  @doc "Echo confirmed blocks and repaint display-only canvas content after a refetch."
+  def reconcile_canvas(socket, request_id \\ nil) do
+    if writable?(socket) and socket.assigns[:editing?] == true do
+      socket
+      |> SharedPaper.push_canvas_echo(request_id)
+      |> refresh_canvas()
+    else
+      socket
+    end
+  end
+
+  @doc "Materialize one supported optional template slot through the canonical op path."
+  def materialize_slot(socket, %{"kind" => kind} = params) do
+    case materialize_slot_block(kind) do
+      nil ->
+        failed_save(socket, params["request_id"])
+
+      block ->
+        op =
+          case params["after"] do
+            after_id when is_binary(after_id) and after_id != "" ->
+              %{"op" => "insert-after", "afterId" => after_id, "block" => block}
+
+            _ ->
+              %{"op" => "append-block", "block" => block}
+          end
+
+        apply_op(socket, write_meta(server_minted_block(op), params))
+    end
+  end
+
+  def materialize_slot(socket, params),
+    do: failed_save(socket, is_map(params) && params["request_id"])
+
+  @doc "Insert a slash-menu block after its anchor, or append it for a blank anchor."
+  def slash_insert(socket, %{"type" => type} = params) when is_binary(type) do
+    id = Blocks.new_block_id()
+
+    block =
+      type
+      |> Blocks.default_block(id)
+      |> maybe_put_field_name(params)
+      |> maybe_merge_callout_shortcut(type, params)
+
+    apply_op(
+      socket,
+      write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], block)), params)
+    )
+  end
+
+  def slash_insert(socket, params),
+    do: failed_save(socket, is_map(params) && params["request_id"])
+
+  @doc "Persist a callout's native details fold state through one patch-block op."
+  def callout_fold(socket, %{"block_id" => id} = params) when is_binary(id) do
+    apply_op(
+      socket,
+      write_meta(
+        %{
+          "op" => "patch-block",
+          "id" => id,
+          "patch" => %{"collapsed" => Map.get(params, "collapsed") == true}
+        },
+        params
+      )
+    )
+  end
+
+  def callout_fold(socket, params),
+    do: failed_save(socket, is_map(params) && params["request_id"])
 
   # ── buffer derivation ───────────────────────────────────────────────────────
 
@@ -295,6 +483,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def sync(socket, paper) do
     socket
     |> assign(:edit_blocks, blocks_of(paper))
+    |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
   end
 
@@ -310,37 +499,157 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp refuse(socket), do: put_flash(socket, :error, @denial)
 
-  defp handle_result({:ok, _result}, socket) do
+  defp refuse_save(socket, request_id), do: socket |> refuse() |> failed_save(request_id)
+
+  defp failed_save(socket, request_id) do
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+  end
+
+  # Connected item-share readers retain the signed mount session in the
+  # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
+  # write so revocation/expiry is checked before an idempotency receipt lookup.
+  defp fresh_authorization_assigns(assigns) do
+    assigns
+    |> refresh_api_token()
+    |> refresh_item_share()
+  end
+
+  defp refresh_api_token(%{api_token: %{id: _}} = assigns) do
+    case Map.get(assigns, :api_token_raw) do
+      raw when is_binary(raw) and raw != "" ->
+        case Auth.verify_token(raw) do
+          {:ok, token} -> Map.put(assigns, :api_token, token)
+          _ -> Map.put(assigns, :api_token, nil)
+        end
+
+      _ ->
+        Map.put(assigns, :api_token, nil)
+    end
+  end
+
+  defp refresh_api_token(assigns), do: assigns
+
+  defp refresh_item_share(assigns) do
+    case {Map.get(assigns, :paper_share_grant),
+          get_in(assigns, [:__plugin_scope_session_share_liveness__, :session])} do
+      {%{grant: :item}, session} when is_map(session) ->
+        Map.put(assigns, :paper_share_grant, PaperViewer.resolve_share_grant(session))
+
+      _ ->
+        assigns
+    end
+  end
+
+  defp replay_principal_key(%{current_user: %{id: id}}) when is_binary(id), do: "user:" <> id
+  defp replay_principal_key(%{api_token: %{id: id}}) when is_binary(id), do: "token:" <> id
+
+  defp replay_principal_key(%{paper_share_grant: %{id: id}}) when is_binary(id),
+    do: "share:" <> id
+
+  defp replay_principal_key(_assigns), do: nil
+
+  defp doc_field(doc, field) when is_map(doc), do: Map.get(doc, field)
+  defp doc_field(_doc, _field), do: nil
+
+  defp handle_result(result, socket), do: handle_result(result, socket, nil)
+
+  defp handle_result({:ok, result}, socket, request_id) do
     socket
     |> sync()
+    |> reconcile_canvas(request_id)
     |> assign(:save_status, "Auto-saved")
+    |> assign(:last_save_ok?, true)
+    |> assign(:last_save_result, %{saved: true, request_id: request_id, rev: result.rev})
     # A prior halt cleared: the next accepted edit dismisses the banner.
     |> assign(:paper_halt, nil)
   end
 
   # A constraint veto (pdd-t20) carries a human-readable reason — surface it so
   # a calmly-rejected edit explains itself.
-  defp handle_result({:error, {:constraint, message, _op}}, socket) do
+  defp handle_result({:error, :precondition_failed}, socket, request_id) do
+    socket = socket |> sync() |> reconcile_canvas(request_id)
+
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      conflict: true,
+      current_rev: socket.assigns[:paper_rev]
+    })
+  end
+
+  defp handle_result({:error, {:constraint, message, _op}}, socket, request_id) do
     socket
     |> put_flash(:error, constraint_flash(message))
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, %{saved: false, request_id: request_id})
   end
 
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
   # no copy of its own (the same D5/D6 stance the Studio editor holds).
-  defp handle_result({:error, {:halted, reason}}, socket) do
+  defp handle_result({:error, {:halted, reason}}, socket, request_id) do
     message = halt_reason(reason)
 
     socket
     |> assign(:paper_halt, message)
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, %{saved: false, request_id: request_id})
   end
 
-  defp handle_result({:error, _reason}, socket) do
+  defp handle_result({:error, _reason}, socket, request_id) do
     socket
     |> put_flash(:error, "Edit failed")
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+  end
+
+  defp revision(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp revision(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp revision(_), do: :error
+
+  defp write_meta(op, params) do
+    op
+    |> Map.put("if_rev", params["if_rev"])
+    |> Map.put("request_id", params["request_id"])
+  end
+
+  # Structural handlers mint block ids before they reach this seam. A lost
+  # acknowledgement rebuilds that op on retry, so bind the minted id to the
+  # stable request id before the exact-once facade fingerprints the payload.
+  defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
+    op
+    |> Map.delete(@server_minted_block)
+    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+  end
+
+  defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
+
+  defp server_minted_block(op), do: Map.put(op, @server_minted_block, true)
+
+  defp request_block_id(request_id) do
+    suffix =
+      request_id
+      |> then(&:crypto.hash(:sha256, &1))
+      |> binary_part(0, 9)
+      |> Base.url_encode64(padding: false)
+
+    "b-" <> suffix
   end
 
   defp constraint_flash(message) when is_binary(message),
@@ -355,41 +664,87 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   # Reorder by swap, expressed as ONE move-block op — the Studio
   # `paper_reorder/4` shape, minus the pane assigns it reads.
-  defp reorder(socket, _blocks, nil, _dir), do: socket
+  defp reorder(socket, _blocks, nil, _dir, params), do: failed_save(socket, params["request_id"])
 
-  defp reorder(socket, blocks, idx, "up") when idx > 0 do
+  defp reorder(socket, blocks, idx, "up", params) when idx > 0 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx - 1)
 
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_save(socket, params["request_id"])
     else
       after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
 
-      apply_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+      apply_op(
+        socket,
+        write_meta(
+          %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id},
+          params
+        )
+      )
     end
   end
 
-  defp reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
+  defp reorder(socket, blocks, idx, "down", params) when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
     displaced = Enum.at(blocks, idx + 1)
 
     if locked_block?(moved) or locked_block?(displaced) do
-      socket
+      failed_save(socket, params["request_id"])
     else
-      apply_op(socket, %{
-        "op" => "move-block",
-        "id" => Map.get(moved, "id"),
-        "after" => Map.get(displaced, "id")
-      })
+      apply_op(
+        socket,
+        write_meta(
+          %{
+            "op" => "move-block",
+            "id" => Map.get(moved, "id"),
+            "after" => Map.get(displaced, "id")
+          },
+          params
+        )
+      )
     end
   end
 
-  defp reorder(socket, _blocks, _idx, _dir), do: socket
+  defp reorder(socket, _blocks, _idx, _dir, params),
+    do: failed_save(socket, params["request_id"])
 
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
 
   defp locked_block_id?(socket, id), do: socket |> block_by_id(id) |> locked_block?()
+
+  defp socket_task_previews(socket), do: socket.assigns[:paper_task_previews] || %{}
+
+  defp materialize_slot_block("featured") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "image",
+      "role" => "featured",
+      "locked" => true
+    }
+  end
+
+  defp materialize_slot_block("ingress") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "paragraph",
+      "role" => "ingress",
+      "content" => []
+    }
+  end
+
+  defp materialize_slot_block(_kind), do: nil
+
+  defp maybe_put_field_name(block, %{"fieldName" => name})
+       when is_binary(name) and name != "",
+       do: Map.put(block, "fieldName", name)
+
+  defp maybe_put_field_name(block, _params), do: block
+
+  defp maybe_merge_callout_shortcut(block, "callout", params),
+    do: Map.merge(block, Map.take(params, ["tone", "collapsible", "collapsed"]))
+
+  defp maybe_merge_callout_shortcut(block, _type, _params), do: block
 
   defp blocks_of(%{content: %{"blocks" => blocks}}) when is_list(blocks), do: blocks
   defp blocks_of(_paper), do: []

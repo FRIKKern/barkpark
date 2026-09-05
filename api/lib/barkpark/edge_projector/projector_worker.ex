@@ -11,12 +11,17 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   ## Queue + uniqueness
 
   Runs on the dedicated `:edge_projector` queue (concurrency 2) so it never
-  competes with `:indx`. Unique on `(op, scope, _id, types)` across
+  competes with `:indx`. Unique on
+  `(op, workspace_id, project_id, scope, _id, types)` across
   `:available` / `:scheduled` / `:executing` for 30s:
 
-    * rebuild jobs carry NO `_id` → dedup on `(rebuild, scope, nil, types)`,
-      i.e. a burst of saves to one scope collapses into a single rebuild PER
-      TYPE SET. `types` MUST be in the key (lvw-t11-followup-dedup): the
+    * rebuild jobs carry NO `_id` → dedup on
+      `(rebuild, workspace_id, project_id, scope, nil, types)`, i.e. a burst
+      of saves to one tenant scope collapses into a single rebuild PER TYPE
+      SET. Tenant ids MUST be in the key because dataset strings repeat across
+      workspaces/projects; otherwise one tenant's job can swallow another's.
+      Nil tenant ids preserve legacy flat-scope dedup. `types` MUST be in the
+      key (lvw-t11-followup-dedup): the
       lifecycle enqueues per-save with `types: [doc.type]`, so without it a
       `types ["task"]` job swallowed a subsequent `types ["paper"]` enqueue in
       the same window — Oban returned the existing job, the new args were
@@ -26,9 +31,9 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       clobber each other. (Contrast `Indx.IndexerWorker`: its blue/green
       whole-dataset swap makes this fix NON-portable there — see task
       indx-rebuild-types-dedup.)
-    * upsert/delete jobs carry an `_id` → dedup per `(op, scope, _id, types)`;
-      a doc always enqueues with its own single type, so this stays per-doc
-      dedup exactly as before.
+    * upsert/delete jobs carry an `_id` → dedup per
+      `(op, workspace_id, project_id, scope, _id, types)`; a doc always
+      enqueues with its own single type, so this stays per-tenant-doc dedup.
 
   `types` is normalised (sorted + deduped) at enqueue so element ORDER cannot
   defeat the uniqueness key.
@@ -79,7 +84,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     queue: :edge_projector,
     max_attempts: 5,
     unique: [
-      keys: [:op, :scope, :_id, :types],
+      keys: [:op, :workspace_id, :project_id, :scope, :_id, :types],
       states: [:available, :scheduled, :executing],
       period: 30
     ]
@@ -115,8 +120,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   @doc """
   Build a debounced UPSERT job projecting a single `id` into `scope`'s graph.
   Routed by `:after_save` / `:after_publish` ONLY when `incremental_project`
-  is ON. Unique per `(scope, id, types)` — per-doc in practice, a doc always
-  enqueues with its own single type.
+  is ON. Unique per `(workspace_id, project_id, scope, id, types)` — per-doc
+  in practice, a doc always enqueues with its own single type.
   """
   @spec enqueue_upsert(String.t(), String.t(), keyword()) ::
           {:ok, Oban.Job.t()} | {:error, term()}
@@ -138,8 +143,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   @doc """
   Build a debounced DELETE job removing every edge touching `id` in `scope`'s
   graph. Routed by `:after_unpublish` / `:after_delete`. Unique per
-  `(scope, id, types)` — per-doc in practice, a doc always enqueues with its
-  own single type.
+  `(workspace_id, project_id, scope, id, types)` — per-doc in practice, a doc
+  always enqueues with its own single type.
   """
   @spec enqueue_delete(String.t(), String.t(), keyword()) ::
           {:ok, Oban.Job.t()} | {:error, term()}
