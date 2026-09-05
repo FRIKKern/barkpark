@@ -74,7 +74,7 @@ defmodule BarkparkWeb.MediaController do
   # defence-in-depth, and the point of repairing it is that a fail-open SHAPE
   # left in place is the thing the next reader trusts.
   @doc false
-  def scope_bound?(opts), do: is_binary(Keyword.get(opts, :workspace_id))
+  def scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
 
   @doc false
   def confine_one(opts, %MediaFile{} = file) do

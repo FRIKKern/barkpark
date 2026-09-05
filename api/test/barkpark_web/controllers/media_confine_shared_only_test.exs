@@ -41,7 +41,8 @@ defmodule BarkparkWeb.MediaConfineSharedOnlyTest do
     proj = create_project!(ws)
 
     {:ok, owned} = create_media_file_in!(ws, proj)
-    shared = %MediaFile{owned | id: Ecto.UUID.generate(), workspace_id: nil, project_id: nil}
+    %MediaFile{} = owned
+    shared = %{owned | id: Ecto.UUID.generate(), workspace_id: nil, project_id: nil}
 
     {:ok, ws: ws, owned: owned, shared: shared}
   end
