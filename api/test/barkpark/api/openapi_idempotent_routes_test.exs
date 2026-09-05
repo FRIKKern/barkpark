@@ -98,7 +98,9 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
         |> String.replace("{dataset}", @dataset)
 
       key = "openapi-idem-#{System.unique_integer([:positive])}"
-      body = Jason.encode!(%{"mutations" => [%{"create" => %{"_type" => "post", "title" => key}}]})
+
+      body =
+        Jason.encode!(%{"mutations" => [%{"create" => %{"_type" => "post", "title" => key}}]})
 
       first = post(conn_with(key), url, body)
 
