@@ -189,7 +189,15 @@ func runCloudInstanceAuthority(out *writer, g globals, args []string) int {
 	// c4, ENCODED not warned: there is no fleet mode. Sampling one box and
 	// speaking for the rest is the exact inference this row exists to prevent,
 	// and the row records it would have gone wrong in BOTH directions.
-	if a.bools["all"] {
+	//
+	// BOTH sources are read on purpose. `--all` is a GLOBAL flag (globals.all,
+	// the pagination knob), so the root parser swallows it before this verb's
+	// argv is built: a guard keyed only on the local bool is UNREACHABLE from
+	// the real entry point and refuses nothing — measured, on a live run that
+	// went ahead and checked a box while `--all` sat parsed and ignored. The
+	// local bool stays because a future root-parser change could stop claiming
+	// it, and a guard that survives both readings is the one worth having.
+	if g.all || a.bools["all"] {
 		return useError(out, "usage",
 			"there is no --all: operator authority is PER BOX, so this verb reads one instance and reports one instance — "+authorityScopeNote,
 			exitUsage)

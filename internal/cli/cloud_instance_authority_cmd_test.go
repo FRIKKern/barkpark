@@ -221,6 +221,45 @@ func TestAuthorityRefusesAll(t *testing.T) {
 	}
 }
 
+// TestAuthorityRefusesAllThroughTheRootParser is the arm that MATTERS, and it is
+// here because the sibling above did not catch a real hole. `--all` is a GLOBAL
+// flag (globals.all, the pagination knob), so parseGlobals CLAIMS it and it never
+// reaches the verb's argv — a guard keyed only on the verb-local bool refused
+// nothing from the real entry point, and a live smoke run went ahead and checked
+// a box with `--all` on the command line. This test drives parseGlobals first, so
+// it fails if the guard is ever unreachable again.
+func TestAuthorityRefusesAllThroughTheRootParser(t *testing.T) {
+	workspaceEnvIsolate(t)
+
+	g, rest, err := parseGlobals([]string{"cloud", "instance", "authority", "--all"})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	// The premise, asserted rather than assumed: the ROOT parser takes --all, so
+	// the verb never sees it in its own argv.
+	if !g.all {
+		t.Fatal("the root parser did not claim --all — this test no longer covers the hole it was written for")
+	}
+	for _, a := range rest {
+		if a == "--all" {
+			t.Fatal("--all survived into the verb argv; the local-bool guard would have been enough")
+		}
+	}
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = "table"
+	w.color = false
+	code := runCloud(w, g, rest[1:])
+
+	if code != exitUsage {
+		t.Fatalf("--all through the root parser exited %d, want %d; out=%s err=%s", code, exitUsage, sout.String(), serr.String())
+	}
+	if !strings.Contains(sout.String()+serr.String(), "PER BOX") {
+		t.Fatalf("the refusal does not name the reason:\n%s%s", sout.String(), serr.String())
+	}
+}
+
 // TestAuthoritySQLPrintsBothQueries: the half with no HTTP door is handed over as
 // runnable SQL rather than skipped. Both queries and the GRANT remedy must be
 // present, and the human form must be copy-pasteable.
