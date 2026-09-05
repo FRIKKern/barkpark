@@ -501,13 +501,13 @@ run_gate "Cloud gate: RED — no reassuring notice on a failure" "$cloud_step" n
 console_step="$TMPROOT/step-console.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/console-harness.yml" console-gate "$console_step"
 run_gate "Console gate: api-only, nothing dispatched" "$console_step" yes 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped \
   R_ESCAPE=success O_CONSOLE=false
 run_gate "Console gate: the harness really ran" "$console_step" no 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success \
   R_ESCAPE=success O_CONSOLE=true
 run_gate "Console gate: RED — no reassuring notice on a failure" "$console_step" no 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
   R_ESCAPE=success O_CONSOLE=true
 
 security_step="$TMPROOT/step-security.sh"
@@ -549,7 +549,7 @@ run_gate "Cloud gate: api-only" "$cloud_step" yes 0 \
   R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_ESCAPE=success O_CLOUD=false
 body_says "Cloud gate" - "NOTHING CLOUD RAN"
 run_gate "Console gate: api-only" "$console_step" yes 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped \
   R_ESCAPE=success O_CONSOLE=false
 body_says "Console gate" - "NOTHING CONSOLE RAN"
 run_gate "Security gate: docs-only" "$security_step" yes 0 \
@@ -656,10 +656,10 @@ red_names "Cloud gate: compile failed" "$cloud_step" "compile" "test" \
   R_CHANGES=success R_COMPILE=failure R_TEST=success R_ESCAPE=success O_CLOUD=true
 
 red_names "Console gate: cssom-parity failed" "$console_step" "cssom-parity" "tier-floor-render" \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
   R_ESCAPE=success O_CONSOLE=true
 red_names "Console gate: tier-floor-render failed" "$console_step" "tier-floor-render" "cssom-parity" \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success \
   R_ESCAPE=success O_CONSOLE=true
 
 red_names "Security gate: mix-audit failed" "$security_step" "mix-audit" "sobelow-inline-overlap" \
@@ -702,7 +702,7 @@ fi
 # fact #11377 left on the floor: `measured` was collected and then discarded on
 # every red where no upstream published a REFUSED verdict.
 run_gate "Console gate: RED, no refusal" "$console_step" no 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
   R_ESCAPE=success O_CONSOLE=true V_CSSOM=MEASURED_DEFECT
 CON_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
 if has "$CON_ANN" "Measured defects (exit 1) in this run: cssom-parity"; then
