@@ -277,9 +277,15 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
 
       run_backfill!()
 
-      assert [{_f, to}] = edge_endpoints(dependent.id),
+      # Bind first, then assert on a boolean: `assert pattern = expr, "msg"`
+      # raises MatchError before assert/2 can ever reach the message, so the
+      # message is dead code (scripts/unreachable-assert-message-check.sh).
+      remaining = edge_endpoints(dependent.id)
+
+      assert length(remaining) == 1,
              "the collision was not de-duplicated — the migration would have aborted"
 
+      assert [{_f, to}] = remaining
       assert to == published.id
     end
 
