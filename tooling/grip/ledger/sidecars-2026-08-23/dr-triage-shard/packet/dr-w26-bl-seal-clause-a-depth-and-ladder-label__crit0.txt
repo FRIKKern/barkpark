@@ -1,0 +1,1 @@
+Clause (a) reads the transitive roster (depth-capped, cycle-guarded, page-full refusal applied PER NODE) and prints depth= and subtree-unread=, refusing on anything it could not descend.

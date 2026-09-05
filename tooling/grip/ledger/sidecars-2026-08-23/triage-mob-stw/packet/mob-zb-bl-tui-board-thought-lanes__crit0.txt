@@ -1,0 +1,1 @@
+Fail-before test: a considering-status row is dropped from the TUI board pre-fix (red quoted), visible in its own lane post-fix; boardColumns matches the 7-role manifest ladder

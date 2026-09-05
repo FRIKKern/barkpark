@@ -1,0 +1,1 @@
+If SQL stays canonical: a test reds when container discovery or the credential lookup breaks, so a silent fallback failure cannot read as a clean verdict. Evidence: the test and a mutation proving it can lose.

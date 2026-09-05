@@ -1,0 +1,1 @@
+The fix makes the piped output byte-identical to the file output, verdict line included, at the same exit code. Evidence: paste `diff <(node ... --selftest) /tmp/st.txt` returning nothing.

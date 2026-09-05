@@ -1,0 +1,1 @@
+The census is made immune at the query or at the publish — not by a periodic sweep of drafts. Evidence: the diff, plus a children read taken DURING an in-flight patch showing the count unchanged.

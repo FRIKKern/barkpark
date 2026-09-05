@@ -25,6 +25,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
   that forgot to thread scope returns the same rows either way. Every test
   below stands up TWO workspaces and asserts across the seam.
   """
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox
@@ -68,7 +69,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
   end
 
   defp json_conn(bearer) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
   end

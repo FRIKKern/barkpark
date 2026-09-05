@@ -1,0 +1,1 @@
+The six open charter/wave-log PRs (#10522, #10496, #10612, #10407, #10173, #10133) are each merged, closed, or explicitly re-cut, with a one-line disposition recorded for each.

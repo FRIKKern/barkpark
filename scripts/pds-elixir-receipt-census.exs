@@ -67,6 +67,7 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
+#   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
@@ -194,7 +195,7 @@ defmodule PDS.Census do
   #
   # THE LENS AND THE ENGINE THIS BASELINE WAS TAKEN WITH (PDS-D448a):
   #   lens    build-free AST (`Code.string_to_quoted`), substring counts via
-  #           :binary.matches/2 (no regex engine, no `\b`), route depth @max_depth = 6,
+  #           :binary.matches/2 (no regex engine, no `\b`), route depth @evidence_depth = 6,
   #           @write_verbs without `transaction`, corpus `api/lib/**/*.ex` = 804 files
   #   engine  Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · darwin arm64 (printed live by
   #           report_engine/0 on every run, so a re-derivation on another engine says so)
@@ -387,15 +388,125 @@ defmodule PDS.Census do
   # verb adds no sibling GET — and `phantom` holding at 9 is the same tell as last
   # wave: the receipt's own comments deliberately do not spell the needle, so an
   # explanation cannot inflate the population it explains.
+
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, route depth 6, `transaction` NOT
+  # a write verb, corpus api/lib/**/*.ex = 837 files, CORPUS-INTACT this run); engine
+  # of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-02.
+  #
+  # WHAT MOVED IT AGAIN: task-16e56d05b809dd39 added ONE more routed-write receipt —
+  # TasksController.renew/2's `ok: true` success arm, the emission that makes a PR-open
+  # lease extension auditable instead of an UNDISPOSED ARRIVAL. One emission moves the
+  # same four rows a second time:
+  #
+  #   textual   107 -> 108  the new `ok: true` occurrence
+  #                         (108 == ast 99 + phantom 9).
+  #   ast        98 ->  99  the same one, as an AST-literal pair.
+  #   emitted    94 ->  95  the site emits on the wire.
+  #   write      56 ->  57  post /v1/tasks/:doc_id/renew joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.Renew.renew/2's Repo
+  #                         write through the Tasks facade. Disposed by the register
+  #                         row authored for it, not by an @routed_excluded entry.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `read` holding at 16 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET.
+  #
+  # THIS BRANCH AND PR #15090 (task-59fe7b40b719b379, the landed verb) EACH MOVED THESE
+  # SAME FOUR LITERALS BY ONE, from 106/97/93/55. Green apart, wrong together: #15090
+  # landed first and took them to 107/98/94/56, so this branch RE-DERIVED BY RUN on the
+  # merged tree rather than taking either diff. The run is the instrument.
+
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the two moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, @evidence_depth 6, @route_depth 12,
+  # `transaction` NOT a write verb, corpus api/lib/**/*.ex = 842 files, CORPUS-INTACT
+  # this run); engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28
+  # (erts 16.3.1) · aarch64-apple-darwin24.6.0, printed live by report_engine/0,
+  # 2026-09-04.
+  #
+  # WHAT MOVED IT: task-a0ce4e18f6776400 (PR #15897) gave
+  # `Barkpark.Content.Writer.do_create_document/5` a function-wide
+  # `rescue e in DBConnection.ConnectionError` and moved its former body into a new
+  # `do_create_document!/5`. NOTHING ENTERED OR LEFT THE POPULATION — textual, ast,
+  # phantom, consumer, emitted and unrouted all read `==` in the same run, which is the
+  # tell: no success literal was written or removed. ONE EXTRA defp HOP was inserted in
+  # the middle of an existing route, and two receipts that were reaching a Repo write
+  # with their last unit of budget stopped reaching it:
+  #
+  #   write   60 -> 58   barkpark_web/controllers/bulldocs_form_controller.ex:50 and :54,
+  #                      BOTH inside `BulldocsFormController.submit/2` (the `ok: true`
+  #                      success arm and the honeypot's identical-shaped decoy). Their
+  #                      route is submit/2 -> store/3 -> Content.create_document/4 ->
+  #                      Writer.create_document/4 -> do_create_document_from_attrs/4 ->
+  #                      do_create_document/5 -> Repo write. That reached the write verb
+  #                      at EXACTLY depth 6; do_create_document!/5 now sits between the
+  #                      last two, so the write verb is at depth 7 and falls outside
+  #                      @evidence_depth.
+  #   read    23 -> 25   the SAME TWO SITES, arriving. They still reach a READ verb
+  #                      within 6 (submit/2's own `fetch_paper/1` lookup), so the pair
+  #                      moves in opposite directions by exactly two: write + read is 83
+  #                      before and after. A pair moving oppositely by the same amount is
+  #                      a RECLASSIFICATION, never an arrival.
+  #
+  # THE RUN SAYS IT IS THE BUDGET AND NOT THE CODE, in its own depth table: write-routed
+  # reads 60 @depth 7 on BOTH trees and 60 @6 on main against 58 @6 here. One hop, one
+  # depth, two sites — the census's own "the floor moves with the lens" block.
+  #
+  # ISOLATED BY RUN, not by reading the diff. Reverting ONLY
+  # api/lib/barkpark/content/writer.ex to its origin/main bytes and re-running the census
+  # printed all eight rows `==` and CENSUS OK at exit 0. The PR's other four files move
+  # NOTHING and that half is worth naming: content/errors.ex adds a `build/1` clause that
+  # holds no `ok: true` literal and sits on no route to a Repo verb; the three test files
+  # are outside the corpus (api/lib/**/*.ex) entirely.
+  #
+  # WHAT WAS *NOT* DONE, DELIBERATELY. The hop is removable — a `rescue` can hang off
+  # `do_create_document/5` itself with no helper — and doing so would have kept the
+  # baseline at 60/23. That would be restructuring the FIX to flatter the LENS, which is
+  # the same defect as editing the literal blind, wearing better clothes. The two
+  # bulldocs receipts still reach the same write; only this census's depth budget stopped
+  # seeing it, and PDS-D480 already ruled that @evidence_depth is a compliance dial and
+  # not a claim about the code.
   @rederived %{
-    textual: 107,
-    ast: 98,
+    textual: 108,
+    ast: 99,
     phantom: 9,
     consumer: 4,
-    emitted: 94,
-    write: 56,
-    read: 16,
-    unrouted: 22
+    emitted: 95,
+    # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
+    # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
+    # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
+    # their own), the capture edge and the variable-module-head edge. Engine and lens are
+    # printed live by the run above. Not one of these is a widened tolerance: each is a
+    # route the old lens could not see and the code has always taken.
+    #
+    # AND THEN RE-DERIVED AGAIN at task-a0ce4e18f6776400 (see the block above): 60 -> 58
+    # and 23 -> 25, the two bulldocs_form_controller.ex receipts reclassifying across
+    # ONE inserted defp hop. `unrouted` is INHERITED UNCHANGED at 12 — the two sites did
+    # not fall out of the route relation, they landed in the other routed class, and a
+    # row that did not move is evidence too.
+    #
+    # RE-DERIVED AGAIN at task-41a740fd6701ec28 (PR #16147, the mutate-path schema
+    # validation mount): 58 -> 57 and 25 -> 26. Mounting `Content.Validation` at the
+    # `Writer.create_document/4` / update chokepoint inserted a hop that moved ONE
+    # already-routed receipt from the write class into the read class; the emitted
+    # population (95), the phantoms (9) and `unrouted` (12) did not move — the site did
+    # not fall out of the route relation, it landed in the other routed class, exactly
+    # the shape task-a0ce4e18f6776400 recorded above. DERIVED BY THE INSTRUMENT ITSELF,
+    # not typed from memory: the D448-DRIFT-REFUSES line of this census on the PR's own
+    # head (CI run 33960196892, head c6a4b42b1f, engine Elixir 1.18.4 · Erlang/OTP 27 (erts 15.0.1) · x86_64-pc-linux-gnu) printed
+    # "write-routed baseline 58 derived 57 · read-routed baseline 25 derived 26"; the
+    # lead amended the baseline from that run because the local box could not complete
+    # the census under load (>10 min at load 90). Re-run `--sites` against origin/main
+    # to NAME the member when the box is quiet — this comment records the count, not
+    # the member.
+    write: 57,
+    read: 26,
+    unrouted: 12
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -438,23 +549,43 @@ defmodule PDS.Census do
                  stream reload reload!)a
   @repo_mods [:Repo, :Multi]
 
-  # DEPTH 6 IS THE CLOSURE OF THE ROUTE RELATION, NOT A TASTE. Sweeping the budget,
-  # write/read/unrouted reads 23/11/57 · 29/23/39 · 39/15/37 · 43/23/25 · 53/15/23 ·
-  # 54/14/23 for depths 1..6 and then 54/14/23 IDENTICALLY at 7,8,9,10,12,15,20,30 —
-  # the bfs seen-set makes the reachable set a finite closure and the route set is
-  # monotone in the budget. The SHAPE relation does NOT close until 12 (POST-READ 6
-  # here, 15/21/23/23/24 at 7/8/9/10/12), and every unit past 6 buys POST-READ
-  # inflation via cross-row certifiers, so above 6 this knob is a COMPLIANCE DIAL,
-  # not a lens. Printed at runtime by report_depth_sweep/2 so it cannot be read as
-  # taste. (The brief's 42/14/35 was the A+B+C lens WITHOUT the clause-collapse fix.)
-  @max_depth 6
+  # DEPTH 6 IS NOT THE CLOSURE OF THE ROUTE RELATION. It used to be — see the block
+  # below — and this comment used to say so with a sweep transcribed off a run whose lens
+  # could not see a capture or a dynamic module head. Every figure it carried is now
+  # printed live by report_depth_sweep/2 instead of typed here.
+  # ONE KNOB USED TO SERVE TWO PURPOSES, AND IT ONLY LOOKED LIKE ONE NUMBER BECAUSE THE
+  # LENS WAS BLIND (PDS-D480). Wave 35's census read the route relation as CLOSED at 6 —
+  # write/read/unrouted flat at 57/16/22 through 7..12 — and concluded that 6 was both
+  # "where the route stops growing" and "where the evidence has not yet started lying".
+  # The first half was an artefact of two dead seams in raw_calls/1 (a capture's inner
+  # node carries args = nil, and a `mod.f(...)` head is a variable, not an alias). With
+  # both repaired the route does NOT stop at 6: it climbs 60/60/63/72/74/77 across 6..12
+  # and only then goes flat. The second half still holds, and holds HARDER: POST-READ
+  # reads 19 at 6 and 53 at 12, so the depth that completes the route is the depth that
+  # nearly triples the compliance count via cross-row certifiers.
+  #
+  # SO THEY ARE TWO NUMBERS, AND NEITHER IS THE OTHER.
+  #   @route_depth     — the budget at which the ROUTE relation closes. It answers "is
+  #                      this receipt about a state change AT ALL", and completeness is
+  #                      the only thing it is allowed to be used for.
+  #   @evidence_depth  — the budget at which SHAPE evidence is admissible. Every unit past
+  #                      it buys POST-READ inflation from functions three modules away
+  #                      vouching for a row they never touched. It is a LENS; the other is
+  #                      a REACH.
+  # The classification the census ships (write?/read?/shape) is taken at @evidence_depth.
+  # @route_depth is reported as the FLOOR CEILING — what the route reaches when depth is
+  # not the binding constraint — and never silently substituted for the other. Both are
+  # checked against the run: ROUTE-DEPTH-IS-CLOSURE reds if @route_depth stops being the
+  # depth the table closes at, so neither literal can drift into a lie.
+  @evidence_depth 6
+  @route_depth 12
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
   # closes at 6 but the shape relation does not" is only worth printing if the run can
-  # still see it fail, so the sweep keeps going past @max_depth and the prose reads its
+  # still see it fail, so the sweep keeps going past @evidence_depth and the prose reads its
   # sentences off these rows. 12 is where wave 34 found the shape relation flat.
-  @beyond [7, 8, 9, 10, 12]
+  @beyond [7, 8, 9, 10, 12, 14, 16]
 
   @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO CATCH-ALL-TO-SUCCESS WRONG-ROW
              DISCARDED-POST-READ)
@@ -520,6 +651,16 @@ defmodule PDS.Census do
     # member it had. inline_alias_bindings/1 resolves them; both rows are now JUDGED and
     # the class has no members. A disposition class whose prose no longer describes
     # anything is deleted rather than kept warm for a member that may never arrive.
+    # A CENSUS OF A DEFECT MUST COUNT ITS OWN CURES (PDS-D706). Without this class a
+    # route REPAIRED to a computed `ok:` reads exactly like a route that never had a
+    # receipt: it falls out of the `ok: true` lens, out of JUDGED, and lands in
+    # `status_only_receipt` — a class whose prose describes an UNEXAMINED receipt. The
+    # instrument would then charge its highest price for the one change this epic exists
+    # to cause. This class names the departure as a REPAIR, and it is deliberately NOT
+    # `status_only_receipt`: a row here says a human read the repaired receipt and found
+    # it derived from the store, which is the opposite of unexamined.
+    repaired_computed_receipt:
+      "2026-09-03 (PDS wave 49, PDS-D706): the routed action HAD a `ok: true` / `\"ok\" => true` literal this lens keyed on, and a REPAIR replaced it with a computed value derived from the store (the honest shape `api/lib/barkpark/plugins/sheets/session.ex:707` has always had and which this lens has NEVER been able to see). The member left the literal population BY BEING FIXED. It is EXCLUDED because the lens is textual and cannot read a computed `ok:` without dataflow — `ok: not is_nil(id)` and `ok: user.is_admin` are indistinguishable to an AST lens, and widening to computed values would reintroduce the guess the census forbids (the precedent is this file's own \"PURE-ECHO 0 DETECTED — not separable from UNCLASSIFIED without dataflow; not guessed\"). Each row here names a repair, so a success this census CAUSED stops reading as a measurement going missing.",
     selftest_fixture:
       "2026-08-02 (PDS wave 38): a synthetic member that exists ONLY in the --selftest corpus (module Barkpark.Filler.M1, written by write_corpus!/2 and absent from the real tree). Carried on purpose: without a committed row the row->member direction of ROUTED-POPULATION-COMPLETE has nothing to go red on, and the TWO rows share one {module, action} pair so the quad key is asked to discriminate on every selftest run."
   }
@@ -645,14 +786,20 @@ defmodule PDS.Census do
     # read back because nothing is stored. Exactly the class prose's case.
     {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
      :validate, :status_only_receipt},
-    # BPML working-copy sync (masterplan W3): renders real `ok: true` receipts, but
-    # they live in sync_apply/6 → sync_persist/6 — one and two helpers below the
-    # routed action, past the register's stated ONE-HOP relation. The class prose's
-    # literal case: the receipt exists and "does not spell the key [where] the lens
-    # greps". The sync cycle IS read back end-to-end in
-    # bulldocs_bpml_api_test.exs ("pull, edit the file, push, converge").
-    {:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
-     :sync, :status_only_receipt},
+    # THE ONE ROW ROUTED-DISPOSITION-UNSHADOWED FOUND ON MERGED MAIN, AND ITS DELETION.
+    # `{:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
+    # :sync, :status_only_receipt}` stood here, and its own comment said the receipts "live
+    # in sync_apply/6 -> sync_persist/6 — one and two helpers below the routed action, past
+    # the register's stated ONE-HOP relation". THE FIRST HOP IS INSIDE THE RELATION: `sync`
+    # calls sync_apply/6 LOCALLY, the register carries a row for that def, and this census
+    # disposes the member JUDGED on every run — it has done so since the row was written.
+    # The row therefore claimed an exclusion the derivation was already contradicting, and
+    # NOTHING SAW IT: EXCLUDED counted 190 while the table held 191 rows, because the cond's
+    # JUDGED > EXCLUDED precedence swallowed it. That is exactly the D2 shape this slice's
+    # arm exists to name, found by the arm on its first run over the real tree — so the
+    # arm's first catch is a row that had been silently wrong on main, not a fixture.
+    # DELETED RATHER THAN RE-CLASSED: a judged member needs no @routed_excluded entry, and
+    # keeping one would leave the same contradiction under a different class name.
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
@@ -669,6 +816,25 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
+    # it stays in `status_only_receipt` with this comment rather than being moved, because
+    # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
+    # the JUDGED RELATION, not an absence of a receipt:
+    #   site_deploy_controller.ex emits a LITERAL `ok: true` inside `defp start/2`, reached
+    #   at DEPTH 2 — trigger -> do_trigger -> start. dispose_routed/4's relation is ONE HOP
+    #   (the action's own span, or a def the action calls locally), so a receipt two helpers
+    #   deep reads as EXCLUDED. That is the stated limit at dispose_routed/4, and this row
+    #   is its single live instance on this tree.
+    # SO THE CLASS SENTENCE IS EXACT AND THE ROW IS HONEST: the action "reaches no `ok:
+    # true` receipt THIS LENS keys on" — THIS LENS, at one hop. What would be false about
+    # it is wave 38's retired clause ("claims success by STATUS alone"): this route does not
+    # claim success by status, it emits the literal key two hops down. That clause is
+    # already retired from the class prose above; this comment is the row-level record so
+    # nobody has to re-run the BFS to learn which member the retirement was about.
+    # WIDENING THE RELATION TO DEPTH 2 IS REFUSED (and this row is the whole case for the
+    # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
+    # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -801,6 +967,177 @@ defmodule PDS.Census do
     {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
   ]
+
+  # ---------------------------------------- the exclusion anchors (PDS-D585)
+  #
+  # THE FRESHNESS DISCIPLINE THE 8-ROW ROSTER ALREADY HAD, GIVEN TO THE EXCLUSION TABLE.
+  # Committed data, keyed on the SAME quad @routed_excluded uses, generated BY RUN with
+  # `--exclusion-keys` and read back — never typed. Each value is
+  # {anchor_mfa, clause_count, def_fp}, where def_fp is the ORDER-SENSITIVE fold of the
+  # per-clause roster_def_fp/1 over the action's clauses in LINE ORDER
+  # (exclusion_def_fp/1 states why order is load-bearing).
+  #
+  # ONLY THE ROWS THAT RESOLVE ARE HERE, AND THE HOLE IS PRINTED RATHER THAN PADDED. A
+  # row that resolves to no def carries NO entry — an anchor invented for a def nobody
+  # can open is the over-claim this census exists to name — and the run prints the
+  # uncovered count, its breakdown and the resulting coverage fraction on every census.
+  #
+  # THE REPAIR WHEN A ROW GOES STALE IS TO RE-DERIVE, NEVER TO RE-TYPE:
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and amend the moved rows in the SAME commit as the change that moved them, with the
+  # exclusion prose re-read against the def it now names.
+  @exclusion_anchors %{
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "29471808"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
+    {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
+    {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "15541809"},
+    {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
+    {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "54697721"},
+    {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "41987025"},
+    {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
+    {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
+    {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
+    {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
+    {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete} => {"BarkparkWeb.ShareController.delete/2", 1, "18318765"},
+    {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
+    {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
+    {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
+    {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},
+    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update} => {"BarkparkWeb.ScimGroupsController.update/2", 1, "36940354"},
+    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update} => {"BarkparkWeb.ScimUsersController.update/2", 1, "39755110"},
+    {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update} => {"BarkparkWeb.ChatController.update/2", 1, "57469860"},
+    {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
+    {:post, "/api/documents/:type", "BarkparkWeb.LegacyController", :create} => {"BarkparkWeb.LegacyController.create/2", 1, "48201604"},
+    {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController", :validate} => {"BarkparkWeb.BulldocsIngestController.validate/2", 1, "93045567"},
+    {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision} => {"BarkparkWeb.PlaygroundController.provision/2", 1, "81349479"},
+    {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create} => {"BarkparkWeb.WorkspaceController.create/2", 1, "102261027"},
+    {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import} => {"BarkparkWeb.WorkspaceController.import/2", 1, "44060553"},
+    {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project} => {"BarkparkWeb.WorkspaceController.create_project/2", 1, "18548149"},
+    {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit} => {"BarkparkWeb.SessionController.reset_submit/2", 2, "81707339"},
+    {:post, "/login", "BarkparkWeb.SessionController", :create} => {"BarkparkWeb.SessionController.create/2", 2, "7347773"},
+    {:post, "/login/account", "BarkparkWeb.SessionController", :account} => {"BarkparkWeb.SessionController.account/2", 2, "107095426"},
+    {:post, "/login/magic", "BarkparkWeb.SessionController", :magic_request} => {"BarkparkWeb.SessionController.magic_request/2", 2, "29283936"},
+    {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa} => {"BarkparkWeb.SessionController.mfa/2", 1, "126433771"},
+    {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request} => {"BarkparkWeb.SessionController.reset_request/2", 2, "114539261"},
+    {:post, "/media/upload", "BarkparkWeb.MediaController", :upload} => {"BarkparkWeb.MediaController.upload/2", 2, "101512734"},
+    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create} => {"BarkparkWeb.ScimGroupsController.create/2", 1, "126989276"},
+    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create} => {"BarkparkWeb.ScimUsersController.create/2", 1, "114979114"},
+    {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
+    {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
+    {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
+    {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
+    {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
+    {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login} => {"BarkparkWeb.AuthController.login/2", 2, "133988271"},
+    {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create} => {"BarkparkWeb.LoginTicketController.create/2", 1, "18892729"},
+    {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login} => {"BarkparkWeb.AuthController.magic_login/2", 2, "16122217"},
+    {:post, "/v1/auth/mfa/enroll", "BarkparkWeb.AuthController", :mfa_enroll} => {"BarkparkWeb.AuthController.mfa_enroll/2", 2, "10292509"},
+    {:post, "/v1/auth/register", "BarkparkWeb.AuthController", :register} => {"BarkparkWeb.AuthController.register/2", 2, "126301787"},
+    {:post, "/v1/auth/saml/:org_slug/slo", "BarkparkWeb.SamlController", :slo} => {"BarkparkWeb.SamlController.slo/2", 2, "84774978"},
+    {:post, "/v1/auth/sso/route", "BarkparkWeb.SsoRoutingController", :route} => {"BarkparkWeb.SsoRoutingController.route/2", 2, "131600103"},
+    {:post, "/v1/auth/tokens", "BarkparkWeb.AuthController", :create_token} => {"BarkparkWeb.AuthController.create_token/2", 1, "88765698"},
+    {:post, "/v1/auth/webauthn/login", "BarkparkWeb.WebauthnController", :login} => {"BarkparkWeb.WebauthnController.login/2", 2, "92158519"},
+    {:post, "/v1/auth/webauthn/login/challenge", "BarkparkWeb.WebauthnController", :login_challenge} => {"BarkparkWeb.WebauthnController.login_challenge/2", 1, "116840622"},
+    {:post, "/v1/auth/webauthn/register/challenge", "BarkparkWeb.WebauthnController", :register_challenge} => {"BarkparkWeb.WebauthnController.register_challenge/2", 1, "132055338"},
+    {:post, "/v1/auth/webauthn/step-up/challenge", "BarkparkWeb.WebauthnController", :step_up_challenge} => {"BarkparkWeb.WebauthnController.step_up_challenge/2", 1, "48343508"},
+    {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll} => {"BarkparkWeb.ChatHostController.enroll/2", 2, "37842751"},
+    {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat} => {"BarkparkWeb.ChatHostController.heartbeat/2", 1, "116850088"},
+    {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate} => {"BarkparkWeb.ChatHostController.rotate/2", 1, "66505558"},
+    {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create} => {"BarkparkWeb.ChatController.create/2", 1, "102474247"},
+    {:post, "/v1/chat/sessions/:id/answer", "BarkparkWeb.ChatController", :answer} => {"BarkparkWeb.ChatController.answer/2", 1, "133125244"},
+    {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive} => {"BarkparkWeb.ChatController.archive/2", 1, "104476556"},
+    {:post, "/v1/chat/sessions/:id/attachments", "BarkparkWeb.ChatAttachmentController", :create} => {"BarkparkWeb.ChatAttachmentController.create/2", 1, "78424610"},
+    {:post, "/v1/chat/sessions/:id/state", "BarkparkWeb.ChatHostController", :report_state} => {"BarkparkWeb.ChatHostController.report_state/2", 2, "49665720"},
+    {:post, "/v1/chat/sessions/:id/unarchive", "BarkparkWeb.ChatController", :unarchive} => {"BarkparkWeb.ChatController.unarchive/2", 1, "57640065"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment} => {"BarkparkWeb.CycleFleetController.create_assignment/2", 1, "67647520"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result} => {"BarkparkWeb.CycleFleetController.create_result/2", 1, "59839797"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open} => {"BarkparkWeb.CycleFleetController.open/2", 1, "76612497"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
+    {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
+    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
+    {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
+    {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym} => {"BarkparkWeb.SearchController.promote_search_synonym/2", 1, "49650472"},
+    {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create} => {"BarkparkWeb.FleetSupportTokenController.create/2", 1, "10356438"},
+    {:post, "/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
+    {:post, "/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
+    {:post, "/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member} => {"BarkparkWeb.V1.MediaCollectionsController.add_member/2", 1, "13667306"},
+    {:post, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share} => {"BarkparkWeb.V1.MediaCollectionsController.share/2", 1, "46171050"},
+    {:post, "/v1/media/:dataset/processing/:id/callback", "BarkparkWeb.V1.MediaProcessingController", :callback} => {"BarkparkWeb.V1.MediaProcessingController.callback/2", 1, "86282624"},
+    {:post, "/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym} => {"BarkparkWeb.V1.MediaController.create_search_synonym/2", 1, "72413520"},
+    {:post, "/v1/media/:dataset/search/synonyms/promote", "BarkparkWeb.V1.MediaController", :promote_search_synonym} => {"BarkparkWeb.V1.MediaController.promote_search_synonym/2", 1, "104509558"},
+    {:post, "/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload} => {"BarkparkWeb.V1.MediaController.upload/2", 2, "73136586"},
+    {:post, "/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create} => {"BarkparkWeb.TicketKeysController.create/2", 1, "107985811"},
+    {:post, "/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause} => {"BarkparkWeb.TicketKeysController.pause/2", 1, "22920551"},
+    {:post, "/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate} => {"BarkparkWeb.TicketKeysController.rotate/2", 1, "32961374"},
+    {:post, "/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause} => {"BarkparkWeb.TicketKeysController.unpause/2", 1, "95854297"},
+    {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert} => {"BarkparkWeb.SchemaController.upsert/2", 1, "130638547"},
+    {:post, "/v1/shares", "BarkparkWeb.ShareController", :create} => {"BarkparkWeb.ShareController.create/2", 1, "79903332"},
+    {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint} => {"BarkparkWeb.ShareLinkController.mint/2", 1, "80845768"},
+    {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token} => {"BarkparkWeb.ShareController.mint_token/2", 1, "22269926"},
+    {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident} => {"BarkparkWeb.StatusController.create_incident/2", 1, "31495109"},
+    {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident} => {"BarkparkWeb.StatusController.resolve_incident/2", 1, "110488227"},
+    {:post, "/v1/tickets/:id/attachments", "BarkparkWeb.TicketsAttachmentsController", :create} => {"BarkparkWeb.TicketsAttachmentsController.create/2", 2, "72508355"},
+    {:post, "/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create} => {"BarkparkWeb.WebhookController.create/2", 1, "116405086"},
+    {:post, "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay} => {"BarkparkWeb.WebhookController.replay/2", 1, "129409722"},
+    {:post, "/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable} => {"BarkparkWeb.WebhookController.reenable/2", 1, "19461935"},
+    {:post, "/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate} => {"BarkparkWeb.WebhookController.rotate/2", 1, "104898539"},
+    {:post, "/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/chat/tokens", "BarkparkWeb.ChatTokenController", :create} => {"BarkparkWeb.ChatTokenController.create/2", 1, "20654694"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment} => {"BarkparkWeb.CycleFleetController.create_assignment/2", 1, "67647520"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result} => {"BarkparkWeb.CycleFleetController.create_result/2", 1, "59839797"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open} => {"BarkparkWeb.CycleFleetController.open/2", 1, "76612497"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote", "BarkparkWeb.CycleFleetController", :promote} => {"BarkparkWeb.CycleFleetController.promote/2", 1, "102701554"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine", "BarkparkWeb.CycleFleetController", :quarantine} => {"BarkparkWeb.CycleFleetController.quarantine/2", 1, "48912053"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate", "BarkparkWeb.CycleFleetController", :activate_release_gate} => {"BarkparkWeb.CycleFleetController.activate_release_gate/2", 1, "68001488"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage", "BarkparkWeb.CycleFleetController", :stage_release_paper} => {"BarkparkWeb.CycleFleetController.stage_release_paper/2", 1, "16663024"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate} => {"BarkparkWeb.CycleFleetController.admit_open_release_gate/2", 1, "114476231"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback} => {"BarkparkWeb.CycleFleetController.rollback/2", 1, "3466593"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member} => {"BarkparkWeb.V1.MediaCollectionsController.add_member/2", 1, "13667306"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share} => {"BarkparkWeb.V1.MediaCollectionsController.share/2", 1, "46171050"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym} => {"BarkparkWeb.V1.MediaController.create_search_synonym/2", 1, "72413520"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload} => {"BarkparkWeb.V1.MediaController.upload/2", 2, "73136586"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create} => {"BarkparkWeb.TicketKeysController.create/2", 1, "107985811"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause} => {"BarkparkWeb.TicketKeysController.pause/2", 1, "22920551"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate} => {"BarkparkWeb.TicketKeysController.rotate/2", 1, "32961374"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause} => {"BarkparkWeb.TicketKeysController.unpause/2", 1, "95854297"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert} => {"BarkparkWeb.SchemaController.upsert/2", 1, "130638547"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens", "BarkparkWeb.TokenController", :create} => {"BarkparkWeb.TokenController.create/2", 1, "63995921"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create} => {"BarkparkWeb.WebhookController.create/2", 1, "116405086"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay} => {"BarkparkWeb.WebhookController.replay/2", 1, "129409722"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable} => {"BarkparkWeb.WebhookController.reenable/2", 1, "19461935"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate} => {"BarkparkWeb.WebhookController.rotate/2", 1, "104898539"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
+    {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment} => {"BarkparkWeb.ChatHostController.create_enrollment/2", 1, "99965870"},
+    {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob} => {"BarkparkWeb.MediaController.put_blob/2", 1, "79434187"},
+    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace} => {"BarkparkWeb.ScimGroupsController.replace/2", 1, "41824804"},
+    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace} => {"BarkparkWeb.ScimUsersController.replace/2", 1, "43223419"},
+    {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings} => {"BarkparkWeb.SearchController.update_search_settings/2", 1, "27744156"},
+    {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings} => {"BarkparkWeb.V1.MediaController.update_search_settings/2", 1, "91283761"},
+    {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update} => {"BarkparkWeb.PluginSettingsController.update/2", 2, "131262955"},
+    {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update} => {"BarkparkWeb.SecretController.update/2", 2, "112646268"},
+    {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update} => {"BarkparkWeb.WebhookController.update/2", 1, "54387880"},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update} => {"BarkparkWeb.SecretController.update/2", 2, "112646268"},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update} => {"BarkparkWeb.WebhookController.update/2", 1, "54387880"}
+  }
 
   # ------------------------------------------------------------- declared register
   #
@@ -1698,6 +2035,26 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
          ~S|test "pulse (pulse.ex apply_pulse)", %{scope: scope} do|}},
+    # barkpark_web/controllers/tasks_controller.ex:1034 — the NON-HOLDER PR lease
+    # extension (task-16e56d05b809dd39). renew/2 emits `ok: true`, so it is JUDGED
+    # rather than excluded, and a judged site needs no @routed_excluded entry. This
+    # one row clears BOTH arms it arrived red on: ROUTED-POPULATION-COMPLETE (the
+    # UNDISPOSED ARRIVAL of post /v1/tasks/:doc_id/renew) and REGISTER-COMPLETE
+    # (the unjudged site).
+    #
+    # THE BASIS IS EARNED, NOT ASSERTED. `end_to_end` needs both halves of its
+    # falsifier: the cited block drives the ROUTE (post/1 through authed/1) and
+    # reads the STORED row back (`Repo.get!(Document, task.id)`), asserting the
+    # wire `until`/`pr`/`renewals` EQUAL the stored ones rather than merely that a
+    # row exists. Not `_unmutated`: the branch's two mutation proofs exercise the
+    # sweeper guard and the pr-matched clear, and the receipt arm is re-run green
+    # after each restore.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.renew/2", "132866510", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence:
+        {"api/test/barkpark_web/controllers/tasks_renew_test.exs",
+         ~S|test "200 ok:true, and the STORED row carries the window the receipt reports",|}},
     # barkpark_web/controllers/tasks_controller.ex:961
     # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
     # unchanged success body to edges_for_kind/3, so the emitting def moved and
@@ -1708,9 +2065,15 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.edges_for_kind/3", "41908878", "113319186"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
-    # barkpark_web/controllers/tasks_controller.ex:952
+    # barkpark_web/controllers/tasks_controller.ex — the graph payload, moved from
+    # graph_show/2 into the private graph_traverse/3 this branch extracted so the
+    # ?perspective refusal can run BEFORE the traversal. The SITE fingerprint is
+    # unchanged (14314567) — the receipt is byte-identical and simply sits inside a
+    # new enclosing def, which moved the def fingerprint 68876245 -> 72555353.
+    # Verdict and basis are carried over untouched: nothing about what this payload
+    # reports, or about it being the postcondition, changed.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.graph_show/2", "68876245", "14314567"},
+            "BarkparkWeb.TasksController.graph_traverse/3", "72555353", "14314567"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:984
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -1842,12 +2205,41 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- entrypoint
 
+  # THE RECORD-TIME GROUP SIZE, DERIVED FROM THE REGISTER ITSELF (PDS-D706). The register
+  # is COMPLETE by construction — one row per emitted site at record time — so the number
+  # of ROWS sharing a {path, mfa} IS the number of sites that group held when the rows
+  # were recorded. No new committed field, nothing to keep in sync, and it cannot rot
+  # independently of the table it describes.
+  @register_group_sizes Enum.frequencies_by(@register, fn r ->
+                          {elem(r.key, 0), elem(r.key, 1)}
+                        end)
+
+  # THE RETIRED ROWS. A row carries `retired: "<prose>"` when its site LEFT the literal
+  # population BY REPAIR — the receipt now computes `ok:` from the store, so no `ok: true`
+  # literal remains for the four-field key to match. The row keeps its bought verdict as
+  # HISTORY and satisfies REGISTER-COMPLETE without a re-key.
+  defp retired_rows, do: Enum.filter(@register, &Map.has_key?(&1, :retired))
+
+  # WHICH POPULATION ROW THE REPAIRED SITE WAS IN, RECORDED AT RETIREMENT TIME. Measured,
+  # not assumed: the first scratch repair of pulse_controller.ex:58 moved FOUR rows, not
+  # three — textual, ast-literal, emitted AND write-routed — because the departing site
+  # was write-routed. Which of write/read/unrouted a given repair vacates is a property of
+  # the SITE, so it cannot be derived once the site is gone; the retiring commit records
+  # it, and REGISTER-RETIRED-STAYS-RETIRED refuses a retired row that does not.
+  @retired_routes [:write, :read, :unrouted]
+
+  defp retired_route_counts,
+    do: retired_rows() |> Enum.frequencies_by(&Map.get(&1, :retired_route))
+
+  defp retired_route_n(key), do: Map.get(retired_route_counts(), key, 0)
+
   def main(argv) do
     case parse_args(argv) do
       {:error, msgs} -> refuse_args(msgs)
       %{selftest?: true} -> selftest()
       %{citations?: true} -> citations_run()
       %{keys?: true} = opts -> keys_run(opts)
+      %{exclusion_keys?: true} = opts -> exclusion_keys_run(opts)
       opts -> census(opts)
     end
   end
@@ -1859,7 +2251,14 @@ defmodule PDS.Census do
     do:
       parse_args(
         argv,
-        %{sites?: false, keys?: false, selftest?: false, citations?: false, files_from: nil},
+        %{
+          sites?: false,
+          keys?: false,
+          exclusion_keys?: false,
+          selftest?: false,
+          citations?: false,
+          files_from: nil
+        },
         []
       )
 
@@ -1867,6 +2266,9 @@ defmodule PDS.Census do
   defp parse_args([], _opts, bad), do: {:error, Enum.reverse(bad)}
   defp parse_args(["--sites" | rest], o, bad), do: parse_args(rest, %{o | sites?: true}, bad)
   defp parse_args(["--keys" | rest], o, bad), do: parse_args(rest, %{o | keys?: true}, bad)
+
+  defp parse_args(["--exclusion-keys" | rest], o, bad),
+    do: parse_args(rest, %{o | exclusion_keys?: true}, bad)
   defp parse_args(["--selftest" | rest], o, bad), do: parse_args(rest, %{o | selftest?: true}, bad)
 
   defp parse_args(["--citations" | rest], o, bad),
@@ -1886,7 +2288,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --citations · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -1932,8 +2334,8 @@ defmodule PDS.Census do
 
     report_lens(textual, ast_sites, phantoms, consumers, emitted)
     report_carriers(parsed, ast_sites)
-    report_split(classified)
-    report_depth_sweep(emitted, index)
+    report_split(classified, index)
+    route_closure = report_depth_sweep(emitted, index)
     report_shapes(classified)
     report_declared_register(classified)
     report_judgment_register(classified)
@@ -1948,7 +2350,7 @@ defmodule PDS.Census do
     ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers, routed)
+      parsed, falsifiers, routed, route_closure)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -2375,6 +2777,19 @@ defmodule PDS.Census do
       |> Enum.flat_map(& &1.defs)
       |> propagate_defaults()
       |> Enum.map(&Map.put(&1, :calls, raw_calls(&1)))
+      # Bound ONCE per def, beside :calls and for the same reason: callees/2 and callers/2
+      # both need it, and re-walking a body per lookup is what turned this seam from a
+      # 8 s census into a 48 s one.
+      |> Enum.map(&Map.put(&1, :binds, concat_bindings(&1[:body])))
+      # THE MEMO KEY (PDS-D712). One unique integer per def, stamped where :calls and
+      # :binds are stamped and for the same reason: verb_hits/1 and callees/2 are pure
+      # per-def lenses the BFS sweeps re-ask hundreds of thousands of times, and a key
+      # they can index on has to be UNIQUE — `callee_key/1`'s {module, name, arity, line}
+      # is the dedup key for a callee list, not an identity, and two files declaring one
+      # module could repeat it. Defs that never pass through this index carry no :cid and
+      # take the uncached clause.
+      |> Enum.with_index()
+      |> Enum.map(fn {d, i} -> Map.put(d, :cid, i) end)
 
     by_key = Enum.group_by(all, fn d -> {d.module, d.name} end)
     by_module = Enum.group_by(all, & &1.module)
@@ -2388,6 +2803,7 @@ defmodule PDS.Census do
         |> Enum.map(fn
           {:local, f, _a} -> {f, d}
           {:remote, _segs, f, _a} -> {f, d}
+          {:dynvar, _var, f, _a} -> {f, d}
         end)
       end)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -2445,7 +2861,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- routing
 
-  defp route(site, index, max \\ @max_depth) do
+  defp route(site, index, max \\ @evidence_depth) do
     start = site.def && resolve_exact(index, site.def)
 
     {verbs, depth, chain} =
@@ -2496,6 +2912,14 @@ defmodule PDS.Census do
       Enum.any?(c.calls, fn
         {:local, f, a} -> f == d.name and c.module == d.module and accepts?(d, a)
         {:remote, segs, f, a} -> f == d.name and suffix?(d.module, segs) and accepts?(d, a)
+        # A variable module head is a caller edge only once the variable BINDS — resolved
+        # against the concat bindings of the CALLER's own body, never guessed.
+        {:dynvar, var, f, a} ->
+          f == d.name and
+            case Map.fetch(c[:binds] || concat_bindings(c[:body]), var) do
+              {:ok, segs} -> suffix?(d.module, segs) and accepts?(d, a)
+              :error -> false
+            end
       end)
     end)
     |> Enum.reject(&(&1.module == d.module and &1.name == d.name))
@@ -2516,54 +2940,178 @@ defmodule PDS.Census do
       List.first(cands)
   end
 
-  defp bfs([], _index, _seen, verbs, depth, chain, _max), do: {verbs, depth, chain}
+  # ONE WALKER, TWO DOORS. `bfs/7` is the single-budget spelling every caller in this
+  # file still uses and its return is unchanged; `bfs_budgets/3` reads MANY budgets off
+  # ONE walk. They share `bfs_walk/9` rather than carrying two copies of a traversal —
+  # a second copy of this loop is how the two sweeps drift apart under the next edit.
+  defp bfs(queue, index, seen, verbs, found_at, chain, max),
+    do: bfs_walk(queue, index, seen, verbs, found_at, chain, max, [], %{}) |> elem(0)
 
-  defp bfs([{d, depth, path} | rest], index, seen, verbs, found_at, chain, max) do
-    key = {d.module, d.name, d.arity}
+  # ---------------------------------------------------------------- one walk, every budget
+  #
+  # THE DEPTH SWEEPS USED TO WALK THE GRAPH ONCE PER BUDGET. `report_depth_sweep/2` and
+  # the LiveView sweep each ask the SAME question at 12 budgets (1..8, 9, 10, 12, 14), and
+  # each re-ran `bfs/7` from scratch for every one of them — 12 full closures per start
+  # def, of which 11 are re-derivations of a walk that had already been taken. Metered on
+  # this corpus (`:erlang.statistics(:runtime)` around the phases, load stamped): the two
+  # sweeps were 15,5 s of a 28,2 s census run — 55 percent of the price, none of it a new
+  # measurement. The census rides the required Elixir gate FOUR times per run (one plain
+  # arm, two mutant arms, one ARGV arm), so that 15,5 s is paid three times per CI run and
+  # showed up as the largest silent gap in the Test job's log (task-18f209f185f5b3f1).
+  #
+  # WHAT MAKES ONE WALK SOUND, AND IT IS NOT A CONVENIENCE. With the 0-1 rule above the
+  # queue's depths are non-decreasing, so the sequence of nodes a budget-b run processes
+  # is exactly the PREFIX of the budget-B run's sequence consisting of the nodes at depth
+  # <= b: enqueueing is gated only by `depth + step > max`, which differs between the two
+  # runs ONLY for children at depth b+1, and those sort after every node the budget-b run
+  # would ever hold. `seen` therefore evolves identically over that prefix. So snapshotting
+  # {verbs, found_at, chain} at the moment the walk first steps past b IS the budget-b
+  # result — not an approximation of it.
+  #
+  # IT RETURNS THE SAME TRIPLE `bfs/7` RETURNS, one per budget, and nothing downstream
+  # learns a new shape. `bfs/7` and `lv_bfs/3` are UNCHANGED in signature and still the
+  # single-budget spelling — including the exact `bfs([{d, 0, [label(d)]}], …` text the
+  # census's own `--selftest` pins a mutation anchor on.
+  defp bfs_budgets(queue, index, budgets) do
+    sorted = budgets |> Enum.uniq() |> Enum.sort()
 
-    if MapSet.member?(seen, key) do
-      bfs(rest, index, seen, verbs, found_at, chain, max)
-    else
-      seen = MapSet.put(seen, key)
-      hits = verb_hits(d)
-      # every function the route actually entered — the evidence the shape test reads
-      verbs = Map.update(verbs, :visited, [d], &[d | &1])
+    {_final, out} =
+      bfs_walk(queue, index, MapSet.new(), %{}, nil, [], List.last(sorted), sorted, %{})
 
-      verbs =
-        Enum.reduce(hits, verbs, fn {kind, verb, line}, acc ->
-          Map.update(acc, kind, [{verb, line, d.path, depth}], &[{verb, line, d.path, depth} | &1])
-        end)
+    out
+  end
 
-      {found_at, chain} =
-        if found_at == nil and Map.has_key?(verbs, :write),
-          do: {depth, path},
-          else: {found_at, chain}
+  defp bfs_walk([], _index, _seen, verbs, found_at, chain, _max, pending, out),
+    do:
+      {{verbs, found_at, chain},
+       Enum.reduce(pending, out, &Map.put(&2, &1, {verbs, found_at, chain}))}
 
-      # A defdelegate is a RENAME, not a call: it holds no logic that could make the
-      # claim true or false, so following one costs no depth. Charging it a hop is how
-      # a 24-entry facade like Barkpark.Tasks eats the whole budget and reports false.
-      step = if d.delegate, do: 0, else: 1
+  defp bfs_walk([{d, depth, path} | rest] = queue, index, seen, verbs, found_at, chain, max, pending, out) do
+    case pending do
+      # the walk has stepped past `b`; a budget-b run's queue is empty HERE, so this state
+      # is its answer.
+      [b | more] when b < depth ->
+        bfs_walk(queue, index, seen, verbs, found_at, chain, max, more,
+          Map.put(out, b, {verbs, found_at, chain}))
 
-      next =
-        if depth + step > max do
-          []
+      _ ->
+        # THE LINE IS LOAD-BEARING — SAME COLLAPSE, SAME FIX, SEE callee_key/1. Without it
+        # `seen` claims a whole multi-clause def the first time ANY clause of it is
+        # visited, so the writing clause callee_key/1 just kept is skipped here instead.
+        key = callee_key(d)
+
+        if MapSet.member?(seen, key) do
+          bfs_walk(rest, index, seen, verbs, found_at, chain, max, pending, out)
         else
-          d
-          |> callees(index)
-          |> Enum.map(&{&1, depth + step, path ++ [label(&1)]})
-        end
+          seen = MapSet.put(seen, key)
+          hits = verb_hits(d)
+          verbs = Map.update(verbs, :visited, [d], &[d | &1])
 
-      bfs(rest ++ next, index, seen, verbs, found_at, chain, max)
+          verbs =
+            Enum.reduce(hits, verbs, fn {kind, verb, line}, acc ->
+              Map.update(acc, kind, [{verb, line, d.path, depth}], &[{verb, line, d.path, depth} | &1])
+            end)
+
+          {found_at, chain} =
+            if found_at == nil and Map.has_key?(verbs, :write),
+              do: {depth, path},
+              else: {found_at, chain}
+
+          step = if d.delegate, do: 0, else: 1
+
+          next =
+            if depth + step > max do
+              []
+            else
+              d
+              |> callees(index)
+              |> Enum.map(&{&1, depth + step, path ++ [label(&1)]})
+            end
+
+          # A ZERO-COST CHILD GOES TO THE FRONT, A ONE-COST CHILD TO THE BACK — THE 0-1 BFS
+          # RULE. `rest ++ next` for both is what a plain FIFO does, and with the `step = 0`
+          # delegate edge above that is NOT breadth-first: a delegate processed at depth k
+          # appended its SAME-DEPTH children behind nodes already queued at depth k+1, so
+          # the queue's depths were not sorted and a key could be `seen`-claimed by a
+          # DEEPER visit than the one that reaches it first. Front-inserting the zero-cost
+          # child restores the sort, which buys the two properties this file now leans on:
+          # `found_at` is the SMALLEST depth at which a write is reached, and a run at
+          # budget b is exactly the PREFIX of a run at budget B > b (see bfs_budgets/3).
+          # PROVEN BY RUN, TWICE, AND THE SECOND RUN IS THE ONE THAT MATTERS.
+          #   (1) Reorder ALONE, sweeps still re-walking per budget: the census's whole
+          #       output over api/lib is BYTE-IDENTICAL to the committed one. The reorder
+          #       is not a lens change — it moved no printed figure.
+          #   (2) Sweeps reading one walk, reorder REMOVED (`queue = rest ++ next`): 16
+          #       lines MOVE. The route sweep reads write 22/24/30/43/50 at depths 1..5
+          #       instead of 22/26/35/44/51, and the LiveView sweep 46/55 instead of 47/61
+          #       at depths 4 and 5 — an UNDERCOUNT at every shallow budget, closing only
+          #       at 6. That is precisely the failure the reorder rules out: a plain FIFO
+          #       let a key be `seen`-claimed by a DEEPER visit, so the snapshot taken at
+          #       budget b had not yet recorded the write that a real budget-b run finds.
+          # So this line is load-bearing for the reduction below, and the reduction is
+          # sound only WITH it. Do not "simplify" it back to one `rest ++ next`.
+          queue = if step == 0, do: next ++ rest, else: rest ++ next
+
+          bfs_walk(queue, index, seen, verbs, found_at, chain, max, pending, out)
+        end
     end
   end
 
   defp label(d), do: "#{Enum.join(d.module, ".")}.#{d.name}/#{d.arity}"
 
-  defp verb_hits(%{delegate: {_, _}}), do: []
+  # ------------------------------------------------ THE TWO MEMOISED LENSES (PDS-D712)
+  #
+  # PROFILED, NOT GUESSED. `:timer.tc` around these two entry points over ONE plain
+  # census of the live corpus (842 files, load1 27, this host): `callees/2` cost
+  # 31 277,9 ms over 360 435 calls and `verb_hits/1` 7 945,6 ms over 778 433 calls —
+  # 39,2 s of a 62,2 s run, 63 percent of the census, and the two phases that pay it are
+  # the two whole-corpus BFS sweeps (`sweep_rows/3` 19,0 s, the LiveView `bfs_budgets`
+  # reach 18,4 s). #15828 already took the redundancy BETWEEN BUDGETS out of both sweeps
+  # — one walk, twelve rows. What was left is the redundancy BETWEEN STARTS: 360 435
+  # `callees/2` calls over a corpus holding some thousands of defs is the SAME def
+  # re-resolved dozens of times, once per walk that passes through it.
+  #
+  # THE PARSE IS NOT THE LEVER, AND THE FILING SAID IT WAS. task-2bde38694b4539b2 leads
+  # with "parse the corpus ONCE and share the AST across the four arms". The profile puts
+  # `parse_file/1` over all 842 files at 5 536,2 ms — 8,9 percent of the run. A perfect
+  # cross-arm AST cache could not buy a tenth of what these two memos buy, and it would
+  # add a serialisation format, a digest and a cache file to an instrument whose whole
+  # claim is that it derives everything by run.
+  #
+  # WHY IT CANNOT CHANGE A NUMBER. Both are PURE functions of one def (plus, for
+  # `callees_uncached/2`, the index — which `main/1` builds exactly once per process:
+  # `census/1`, `keys_run/1` and `citations_run/0` are alternative dispatches, never
+  # nested). The key is `:cid`, a per-run unique integer stamped on every def by
+  # `build_index/1` — NOT `callee_key/1`, whose {module, name, arity, line} could in
+  # principle repeat across two files declaring one module. A def that carries no `:cid`
+  # (anything not resolved through the index) falls through to the uncached clause, so
+  # the memo can only ever return the value the uncached function would have returned.
+  # The proof is the c2 diff: the whole census output is byte-identical before and after
+  # on the live corpus AND on a mutated tree, save the `user cpu` line it labels volatile.
+  #
+  # THE PROCESS DICTIONARY, DELIBERATELY. These sweeps run in ONE process (`Enum.map`,
+  # never `Task.async`), so a pdict entry is a constant-time read with no ETS table to
+  # own, name-collide or clean up — and it dies with the process, which is the scope the
+  # cache is correct for.
+  defp verb_hits(%{cid: cid} = d) do
+    case :erlang.get({:pds_vh, cid}) do
+      :undefined ->
+        v = verb_hits_uncached(d)
+        :erlang.put({:pds_vh, cid}, v)
+        v
 
-  defp verb_hits(%{body: nil}), do: []
+      v ->
+        v
+    end
+  end
 
-  defp verb_hits(%{body: body}) do
+  defp verb_hits(d), do: verb_hits_uncached(d)
+
+  defp verb_hits_uncached(%{delegate: {_, _}}), do: []
+
+  defp verb_hits_uncached(%{body: nil}), do: []
+
+  defp verb_hits_uncached(%{body: body}) do
     {_, hits} =
       Macro.prewalk(body, [], fn
         {{:., _, [{:__aliases__, _, segs}, f]}, meta, args} = n, acc when is_list(args) ->
@@ -2593,17 +3141,42 @@ defmodule PDS.Census do
     hits
   end
 
+  # THE SECOND MEMO — see the block above verb_hits/1 for the profile that named it.
+  defp callees(%{cid: cid} = d, index) do
+    case :erlang.get({:pds_cl, cid}) do
+      :undefined ->
+        v = callees_uncached(d, index)
+        :erlang.put({:pds_cl, cid}, v)
+        v
+
+      v ->
+        v
+    end
+  end
+
+  defp callees(d, index), do: callees_uncached(d, index)
+
   # callees: defdelegate target, or every local/remote call resolvable in the corpus
-  defp callees(%{delegate: {target, as}} = d, index) when is_list(target),
+  defp callees_uncached(%{delegate: {target, as}} = d, index) when is_list(target),
     do: resolve(index, target, as, d.arity)
 
-  defp callees(%{delegate: {_, _}}, _index), do: []
+  defp callees_uncached(%{delegate: {_, _}}, _index), do: []
 
-  defp callees(%{body: nil}, _index), do: []
+  defp callees_uncached(%{body: nil}, _index), do: []
 
-  defp callees(%{module: mod} = d, index) do
+  defp callees_uncached(%{module: mod} = d, index) do
+    binds = d[:binds] || concat_bindings(d[:body])
+
     (d[:calls] || raw_calls(d))
     |> Enum.flat_map(fn
+      # THE VARIABLE IS THE KEY. An unbound variable head resolves to [], never to "some
+      # module in this body".
+      {:dynvar, var, f, a} ->
+        case Map.fetch(binds, var) do
+          {:ok, segs} -> resolve(index, segs, f, a)
+          :error -> []
+        end
+
       # A {:local, f, a} with no def of that name AND ARITY in the calling module is
       # either undefined or IMPORTED — and an imported call is a real edge, so follow it.
       {:local, f, a} ->
@@ -2615,14 +3188,74 @@ defmodule PDS.Census do
       {:remote, segs, f, a} ->
         resolve(index, segs, f, a)
     end)
-    |> Enum.uniq_by(&{&1.module, &1.name, &1.arity})
+    |> Enum.uniq_by(&callee_key/1)
   end
+
+  # THE CALLEE DEDUP KEY, AND THE LINE IN IT IS THE WHOLE FIX (PDS-D480a). This read
+  # `{module, name, arity}`, which collapses a multi-clause def to ONE clause — and the
+  # index hands them back in REVERSE SOURCE ORDER, so the VERB-FREE fallback clause won
+  # and the writing clause was discarded before bfs/7 ever saw it.
+  # Barkpark.Accounts.confirm_user/1 is the worked example: the writing clause at
+  # accounts.ex:confirm_user/1's writing clause (Repo.transaction with delete!/update!) lost to
+  # `def confirm_user(_), do: :error`.
+  # PATCHING THIS ALONE CHANGES NOTHING, MEASURED: bfs_walk/9's `seen` key repeats the
+  # identical collapse, so a clause this function now keeps is dropped one step later.
+  # Both keys carry the line, or neither is worth carrying. (Run: with only this key
+  # patched the census output is byte-identical to the unpatched one except the volatile
+  # `user cpu` line; with only the `seen` key patched, write/read/unrouted are 57/16/22
+  # either way. Together they move 57/16/22 -> 60/15/20 on the wave-35 lens.)
+  defp callee_key(d), do: {d.module, d.name, d.arity, d.line}
 
   defp imported_defs(index, mod, f, arity) do
     index.imports
     |> Map.get({mod, f}, [])
     |> Enum.flat_map(&resolve(index, &1, f, arity))
   end
+
+  # The arity literal of a capture, under BOTH spellings (see raw_calls/1).
+  defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: n
+  defp capture_arity(n) when is_integer(n), do: n
+  defp capture_arity(_), do: nil
+
+  # `mod = Module.concat(Barkpark.Plugins.Github, Intake)` -> %{mod: [:Barkpark, :Plugins,
+  # :Github, :Intake]}. KEYED ON THE BOUND VARIABLE, never paired positionally with the
+  # dynamic calls in the same body: a body holding two concats and two dynamic calls must
+  # resolve each call to ITS OWN module, and a body whose variable was never bound to a
+  # concat must resolve to NOTHING. Pairing by body would emit all four edges — the
+  # cross-product this map exists to refuse (CONCAT-BINDS-THE-VARIABLE in --selftest).
+  defp concat_bindings(nil), do: %{}
+
+  defp concat_bindings(body) do
+    {_, binds} =
+      Macro.prewalk(body, %{}, fn
+        {:=, _, [{var, _, vctx}, {{:., _, [{:__aliases__, _, [:Module]}, :concat]}, _, cargs}]} =
+            n,
+        acc
+        when is_atom(var) and not is_list(vctx) ->
+          case concat_segs(cargs) do
+            nil -> {n, acc}
+            segs -> {n, Map.put(acc, var, segs)}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    binds
+  end
+
+  # Module.concat(A.B, C) and Module.concat([A, B, C]) — alias arguments only. Anything
+  # computed (a variable, a Module.split pipeline) yields nil and the edge stays unresolved
+  # rather than guessed.
+  defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), do: a ++ b
+
+  defp concat_segs([list]) when is_list(list) do
+    if Enum.all?(list, &match?({:__aliases__, _, _}, &1)),
+      do: Enum.flat_map(list, fn {:__aliases__, _, s} -> s end),
+      else: nil
+  end
+
+  defp concat_segs(_), do: nil
 
   defp raw_calls(%{body: nil}), do: []
 
@@ -2631,6 +3264,54 @@ defmodule PDS.Census do
       body
       |> expand_pipes()
       |> Macro.prewalk([], fn
+        # A CAPTURE IS AN EDGE, AND THE PREWALK USED TO LOSE IT (PDS-D480 seam (a)).
+        # `&default_ingest/2` quotes as {:&,_,[{:/,_,[{:default_ingest,_,nil}, 2]}]}. `&`
+        # and `/` are operators, so both generic clauses below decline them, and the inner
+        # node {:default_ingest, _, nil} carries args = nil, NOT a list — so the
+        # `is_list(args)` guard declines it too and the chain simply ends. That is how
+        # github_webhook_controller's `intake_fun/0` resolved to ONLY
+        # [{:remote,[:Application],:get_env}] while its real route reaches a write.
+        # THE ARITY IS NOT A BARE INTEGER HERE. parse_file/1 parses with
+        # `literal_encoder: &{:ok, {:__block__, &2, [&1]}}`, so the 2 in `&f/2` arrives as
+        # {:__block__, _, [2]}. A naive `when is_integer(a)` guard is DEAD — it matches
+        # nothing and reports "changes nothing" while doing nothing at all. capture_arity/1
+        # reads BOTH spellings, and CAPTURE-EDGE-FIRES in --selftest proves this fires.
+        # The node is REPLACED by an inert atom rather than left in place: prewalk re-enters
+        # what the function returns, and `&Mod.f/2`'s inner {{:.,_,[alias,f]},_,[]} would
+        # otherwise ALSO be recorded as a remote call of arity 0 — a second, wrong edge.
+        {:&, _, [{:/, _, [{{:., _, [{:__aliases__, _, segs}, f]}, _, []}, a]}]}, acc
+        when is_atom(f) ->
+          case capture_arity(a) do
+            nil -> {:__pds_capture__, acc}
+            ar -> {:__pds_capture__, [{:remote, segs, f, ar} | acc]}
+          end
+
+        {:&, _, [{:/, _, [{f, _, ctx}, a]}]}, acc when is_atom(f) and not is_list(ctx) ->
+          case capture_arity(a) do
+            nil -> {:__pds_capture__, acc}
+            ar -> {:__pds_capture__, [{:local, f, ar} | acc]}
+          end
+
+        # A CALL ON A VARIABLE MODULE HEAD (PDS-D480 seam (b)). `mod.ingest(payload, opts)`
+        # quotes as {{:., _, [{:mod, _, nil}, :ingest]}, _, args}: the head is a VARIABLE,
+        # not an {:__aliases__, _, segs}, so the remote clause below declines it and the
+        # local clause declines it too (its `f` is a dot-tuple, not an atom). Recorded here
+        # as a :dynvar edge naming the VARIABLE; callees/2 resolves it against the
+        # Module.concat bindings of the SAME body, by name. It is deliberately NOT resolved
+        # here: raw_calls/1 sees one node, and pairing concats with dynamic calls at the
+        # body level would emit a cross-product in a body holding two of each.
+        # `no_parens: true` in the OUTER meta is what separates the CALL `mod.ingest(p, o)`
+        # from the FIELD ACCESS `changeset.errors` — both quote with a variable head, and
+        # the second is not an edge. Without this the census crashed on
+        # {:dynvar, :result, :errors, 0} the first time it ran.
+        {{:., _, [{var, _, vctx}, f]}, meta, args}, acc
+        when is_atom(var) and is_atom(f) and is_list(args) and not is_list(vctx) ->
+          if Keyword.get(meta, :no_parens, false) do
+            {{:__pds_field__, f}, acc}
+          else
+            {{:__pds_dyn__, f, args}, [{:dynvar, var, f, length(args)} | acc]}
+          end
+
         {{:., _, [{:__aliases__, _, segs}, f]}, _, args} = n, acc
         when is_atom(f) and is_list(args) ->
           {n, [{:remote, segs, f, length(args)} | acc]}
@@ -2728,7 +3409,7 @@ defmodule PDS.Census do
       [
         if(site.write?, do: "write-routed at depth #{site.depth}", else: nil),
         if(site.read? and not site.write?, do: "read-routed only", else: nil),
-        if(!site.write? and !site.read?, do: "no Repo verb within depth #{@max_depth}", else: nil),
+        if(!site.write? and !site.read?, do: "no Repo verb within depth #{@evidence_depth}", else: nil),
         if(writes != [], do: "local writes: #{Enum.map_join(writes, ",", &elem(&1, 0))}", else: nil),
         if(reads != [], do: "local reads: #{Enum.map_join(reads, ",", &elem(&1, 0))}", else: nil)
       ]
@@ -2746,7 +3427,7 @@ defmodule PDS.Census do
     w != [] and r != [] and Enum.max(r) > Enum.min(w)
   end
 
-  # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:139-141).
+  # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:consume_login_ticket/1).
   # The honest idiom is `select:` INSIDE the update query.
   #
   # KNOWN RESIDUAL UNSOUNDNESS, NAMED AND NOT FIXED HERE (PDS wave 34). This prewalks the
@@ -3074,6 +3755,23 @@ defmodule PDS.Census do
     end)
 
     row("EMITTED success claims", length(emitted), nil, :emitted)
+
+    # THE CONSERVED DENOMINATOR (PDS-D706). A census of a defect must count its own
+    # cures, or every success it causes reads as a measurement going missing. A
+    # status-descending repair — the one change this epic exists to cause — removes an
+    # `ok: true` literal, so `textual`, `ast-literal` and `emitted` each fall by one and
+    # the drift arm reads the FIX as a disappearance. The retired register rows are the
+    # ledger of those departures, so the arm compares emitted + retired-by-repair and a
+    # repair stops costing a red. THE ARM KEEPS ITS TEETH: a genuine ARRIVAL adds a
+    # literal without adding a retired row, so the conserved total still moves and still
+    # reds. Conservation is NOT suppression — it is the difference between "one fewer
+    # claim exists" and "one claim was fixed", which the raw count cannot tell apart.
+    retired = length(retired_rows())
+    p(String.pad_trailing("  CONSERVED  emitted #{length(emitted)} + retired-by-repair #{retired}", 48) <> String.pad_leading(to_string(length(emitted) + retired), 4))
+    p("      the FOUR rows a repair moves — textual, AST-literal, EMITTED and the route")
+    p("      row the departing site sat in — are compared against the baseline WITH the")
+    p("      retired count added back, so a fix is not a drift. Nothing else is")
+    p("      conserved, and an ARRIVAL adds no retired row, so the arm keeps its teeth.")
     p("")
   end
 
@@ -3092,23 +3790,23 @@ defmodule PDS.Census do
     p("")
   end
 
-  defp report_split(classified) do
+  defp report_split(classified, index) do
     w = Enum.count(classified, & &1.write?)
     r = Enum.count(classified, &(not &1.write? and &1.read?))
     u = Enum.count(classified, &(not &1.write? and not &1.read?))
 
-    p("WHAT EACH CLAIM IS ABOUT (route-following through defdelegate, depth #{@max_depth})")
+    p("WHAT EACH CLAIM IS ABOUT (route-following through defdelegate, depth #{@evidence_depth})")
     p(String.duplicate("-", 78))
     row("write-routed  (claims a state change)", w, nil, :write)
     row("read-routed   (claims a read)", r, nil, :read)
     row("unrouted      (no Repo verb reached)", u, nil, :unrouted)
     p("")
     p("  #{w} IS A FLOOR, NEVER A CEILING. The #{u} unrouted sites are unrouted because this")
-    p("  lens gave up at depth #{@max_depth} or could not resolve an alias — not because they")
+    p("  lens gave up at depth #{@evidence_depth} or could not resolve an alias — not because they")
     p("  touch no state. PDS-D448 judged them almost certainly writes. Read the write count")
     p("  as \"at least #{w} success claims are about a state change\".")
     p("")
-    report_clause_collapse(classified)
+    report_clause_collapse(classified, index)
   end
 
   # ATTRIBUTION INTEGRITY, PRINTED. Every site must be owned by a def clause whose line
@@ -3122,7 +3820,7 @@ defmodule PDS.Census do
   # resolver could not own AT ALL (owner == nil) was neither collapsed nor counted, and the
   # number printed here read 0 while attribution had failed outright. An unowned site is
   # the WORST attribution failure available, not the absence of one; it is counted here.
-  defp report_clause_collapse(classified) do
+  defp report_clause_collapse(classified, index) do
     {owned, unowned} = Enum.split_with(classified, & &1.owner)
     mis_owned = Enum.reject(owned, &(&1.owner.line <= &1.line and &1.line <= &1.owner.last))
     n = length(mis_owned) + length(unowned)
@@ -3130,6 +3828,7 @@ defmodule PDS.Census do
     p("  CLAUSE-COLLAPSE  #{n} of #{length(classified)} sites NOT attributed to a def clause that")
     p("  contains their line — #{length(mis_owned)} owned by a clause that does not contain them, #{length(unowned)} owned")
     p("  by no clause at all (0 is correct; wave 33's shipped lens read 15).")
+    report_callee_collapse(index)
 
     Enum.each(Enum.sort_by(mis_owned, &{&1.path, &1.line}), fn s ->
       p("      #{short(s.path)}:#{s.line} — owned by #{label(s.owner)} at :#{s.owner.line}-#{s.owner.last}")
@@ -3143,6 +3842,64 @@ defmodule PDS.Census do
     n
   end
 
+  # THE OTHER HALF OF CLAUSE COLLAPSE, AND THE SENTENCE ABOVE WOULD NOT HAVE MOVED FOR IT
+  # (PDS-D480a). CLAUSE-COLLAPSE audits ATTRIBUTION — which def clause owns a receipt's
+  # LINE. Callee RESOLUTION had the identical bug in a different key, and it is invisible
+  # from there: the printed `CLAUSE-COLLAPSE 0 of N` would read 0 even if callee-side
+  # collapse were TOTAL. A reader finished that line believing clause collapse was solved.
+  # It was half-solved, and the broken half silently deleted write evidence.
+  #
+  # TWO NUMBERS, AND THEY ARE NOT THE SAME NUMBER.
+  #   COLLAPSED  — what the SHIPPED key actually discards on this run. It is 0 because
+  #                callee_key/1 carries the def line; revert that line and it is not.
+  #   LATENT     — {module, name, arity} groups in the corpus where the clause the OLD
+  #                key would have kept carries NO Repo verb while a later clause does.
+  #                It is a measure of how much unsoundness the old key was exposed to,
+  #                NOT a count of mis-routed rows: most of these groups sit on no
+  #                receipt's route at all. Anyone quoting it as "N wrong rows" is quoting
+  #                it wrong.
+  defp report_callee_collapse(index) do
+    groups = Enum.group_by(index.defs, &{&1.module, &1.name, &1.arity})
+
+    latent =
+      Enum.count(groups, fn {_k, ds} ->
+        case ds do
+          [first | rest] -> not writes?(first) and Enum.any?(rest, &writes?/1)
+          _ -> false
+        end
+      end)
+
+    collapsed =
+      Enum.count(groups, fn {_k, ds} ->
+        length(ds) > 1 and length(Enum.uniq_by(ds, &callee_key/1)) < length(ds) and
+          Enum.any?(ds, &writes?/1)
+      end)
+
+    p("  CALLEE-COLLAPSE  #{collapsed} clause group(s) discarded by the callee resolver's own")
+    p("  dedup key on this run — the key carries the def LINE, so a multi-clause def is")
+    p("  followed clause by clause instead of collapsing to whichever one the index")
+    p("  returned first. #{latent} group(s) are LATENT resolver unsoundness: the clause the")
+    p("  OLD {module, name, arity} key would have kept has no Repo verb while a later")
+    p("  clause has one. THAT IS NOT #{latent} MIS-ROUTED ROWS — most sit on no receipt's")
+    p("  route at any depth; it is the exposure the old key carried. Quote it as latent.")
+    p("  (PDS-D480a's filing said 68, counted over the COARSER {module, name} grouping —")
+    p("  #{latent_by_name(index)} under that grouping on this tree. The resolver keys on ARITY too, so the")
+    p("  #{latent} above is the one that describes THIS lens. Both are latent, neither is live.)")
+  end
+
+  # The filing's grouping, kept so its 68 can be compared against something instead of
+  # being silently replaced by a different measure wearing the same name.
+  defp latent_by_name(index) do
+    index.defs
+    |> Enum.group_by(&{&1.module, &1.name})
+    |> Enum.count(fn {_k, ds} ->
+      case ds do
+        [first | rest] -> not writes?(first) and Enum.any?(rest, &writes?/1)
+        _ -> false
+      end
+    end)
+  end
+
   # WHY THE FLOOR IS A FLOOR, shown rather than asserted. The write count is a function
   # of the depth budget, not a property of the code: a controller that calls a context
   # that calls a query builder that calls Repo is 4 hops, and depth 3 cannot see it.
@@ -3150,11 +3907,11 @@ defmodule PDS.Census do
     p("THE FLOOR MOVES WITH THE LENS (depth sensitivity — the drift vs PDS-D448 explained)")
     p(String.duplicate("-", 78))
 
-    rows = Enum.map(@sweep ++ @beyond, &sweep_row(emitted, index, &1))
-    {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @max_depth))
+    rows = sweep_rows(emitted, index, @sweep ++ @beyond)
+    {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @evidence_depth))
 
     Enum.each(inside, fn r ->
-      mark = if r.depth == @max_depth, do: "  <- the census depth", else: ""
+      mark = if r.depth == @evidence_depth, do: "  <- the census depth", else: ""
 
       p("  depth #{r.depth}   write #{pad(r.write)}   read #{pad(r.read)}   unrouted #{pad(r.unrouted)}   POST-READ #{pad(r.post_read)}#{mark}")
     end)
@@ -3164,55 +3921,245 @@ defmodule PDS.Census do
     end)
 
     p("")
-    p("  WHY #{@max_depth} AND NOT MORE. EVERY NUMBER IN THIS PARAGRAPH IS READ OFF THE TABLE ABOVE")
+    p("  TWO DEPTHS, NOT ONE. EVERY NUMBER IN THIS PARAGRAPH IS READ OFF THE TABLE ABOVE")
     p("  (PDS wave 35 — this paragraph used to hardcode a write sweep that its own table")
     p("  refuted at depths 2 and 3, and a POST-READ figure less than half the one printed")
     p("  above it. A lens whose commentary disagrees with its own measurement is the defect")
     p("  this epic keeps filing; the false numbers are not reprinted here, only replaced.)")
     p("")
-    at_max = Enum.find(rows, &(&1.depth == @max_depth))
-    p("  THE ROUTE RELATION CLOSES AT #{@max_depth}. Write-routed climbs #{Enum.map_join(inside, "/", &to_string(&1.write))} across depths")
-    p("  #{List.first(@sweep)}..#{@max_depth}, and then write #{at_max.write} / read #{at_max.read} / unrouted #{at_max.unrouted} is #{closure_word(rows, at_max)} at depths")
-    p("  #{Enum.map_join(@beyond, ", ", &to_string/1)} — the bfs seen-set makes the reachable set a finite closure, and the")
-    p("  route set is MONOTONE in the budget by construction (a larger budget explores a")
-    p("  superset), so nothing is lost by stopping at the closure.")
-    p("  THE SHAPE RELATION DOES NOT CLOSE THERE. POST-READ reads #{at_max.post_read} at depth #{@max_depth} and")
-    p("  #{Enum.map_join(beyond, "/", &to_string(&1.post_read))} at depths #{Enum.map_join(@beyond, "/", &to_string/1)} — #{launder_phrase(rows, at_max)}. Those extra")
-    p("  certifications are CROSS-ROW: at depth 7, six of them come from")
+    at_max = Enum.find(rows, &(&1.depth == @evidence_depth))
+    closes = route_closure_row(rows)
+    at_route = Enum.find(rows, &(&1.depth == @route_depth))
+    flat = Enum.filter(rows, &(&1.depth > closes.depth))
+
+    p("  THE ROUTE RELATION DOES NOT CLOSE AT #{@evidence_depth} — IT CLOSES AT #{closes.depth}, AND THAT IS THE WHOLE")
+    p("  POINT OF SPLITTING THE KNOB (PDS-D480). Write-routed climbs #{Enum.map_join(inside, "/", &to_string(&1.write))} across")
+    p("  depths #{List.first(@sweep)}..#{@evidence_depth} and KEEPS CLIMBING past it: #{Enum.map_join(beyond, "/", &to_string(&1.write))} at depths")
+    p("  #{Enum.map_join(@beyond, "/", &to_string/1)}. It goes flat at #{closes.depth} — write #{closes.write} / read #{closes.read} / unrouted #{closes.unrouted}, #{closure_word(rows, closes)} at")
+    p("  depth(s) #{Enum.map_join(flat, ", ", &to_string(&1.depth))} — because the bfs seen-set makes the reachable set a finite")
+    p("  closure and the route set is MONOTONE in the budget. Until wave 35's two dead seams")
+    p("  in raw_calls/1 were repaired (a capture, and a `mod.f(...)` variable module head)")
+    p("  the table went flat at #{@evidence_depth} instead, and this census read that artefact as a property")
+    p("  of the code. @route_depth is #{@route_depth}; ROUTE-DEPTH-IS-CLOSURE below reds if it stops matching.")
+    p("")
+    p("  NEITHER WRITE FIGURE MAY BE QUOTED ALONE. THE PAIR IS THE UNIT:")
+    p("      @evidence_depth #{@evidence_depth}   write #{at_max.write}  ·  POST-READ #{at_max.post_read}   <- the classification this census SHIPS")
+    p("      @route_depth   #{String.pad_trailing(to_string(@route_depth), 2)}   write #{at_route.write}  ·  POST-READ #{at_route.post_read}   <- REACH ONLY. NOT an evidence figure.")
+    p("  The write floor rises #{at_max.write} -> #{at_route.write} (+#{at_route.write - at_max.write}) between them, and POST-READ rises #{at_max.post_read} -> #{at_route.post_read}")
+    p("  (x#{Float.round(at_route.post_read / max(at_max.post_read, 1), 1)}). A reader handed \"#{at_route.write}\" without \"POST-READ #{at_route.post_read}\" beside it has been handed")
+    p("  the over-claim this epic exists to stop: the depth that completes the route is the")
+    p("  depth at which unrelated rows start certifying each other.")
+    p("")
+    p("  THE SHAPE RELATION IS WHY THE EVIDENCE DEPTH STAYS AT #{@evidence_depth}. POST-READ reads #{at_max.post_read} at depth")
+    p("  #{@evidence_depth} and #{Enum.map_join(beyond, "/", &to_string(&1.post_read))} at depths #{Enum.map_join(@beyond, "/", &to_string/1)} — #{launder_phrase(rows, at_max)}. Those")
+    p("  extra certifications are CROSS-ROW: at depth 7, six of them come from")
     p("  Barkpark.Webhooks.record_endpoint_failure/2 — a real `select:` on a WEBHOOK FAILURE")
     p("  COUNTER vouching for a session-revoke receipt (auth_controller.ex:329) and for")
     p("  WebAuthn registration. A read of an unrelated row is not a post-read.")
-    p("  ABOVE #{@max_depth} THIS KNOB IS A COMPLIANCE DIAL, NOT A LENS. #{@max_depth} is where the route stops")
-    p("  growing and the evidence has not yet started lying.")
+    p("  ABOVE #{@evidence_depth} THE EVIDENCE KNOB IS A COMPLIANCE DIAL, NOT A LENS. What is NO LONGER")
+    p("  claimed here is that #{@evidence_depth} is also where the route stops growing. It is not.")
     p("")
+    report_route_residual(emitted, index, rows)
     p("  PDS-D448 recorded write=#{@recorded.write} read=#{@recorded.read} unrouted=#{@recorded.unrouted}. That is NOT this lens at")
-    p("  depth #{@max_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
+    p("  depth #{@evidence_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
     p("  neither is a ceiling — which is the point. A success-claim census reports the")
     p("  budget it measured with, or its integer means nothing.")
     p("")
+    closes
   end
 
-  defp sweep_row(emitted, index, d) do
-    routed = Enum.map(emitted, &route(&1, index, d))
-    shaped = Enum.map(routed, &classify(&1, index))
+  # ONE ROW PER DEPTH, ONE WALK PER SITE. `sweep_row/3` used to take the whole `emitted`
+  # list and re-`route/3` every site at its own budget — 12 budgets x N sites x a full
+  # `bfs/7` closure each, of which 11 twelfths were re-derivations. `route_budgets/3`
+  # returns route/3's map for EVERY budget off one walk per site (plus one per caller it
+  # actually consults), and the counting below is untouched: same predicates, same
+  # `classify/2`, same order.
+  defp sweep_rows(emitted, index, depths) do
+    per_site = Enum.map(emitted, &route_budgets(&1, index, depths))
 
-    %{
-      depth: d,
-      write: Enum.count(routed, & &1.write?),
-      read: Enum.count(routed, &(not &1.write? and &1.read?)),
-      unrouted: Enum.count(routed, &(not &1.write? and not &1.read?)),
-      post_read: Enum.count(shaped, fn s -> elem(s.shape, 0) == "POST-READ" end)
-    }
+    Enum.map(depths, fn d ->
+      routed = Enum.map(per_site, &Map.fetch!(&1, d))
+      shaped = Enum.map(routed, &classify(&1, index))
+
+      %{
+        depth: d,
+        write: Enum.count(routed, & &1.write?),
+        read: Enum.count(routed, &(not &1.write? and &1.read?)),
+        unrouted: Enum.count(routed, &(not &1.write? and not &1.read?)),
+        post_read: Enum.count(shaped, fn s -> elem(s.shape, 0) == "POST-READ" end)
+      }
+    end)
+  end
+
+  # route/3 AT MANY BUDGETS. Every clause below mirrors route/3 above line for line — the
+  # downward walk, the ONE-HOP-UP caller fallback taken only when the downward walk found
+  # no write, `Enum.reduce_while`'s halt on the FIRST caller that does, and the same merge
+  # and the same keys. What differs is that each walk is taken once and read at every
+  # budget, and that a caller's walk is taken LAZILY and memoised: route/3 consults
+  # callers only for the budgets that need them, and so does this.
+  defp route_budgets(site, index, budgets) do
+    budgets = budgets |> Enum.uniq() |> Enum.sort()
+    start = site.def && resolve_exact(index, site.def)
+
+    downs =
+      case start do
+        nil -> Map.new(budgets, &{&1, {%{}, nil, []}})
+        d -> bfs_budgets([{d, 0, [label(d)]}], index, budgets)
+      end
+
+    # route/3 builds the caller list INSIDE the `if`, so it is not built at all for a site
+    # whose downward walk already found a write. Same here: `callers/2` is only paid when
+    # at least one budget would have asked for it.
+    up =
+      if start && Enum.any?(budgets, &(not Map.has_key?(elem(Map.fetch!(downs, &1), 0), :write))),
+        do: Enum.with_index(callers(start, index)),
+        else: []
+
+    {rows, _cache} =
+      Enum.map_reduce(budgets, %{}, fn b, cache ->
+        {verbs, depth, chain} = Map.fetch!(downs, b)
+
+        {{via, via_verbs}, cache} =
+          if start && not Map.has_key?(verbs, :write) do
+            route_up(up, index, budgets, b, cache)
+          else
+            {{nil, %{}}, cache}
+          end
+
+        merged =
+          Map.merge(via_verbs, verbs, fn
+            :visited, a, c -> a ++ c
+            _k, a, c -> a ++ c
+          end)
+
+        {{b,
+          Map.merge(site, %{
+            verbs: merged,
+            write?: Map.has_key?(merged, :write),
+            read?: Map.has_key?(merged, :read),
+            depth: depth,
+            via_caller: via,
+            chain: chain,
+            owner: start
+          })}, cache}
+      end)
+
+    Map.new(rows)
+  end
+
+  # THE HALT IS THE POINT: the first caller whose walk reaches a write wins, and the rest
+  # are never walked — exactly route/3's reduce_while. The cache is keyed on the caller's
+  # POSITION, never on `label/1`: two clauses of one function share a label and do not
+  # share a body.
+  defp route_up([], _index, _budgets, _b, cache), do: {{nil, %{}}, cache}
+
+  defp route_up([{c, i} | rest], index, budgets, b, cache) do
+    {snap, cache} =
+      case cache do
+        %{^i => s} ->
+          {s, cache}
+
+        _ ->
+          s = bfs_budgets([{c, 1, [label(c)]}], index, budgets)
+          {s, Map.put(cache, i, s)}
+      end
+
+    {v, _, _} = Map.fetch!(snap, b)
+
+    if Map.has_key?(v, :write),
+      do: {{label(c), v}, cache},
+      else: route_up(rest, index, budgets, b, cache)
   end
 
   defp pad(n), do: String.pad_leading(to_string(n), 3)
 
-  defp closure_word(rows, at_max) do
-    beyond = Enum.filter(rows, &(&1.depth > @max_depth))
+  # THE DEPTH THE ROUTE RELATION CLOSES AT, DERIVED FROM THE TABLE. The shallowest row
+  # whose {write, read, unrouted} triple is repeated by EVERY deeper row in the sweep.
+  # Falls back to the deepest row measured, which is the honest answer to "it had not
+  # closed by the time we stopped looking".
+  defp route_closure_row(rows) do
+    triple = &{&1.write, &1.read, &1.unrouted}
 
-    if Enum.all?(beyond, &(&1.write == at_max.write and &1.read == at_max.read)),
-      do: "IDENTICAL",
-      else: "NOT identical (the closure claim no longer holds — read the table)"
+    Enum.find(rows, List.last(rows), fn r ->
+      rows
+      |> Enum.filter(&(&1.depth > r.depth))
+      |> Enum.all?(&(triple.(&1) == triple.(r)))
+    end)
+  end
+
+  # THE RESIDUAL, NAMED RATHER THAN LEFT SILENT (PDS-D480, criterion 6). An unrouted site
+  # is unrouted for one of two reasons and they are NOT the same finding:
+  #   (a) THE BUDGET. It routes once depth is not the binding constraint — a property of
+  #       @evidence_depth, not of the code, and the split above is what makes it visible.
+  #   (b) THE LENS. It is STILL unrouted at @route_depth, where depth has stopped being an
+  #       excuse. Wave 35's two seam repairs took this class from a hypothesis to a short
+  #       list, and a short list of named sites is a FINDING. A third blind spot is not
+  #       excluded; budget exhaustion through a wide helper is the standing hypothesis.
+  defp report_route_residual(emitted, index, rows) do
+    at_ev = Enum.find(rows, &(&1.depth == @evidence_depth))
+    per_site = Enum.map(emitted, &route_budgets(&1, index, [@evidence_depth, @route_depth]))
+    unrouted? = &(not &1.write? and not &1.read?)
+
+    still =
+      per_site
+      |> Enum.filter(&(unrouted?.(Map.fetch!(&1, @evidence_depth)) and unrouted?.(Map.fetch!(&1, @route_depth))))
+      |> Enum.map(&Map.fetch!(&1, @evidence_depth))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    budget_only =
+      per_site
+      |> Enum.filter(&(unrouted?.(Map.fetch!(&1, @evidence_depth)) and not unrouted?.(Map.fetch!(&1, @route_depth))))
+      |> Enum.map(&Map.fetch!(&1, @evidence_depth))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    p("  UNROUTED SPLITS IN TWO, AND ONLY ONE HALF IS ABOUT THE CODE.")
+    p("      #{length(budget_only)} of #{at_ev.unrouted} unrouted @#{@evidence_depth} ROUTE at @route_depth #{@route_depth} — the budget, not the code:")
+
+    budget_only
+    |> Enum.group_by(& &1.path)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.each(fn {path, sites} ->
+      lines = sites |> Enum.map(&to_string(&1.line)) |> Enum.join(", ")
+      p("        #{short(path)}  :#{lines}  (#{length(sites)} site(s))")
+    end)
+
+    p("      PDS-D480 left these NOT EXPLAINED and named a third resolver blind spot as a")
+    p("      live possibility. They are the depth budget: every one of them reaches a Repo")
+    p("      verb once the route is allowed to close. That is the split, doing its job.")
+    p("      #{length(still)} of #{at_ev.unrouted} are STILL unrouted at #{@route_depth}. THAT is the residual FINDING:")
+
+    still
+    |> Enum.group_by(& &1.path)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.each(fn {path, sites} ->
+      lines = sites |> Enum.map(&to_string(&1.line)) |> Enum.join(", ")
+      p("        #{short(path)}  :#{lines}  (#{length(sites)} site(s))")
+    end)
+
+    if still == [] do
+      p("        (none — every unrouted site at #{@evidence_depth} routes by #{@route_depth})")
+    else
+      p("      These reach NO Repo verb even where depth has stopped being the constraint.")
+      p("      They are NOT certified write-free: a third resolver blind spot is not excluded,")
+      p("      and PDS-D480 named budget exhaustion through a wide helper as the hypothesis.")
+      p("      Printed by name so the next wave audits a LIST, never a residual integer.")
+    end
+
+    p("")
+  end
+
+  # ANCHORED ON THE ROW IT IS ASKED ABOUT, not on @evidence_depth. It used to filter
+  # `&1.depth > @evidence_depth` no matter which row it was handed, which was harmless
+  # only while the two depths were the same number — the exact silent reuse PDS-D480
+  # splits apart. Asked about the closure row it now reads the rows BELOW that closure.
+  defp closure_word(rows, at) do
+    beyond = Enum.filter(rows, &(&1.depth > at.depth))
+
+    cond do
+      beyond == [] -> "the deepest budget measured (closure NOT proven — look further)"
+      Enum.all?(beyond, &(&1.write == at.write and &1.read == at.read)) -> "IDENTICAL"
+      true -> "NOT identical (the closure claim no longer holds — read the table)"
+    end
   end
 
   defp launder_phrase(rows, at_max) do
@@ -3385,8 +4332,24 @@ defmodule PDS.Census do
 
     {rows, _taken} =
       Enum.map_reduce(@register, MapSet.new(), fn r, taken ->
-        case Map.get(live, r.key) do
-          nil ->
+        retired? = Map.has_key?(r, :retired)
+
+        case {Map.get(live, r.key), retired?} do
+          # A RETIRED ROW WHOSE SITE IS BACK is a contradiction, and it gets its own arm
+          # rather than a silent re-adoption: the row says the literal LEFT by repair, and
+          # the tree says it is here. One of the two is wrong and neither says so.
+          {s, true} when not is_nil(s) ->
+            {{r, :resurrected, s}, taken}
+
+          # THE RETIRED FORM (PDS-D706). It resolves to NOTHING and that is CORRECT: the
+          # site left the literal population by being fixed. It is neither an orphan (an
+          # orphan is a row that judges nothing and never said so) nor a re-key — the
+          # bought verdict stays readable as history, and REGISTER-COMPLETE is satisfied
+          # WITHOUT touching the four-field key.
+          {nil, true} ->
+            {{r, :retired, nil}, taken}
+
+          {nil, false} ->
             {path, mfa, _, _} = r.key
 
             cands =
@@ -3396,12 +4359,28 @@ defmodule PDS.Census do
                 &(MapSet.member?(exact, site_key(&1)) or MapSet.member?(taken, site_key(&1)))
               )
 
+            # THE NEIGHBOUR FENCE (PDS-D706), AND IT IS PROVED, NOT SUSPECTED. Repairing
+            # search_controller.ex:337 while editing its sibling at :340 re-pointed the
+            # register key recorded for :337 onto the receipt at :340 — honestly DEMOTED,
+            # which is the mitigation, but the row now names the wrong receipt and the
+            # bought judgment has changed hands. The fallback is sound only where the
+            # group held ONE site at record time; where it held more, "the unique
+            # remaining candidate" is an artifact of which sibling was edited first.
+            # REFUSE the re-point there and let the row ORPHAN, which is loud and true.
+            # FREE ON THE SOLO POPULATION by construction: a group of one cannot trip it.
             case cands do
-              [s] -> {{r, :stale, s}, MapSet.put(taken, site_key(s))}
-              _ -> {{r, :orphan, nil}, taken}
+              [s] ->
+                if Map.get(@register_group_sizes, {path, mfa}, 1) > 1 do
+                  {{r, :orphan, nil}, taken}
+                else
+                  {{r, :stale, s}, MapSet.put(taken, site_key(s))}
+                end
+
+              _ ->
+                {{r, :orphan, nil}, taken}
             end
 
-          s ->
+          {s, false} ->
             {{r, :live, s}, taken}
         end
       end)
@@ -3459,10 +4438,35 @@ defmodule PDS.Census do
       end)
 
       p("")
+      report_register_retired(Enum.filter(rows, &(&1.status == :retired)))
       report_register_stale(stale)
       report_register_tags(rows)
       report_register_prose(rows)
     end
+  end
+
+  # THE CURE, KEPT AS HISTORY. A retired row resolves to no site BY DESIGN — the receipt
+  # was repaired to a computed `ok:` and left the literal population — so without this
+  # block the bought judgment would simply stop being printed and the repair would read,
+  # once more, as a measurement going missing. The verdict and basis are printed EXACTLY
+  # as their author committed them: nothing here re-derives, demotes or edits a verdict.
+  defp report_register_retired([]), do: :ok
+
+  defp report_register_retired(retired) do
+    p("  RETIRED BY REPAIR (#{length(retired)}) — the site left the `ok: true` population by being")
+    p("  FIXED. REGISTER-COMPLETE is satisfied WITHOUT a re-key, the population row each")
+    p("  repair vacated is added back to the conserved denominator, and the verdict below")
+    p("  is the one its author bought, kept as history rather than deleted with the site.")
+
+    Enum.each(retired, fn r ->
+      {path, mfa, hh, fp} = r.key
+      p("      #{short(path)}  #{mfa}")
+      p("        recorded #{hh}/#{fp} · vacated the #{Map.get(r, :retired_route, "?")}-routed population row")
+      p("        BOUGHT VERDICT #{r.verdict} / #{r.basis} — STANDS, as history")
+      wrap(Map.get(r, :retired, "(no retirement note recorded)"), "        ")
+    end)
+
+    p("")
   end
 
   defp report_register_stale([]), do: :ok
@@ -3791,6 +4795,20 @@ defmodule PDS.Census do
   # A name this pass retires is not guessed: the tuple keeps `"?"` and the row DECLINES.
   # Declining is a smaller lie than inlining a binding that may not hold, and the selftest
   # plants exactly that nested rebind to prove the two behaviours differ.
+  #
+  # THE SECOND LIMIT, NAMED HERE BECAUSE AN UNDISCLOSED LIMIT INSIDE A FIX IS THIS EPIC'S
+  # OWN DISEASE. This pass runs on `register_routes/1`'s body, and plugin_route_specs/1
+  # applies it BEFORE both the literal walk and follow_route_delegation/2 — so a delegating
+  # callback whose OWN body binds an alias to a variable is covered. What is NOT covered is
+  # the DELEGATE'S body: follow_route_delegation/2 resolves `Routes.all()` to that def and
+  # hands its raw AST to route_specs/1 without a substitution pass, so a `var = Alias`
+  # binding inside the delegate resolves to `"?"` and its route DECLINES. That is EMPTY
+  # today and the emptiness is derived, not assumed — onixedit/routes.ex is the only
+  # delegate target in the tree and it holds zero `=` bindings — but it is a LIVE second
+  # instance of the same shape, and it is written down here rather than left dark. The
+  # repair, when a delegate first binds one, is one call: inline_alias_bindings/1 on `b`
+  # inside follow_route_delegation/2's flat_map. It is not made now because a resolver
+  # arm with no member to resolve is an unfalsifiable arm.
   defp inline_alias_bindings(body) do
     stmts = block_stmts(body)
 
@@ -3994,6 +5012,28 @@ defmodule PDS.Census do
       |> Enum.filter(fn {_k, n} -> n > 1 end)
       |> Enum.map(&elem(&1, 0))
 
+    # THE THIRD CONTRADICTION THE TABLE CAN CARRY, AND THE ONE NOTHING SAW (PDS-D556).
+    # `orphans` catches a row naming NO live member; `dupes` catches a key carrying two
+    # rows. Neither can see a row that names a member the SAME RUN disposed JUDGED or
+    # ROSTERED: the cond above has precedence JUDGED > ROSTERED > EXCLUDED, so such a row
+    # is SWALLOWED — the member takes its derived label, EXCLUDED does not move, the key
+    # is live so it is not an orphan, and the row is unique so it is not a dupe. MEASURED
+    # ON MERGED MAIN: plant {:post, "/v1/paperflow/papers", "BarkparkWeb.BulldocsIngestController",
+    # :ingest, :status_only_receipt} — a member this lens JUDGES — and the census prints
+    # PASS ROUTED-POPULATION-COMPLETE, EXCLUDED UNMOVED while the table holds one row more,
+    # UNDISPOSED 0, CENSUS OK, exit 0. NOT ONE NUMBER MOVES. The exclusion table could be
+    # grown over judged members with zero observable effect on any printed figure or any
+    # arm, which is a table that cannot be audited by reading the run.
+    #
+    # DERIVED, NOT SNAPSHOTTED. Both inputs are already in scope here — the labels this
+    # cond just assigned, and the committed map it read to assign them — so this costs one
+    # comprehension and no new committed data, which is what keeps it un-rottable.
+    shadowed =
+      for {key, verdict, _} <- disposed,
+          verdict in [:judged, :rostered],
+          Map.has_key?(committed, key),
+          do: {key, verdict, Map.fetch!(committed, key)}
+
     # ---- THE JUDGMENT-COVERAGE LADDER, TAKEN EXACTLY ONCE, HERE -------------------
     #
     # THE TOP RUNG IS A UNION AND MUST NEVER BE A SUM. leg_a and leg_b are two
@@ -4058,6 +5098,7 @@ defmodule PDS.Census do
       undisposed: for({k, :undisposed, _} <- disposed, do: k),
       orphans: orphans,
       dupes: dupes,
+      shadowed: shadowed,
       classes: Enum.frequencies(for {_k, :excluded, c} <- disposed, do: c)
     }
   end
@@ -4149,6 +5190,245 @@ defmodule PDS.Census do
   defp action_defs(index, module, action) do
     segs = module |> String.split(".") |> Enum.map(&String.to_atom/1)
     Map.get(index.by_key, {segs, action}, [])
+  end
+
+  # ---------------------------------------- the exclusion anchor (PDS-D585)
+  #
+  # WHY THIS EXISTS. #9112 gave the 8-row @roster `anchor_mfa` + `def_fp` precisely so a
+  # verdict cannot outlive its defect. The exclusion table got NOTHING: every row was a
+  # bare 5-tuple, so a repair landing UNDER a stale exclusion row could not red, and the
+  # committed prose kept describing a receipt that had already been fixed. The anchor
+  # below is the roster's discipline, one table over.
+  #
+  # IT REUSES roster_def_fp/1 AND NOTHING ELSE. A second normaliser would make two tables
+  # that drift apart under one edit to fp/1 or drop_meta/1; there is exactly one spelling
+  # of "this def, normalised", and editing it re-keys the roster's 8 rows and these rows
+  # in the same commit, which is the property that makes the re-key visible.
+  #
+  # THE FOLD IS ORDER-SENSITIVE, AND THAT IS A DECISION, NOT AN ACCIDENT. The roster never
+  # needed one: it resolves a LITERAL to the narrowest enclosing def, unique by
+  # construction. A routed {module, action} is NOT unique — a multi-head controller action
+  # resolves to several clauses — so the anchor folds the per-clause fingerprints IN LINE
+  # ORDER. Clause order is Elixir semantics (the first matching head wins), so two clauses
+  # SWAPPED is a real behavioural change and MUST move the fingerprint; a set-hash or a
+  # sorted fold would call that edit a no-op. The cost is that a pure re-ordering reds as
+  # loudly as a rewrite, which is the correct direction for an anchor whose whole job is
+  # to refuse to certify a def it has not seen.
+  defp exclusion_defs(index, mod, action),
+    do: index |> action_defs(mod, action) |> Enum.sort_by(& &1.line)
+
+  defp exclusion_def_fp([]), do: nil
+
+  defp exclusion_def_fp(defs),
+    do: defs |> Enum.map(&roster_def_fp/1) |> :erlang.phash2() |> to_string()
+
+  # {quad, anchor_mfa, clause_count, def_fp, file} — the row the emitter prints and the
+  # freshness arms compare. A row that resolves to NO def gets `-` in three fields and a
+  # clause_count of 0: it is NAMED as uncovered rather than absorbed, which is the whole
+  # point of printing the coverage hole.
+  defp exclusion_anchor(index, module_files, {m, p, mod, a, class}) do
+    defs = exclusion_defs(index, mod, a)
+
+    %{
+      quad: {m, p, mod, a},
+      class: class,
+      anchor_mfa: if(defs == [], do: "-", else: label(hd(defs))),
+      clause_count: length(defs),
+      def_fp: exclusion_def_fp(defs) || "-",
+      file: Map.get(module_files, mod, "-"),
+      in_corpus?: Map.has_key?(module_files, mod)
+    }
+  end
+
+  defp exclusion_anchors(parsed, index),
+    do: Enum.map(@routed_excluded, &exclusion_anchor(index, module_file_index(parsed), &1))
+
+  # DELETE/REVOKE IS THE NARROW ARM'S SCOPE, DERIVED FROM THE ACTION NAME AND NEVER TYPED
+  # AS A ROW LIST. A hand list of "the seventeen" rots the first time a delete route is
+  # added or renamed; a stem test moves with the table.
+  @exclusion_narrow_stems ~w(delete revoke destroy purge)
+
+  defp exclusion_narrow?(%{quad: {_m, _p, _mod, a}}) when is_atom(a) and not is_nil(a),
+    do: Enum.any?(@exclusion_narrow_stems, &String.starts_with?(to_string(a), &1))
+
+  defp exclusion_narrow?(_), do: false
+
+  # STDOUT IS TSV AND NOTHING ELSE — same contract as --keys, so `cut` and `wc -l` mean
+  # what they say and the one-line summary goes to STDERR.
+  defp exclusion_keys_run(opts) do
+    files = corpus(opts)
+    guard_corpus!(files, false)
+
+    parsed = Enum.map(files, &parse_file/1)
+    index = build_index(parsed)
+    rows = exclusion_anchors(parsed, index)
+
+    Enum.each(rows, fn r ->
+      {m, p, mod, a} = r.quad
+
+      IO.puts(
+        Enum.join(
+          [m, p, mod, inspect(a), r.anchor_mfa, r.clause_count, r.def_fp, r.file],
+          "\t"
+        )
+      )
+    end)
+
+    no_def = Enum.count(rows, &(&1.clause_count == 0))
+    multi = Enum.count(rows, &(&1.clause_count > 1))
+
+    IO.puts(
+      :stderr,
+      "exclusion-keys #{length(rows)} row(s) · #{no_def} resolve to NO def · #{multi} multi-clause (fold REQUIRED) · #{Enum.count(rows, &exclusion_narrow?/1)} delete/revoke · normaliser #{@key_normaliser}"
+    )
+
+    System.halt(0)
+  end
+
+  # -- EXCLUSION ANCHOR FRESHNESS: one derivation, two arms -------------------
+  #
+  # TWO ARMS OVER ONE DERIVATION, AND THE SPLIT IS THE WHOLE RULING (PDS-D585). The
+  # measurement that decided it was a REPLAY over the real commit window, not a
+  # preference: the WIDE set moves on ordinary feature churn inside an excluded def
+  # several times a week, so a hard arm over it would be switched off inside a
+  # fortnight — it DEMOTES AND NAMES in the printed block, exactly the shape
+  # ROSTER-VERDICT-FRESH uses, and it never edits a committed row. The NARROW set (the
+  # delete/revoke anchors, where a repair landing under a stale exclusion is the
+  # epic's headline defect) is rare enough to gate, so it REDS.
+  #
+  # SCOPED BY THE SAME PREDICATE THE REGISTER ARMS USE. The synthetic selftest tree
+  # carries none of the real controllers and its own fixture modules carry no committed
+  # anchor, so an unconditional arm would red the selftest on its own commit — and, worse,
+  # the `:repaired` corpus deliberately REWRITES six echo actions, which is a moved anchor
+  # by construction. THAT is why the mutants proving this arm can go red census the REPO
+  # (`corpus: :repo`): an arm proven only where it is scoped out is proven nowhere.
+  defp exclusion_freshness(parsed, index),
+    do: Enum.map(exclusion_anchors(parsed, index), &Map.put(&1, :state, exclusion_state(&1)))
+
+  defp exclusion_state(%{in_corpus?: false}), do: {:out_of_scope, []}
+
+  defp exclusion_state(r) do
+    case {Map.get(@exclusion_anchors, r.quad), r.clause_count} do
+      {nil, 0} ->
+        {:no_def, []}
+
+      {nil, _} ->
+        {:unanchored,
+         ["resolves to #{r.clause_count} clause(s) and carries NO committed anchor — re-derive with --exclusion-keys"]}
+
+      {{mfa, _cc, _fp}, 0} ->
+        {:vanished, ["the anchored def #{mfa} resolves to NO clause in this corpus"]}
+
+      {{mfa, cc, fp}, _} ->
+        moved =
+          [
+            if(mfa != r.anchor_mfa, do: "anchor_mfa moved #{mfa} -> #{r.anchor_mfa}"),
+            if(cc != r.clause_count, do: "clause_count moved #{cc} -> #{r.clause_count}"),
+            if(fp != r.def_fp, do: "def_fp moved #{fp} -> #{r.def_fp}")
+          ]
+          |> Enum.reject(&is_nil/1)
+
+        if moved == [], do: {:fresh, []}, else: {:stale, moved}
+    end
+  end
+
+  @exclusion_unfresh [:stale, :unanchored, :vanished]
+
+  defp exclusion_tag(%{state: {t, _}}), do: t
+  defp exclusion_why(%{state: {_, why}}), do: Enum.join(why, " · ")
+
+  defp exclusion_quad_label(%{quad: {m, p, mod, a}}), do: "#{m} #{p} -> #{mod}.#{inspect(a)}"
+
+  # THE COVERAGE HOLE IS PRINTED OR THIS SHIPS NOTHING. A slice that says "the exclusion
+  # table is now freshness-checked" without printing the rows it CANNOT key commits this
+  # epic's exact over-claim one lens down, so the breakdown and the fraction are OUTPUT,
+  # never PR prose.
+  defp report_exclusion_freshness(rows) do
+    by = Enum.group_by(rows, &exclusion_tag/1)
+    n = fn t -> length(Map.get(by, t, [])) end
+    out_of_scope = n.(:out_of_scope)
+    no_def = n.(:no_def)
+    in_scope = length(rows) - out_of_scope
+    anchored = in_scope - no_def
+    unfresh = Enum.filter(rows, &(exclusion_tag(&1) in @exclusion_unfresh))
+    narrow = Enum.filter(rows, &exclusion_narrow?/1)
+    narrow_anchored = Enum.count(narrow, &(exclusion_tag(&1) not in [:out_of_scope, :no_def]))
+
+    no_def_classes =
+      by
+      |> Map.get(:no_def, [])
+      |> Enum.frequencies_by(& &1.class)
+      |> Enum.sort()
+      |> Enum.map_join(", ", fn {c, k} -> "#{k} #{c}" end)
+
+    p("  EXCLUSION-ANCHOR FRESHNESS — the #{length(@roster)}-row roster's discipline, given to the")
+    p("  #{length(@routed_excluded)}-row exclusion table. Every anchor RE-DERIVED this run: anchor_mfa,")
+    p("  clause_count and an ORDER-SENSITIVE fold of the per-clause def fingerprints.")
+    p("    rows          #{pad(length(@routed_excluded))}")
+    p("    OUT OF SCOPE  #{pad(out_of_scope)}  module absent from this corpus — judged neither way")
+    p("    NO DEF        #{pad(no_def)}  in-corpus row whose {module, action} resolves to no def:")
+    p("                       #{if no_def_classes == "", do: "none", else: no_def_classes}")
+    p("                       A LiveView route names {Module, :action-or-nil} and its writes")
+    p("                       live in handle_event/3 — there is no {Controller, action} def to")
+    p("                       fingerprint. These need a DIFFERENT anchor kind and are NAMED")
+    p("                       here with 0 defs rather than absorbed into a coverage figure.")
+    p("    ANCHORED      #{pad(anchored)}  committed {anchor_mfa, clause_count, def_fp}")
+    p("      FRESH       #{pad(n.(:fresh))}")
+    p("      STALE       #{pad(n.(:stale))}  demoted-and-named below; NEVER rewritten in the file")
+    p("      UNANCHORED  #{pad(n.(:unanchored))}  an arriving row with no committed anchor")
+    p("      VANISHED    #{pad(n.(:vanished))}  the anchored def resolves to no clause any more")
+    p("    COVERAGE      #{anchored}/#{in_scope} = #{lv_pct(anchored, in_scope)} of IN-SCOPE rows carry an anchor")
+    p("    MULTI-CLAUSE  #{pad(Enum.count(rows, &(&1.clause_count > 1)))}  rows whose action resolves to more than one clause —")
+    p("                       the fold is REQUIRED for these, and an edit to the SECOND clause")
+    p("                       moves the fingerprint where a first-clause-only anchor cannot")
+    p("    NARROW ARM    #{pad(narrow_anchored)}  anchored delete/revoke row(s) of #{length(narrow)} narrow row(s) —")
+    p("                       EXCLUSION-ANCHORS-FRESH REDS on these. The WIDE set above is")
+    p("                       PRINTED ONLY: measured over the real commit window it moves on")
+    p("                       ordinary feature churn inside an excluded def, and a hard arm")
+    p("                       over it would be switched off inside a fortnight.")
+
+    Enum.each(unfresh, fn r ->
+      p("      EXCLUSION UNRE-DERIVED  #{exclusion_quad_label(r)} [#{r.class}]#{if exclusion_narrow?(r), do: "  (NARROW)", else: ""}")
+      p("               #{exclusion_why(r)}")
+      p("               the class prose above was written against a def that no longer exists")
+      p("               in that shape — a human owes this row a re-derivation; this block")
+      p("               never edits a committed row and never assigns a disposition")
+    end)
+
+    p("")
+  end
+
+  defp exclusion_freshness_check(rows) do
+    narrow = Enum.filter(rows, &exclusion_narrow?/1)
+    fresh = Enum.count(narrow, &(exclusion_tag(&1) == :fresh))
+    bad = Enum.filter(narrow, &(exclusion_tag(&1) in @exclusion_unfresh))
+
+    # 0-OF-N IS NOT A PASS, the same refusal ROSTER-VERDICT-FRESH makes: an arm that
+    # certifies an empty set is the vacuous green this epic exists to refuse, and it is
+    # exactly what a broken resolver produces.
+    vacuous? = fresh == 0 and bad == []
+
+    why =
+      cond do
+        vacuous? ->
+          "NOT ONE of #{length(narrow)} delete/revoke exclusion row(s) resolved to an anchored def, so this arm certified an EMPTY SET — the resolver, not the table, is what failed"
+
+        bad != [] ->
+          "#{length(bad)} of #{length(narrow)} delete/revoke exclusion row(s) no longer name the def they were committed against — " <>
+            Enum.map_join(Enum.take(bad, 4), " || ", fn r ->
+              "STALE EXCLUSION #{exclusion_quad_label(r)} [#{r.class}] — #{exclusion_why(r)}"
+            end) <>
+            if(length(bad) > 4,
+              do: " || (+#{length(bad) - 4} more, all listed in the block above)",
+              else: ""
+            ) <>
+            " — a repair landing UNDER a stale exclusion row is the defect this arm exists to catch: RE-READ the class prose against the def it now names and re-derive with `--exclusion-keys` in the SAME commit"
+
+        true ->
+          "#{fresh} delete/revoke exclusion row(s) still name the def they were committed against — anchor_mfa, clause_count AND the order-sensitive clause fold all re-derived this run, never transcribed. BLIND SHAPE, STATED: the fold is SAME-DEF, so a repair confined to a CALLEE of the excluded action moves no byte inside the action's own clauses and this arm prints PASS through it — and the WIDE set is printed, never gated, so a stale row outside the delete/revoke stems demotes in the block above without reddening anything"
+      end
+
+    {"EXCLUSION-ANCHORS-FRESH", not vacuous? and bad == [], why}
   end
 
   # ------------------------------------- derivation partition (PDS wave 40)
@@ -4864,7 +6144,31 @@ defmodule PDS.Census do
     end)
 
     p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
+    p("    SHADOWED  #{pad(length(disp.shadowed))}  <- ROUTED-DISPOSITION-UNSHADOWED reds on this. NOT a")
+    p("                  disposition class and NOT part of the sum below: it counts members")
+    p("                  the cond disposed JUDGED or ROSTERED that ALSO carry a committed")
+    p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
+    p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
+    p("  surface this lens has JUDGED (disposed JUDGED or ROSTERED) — PRINTED, NEVER GATED")
+    wrap(
+      "IT IS NOT A THRESHOLD AND MUST NEVER BECOME ONE, and the reason is a measurement, " <>
+        "not a preference (PDS-D563). Over 95 api/lib commits this fraction MOVED 9 times " <>
+        "(once per 10.6 commits), and all 8 of the movers that moved the DENOMINATOR were " <>
+        "plain FEATURE commits that touched no receipt at all: a route added is a routed " <>
+        "member added, so an honest feature lowers this fraction the instant it lands. A " <>
+        "thresholded or non-decreasing arm over this line would have redded five times in " <>
+        "eleven days on work that broke nothing. THE NUMERATOR IS THE HALF THAT RATCHETS: " <>
+        "judged never decreased across all 95 commits and ROSTERED held at 7 throughout, " <>
+        "which is why a numerator floor is the only shape that could ever be honest here " <>
+        "— and even that is not shipped, because D454 stands. What this line buys is that " <>
+        "the coverage of the judgment can no longer be an unstated number a reader has to " <>
+        "divide two other lines to find.",
+      "    "
+    )
 
     p("")
     lad = disp.ladder
@@ -4914,6 +6218,10 @@ defmodule PDS.Census do
     p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
 
     p("")
+    exfresh = exclusion_freshness(parsed, index)
+    report_exclusion_freshness(exfresh)
+
+    p("")
     deriv = derivation_partition(disp, index)
     report_derivation_partition(deriv, Map.get(disp.classes, @derivation_class, 0))
 
@@ -4925,7 +6233,11 @@ defmodule PDS.Census do
     p("")
     lv = report_liveview_population(lives, parsed, index)
 
-    d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv) |> Map.put(:liveview, lv)
+    d
+    |> Map.put(:disposition, disp)
+    |> Map.put(:derivation, deriv)
+    |> Map.put(:liveview, lv)
+    |> Map.put(:exclusion, %{rows: exfresh, scope: register_scope(classified)})
   end
 
   # THE PARTITION, PRINTED IN FULL. Every row prints the producing call NAME it was
@@ -5223,15 +6535,38 @@ defmodule PDS.Census do
     p("      the mount count cannot stand in for this one in either direction.")
     p("")
 
+    depths = @lv_sweep ++ @lv_beyond
+
+    # ONE WALK PER CLAUSE, TWELVE ROWS READ OFF IT. This was `lv_bfs(&1, index, depth)`
+    # inside the depth loop — the same closure re-taken at 12 budgets for every
+    # handle_event/3 clause in the corpus, and the largest single phase of a census run
+    # (metered: ~10,5 s of 28,2 s). `bfs_budgets/3` takes it once. The predicate is
+    # unchanged: a clause is a hit at depth d iff its walk holds a :write at budget d,
+    # which is what `elem(lv_bfs(d, index, depth), 0)` asked. `lv_bfs/3` itself is
+    # untouched and still the spelling the other four blocks below use.
+    #
+    # AND THE GUARDS MOVED WITH IT, BECAUSE THE SELFTEST MADE THEM. Two `--selftest`
+    # cases — LIVEVIEW-DEPTH-NOT-CONSTANT and LIVEVIEW-WRITE-FLAG-ARMED — mutated
+    # `lv_bfs/3`, which this block no longer calls, so the first run of this reduction
+    # left both of them unable to reach the thing they assert on. They FAILED, by name,
+    # and their anchors are now on the two expressions below. A refactor that moves code
+    # out from under a mutant and leaves the mutant reporting PASS is the exact vacuity
+    # this instrument exists to refuse; it refused it here, on its own author.
+    reach = Enum.map(pop, fn d -> {d, bfs_budgets([{d, 0, [label(d)]}], index, depths)} end)
+
     rows =
-      Enum.map(@lv_sweep ++ @lv_beyond, fn depth ->
-        hits = Enum.filter(pop, &elem(lv_bfs(&1, index, depth), 0))
+      Enum.map(depths, fn depth ->
+        hits =
+          for {d, snap} <- reach,
+              Map.has_key?(elem(Map.fetch!(snap, depth), 0), :write),
+              do: d
+
         %{depth: depth, full: length(hits), routed: Enum.count(hits, routed?)}
       end)
 
     last = List.last(rows)
     closes = Enum.find(rows, last, &(&1.full == last.full))
-    at_max = Enum.find(rows, last, &(&1.depth == @max_depth))
+    at_max = Enum.find(rows, last, &(&1.depth == @evidence_depth))
     monotone? = rows |> Enum.map(& &1.full) |> then(&(&1 == Enum.sort(&1)))
 
     p("    WRITE-REACHING BY DEPTH — EVERY ROW A FLOOR, BOTH REASONS PRINTED BELOW")
@@ -5240,9 +6575,9 @@ defmodule PDS.Census do
     Enum.each(rows, fn r ->
       mark =
         cond do
-          r.depth == @max_depth -> "   <- @max_depth, the census budget"
+          r.depth == @evidence_depth -> "   <- @evidence_depth, the census budget"
           r.depth == closes.depth -> "   <- the relation CLOSES here"
-          r.depth > @max_depth -> "   (past the census depth)"
+          r.depth > @evidence_depth -> "   (past the census depth)"
           true -> ""
         end
 
@@ -5257,17 +6592,17 @@ defmodule PDS.Census do
     at7 = Enum.find(rows, at_max, &(&1.depth == 7))
     p("      A TRANSCRIBED FIGURE IS REFUTED HERE: this run reads #{at7.routed} / #{nr} @7, so a note")
     p("      carrying #{last.full} / #{nr} @7 is off by #{last.full - at7.routed} / #{nr} and was copied, not measured.")
-    p("      @max_depth is #{@max_depth} and is NOT changed by this block: #{at_max.routed} / #{nr} @#{@max_depth} is what the")
+    p("      @evidence_depth is #{@evidence_depth} and is NOT changed by this block: #{at_max.routed} / #{nr} @#{@evidence_depth} is what the")
     p("      census's own budget sees; #{closes.full} / #{nr} @#{closes.depth} is what the relation closes at. BOTH")
     p("      are printed, because a lens that prints one of them is choosing an answer.")
-    p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@max_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
+    p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@evidence_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
     p("      FLOOR, REASON 2 — THE KEY. bfs/7's seen-set and callees/2's uniq_by are BOTH")
     p("      {module, name, arity}, so exactly ONE clause per callee key is ever entered. A")
     p("      write living in a SECOND clause of an already-visited key is invisible at")
     p("      EVERY depth, and no budget buys it back. Neither reason is an estimate.")
     p("      THE SWEEP IS DENOMINATOR-BLIND: the routed and full NUMERATORS are identical")
     p("      at every depth above (all #{nc} / #{nc} component clauses are write-FALSE at every")
-    p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@max_depth}.")
+    p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@evidence_depth}.")
     p("      A bare integer here could not be caught by any run output. Hence none is bare.")
     p("")
 
@@ -5290,7 +6625,7 @@ defmodule PDS.Census do
         end)
       end
 
-    rc_max = routed_cross.(@max_depth)
+    rc_max = routed_cross.(@evidence_depth)
     rc_close = routed_cross.(closes)
 
     comp_vis = Enum.map(comp, fn c -> {c, elem(lv_bfs(c, index, deep), 1)} end)
@@ -5321,7 +6656,7 @@ defmodule PDS.Census do
     p("                       #{length(cross_files)} / #{length(Enum.uniq(Enum.map(comp, & &1.path)))} component file(s). Depth-invariant: they cross at")
     p("                       every budget measured.")
     p("        #{length(rc_close)} / #{nr} @#{closes}   routed clause(s) that cross a boundary and are NOT")
-    p("                       write-reaching (#{length(rc_max)} / #{nr} @#{@max_depth}). These sit in NO write column")
+    p("                       write-reaching (#{length(rc_max)} / #{nr} @#{@evidence_depth}). These sit in NO write column")
     p("                       above — the third term a two-way sum drops on the floor.")
     p("        #{length(tags)} / #{map_size(hc_by_tag)}        handle_call/3 LITERAL TAG(S) the crossing clauses join")
     p("                       to, out of every literal-tagged handle_call/3 in the corpus:")
@@ -5329,7 +6664,7 @@ defmodule PDS.Census do
     Enum.each(tags, fn t ->
       Enum.each(Map.fetch!(hc_by_tag, t), fn d ->
         prof =
-          Enum.map_join([4, @max_depth, closes, 10, 12], " ", fn depth ->
+          Enum.map_join([4, @evidence_depth, closes, 10, 12], " ", fn depth ->
             "#{depth}:#{if elem(lv_bfs(d, index, depth), 0), do: "W", else: "-"}"
           end)
 
@@ -5346,7 +6681,7 @@ defmodule PDS.Census do
     p("      credits #{length(comp_cross)} / #{nc} at the WRONG depth, and the measured answer is #{length(comp_cross)} / #{nc}")
     p("      reaching a handle_call clause itself write-reaching only from the depth in the")
     p("      row above. A WAVE-40 FIGURE IS RETIRED HERE: any single number that adds a")
-    p("      depth-#{@max_depth} count over the routed #{nr} to a depth-invariant count over the #{nc}")
+    p("      depth-#{@evidence_depth} count over the routed #{nr} to a depth-invariant count over the #{nc}")
     p("      is not a bigger truth, it is two denominators in a trench coat.")
     p("")
   end
@@ -5418,12 +6753,12 @@ defmodule PDS.Census do
 
     h = length(hole)
     files = hole |> Enum.map(& &1.path) |> Enum.uniq() |> length()
-    w_max = Enum.count(hole, &elem(lv_bfs(&1, index, @max_depth), 0))
+    w_max = Enum.count(hole, &elem(lv_bfs(&1, index, @evidence_depth), 0))
     w_close = Enum.count(hole, &elem(lv_bfs(&1, index, closes), 0))
 
     p("    A NAMED HOLE, WITH ITS OWN DENOMINATOR: handle_info/2 + handle_params/3")
     p("      #{h} / #{length(index.defs)} corpus def(s), over #{files} / #{MapSet.size(paths)} live file(s) (#{MapSet.size(paths)} / #{length(parsed)} corpus file(s)")
-    p("      carry a live module or a LiveComponent). Write-reaching #{w_max} / #{h} @#{@max_depth} and")
+    p("      carry a live module or a LiveComponent). Write-reaching #{w_max} / #{h} @#{@evidence_depth} and")
     p("      #{w_close} / #{h} @#{closes} — #{w_close - w_max} / #{h} clause(s) bigger at closure than at the census")
     p("      depth, on a surface no column above counts at all. These are writes a USER")
     p("      NEVER CLICKED: a timer, a PubSub delivery, a live patch. NOTHING in this")
@@ -6318,11 +7653,48 @@ defmodule PDS.Census do
             else: Enum.map_join(blind, ", ", fn {n, a, l} -> "#{n}/#{a}:#{l}" end)
       end
 
+    # THE ARM PRINTS THE DEPARTURE CASE IT CANNOT CATCH, IN ITS PASS SENTENCE (PDS-D556).
+    # Departure decomposes into three cases and this arm owns exactly ONE of them:
+    #   D1  a receipt vanishes and no row is added  -> already reds as UNDISPOSED ARRIVAL.
+    #   D2  a row is planted over a still-judged member -> THIS ARM. Free, derived.
+    #   D3  the judgment is lost AND the row added in ONE commit -> the member is disposed
+    #       EXCLUDED, honestly, by a table that names it. The contradiction exists only
+    #       BETWEEN TWO CHECKOUTS, and a build-free ONE-CHECKOUT lens structurally cannot
+    #       read history. SHADOWED 0 THEREFORE DOES NOT MEAN "NO DEPARTURES" — and a reader
+    #       who takes it that way can only be stopped by prose, so the prose ships in the
+    #       PASS sentence rather than in a comment nobody runs.
+    # ARRIVAL SEMANTICS, NEVER A COUNT: the predicate is `shadowed == []` and the failure
+    # text NAMES THE QUADS. An honest table edit — a row added over an undisposed member,
+    # a row removed — cannot red this, because no number is compared to anything.
+    shadow_why =
+      if disp.shadowed == [] do
+        "no committed disposition row names a member this run disposed JUDGED or ROSTERED — the #{length(@routed_excluded)}-row table and the #{disp.judged + disp.rostered} derived judgment(s) do not overlap · BLIND SHAPE, PRINTED: this catches a member judged AND excluded AT THE SAME TIME (D2). It CANNOT catch a judgment lost and an exclusion row added in ONE commit (D3) — that departure leaves a contradiction only in HISTORY, and a build-free one-checkout lens cannot read history. SHADOWED 0 IS NOT \"NO DEPARTURES\""
+      else
+        Enum.join(
+          Enum.map(Enum.take(disp.shadowed, 6), fn {{m, p, mod, a}, verdict, c} ->
+            "SHADOWED DISPOSITION #{m} #{p} -> #{mod}.#{a} [#{c}] — this run disposed it #{String.upcase(to_string(verdict))}, so the row is SWALLOWED by the cond's precedence and moves no printed number"
+          end) ++
+            [
+              "the exclusion table is claiming a member the derivation judges; one of the two is wrong and neither says so"
+            ],
+          " · "
+        )
+      end
+
     [
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
-      {"LENS-CAN-MISS", resolved != [], lens_why}
-    ] ++ derivation_checks(d) ++ liveview_checks(d)
+      {"LENS-CAN-MISS", resolved != [], lens_why},
+      {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
+    ] ++ exclusion_freshness_checks(d) ++ derivation_checks(d) ++ liveview_checks(d)
   end
+
+  # SCOPED OUT ON THE SYNTHETIC TREE, exactly like the register and roster arms — see
+  # the comment on exclusion_freshness/2 for why an unconditional arm would red the
+  # selftest on its own commit, and why the mutants for this arm census the REPO.
+  defp exclusion_freshness_checks(%{exclusion: %{scope: :real, rows: rows}}),
+    do: [exclusion_freshness_check(rows)]
+
+  defp exclusion_freshness_checks(_), do: []
 
   # A RELATION, NEVER A THRESHOLD (PDS wave 40). This arm asserts that the partition
   # DISPOSES ITS OWN CLASS EXACTLY ONCE — the sum of the eight classes equals the
@@ -6584,7 +7956,7 @@ defmodule PDS.Census do
     {verbs, depth, chain} =
       case close do
         nil -> {%{}, nil, []}
-        d -> bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @max_depth)
+        d -> bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @evidence_depth)
       end
 
     write? = Map.has_key?(verbs, :write)
@@ -6973,6 +8345,96 @@ defmodule PDS.Census do
       expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
       proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
+    # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
+    # is scoped to the real corpus by the same predicate the register and roster arms
+    # use, so a mutant over the synthetic tree would be proven exactly where the arm is
+    # switched off (PDS-D541). Nothing below writes to api/lib: each case perturbs the
+    # COMMITTED side of the comparison, which is the only side a selftest may edit.
+    %{
+      name: "EXCLUSION-DEF-FP-MOVED",
+      corpus: :repo,
+      argv: [],
+      # A repair landing UNDER a stale exclusion row — the defect this arm exists to
+      # catch. Perturbing the recorded fingerprint is that divergence seen from the
+      # other side: recorded fold vs re-derived fold, on a DELETE row, which is the
+      # narrow arm's scope and therefore a hard red.
+      mut: {", 1, " <> "\"29471808\"}", ", 1, \"29471808-perturbed\"}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-ANCHORS-FRESH",
+        "STALE EXCLUSION",
+        "BarkparkWeb.MemberController.:delete",
+        "def_fp moved"
+      ],
+      proves: "an exclusion row whose anchored def CHANGED reds BY NAME on the delete/revoke arm — the staleness the 182-row table could not have on any run before this one, because it carried no anchor at all"
+    },
+    %{
+      name: "EXCLUSION-FOLD-IS-THE-ANCHOR",
+      corpus: :repo,
+      argv: [],
+      # THE MULTI-CLAUSE FOLD, PROVEN LOAD-BEARING FROM THE INSTRUMENT SIDE. Folding only
+      # the FIRST clause is exactly the anchor a naive implementation would ship: it is
+      # BYTE-IDENTICAL on every single-clause row and re-keys only the multi-clause ones,
+      # so the mutation is a clean read on the fold and on nothing else. It is also the
+      # ONE case that proves the WIDE arm's SHAPE — not one multi-clause row is a
+      # delete/revoke, so the run DEMOTES AND NAMES them and still exits 0. A wide arm
+      # that hard-failed would break this case, which is what keeps the ruling honest.
+      mut:
+        {"do: defs |> Enum.map(&roster" <> "_def_fp/1)",
+         "do: defs |> Enum.take(1) |> Enum.map(&roster_def_fp/1)"},
+      exit: 0,
+      expect: ["CENSUS OK", "EXCLUSION UNRE-DERIVED", "def_fp moved", "PASS  EXCLUSION-ANCHORS-FRESH"],
+      proves: "the per-clause fold is what the multi-clause rows are keyed on — dropping to the first clause moves their fingerprints — AND the wide set demotes-and-names at exit 0 rather than hard-failing, which is the ruling the commit-window replay bought"
+    },
+    %{
+      name: "EXCLUSION-NARROW-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, one table over from ROSTER-FRESH-NOT-VACUOUS. An empty narrow
+      # set makes every comparison unreachable, which is how a freshness arm certifies
+      # nothing at exit 0 while printing PASS.
+      mut: {"@exclusion_narrow_stems ~w(delete" <> " revoke destroy purge)", "@exclusion_narrow_stems ~w()"},
+      exit: 1,
+      expect: ["FAIL  EXCLUSION-ANCHORS-FRESH", "certified an EMPTY SET"],
+      proves: "a narrow set that selects NOTHING reds instead of passing 0-of-0 — an arm that certifies an empty set is the vacuous green this epic refuses"
+    },
+    # THE SELF-ERASING LENS (PDS-D706). Both cases census the REPO: the register arms are
+    # scoped to the corpus the register's paths live in, so a mutant over the synthetic
+    # tree would be proven exactly where the arm is switched off (PDS-D541). Neither case
+    # writes to api/lib.
+    %{
+      name: "REGISTER-FENCE-IS-LIVE",
+      corpus: :repo,
+      argv: [],
+      # THE FENCE, PROVEN REACHABLE RATHER THAN ASSUMED. It refuses the single-candidate
+      # re-point when the row's {path, mfa} group held MORE THAN ONE site at record time,
+      # and it costs nothing on today's tree because every basis-stale row sits in a solo
+      # group. Widening the threshold to fence the SOLO groups too turns exactly those
+      # honest demotions into ORPHANS — which is the only way to see, from inside the
+      # instrument, that the group-size test is what admits them and not an accident.
+      mut:
+        {"if Map.get(@register_group_sizes, {path, mfa}, 1) " <> "> 1 do",
+         "if Map.get(@register_group_sizes, {path, mfa}, 1) > 0 do"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-COMPLETE", "ORPHANED ROW", "register row(s) name NO emitted site"],
+      proves: "the record-time group-size fence is LIVE on the fallback path — the demotions that pass today pass BECAUSE their group held one site, so the fence is what stands between a bought verdict and its neighbour's receipt"
+    },
+    %{
+      name: "REGISTER-RETIRED-RESURRECTION-REDS",
+      corpus: :repo,
+      argv: [],
+      # THE RETIRED FORM'S TEETH, ON A TREE WITH ZERO RETIRED ROWS. The arm's job is to
+      # refuse a row that says "the literal left by repair" while the literal is right
+      # there — a reverted repair must not inherit the verdict the repair bought. Treating
+      # every register row as retired is the cheapest way to put a live site under a
+      # retired key, and it reds on the branch that would otherwise be unreachable until
+      # the first real repair lands.
+      mut:
+        {"retired? = Map.has_key?(r, " <> ":retired)", "retired? = Map.has_key?(r, :verdict)"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
+      proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
+    },
     # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
     # subject is a HOP between two real defs, and the synthetic tree's controllers respond
     # in their own bodies — a fixture would exercise the code and prove nothing about it.
@@ -7020,14 +8482,14 @@ defmodule PDS.Census do
       mut: nil,
       exit: 0,
       expect: [
-        "0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget",
+        "0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget",
         "1 / 4  (25.0%)    1 / 5  (20.0%)   <- the relation CLOSES here",
         "5 == population 5",
         "2 / 2  clause(s) whose EVERY live_session chain",
         "2 / 2  reachable clause(s) covered by a deny-by-default gate",
         "PASS  LIVEVIEW-REACH-CLOSES"
       ],
-      proves: "the routed fixture LiveView's write sits ONE HOP past @max_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
+      proves: "the routed fixture LiveView's write sits ONE HOP past @evidence_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
     },
     %{
       name: "LIVEVIEW-DEPTH-NOT-CONSTANT",
@@ -7037,14 +8499,23 @@ defmodule PDS.Census do
       # corpus UNMUTATED before any mutant runs, so a fixture edit is a function the
       # mutant never calls and passes vacuously. Charging the entry clause one hop less
       # is the same displacement seen from the lens side.
-      # THE ANCHOR CARRIES ITS BINDING. The bare `bfs([{d, 0, …` spelling occurs THREE
+      # THE ANCHOR CARRIES ITS BINDING. The bare `bfs([{d, 0, …` spelling occurs several
       # times in this file — apply_mutation/2 refuses an ambiguous anchor rather than
       # mutating the first one it meets, which is the guard working.
-      mut: {"{verbs, _found, _chain} = bfs([{d, 0" <> ", [label(d)]}], index, MapSet.new(), %{}, nil, [], max)",
-            "{verbs, _found, _chain} = bfs([{d, -1, [label(d)]}], index, MapSet.new(), %{}, nil, [], max)"},
+      #
+      # RE-POINTED WHEN THE SWEEP STOPPED CALLING `lv_bfs/3`. This case used to displace
+      # the start depth inside `lv_bfs/3`; the sweep now reads its twelve rows off ONE
+      # `bfs_budgets/3` walk, so that mutation no longer REACHES the block this case
+      # asserts on and the case went vacuous — it FAILED, loudly, on the run that
+      # introduced the reduction, which is the selftest doing its job. The anchor moved
+      # to the sweep's own walk; the displacement, the expectation and the refutation are
+      # unchanged. `, index, depths)` is what makes it unique: `route_budgets/3` spells
+      # the same call with `, index, budgets)`.
+      mut: {"bfs_budgets([{d, 0" <> ", [label(d)]}], index, depths)",
+            "bfs_budgets([{d, -1, [label(d)]}], index, depths)"},
       exit: 0,
-      expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @max_depth, the census budget"],
-      refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
+      expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @evidence_depth, the census budget"],
+      refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget"],
       proves: "the printed FRACTION at the budget moves from 0 / 1 to 1 / 1 when the write moves one hop — so it is a measurement of the tree and not a constant the block prints either way"
     },
     %{
@@ -7054,10 +8525,15 @@ defmodule PDS.Census do
       # THE OTHER DIRECTION, AND THE ONE THAT WAS MEASURED VACUOUS. Forcing the write
       # flag false made every LiveView depth cell read 0 and the census STILL exited 0
       # with CENSUS OK — nothing in the selftest could see it. It can now.
-      mut: {"{Map.has_key?(verbs, :write)" <> ", Map.get(verbs, :visited, [])}",
-            "{false, Map.get(verbs, :visited, [])}"},
+      #
+      # RE-POINTED FOR THE SAME REASON AS THE CASE ABOVE, and it failed the same way
+      # first: the flag the sweep reads is no longer `lv_bfs/3`'s return but the `:write`
+      # key of the snapshot the sweep takes, so forcing `lv_bfs/3` false left the sweep
+      # printing 1 / 4 and this case caught it. The forced-false mutation is the same
+      # mutation, now aimed at the expression the block actually consults.
+      mut: {"Map.has_key?(elem(Map.fetch!(snap, depth), 0)" <> ", :write)", "false"},
       exit: 0,
-      expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
+      expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget"],
       refute: ["1 / 4  (25.0%)    1 / 5  (20.0%)"],
       proves: "a write flag forced false empties every depth cell and the case REDS on the missing 1 / 4 — the exact mutation that used to survive at exit 0 with every arm printing PASS"
     },
@@ -7128,6 +8604,105 @@ defmodule PDS.Census do
       refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
       proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
     },
+    # THE ALIAS RESOLVER GETS ITS OWN MUTANT (PDS-D562). inline_alias_bindings/1 is the
+    # clause that reclaimed the two Sheets write routes from the retired
+    # `action_not_in_corpus` class, and until this case existed it was a RESOLVER WITH NO
+    # MUTANT — exactly the quietly-rotting shape this epic distrusts, and one whose
+    # rot is INVISIBLE in the shipped numbers (a retired binding does not red anything on
+    # the real tree; it silently re-labels two members).
+    #
+    # IT PROVES THE JOIN BY NAME, WHICH IS THE WHOLE POINT. The fixture plugin binds
+    # `ops_mod = Barkpark.Filler.PluginOpsLive` at the top of register_routes/1 and spells
+    # its route with the VARIABLE, and a committed disposition row names the RESOLVED
+    # module. Retire the substitution (bind_counts/1 can never equal 99) and that one route
+    # splits in two directions AT ONCE: the live member arrives as `?.index` with no
+    # disposition, and the committed row that named the resolved module now names nothing
+    # live. BOTH halves are asserted, because either alone could be produced by something
+    # other than the substitution — together they can only mean the module name moved from
+    # `Barkpark.Filler.PluginOpsLive` to `?`, which IS the resolution, observed by name.
+    %{
+      name: "ROUTE-ALIAS-BINDING-RESOLVES",
+      corpus: :full,
+      argv: [],
+      # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+      # an ambiguous anchor, and a mut literal that occurs twice is exactly that.
+      mut:
+        {"Map.get(counts, name, " <> "0) == 1", "Map.get(counts, name, " <> "0) == 99"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-POPULATION-COMPLETE",
+        "UNDISPOSED ARRIVAL live /plugins/ops-live -> ?.index",
+        "ORPHANED DISPOSITION live /plugins/ops-live -> Barkpark.Filler.PluginOpsLive.index"
+      ],
+      refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
+      proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
+    },
+    # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
+    #
+    # THE CORPUS IS THE REPO, AND THAT IS THE WHOLE COST STORY. The arm's predicate reads
+    # `verdict in [:judged, :rostered]`, and BOTH labels are DERIVED — a member is judged
+    # because this run found a receipt the register keys, rostered because it found a
+    # @roster anchor. Over the synthetic tree neither label exists for a member the
+    # shipped @routed_excluded also names, so a mutant there would run a check that
+    # returned [] before and [] after — PDS-D541's unmutatability, wearing a new arm's
+    # name. The read-only REPO corpus already exists for exactly this scope problem (13
+    # cases ride it), so no seventh corpus is built: the brief's "third selftest corpus
+    # carrying one file at a live @register path" would flip register_scope/1 to :real
+    # over a synthetic tree and red FOUR unrelated arms, and the case would then have to
+    # borrow an exit code it did not earn. HERE IT EARNS IT, and the earning is ASSERTED,
+    # not assumed: each case requires `PASS  ROUTED-POPULATION-COMPLETE` and
+    # `PASS  LENS-CAN-MISS` in the SAME output as its own FAIL, so exit 1 can only be this
+    # arm's. That is strictly more than the brief asked for and strictly less fixture.
+    #
+    # NOTHING SHIPPED MOVES. Both mutants ADD one @routed_excluded row over a member the
+    # real tree already disposes JUDGED (or ROSTERED). The cond's precedence swallows it,
+    # so EXCLUDED does not move, the derivation partition's total does not move, and the
+    # @rederived baseline does not move — which is the DEFECT restated as a fixture: the
+    # only observable the plant has is the arm this slice adds.
+    #
+    # ONE CASE PER BRANCH, AND EACH CAUGHT BY ITS OWN. Mutating the predicate to
+    # `[:rostered]` leaves SHADOWED-ROW-OVER-ROSTERED green and reds SHADOWED-ROW-OVER-JUDGED
+    # by name; mutating it to `[:judged]` does the mirror. With only one of the two cases
+    # the corresponding half of the predicate is a live arm with no mutant on it — this
+    # epic's failure mode inside its own selftest.
+    %{
+      name: "SHADOWED-ROW-OVER-JUDGED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/paperflow/papers\", \"BarkparkWeb.BulldocsIngestController\", :ingest, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/paperflow/papers -> BarkparkWeb.BulldocsIngestController.ingest",
+        "this run disposed it JUDGED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the JUDGED branch of the predicate is live: an exclusion row planted over a member this run disposes JUDGED reds the new arm BY QUAD while every neighbouring arm stays PASS — the shape that on origin/main moved not one printed number"
+    },
+    %{
+      name: "SHADOWED-ROW-OVER-ROSTERED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/chat-host/events\", \"BarkparkWeb.ChatHostController\", :event, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/chat-host/events -> BarkparkWeb.ChatHostController.event",
+        "this run disposed it ROSTERED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the ROSTERED branch is live and is NOT reachable through the JUDGED one: the planted row names a member disposed ROSTERED by a @roster anchor, and the arm reds naming that quad and that label"
+    },
     # THE LADDER'S TOP RUNG, AND THE ONLY DISCRIMINATOR THAT EXISTS FOR IT (wave 45).
     # OVERLAP is 0 on today's tree, so `leg_a + leg_b` and Enum.count(MapSet.union(..))
     # BOTH print the same integer: an implementation that ADDED the legs would be green,
@@ -7173,6 +8748,54 @@ defmodule PDS.Census do
     # GONE the first time `unrouted` moved — loud rather than wrong, and still a red this
     # arm has no business printing.
     # The FAIL sentence carries the re-derivation command so the repair is one run.
+    # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
+    #
+    # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
+    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
+    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
+    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
+    # one-clause mutation and named in the output. A drift row rides along as the second
+    # half: killing a live edge cannot leave the population untouched.
+    #
+    # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
+    # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
+    # neither, so a mutant there would disable a resolution that resolved nothing — PDS-D541's
+    # unmutatability wearing a new name. Thirteen cases already ride `corpus: :repo`.
+    #
+    # THE ANCHOR IS SPLIT so the mut tuple does not match ITSELF; apply_mutation/2 refuses
+    # an ambiguous anchor and a literal that occurs twice IS one.
+    %{
+      name: "CAPTURE-EDGE-FIRES",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp capture_arity({:__block__, _, [n]}) when is_integer(n), " <> "do: n",
+         "defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: (n && nil)"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+    },
+    %{
+      name: "CONCAT-BINDS-THE-VARIABLE",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), " <> "do: a ++ b",
+         "defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), do: (a && b && nil)"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
     %{
       name: "D448-BASELINE-REFUSES",
       corpus: :repo,
@@ -7836,7 +9459,7 @@ defmodule PDS.Census do
 
     # THE LIVEVIEW FIXTURE (PDS wave 42), IN THREE COUPLED FILES. The routed LiveView's
     # write sits EXACTLY ONE HOP BEYOND the census budget — handle_event is depth 0 and
-    # hop7/2 is depth 7, one past @max_depth — so the depth sweep prints a FALSE cell and a
+    # hop7/2 is depth 7, one past @evidence_depth — so the depth sweep prints a FALSE cell and a
     # TRUE one past it, and both are asserted as FRACTIONS. A bare numerator could not
     # tell the routed lens from the repo-wide one: they are identical at every depth by
     # construction, here and on the real tree.
@@ -8023,22 +9646,36 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
     # THE EIGHT POPULATION ROWS, DERIVED ONCE AND READ TWICE — by the arm that refuses a
     # drift and by the block that prints them. Two lists would be two lenses wearing one
     # name, which is the defect this file exists to refuse.
+    # THE CONSERVED ROWS, MEASURED RATHER THAN GUESSED (PDS-D706). The first scratch
+    # repair proved a status-descending fix moves FOUR of the eight rows, not three:
+    # textual -1, ast -1, emitted -1 AND the route row the departing site sat in (-1 on
+    # write-routed for pulse_controller.ex:58). The first three are conserved for every
+    # retired row; the fourth is conserved on the row the retiring commit RECORDED, which
+    # is why `retired_route` is a required field. The four rows a repair never touches —
+    # phantom and consumer — are left alone: conserving a number no repair moves would be
+    # suppression. An ARRIVAL adds a literal and NO retired row, so it still moves the
+    # conserved totals and still reds.
+    retired_n = length(retired_rows())
+
     drift_rows = [
-      {"textual", textual, :textual},
-      {"ast-literal", length(ast_sites), :ast},
+      {"textual", textual + retired_n, :textual},
+      {"ast-literal", length(ast_sites) + retired_n, :ast},
       {"phantom", length(phantoms), :phantom},
       {"consumer", length(consumers), :consumer},
-      {"emitted", length(emitted), :emitted},
-      {"write-routed", Enum.count(classified, & &1.write?), :write},
-      {"read-routed", Enum.count(classified, &(not &1.write? and &1.read?)), :read},
-      {"unrouted", Enum.count(classified, &(not &1.write? and not &1.read?)), :unrouted}
+      {"emitted", length(emitted) + retired_n, :emitted},
+      {"write-routed", Enum.count(classified, & &1.write?) + retired_route_n(:write), :write},
+      {"read-routed",
+       Enum.count(classified, &(not &1.write? and &1.read?)) + retired_route_n(:read), :read},
+      {"unrouted",
+       Enum.count(classified, &(not &1.write? and not &1.read?)) + retired_route_n(:unrouted),
+       :unrouted}
     ]
 
     # EVERY ARM RENDERS ITS OWN FAIL SENTENCE. One `why` for both branches is how a RED
@@ -8083,7 +9720,8 @@ defmodule PDS.Census do
         routed_checks(routed) ++
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
-        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified)
+        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
+        route_depth_checks(route_closure, classified)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -8095,11 +9733,13 @@ defmodule PDS.Census do
     p("")
     p("DRIFT vs THE WAVE-47 RE-DERIVED BASELINE (ARMED — a DRIFT line here exits 1)")
     p(String.duplicate("-", 78))
-    p("  lens: build-free AST, substring counts (no regex engine), route depth #{@max_depth},")
+    p("  lens: build-free AST, substring counts (no regex engine), route depth #{@evidence_depth},")
     p("  `transaction` NOT a write verb · engine printed above · re-derive with")
     p("  `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend")
     p("  @rederived WITH the lens and the engine in the same commit (PDS-D448a, PDS-D678).")
     p("  #{length(rederived_rows())} row(s) re-derived at wave 47, #{map_size(@rederived) - length(rederived_rows())} inherited from PDS-D448's wave-33 figures.")
+    p("  CONSERVED: textual, ast-literal, emitted (+#{retired_n}) and the recorded route row")
+    p("  of each retired repair (write +#{retired_route_n(:write)} · read +#{retired_route_n(:read)} · unrouted +#{retired_route_n(:unrouted)}) — a repair is not a drift; an arrival is.")
     p("")
     Enum.each(drift_rows, fn {label, got, key} -> drift(label, got, key) end)
     p("")
@@ -8589,6 +10229,7 @@ defmodule PDS.Census do
       :real ->
         [
           register_complete(classified),
+          register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
           roster_check(parsed)
@@ -8605,8 +10246,13 @@ defmodule PDS.Census do
     row_keys = Enum.map(@register, & &1.key)
     row_freq = Enum.frequencies(row_keys)
 
-    covered = MapSet.new(for {_r, st, s} <- resolved, st in [:live, :stale], do: site_key(s))
+    covered =
+      MapSet.new(
+        for {_r, st, s} <- resolved, st in [:live, :stale, :resurrected], do: site_key(s)
+      )
+
     demoted = Enum.count(resolved, fn {_r, st, _s} -> st == :stale end)
+    retired = Enum.count(resolved, fn {_r, st, _s} -> st == :retired end)
 
     unjudged = Enum.reject(site_keys, &MapSet.member?(covered, &1))
     orphaned = for {r, :orphan, _s} <- resolved, do: r.key
@@ -8616,7 +10262,15 @@ defmodule PDS.Census do
 
     why =
       if ok? do
+        # THE ROW->SITE DIRECTION COUNTS RETIRED ROWS AS SATISFIED, and the sentence says
+        # so rather than hiding them in a total: a retired row is a row whose site was
+        # REPAIRED away, which is the outcome this census exists to cause.
         "#{length(row_keys)} row(s) <-> #{length(site_keys)} emitted site(s), both directions, no duplicate key" <>
+          if(retired > 0,
+            do:
+              " (#{retired} RETIRED BY REPAIR — resolving to no site is CORRECT for those, and their bought verdicts stay readable above)",
+            else: ""
+          ) <>
           if(demoted > 0, do: " (#{demoted} demoted to basis_stale — reported, never a red)", else: "")
       else
         Enum.join(
@@ -8633,6 +10287,45 @@ defmodule PDS.Census do
       end
 
     {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # A RETIRED ROW THAT RESOLVES AGAIN IS A CONTRADICTION, NEVER A QUIET RE-ADOPTION. The
+  # row asserts a repair happened; a live site under its exact key asserts the literal is
+  # back. Re-adopting the row would let a REVERTED repair inherit the verdict the repair
+  # bought, which is the same "verdict outliving its defect" this file chases everywhere
+  # else. It also keeps the retired form from becoming a suppression switch: a row cannot
+  # be retired to silence a site that is still there.
+  defp register_retired_intact(classified) do
+    back = for {r, :resurrected, _s} <- resolve_register(classified), do: r
+    n = length(retired_rows())
+
+    # THE CONSERVATION IS ONLY AS GOOD AS THE FIELD IT READS. A retired row with no
+    # `retired_route` silently conserves nothing on the route rows, which is a repair
+    # reading as a drift again — the exact defect this form exists to remove.
+    fieldless = Enum.reject(retired_rows(), &(Map.get(&1, :retired_route) in @retired_routes))
+
+    why =
+      cond do
+        back != [] ->
+          "#{length(back)} RETIRED row(s) resolve to a LIVE emitted site again — the row says the literal left by repair and the tree says it is back: " <>
+            Enum.map_join(back, " · ", fn r ->
+              "RESURRECTED #{short(elem(r.key, 0))} #{elem(r.key, 1)} — retired as: #{Map.get(r, :retired, "(no retirement note recorded)")}"
+            end) <>
+            " — a reverted repair must NOT inherit the verdict the repair bought; un-retire the row with a re-derivation, or re-land the repair"
+
+        fieldless != [] ->
+          "#{length(fieldless)} retired row(s) carry no valid `retired_route` (one of #{inspect(@retired_routes)}): " <>
+            Enum.map_join(fieldless, " · ", &"#{short(elem(&1.key, 0))} #{elem(&1.key, 1)}") <>
+            " — without it the route population row is not conserved and the repair reads as a drift again"
+
+        n == 0 ->
+          "0 retired row(s) — the set is EMPTY today and this arm SAYS SO rather than printing a green over nothing; it arms the moment a repair retires its first row"
+
+        true ->
+          "#{n} retired row(s) resolve to no emitted site, which is what RETIRED means, and each records the population row its repair vacated"
+      end
+
+    {"REGISTER-RETIRED-STAYS-RETIRED", back == [] and fieldless == [], why}
   end
 
   # NOT "the row's line still carries a success pair" (PDS-D521): the pair occurs on 11
@@ -8711,6 +10404,34 @@ defmodule PDS.Census do
   # baseline, so an unconditional arm would red the selftest on its own commit. That is
   # why the cases proving this arm CAN go red census the REPO (`corpus: :repo`) — an arm
   # proven only where it is scoped out is proven nowhere (PDS-D541).
+
+  # THE SAME SCOPE RULE baseline_checks/2 USES, AND FOR THE SAME REASON (PDS-D541). Over
+  # the synthetic selftest corpus the route relation closes wherever a five-file fixture
+  # happens to close; @route_depth describes api/lib and nothing else, so an unconditional
+  # arm here reds every case that censuses the fixture at exit 0. Proven where it is in
+  # scope: CAPTURE-EDGE-FIRES and CONCAT-BINDS-THE-VARIABLE both ride `corpus: :repo` and
+  # both red THIS arm by name.
+  defp route_depth_checks(route_closure, classified) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [route_depth_check(route_closure)]
+    end
+  end
+
+  defp route_depth_check(route_closure) do
+    # THE LITERAL CANNOT DRIFT INTO A LIE. @route_depth is typed; the depth the route
+    # relation actually closes at is measured by report_depth_sweep/2 off the same walk
+    # that prints the table. If a corpus change moves the closure, this reds instead of
+    # letting a stale 12 keep describing a route that now needs 14 — which is exactly
+    # how @evidence_depth spent two waves describing a closure that was an artefact.
+    {"ROUTE-DEPTH-IS-CLOSURE", route_closure.depth == @route_depth,
+     if route_closure.depth == @route_depth do
+       "@route_depth #{@route_depth} IS the measured closure: write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, flat at every deeper budget swept (POST-READ #{route_closure.post_read} there — never quote the write without it)"
+     else
+       "@route_depth is typed #{@route_depth} but the route relation closes at #{route_closure.depth} on this run (write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, POST-READ #{route_closure.post_read}) — RE-DERIVE the literal, never re-type it, and widen @beyond if the closure ran off the end of the sweep"
+     end}
+  end
+
   defp baseline_checks(drift_rows, classified) do
     case register_scope(classified) do
       :scoped_out -> []

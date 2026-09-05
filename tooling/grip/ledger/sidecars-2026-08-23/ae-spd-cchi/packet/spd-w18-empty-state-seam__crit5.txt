@@ -1,0 +1,1 @@
+The test asserts floor membership: paper, sheet, task, session AND a fabricated schemaless orphan type are all covered, and each is driven through PaneBuilder.walk_path so desk gating cannot shrink the set.

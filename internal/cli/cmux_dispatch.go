@@ -118,6 +118,9 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 		if claimFlag && !dryRun {
 			w := dispatchClaimWorkerID(id)
 			resources := sortedFiles(taskboard.FilesOf(p.Task))
+			// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): the
+			// claim receipt is the server's own ok:true + claim.epoch>0; see
+			// runTaskNextFrontier for the same argument at length.
 			outcome, err := client.TaskClaimResources(p.Task.DocID, w, resources)
 			if err != nil {
 				// Transport failure or a won claim with no fencing epoch — hard, but

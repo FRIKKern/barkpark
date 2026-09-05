@@ -1,0 +1,1 @@
+Both #fleet-add-support and #fleet-add-support-cta are OMITTED for a member — not disabled, not aria-disabled, absent — and OMITTED for unknown authority too (fail closed). Evidence: the member and unknown renders.

@@ -1,0 +1,1 @@
+A DeployCensusSite pair is in @pairs on `entry: {:site_row, 2}`, and the payload census is green with ZERO new allowlist rows. Paste `CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_cloud/payload_key_set_census_test.exs`

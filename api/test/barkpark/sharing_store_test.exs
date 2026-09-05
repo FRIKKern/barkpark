@@ -15,6 +15,7 @@ defmodule Barkpark.SharingStoreTest do
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Share, StoredShare}
   alias Barkpark.Repo
+  alias Barkpark.SharingFixtures
 
   setup do
     # Snapshot BOTH env keys and the live list; restore them after each test so a
@@ -152,6 +153,62 @@ defmodule Barkpark.SharingStoreTest do
       Sharing.refresh()
       assert Sharing.shares() == []
       refute Sharing.active?()
+    end
+  end
+
+  # ── arpss-w8: the FIXTURE-WIPE class, pinned in both directions ──────────
+  #
+  # `refresh/0` = `shares_env() ++ list_stored()`. A fixture that is in neither
+  # input does not survive it, and the wipe is SILENT — the suite goes on
+  # asserting over an empty registry and passes. These two tests pin the pair:
+  # the sanctioned planting survives an unrelated write, and the bare `put_env`
+  # planting demonstrably does not.
+
+  describe "fixture survival across an unrelated refresh (arpss-w8)" do
+    test "a share planted through plant_shares!/1 survives an unrelated add_share" do
+      SharingFixtures.plant_shares!("victim-ws/victim-proj/production:docs:edit")
+      assert Sharing.shared?("victim-ws", "victim-proj", "production", :docs)
+      assert Sharing.access_for("victim-ws", "victim-proj", "production") == :edit
+
+      # An UNRELATED scope is shared — the natural way to build a second-tenant
+      # fixture. add_share/1 fires refresh/0, which recomputes the whole list.
+      assert {:ok, _} = Sharing.add_share("other-ws/other-proj/production:papers:read")
+
+      # The planted fixture is STILL live: it is a StoredShare row, so
+      # list_stored/0 rebuilt it.
+      assert Sharing.shared?("victim-ws", "victim-proj", "production", :docs),
+             "the planted fixture was erased by an unrelated add_share — planting must go through Sharing.add_share/1, not a bare Application.put_env(:barkpark, :shares, …)"
+
+      assert Sharing.access_for("victim-ws", "victim-proj", "production") == :edit
+      assert Sharing.shared?("other-ws", "other-proj", "production", :papers)
+
+      # And an explicit second refresh changes nothing — idempotent.
+      Sharing.refresh()
+      assert Sharing.shared?("victim-ws", "victim-proj", "production", :docs)
+    end
+
+    test "a bare put_env fixture IS erased by an unrelated add_share — the hazard itself" do
+      SharingFixtures.snapshot_shares!()
+
+      Application.put_env(
+        :barkpark,
+        :shares,
+        Sharing.parse("victim-ws/victim-proj/production:docs:edit")
+      )
+
+      assert Sharing.shared?("victim-ws", "victim-proj", "production", :docs),
+             "non-vacuous: the bare put_env fixture starts LIVE"
+
+      assert {:ok, _} = Sharing.add_share("other-ws/other-proj/production:papers:read")
+
+      refute Sharing.shared?("victim-ws", "victim-proj", "production", :docs)
+      assert Sharing.shares() |> Enum.map(& &1.workspace_slug) == ["other-ws"]
+    end
+
+    test "plant_shares!/1 REFUSES a comma-joined multi-scope string (parse splits on \";\")" do
+      assert_raise ArgumentError, fn ->
+        SharingFixtures.plant_shares!("ws-a:papers:read,ws-b:papers:read")
+      end
     end
   end
 end

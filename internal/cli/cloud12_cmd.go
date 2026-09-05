@@ -1166,7 +1166,7 @@ func requireCloud(out *writer) (*Config, bool) {
 		return nil, false
 	}
 	if !cfg.HasCloudToken() {
-		useError(out, "auth", "not logged in — run `bp login` first", exitAuth)
+		useError(out, "auth", "not logged in — run `bp login` first, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 		return nil, false
 	}
 	return cfg, true

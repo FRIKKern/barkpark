@@ -1,0 +1,1 @@
+Sheets, Graph and Media explorer panes measured at 1024 / 900 / 720 / 640px with evidence (screenshots or computed widths), showing whether horizontal clipping occurs

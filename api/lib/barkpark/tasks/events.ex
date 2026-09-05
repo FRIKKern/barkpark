@@ -71,7 +71,10 @@ defmodule Barkpark.Tasks.Events do
     * `:workspace_id` — when a non-nil binary, restrict to events whose own
       denormalised `workspace_id` matches — the SAME row-local tenant boundary
       `EventLog.replay_since/4` enforces (never an INNER JOIN to `documents`, so
-      delete tombstones survive). nil → unscoped (back-compat / admin token).
+      delete tombstones survive). The `:shared_only` empty-scope sentinel
+      (`ScopeHelpers.scope_opts/1` for a request that resolved NO workspace)
+      narrows to `workspace_id IS NULL` — the shared layer alone, never every
+      tenant. nil → unscoped (back-compat / admin token).
 
   `since` below 0 is floored to 0 (a first call with no cursor replays from the
   start of the backlog, exactly like a `Last-Event-ID: 0`).
@@ -117,5 +120,31 @@ defmodule Barkpark.Tasks.Events do
   defp maybe_scope_workspace(query, ws_id) when is_binary(ws_id),
     do: from(e in query, where: e.workspace_id == ^ws_id)
 
+  # The empty-scope sentinel (task-5ca36b127acf9cbd, class task-3e2a70930c6df723).
+  #
+  # `BarkparkWeb.ScopeHelpers.scope_opts/1` emits `:shared_only` whenever an
+  # HTTP request resolved NO workspace, and `TasksController.events/2` hands
+  # that value straight to `replay_since/3`. It means the SHARED layer
+  # (`workspace_id IS NULL`) — never "every tenant".
+  #
+  # Before this clause the atom failed the `is_binary/1` guard above and fell
+  # into the permissive catch-all, so the feed went workspace-BLIND and
+  # replayed every co-dataset tenant's task mutations. That is the fail-open
+  # shape the sentinel exists to retire: the guard-plus-permissive-fallback
+  # pair cannot distinguish "no tenant resolved" from "an internal caller wants
+  # everything", and the wide reading won for both.
+  #
+  # Byte-for-byte the arm the correct modules already carry —
+  # `Content.Scope.scope_to_workspace/3` (scope.ex:162) and this feed's own
+  # SSE twin `Content.EventLog.replay_since/4` (event_log.ex:92), which this
+  # module is explicitly modelled on. Ordered BEFORE the catch-all and after
+  # the binary clause; all three are disjoint.
+  defp maybe_scope_workspace(query, :shared_only),
+    do: from(e in query, where: is_nil(e.workspace_id))
+
+  # `nil` stays EXACTLY as it was: unfiltered, the deliberate global read for
+  # internal / back-compat callers. Widening or narrowing it is not this
+  # change's to make — only a REQUEST can produce `:shared_only`, which is
+  # what separates the two intents.
   defp maybe_scope_workspace(query, _), do: query
 end

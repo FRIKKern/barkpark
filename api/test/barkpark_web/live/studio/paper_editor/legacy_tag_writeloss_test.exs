@@ -97,9 +97,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
     # fix) alongside my `[0].strength="80"`. PRE-FIX the row rendered a blank tag,
     # so this would persist `tag=""` and LOSE "obsidian"; this asserts the name
     # survives.
-    view
-    |> element(~s([data-block-id="c-tags"] form))
-    |> render_change(%{"[0].strength" => "80"})
+    flush_form(view, ~s([data-block-id="c-tags"] form), %{"[0].strength" => "80"})
 
     render(view)
 
@@ -173,9 +171,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
 
     open_editor(view)
 
-    view
-    |> element(~s([data-block-id="c-prices"] form))
-    |> render_change(%{"[1].currency" => "SEK"})
+    flush_form(view, ~s([data-block-id="c-prices"] form), %{"[1].currency" => "SEK"})
 
     render(view)
 
@@ -231,9 +227,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
 
     open_editor(view)
 
-    view
-    |> element(~s([data-block-id="c-keywords"] form))
-    |> render_change(%{"[1]" => "sweden"})
+    flush_form(view, ~s([data-block-id="c-keywords"] form), %{"[1]" => "sweden"})
 
     render(view)
 
@@ -242,5 +236,16 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
 
     # Bare strings stayed bare — no element was turned into a %{"tag" => …} map.
     assert block["value"] == ["history", "sweden"]
+  end
+
+  defp flush_form(view, selector, values) do
+    target = element(view, selector)
+    render_change(target, values)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => :sys.get_state(view.pid).socket.assigns.paper_rev,
+      "values" => values
+    })
   end
 end

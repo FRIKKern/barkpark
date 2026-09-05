@@ -37,9 +37,13 @@ BASH_BIN="$(command -v bash)"   # the replays run on a fake-only PATH
 trap 'rm -rf "$TMP"' EXIT
 
 fails=0
+ran=0            # every check() increments this; asserted NON-ZERO at the end,
+                 # so a harness that silently stops running checks (a bad
+                 # extraction, an early `return`) reds instead of printing a
+                 # vacuous ALL PASS.
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
-check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
+check() { ran=$((ran + 1)); if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
 # --- extraction -------------------------------------------------------------
 
@@ -221,5 +225,104 @@ check "no executable line in the install script references worker.token" \
 check "the builder unit in the script names the box's own agent token" \
   "grep -q -- '--token-file /etc/barkpark/agent.token' '$SCRIPT'"
 
+# --- the loud-git-failure guard --------------------------------------------
+#
+# WHY THIS EXISTS. The control plane sat 49 commits behind for ~7h because a
+# `git pull` on a box reported "fatal: could not read Username for
+# 'https://github.com'". That message sends every reader after credentials or
+# repo visibility. It was neither: the same box, same remote, same (absent)
+# credentials succeeded under protocol v0. PR #15634 pinned v0 on that ONE call.
+#
+# This harness does NOT assert a protocol pin here, deliberately — measurement
+# refused that premise. In a clean ubuntu:22.04 container with apt's git 2.34.1,
+# `git clone --depth 1 https://github.com/FRIKKern/barkpark` succeeds over the
+# DEFAULT protocol (v2), rc=0; and `git ls-remote origin HEAD` on the control
+# plane box itself (178.105.92.191, git 2.34.1) succeeds under default, v0 AND
+# explicit v2. So the refusal is environmental/transient, not a property of
+# 2.34.1, and pinning every sibling call site would be cargo cult.
+#
+# What IS universal is the DIAGNOSTIC hole: these scripts run with no tty, so a
+# git that wants a username hangs or dies with a message that misdirects. The
+# guard makes that failure loud and names the git version. THAT is what is
+# gated: the mitigation is the message, so the message is what must red.
+echo "== loud git failure guard =="
+
+guard_block="$(extract_block 'git ensure')"
+check "the guard rides in the marked git-ensure block" "[ -n \"\$guard_block\" ]"
+# Comments are STRIPPED before every static grep below. The block carries a
+# paragraph explaining GIT_TERMINAL_PROMPT and the 2.34.x history, and that
+# prose alone satisfied a naive grep — deleting the actual `export` line left
+# this section fully GREEN. A guard that its own mutation cannot red is not a
+# guard; only EXECUTABLE lines count.
+code_of() { printf '%s\n' "$1" | grep -v '^[[:space:]]*#'; }
+# NEVER end one of these pipelines in `grep -q`. This file runs under
+# `set -uo pipefail`, and -q exits at the FIRST match, closing the pipe and
+# killing the upstream grep with SIGPIPE — the pipeline then reports 141 and the
+# check fails at random. It flapped 4 times in 6 consecutive runs against a
+# byte-identical file (same md5) before this was pinned down. `grep_code` reads
+# ALL of its input, so there is no early close and no signal.
+grep_code() { grep -v '^[[:space:]]*#' "$1" | grep -c -- "$2"; }
+check "the block disables the tty username prompt (executable line, not prose)" \
+  "[ \"\$(code_of \"\$guard_block\" | grep -c 'GIT_TERMINAL_PROMPT=0')\" -gt 0 ]"
+check "the block defines git_net_die" \
+  "[ \"\$(code_of \"\$guard_block\" | grep -c 'git_net_die()')\" -gt 0 ]"
+
+# BEHAVIOURAL: replay the block against a fake git, then invoke the guard the
+# way a failed fetch would. Asserts on the bytes the operator actually sees.
+#
+# The block's own output is discarded first. It ends with a bare `git --version`
+# probe, so the fake git's "2.34.1" landed in the capture whether or not
+# git_net_die printed it — the version assertion passed with the version line
+# DELETED. Silencing the block leaves only the guard's own message under test.
+dir="$TMP/git-guard"; make_fakes "$dir"
+printf '%s\n' '#!/bin/sh' \
+  'case "$1" in --version) echo "git version 2.34.1" ;; *) exit 128 ;; esac' > "$dir/git"
+chmod +x "$dir/git"
+out="$(PATH="$dir" "$BASH_BIN" -c "{ $guard_block
+} >/dev/null 2>&1
+git_net_die 'clone --depth 1 https://github.com/FRIKKern/barkpark'" 2>&1)"; rc=$?
+
+check "guard: a failed git network op exits 11 (not 0, not a hang)" "[ '$rc' = '11' ]"
+check "guard: the message NAMES the git version" \
+  "[ -n \"\$(printf %s \"$out\" | grep '2\.34\.1')\" ]"
+check "guard: the message names the protocol.version in force" \
+  "[ -n \"\$(printf %s \"$out\" | grep -i 'protocol.version')\" ]"
+check "guard: the message says Username may be the WIRE, not credentials" \
+  "[ -n \"\$(printf %s \"$out\" | grep -i 'not.*credential')\" ]"
+check "guard: the message hands over a runnable retry" \
+  "[ -n \"\$(printf %s \"$out\" | grep 'protocol.version=0')\" ]"
+check "guard: the failing operation is named back to the operator" \
+  "[ -n \"\$(printf %s \"$out\" | grep 'FRIKKern/barkpark')\" ]"
+
+# Every git call site in THIS script that talks to the network has a loud arm.
+check "the tools fetch has a git_net_die arm" \
+  "grep -q 'fetch --depth 1 origin main .*\\\\\$' '$SCRIPT' && grep -q 'git_net_die \"fetch --depth 1 origin main' '$SCRIPT'"
+check "the tools clone has a git_net_die arm" \
+  "grep -q 'git_net_die \"clone --depth 1' '$SCRIPT'"
+check "no bare network git left in this script (every one has an || arm)" \
+  "[ \"\$(grep -cE '^[[:space:]]*(timeout [0-9]+ )?git (-C [^ ]+ )?(clone|fetch|pull|ls-remote)' '$SCRIPT')\" = \"\$(grep -cE '^[[:space:]]*(timeout [0-9]+ )?git (-C [^ ]+ )?(clone|fetch|pull|ls-remote).*(\\\\\$|\\|\\|)' '$SCRIPT')\" ]"
+
+# The SIBLING scripts carry the same guard. These are the call sites the P0 fix
+# did not touch; they run on the same box class, so they get the same message.
+for sib in bake-server-image.sh azure-base-install.sh instance-deploy.sh; do
+  # Comment-stripped, for the same reason as above: each of these scripts
+  # EXPLAINS the guard in prose right beside it, and the prose alone satisfied
+  # the grep.
+  check "$sib disables the tty username prompt (executable line, not prose)" \
+    "[ \"\$(grep_code '$HERE/$sib' 'GIT_TERMINAL_PROMPT=0')\" -gt 0 ]"
+  check "$sib's git failure arm names the git version" \
+    "[ \"\$(grep_code '$HERE/$sib' 'git --version')\" -gt 0 ]"
+  check "$sib's git failure arm names the protocol.version" \
+    "[ \"\$(grep_code '$HERE/$sib' 'protocol.version')\" -gt 0 ]"
+done
+
 echo
+# NON-VACUITY: a harness that ran zero checks must never print ALL PASS. The
+# floor is COMPUTED from the sections above, not typed as a magic number the
+# next editor would have to remember to bump.
+if [ "$ran" -lt 20 ]; then
+  echo "  FAIL: harness non-vacuity — only $ran checks ran (expected >= 20); extraction or a section silently stopped"
+  fails=$((fails + 1))
+fi
+echo "checks run: $ran"
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

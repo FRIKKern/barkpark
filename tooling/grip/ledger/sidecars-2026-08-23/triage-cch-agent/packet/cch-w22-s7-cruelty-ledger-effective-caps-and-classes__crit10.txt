@@ -1,0 +1,1 @@
+THE `hash:#fleet` HAND-OFF CAN REFUSE: `overflow-guard.mjs` gains a scenario census so that a deleted cruel scenario, or a cruel scenario no leg drives, refuses at exit 2 by NAME instead of failing at runtime or passing in silence. Evidence: both mutations with `rc=$?`. Also record the four residue entries driven by nothing (`provisioning`, `failed`, `loggedout`, `empty`).

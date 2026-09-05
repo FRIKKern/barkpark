@@ -1,0 +1,1 @@
+The invariant is asserted by a program, not a comment: running the guard on the current tree reports the console-tests MARK line and the LAST depth-0 await line, and passes only because the former exceeds the latter. Quote both numbers from the run.

@@ -1,0 +1,1 @@
+A committed check reds when any file in cloud/lib other than failure_copy.ex names FailureCopy.scrub( or an aliased-as form, and the check is proved by mutation with the output pasted.

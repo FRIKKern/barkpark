@@ -11,7 +11,7 @@ defmodule BarkparkWeb.SheetsPluginRoutesTest do
   test generates a >50_000-cell CSV and expects 413. A full HTTP-level
   round trip (import xlsx → export.xlsx → re-import) closes the loop.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.XlsxImport

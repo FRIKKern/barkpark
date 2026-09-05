@@ -1,0 +1,1 @@
+One scheduled stale-verdict-watch run exits 0 on the live population, and the run URL is quoted.

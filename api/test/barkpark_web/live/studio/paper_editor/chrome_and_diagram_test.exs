@@ -32,8 +32,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
   # already be open (the form lives in the block editor).
   defp insert_chrome_block(view, type) do
     view
-    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => type})
-    |> render_submit()
+    |> element(~s([data-test-id="paper-add-block"]))
+    |> render_submit(wire_params(view, %{"block-type" => type}))
 
     Content.paper_blocks(@slug, @dataset) |> List.last() |> Map.get("id")
   end
@@ -41,7 +41,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
   defp submit_edit_form(view, id, params) do
     view
     |> element(~s([data-edit-block-id="#{id}"] form.bp-paper-edit-form))
-    |> render_submit(Map.put(params, "block_id", id))
+    |> render_submit(wire_params(view, Map.put(params, "block_id", id)))
   end
 
   defp block_after_edit(id),
@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
   defp autosave_edit_form(view, id, params) do
     view
     |> element(~s([data-edit-block-id="#{id}"] form.bp-paper-edit-form))
-    |> render_change(Map.put(params, "block_id", id))
+    |> render_change(wire_params(view, Map.put(params, "block_id", id)))
   end
 
   test "a callout block auto-saves on change (no Save submit)", %{conn: conn} do
@@ -225,6 +225,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
     # Fire the autosave event directly with a block_id that resolves to nil →
     # build_block_patch(nil, …) → %{} → harmless patch-block on a missing id.
     render_hook(view, "paper-block-autosave", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "block_id" => "does-not-exist",
       "text" => "ignored"
     })
@@ -258,17 +260,23 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
     # Add a field-string, then delete it — the per-block × control fires a
     # remove-block op through the same pipeline, regardless of block type.
     view
-    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => "field-string"})
-    |> render_submit()
+    |> element(~s([data-test-id="paper-add-block"]))
+    |> render_submit(wire_params(view, %{"block-type" => "field-string"}))
 
     new_id = Content.paper_blocks(@slug, @dataset) |> List.last() |> Map.get("id")
     assert new_id in (Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]))
 
     view
     |> element(~s([data-edit-block-id="#{new_id}"] [data-test-id="paper-delete-block"]))
-    |> render_click()
+    |> render_click(wire_params(view, %{"id" => new_id}))
 
     refute new_id in (Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]))
     refute render(view) =~ ~s(data-edit-block-id="#{new_id}")
+  end
+
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
+  defp wire_params(view, params) do
+    Map.merge(params, %{"request_id" => Ecto.UUID.generate(), "if_rev" => paper_rev(view)})
   end
 end

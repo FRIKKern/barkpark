@@ -1,0 +1,1 @@
+FailureCopy.raw/1 exists as the named raw-capture helper (strip_ansi |> scrub) and web/router.ex:11043's failure_reason_raw uses it instead of the leaky order.

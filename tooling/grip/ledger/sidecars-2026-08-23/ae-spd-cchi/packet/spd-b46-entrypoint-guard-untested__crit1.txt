@@ -1,0 +1,1 @@
+A test asserts each of the three --out error paths (empty value, followed-by-flag, last-argument) exits 1 and prints its own named message, not a stack trace. Moving the resolution back to module scope must turn it red.

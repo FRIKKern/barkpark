@@ -91,12 +91,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: scaffy-catalog-drift-${{ github.ref }}
+  group: scaffy-catalog-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # LITERAL false — strictly never-cancel. A daily audit has no reason to
   # cancel an in-flight run, and a literal `true` here reds
   # never-cancel-main-check.sh via doc-gates' .github/workflows/** glob
   # (this workflow fires on push-to-main). Keep it false.
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   drift:

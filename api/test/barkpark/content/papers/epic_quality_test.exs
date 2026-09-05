@@ -51,8 +51,7 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
   test "a body_html-only wave Paper is refused - blocks_not_array is the arm the corpus needed" do
     content = %{
       "tags" => [@epic_tag],
-      "body_html" =>
-        "<h1>The crown is hollow</h1><p>Wave 27 of the deploy-reliability epic.</p>"
+      "body_html" => "<h1>The crown is hollow</h1><p>Wave 27 of the deploy-reliability epic.</p>"
     }
 
     refute Map.has_key?(content, "blocks")

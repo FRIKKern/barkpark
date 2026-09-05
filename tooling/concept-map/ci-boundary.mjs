@@ -382,13 +382,179 @@ export function baselineConcepts(baseline) {
 const conceptsOfEdge = (e) => String(e).split(">");
 const conceptsOfPair = (p) => String(p).split("|");
 
+// ── ACCEPTED-UNTIL-FIXED: the three arms that let this gate BLOCK ───────────
+//
+// The gate was advisory for its whole life because today's tree carries real
+// regressions and a blocking gate would have reddened every PR for debt nobody
+// on that PR added. The accepted list is how it becomes blocking WITHOUT
+// pretending the debt is gone: a small, named, row-backed set of identities the
+// gate tolerates, and three arms that make the set DECAY.
+//
+//   (a) NEVER-WORSE — anything not on the list still reds. This is the arm the
+//       gate already had; the list only subtracts, it never adds tolerance for
+//       an identity that is not written down.
+//   (b) ROW CLOSED, DEBT PRESENT — a listed row that is done/cancelled while its
+//       identity is STILL in the graph. Somebody closed the row without paying
+//       the edge down, and without this arm the acceptance would outlive its
+//       justification silently, forever.
+//   (c) HEALED — a listed identity that is GONE from the graph. The entry has
+//       nothing left to accept, so it must be deleted in the PR that healed it.
+//       Without this arm the list only ever grows, and a list that grows stops
+//       discriminating: the Nth entry is waved through by the N-1 above it.
+//
+// (b) needs the ledger. If the ledger cannot be read the arm REFUSES — exit
+// non-zero, named — and never falls through to green. An acceptance whose
+// justification could not be checked is not an acceptance, it is an allowlist.
+
+export const ACCEPTED_PATH = join(HERE, "accepted-until-fixed.json");
+
+// A row in one of these states no longer owes the fix, so an entry citing it
+// cannot keep accepting a debt that is still in the graph.
+const CLOSED_LIFECYCLES = new Set(["done", "cancelled"]);
+
+// Parse + VALIDATE the accepted list. Refuses rather than tolerating: an entry
+// with no `row` is exactly the shape this list must never take, so the loader
+// is where that is enforced, not review.
+export function loadAcceptedEntries(raw) {
+  let parsed;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`accepted-until-fixed.json is not parseable JSON: ${err.message}`);
+    }
+  } else {
+    parsed = raw;
+  }
+  const entries = parsed && parsed.entries;
+  if (!Array.isArray(entries)) {
+    throw new Error("accepted-until-fixed.json must carry an `entries` array");
+  }
+  const seen = new Set();
+  for (const e of entries) {
+    if (!e || typeof e.identity !== "string" || !e.identity.trim()) {
+      throw new Error("accepted-until-fixed.json: every entry must name an `identity` (the edge or cycle pair)");
+    }
+    // NO ENTRY WITHOUT A ROW. An acceptance with nobody on the hook is an
+    // allowlist, and an allowlist is what this file exists not to be.
+    if (typeof e.row !== "string" || !/^task-[0-9a-f]+$/.test(e.row)) {
+      throw new Error(
+        `accepted-until-fixed.json: entry "${e.identity}" carries no bp task row id ` +
+          `(expected a "task-…" id in \`row\`). An acceptance with nobody on the hook is an allowlist.`
+      );
+    }
+    if (seen.has(e.identity)) {
+      throw new Error(`accepted-until-fixed.json: "${e.identity}" is listed twice`);
+    }
+    seen.add(e.identity);
+  }
+  return entries;
+}
+
+// Arms (b) and (c), as one pure function over: the entries, the identities the
+// gate found in the CURRENT graph, and a row→lifecycle map. A row missing from
+// the map, or mapped to null, means THE LEDGER COULD NOT BE READ for it.
+export function auditAccepted({ entries, present, lifecycle }) {
+  const failures = [];
+  const seen = present instanceof Set ? present : new Set(present || []);
+  const statuses = lifecycle instanceof Map ? lifecycle : new Map(Object.entries(lifecycle || {}));
+
+  for (const entry of entries) {
+    const here = seen.has(entry.identity);
+
+    // ARM (c) — HEALED. Checked first: a healed entry's row lifecycle is beside
+    // the point, the entry has nothing left to accept either way.
+    if (!here) {
+      failures.push({
+        arm: "healed",
+        identity: entry.identity,
+        row: entry.row,
+        reason:
+          `HEALED: delete entry ${entry.identity} — it is no longer in the graph, so its ` +
+          `acceptance accepts nothing. Remove it from tooling/concept-map/accepted-until-fixed.json ` +
+          `in the same PR that healed it (row ${entry.row}).`,
+      });
+      continue;
+    }
+
+    // ARM (b) — the row's lifecycle. Unreadable is a REFUSAL, never a pass.
+    const status = statuses.has(entry.row) ? statuses.get(entry.row) : null;
+    if (status === null || status === undefined || status === "") {
+      failures.push({
+        arm: "ledger-unreadable",
+        identity: entry.identity,
+        row: entry.row,
+        reason:
+          `REFUSING: the lifecycle of row ${entry.row} (accepting "${entry.identity}") could not be read ` +
+          `from the ledger. An acceptance whose justification cannot be checked is an allowlist, so this ` +
+          `gate says HOLD rather than green. Provision LEDGER_TOKEN (repo secret BARKPARK_TASK_TOKEN) and re-run.`,
+      });
+      continue;
+    }
+    if (CLOSED_LIFECYCLES.has(status)) {
+      failures.push({
+        arm: "row-closed",
+        identity: entry.identity,
+        row: entry.row,
+        lifecycle: status,
+        reason:
+          `row ${entry.row} is '${status}' but "${entry.identity}" is STILL in the graph — the acceptance ` +
+          `outlived its justification. Either the debt was not actually paid down (reopen the row) or the ` +
+          `entry is stale (delete it and let the never-worse arm speak).`,
+      });
+    }
+  }
+  return { failed: failures.length > 0, failures };
+}
+
+// Read one row's lifecycle_status off the ledger, the same door and the same
+// envelope scripts/pr-task-gate.sh reads (/v1/data/doc/<dataset>/task/<id>,
+// which flattens `content` to the top level). Returns null on ANY failure —
+// unreachable, refused, malformed — and arm (b) turns that null into a refusal.
+async function readLifecycle(row, { base, token, dataset }) {
+  const url = `${String(base).replace(/\/$/, "")}/v1/data/doc/${dataset}/task/${row}`;
+  try {
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const doc = body && (body.result || body.doc || body);
+    const status = doc && (doc.lifecycle_status || (doc.content && doc.content.lifecycle_status));
+    return typeof status === "string" && status ? status : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readLifecycles(rows, env = process.env) {
+  const cfg = {
+    base: env.LEDGER_BASE || "https://guerrilla.barkpark.cloud",
+    token: env.LEDGER_TOKEN || env.BARKPARK_TASK_TOKEN || "",
+    dataset: env.LEDGER_DATASET || "production",
+  };
+  const out = new Map();
+  for (const row of new Set(rows)) out.set(row, await readLifecycle(row, cfg));
+  return out;
+}
+
 // Compare current metrics vs baseline. Returns { regressed, regressions[], growth }.
-export function compare(current, baseline) {
+export function compare(current, baseline, acceptedEntries = []) {
   const regressions = [];
   const bc = baseline.counts || {};
   const known = baselineConcepts(baseline);
   const baselineKernel = new Set(baseline.kernel || []);
   const isKnown = (parts) => parts.every((c) => known.has(c));
+
+  // ARM (a), the never-worse arm, with the accepted list subtracted. This ONE
+  // line is the whole tolerance surface: an identity is waved through if and
+  // only if it is written down in accepted-until-fixed.json with a row id.
+  // Anything else — a brand-new edge, a reshuffle, a count rise the accepted
+  // set does not explain — still reds, exactly as before.
+  const acceptedSet = new Set((acceptedEntries || []).map((e) => String(e.identity)));
+  const isAccepted = (k) => acceptedSet.has(String(k));
+  const accepted = { sideways: [], wrongDirection: [], featureCycles: [] };
 
   // Split every current identity into COMPARABLE (both ends baseline-known) and
   // GROWTH (touches a concept the baseline never saw) BEFORE anything is judged.
@@ -398,6 +564,13 @@ export function compare(current, baseline) {
 
   const sortInto = (dim, keys, split) => {
     for (const k of keys) {
+      // Accepted FIRST, before the known/growth split: an accepted identity must
+      // not raise the comparable COUNT either, or the count arm would red for the
+      // very edge the entry accepts and the acceptance would buy nothing.
+      if (isAccepted(k)) {
+        accepted[dim].push(k);
+        continue;
+      }
       const parts = split(k);
       if (isKnown(parts)) {
         comparable[dim].push(k);
@@ -487,6 +660,23 @@ export function compare(current, baseline) {
     regressed: regressions.length > 0,
     regressions,
     comparableCounts,
+    // Every identity the CURRENT graph carries, accepted ones included. Arm (c)
+    // reads this: an entry whose identity is absent HERE has been healed.
+    present: [
+      ...current.edges.sideways,
+      ...current.edges.wrongDirection,
+      ...current.featureCyclePairs,
+    ].map(String),
+    accepted: {
+      counts: {
+        sideways: accepted.sideways.length,
+        wrongDirection: accepted.wrongDirection.length,
+        featureCycles: accepted.featureCycles.length,
+      },
+      sideways: accepted.sideways.sort(),
+      wrongDirection: accepted.wrongDirection.sort(),
+      featureCycles: accepted.featureCycles.sort(),
+    },
     growth: {
       newConcepts: growth.newConcepts,
       counts: {
@@ -504,7 +694,7 @@ export function compare(current, baseline) {
 
 // ── main ────────────────────────────────────────────────────────────────────
 
-function main() {
+async function main() {
   // FIRST, before the graph rebuild and before anything is read: can this tree
   // produce the verdict CI produces? If not, say so in one line and stop.
   const refusal = preflightRefusal({
@@ -555,7 +745,33 @@ function main() {
   const boundary = runNodeJson(BOUNDARY);
   const current = deriveMetrics(boundary);
   const baseline = loadBaseline();
-  const { regressed, regressions, comparableCounts, growth } = compare(current, baseline);
+  // The accepted list is loaded HERE, not lazily inside compare: a malformed or
+  // row-less list must stop the gate outright (exit 2), never degrade it to a
+  // run with an empty tolerance set that reds on today's known debt and reads as
+  // a real finding.
+  let acceptedEntries;
+  try {
+    acceptedEntries = existsSync(ACCEPTED_PATH)
+      ? loadAcceptedEntries(readFileSync(ACCEPTED_PATH, "utf8"))
+      : [];
+  } catch (err) {
+    note(`ci-boundary: ${err.message}`);
+    throw new GateFault();
+  }
+  const { regressed, regressions, comparableCounts, growth, present, accepted } = compare(
+    current,
+    baseline,
+    acceptedEntries
+  );
+
+  // ARMS (b) and (c). They run on EVERY run, red or green: an acceptance that
+  // has outlived its row, or its edge, is a finding in its own right and must
+  // not wait for some other regression to surface it.
+  const lifecycle = await readLifecycles(
+    acceptedEntries.map((e) => e.row),
+    process.env
+  );
+  const audit = auditAccepted({ entries: acceptedEntries, present: new Set(present), lifecycle });
 
   const report = {
     builtAt: new Date().toISOString(),
@@ -568,6 +784,9 @@ function main() {
     current: { counts: current.counts },
     comparable: { counts: comparableCounts },
     growth,
+    accepted,
+    acceptedEntries,
+    acceptedAudit: audit,
     regressed,
     regressions,
   };
@@ -607,6 +826,25 @@ function main() {
   }
   note("");
 
+  // The accepted list, printed in full on every run — a tolerance nobody reads
+  // is an allowlist. Each line names its row so the debt has an owner on screen.
+  note(
+    `ci-boundary: ACCEPTED-UNTIL-FIXED — ${acceptedEntries.length} identit${
+      acceptedEntries.length === 1 ? "y" : "ies"
+    } tolerated, each with a row that owes the fix:`
+  );
+  for (const e of acceptedEntries) {
+    note(`  · ${e.identity}  [${e.dimension || "?"}]  ${e.row}  (since ${e.since || "?"})`);
+  }
+  if (!acceptedEntries.length) note("  (none — the gate is tolerating nothing)");
+  note("");
+
+  if (audit.failed) {
+    note("ci-boundary: THE ACCEPTED LIST IS NO LONGER HONEST:");
+    for (const f of audit.failures) note(`  ✗ [${f.arm}] ${f.reason}`);
+    note("");
+  }
+
   if (regressed) {
     note("ci-boundary: REGRESSION — new architectural debt vs baseline:");
     for (const r of regressions) note(`  ✗ ${r.reason}`);
@@ -622,6 +860,13 @@ function main() {
     note("concepts the baseline already knew, so --write-baseline would erase a real");
     note("measurement rather than record a paid-down one.");
     return 1;
+  }
+
+  // A ledger the gate could not read is a FAULT (2), not a regression (1): no
+  // architectural debt was found, the instrument simply could not be completed.
+  // Every other accepted-list failure is a real finding about this repo (1).
+  if (audit.failed) {
+    return audit.failures.every((f) => f.arm === "ledger-unreadable") ? 2 : 1;
   }
 
   note("ci-boundary: PASS — no new feature→feature, kernel→feature, or cycle debt vs baseline.");
@@ -643,8 +888,12 @@ const INVOKED_DIRECTLY =
   !!process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (INVOKED_DIRECTLY) {
+  // await, not .then(): an unawaited main() would let this module finish and
+  // node exit 0 before the ledger reads (arm b) resolved — the accepted-list
+  // arms would be structurally dead in exactly the way this gate's job-level
+  // continue-on-error already was once.
   try {
-    process.exitCode = main();
+    process.exitCode = await main();
   } catch (err) {
     if (!(err instanceof GateFault)) throw err;
     process.exitCode = 2; // FAULT — the diagnosis is already on stderr.

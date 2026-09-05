@@ -1,0 +1,1 @@
+absent-context-census's 11-of-11 failure is DIAGNOSED before it is either wired or deleted — a watch that has never once succeeded may be reporting a real thing badly. Evidence: the deciding output from one failing run.

@@ -1,0 +1,1 @@
+A cli release is cut so `curl|sh` installs stop being 744 commits behind, or the install path pins the branch under test.

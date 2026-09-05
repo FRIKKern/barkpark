@@ -1,0 +1,1 @@
+A ruling is recorded on whether a cancelled attempt belongs in the failure-rate denominator, citing D19/D43

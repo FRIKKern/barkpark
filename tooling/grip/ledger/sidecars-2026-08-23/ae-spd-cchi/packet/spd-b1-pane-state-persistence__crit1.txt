@@ -1,0 +1,1 @@
+Server-side seeding happens only at connected mount via connect_params (static first paint stays CSS-owned)

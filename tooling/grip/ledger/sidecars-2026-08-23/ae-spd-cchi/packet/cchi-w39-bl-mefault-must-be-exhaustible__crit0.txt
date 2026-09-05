@@ -1,0 +1,1 @@
+cloud/priv/static/__preview__/scenarios.mjs's meFault override accepts an EXHAUSTIBLE form (e.g. `meFault: { status: 500, body: {...}, times: 1 }`, or a queue of responses) while the STICKY default stays intact — prove the default is unchanged by running #9922's `operator-me-unreadable` scenario before and after and showing its output byte-identical.

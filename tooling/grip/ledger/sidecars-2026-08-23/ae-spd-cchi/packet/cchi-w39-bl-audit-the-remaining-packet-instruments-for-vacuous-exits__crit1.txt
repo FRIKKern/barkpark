@@ -1,0 +1,1 @@
+scripts/required-checks-floor.sh's clearance is RE-CONFIRMED by run rather than inherited: :120-124 fail on a reference OR candidate listing zero required contexts, and its exit-0 paths (:153 ack-growth, :160 exact-hold) are reachable only after a non-empty set comparison. Quote the run.

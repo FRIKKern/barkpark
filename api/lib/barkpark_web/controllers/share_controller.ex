@@ -195,6 +195,16 @@ defmodule BarkparkWeb.ShareController do
       not is_binary(surfaces) or surfaces == "" ->
         unprocessable(conn, "surfaces is required (comma list of papers,docs,media)")
 
+      # SHAPE GUARD, alongside its two siblings. `access` is the only create
+      # attribute that reached `do_create/4` unshaped, and it is INTERPOLATED
+      # into the `"scope:surfaces:access"` spec string there — so a JSON body
+      # sending it as an object raised `Protocol.UndefinedError` (String.Chars
+      # is not implemented for Map) and a list of objects raised
+      # `ArgumentError`, both 500s. Every other malformed attribute on this
+      # action is a 422; this arm makes the third one agree.
+      not is_binary(access) ->
+        unprocessable(conn, "access must be read or edit")
+
       true ->
         case scope_workspace(scope) do
           {:ok, ws_id} ->
@@ -398,7 +408,7 @@ defmodule BarkparkWeb.ShareController do
   defp do_revoke(conn, token_id) do
     case Barkpark.Auth.revoke_token(token_id) do
       # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
-      # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
+      # (auth.ex:revoke_token/1). `revoked: true` was a literal and `token_id` echoed
       # the path param — neither could change if the update wrote nothing. Both
       # now descend from the returned row's own `revoked_at` stamp.
       {:ok, revoked} ->
@@ -443,6 +453,25 @@ defmodule BarkparkWeb.ShareController do
   # for this seam specifically, by the "the chokepoint denies a malformed
   # workspace id" test in this controller's own suite. Re-adding a local uuid
   # dance here would teach the next reader that every caller must remember it.
+  # THE UN-TENANTED INSTALL IS UNSUPPORTED — no arm, on purpose
+  # (arpss-w8-followup-untenanted-install-share-tokens, ruled by main 2026-09-03).
+  #
+  # With ZERO workspaces `Auth.create_token/5` writes a token with a nil
+  # `workspace_id` and no membership row, so this predicate can never be true
+  # and all three token actions refuse. Measured on that shape (PR #15852,
+  # commit 9aaf69425): mint 422 "the workspace/project does not exist" (scope
+  # resolution runs BEFORE this predicate, so it is not a 403), list 200
+  # `{"tokens":[]}`, revoke 404 "token not found".
+  #
+  # The shape is unreachable on any supported boot, which is why nothing
+  # surfaces it: the Default Workspace is seeded by MIGRATION
+  # 20260527110200_backfill_default_tenancy (idempotent, unconditional, not a
+  # one-off task an operator can skip), every boot path migrates
+  # (`Barkpark.Release.migrate/0`, deploy/instance-deploy.sh, the Makefile), and
+  # deleting the Default Workspace removes its tokens rather than orphaning them
+  # (`api_tokens.workspace_id` is `:delete_all` since 20260527140000). Only an
+  # un-migrated DB produces it. Do NOT add an un-tenanted arm here: it would be
+  # dead code on every real install and a standing bypass on a tenanted one.
   defp workspace_admin?(conn, workspace_id),
     do: TenancyAuth.workspace_admin?(conn.assigns[:api_token], workspace_id)
 

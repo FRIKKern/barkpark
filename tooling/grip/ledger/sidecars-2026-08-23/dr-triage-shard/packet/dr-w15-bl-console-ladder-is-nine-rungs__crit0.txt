@@ -1,0 +1,1 @@
+app.js classifyBp / ATTENTION_RANK covers every rung the Go ladder covers, with matching rank order and bucket membership

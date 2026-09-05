@@ -1,0 +1,1 @@
+The fan-out is classified as demand or as churn with evidence, and the classification is recorded as a decision rather than an assumption

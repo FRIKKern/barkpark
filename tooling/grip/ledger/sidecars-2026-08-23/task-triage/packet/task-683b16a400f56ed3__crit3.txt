@@ -1,0 +1,1 @@
+MUTATION-PROVEN: remove the plumbing that carries the log to the surface, watch the new guard red BY NAME, restore. git diff --stat proves the mutation landed — a mutation that changes nothing is a contradiction, not a pass.

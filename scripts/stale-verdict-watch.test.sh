@@ -957,5 +957,113 @@ grep -q "this string is not in any verdict" <<<"$out" \
   || ok "a nonsense assertion fails, so the greps above are load-bearing"
 
 echo
+section "(m) the LIVE page loop: a GraphQL page above macOS total argv still appends to the population"
+
+# THE BUG THIS OWNS. Section (k) proves the --fixture path carries nothing by
+# argv. The LIVE path did not go through it: scripts/stale-verdict-watch.sh
+# accumulated pages with `jq -n --argjson a "$rows" --argjson b "$got"`, so the
+# whole population travelled as one argv word per page. Every run from
+# 2026-09-03 06:08Z died "jq: Argument list too long" and was read as
+# UNREACHABLE — the harness stayed green because (k) never paged. A stub `gh`
+# serves ONE oversized page here; the append must survive and classify it.
+LSTUB="$TMP/l-stub"; mkdir -p "$LSTUB/bin"
+LPAGE="$LSTUB/page.json"
+python3 - "$LPAGE" <<'PY'
+import json,sys
+nodes=[{"number":30000+i,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"%040d"%i,"updatedAt":"2026-08-01T00:00:00Z",
+        "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+          {"__typename":"CheckRun","name":"advisory-context-%d-a-realistically-long-workflow-job-name"%k,"status":"COMPLETED","conclusion":"SUCCESS",
+           "completedAt":"2026-09-01T00:00:00Z","detailsUrl":"https://github.com/FRIKKern/barkpark/actions/runs/1/job/1"} for k in range(60)]}}}}]}} for i in range(100)]
+page={"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":False,"endCursor":None},"nodes":nodes}}}}
+open(sys.argv[1],"w").write(json.dumps(page))
+PY
+printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
+lpage_bytes="$(wc -c < "$LPAGE" | tr -d ' ')"
+[ "${lpage_bytes:-0}" -ge "$SCALE_MIN" ] \
+  && ok "the generated live page is ${lpage_bytes}B ≥ ${SCALE_MIN}B" \
+  || bad "the live-page fixture is only ${lpage_bytes}B — below the ${SCALE_MIN}B bound"
+out="$(env PATH="$LSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1)"; rc=$?
+grep -qi "Argument list too long" <<<"$out" \
+  && bad "(m) execve E2BIG on the live page loop — the population still travels by argv" \
+  || ok "(m) no 'Argument list too long' on the live page loop"
+grep -qE "classified 100" <<<"$out" \
+  && ok "(m) the oversized page was appended and all 100 rows classified" \
+  || bad "(m) the page was not classified (rc=$rc): $(printf '%s' "$out" | grep -iE 'population|UNREACHABLE|classified' | head -2 | tr '\n' ' ')"
+
+echo
+section "(q) a DRAFT conflicted PR is not NOVEL — it is printed, not counted"
+
+# THE BUG THIS OWNS. A CONFLICTING PR asserting a stale green reds main. A
+# DRAFT one cannot be merged by anyone — GitHub refuses and the merge sweep
+# skips it — so it asserts no verdict a human can act on, and the LEAD-BRIEF's
+# own remedy for a stale conflicted PR is "draft it instead". main drafted
+# #15631 at 2026-09-04T02:31Z and run 33837151186 at 04:31Z still printed
+# "NOVEL 1 — #15631" and failed, because the watch never read isDraft.
+#
+# THESE PROBES DRIVE THE LIVE PATH, NOT --fixture. Section (m)'s lesson: a
+# property proven only on the --fixture path leaves the live path unproven, and
+# isDraft is exactly such a field — it enters through the GraphQL selection and
+# PR_NORMALISE_JQ, neither of which --fixture touches. So a stub `gh` serves a
+# real GraphQL page shape here and the flag travels the transport production
+# takes. The commit history still comes from --commits, so nothing is timing-
+# dependent.
+QSTUB="$TMP/q-stub"; mkdir -p "$QSTUB/bin"
+
+q_page() { # <path> <isDraft: true|false>  — one CONFLICTING PR with a full stale green
+  local path="$1" draft="$2" ctxjson="[]" c
+  for c in "${CTX[@]}"; do
+    ctxjson="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, status:"COMPLETED", conclusion:"SUCCESS", completedAt:$t}]' <<<"$ctxjson")"
+  done
+  jq -n --argjson draft "$draft" --argjson ctx "$ctxjson" '
+    { data: { repository: { pullRequests: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [ { number: 15631, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY",
+                   updatedAt: "2026-08-01T00:00:00Z",
+                   headRefOid: "cbbe4a6390000000000000000000000000000000",
+                   isDraft: $draft,
+                   commits: { nodes: [ { commit: { statusCheckRollup: { contexts: { nodes: $ctx } } } } ] } } ] } } } }' \
+    > "$path"
+}
+
+q_run() { # <page json path> — the live read, with only `gh` stubbed
+  local page="$1"
+  printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' "$page" > "$QSTUB/bin/gh"
+  chmod +x "$QSTUB/bin/gh"
+  env PATH="$QSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
+    bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1
+}
+
+# (q1) DRAFT — the identical row, marked draft, must NOT be novel and must exit 0.
+q_page "$TMP/q-draft.json" true
+out="$(q_run "$TMP/q-draft.json")"; rc=$?
+[ "$rc" -eq 0 ] \
+  && ok "(q1) a DRAFT conflicted PR asserting a stale green exits 0" \
+  || bad "(q1) exit $rc, expected 0 — a draft that cannot be merged still fails the run"
+grep -qE "NOVEL +0" <<<"$out" \
+  && ok "(q1) …and the NOVEL count is 0" \
+  || bad "(q1) NOVEL is not 0: $(grep -E 'NOVEL' <<<"$out" | head -1)"
+grep -q "DRAFT, not counted: #15631" <<<"$out" \
+  && ok "(q1) …and #15631 is PRINTED on its own labelled draft line, not silenced" \
+  || bad "(q1) the draft row was not printed on a draft line — a silent exclusion is worse than the red"
+grep -q "RED — " <<<"$out" \
+  && bad "(q1) the run printed a RED verdict on a population of one draft" \
+  || ok "(q1) …and no RED sentence was printed"
+
+# (q2) THE SAME ROW, NOT A DRAFT — still NOVEL, still exit 1. Without this the
+# probe above is satisfied by a script that reports nothing at all.
+q_page "$TMP/q-ready.json" false
+out="$(q_run "$TMP/q-ready.json")"; rc=$?
+[ "$rc" -eq 1 ] \
+  && ok "(q2) the SAME row not marked draft exits 1" \
+  || bad "(q2) exit $rc, expected 1 — the draft exclusion swallowed a real stale green"
+grep -qE "NOVEL +1 — #15631" <<<"$out" \
+  && ok "(q2) …and #15631 is named NOVEL" \
+  || bad "(q2) #15631 is not named NOVEL: $(grep -E 'NOVEL' <<<"$out" | head -1)"
+grep -q "DRAFT, not counted: #15631" <<<"$out" \
+  && bad "(q2) a non-draft row was printed on the draft line" \
+  || ok "(q2) …and it is NOT on the draft line"
+
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1

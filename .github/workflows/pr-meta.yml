@@ -103,7 +103,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-meta-${{ github.ref }}
+  group: pr-meta-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # never cancel a main run — a cancelled run on main leaves no verdict at all,
   # which reads identically to a clean one.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -162,6 +162,24 @@ jobs:
             exit 1
           fi
           echo "tooling/status: ${tally} tests, floor 12 — pin re-earned"
+
+      # tooling/lib's shared 429 backoff, for the same reason the step above
+      # exists: a test that runs NOWHERE re-earns nothing. The helper is the one
+      # place tooling/ consumers get backpressure handling (task-0c30e7b99ad87cec
+      # — a 429 under this fleet's own load was rendering as an infra fault), so
+      # a future edit that quietly drops the retry must go red somewhere.
+      # node-test-floor.mjs, never bare `node --test`: a zero-match glob or a
+      # file registering no tests exits 0 three separate ways.
+      - name: tooling/lib tests (node-test-floor, 9-test tally)
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs --floor 1 'tooling/lib/*.test.mjs' 2>&1 | tee /tmp/lib-tests.txt
+          tally=$(sed -nE 's/^node-test floor: ran ([0-9]+) tests .*/\1/p' /tmp/lib-tests.txt | tail -1)
+          if [ "${tally:-0}" -lt 9 ]; then
+            echo "::error::tooling/lib: ran ${tally:-0} test(s), the pin was filed with 9 — the backpressure suite stopped being discovered or tests were deleted; lower the floor here deliberately or restore them"
+            exit 1
+          fi
+          echo "tooling/lib: ${tally} tests, floor 9 — pin re-earned"
 
       - name: No symlink is committed to this repo
         run: bash scripts/committed-symlink-check.sh

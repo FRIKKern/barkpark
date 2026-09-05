@@ -14,6 +14,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -800,6 +801,94 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert body["error"]["reason"] == "database_unavailable"
       assert body["error"]["message"] != ""
       assert body["error"]["hint"] =~ "Retry"
+    end
+
+    # ── THE 404 FOLD (gfr-s2-export-error-folded-into-404) ────────────────
+    # export/2 used to end in `{:error, _} -> {:error, :not_found}`, comment and
+    # all: "fold any error into 404 rather than leak an engine tuple". So an
+    # engine failure told a caller we had JUST proven `workspace_admin` of that
+    # their workspace does not exist, and it did so with a 4xx no operator page
+    # ever fires on. These three arms pin the split: an engine error is an
+    # honest logged 500, genuine absence is still 404, and a healthy export is
+    # still 200 (the positive control that keeps the first two non-vacuous).
+    test "an engine error inside export/2 answers a LOGGED 500 internal_error — never 404",
+         %{conn: conn} do
+      raw_admin = "ws-export-engine-500-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Engine Fault WS"}, admin_token(raw_admin))
+
+      # `:workspace_id_required` is one of the two atoms `export_to_file/2`
+      # actually returns (workspace_bundle.ex `@spec`), injected through the
+      # controller's own seam because neither is reachable over this route once
+      # the slug has resolved to a real %Workspace{} with a UUID id.
+      Application.put_env(:barkpark, :export_engine_fault, {:error, :workspace_id_required})
+      on_exit(fn -> Application.delete_env(:barkpark, :export_engine_fault) end)
+
+      {resp, log} =
+        with_log(fn ->
+          conn
+          |> authed(raw_admin)
+          |> get("/api/workspaces/#{target.slug}/export")
+        end)
+
+      assert resp.status == 500
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "internal_error"
+
+      # THE OPERATOR HEARS IT. A 404 is not a 5xx, so the old fold produced no
+      # error line at all; the whole point of the honest status is that the term
+      # reaches the log with the route on it.
+      assert log =~ "workspace_id_required"
+      assert log =~ "/export"
+
+      # …and the wire carries no engine TUPLE — only the code-authored atom the
+      # Errors term-family reducer deliberately speaks (errors.ex type_name/1).
+      refute resp.resp_body =~ "WorkspaceBundle"
+      refute resp.resp_body =~ "Elixir."
+    end
+
+    test "GENUINE ABSENCE is still 404: the engine's :workspace_not_found keeps its status",
+         %{conn: conn} do
+      raw_admin = "ws-export-gone-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Vanishing WS"}, admin_token(raw_admin))
+
+      # The real race this shape encodes: the row resolved by slug is deleted
+      # between that lookup and the export. The workspace really IS gone, so
+      # 404 is the true answer and the split must not sweep it into the 500.
+      Application.put_env(:barkpark, :export_engine_fault, {:error, :workspace_not_found})
+      on_exit(fn -> Application.delete_env(:barkpark, :export_engine_fault) end)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "POSITIVE CONTROL: with no fault configured the same admin still exports 200",
+         %{conn: conn} do
+      raw_admin = "ws-export-ok-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Healthy Export WS"}, admin_token(raw_admin))
+
+      refute Application.get_env(:barkpark, :export_engine_fault)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 200
+      assert byte_size(resp.resp_body) > 0
     end
 
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do

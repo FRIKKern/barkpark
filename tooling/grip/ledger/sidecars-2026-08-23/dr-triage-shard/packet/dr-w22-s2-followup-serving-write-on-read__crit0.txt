@@ -1,0 +1,1 @@
+ServingMemory does not perform a disk write inside the HTTP request path on a steady-state box, proven by a test that reads twice and asserts the file mtime is unchanged

@@ -226,7 +226,7 @@ defmodule BarkparkCloud.FailureCopyTest do
       "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
 
     human =
-      "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
+      "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
 
     assert FailureCopy.humanize(raw) == human
     # Idempotent under the client failureCopy() second pass (its output does not

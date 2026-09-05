@@ -1,0 +1,1 @@
+Any index that is created is created CONCURRENTLY and its presence or removal is verified by reading pg_indexes afterwards

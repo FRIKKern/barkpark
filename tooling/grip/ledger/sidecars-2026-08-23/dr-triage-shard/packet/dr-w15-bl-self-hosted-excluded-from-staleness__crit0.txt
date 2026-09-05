@@ -1,0 +1,1 @@
+A decision is recorded on whether a self_hosted box should be a candidate for the staleness alert, with the product reason stated — not merely a code change

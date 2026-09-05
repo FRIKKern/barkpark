@@ -1,0 +1,1 @@
+The per-slug door-refusal histogram reaches a human-readable surface (not a log line), with its window and its denominator beside it.

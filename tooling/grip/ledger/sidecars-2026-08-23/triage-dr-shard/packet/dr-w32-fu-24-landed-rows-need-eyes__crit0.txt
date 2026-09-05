@@ -1,0 +1,1 @@
+Each of the 3 GROUP B rows is resolved: either its own merge-check command now passes on origin/main with the output pasted, or the criterion is reworded and the reason recorded on the row.

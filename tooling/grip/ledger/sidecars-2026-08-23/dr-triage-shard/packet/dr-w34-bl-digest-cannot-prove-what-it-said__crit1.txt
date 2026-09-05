@@ -1,0 +1,1 @@
+If added, a delivery row for a real send is shown carrying a hash that matches the rendered body recomputed independently.

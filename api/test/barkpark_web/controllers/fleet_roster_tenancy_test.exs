@@ -49,7 +49,7 @@ defmodule BarkparkWeb.FleetRosterTenancyTest do
   query param on the route changes nothing.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
   alias Barkpark.Tasks.Fleet

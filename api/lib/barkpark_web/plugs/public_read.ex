@@ -100,6 +100,7 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   import Plug.Conn
   alias Barkpark.Content
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.TasksController.Params
 
   def init(opts), do: opts
 
@@ -162,8 +163,26 @@ defmodule BarkparkWeb.Plugs.PublicRead do
 
   defp allowed_route?(_), do: false
 
+  # TWO readers of "which perspective did the caller ask for?" live downstream of
+  # this plug, and BOTH must be refused here — a gate that reads one param while
+  # the controller reads two is a bypass by construction.
+  #
+  #   1. the RAW `perspective` string (`AnonPerspective.parse/1`) — the literal
+  #      allowlist below, unchanged. It is load-bearing on its own: `raw` maps to
+  #      `:published` under `parse_perspective/1`, so only the literal check
+  #      refuses `?perspective=raw`.
+  #   2. `TasksController.Params.parse_perspective/1` — the graph surface's
+  #      parser, which ALSO honours the `?drafts=true|1` ALIAS. That alias is
+  #      real and live (`internal/apiclient/client.go` sends
+  #      `?drafts=true&direction=both&kinds=blocks`), so removing it would break
+  #      a shipped caller; instead this gate now reads THE SAME parser, which is
+  #      the only shape that cannot drift apart from what the controller honours.
+  #
+  # Both clauses are load-bearing and neither subsumes the other: drop (1) and
+  # `?perspective=raw` walks through; drop (2) and `?drafts=true` does.
   defp allowed_perspective?(conn) do
-    conn.params["perspective"] in [nil, "", "published"]
+    conn.params["perspective"] in [nil, "", "published"] and
+      Params.parse_perspective(conn.params) == :published
   end
 
   # Route-shape aware, and TOTAL. The old shape destructured

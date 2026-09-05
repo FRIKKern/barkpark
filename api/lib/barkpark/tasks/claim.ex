@@ -144,10 +144,43 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
+  # ── THE SECOND FORK (task-ca05dd6a02a0b55f) ─────────────────────────────
+  #
+  # `documents` is unique on `(doc_id, type, dataset_id)`, NOT on
+  # `(doc_id, type)` (migration 20260527134000). One task doc_id can therefore
+  # live in TWO datasets in a single workspace/project, and this lookup carries
+  # no dataset discriminator by design — `bp task claim <id>` names no dataset.
+  # Without a `limit`, that shape made `Repo.one/1` raise
+  # `Ecto.MultipleResultsError`, i.e. a 500 on every attempt, forever.
+  #
+  # PR #15551 fixed exactly this in the READ path (`fetch_task_exact/3` in
+  # tasks_controller.ex) and did not find this fork, so three days later
+  # `bp task get akbr-feedback-2026-08-epic` resolved while
+  # `bp task claim akbr-feedback-2026-08-epic` still 500'd (measured against
+  # guerrilla 2026-09-05, request_id GNJljRgMcPdcwAYAABsC). A row that cannot be
+  # CLAIMED cannot be stamped, closed or released either — every one of those
+  # verbs is claim-fenced — so this one function kept the eleven known
+  # cross-dataset rows exactly as unreachable as before the read was fixed.
+  #
+  # The order is the rule `Content.Graph.resolve_doc/3`
+  # (`@canonical capability:slug-resolve`) and `fetch_task_exact/3` already
+  # spell, and it is TOTAL — published-first, then dataset, then id — so the
+  # same call returns the same row across every pooled connection. A partial
+  # order would trade a 500 for a silently alternating answer, which is worse.
+  #
+  # `FOR UPDATE` is preserved: this is the targeted-claim path and the row lock
+  # is what makes the claim a CAS. A fix that dropped it would trade a 500 for
+  # a lost update.
   defp fetch_task_exact_locked(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task",
+        order_by: [
+          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
+          asc: d.dataset,
+          asc: d.id
+        ],
+        limit: 1,
         lock: "FOR UPDATE"
       )
 

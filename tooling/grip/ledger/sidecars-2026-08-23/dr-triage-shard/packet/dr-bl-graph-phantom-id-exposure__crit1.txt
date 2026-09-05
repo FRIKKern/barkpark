@@ -1,0 +1,1 @@
+If ANY shape does NOT already expose the id, phantoms are dropped or hashed for the restricted tier and a test pins it — a phantom carries the id as its title, so an unexposed shape means graph_corpus is a new leak of private-type or unpublished document ids.

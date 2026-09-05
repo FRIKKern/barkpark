@@ -16,7 +16,7 @@ defmodule BarkparkWeb.MediaByteRangeTest do
     * no Range header still answers 200 with everything;
     * every answer advertises `accept-ranges: bytes`.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Storage.MediaFile
@@ -58,7 +58,7 @@ defmodule BarkparkWeb.MediaByteRangeTest do
 
   defp fetch(ctx, range) do
     conn =
-      build_conn()
+      scoped_conn()
       |> Plug.Conn.put_req_header("authorization", "Bearer " <> ctx.token)
 
     conn = if range, do: Plug.Conn.put_req_header(conn, "range", range), else: conn

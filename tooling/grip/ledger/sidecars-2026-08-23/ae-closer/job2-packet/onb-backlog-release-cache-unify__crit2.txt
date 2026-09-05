@@ -1,0 +1,1 @@
+MERGE-GATED (lead closes on merge): PR merged, go build+vet+test green

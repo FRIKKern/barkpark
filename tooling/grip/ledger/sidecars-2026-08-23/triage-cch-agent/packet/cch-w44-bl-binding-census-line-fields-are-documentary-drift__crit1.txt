@@ -1,0 +1,1 @@
+After the change, a deliberate line shift in app.js (insert 50 blank lines above a pinned write site) either prints the correct new line or reds — it can no longer print a stale one silently. Evidence: the mutant run output.

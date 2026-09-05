@@ -1,0 +1,1 @@
+A written ruling on what `current` should mean when the blessed release is far behind main, naming the blast radius on `AutoupdateRolloutWorker`'s candidate set. Evidence: the ruling, plus the measured distance (`git rev-list --count <tag>..origin/main`) at write time.

@@ -1,0 +1,1 @@
+spd-b42-provenance-cites-superseded-run is closed or explicitly deferred, so spd-b42's arithmetic stops resting on an open integrity flag

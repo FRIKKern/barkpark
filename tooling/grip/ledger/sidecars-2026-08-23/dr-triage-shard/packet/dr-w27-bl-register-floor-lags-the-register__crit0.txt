@@ -1,0 +1,1 @@
+@register_floor is raised to match the register length, and a mutation proves it: deleting ONE register row reds the floor assertion by name.

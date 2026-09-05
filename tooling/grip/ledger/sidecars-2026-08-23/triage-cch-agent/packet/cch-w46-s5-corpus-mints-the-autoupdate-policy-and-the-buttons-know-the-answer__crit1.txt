@@ -1,0 +1,1 @@
+REPRODUCTION: with the corpus corrected and BEFORE the predicate lands, a rendered-bytes probe shows panel-overview-member (role "member") being offered ENABLED [data-au] buttons in the visible #instance-body, byte-identical to the owner's action row. Evidence: the member's rendered action row, pasted.

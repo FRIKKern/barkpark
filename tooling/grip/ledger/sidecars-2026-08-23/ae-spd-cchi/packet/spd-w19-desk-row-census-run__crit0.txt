@@ -1,0 +1,1 @@
+Both dependency merge commits are named before any press: spd-w19-nil-icon-policy-fork and spd-w19-legc-census-instrument, each proven an ancestor of the served commit with git merge-base --is-ancestor.

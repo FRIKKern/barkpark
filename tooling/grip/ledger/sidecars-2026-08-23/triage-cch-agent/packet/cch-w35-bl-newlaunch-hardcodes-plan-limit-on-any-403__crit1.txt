@@ -1,0 +1,1 @@
+A member's launch 403 renders an authority sentence naming the admin role on the team, and a real limit_reached 403 still renders the plan-ceiling copy. Evidence: both rendered outputs from the harness.

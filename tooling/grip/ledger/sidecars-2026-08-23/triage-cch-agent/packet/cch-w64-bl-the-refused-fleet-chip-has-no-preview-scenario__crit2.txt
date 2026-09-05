@@ -1,0 +1,1 @@
+If the corpus size moved, every pinned literal is re-derived by RUNNING its tool and writing the number it PRINTED (never pin +/- 1): paste each tool run. If a fleet ROW was added instead, paste the unchanged 111 from member-authority-sweep.

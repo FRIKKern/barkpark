@@ -1,0 +1,1 @@
+The interaction with dr-w27-s5 ARM D is recorded: the deferred population is a floor because a lost defer CAS produces no deferred row.

@@ -1,0 +1,1 @@
+The box refusal code is persisted in a structured field at box_refusal/3 time, and DeployLedger.classify/1 reads that field rather than parsing the raw failure_reason string.

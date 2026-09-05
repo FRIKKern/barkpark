@@ -197,14 +197,24 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
     # THE COST OF THE FAIL-CLOSED RULING, RECORDED AT THE RECEIPT SURFACE.
     #
     # A stored row whose workspace has no row (an operator-planted ghost, or a
-    # workspace deleted after the share was declared) is no longer removable
-    # from this panel: `target_workspace_admits?/2` refuses BEFORE
-    # `remove_share/3` runs, so there is no receipt at all — an authorization
-    # error, not a "Stopped sharing" sentence that would be a lie either way.
-    # `DELETE /v1/shares` still declines to confine an unresolvable workspace,
-    # and that is the cleanup path. Asserted rather than assumed, so a future
-    # change to the ruling has to come back and rewrite this test.
-    test "a stored row on a workspace that does not exist is refused, not silently kept", %{
+    # workspace deleted after the share was declared) is not removable from this
+    # panel: `target_workspace_admits?/2` refuses BEFORE `remove_share/3` runs,
+    # so there is no receipt at all — an authorization error, not a "Stopped
+    # sharing" sentence that would be a lie either way. `DELETE /v1/shares`
+    # still declines to confine an unresolvable workspace, and that is the
+    # cleanup path. Asserted rather than assumed, so a future change to the
+    # ruling has to come back and rewrite this test.
+    #
+    # REWRITTEN by task-87c43ffa0be7ad95, WHICH MOVED THE FIRST HALF OF IT. The
+    # READ half now asks the same `target_workspace_admits?/2`, so the ghost row
+    # is not LISTED either: the Remove button this test used to click no longer
+    # renders at all. That is the whole point of the read clamp — the panel must
+    # not show what it refuses to let you touch — so the button's ABSENCE is now
+    # the first assertion, and the refusal is proved by dispatching the event
+    # the vanished button would have sent. Both halves stay pinned: the listing
+    # hides the ghost AND the handler still refuses it, so a regression in
+    # either one reds here.
+    test "a stored row on a workspace that does not exist is neither LISTED nor removable", %{
       conn: conn
     } do
       ghost = "receipt-ghost-#{System.unique_integer([:positive])}"
@@ -215,7 +225,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
       {:ok, view, _html} = admin_view(conn)
       open_panel(view)
 
-      html = view |> remove_button(scope) |> render_click()
+      # THE READ HALF: no row, therefore no button. `has_element?/1` is the
+      # non-raising twin of the `element/2 |> render_click/1` this test used to
+      # perform — the same selector, asked as a question.
+      refute has_element?(remove_button(view, scope)),
+             "the ghost scope #{scope} is still LISTED with a live Remove button, " <>
+               "though `shares-remove` refuses it"
+
+      # THE WRITE HALF, unchanged: the event the vanished button would have
+      # sent is still refused with the authorization sentence, and mutates
+      # nothing. Dispatched directly BECAUSE the button is gone.
+      html = render_hook(view, "shares-remove", %{"scope" => scope})
 
       assert html =~ "not an admin of that scope&#39;s workspace"
       refute html =~ "Stopped sharing #{scope}"

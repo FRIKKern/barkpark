@@ -16,6 +16,7 @@ defmodule BarkparkWeb.CapabilitiesController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Plugins.Capabilities
+  alias BarkparkWeb.Http.IfNoneMatch
 
   import Plug.Conn,
     only: [get_req_header: 2, get_resp_header: 2, put_resp_header: 3, send_resp: 3]
@@ -72,7 +73,7 @@ defmodule BarkparkWeb.CapabilitiesController do
       |> put_vary_authorization()
       |> put_resp_header("etag", etag)
 
-    if etag_matches?(conn, etag) do
+    if IfNoneMatch.match?(conn, etag) do
       send_resp(conn, 304, "")
     else
       json(conn, manifest)
@@ -110,23 +111,6 @@ defmodule BarkparkWeb.CapabilitiesController do
         else: existing ++ ["authorization"]
 
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
-  end
-
-  # Honor If-None-Match. The header may carry a comma-separated list of
-  # validators or the wildcard `*`; a match short-circuits to 304.
-  defp etag_matches?(conn, etag) do
-    case get_req_header(conn, "if-none-match") do
-      [] ->
-        false
-
-      values ->
-        candidates =
-          values
-          |> Enum.flat_map(&String.split(&1, ","))
-          |> Enum.map(&String.trim/1)
-
-        "*" in candidates or etag in candidates
-    end
   end
 
   # Per-request public base URL, mirroring

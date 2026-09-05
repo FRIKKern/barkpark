@@ -1,0 +1,1 @@
+A protective run proves the distinction: with a squatter deliberately planted, the guard's failure is reported with an exit code and message that a caller can tell apart from a real defect finding.

@@ -539,6 +539,14 @@ defmodule Barkpark.Plugin do
               optional(:repeatable) => boolean()
             }
           ],
+          # `writes` is a SAFETY bit, not decoration: the MCP bridge derives
+          # ReadOnlyHint from it and `bp` gates the prod write confirmation on
+          # it. `required(...)` here is a TYPESPEC — dialyzer-only, zero runtime
+          # force. The runtime owner is
+          # `Barkpark.Plugins.Capabilities.declare_writes_fail_closed/2`, which
+          # emits `writes: true` (assume it mutates) plus a Logger.warning for
+          # any plugin command that omits the key. Declare it anyway: a
+          # fail-closed default makes a plugin READ look like a mutator.
           required(:writes) => boolean(),
           required(:batch) => boolean(),
           required(:paginated) => boolean(),

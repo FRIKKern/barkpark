@@ -1,0 +1,1 @@
+Both prose blocks state the spec-vs-live divergence explicitly, name the live API read as authoritative, and point at cch-w11-s1 as the owner of the PUT — rather than asserting a required-set that is true only by accident.

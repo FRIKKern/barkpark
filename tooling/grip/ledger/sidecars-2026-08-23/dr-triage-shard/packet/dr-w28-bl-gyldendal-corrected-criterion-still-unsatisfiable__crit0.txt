@@ -1,0 +1,1 @@
+The corrected packet's criterion 2 names DELIVERY-PROVING reasons (unreachable|unauthorized|refused|instance_error), not the bare presence of unavailable_reason.

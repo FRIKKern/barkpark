@@ -32,6 +32,8 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
 
   use BarkparkWeb, :live_view
 
+  import BarkparkWeb.Studio.PageScroll
+
   # The tokenized Studio control kit — the Controls gallery below renders these
   # real function components (bp_input/bp_select/bp_textarea/bp_checkbox/
   # bp_radio/bp_switch), so the gallery DOM IS the component DOM (D22).
@@ -143,6 +145,12 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <%!-- studio-shell child contract (BarkparkWeb.Studio.PageScroll): the
+          shell is height:100vh + overflow:hidden, so a bare centred column
+          here is CLIPPED and its tail is unreachable by any input. This
+          wrapper fills the shell and owns the scroll; the centred column
+          below is unchanged, so the reading measure is too. --%>
+    <.studio_page_scroll>
     <div
       id="sg-root"
       phx-hook="SgTheme"
@@ -578,6 +586,7 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
         </div>
       </section>
     </div>
+    </.studio_page_scroll>
     """
   end
 end

@@ -31,7 +31,7 @@ defmodule BarkparkWeb.BulldocsIntentsTenancyTest do
   A-bound token SEES A's own intent — so an empty result can never be mistaken
   for a clean one.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

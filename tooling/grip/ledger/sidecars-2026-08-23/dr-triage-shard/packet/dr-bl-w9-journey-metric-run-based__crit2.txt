@@ -1,0 +1,1 @@
+A journey whose rev is NULL or the empty sentinel is UNMETERED, never folded into a group — proved by mutation over a fixture carrying the empty rev. Evidence: both run outputs.

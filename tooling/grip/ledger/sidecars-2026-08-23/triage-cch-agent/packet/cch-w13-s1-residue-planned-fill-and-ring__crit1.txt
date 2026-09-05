@@ -1,0 +1,1 @@
+A planned active step renders a fill-free pulsing dot (the .new-step.next idiom) rather than a conic ring at a fraction of a constant, with the CSS rule and a driven computed style quoted.

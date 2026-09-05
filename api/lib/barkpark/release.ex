@@ -30,6 +30,17 @@ defmodule Barkpark.Release do
     end
   end
 
+  # `seed_script` is `priv_path_for/2`: the OTP app's own `:code.priv_dir`
+  # joined with the compile-time literals "repo" and "seeds.exs". No runtime
+  # input reaches `Code.eval_file/1`, and `seed/0` is an operator-invoked
+  # release task (`bin/barkpark eval`), never a request path.
+  #
+  # Inline rather than a `.sobelow-skips` row on purpose: a baseline entry is
+  # pinned to a LINE, so any edit above the call silently kills the waiver and
+  # the finding returns as new — which is exactly how the row this replaces
+  # (the `RCE.CodeModule` row for `seed/0`) died. The annotation binds by AST adjacency
+  # and survives line moves.
+  # sobelow_skip ["RCE.CodeModule"]
   def seed do
     load_app()
 

@@ -1,0 +1,1 @@
+bp cloud status -o json carries per-row deploy truth (live, volume, rate or the named refusal) plus the pinned window, and the refusal states are NAMED keys, never an omitted key and never a zero.

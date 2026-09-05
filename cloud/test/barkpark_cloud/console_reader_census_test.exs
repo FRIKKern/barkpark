@@ -400,48 +400,44 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     # ------------------------------------------------------------------ github arm
     # Round 3 (D883, wave 75) PAID repo_not_in_installation — its fallback was a
     # measured transience lie, so it gained the curated ERRORS reader and its row
-    # was deleted (rot arm ran red first). github_error stays CLASSIFICATION-STANDS:
-    # its three sites are all admin-gated at the console and its fallbacks overclaim
-    # nothing (the slug is genuinely ambiguous). The zero-caller / guard-shield
-    # classifications below stay until their flip conditions fire.
-    %{
-      code: "github_error",
-      site: "router.ex GET /v1/github/repos",
-      reason:
-        "Classification stands (D883): the route is require_user, but the ONLY " <>
-          "console affordance that calls it is the #site-github button, rendered " <>
-          "solely for authority===\"grant\" (admin) — a member never reaches this " <>
-          "emit from the console, and the admin reader (openSiteGithub) renders the " <>
-          "caller fallback \"Couldn't load your repositories.\" github_error is " <>
-          "genuinely ambiguous (outage, rate-limit, and token-death are " <>
-          "indistinguishable at the emit), so that fallback overclaims no cause and " <>
-          "paints nothing permanent. Flip: github_error gains an ERRORS key OR a " <>
-          "member console affordance to GET /v1/github/repos ships."
-    },
-    %{
-      code: "github_error",
-      site: "router.ex POST /v1/github/repos (create_repo_from_template github_error 502)",
-      reason:
-        "Classification stands (D883): admin-gated (require_team_admin) create-repo " <>
-          "path; the console newCreateRepo reader renders its caller fallback " <>
-          "\"Please try again.\" The slug is the same genuinely-ambiguous upstream " <>
-          "verdict (outage/rate-limit/token-death indistinguishable), so the fallback " <>
-          "overclaims nothing. NOT the vercel_reason 502 route — it is minted bare in " <>
-          "the create_repo_from_template case arm. Flip: github_error gains an ERRORS " <>
-          "key OR a member affordance to GET /v1/github/repos ships."
-    },
-    %{
-      code: "github_error",
-      site: "router.ex connect_site_github",
-      reason:
-        "Classification stands (D883): admin-gated (require_team_admin) connect-flow " <>
-          "site of the same slug; the submitSiteGithub reader renders its caller " <>
-          "fallback \"Please try again.\" github_error is genuinely ambiguous " <>
-          "(outage/rate-limit/token-death indistinguishable at the emit), so the " <>
-          "fallback overclaims no cause and paints nothing permanent. Flip: " <>
-          "github_error gains an ERRORS key OR a member affordance to GET " <>
-          "/v1/github/repos ships."
-    },
+    # was deleted (rot arm ran red first).
+    #
+    # Round 4 (D875/D878, wave 72 cch-w72-bl) PAID github_error and invalid_name.
+    # Their FOUR rows (github_error x3, invalid_name x1) were deleted in the same
+    # diff that registered the readers — the rot arm ran RED naming both codes
+    # first. The flip conditions those rows named ("github_error gains an ERRORS
+    # key", "a wave rules per-slug copy owed") FIRED, by ruling rather than by
+    # discovery, so the classifications did not survive to be reworded.
+    #
+    # REACHABILITY LIMITS carried by that payment — recorded here because this
+    # file is the durable venue the merge carries, and none of the three github
+    # cures has a live capture (the twin record is the header of the cch-w72-bl
+    # block at the tail of cloud/priv/static/__app.test.mjs):
+    #
+    #   github_error             — reachable BY CONSTRUCTION (any GitHub API
+    #                              fault). All three emit sites match the cause
+    #                              AWAY before minting, so outage, rate-limit and
+    #                              token-death are indistinguishable at the wire;
+    #                              the curated sentence therefore names NO cause.
+    #                              Never captured live.
+    #   invalid_name             — reachable BY CONSTRUCTION: #new-gh-name is free
+    #                              text and newCreateRepo POSTs it verbatim, where
+    #                              the router's OWN valid_repo_name?/1 pre-check
+    #                              refuses it deterministically BEFORE any GitHub
+    #                              call. That location is measured, and it is why
+    #                              the copy does NOT say "GitHub refused" — the
+    #                              wave's filed sentence did, and would have been
+    #                              the exact class of lie D878 opened to remove.
+    #                              Never captured live.
+    #   repo_not_in_installation — reachable BY CONSTRUCTION through a TOCTOU
+    #                              window: the picker's GET lists a repo, access is
+    #                              revoked on GitHub, the connect POST then refuses.
+    #                              That race cannot be driven from a test and has
+    #                              no live capture — the D870 precedent for
+    #                              accepting a constructed reachability proof.
+    #
+    # The zero-caller / guard-shield classifications below stay until their flip
+    # conditions fire.
     %{
       code: "installation_id_required",
       site: "router.ex POST /v1/github/installations",
@@ -459,16 +455,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "sibling — no App-install callback consumer exists, no setup_action route, " <>
           "no installation_id reader anywhere. Conditioned on that absence. Flip: a " <>
           "callback consumer ships and this becomes a reader-owed row."
-    },
-    %{
-      code: "invalid_name",
-      site: "router.ex POST /v1/github/repos (bare 422 pre-check, not valid_repo_name?)",
-      reason:
-        "Classification stands (D883): admin-gated (require_team_admin) new-repo path; " <>
-          "the router's OWN valid_repo_name? pre-check mints this bare 422 (NOT the " <>
-          "vercel_reason 502 route), and newCreateRepo renders its caller fallback " <>
-          "\"Please try again.\" — an honest, non-permanent sentence for a name the " <>
-          "console form fed through its own input. Flip: a wave rules per-slug copy owed."
     },
     %{
       code: "repo_full_name_required",

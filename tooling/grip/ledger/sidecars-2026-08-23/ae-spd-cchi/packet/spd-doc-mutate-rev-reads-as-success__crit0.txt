@@ -1,0 +1,1 @@
+bp doc mutate's output distinguishes a draft-only write from a change to the published document, so a rev alone can no longer be read as 'the ledger changed'

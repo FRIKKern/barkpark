@@ -1,0 +1,1 @@
+The failed arm carries a recovery affordance that re-runs loadMe and repaints the rail, proven by driving it in the harness (click the control, resolve /v1/me 200 owner, assert the live Decommission returns).

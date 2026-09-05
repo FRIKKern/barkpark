@@ -277,6 +277,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # renders `@grouped_rows`, recomputed ONCE per append (via
          # `assign_messages/2`), never per render over the full `@messages`.
          grouped_rows: [],
+         # The incremental-regroup memo (task-07f27c32c84a5005): the already
+         # grouped PREFIX of `@messages`, spliced in front of a freshly grouped
+         # tail on every write. See `regroup/2`.
+         grouping_cache: empty_grouping_cache(),
          next_id: 0,
          # The in-memory id of THIS turn's TodoWrite living-checklist card
          # (charter D39). The turn's first TodoWrite appends a :todo card and
@@ -4921,6 +4925,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
       # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
       grouped_rows: grouped_rows(messages),
+      # A reopen groups from scratch; the memo starts empty and the first live
+      # append rebuilds it, after which every append is tail-bounded.
+      grouping_cache: empty_grouping_cache(),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -5068,6 +5075,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       init: nil,
       messages: [],
       grouped_rows: [],
+      grouping_cache: empty_grouping_cache(),
       next_id: 0,
       todo_card_id: nil,
       streaming: nil,
@@ -6773,7 +6781,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # over the full transcript.
   defp assign_messages(socket, messages) do
     trimmed = trim_transcript(messages)
-    assign(socket, messages: trimmed, grouped_rows: grouped_rows(trimmed))
+
+    {rows, cache} =
+      regroup(trimmed, socket.assigns[:grouping_cache] || empty_grouping_cache())
+
+    assign(socket, messages: trimmed, grouped_rows: rows, grouping_cache: cache)
   end
 
   # Keep only the last `@transcript_window` rows. The drop count is floored at 0
@@ -6870,6 +6882,116 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> group_agent_rows()
     |> fold_running_turn()
     |> fold_settled_turns()
+  end
+
+  # ── incremental regrouping (task-07f27c32c84a5005) ──────────────────────
+  #
+  # `grouped_rows/1` is a fold over the transcript, and the old write path ran it
+  # over the WHOLE list on every append: O(N) grouping per write, O(N²) across a
+  # session. Nothing about the items it emits changes here — only how much of the
+  # list the pass has to look at.
+  #
+  # THE BOUNDARY. The memo carries an already-grouped PREFIX plus the two facts a
+  # later message could use to reach back into it. A write splices `cache.items`
+  # in front of the freshly grouped TAIL, so the pass visits the tail only. The
+  # prefix is extended ONLY up to a NON-tool message, and that is what makes the
+  # cut safe for all three passes:
+  #
+  #   * `fold_running_turn/1` and `fold_settled_turns/1` are `chunk_by` over
+  #     CONSECUTIVE items, and both hand a non-`{:row, tool}` item a nil key. A
+  #     nil-keyed chunk is returned unchanged by both, so cutting the list right
+  #     after a non-tool row can never split a chunk either fold would collapse.
+  #   * `group_agent_rows/1` DOES look both ways — a child is bucketed by ID
+  #     match, not adjacency — so the cut carries two explicit guards: no tail row
+  #     may name a prefix spawn as its parent, and no prefix ORPHAN reference may
+  #     be satisfied by a tail spawn. Either guard failing falls back to a full
+  #     regroup: correct, just not cheap.
+  #
+  # The RUNNING turn is always the trailing run of tool rows, so it always lands
+  # in the tail — the bound is "the last turn", never N. Front-trimming (the
+  # `@transcript_window` cap) rewrites the prefix, so it MISSES and regroups the
+  # window once; the cap itself is what keeps that bounded.
+  @doc false
+  def empty_grouping_cache do
+    %{msgs: [], len: 0, items: [], spawn_ids: MapSet.new(), orphan_refs: MapSet.new(), visited: 0}
+  end
+
+  # Returns `{grouped_rows, cache}` — the SAME items `grouped_rows/1` would have
+  # returned for the whole list. `cache.visited` is how many transcript rows this
+  # call handed to the grouping pass: the per-append bound, read directly by
+  # chat_regroup_incremental_test.exs.
+  @doc false
+  def regroup(messages, cache) do
+    case reusable_tail(messages, cache) do
+      {:ok, tail} -> extend_grouping(cache, tail)
+      :miss -> extend_grouping(empty_grouping_cache(), messages)
+    end
+  end
+
+  # The memo is reusable only when its prefix is still literally the head of the
+  # list (a merge or a card flip that rewrote a prefix row MISSES, as it must)
+  # and the tail cannot reach back into it.
+  defp reusable_tail(_messages, %{len: 0}), do: :miss
+
+  defp reusable_tail(messages, cache) do
+    with true <- List.starts_with?(messages, cache.msgs),
+         tail = Enum.drop(messages, cache.len),
+         true <- split_safe?(cache, tail) do
+      {:ok, tail}
+    else
+      _ -> :miss
+    end
+  end
+
+  defp split_safe?(cache, tail) do
+    MapSet.disjoint?(cache.spawn_ids, parent_refs(tail)) and
+      MapSet.disjoint?(cache.orphan_refs, top_spawn_ids(tail))
+  end
+
+  defp extend_grouping(cache, tail) do
+    items = cache.items ++ grouped_rows(tail)
+
+    cache =
+      if advanceable?(tail) do
+        spawns = top_spawn_ids(tail)
+
+        %{
+          msgs: cache.msgs ++ tail,
+          len: cache.len + length(tail),
+          items: items,
+          spawn_ids: MapSet.union(cache.spawn_ids, spawns),
+          orphan_refs:
+            MapSet.union(cache.orphan_refs, MapSet.difference(parent_refs(tail), spawns)),
+          visited: length(tail)
+        }
+      else
+        %{cache | visited: length(tail)}
+      end
+
+    {items, cache}
+  end
+
+  # Only a tail that ENDS on a non-tool row may join the prefix — that is the one
+  # cut both folds are blind to. A tail still inside a turn stays live, so the
+  # next append regroups that turn and nothing before it.
+  defp advanceable?([]), do: false
+  defp advanceable?(tail), do: List.last(tail)[:role] != :tool
+
+  defp top_spawn_ids(messages) do
+    for m <- messages,
+        m.role == :tool,
+        m[:spawn?],
+        is_nil(m[:parent_tool_use_id]),
+        is_binary(m[:tool_use_id]),
+        into: MapSet.new(),
+        do: m[:tool_use_id]
+  end
+
+  defp parent_refs(messages) do
+    for m <- messages,
+        is_binary(m[:parent_tool_use_id]),
+        into: MapSet.new(),
+        do: m[:parent_tool_use_id]
   end
 
   # SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa). While a turn RUNS, its consecutive

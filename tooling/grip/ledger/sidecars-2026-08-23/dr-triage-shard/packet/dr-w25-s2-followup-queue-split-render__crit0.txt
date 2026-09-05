@@ -1,0 +1,1 @@
+cloudclient.PlatformDelivery decodes queued_self_seconds/queued_pickup_seconds/queued_stall_seconds as pointers, and a per-struct reflection pin asserts all three are tags on that struct itself

@@ -1,0 +1,1 @@
+apply_line/4 treats a whitespace-only line as a block boundary and a new fixture with a trailing-space separator passes chunking invariance across 20+ partitions.

@@ -1,0 +1,16 @@
+[
+  "eq",
+  "neq",
+  "in",
+  "nin",
+  "has",
+  "hasStrong",
+  "contains",
+  "startsWith",
+  "endsWith",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "is"
+]

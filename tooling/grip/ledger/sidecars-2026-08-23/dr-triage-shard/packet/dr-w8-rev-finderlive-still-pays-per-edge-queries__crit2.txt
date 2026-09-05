@@ -1,0 +1,1 @@
+MUTATION: /v1/graph/dangling and the EdgeProjector still name the same rows after the change — the default stays :resolve and a test reds if it flips.

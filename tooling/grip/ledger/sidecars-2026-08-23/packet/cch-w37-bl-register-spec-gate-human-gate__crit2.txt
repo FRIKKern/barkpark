@@ -1,0 +1,1 @@
+The spec PR lands the fifth context and deletes the S7 exclusion row, and the advisory-drift red expected between that merge and the PUT is announced in the PR body so nobody reverts it.

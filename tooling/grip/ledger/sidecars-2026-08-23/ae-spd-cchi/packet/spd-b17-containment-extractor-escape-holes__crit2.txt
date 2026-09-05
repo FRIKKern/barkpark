@@ -1,0 +1,1 @@
+The non-vacuity guard still names the canonical container rule truthfully when it fires (its message is not repurposed for the duplicate case), and the baseline run is green with the new positive controls

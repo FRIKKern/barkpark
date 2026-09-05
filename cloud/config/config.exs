@@ -340,6 +340,13 @@ config :barkpark_cloud, Oban,
        # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
        # a missed tick is harmless and a double-enqueue must not double-send.
        {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+       # cch-w30-bl: the daily PAT expiry warning — mail the token's OWNER (and
+       # ONLY the owner, on the user-scoped transactional path) 7 days before a
+       # personal access token's bounded `expires_at`. Runs at 07:10: after the
+       # 06:00 operator digest, off every on-the-hour sweep. DAILY, not hourly —
+       # the deadline is day-grained and the per-token stamp
+       # (`user_tokens.expiry_warned_at`) makes the notice one-shot anyway.
+       {"10 7 * * *", BarkparkCloud.Workers.TokenExpiryWarningWorker},
        # stw9 (charter D57b): the hourly TEMPLATE-freshness sweep — re-enqueue an
        # UNFORCED "template-auto" build for every deployed content-bound site, so
        # a merged template change reaches live sites with no human in the loop.

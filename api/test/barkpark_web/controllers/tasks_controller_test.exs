@@ -16,7 +16,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   `plugin_settings_controller_test.exs`.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 
@@ -510,6 +510,96 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # THE FLAT NAMESPACE (task-233cb8a1d033c738). #12780 closed the filter[...]
+  # container; the top level stayed fail-OPEN, so `?parent_id=X` and `?bogus=1`
+  # each returned a 200 carrying the UNFILTERED page. Every assertion here is on
+  # the RETURNED ROWS, not on a helper call, because the defect was a plausible
+  # page of foreign rows — a helper-level assertion would not have seen it.
+  describe "GET /v1/tasks — the flat query namespace" do
+    defp list_ids(conn, qs) do
+      resp = conn |> authed() |> get("/v1/tasks?" <> qs)
+      {resp.status, Jason.decode!(resp.resp_body)}
+    end
+
+    test "?parent_id= returns ONLY that parent's children, not the whole corpus",
+         %{conn: conn, scope: scope} do
+      parent = uniq("flat-parent")
+      other = uniq("flat-other")
+      _p = mk_task!(parent, scope)
+      _o = mk_task!(other, scope)
+      for _ <- 1..3, do: mk_task!(uniq("kid"), scope, %{"parent_id" => parent})
+      for _ <- 1..2, do: mk_task!(uniq("stranger"), scope, %{"parent_id" => other})
+
+      {status, body} = list_ids(conn, "parent_id=#{parent}&limit=100")
+      assert status == 200
+
+      docs = body["docs"] || []
+      parents = docs |> Enum.map(& &1["parent_id"]) |> Enum.uniq()
+
+      # THE DEFECT: before this, the same call returned every row in the corpus
+      # across every parent, 200 OK — a false confirmation an automated
+      # re-parent driver acts on.
+      assert length(docs) == 3
+      assert parents == [parent]
+    end
+
+    test "?parent_id= and ?parent= agree — the alias is not a second answer",
+         %{conn: conn, scope: scope} do
+      parent = uniq("flat-alias")
+      _p = mk_task!(parent, scope)
+      for _ <- 1..2, do: mk_task!(uniq("kid"), scope, %{"parent_id" => parent})
+
+      {200, by_alias} = list_ids(conn, "parent_id=#{parent}&limit=100")
+      {200, by_canonical} = list_ids(conn, "parent=#{parent}&limit=100")
+
+      ids = fn body -> body["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() end
+      assert ids.(by_alias) == ids.(by_canonical)
+      assert length(by_alias["docs"]) == 2
+    end
+
+    test "an unknown flat param is a 400 that NAMES it and the accepted set",
+         %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("flat-bogus"), scope)
+
+      {status, body} = list_ids(conn, "bogus=1")
+
+      assert status == 400
+      assert body["reason"] == "invalid_filter"
+      assert body["message"] =~ ~s|"bogus"|
+      assert body["message"] =~ "parent_id"
+      assert body["details"]["key"] == "bogus"
+      assert "parent_id" in body["details"]["supported_flat"]
+    end
+
+    test "every param the shipped consumers send is still accepted",
+         %{conn: conn, scope: scope} do
+      # THE CALLER CENSUS, pinned as a test. `bp` is manifest-driven: run.go
+      # sets `view`, `limit` and `offset` explicitly and then one query key per
+      # DECLARED flag, and task.ls declares limit/offset/cursor. Nothing else
+      # ships an HTTP caller of this route — Studio and the task LiveViews use
+      # the Barkpark.Tasks context directly, and the cloud console only calls
+      # /v1/tasks/<id>. If a future manifest flag is added without widening the
+      # allowlist, this test reds instead of a lane discovering it in prod.
+      _t = mk_task!(uniq("flat-census"), scope)
+
+      for qs <- [
+            "limit=5",
+            "offset=0",
+            "view=brief",
+            "limit=5&offset=0&view=brief",
+            "type=task",
+            "kind=task",
+            "lifecycle_status=open",
+            "phase_id=none",
+            "label=none",
+            "filter[parent_id]=none"
+          ] do
+        {status, _} = list_ids(conn, qs)
+        assert status == 200, "a shipped consumer's param was refused: #{qs}"
+      end
+    end
+  end
+
   describe "POST /v1/tasks/:doc_id/close" do
     test "happy path: closes a claimed task; lifecycle flips to done",
          %{conn: conn, scope: scope} do
@@ -533,6 +623,83 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["lifecycle_status"] == "done"
     end
 
+    test "a REPLAY of the same worker's close is 200 already_closed, not a failure",
+         %{conn: conn, scope: scope} do
+      # task-17224f58d3bda3bd. Measured on five real closes: attempt 1 commits,
+      # its response is lost under load, attempt 2 read the now-terminal row and
+      # was told `stale_claim` — so a worker reported a correctly-closed row as
+      # uncloseable, and re-claiming it then failed `not_ready`.
+      phase = uniq("phase-replay")
+      doc_id = uniq("replay-a")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      claimed_doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      close_body =
+        Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch, reason: "first close"})
+
+      first = conn |> authed() |> post("/v1/tasks/#{claimed_doc_id}/close", close_body)
+      assert first.status == 200
+      first_payload = Jason.decode!(first.resp_body)
+      assert first_payload["already_closed"] == nil
+
+      replay = conn |> authed() |> post("/v1/tasks/#{claimed_doc_id}/close", close_body)
+      assert replay.status == 200
+
+      payload = Jason.decode!(replay.resp_body)
+      assert payload["ok"] == true
+      assert payload["already_closed"] == true
+      assert payload["doc"]["lifecycle_status"] == "done"
+      assert payload["message"] =~ "already closed by worker-1"
+      # The replay echoes the STORED row, unchanged. Comparing the whole
+      # rendered doc rather than one field is the stronger assertion: a replay
+      # that wrote anything at all — a new rev, a new closed_at, an overwritten
+      # reason — reds here.
+      assert payload["doc"] == first_payload["doc"]
+    end
+
+    test "a replay by a DIFFERENT worker is still refused as a lost race",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-race")
+      doc_id = uniq("race-a")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      claimed_doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      first =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{claimed_doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      assert first.status == 200
+
+      second =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{claimed_doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-2",
+            observed_epoch: epoch,
+            holder_override: "second closer racing the first"
+          })
+        )
+
+      assert second.status == 409
+      assert Jason.decode!(second.resp_body)["reason"] == "stale_claim"
+    end
+
     test "error path: returns ok=false reason=fenced_off on epoch mismatch",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-fenced")
@@ -551,6 +718,219 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == false
       assert payload["reason"] == "fenced_off"
+    end
+
+    # ── dr-w14-bl-fenced-off-409-is-mute ────────────────────────────────────
+    #
+    # The wrong-epoch 409 used to ship as a bare {"ok":false,"reason":
+    # "fenced_off"}: it told the caller its epoch was wrong and never which
+    # epoch is right, so recovery cost a re-read the refusal never asked for.
+    # The body must now NAME the current epoch and the command that spends it.
+    test "fenced_off names the CURRENT epoch and the re-run command",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("fenced-speaks"), scope, %{"acceptance_criteria" => []})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+      assert is_integer(epoch)
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch + 998})
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+
+      # The machine-readable token is UNCHANGED — the bp CLI string-matches it.
+      assert payload["ok"] == false
+      assert payload["reason"] == "fenced_off"
+
+      # …and the body now carries the number recovery needs, plus the sentence.
+      assert payload["current_epoch"] == epoch
+
+      message = payload["message"]
+      assert is_binary(message) and message != "", "the wrong-epoch 409 is mute"
+      assert message =~ "epoch #{epoch}"
+      assert message =~ "bp task close <id> <worker> #{epoch}"
+      assert message =~ "Nothing was written"
+    end
+
+    test "fenced_off and not_holder are distinguishable by reason and BOTH teach a remedy",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("two-409s"), scope, %{"acceptance_criteria" => []})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-A"}))
+
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      # Same endpoint, same task — the two refusals differ only in WHICH gate
+      # fired, so the reason token has to keep them apart and each message has
+      # to name its own way out.
+      fenced =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-A", observed_epoch: epoch + 42})
+        )
+
+      foreign =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-B", observed_epoch: epoch})
+        )
+
+      assert fenced.status == 409 and foreign.status == 409
+      fenced_payload = Jason.decode!(fenced.resp_body)
+      foreign_payload = Jason.decode!(foreign.resp_body)
+
+      assert fenced_payload["reason"] == "fenced_off"
+      assert foreign_payload["reason"] == "not_holder:worker-A"
+      refute fenced_payload["reason"] == foreign_payload["reason"]
+
+      for {label, payload, needle} <- [
+            {"fenced_off", fenced_payload, "bp task close"},
+            {"not_holder", foreign_payload, "holder_override"}
+          ] do
+        message = payload["message"]
+        assert is_binary(message) and message != "", "#{label} carries no remedy sentence"
+        assert message =~ needle, "#{label}'s remedy does not name what to type"
+      end
+    end
+
+    # ── pds-bl-close-409-hint-promises-absent-fields ────────────────────────
+    #
+    # The two VALUES were always on the wire; the COMMAND that spends them was
+    # not, so an operator read `current_rev` off the body and still had to go
+    # find the recovery. The body alone must now be enough.
+    test "doc_changed_since_claim body alone carries the whole recovery",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("drift-speaks"), scope, %{
+          "description" => "v1 brief",
+          "acceptance_criteria" => []
+        })
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      row = Repo.get_by!(Document, doc_id: task.doc_id)
+      new_content = Map.put(row.content, "description", "v2 brief")
+
+      {1, _} =
+        from(d in Document, where: d.id == ^row.id and d.rev == ^row.rev)
+        |> Repo.update_all(set: [content: new_content, rev: Internal.generate_rev()])
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+      current_rev = Repo.get_by!(Document, doc_id: task.doc_id).rev
+
+      assert payload["reason"] == "doc_changed_since_claim"
+      assert payload["current_rev"] == current_rev
+      assert payload["changed_fields"] == ["description"]
+
+      message = payload["message"]
+      assert is_binary(message) and message != ""
+      assert message =~ "description"
+      # The rev is SUBSTITUTED into the command — no second read to run it.
+      assert message =~ "--set observed_rev=#{current_rev}"
+    end
+
+    # ── the status-position refusal (measured live 2026-09-02) ──────────────
+    #
+    # `bp task close <id> <worker> <epoch> "<a whole sentence>"` parses the
+    # sentence as the LIFECYCLE STATUS. The gate is right to refuse it; the
+    # refusal was `invalid_lifecycle:<the whole sentence>` and nothing else.
+    test "a close REASON in the status position says so and prints the fix",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("status-position"), scope, %{"acceptance_criteria" => []})
+      sentence = "landed #14383 @ 63b89bef30, all four gates green"
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: 1,
+            lifecycle_status: sentence
+          })
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+
+      # The gate does NOT widen: the token still reports the rejected value.
+      assert payload["reason"] == "invalid_lifecycle:#{sentence}"
+
+      message = payload["message"]
+      assert is_binary(message) and message != ""
+      # …names the mistake,
+      assert message =~ "STATUS position"
+      assert message =~ "the reason 5th"
+      # …names every status that IS allowed,
+      for status <- ~w(done cancelled blocked), do: assert(message =~ status)
+      # …and prints the corrected command.
+      assert message =~ ~s|bp task close <id> <worker> <epoch> done "<your reason>"|
+
+      reread = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+
+      assert Jason.decode!(reread.resp_body)["doc"]["lifecycle_status"] == "open",
+             "the refusal wrote nothing"
+    end
+
+    test "a status-shaped typo is refused by NAMING the allowed statuses",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("status-typo"), scope, %{"acceptance_criteria" => []})
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: 1,
+            lifecycle_status: "finished"
+          })
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+      assert payload["reason"] == "invalid_lifecycle:finished"
+
+      message = payload["message"]
+      assert message =~ ~s|"finished" is not a close status|
+      for status <- ~w(done cancelled blocked), do: assert(message =~ status)
+      # A one-word typo is NOT a misplaced reason — it must not be told so.
+      refute message =~ "STATUS position"
     end
 
     test "error path: 409 doc_changed_since_claim when the brief changed under the claim",
@@ -1069,7 +1449,7 @@ defmodule BarkparkWeb.TasksControllerTest do
              }
 
       epoch_invalid =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/absent/release",
@@ -1081,7 +1461,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert epoch_invalid["message"] == "observed_epoch is required"
 
       missing =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/absent/release",
@@ -1112,7 +1492,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert_release_unchanged(claimed, before)
 
       stale_epoch =
-        build_conn()
+        scoped_conn()
         |> authed()
         |> post(
           "/v1/tasks/#{task.doc_id}/release",
@@ -1132,7 +1512,7 @@ defmodule BarkparkWeb.TasksControllerTest do
         before = release_snapshot(task)
 
         payload =
-          build_conn()
+          scoped_conn()
           |> authed()
           |> post(
             "/v1/tasks/#{task.doc_id}/release",
@@ -1469,6 +1849,133 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       assert r2.status == 409
       assert Jason.decode!(r2.resp_body)["reason"] == "not_holder"
+    end
+
+    # ─── THE POST-CLOSE ATTEMPT ON THE WIRE (task-d68754135a6a9f66) ────────
+    #
+    # Criterion 4 of the row: the --miss path must work end to end, CLI wire
+    # shape → controller → Stamp, against a REAL done row. These use the exact
+    # bp CLI shape (positional worker_id + observed_epoch in the JSON body,
+    # flags as kebab query params) so a green here is a green for `bp task
+    # stamp <id> <worker> 0 --criterion N --miss --note "…" --observed-rev <rev>`.
+
+    # Claim, then close into `status`, returning {doc_id, closed_rev}.
+    defp closed_with_criteria!(conn, scope, criteria, status \\ "done") do
+      {doc_id, epoch} = claim_with_criteria!(conn, scope, criteria)
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: status,
+          criteria_override: "closing with criteria unproven on purpose"
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{doc_id}/close", close_body)
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["doc"]["lifecycle_status"] == status
+      {doc_id, payload["doc"]["rev"]}
+    end
+
+    test "--miss on a DONE row lands 200 through the wire, --met on it is still 409",
+         %{conn: conn, scope: scope} do
+      {doc_id, rev} =
+        closed_with_criteria!(conn, scope, [
+          %{"criterion" => "gate green", "met" => false, "evidence" => ""},
+          %{"criterion" => "docs updated", "met" => true, "evidence" => "PR #1 body"}
+        ])
+
+      # A closed row has no live epoch; the CLI still sends the positional 0.
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      miss =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=re-read+after+close%3A+the+gate+log+is+gone" <>
+            "&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert miss.status == 200
+      doc = Jason.decode!(miss.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "done", "the seal survives the annotation"
+
+      [c0, c1] = doc["content"]["acceptance_criteria"]
+      assert [%{"note" => "re-read after close: the gate log is gone"}] = c0["attempts"]
+      assert c0["met"] == false
+      assert c0["evidence"] == "", "an attempt writes no evidence — ever"
+
+      # The met=true neighbour is byte-identical: not lowered, not re-evidenced.
+      assert c1 == %{"criterion" => "docs updated", "met" => true, "evidence" => "PR #1 body"}
+
+      # And the RAISE is still walled, WITH the same rev pinned. The message is
+      # load-bearing: it is what stops a blocked closer reaching for a raw
+      # /v1/data/mutate, which is the substitution this whole change removes.
+      met =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=gate+green&met=true" <>
+            "&evidence=verified+CI-green+after+the+close&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert met.status == 409
+      payload = Jason.decode!(met.resp_body)
+      assert payload["reason"] == "not_in_progress:done"
+      assert payload["message"] =~ "--miss --note"
+      assert payload["message"] =~ "--observed-rev"
+      assert payload["message"] =~ "/v1/data/mutate"
+    end
+
+    test "a post-close --miss with no --observed-rev is 409 and names the read it needs",
+         %{conn: conn, scope: scope} do
+      {doc_id, _rev} =
+        closed_with_criteria!(conn, scope, [%{"criterion" => "gate green", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=no+rev+pinned", body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "observed_rev_required"
+      assert payload["message"] =~ "--observed-rev"
+      assert payload["message"] =~ "post-close --miss"
+
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      [c0] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert Map.get(c0, "attempts") == nil, "a refused attempt writes nothing"
+    end
+
+    test "a CANCELLED row takes the attempt on the same fence", %{conn: conn, scope: scope} do
+      {doc_id, rev} =
+        closed_with_criteria!(
+          conn,
+          scope,
+          [%{"criterion" => "gate green", "met" => false}],
+          "cancelled"
+        )
+
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=cancelled+before+this+ran" <>
+            "&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert resp.status == 200
+      [c0] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert [%{"note" => "cancelled before this ran"}] = c0["attempts"]
     end
   end
 
@@ -3020,8 +3527,16 @@ defmodule BarkparkWeb.TasksControllerTest do
         assert Map.has_key?(doc, "content")
         assert Map.has_key?(doc, "type")
         assert Map.has_key?(doc, "dependency_count")
-        refute Map.has_key?(doc, "child_count")
         refute Map.has_key?(doc, "criteria_met")
+
+        # task-3e0eda896a247776: `child_count` is NO LONGER a view
+        # discriminator. It used to be brief-only, which meant the DEFAULT
+        # view of the ledger answered "no children" for every epic root and
+        # the fleet's "skip a high child_count" triage filter read a 189-child
+        # root as a claimable leaf. The field now rides BOTH cards with one
+        # meaning; `content` / `type` / `dependency_count` (full-only) and
+        # `criteria_met` (brief-only) are the markers that still discriminate.
+        assert Map.has_key?(doc, "child_count")
       end
     end
 

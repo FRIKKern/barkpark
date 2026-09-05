@@ -1,0 +1,1 @@
+The stale-roster disposition is DECIDED as FAIL for Go parity (a roster entry that becomes clean reds), stated in the script header and the PR body. Evidence: the text and a mutation proving it reds.

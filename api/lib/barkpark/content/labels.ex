@@ -153,18 +153,30 @@ defmodule Barkpark.Content.Labels do
   end
 
   @doc false
-  # The same resolvers as `render_opts/1`, plus the per-doc render `:style`
-  # when the paper is marked `"article"`. Threaded into `Render.render_blocks/2`
-  # so an article paper's body_html cache (and delta fragments) come out in the
-  # article palette. A nil / non-"article" style adds nothing → email default,
-  # byte-unchanged from `render_opts/1`.
+  # The same resolvers as `render_opts/1`, plus the per-doc render `:style`.
+  # Threaded into `Render.render_blocks/2` so a paper's body_html cache (and its
+  # delta fragments) come out in the on-screen palette.
+  #
+  # task-1d095b61a47bf057: BOTH clauses now name `:article`. They used to
+  # differ — a nil / non-"article" style returned style-less opts, so
+  # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default decided,
+  # and every NON-article paper's `body_html` was inline-stamped EMAIL HTML.
+  # That string is what the public web reader injects into `.bp-paper-surface`
+  # (web/components/document-detail.tsx), so mail-client typography reached a
+  # screen surface. The census on this row found no reader of `body_html` that
+  # wants email HTML; the one consumer that does
+  # (`bulldocs_email_controller.ex:39`) passes `style: :email` itself and
+  # re-renders from blocks, so it is unaffected. The clauses are kept SEPARATE
+  # rather than collapsed because the article/non-article split is still a real
+  # distinction the renderer may re-acquire; today both map to `:article`.
   def paper_render_opts(dataset, style), do: paper_render_opts(dataset, style, [])
 
   @doc false
   def paper_render_opts(dataset, style, scope) when style in ["article", "article-wide"],
     do: Map.put(render_opts(dataset, scope), :style, :article)
 
-  def paper_render_opts(dataset, _style, scope), do: render_opts(dataset, scope)
+  def paper_render_opts(dataset, _style, scope),
+    do: Map.put(render_opts(dataset, scope), :style, :article)
 
   @doc false
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs

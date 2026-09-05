@@ -1,0 +1,1 @@
+A planned run paints a COUNT-based master-bar fill (completed steps / total), quoted from a driven render, and the deploy rail model is proven unaffected.

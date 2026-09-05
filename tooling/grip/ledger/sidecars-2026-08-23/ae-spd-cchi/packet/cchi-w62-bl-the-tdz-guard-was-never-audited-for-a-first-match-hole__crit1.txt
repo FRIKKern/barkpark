@@ -1,0 +1,1 @@
+At least four independent mutations are run against the REAL cloud/priv/static/__app.test.mjs (not only the committed fixtures), each quoted with its rc and its named output — a guard proved only by its own fixtures is one vacuity away from the class it polices.

@@ -1,0 +1,1 @@
+MUTATION PROOF: a fixture tree built by git init plus a deliberate divergence drives the refusal to both polarities, and removing the refusal reproduces the pre-fix output. No git worktree add — the suite forbids writing inside the repo.

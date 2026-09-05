@@ -39,7 +39,7 @@ on:
       - ".github/workflows/astro-search-finder-test.yml"
 
 concurrency:
-  group: astro-search-finder-test-${{ github.ref }}
+  group: astro-search-finder-test-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

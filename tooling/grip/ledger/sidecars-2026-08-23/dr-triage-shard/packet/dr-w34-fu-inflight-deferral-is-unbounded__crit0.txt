@@ -1,0 +1,1 @@
+The in-flight arm carries an explicit age bound, and the constant is stated in the script with its rationale.

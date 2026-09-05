@@ -1,0 +1,1 @@
+spd-b42's criterion 4 is re-read against the post-lock-extension reality rather than the pre-extension assumption that a lock edit was structurally forced

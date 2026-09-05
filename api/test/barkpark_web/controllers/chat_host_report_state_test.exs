@@ -8,7 +8,7 @@ defmodule BarkparkWeb.ChatHostReportStateTest do
   /v1/chat-host/events: stale_fence / lease_expired → 409, no lease → 422,
   bad vocabulary → 422 before the store is ever touched.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -49,7 +49,7 @@ defmodule BarkparkWeb.ChatHostReportStateTest do
   end
 
   defp as_host(credential) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Host #{credential}")
     |> put_req_header("content-type", "application/json")
   end
@@ -210,7 +210,7 @@ defmodule BarkparkWeb.ChatHostReportStateTest do
 
   test "401: no host credential, no report", %{sid: sid} do
     conn =
-      build_conn()
+      scoped_conn()
       |> put_req_header("content-type", "application/json")
       |> post("/v1/chat/sessions/#{sid}/state", %{"state" => "working", "epoch" => 1})
 

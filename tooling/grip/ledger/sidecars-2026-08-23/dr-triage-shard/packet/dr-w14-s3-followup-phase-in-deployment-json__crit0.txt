@@ -1,0 +1,1 @@
+deployment_json/1 emits the refusal phase beside failure_class, and the pinned key-set test is extended so the Go reader cannot silently miss it

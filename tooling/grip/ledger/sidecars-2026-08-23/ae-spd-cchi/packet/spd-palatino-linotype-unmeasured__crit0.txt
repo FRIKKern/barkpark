@@ -1,0 +1,1 @@
+Palatino Linotype's units-per-em and '0' glyph advance are read from the font binary itself, with the file and the extraction method named — not taken from a specimen or a web source

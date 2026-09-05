@@ -77,6 +77,33 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     doc
   end
 
+  # STAGE A DRAFT DERIVED FROM THE PUBLISHED ROW.
+  #
+  # These probes need a draft that coexists with a published row, and until
+  # task-b9c618482e688500 they minted one the cheap way: a `patch` on the bare
+  # id, whose base resolved draft-first and fell back to the published row, then
+  # wrote `drafts.<id>`. That fallback is exactly the defect that row closed —
+  # for a `type:task` a bare-id patch now resolves PUBLISHED-first and LANDS on
+  # the published row, so it no longer leaves a draft behind to publish.
+  #
+  # The staging moves to the Writer seam, which is where replication really
+  # writes (`source: :sync`) and where the birth gate lives. Every assertion
+  # below is unchanged: the subject of this file is the PUBLISH DOOR, and it
+  # still sees the same draft/published pair it always did.
+  defp stage_draft!(id, changes, scope, source) do
+    {:ok, pub} = Content.get_document(id, "task", @dataset, scope)
+
+    {:ok, draft} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => id, "title" => pub.title, "content" => Map.merge(pub.content, changes)},
+        @dataset,
+        Keyword.put(scope, :source, source)
+      )
+
+    draft
+  end
+
   defp published!(doc_id, scope) do
     {:ok, doc} = Content.get_document(doc_id, "task", @dataset, scope)
     doc
@@ -145,20 +172,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     # Sync.Applier's mirror shape births a done draft the Writer gate exempts —
     # the only remaining legal way a done draft can coexist with an open twin.
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => "pdg-forge",
-                     "type" => "task",
-                     "set" => %{"lifecycle_status" => "done"}
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :sync]
-             )
+    _draft = stage_draft!("pdg-forge", %{"lifecycle_status" => "done"}, scope, :sync)
 
     # Publishing it from the API source is an open→done at the publish door —
     # refused, naming from, to and the close primitive.
@@ -212,24 +226,17 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     # The met-flip: patch derives the draft from the CURRENT published content
     # (claim + lifecycle ride along verbatim), then republish collapses it.
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => "pdg-metflip",
-                     "type" => "task",
-                     "set" => %{
-                       "acceptance_criteria" => [
-                         %{"criterion" => "it works", "met" => true, "evidence" => "proof"}
-                       ]
-                     }
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :api]
-             )
+    _draft =
+      stage_draft!(
+        "pdg-metflip",
+        %{
+          "acceptance_criteria" => [
+            %{"criterion" => "it works", "met" => true, "evidence" => "proof"}
+          ]
+        },
+        scope,
+        :api
+      )
 
     assert {:ok, pub} =
              Content.publish_document("pdg-metflip", "task", @dataset, scope ++ [source: :api])
@@ -250,21 +257,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     # the revision escape (proves the caller read the row) — and because
     # open → blocked is LEGAL in the D7 table both the Writer-seam gate and
     # the publish-door gate let it through.
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => "pdg-block",
-                     "type" => "task",
-                     "ifRevisionID" => pub.rev,
-                     "set" => %{"lifecycle_status" => "blocked"}
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :api]
-             )
+    _ = pub
+    _draft = stage_draft!("pdg-block", %{"lifecycle_status" => "blocked"}, scope, :api)
 
     assert {:ok, pub} =
              Content.publish_document("pdg-block", "task", @dataset, scope ++ [source: :api])
@@ -337,24 +331,17 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     # The regressing draft arrives the way replication really writes it —
     # through the Writer seam under `source: :sync` (exempt there by design).
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => "pdg-sync-erase",
-                     "type" => "task",
-                     "set" => %{
-                       "acceptance_criteria" => [
-                         %{"criterion" => "it works", "met" => false, "evidence" => ""}
-                       ]
-                     }
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :sync]
-             )
+    _draft =
+      stage_draft!(
+        "pdg-sync-erase",
+        %{
+          "acceptance_criteria" => [
+            %{"criterion" => "it works", "met" => false, "evidence" => ""}
+          ]
+        },
+        scope,
+        :sync
+      )
 
     # The erasure is refused AT THE PUBLISH DOOR even from :sync…
     assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
@@ -431,20 +418,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     # Upstream reopened the task but kept its proof — the mirror carries the
     # done→open edge (transition-exempt for :sync) AND the intact criteria.
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => "pdg-sync-keep",
-                     "type" => "task",
-                     "set" => %{"lifecycle_status" => "open"}
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :sync]
-             )
+    _draft = stage_draft!("pdg-sync-keep", %{"lifecycle_status" => "open"}, scope, :sync)
 
     assert {:ok, pub} =
              Content.publish_document("pdg-sync-keep", "task", @dataset, scope ++ [source: :sync])

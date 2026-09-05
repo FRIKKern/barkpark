@@ -1,0 +1,1 @@
+smoke.mjs exports makeDom, bootScenario and flush, and importing it does NOT run the corpus — proven by a scratch module that imports it and asserts no scenario ran and no process.exit fired.

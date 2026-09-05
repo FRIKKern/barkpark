@@ -1,0 +1,1 @@
+A decision is recorded: merge, or a named reason not to. If merged, the post-merge orphan integer is re-derived and quoted with its own UTC stamp.

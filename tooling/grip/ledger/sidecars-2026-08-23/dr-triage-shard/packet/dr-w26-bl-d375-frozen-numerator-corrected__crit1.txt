@@ -1,0 +1,1 @@
+The 50.0% burst-free carried-sha rate replaces 36.7%/51.2% wherever those are quoted, with the exclusion stated.

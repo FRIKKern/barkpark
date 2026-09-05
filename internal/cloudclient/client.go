@@ -215,9 +215,35 @@ type Barkpark struct {
 	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
 	// number `barkpark_json` serves so the CLIENT can own the stalled
 	// threshold. A POINTER for the same honesty rule as Pressure: nil is both
-	// "nothing queued" and "this CP predates the field", and neither may ever
-	// read as stalled — the alarm arms only on a real number.
-	QueuedDeployAgeSeconds *float64 `json:"queued_deploy_age_seconds"`
+	// "nothing queued" and "this CP predates the field" at the Go value level,
+	// so QueuedDeployAgeSecondsMissing records the wire-level distinction. An
+	// explicit null is the producer's honest "nothing queued" response; an
+	// omitted key means the control plane is too old or its contract drifted.
+	QueuedDeployAgeSeconds        *float64 `json:"queued_deploy_age_seconds"`
+	QueuedDeployAgeSecondsMissing bool     `json:"-"`
+}
+
+// UnmarshalJSON preserves whether the control plane emitted
+// queued_deploy_age_seconds. encoding/json normally collapses an omitted key
+// and an explicit null into the same nil pointer, which would make a producer
+// rename look exactly like a healthy fleet with no queued deployment.
+func (b *Barkpark) UnmarshalJSON(data []byte) error {
+	type barkparkJSON Barkpark
+
+	var decoded barkparkJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	*b = Barkpark(decoded)
+	_, present := fields["queued_deploy_age_seconds"]
+	b.QueuedDeployAgeSecondsMissing = !present
+	return nil
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in
@@ -1311,6 +1337,49 @@ type MetricsLatest struct {
 	Cores *float64 `json:"cores"`
 }
 
+// MetricsPressure is the control plane's pressure VERDICT block (`pressure` on
+// GET /v1/barkparks/:id/metrics), rendered by every surface and computed by
+// none of them.
+//
+// State is a CLOSED set — "struggling" | "watch" | "calm" | "unknown" — and a
+// consumer must fold anything else onto "unknown": reading a word it does not
+// know as reassurance is the exact failure this block exists to end.
+// "unknown" is not a bad reading, it is the ABSENCE of one, and it must never
+// collapse into "calm".
+//
+// Measured/Of always travel so a verdict drawn from part of its signals reads
+// as the weak claim it is — "calm, 1 of 4" is not a clean bill. They are
+// POINTERS for the usual reason: nil is a control plane that did not say,
+// never a measured zero.
+type MetricsPressure struct {
+	State    string                  `json:"state"`
+	Measured *float64                `json:"measured"`
+	Of       *float64                `json:"of"`
+	Signals  []MetricsPressureSignal `json:"signals"`
+}
+
+// MetricsPressureSignal is ONE signal behind the verdict: its reading, its unit,
+// and the two thresholds that banded it.
+//
+// EVERY signal rides the list, including the calm ones and the ones that could
+// not be read (State "unknown", Value nil) — a verdict that silently drops the
+// signals it could not measure is a verdict whose confidence a reader cannot
+// judge. Value is a POINTER so an unread signal is a gap, never a 0 that would
+// render as a healthy floor.
+//
+// Unit is "pct" or "per_core" today. Load is judged PER CORE — 2.0 is idle on
+// 16 cores and a queue two deep on 2 — and the control plane has already done
+// that division, so a renderer formats the number it is given and never
+// re-derives it.
+type MetricsPressureSignal struct {
+	Key          string   `json:"key"`
+	State        string   `json:"state"`
+	Value        *float64 `json:"value"`
+	Unit         string   `json:"unit"`
+	WatchAt      *float64 `json:"watch_at"`
+	StrugglingAt *float64 `json:"struggling_at"`
+}
+
 // MetricsResult is a COMPLETED metrics roll-up: the control plane rolled the
 // agent's beat window and reported per-series points. This client NEVER computes
 // — it renders the CP's truth. Raw is the envelope BYTES verbatim so `-o json`
@@ -1335,6 +1404,25 @@ type MetricsResult struct {
 	Series        map[string][]MetricPoint `json:"series"`
 	Latest        MetricsLatest            `json:"latest"`
 	ServiceHealth ServiceHealth            `json:"service_health"`
+
+	// Pressure is the control plane's resource-pressure VERDICT for this box —
+	// calm | watch | struggling | unknown — computed ONCE in
+	// BarkparkCloud.Metrics.pressure/1 from exactly the scalars this envelope
+	// publishes as `latest`, with every signal's reading and both its
+	// thresholds travelling beside the word so the verdict is checkable
+	// against the same response that made it.
+	//
+	// A POINTER, and for the same reason Space is: a control plane that
+	// predates the block omits the key entirely, and nil means "this CP does
+	// not speak a verdict" — which is NOT the same fact as a CP that spoke and
+	// said "unknown" (a box whose signals could not be read). A value struct
+	// would collapse the two at the decode boundary and turn a missing block
+	// into a rendered verdict nobody computed.
+	//
+	// The thresholds are NEVER re-derived here. They live in
+	// @pressure_signals with their evidence written down; a threshold
+	// duplicated per surface is a threshold that drifts per surface.
+	Pressure *MetricsPressure `json:"pressure"`
 
 	// Space is the newest HOST-SPACE report, or nil when the box has never sent
 	// one. A POINTER, never a value struct: the control plane sends `null` here

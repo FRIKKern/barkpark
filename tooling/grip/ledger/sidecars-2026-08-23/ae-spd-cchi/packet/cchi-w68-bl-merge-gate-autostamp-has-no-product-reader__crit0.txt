@@ -1,0 +1,1 @@
+merge_gate_autostamp is registered in the reader-less instrument census with a note naming close_test.exs as its only (test-tier) audience, and deleting the key's writer or its test audience reds the census — mutation run recorded in a durable venue the merge carries.

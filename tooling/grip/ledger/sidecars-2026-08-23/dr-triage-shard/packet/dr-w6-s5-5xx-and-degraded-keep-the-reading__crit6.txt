@@ -1,0 +1,1 @@
+The slice states honestly which half is proven on merge day. Evidence: `strings -a /usr/local/bin/barkpark-agent | grep -c err_5xx_per_s` run on guerrilla with its result, the live `/v1/barkparks` excerpt showing `err_5xx_per_s` null across the fleet, and the explicit sentence that the render is exercised by its own tests until the agent ships the field.

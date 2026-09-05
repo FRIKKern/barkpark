@@ -1,0 +1,1 @@
+THE ERASER WAS NOT TRIPPED: the published perspective is read back after every write and the three pre-existing attempt notes are proven to still be there (2 at index 2, 1 at index 4); drafts.task-f559f7c508527010 was never published.

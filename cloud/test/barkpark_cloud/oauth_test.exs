@@ -164,7 +164,7 @@ defmodule BarkparkCloud.OAuthTest do
     test "first sight births a user + team + owner membership + one identity" do
       identity = %{provider: "github", provider_uid: "u-1", email: "first@example.com"}
 
-      assert {:ok, %User{} = user} = Accounts.get_or_create_user_from_oauth(identity)
+      assert {:ok, %User{} = user, :created} = Accounts.get_or_create_user_from_oauth(identity)
       assert user.email == "first@example.com"
 
       # The team + owner membership were born in the same transaction.
@@ -189,11 +189,11 @@ defmodule BarkparkCloud.OAuthTest do
     test "second sight of the SAME (provider, provider_uid) returns the same user, no new rows" do
       identity = %{provider: "github", provider_uid: "u-2", email: "stable@example.com"}
 
-      assert {:ok, user1} = Accounts.get_or_create_user_from_oauth(identity)
+      assert {:ok, user1, :created} = Accounts.get_or_create_user_from_oauth(identity)
       users_before = Repo.aggregate(User, :count)
       ids_before = Repo.aggregate(ExternalIdentity, :count)
 
-      assert {:ok, user2} = Accounts.get_or_create_user_from_oauth(identity)
+      assert {:ok, user2, :existing} = Accounts.get_or_create_user_from_oauth(identity)
       assert user2.id == user1.id
       assert Repo.aggregate(User, :count) == users_before
       assert Repo.aggregate(ExternalIdentity, :count) == ids_before
@@ -202,7 +202,7 @@ defmodule BarkparkCloud.OAuthTest do
     test "the ANTI-COOLIFY case: same verified email via a SECOND provider LINKS, never forks" do
       email = "converge@example.com"
 
-      assert {:ok, gh_user} =
+      assert {:ok, gh_user, :created} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "github",
                  provider_uid: "gh-9",
@@ -210,7 +210,7 @@ defmodule BarkparkCloud.OAuthTest do
                })
 
       # Now the SAME human signs in with Google, same verified email.
-      assert {:ok, g_user} =
+      assert {:ok, g_user, :linked} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "google",
                  provider_uid: "g-9",
@@ -236,7 +236,7 @@ defmodule BarkparkCloud.OAuthTest do
       memberships_before = Repo.aggregate(TeamMembership, :count)
 
       # Later they click "Continue with GitHub" — same VERIFIED email.
-      assert {:ok, oauth_user} =
+      assert {:ok, oauth_user, :linked} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "github",
                  provider_uid: "gh-conv",
@@ -265,14 +265,14 @@ defmodule BarkparkCloud.OAuthTest do
     end
 
     test "a second link to the SAME (provider, provider_uid) is a unique violation (conflict guard)" do
-      {:ok, user_a} =
+      {:ok, user_a, :created} =
         Accounts.get_or_create_user_from_oauth(%{
           provider: "github",
           provider_uid: "dup-1",
           email: nil
         })
 
-      {:ok, user_b} =
+      {:ok, user_b, :created} =
         Accounts.get_or_create_user_from_oauth(%{
           provider: "github",
           provider_uid: "other",
@@ -297,7 +297,7 @@ defmodule BarkparkCloud.OAuthTest do
     end
 
     test "a withheld email (nil) still births a usable account on a synthetic email" do
-      assert {:ok, user} =
+      assert {:ok, user, :created} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "github",
                  provider_uid: "noemail-1",
@@ -310,14 +310,14 @@ defmodule BarkparkCloud.OAuthTest do
     end
 
     test "distinct uids with no shared email yield distinct users" do
-      assert {:ok, a} =
+      assert {:ok, a, :created} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "github",
                  provider_uid: "d-1",
                  email: nil
                })
 
-      assert {:ok, b} =
+      assert {:ok, b, :created} =
                Accounts.get_or_create_user_from_oauth(%{
                  provider: "github",
                  provider_uid: "d-2",

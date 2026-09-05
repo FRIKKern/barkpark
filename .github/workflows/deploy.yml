@@ -192,7 +192,21 @@ jobs:
             echo "instance=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed="$(git diff --name-only "$base" "${{ github.sha }}")"
+          # TWO-DOT ON PURPOSE — do not "fix" this to three-dot. This is a
+          # push-to-main workflow: $base is the last SUCCESSFUL deploy's head,
+          # already an ancestor of github.sha on main, so `base sha` IS the
+          # union of every push not yet shipped. A merge-base rewrite here would
+          # narrow the range and drop somebody else's un-deployed commits.
+          #
+          # The PRODUCER, though, carried the same two silent false-greens the
+          # wave-10 dispatchers closed, and here they decide whether PRODUCTION
+          # ROLLS: `--name-only` quotes a path containing `"`, and rename
+          # detection prints only the destination — so a `cloud/` file renamed
+          # out classifies cp=false and the control plane silently does not
+          # deploy, under a green run. -z + --no-renames + core.quotepath=false.
+          # scripts/check-deployyml-filters.sh drives this exact step body
+          # against both shapes and reds if this line regresses.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "$base" "${{ github.sha }}" | tr '\0' '\n')"
           echo "changed files:"; echo "$changed"
           # internal/ + cmd/ ride the control plane too: bp-provisioner is
           # cross-built from ./cmd/barkpark-provisioner (code under
@@ -211,7 +225,17 @@ jobs:
           # installs the cloud-sandbox-runner from that tree (charter D275, W35).
           # The prefix is exact — scripts/connectors, not scripts — so a change
           # under scripts/other/ does not falsely flip instance=true.
-          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
+          # cmd/ rides the content instance TOO — it is the one prefix BOTH jobs
+          # must claim. instance-deploy.sh:1071 builds /usr/local/bin/barkpark-agent
+          # from ./cmd/barkpark-agent (and the bp CLI from ./cmd/barkpark), and
+          # instance-deploy.sh is the ONLY thing that rebuilds that binary. cmd/**
+          # is in on.push.paths and matched the cp regex above, so a cmd/-only merge
+          # STARTED this workflow, deployed the control plane, ran no instance
+          # deploy, and left a stale agent on the content box under a GREEN run.
+          # The TARGET arm of check-deployyml-filters.sh pins BOTH halves of this
+          # prefix by name (cmd -> instance, cmd -> cp): the forward arm cannot see
+          # it, because a path matched by the WRONG job is still a path matched.
+          if echo "$changed" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
           # THE OVERRIDE, AND ONLY ON A DISPATCH. A push can never reach this —
           # `github.event_name` is the trigger, not an input — so the automatic
           # path is byte-for-byte what it was. `auto` deliberately falls through
@@ -474,12 +498,56 @@ jobs:
           # — never split into extra words of the remote command line.
           $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
       - name: Smoke test
-        env:
-          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        # THREE assertions, because the single `test "$code" = "200"` this step
+        # used to be covers the dead-pool class and NOTHING else (charter D369,
+        # which NARROWS D344 — it does not retract it: that predicate has fired,
+        # run 30686555528 caught `guerrilla /api/schemas = 500`).
+        #
+        # What one 200 could not lose on, and what each new arm closes:
+        #
+        #   AN EMPTY CATALOG. `/api/schemas` -> LegacyController.schemas/2 ->
+        #   Content.list_schemas/2 -> Repo.all(), and legacy_controller.ex's
+        #   `json(conn, Enum.map(schemas, ...))` has no emptiness check anywhere
+        #   in the chain. Mutation-proved: the old predicate scores 200 and
+        #   PASSES against a server answering `[]`. A wiped or wrong-database
+        #   box is a live box. So the catalog length is now asserted > 0 (live:
+        #   5 entries). jq failing on a non-JSON body fails the step too — a
+        #   Caddy error page is not a catalog.
+        #
+        #   THE ENTIRE AUTHENTICATED STACK. The route pipes through
+        #   [:api, LegacyDeprecation] only and is deliberately not token-gated:
+        #   it answers 200 with no Authorization header, so no amount of auth
+        #   breakage moves it. The bad-creds login probe below is an INDEPENDENT
+        #   second oracle over a DIFFERENT pipeline, transplanted byte-identical
+        #   from the control-plane smoke and from deploy/cp-deploy.sh:129-141,
+        #   whose comment names the 16 h outage the shallow gate slept through.
+        #   Live-verified 401 against guerrilla. No credential is introduced —
+        #   the address is invalid, on the reserved .example TLD.
+        #
+        # Still NOT covered here, by design, and named so nobody reads this step
+        # as complete: a deploy that exits 0 without moving (instance-deploy.sh
+        # coalesces on "already deployed healthy") and a flip lost onto a LIVE
+        # sibling slot serving old code. Both are the next step's job — "Assert
+        # the content instance serves this commit or a descendant" — not this
+        # one's. scripts/check-deploy-smoke.sh is the tripwire on all of it.
+        #
+        # No `env:` block: GUERRILLA_HOST is the SSH target (an address), never
+        # the public origin. Declaring it here and hardcoding the URL below let a
+        # secret repointed at one box certify another. The deploy steps above own
+        # that secret; this step asserts about the public name, and says so.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          code="$(curl -s -o /tmp/instance-schemas.json -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+          count="$(jq -e 'if type == "array" then length else error("not a JSON array") end' /tmp/instance-schemas.json)"
+          echo "guerrilla /api/schemas catalog entries = $count"
+          test "$count" -gt 0
+          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            -X POST -H 'content-type: application/json' \
+            -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
+            "https://guerrilla.barkpark.cloud/v1/auth/login" || true)"
+          echo "https://guerrilla.barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
+          test "$dbcode" = "401"
       - name: Assert the content instance serves this commit or a descendant
         # The instance smoke above is `test "$code" = "200"` on /api/schemas. It
         # cannot fail on a lost Caddy flip onto a live sibling slot, nor on

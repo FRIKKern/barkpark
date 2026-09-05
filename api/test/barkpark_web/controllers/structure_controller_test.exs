@@ -1,5 +1,5 @@
 defmodule BarkparkWeb.StructureControllerTest do
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # GET /v1/structure/:dataset serves the SAME tree Studio renders
   # (Barkpark.Structure.build/2) — host groups + plugin desk items — so the

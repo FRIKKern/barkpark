@@ -660,7 +660,7 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       token_struct: token
     } do
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Conn.assign(:api_token, token)
         # BARE CONN — no router, so no `:api` pipeline and no AssignDefaultScope.
         # This test asserts the DRAFTS-PERSPECTIVE clamp (anon_pinned?-scoped),
@@ -688,7 +688,7 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       {:ok, token} = Auth.verify_token(raw)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Conn.assign(:api_token, token)
         # BARE CONN — no router, so no `:api` pipeline and no AssignDefaultScope.
         # This test asserts the DRAFTS-PERSPECTIVE clamp (anon_pinned?-scoped),

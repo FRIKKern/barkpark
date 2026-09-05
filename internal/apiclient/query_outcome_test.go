@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // QueryResult must tell a refused/broken/unreachable read apart from an
@@ -37,6 +38,11 @@ func TestQueryResultOutcomes(t *testing.T) {
 			}))
 			defer srv.Close()
 			cl := New(Config{BaseURL: srv.URL, Token: "t", Workspace: "default", Project: "default", Dataset: "production"})
+			// The 429 row is now genuinely retried (retry_backpressure.go), so
+			// without this seam this table would spend the real backoff on
+			// every run. Same package, so the transport's test sleep is
+			// reachable; the CLASSIFICATION under test is unchanged.
+			cl.retry.sleep = func(time.Duration) {}
 
 			docs, outcome := cl.QueryResult("post", "")
 			if outcome != c.want {
@@ -78,6 +84,7 @@ func TestGetPerspectiveResultSeparatesRefusalFromUnreachable(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"x"}`))
 		}))
 		cl := New(Config{BaseURL: srv.URL, Token: "t", Workspace: "default", Project: "default", Dataset: "production"})
+		cl.retry.sleep = func(time.Duration) {} // see the note in TestQueryResultOutcomes
 		doc, outcome := cl.GetPerspectiveResult("task", "t1", "drafts")
 		srv.Close()
 		if outcome != c.want {

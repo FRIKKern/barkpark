@@ -9,7 +9,7 @@ defmodule BarkparkWeb.ExportControllerTest do
   opt-in invariant). Per-type schema resolution must redact a multi-type export
   correctly.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Content
@@ -67,7 +67,7 @@ defmodule BarkparkWeb.ExportControllerTest do
 
   defp raw_export(token) do
     resp =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{token}")
       |> get("/v1/data/export/#{@dataset}")
 

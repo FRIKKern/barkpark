@@ -1,0 +1,1 @@
+The PR touches at least one .go file alongside the fixture, so the only working guard actually fires — a fixture-only PR runs no Go suite at all (go-tests.yml paths exclude cloud/**) while both required gates report green having asserted nothing.

@@ -20,6 +20,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.Accounts.AuditEvent
   alias BarkparkCloud.Registry.{AgentToken, Barkpark, ProvisionJob, Vault}
   alias BarkparkCloud.Web.Router
 
@@ -385,6 +386,77 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
   end
 
   ## DELETE /v1/fleet/supports/:id
+
+  # THE TRAIL (task-55fb1f33a217249b). Both lanes of this route removed a team's
+  # instance row and wrote NOTHING to the audit trail — the console's
+  # append-only Activity list recorded the removal of a main and was silent
+  # about every support unbound the same way. `Accounts.audit/3` puts the row
+  # delete and `barkpark.deleted` in ONE transaction, so there is never a
+  # removal the trail cannot name.
+  describe "DELETE /v1/fleet/supports/:id writes barkpark.deleted" do
+    test "the non-live unbind lands on the team's trail, naming the actor and lane" do
+      {user, team, token} = user_with_role("owner")
+      main = main_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Doomed #{n}",
+          slug: "doomed-#{n}",
+          parent_id: main.id,
+          token_id: "t"
+        })
+
+      assert audit_rows(team) == []
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, token)
+
+      assert conn.status == 200
+      assert Registry.get_barkpark(support.id) == nil
+
+      assert [%AuditEvent{} = event] = audit_rows(team)
+      assert event.action == "barkpark.deleted"
+      assert event.target_type == "barkpark"
+      assert event.target_id == support.id
+      assert event.team_id == team.id
+      assert event.actor_user_id == user.id
+      assert event.metadata["lane"] == "fleet_support_not_live"
+    end
+
+    test "the detach lane lands too — the row goes, so the trail says so" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}?mode=detach", nil, token)
+
+      assert conn.status == 200
+      assert Registry.get_barkpark(support.id) == nil
+
+      assert [%AuditEvent{} = event] = audit_rows(team)
+      assert event.action == "barkpark.deleted"
+      assert event.metadata["lane"] == "fleet_support_detach"
+    end
+
+    test "a refused unbind writes nothing — the trail records acts, not attempts" do
+      # The control. An arm that stamped the verb per REQUEST rather than per
+      # DELETE would be as green as this one without it.
+      {_u_a, _team_a, token_a} = user_with_role("owner")
+      team_b = team_fixture()
+      main_b = live_main_fixture(team_b)
+      support_b = live_support_fixture(team_b, main_b)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support_b.id}?mode=detach", nil, token_a)
+
+      assert conn.status == 404
+      assert Registry.get_barkpark(support_b.id) != nil
+      assert audit_rows(team_b) == []
+    end
+  end
+
+  defp audit_rows(team) do
+    Repo.all(from(e in AuditEvent, where: e.team_id == ^team.id))
+  end
 
   describe "DELETE /v1/fleet/supports/:id" do
     test "removes a support row → 200, the row is gone" do

@@ -1,0 +1,1 @@
+First-frame state, the count of inspector-visible frames out of total sampled, and the number of visual transitions are all reported. Zero visible frames is the bar; if the build fails it, report a MISS rather than flipping it.

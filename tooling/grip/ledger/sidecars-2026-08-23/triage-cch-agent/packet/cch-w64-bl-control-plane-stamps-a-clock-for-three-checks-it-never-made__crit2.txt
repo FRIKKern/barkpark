@@ -1,0 +1,1 @@
+Every reader of update_checked_at is enumerated and checked against the new nil case (the console rail, the fleet card, the operator console) — a nil that renders as a bare dash somewhere is the same defect one screen over.

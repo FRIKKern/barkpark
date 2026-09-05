@@ -96,12 +96,18 @@ set -euo pipefail
 #   the full suite it is gating. gate-announces-skips.test.sh joins them for the
 #   same reason: it is executed by elixir.yml's unfiltered `path-escape` job, so
 #   a change to it is a change to what this required context asserts.
+#   prod-build-cache-guard.sh joins them for the strongest version of that
+#   reason: mix-prod-compile EXECUTES it, and its verdict decides whether that
+#   required gate compiles against a restored dependency tree or rebuilds from
+#   scratch. A PR that edited only the guard would otherwise change what the
+#   prod-compile gate does while skipping the prod-compile gate.
 ELIXIR_COMPILE_PATHS='api/**
 design/**
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
-scripts/gate-announces-skips.test.sh'
+scripts/gate-announces-skips.test.sh
+scripts/prod-build-cache-guard.sh'
 
 # TEST-ONLY set — fixture/mirror trees read by tests but never compiled against.
 # Each entry is a MEASURED read, not a guess; see --list-escapes for the census.
@@ -198,10 +204,19 @@ scripts/gate-announces-skips.test.sh'
 #   api/assets/sheet-grid/**  <- api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs
 #                                System.cmd("node", [__*.test.mjs], cd: api/assets/sheet-grid) (#15196);
 #                                redundant with api/** in the compile set, declared per task-509410 crit 4.
+#   web/components/**  <- api/test/barkpark_web/live/sheets_cf_live_matrix_receipt_test.exs
+#   web/lib/**            transpiles web/components/sheet-grid.tsx with the repo's own
+#   web/node_modules/**   TypeScript and renderToStaticMarkup's it (#15435). Declared as the
+#                         three EXACT subdirs the test names, never the bare `web` tree: a
+#                         change to web/app/** cannot break it, so it must not run the suite.
+#                         node_modules is gitignored and can never be a changed path — it is
+#                         declared because the test PROBES it (react-dom, typescript) and an
+#                         undeclared existing read reds this gate on any tree that installed it.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx
 cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
@@ -213,6 +228,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh
@@ -228,6 +244,9 @@ scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
 web/__tests__/**
+web/components/**
+web/lib/**
+web/node_modules/**
 web/public/assets/bp-paper-editor.css
 web/public/bp-paper-editor.bundle.js'
 
@@ -476,7 +495,13 @@ REPO_ROOT="${ELIXIR_PATH_ESCAPE_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")
 
 # normalize a slash path: resolve `.` and `..` lexically, drop empty segments.
 # String-only (no arrays) so it behaves identically on bash 3.2 (macOS) and 5.x.
-norm_path() {
+# Two entry points, ONE implementation. `norm_path_v` writes its answer to the
+# global `NP`; `norm_path` prints it. The census resolves one path per matched
+# literal — 562 calls on this tree — and `resolved="$(norm_path …)"` is a FORK
+# apiece for a function that never leaves bash. Every call site inside
+# `list_escapes` uses the `_v` form; `norm_path` stays for readers and for any
+# caller that wants a value in a pipeline.
+norm_path_v() {
   local rest="$1" seg out=""
   while [ -n "$rest" ]; do
     seg="${rest%%/*}"
@@ -487,7 +512,12 @@ norm_path() {
       *) out="$out/$seg" ;;
     esac
   done
-  printf '%s' "${out#/}"
+  NP="${out#/}"
+}
+
+norm_path() {
+  norm_path_v "$1"
+  printf '%s' "$NP"
 }
 
 # glob (dir/** or an exact path) -> anchored ERE
@@ -568,12 +598,98 @@ list_escapes() {
   local concats cj clit crest suppress sup skip
   local chains ch subname sublit subdir cjoins
   local sigil orow omatch el xlits xl
+  local prescan_file p_tab pla pla_eof prest pf ppay ptag
   # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
   # .exs on disk is code the suite will run, so it is code this ratchet must see.
   sources="$(cd -- "$REPO_ROOT" && find api/lib api/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
+
+  # ---- THE BATCHED PRE-SCAN ----------------------------------------------
+  # Three of this function's greps are PER FILE and unconditional — the anchor
+  # scan, the opener scan (shapes 6 + 2 share one grep) and the literal/sigil
+  # scan. At 2,227 files on this tree that is ~6,700 grep processes per census,
+  # and the `path-escape` job runs six censuses (five harness cases plus
+  # `--check`). MEASURED on the last 8 green main pushes, that job took
+  # 170/169/162/161/145/139/135/125 s wall.
+  #
+  # Fork cost is not scan cost: the same three EREs over the same 2,227 files
+  # are THREE grep invocations when the file list is handed to grep in bulk.
+  # So they run here, once each, tagged `A`/`O`/`L`, and the loop below reads
+  # each file's rows out of the merged stream instead of shelling out.
+  #
+  # WHY THIS IS THE SAME CENSUS, not an approximation:
+  #   * the EREs are the ones the three sites used, character for character;
+  #   * `-H` restores the filename `-h` used to suppress, and it is the only
+  #     thing stripped back off — the payload handed to each door is byte-for-
+  #     byte what its own `grep -oh` / `grep -no` produced;
+  #   * grep visits files in the order given, so within a tag every file's
+  #     rows stay in file order and every file's own rows stay in line order;
+  #   * `sort -s` (STABLE) on the filename field alone therefore groups by
+  #     file WITHOUT reordering anything inside a group, and the A-then-O-then-L
+  #     concatenation order is preserved per file — which is irrelevant to the
+  #     output anyway, since each tag lands in its own variable;
+  #   * the filename key is sorted `LC_ALL=C`, exactly as `sources` is, so the
+  #     merged stream advances in lockstep with the loop below.
+  # A file with no rows in any of the three streams emitted nothing before
+  # (every door either loops over an empty match set or hits the `[ -n "$lits" ]
+  # guard), and contributes nothing here.
+  #
+  # `xargs -0` rather than one giant argv: the file list is ~130 KB today and
+  # ARG_MAX is not a limit this scanner should acquire silently. xargs preserves
+  # the order of the list across batches, and `-H` is passed explicitly so a
+  # final batch of ONE file still prints its filename.
+  p_tab="$(printf '\t')"
+  prescan_file="${TMPDIR:-/tmp}/elixir-path-escape-prescan.$$.$RANDOM"
+  (
+    cd -- "$REPO_ROOT" || exit 1
+    {
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EoH '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.expand\("[./]*(\#\{[^}]*\})?[./]*",[[:space:]]*__DIR__\)' 2>/dev/null |
+        awk -v t=A '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EonH '^[[:space:]]*Path\.join\([[:space:]]*$|System\.(cmd|shell)\(' 2>/dev/null |
+        awk -v t=O '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EoH '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' 2>/dev/null |
+        awk -v t=L '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+    } | LC_ALL=C sort -s -t"$p_tab" -k2,2
+  ) >"$prescan_file"
+
+  exec 9<"$prescan_file"
+  pla=""
+  pla_eof=0
+  IFS= read -r pla <&9 || pla_eof=1
+
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    d="$(dirname -- "$f")"
+    # `dirname` was a fork per file; every path here is under api/lib or
+    # api/test, so it always has a slash. The `*` arm keeps the fallback
+    # `dirname` gave a bare filename.
+    case "$f" in
+      */*) d="${f%/*}" ;;
+      *) d="." ;;
+    esac
+
+    # Drain this file's pre-scan rows. The stream is grouped and ordered like
+    # `sources`, so a file with no rows simply does not advance the reader.
+    anchors=""
+    openers=""
+    lits=""
+    while [ "$pla_eof" -eq 0 ]; do
+      prest="${pla#*$p_tab}"
+      pf="${prest%%$p_tab*}"
+      [ "$pf" = "$f" ] || break
+      ptag="${pla%%$p_tab*}"
+      ppay="${prest#*$p_tab}"
+      case "$ptag" in
+        A) anchors="$anchors$ppay
+" ;;
+        O) openers="$openers$ppay
+" ;;
+        L) lits="$lits$ppay
+" ;;
+      esac
+      IFS= read -r pla <&9 || pla_eof=1
+    done
     # The SOURCE-TREE half of the tag. `other` is deliberately absent from
     # ELIXIR_ESCAPE_IDIOM_MIN: the `find` above walks exactly api/lib and
     # api/test, so a row tagged `other-*` means somebody widened the find
@@ -619,7 +735,6 @@ list_escapes() {
     # (most are a finished read, not something later joined onto) and, at 89
     # extra anchors, the difference between this check finishing in ~1 minute
     # and not finishing inside a CI timeout.
-    anchors="$(grep -Eoh '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.expand\("[./]*(\#\{[^}]*\})?[./]*",[[:space:]]*__DIR__\)' "$REPO_ROOT/$f" || true)"
     anchor_pairs=""
     while IFS= read -r a; do
       [ -n "$a" ] || continue
@@ -644,7 +759,8 @@ list_escapes() {
       anchor_interp=0
       case "$alit" in *'#{'*) anchor_interp=1 ;; esac
       alit="${alit%%\#\{*}"
-      adir="$(norm_path "$d/$alit")"
+      norm_path_v "$d/$alit"
+      adir="$NP"
       # SHAPE 6 (after this whole anchor loop) needs every anchor's
       # (name, resolved-directory) pair, regardless of which join form — if
       # any — matched it here, so collect them as they're computed.
@@ -707,7 +823,8 @@ EOF
         [ -n "$sublit" ] || continue
         # only a binding something is actually JOINED OFF is an anchor
         grep -Eq '(Path\.join\(\[?[[:space:]]*@?'"$subname"',)|(@?'"$subname"'[[:space:]]*\|>[[:space:]]*Path\.join\()' "$REPO_ROOT/$f" || continue
-        subdir="$(norm_path "$adir/$sublit")"
+        norm_path_v "$adir/$sublit"
+        subdir="$NP"
         [ -n "$subdir" ] || continue
         suppress="$suppress$sublit
 "
@@ -730,7 +847,8 @@ $(grep -Eoh 'Path\.join\(\[[[:space:]]*@?'"$subname"',[[:space:]]*"[^"]*"' "$REP
               ;;
           esac
           [ -n "$jlit" ] || continue
-          resolved="$(norm_path "$subdir/$jlit")"
+          norm_path_v "$subdir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -803,7 +921,8 @@ $suppress
 EOF
             [ "$skip" -eq 0 ] || continue
           fi
-          resolved="$(norm_path "$adir/$jlit")"
+          norm_path_v "$adir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           # inside api/ is not an escape
           case "$resolved" in api | api/*) continue ;; esac
@@ -836,7 +955,8 @@ EOF
             ;;
         esac
         [ -n "$clit" ] || continue
-        resolved="$(norm_path "$adir/$clit")"
+        norm_path_v "$adir/$clit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         case "$resolved" in api | api/*) continue ;; esac
         [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -866,7 +986,8 @@ EOF
             ;;
         esac
         [ -n "$blit" ] || continue
-        resolved="$(norm_path "$adir/$blit")"
+        norm_path_v "$adir/$blit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         case "$resolved" in api | api/*) continue ;; esac
         [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -902,7 +1023,6 @@ EOF
     # a separate grep per shape took the real-tree run 73s -> 117s; folded
     # into this alternation it is back at ~76s. `-no` keeps `LINE:MATCH`, and
     # the match text is what routes each hit to its own door.
-    openers="$(grep -noE '^[[:space:]]*Path\.join\([[:space:]]*$|System\.(cmd|shell)\(' "$REPO_ROOT/$f" || true)"
     while IFS= read -r orow; do
       [ -n "$orow" ] || continue
       ol="${orow%%:*}"
@@ -932,7 +1052,8 @@ EOF
               ;;
           esac
           [ -n "$jlit" ] || continue
-          resolved="$(norm_path "$aadir/$jlit")"
+          norm_path_v "$aadir/$jlit"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -999,7 +1120,8 @@ EOF
           [ -n "$xl" ] || continue
           # an absolute argument is not resolved against the cwd at all
           case "$xl" in /*) continue ;; esac
-          resolved="$(norm_path "$aadir/$xl")"
+          norm_path_v "$aadir/$xl"
+          resolved="$NP"
           [ -n "$resolved" ] || continue
           case "$resolved" in api | api/*) continue ;; esac
           [ -e "$REPO_ROOT/$resolved" ] || continue
@@ -1029,7 +1151,6 @@ EOF
     # per-file process cost the note on the opener scan above prices. A hit
     # starting with `~` is a sigil, everything else is a double-quoted
     # literal; the `case` below is what routes it.
-    lits="$(grep -Eoh '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' "$REPO_ROOT/$f" || true)"
     [ -n "$lits" ] || continue
     while IFS= read -r lit; do
       # `~s(../x)` / `~S{…}` / `~c[…]` / `~C<…>` — SHAPE 5. Every supported
@@ -1065,7 +1186,8 @@ EOF
         else
           if [ "$sigil" -eq 1 ]; then idiom="$tree-sigildir"; else idiom="$tree-dir"; fi
         fi
-        resolved="$(norm_path "$base/$lit")"
+        norm_path_v "$base/$lit"
+        resolved="$NP"
         [ -n "$resolved" ] || continue
         # inside api/ is not an escape
         case "$resolved" in api | api/*) continue ;; esac
@@ -1080,6 +1202,8 @@ EOF
   done <<EOF
 $sources
 EOF
+  exec 9<&-
+  rm -f -- "$prescan_file"
 }
 
 is_exempt() {

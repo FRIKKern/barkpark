@@ -122,7 +122,7 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
   #
   # `autoupdate_paused` has NO automatic clear: its only `false` writer anywhere is
   # the human PATCH on `/v1/barkparks/:id/autoupdate`, behind
-  # `Auth.require_primary_team_admin`. There is a `pause_autoupdate/1` verb and no
+  # `Auth.require_current_team_admin`. There is a `pause_autoupdate/1` verb and no
   # resume verb at all. So every entry into it has to earn itself, exactly as the
   # 503 branch below now does (#13474 / #13551).
   #

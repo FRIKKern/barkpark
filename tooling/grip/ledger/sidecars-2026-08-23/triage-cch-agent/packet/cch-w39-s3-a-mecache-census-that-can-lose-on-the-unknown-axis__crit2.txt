@@ -1,0 +1,1 @@
+The positive control is a COMMITTED FIXTURE with two must-flag and two must-clear functions, run on every invocation; repairing a positive control exits 2 and deleting the fixture exits 2. Paste both.

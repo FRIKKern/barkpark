@@ -54,7 +54,7 @@ defmodule BarkparkWeb.InteractionReceiptTest do
   Every case below posts WITHOUT an authorization header, and the first two
   tests prove that anonymity is real rather than assumed — a run, not a read.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

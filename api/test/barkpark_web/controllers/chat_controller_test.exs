@@ -93,16 +93,9 @@ defmodule BarkparkWeb.ChatControllerTest do
     )
 
     on_exit(fn ->
-      # Reap any spawned runtimes so a live subprocess never leaks into the next test.
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
-      |> Enum.each(fn
-        {_, pid, _, _} when is_pid(pid) ->
-          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
-
-        _ ->
-          :ok
-      end)
+      # Reap any spawned runtimes so a live subprocess — and the node-global
+      # admission lease it holds — never leaks into the next test.
+      reap_runtimes()
 
       if prev,
         do: Application.put_env(:barkpark, :claude_chat, prev),
@@ -134,7 +127,7 @@ defmodule BarkparkWeb.ChatControllerTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
 
   # ── wave-session-card wire fixtures (wsc charter D3/D6/D9) ────────────────
 
@@ -218,7 +211,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       for {method, path} <- routes do
         conn =
           dispatch(
-            build_conn() |> put_req_header("content-type", "application/json"),
+            scoped_conn() |> put_req_header("content-type", "application/json"),
             method,
             path
           )
@@ -396,7 +389,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "unauthenticated stays 401 for BOTH malformed and absent ids (auth first)",
          %{} do
-      base = build_conn() |> put_req_header("content-type", "application/json")
+      base = scoped_conn() |> put_req_header("content-type", "application/json")
       assert dispatch(base, :get, "/v1/chat/sessions/not-a-uuid") |> json_response(401)
 
       assert dispatch(base, :get, "/v1/chat/sessions/#{Ecto.UUID.generate()}")
@@ -1513,7 +1506,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   # The classification seam (ChatController.send_failure_response/2 — public
   # per the exit-reason-mapping convention): one assertion per allowlist leg.
   defp split(reason) do
-    conn = ChatController.send_failure_response(build_conn(), reason)
+    conn = ChatController.send_failure_response(scoped_conn(), reason)
 
     {conn.status, Jason.decode!(conn.resp_body)["error"],
      Plug.Conn.get_resp_header(conn, "retry-after")}
@@ -1572,6 +1565,11 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     test "E2E capacity: a full admission pool answers 503 runtime_capacity + Retry-After",
          %{admin: a1, sid: sid} do
+      # The pool is NODE-GLOBAL (a lease count over the shared RecorderRegistry),
+      # so a capacity-1 assertion is only meaningful from an empty pool. Drain it
+      # and WAIT for the count to actually reach zero — see `reap_runtimes/1`.
+      assert reap_runtimes() == 0
+
       prev = Application.get_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
 
       Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission,
@@ -2662,7 +2660,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   describe "GET /v1/chat/rollup" do
     test "auth runs first: missing bearer 401, non-admin reader 403", %{reader: reader} do
-      assert build_conn() |> get("/v1/chat/rollup") |> json_response(401)
+      assert scoped_conn() |> get("/v1/chat/rollup") |> json_response(401)
       assert json_conn(reader) |> get("/v1/chat/rollup") |> json_response(403)
     end
 
@@ -2722,4 +2720,43 @@ defmodule BarkparkWeb.ChatControllerTest do
   defp dispatch(conn, :get, path), do: get(conn, path)
   defp dispatch(conn, :post, path), do: post(conn, path, "")
   defp dispatch(conn, :patch, path), do: patch(conn, path, "")
+
+  # Terminate every live Recorder and WAIT until the admission pool reads empty.
+  #
+  # `DynamicSupervisor.terminate_child/2` returns once the Recorder process is
+  # dead, but the Recorder's admission lease lives in the shared
+  # `RecorderRegistry`, and a Registry drops a dead owner's entry ASYNCHRONOUSLY
+  # — its partition process has to handle the `:DOWN` first. On a loaded box that
+  # cleanup can land after the next test has already started, so a reaped
+  # runtime still counts against `RuntimeAdmission.active_count/1`. That is how
+  # push:main run 33957660630 failed the capacity-1 test in its OWN setup with
+  # `{:error, {:managed_runtime_capacity, 1}}` (task-ea91a85d198b36f8): the
+  # previous test's already-reaped Recorder still held the single slot.
+  # Returns the final lease count (0 when the pool actually drained).
+  defp reap_runtimes(tries \\ 200) do
+    Barkpark.StudioChat.RuntimeSupervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.each(fn
+      {_, pid, _, _} when is_pid(pid) ->
+        DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+      _ ->
+        :ok
+    end)
+
+    await_empty_pool(tries)
+  end
+
+  defp await_empty_pool(0), do: Barkpark.StudioChat.RuntimeAdmission.active_count()
+
+  defp await_empty_pool(tries) do
+    case Barkpark.StudioChat.RuntimeAdmission.active_count() do
+      0 ->
+        0
+
+      _ ->
+        Process.sleep(10)
+        await_empty_pool(tries - 1)
+    end
+  end
 end

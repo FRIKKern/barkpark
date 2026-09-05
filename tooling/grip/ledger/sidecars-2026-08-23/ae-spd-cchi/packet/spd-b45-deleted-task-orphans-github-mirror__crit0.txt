@@ -1,0 +1,1 @@
+The orphan mechanism is reproduced deliberately: publish a throwaway task, confirm its mirror issue exists, delete the task, and show the issue still open with its task id returning not_found

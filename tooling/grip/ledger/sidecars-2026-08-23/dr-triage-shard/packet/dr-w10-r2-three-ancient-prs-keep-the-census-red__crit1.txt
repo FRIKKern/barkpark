@@ -1,0 +1,1 @@
+A live run of scripts/absent-context-census.sh is quoted AFTER that disposition, showing the absent tally and which rows remain — so the census green-by-default claim is a measurement, not a plan

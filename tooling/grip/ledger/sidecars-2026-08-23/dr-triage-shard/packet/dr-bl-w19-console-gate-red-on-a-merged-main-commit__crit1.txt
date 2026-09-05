@@ -1,0 +1,1 @@
+Whether a required context failing on a main commit reaches ANY human is answered by RUNNING the reporting path, not by reading config

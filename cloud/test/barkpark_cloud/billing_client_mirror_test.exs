@@ -58,7 +58,9 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
 
     1. It covers ONLY the `instances` numeral. Price is structurally
        uncoverable — no price amount exists server-side at all (pinned by the
-       SCOPE test below). `trial_days` is a separate row and not mirrored here.
+       SCOPE test below). `trial_days` (the trial's LENGTH) is a separate row and still not
+       mirrored here. The trial REMINDER SCHEDULE now is — see THE REMINDER
+       SCHEDULE MIRROR at the tail of this file (cch-w50-s5).
     2. It pins the CONSTANT, not the render. Whether the console ever PRINTS a
        ceiling to a user is a different question, owned by cch-w49-s1's
        absent-arm assertion over the rendered bytes in `__preview__/smoke.mjs`
@@ -90,6 +92,7 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
 
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.PlanLimits
+  alias BarkparkCloud.Workers.TrialExpiryWorker
 
   # The PINNED tier set the CONSOLE declares. Declared by NEITHER side (see the
   # moduledoc).
@@ -106,6 +109,13 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
   # console ever grows a trial tier, or a mirrored tier loses its card, the
   # coverage test below reds instead of the mirror quietly covering less.
   @unmirrored_seam_plans ~w(trial)
+
+  # cch-w50-s5 — THE ADVANCE-NOTICE SCHEDULE, in whole days, longest first.
+  # Declared HERE for the same reason @pinned_plans is (see the moduledoc): a
+  # guard that compares only what the two sides happen to declare goes GREEN when
+  # BOTH are deleted, or when the console's sentence loses its numerals. This
+  # list is the third opinion, and deleting either side's value reds against it.
+  @pinned_notice_days [3, 1]
 
   defp client_catalog! do
     node = System.find_executable("node")
@@ -516,5 +526,128 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
     # later comparison, and a wrongly-cleared real override would disarm them.
     assert PlanLimits.env()["LIMIT_SUPPORTER"] == previous,
            "this test did not restore LIMIT_SUPPORTER (expected #{inspect(previous)}, got #{inspect(PlanLimits.env()["LIMIT_SUPPORTER"])})"
+  end
+
+  # ── cch-w50-s5 · THE REMINDER SCHEDULE MIRROR ───────────────────────────────
+  #
+  # A SECOND cross-layer promise on this screen, and until this slice nothing
+  # connected its two halves either. The server owns the advance-notice schedule
+  # (`TrialExpiryWorker`'s `@three_days` / `@one_day`, published by
+  # `notice_thresholds_days/0`); the console re-typed it into a sentence — "We'll
+  # remind you 3 days and 1 day before the trial ends." — that no test on either
+  # side read. Measured: `grep "3 days and 1 day" __app.test.mjs` returned rc=1,
+  # zero hits, so the numerals could be edited to anything with the console suite
+  # green.
+  #
+  # SAME RULES AS THE MIRROR ABOVE. Both sides are read BY RUNNING: the server by
+  # CALLING the accessor from this booted BEAM, the client by evaluating the
+  # SHIPPED app.js in a node:vm sandbox (`__preview__/__trial_reminder_dump.mjs`)
+  # and reading `__bpTestHook.trialNoticeDays` plus the card `trialCardHtml`
+  # actually renders. No regex over app.js source, no `File.read!` of it.
+
+  defp client_trial_reminder! do
+    node = System.find_executable("node")
+
+    assert node,
+           "node is not on PATH — the trial-reminder mirror cannot read the client schedule"
+
+    script =
+      [__DIR__, "..", "..", "priv", "static", "__preview__", "__trial_reminder_dump.mjs"]
+      |> Path.join()
+      |> Path.expand()
+
+    assert File.exists?(script),
+           "the client dump script is missing at #{script} — the client side cannot be read"
+
+    {out, status} = System.cmd(node, [script], stderr_to_stdout: true)
+
+    assert status == 0,
+           "the client dump failed (exit #{status}) — the console's reminder schedule could not be read by running: #{out}"
+
+    Jason.decode!(out)
+  end
+
+  test "THE REMINDER SCHEDULE: the console's numerals equal the worker's advance-notice thresholds" do
+    server = TrialExpiryWorker.notice_thresholds_days()
+    client = client_trial_reminder!()["noticeDays"]
+
+    assert server == @pinned_notice_days,
+           "the SERVER's advance-notice schedule moved: TrialExpiryWorker.notice_thresholds_days/0 says #{inspect(server)} vs the pinned #{inspect(@pinned_notice_days)}. Every team on this schedule is told a day count derived from it, and the console promises the pinned one."
+
+    assert client == @pinned_notice_days,
+           "the CONSOLE's advance-notice schedule moved: app.js TRIAL_NOTICE_DAYS says #{inspect(client)} vs the pinned #{inspect(@pinned_notice_days)}"
+
+    assert server == client,
+           "the trial-reminder promise has drifted: the worker notices at #{inspect(server)} days out, the console promises #{inspect(client)}"
+  end
+
+  test "THE NUMERALS REACH THE SENTENCE: every scheduled day appears in the card the console renders" do
+    # The constant agreeing is not enough — a schedule nothing renders promises
+    # nothing. This reads the RENDERED card and requires each day to be in it, so
+    # deleting the numerals from the sentence (or the sentence itself) reds here
+    # against @pinned_notice_days even if both constants still agree.
+    dump = client_trial_reminder!()
+    on = dump["cards"]["on"]
+
+    for day <- @pinned_notice_days do
+      phrase = if day == 1, do: "1 day", else: "#{day} days"
+
+      assert String.contains?(on, phrase),
+             "the rendered trial card never says #{inspect(phrase)} — the console promises a reminder schedule it does not state. Card: #{on}"
+    end
+
+    assert String.contains?(on, "We'll remind you"),
+           "the alerts-ON card lost the reminder promise entirely: #{on}"
+  end
+
+  test "THE MUTE READ FAILS CLOSED: an UNKNOWN alert state softens the promise, it does not keep it" do
+    # WHY THIS IS NOT PARANOIA. `alerts_enabled` reaches app.js through exactly
+    # one door — GET /v1/notifications/settings, whose sole success path is
+    # renderNotifications, which is what sets `notifCache`. `renderBilling`
+    # fetches the SUBSCRIPTION and nothing else. A person landing directly on
+    # /billing therefore has `notifCache === null`, and the naive guard
+    # (`notifCache && notifCache.alerts_enabled === false`) is FALSE in exactly
+    # that state — i.e. it KEEPS the flat promise for a team whose alerts are
+    # muted and whose worker (`TrialExpiryWorker.receivable?/1`) will send
+    # nothing. An unpopulated cache is not evidence that alerts are on.
+    dump = client_trial_reminder!()
+    %{"unknown" => unknown, "on" => on, "muted" => muted} = dump["cards"]
+
+    refute String.contains?(unknown, "We'll remind you 3 days"),
+           "with the team's alert state UNKNOWN the console still made the flat promise — this is the naive check, and it is false for a muted team: #{unknown}"
+
+    assert String.contains?(unknown, "If your team's alerts are on"),
+           "the UNKNOWN arm must state its own condition rather than assert or deny delivery: #{unknown}"
+
+    refute String.contains?(muted, "We'll remind you"),
+           "a MUTED team was still promised a reminder the worker will not send: #{muted}"
+
+    assert String.contains?(muted, "alerts muted"),
+           "the muted arm must name the mute, so the person can act on it: #{muted}"
+
+    # NON-VACUITY: the flat promise still exists for the one state that earns it.
+    assert String.contains?(on, "We'll remind you"),
+           "the alerts-ON arm lost the promise too — this guard would then be passing for the wrong reason"
+
+    # And the three arms are genuinely three, not one sentence read three times.
+    assert length(Enum.uniq([unknown, on, muted])) == 3,
+           "two of the three mute arms rendered identically — the state is not reaching the copy"
+  end
+
+  test "REACHABILITY: no notice threshold sits beyond the trial scan horizon" do
+    # A threshold further out than `Billing.active_trials/1` will look is DEAD —
+    # the row is never returned, so the arm cannot fire and the console promises
+    # a notice nobody can receive. cch-w50 introduced that horizon as its own
+    # hand-typed `3 * 86_400` in Billing, one module away from the worker's
+    # `@three_days`, and nothing tied them together: widening ONLY the worker
+    # threshold is silently a no-op, and widening ONLY the horizon is silently
+    # unused. (Measured on origin/main: widening BOTH to five days left the whole
+    # committed suite green while a trial four days out was told "in 3 days".)
+    horizon_days = div(Billing.trial_scan_horizon_seconds(), 86_400)
+
+    for day <- TrialExpiryWorker.notice_thresholds_days() do
+      assert day <= horizon_days,
+             "the worker notices at T-#{day} days but Billing.active_trials/1 only scans #{horizon_days} days ahead — that threshold can never fire, and the console promises the notice anyway"
+    end
   end
 end

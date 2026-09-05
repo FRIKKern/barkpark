@@ -1,0 +1,1 @@
+The 403 is reproduced at decision time rather than quoted from wave 30: the operator route's status code and body are re-read live. Evidence: the curl and its output with a timestamp.

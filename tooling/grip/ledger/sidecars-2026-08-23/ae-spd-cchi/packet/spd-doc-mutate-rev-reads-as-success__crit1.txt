@@ -1,0 +1,1 @@
+A regression test fires a mutate that touches only the draft and asserts the published read is unchanged AND that the CLI output says so

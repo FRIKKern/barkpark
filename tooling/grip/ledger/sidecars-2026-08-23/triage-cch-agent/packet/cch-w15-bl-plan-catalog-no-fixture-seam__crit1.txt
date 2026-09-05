@@ -1,0 +1,1 @@
+The five-tier case is driven through the normal scenario path (no source patching) and the tier grid reports zero clipped CTAs at 619/900/901/1200/1700.

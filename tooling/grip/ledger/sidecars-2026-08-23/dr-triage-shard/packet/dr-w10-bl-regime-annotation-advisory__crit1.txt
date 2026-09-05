@@ -1,0 +1,1 @@
+A window with no health rows, or with an empty git_commit, prints regime UNMETERED and never claims a single regime — proved by a fixture in both directions

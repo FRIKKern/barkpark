@@ -1,0 +1,1 @@
+A two-turn codex interleaving test proves a stale turn-1 settle can no longer clear a live turn-2 tail, mutation-proven on both surfaces

@@ -313,6 +313,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   paper_rev={@paper_rev}
                   dataset={@dataset}
                   api_token_raw={@api_token_raw}
+                  scope_prefix={@scope_prefix}
                   canvas_eligible={true}
                   task_previews={@task_previews}
                   save_status={@save_status}
@@ -389,6 +390,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     doc_type={@doc_type}
                     html_backed={@html_backed_body}
                     repairable={@doc_type == Content.paper_type() and not @html_backed_body}
+                    if_rev={@paper_rev}
                     list_href={doc_list_href(@scope_prefix, @doc_type, @dataset)}
                   />
                 </article>
@@ -481,6 +483,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:doc_type, :string, required: true)
   attr(:repairable, :boolean, default: false)
   attr(:html_backed, :boolean, default: false)
+  attr(:if_rev, :integer, required: true)
   attr(:list_href, :string, required: true)
 
   def unrenderable_document_notice(assigns) do
@@ -514,6 +517,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           class="btn btn-primary btn-sm"
           phx-click="paper-add-block"
           phx-value-block-type="paragraph"
+          phx-value-if_rev={@if_rev}
           data-test-id="paper-unrenderable-start-body"
         >
           Start the body with a paragraph
@@ -1704,13 +1708,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <div class="editor-body editor-panel-main bp-paper-body">
                 <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-doc-beta-shell">
                   <.paper_block_editor
-                    slug={@editor_doc.doc_id}
+                    slug={Content.published_id(@editor_doc.doc_id)}
+                    doc_type={@editor_doc.type}
                     blocks={@editor_blocks}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
                     descriptors={beta_all_descriptors(@editor_schema, @editor_blocks)}
-                    paper_rev={0}
+                    document_rev={@editor_doc.rev}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
+                    scope_prefix={Map.get(assigns, :scope_prefix, "")}
                   />
                 </main>
               </div>
@@ -1759,6 +1765,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 reason={empty.reason}
                 doc_id={empty.doc_id}
                 doc_type={empty.doc_type}
+                cause={Map.get(empty, :cause)}
+                elsewhere_name={Map.get(empty, :elsewhere_name)}
+                elsewhere_href={Map.get(empty, :elsewhere_href)}
+                grant_scope={Map.get(empty, :grant_scope)}
                 list_href={
                   if empty.reason == :not_found and empty.doc_type,
                     do:

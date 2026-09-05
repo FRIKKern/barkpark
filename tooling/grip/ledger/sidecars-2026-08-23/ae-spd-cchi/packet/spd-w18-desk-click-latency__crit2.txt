@@ -1,0 +1,1 @@
+Between press and answer the row carries a NAMED state a test can assert (aria-busy, disabled, or a label swap), not only .phx-click-loading opacity.

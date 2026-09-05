@@ -86,23 +86,29 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
 
     # The stale draft twin: derived from the CURRENT published content (claim
     # verbatim — it will sail past stale_claim?/2), minted BEFORE the stamp.
-    assert {:ok, {_tx, _}} =
-             Content.apply_mutations(
-               [
-                 %{
-                   "patch" => %{
-                     "id" => doc_id,
-                     "type" => "task",
-                     "set" => %{
-                       "description" =>
-                         "The github mirror touched this row's bookkeeping during an active claim."
-                     }
-                   }
-                 }
-               ],
-               @dataset,
-               scope ++ [source: :api]
-             )
+    # Minted at the WRITER SEAM, not through a mutate `patch`: since
+    # task-b9c618482e688500 a bare-id `patch` on a `type:task` resolves
+    # PUBLISHED-first and LANDS there, so it no longer leaves a twin behind to
+    # collapse. The twin this file needs — derived from the published content,
+    # claim verbatim, minted pre-stamp — is byte-identical either way.
+    {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
+
+    {:ok, _twin} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => published.title,
+          "content" =>
+            Map.put(
+              published.content,
+              "description",
+              "The github mirror touched this row's bookkeeping during an active claim."
+            )
+        },
+        @dataset,
+        scope
+      )
 
     # The stamp writes the PUBLISHED row directly; the draft never rebases.
     # The stamp addresses the PUBLISHED row (the draft row died at publish).

@@ -1,0 +1,1 @@
+A fleet_digest row written by DailyDigestWorker is READ back over that door in a test, by a member of the owning team, and a non-member gets 404/403 — both pasted

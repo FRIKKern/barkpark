@@ -28,6 +28,7 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
     @http_surfaces ~w(source_json public_html)
     @headless_surfaces ~w(cli task_board tui)
     @max_command_output_bytes 2_000_000
+    @headless_command_timeout_ms 30_000
 
     @impl true
     def capture(request) do
@@ -168,7 +169,7 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
           {"BARKPARK_TOKEN", token}
         ]
 
-        case bounded_cmd(bp_path, args, 30_000, env: env) do
+        case bounded_cmd(bp_path, args, headless_command_timeout_ms(), env: env) do
           {output, 0} ->
             case decode_headless(output, request, role) do
               {:ok, role_captures} -> {:cont, {:ok, Map.merge(captures, role_captures)}}
@@ -285,6 +286,21 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
 
     defp content_type("source_json"), do: "application/json"
     defp content_type("public_html"), do: "text/html"
+
+    # The headless spawn's deadline. A real capture gets @headless_command_timeout_ms;
+    # the bound is configurable because the ONLY honest proof that the `after
+    # remaining ->` clause in collect_command/4 cuts the spawn is a WALL-CLOCK
+    # measurement, and a 30 s wall-clock assertion made the deadline test the
+    # single largest stall in the required Elixir gate (task-18f209f185f5b3f1).
+    # Under test the bound is dialled down and the stub's sleep down with it, so
+    # the SAME cut is proven at a tenth of the price. Production never sets it.
+    defp headless_command_timeout_ms do
+      Application.get_env(
+        :barkpark,
+        :cycle_release_capture_command_timeout_ms,
+        @headless_command_timeout_ms
+      )
+    end
 
     defp bounded_cmd(command, args, timeout, opts) do
       port =

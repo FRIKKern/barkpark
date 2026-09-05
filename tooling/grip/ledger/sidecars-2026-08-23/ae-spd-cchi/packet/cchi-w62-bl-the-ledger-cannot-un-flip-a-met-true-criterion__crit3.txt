@@ -1,0 +1,1 @@
+A SWEEP names every other row epic-wide whose evidence text contains a withdrawal notice while its met flag is still true — the population is unknown today and one instance is not a census. State the count, even if it is 1.

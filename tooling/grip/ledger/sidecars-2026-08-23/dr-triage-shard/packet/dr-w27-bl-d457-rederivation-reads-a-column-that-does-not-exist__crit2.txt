@@ -1,0 +1,1 @@
+The corrected packet's criterion 5 is restated to the honest bound: rejected is distinguishable from unreachable; rejected is not distinguishable from accepted-but-unlogged on 116.203.98.0.

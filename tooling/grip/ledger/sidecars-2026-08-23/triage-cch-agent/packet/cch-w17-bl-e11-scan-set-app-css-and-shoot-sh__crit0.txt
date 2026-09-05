@@ -1,0 +1,1 @@
+app.css is in E11's scan set and both of its self-citations are disposed of: `node cloud/priv/static/__css_check.mjs` (captured via spawnSync or to a file, NEVER a pipe — a pipe truncates and has reported 1 E11 line where the run produced 25) exits 0 with zero E11 errors, and the run BEFORE the repairs names exactly app.css:4815 and app.css:5225. Evidence: both captured runs.

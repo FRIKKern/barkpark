@@ -1,0 +1,1 @@
+seal-predicate.mjs's roster read pages until a short page returns, and the ROSTER-TRUNCATED refusal is KEPT (now firing only on a violated paging contract), not deleted and not defused by a larger single-page limit.

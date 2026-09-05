@@ -1,0 +1,1 @@
+Deploy health enters the roll-up: a box failing a material share of its deploys no longer lands in 'current'. A test with a high-failure-rate instance asserts it is not counted healthy, and the test FAILS if the deploy signal is removed from summary/1.

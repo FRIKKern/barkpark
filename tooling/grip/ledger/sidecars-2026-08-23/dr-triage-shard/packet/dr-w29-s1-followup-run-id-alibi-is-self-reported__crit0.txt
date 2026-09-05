@@ -1,0 +1,1 @@
+A crown row whose delivering_run_id names a REAL delivering run that could not have written it (its first_seen_at falls outside that run interval, or its sha is not reachable from that run head) is classified WRONG. Evidence: the new classifier plus the live read.

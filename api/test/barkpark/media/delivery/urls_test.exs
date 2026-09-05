@@ -270,6 +270,23 @@ defmodule Barkpark.Media.Delivery.UrlsTest do
       refute conn.state == :sent
       assert conn.status == nil
     end
+
+    # A header made only of separators carries NO entity-tag. The shared
+    # matcher drops the empty entries, so nothing can match: full 200, and the
+    # request never crashes on an empty candidate.
+    test "a separators-only If-None-Match carries no validator and does NOT 304" do
+      path = tmp_blob!()
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", " , ,")
+        |> Urls.put_file_cache_headers(path, "public")
+
+      refute conn.state == :sent
+      assert conn.status == nil
+      assert match?([_], Plug.Conn.get_resp_header(conn, "etag"))
+    end
   end
 
   describe "etag_for/1" do

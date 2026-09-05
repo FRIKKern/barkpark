@@ -1,0 +1,1 @@
+A test in cloud/priv/static/__app.test.mjs reds if the unknown arm ever renders an affirmative freshness verb again.

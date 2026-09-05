@@ -1,0 +1,1 @@
+Reachability is settled per host with the caller or route named and the verdict labelled L1 or L2. Evidence: the citation per host.

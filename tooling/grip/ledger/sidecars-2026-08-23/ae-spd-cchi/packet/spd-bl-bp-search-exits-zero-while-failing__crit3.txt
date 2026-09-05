@@ -1,0 +1,1 @@
+A TEST ASSERTS THAT A FAILED MANIFEST FETCH YIELDS A NON-ZERO EXIT. This is the row's own FIX clause, verbatim in intent: 'Add a test that a failed manifest fetch yields a non-zero exit.'

@@ -67,7 +67,7 @@ func runCloudWebhook(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to control an instance's webhooks", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to control an instance's webhooks, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	verb, rest := args[0], args[1:]

@@ -1,0 +1,1 @@
+A REACHABILITY answer is recorded: name every forward caller of openProviderPicker on origin/main with the grep that re-derives it, and state whether the picker is reachable by any gesture other than #cred-back.

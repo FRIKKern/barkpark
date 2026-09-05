@@ -120,6 +120,13 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		}
 	}
 
+	// A stated -w/-p this command's URL can neither carry nor mirror is refused
+	// BEFORE any I/O — the alternative is a successful answer about the wrong
+	// workspace (scope_honesty.go).
+	if msg := refuseUnrepresentableScope(cmd, ctx); msg != "" {
+		return nil, &dispatchError{msg: msg, withUsage: true}
+	}
+
 	// Build the absolute URL (fills :placeholders + prepends scoped_prefix).
 	rawURL, err := m.BuildURL(cmd, ctx, argMap)
 	if err != nil {
@@ -372,6 +379,33 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		}
 	}
 
+	// `bp task ls --status/--assignee/--claimed/--claimed-by`: the FOURTH
+	// additive, opt-in flag group the manifest never declares, stripped here for
+	// the same reason as the three above. Unlike --match this group is SPLIT —
+	// --status is pushed onto the URL as filter[lifecycle_status] (a filter
+	// GET /v1/tasks really has), while the claim-holder axes have no server
+	// filter at all and can only be honoured over walked rows. See
+	// tasks_scan.go for the full contract and why the split is stated out loud.
+	var taskScan taskScanOpts
+	if cmd.ID == taskLsCommandID {
+		var serr error
+		taskScan, tail, serr = extractTaskScanFlags(tail)
+		if serr != nil {
+			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
+				out.userErr("%v", serr)
+				usageCommand(out, cmd)
+			}
+			return exitUsage
+		}
+		// A client-side filter that read one page would answer "no foreign
+		// claims" about a ledger it never walked — the exact silence this flag
+		// group exists to end. So the claim-holder axes IMPLY --all, whether or
+		// not the caller typed it, and say so.
+		if taskScan.clientSide() {
+			g.all = true
+		}
+	}
+
 	// Resolve the request-side view HERE, with the writer in hand — never
 	// inside buildManifestRequest, which is pure/writer-less and shared by the
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
@@ -395,6 +429,21 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			}
 		}
 		return exitUsage
+	}
+
+	// --status rides the RESOLVED url, so it is visible to --dry-run, to the
+	// single-page send, and to every page of the --all walk alike (all three
+	// read req.url). Stamped only when --status was given, so no existing
+	// caller's URL changes shape by a byte.
+	if taskScan.status != "" {
+		stamped, serr := appendTaskStatusFilter(req.url, taskScan.status)
+		if serr != nil {
+			if !renderErrorEnvelope(out, "usage", serr.Error(), "", "") {
+				out.userErr("%v", serr)
+			}
+			return exitUsage
+		}
+		req.url = stamped
 	}
 
 	// Non-fatal notices from the writer-less build half (today: an unused
@@ -446,14 +495,38 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return code
 	}
 
+	// Stale-cite advisory (publish_cites_guard.go), PRE-WRITE half: read the
+	// DRAFT's prose now, because a successful publish removes the drafts.<id>
+	// twin this text lives on. Candidate ids only — the status lookups and the
+	// printing happen after the 2xx, so this cannot delay or influence the
+	// write. Silent, and does no network work at all, for every command that is
+	// not `doc publish` on a task.
+	var publishCites []publishCite
+	if typeName, bareID, ok := publishCitesArgs(cmd, tail); ok {
+		publishCites = readDraftCites(g, ctx, m, typeName, bareID)
+	}
+
 	// Paginated reads with --all loop over offset pages. A non-empty --match
 	// hands the walk a row filter; every other caller passes nil and the walk
 	// behaves exactly as it always has.
 	if cmd.Paginated && g.all && !cmd.Writes {
 		var opts paginatedAllOpts
+		var matchFilter func(json.RawMessage) bool
 		if taskMatch != "" {
-			opts.filter = taskRowMatcher(taskMatch)
+			matchFilter = taskRowMatcher(taskMatch)
 			opts.pageSize = taskWalkPageSize
+		}
+		// --match and the scan's claim-holder axes compose with AND: they narrow
+		// ONE question, they do not ask two. andRowFilters returns nil when both
+		// are absent, so every pre-existing caller keeps the unfiltered walk.
+		opts.filter = andRowFilters(matchFilter, taskScanRowMatcher(taskScan))
+		if taskScan.clientSide() {
+			// The big window for the same reason --match takes it: this walk
+			// reads the whole ledger, and 100-row pages pay ~9x the round-trips
+			// on the one command whose premise is that the old remedy cost too
+			// much.
+			opts.pageSize = taskWalkPageSize
+			out.errf("bp: %s", taskScanClientSideNotice(taskScan))
 		}
 		return runPaginatedAll(out, cmd, req.url, req.headers, opts)
 	}
@@ -483,6 +556,25 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// minutes. Silent on every envelope without a `lease` object, so no
 		// other verb's receipt changes (tasks_lease.go).
 		emitClaimLease(out, respBody)
+		// A ruling the row ALREADY carries (content.disposition_reason), shouted
+		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
+		// stderr in every output mode, silent on a row with no ruling
+		// (tasks_ruling.go).
+		emitTaskRuling(out, cmd, respBody)
+		// The stale-cite advisory's POST-WRITE half: the publish has already
+		// landed, so this is pure commentary — one stderr line per cited task
+		// id with its CURRENT lifecycle_status. It never refuses, never
+		// changes `code`, and never touches stdout, so `-o json` stays one
+		// byte-identical document (publish_cites_guard.go).
+		emitPublishCiteAdvisory(out, g, ctx, m, publishCites)
+		// `doc mutate` / `doc patch` write the DRAFT lens while every canonical
+		// reader is published-first, so a bare `rev:` receipt reads the same for
+		// a landed ledger edit and for a write parked on a draft twin. This
+		// names which lens moved, derived from the envelope's own
+		// results[].document._draft/_publishedId/_type — zero extra requests —
+		// and folds in #15851's fork advisory codes. stderr in every output
+		// shape, so `-o json` stays byte-identical (mutate_perspective.go).
+		emitMutatePerspective(out, cmd, respBody)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
@@ -761,27 +853,70 @@ func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody 
 	if !cmd.Writes {
 		return 0, false
 	}
-
-	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
-		len(bytes.TrimSpace(respBody)) == 0 {
-		reason := fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status)
+	switch kind, reason, hint := writeReceiptVerdict(status, respBody); kind {
+	case writeReceiptDeclaredEmpty:
 		if !out.emitStructured(map[string]any{"ok": true, "confirmed": false, "reason": reason}) {
 			out.outf("not confirmed: %s", reason)
 		}
 		return exitOK, true
+	case writeReceiptPoisoned:
+		msg := fmt.Sprintf(
+			"unreadable write receipt: HTTP %d %s (%d bytes): %s",
+			status, reason, len(respBody), bodyPreview(respBody),
+		)
+		refuseWithRemedy(out, "unreadable_write_receipt", msg, hint)
+		return exitGeneric, true
 	}
+	return 0, false
+}
 
-	reason := unreadableWriteReceipt(respBody)
-	if reason == "" {
-		return 0, false
+// writeReceiptVerdictKind is the write fence's THREE outcomes, and the reason
+// there are three rather than two is the 204/205 arm: a declared empty receipt
+// is neither silence nor a renderable body.
+type writeReceiptVerdictKind int
+
+const (
+	// writeReceiptRenderable — the body carries a statement about the write;
+	// the caller renders it.
+	writeReceiptRenderable writeReceiptVerdictKind = iota
+	// writeReceiptDeclaredEmpty — HTTP 204/205 with an empty body: the server
+	// DECLARED it has no receipt for this write. An honest outcome that must be
+	// NAMED, never printed as a blank line and never refused.
+	writeReceiptDeclaredEmpty
+	// writeReceiptPoisoned — a stated success whose body said nothing at all.
+	writeReceiptPoisoned
+)
+
+// writeReceiptVerdict is THE write fence — one function, one verdict, for every
+// surface that turns a Barkpark write response into something a caller believes.
+// It returns the kind, the sentence naming WHY, and the remedy hint that belongs
+// to that sentence.
+//
+// PLACEMENT (pds-bl-mcp-exec-bypasses-write-fence, c1). It deliberately does NOT
+// live in execManifestCommand (run.go:307), the headless dispatch primitive. That
+// function's contract is "raw status + body, no guards, no rendering", and 3 of
+// its 12 callers are internal READ probes (destroy_confirm.go, discard_draft_guard.go,
+// doctor_onboarding.go) that must see the untouched response; a refusal there
+// would either break their contract or push a fourth return value through every
+// caller. The fence belongs where a response becomes a VERDICT, and there are
+// exactly two such sites — the CLI render path (screenWriteReceipt, above) and
+// the MCP tool result (mcpPoisonedReceipt, mcp_tasks.go). Both call this; neither
+// re-derives it. Before this consolidation both re-implemented the 204/205 arm
+// around a shared unreadableWriteReceipt, so half the fence was copied.
+//
+// THE DISCRIMINATOR ITSELF stays unreadableWriteReceipt (below): "did the server
+// say anything at all", never "does the body carry a key we recognise".
+func writeReceiptVerdict(status int, body []byte) (writeReceiptVerdictKind, string, string) {
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(body)) == 0 {
+		return writeReceiptDeclaredEmpty,
+			fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status),
+			""
 	}
-
-	msg := fmt.Sprintf(
-		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
-		status, reason, len(respBody), bodyPreview(respBody),
-	)
-	refuseWithRemedy(out, "unreadable_write_receipt", msg, unreadableWriteReceiptHint)
-	return exitGeneric, true
+	if reason := unreadableWriteReceipt(body); reason != "" {
+		return writeReceiptPoisoned, reason, unreadableWriteReceiptHint
+	}
+	return writeReceiptRenderable, "", ""
 }
 
 // failOnFailedDeliveryFlag is the literal token for `bp webhook test-send
@@ -1612,6 +1747,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	if cmd.SetKey != "" {
 		setTarget = map[string]any{}
 	}
+	// Keys a `--set key:=null` retired: on a patch they ride the mutation's
+	// `unset` list instead of storing a null (see below).
+	var unsetKeys []string
 	if sets, ok := flags["set"]; ok && len(sets) > 0 {
 		for _, kv := range sets {
 			// key:=raw-json sends a TYPED value (httpie convention): the
@@ -1623,22 +1761,59 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			// type is the caller's explicit choice, never sniffed from the
 			// value (a title that LOOKS numeric must stay a string).
 			if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
+				key := kv[:eq]
 				var typed any
 				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 					return nil, nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
 				}
-				setTarget[kv[:eq]] = typed
+				// `--set key:=null` on a patch DELETES the key. Storing a
+				// literal null instead left junk keys unremovable through the
+				// CLI: the patch op merges `set` into content, so a null value
+				// is a present key holding null and there is no other delete
+				// verb. The mutate patch op's own `unset` list is the delete
+				// (Map.drop in Mutations.apply_one/3), so route it there.
+				//
+				// The nesting refusal below is deliberately NOT applied to this
+				// branch: naming a key that already exists literally — such as
+				// the "content.description" a pre-fix dotted patch created — is
+				// the ONLY way its author can remove it. Refusing the dot here
+				// would seal the junk in.
+				if typed == nil && setSupportsUnset(cmd) {
+					unsetKeys = append(unsetKeys, key)
+					continue
+				}
+				if err := checkSetKeyNesting(kv, key); err != nil {
+					return nil, nil, "", err
+				}
+				// `--set 'content:={…}'` on a patch double-nests to
+				// content.content. The server only WARNS (Warnings advisory,
+				// mutations.ex warn_on_nested_content/1) and still returns a
+				// rev, so the no-op reads as success. Refuse it here with the
+				// same hint the dotted spelling gets — one mistake, one
+				// answer. Map values only, matching the server's own guard: a
+				// scalar field legitimately named `content` is not this shape.
+				if _, isMap := typed.(map[string]any); isMap && key == "content" && cmd.SetKey != "" {
+					return nil, nil, "", setNestingError(kv, key, "blocks:=[…]")
+				}
+				setTarget[key] = typed
 				continue
 			}
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
 				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
-			setTarget[kv[:eq]] = kv[eq+1:]
+			key := kv[:eq]
+			if err := checkSetKeyNesting(kv, key); err != nil {
+				return nil, nil, "", err
+			}
+			setTarget[key] = kv[eq+1:]
 		}
 	}
 	if cmd.SetKey != "" {
 		obj[cmd.SetKey] = setTarget
+	}
+	if len(unsetKeys) > 0 {
+		obj["unset"] = unsetKeys
 	}
 
 	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
@@ -1658,6 +1833,51 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	}
 	raw, _ := json.Marshal(obj)
 	return raw, nil, "application/json", nil
+}
+
+// setNestingError is the ONE refusal both spellings of the content-nesting
+// mistake get: `--set 'content:={…}'` and `--set 'content.description=…'` are
+// the same error typed two ways, so they must read the same way. The message
+// names the mechanism (--set fields are merged INTO content, nothing nests) and
+// then spells the bare inner field the caller wanted. `example` is that
+// spelling.
+func setNestingError(kv, key, example string) error {
+	return fmt.Errorf("invalid --set %q: --set fields are merged INTO the document's content, "+
+		"so %q does not nest — it lands a literal key. Set the inner field directly, "+
+		"e.g. --set '%s' (use --file to send a body verbatim if you really meant a literal key)",
+		kv, key, example)
+}
+
+// checkSetKeyNesting refuses a --set key containing a dot. The merge is SHALLOW
+// at every write path, so `--set content.description=x` stored a key literally
+// named "content.description" beside the real `description` and still returned
+// a rev — every success signal a caller checks (rev, exit 0, a clean publish,
+// a moved updated_at) said the write landed while the field never changed. A
+// dot is never a path here, so the honest answer is a refusal, not a silent
+// literal. The ONE exception lives at the call site: `key:=null` on a patch is
+// a deletion, and a junk key already stored under a dotted name can only be
+// named to remove it.
+func checkSetKeyNesting(kv, key string) error {
+	if !strings.Contains(key, ".") {
+		return nil
+	}
+	// `content.<field>` is the exact double-nest mistake, one spelling further
+	// on: the read path prints these fields under a `content` object, so the
+	// caller writes back the path they just read. Point at the bare field.
+	if inner := strings.TrimPrefix(key, "content."); inner != key && inner != "" && !strings.Contains(inner, ".") {
+		return setNestingError(kv, key, inner+"=…")
+	}
+	head := key[:strings.Index(key, ".")]
+	return setNestingError(kv, key, head+":={…}")
+}
+
+// setSupportsUnset reports whether this command's wire shape has a place to put
+// a deletion. Only the mutate `patch` op does: its body carries an `unset` list
+// the server drops from content. A create/replace body has no such slot, and
+// there a `--set field:=null` is a legitimate null-valued field on a new
+// document — so it keeps riding as a null.
+func setSupportsUnset(cmd manifest.Command) bool {
+	return cmd.MutationOp == "patch" && cmd.SetKey != ""
 }
 
 // commandFlagBelongsInBody reports whether a command-local flag rides in the
@@ -2210,6 +2430,12 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 			out.outf("%s", string(payload))
 		}
 	case "table":
+		// `bp task get` only: the row's title and, directly under it, the
+		// recorded disposition + disposition_reason — above the key/value dump
+		// where the whole `doc` object collapses into one truncated cell. No-op
+		// for every other verb and for a row carrying no ruling
+		// (tasks_ruling.go).
+		emitTaskGetRulingHeader(out, cmd, payload)
 		renderTable(out, payload)
 		emitWarnings(out, payload)
 		emitNotices(out, payload)

@@ -1,0 +1,1 @@
+MUTATION PROOF: deleting the structured-field branch (or blanking the three fields) changes the rendered output — a green that cannot go red does not prove the CLI stopped reading English.

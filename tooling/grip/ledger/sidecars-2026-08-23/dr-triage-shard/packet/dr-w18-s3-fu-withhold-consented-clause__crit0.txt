@@ -1,0 +1,1 @@
+Withhold.record/4 gains an explicit CONSENTED clause for the recipient-less-by-construction cases its own moduledoc already names (the fleet digest with no platform admins, and the zero-member team): it returns 0 WITHOUT the Logger.error refused-an-unrecordable-withhold line, which today misreports a consented absence as an operator bug.

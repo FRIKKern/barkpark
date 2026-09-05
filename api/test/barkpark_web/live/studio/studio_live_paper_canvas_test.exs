@@ -109,6 +109,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     html
   end
 
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
   # Slice just the editor surface so the snapshot is stable against unrelated
   # chrome (header buttons carry tokens / counts that drift across runs).
   defp editor_html(html) do
@@ -183,13 +185,15 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       rendered = editor_html(open_editor(view))
 
       if File.exists?(@snapshot_path) do
-        baseline = File.read!(@snapshot_path)
+        # The snapshot is a text file; its final newline is not part of the DOM.
+        baseline = @snapshot_path |> File.read!() |> String.trim_trailing("\n")
 
-        assert rendered == baseline, """
-        FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
-        path must stay byte-identical. If this change is intentional, delete
-        #{@snapshot_path} and re-run to re-baseline.
-        """
+        assert rendered == baseline,
+               inspect(
+                 Enum.reject(String.myers_difference(baseline, rendered), fn {kind, _} ->
+                   kind == :eq
+                 end)
+               )
       else
         File.mkdir_p!(Path.dirname(@snapshot_path))
         File.write!(@snapshot_path, rendered)
@@ -799,6 +803,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # run keyed by the slug + its ORDINAL (Bug #1a/#1c) — run 0 → "<slug>-run-0".
       # Edit the intro paragraph.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -833,6 +839,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # "paper-canvas-h-1" → the hook dropped it (baseline stuck) AND the re-render
       # computed a new wrapper id → remount (caret + in-flight edit lost).
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "remove-block", "id" => "h-1"}]
       })
 
@@ -886,6 +894,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       open_editor(view)
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -944,6 +954,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       open_editor(view)
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1105,6 +1117,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       view = mount_canvas_editor(conn)
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1145,6 +1159,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # insert-after uses "afterId" (NOT "after" — that key is move-block's). Insert
       # directly after p-intro → it lands at index 2, between p-intro and c-note.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "insert-after", "afterId" => "p-intro", "block" => new_block}]
       })
 
@@ -1169,6 +1185,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       view = mount_canvas_editor(conn)
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "remove-block", "id" => "c-note"}]
       })
 
@@ -1190,6 +1208,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # move-block uses "after" (the anchor id). Move p-after to just after h-1 — it
       # jumps from index 3 to index 1.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "move-block", "id" => "p-after", "after" => "h-1"}]
       })
 
@@ -1215,6 +1235,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # the divider. The fold applies them in order; the persisted result is the
       # COMPOSED effect of all three.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "patch-block", "id" => "h-1", "patch" => %{"text" => "Batched Heading"}},
           %{"op" => "insert-after", "afterId" => "p-intro", "block" => inserted},
@@ -1255,6 +1277,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # First batch + its echo.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1272,6 +1296,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # SECOND, independent edit on the same still-mounted view — drives the loop again.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1307,6 +1333,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       sentinel = "Survives-a-reload-#{System.unique_integer([:positive])}"
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1345,6 +1373,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # absent id would HALT the atomic fold with {:block_not_found}, the whole batch
       # would error → "Edit failed" flash → the real patch would be LOST.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "ghost-id"},
           %{
@@ -1430,6 +1460,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # as `paper-ops`. Here: one patch-block editing the intro paragraph's text —
       # the SAME op shape the per-block path persists, just inside a batch array.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1477,7 +1509,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
         }
       ]
 
-      render_hook(view, "paper-ops", %{"ops" => ops})
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
+        "ops" => ops
+      })
 
       blocks = Content.paper_blocks(@slug, @dataset)
 
@@ -1519,8 +1555,18 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       before = Content.paper_blocks(@slug, @dataset)
       pid_before = view.pid
 
-      render_hook(view, "paper-ops", %{"ops" => []})
-      render_hook(view, "paper-ops", %{"ops" => "not-a-list"})
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
+        "ops" => []
+      })
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
+        "ops" => "not-a-list"
+      })
+
       render_hook(view, "paper-ops", %{})
 
       assert Content.paper_blocks(@slug, @dataset) == before
@@ -1585,6 +1631,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert footer_save_text(view) == ""
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1618,6 +1666,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # Removing every substantive block hollows the paper — the server-owned
       # hollow ratchet HALTS the batch (put_paper_halt/2).
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "p-intro"},
           %{"op" => "remove-block", "id" => "c-note"},
@@ -1637,6 +1687,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       open_editor(view)
 
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1651,6 +1703,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # A refused batch REPLACES the calm token — a rejected write must never
       # leave a stale "Auto-saved" on screen.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "p-intro"},
           %{"op" => "remove-block", "id" => "c-note"},
@@ -1662,6 +1716,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # …and a subsequent good write recovers the announcement.
       render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",

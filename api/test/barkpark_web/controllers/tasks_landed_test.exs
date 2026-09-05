@@ -16,7 +16,7 @@ defmodule BarkparkWeb.TasksLandedTest do
     * an unknown task is a 404.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document

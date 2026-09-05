@@ -1,0 +1,45 @@
+{
+  "blocks": [
+    {
+      "axes": {
+        "max": 100,
+        "min": 0,
+        "xLabels": [
+          "top 1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "top 10"
+        ]
+      },
+      "caption": "Cumulative share of block instances by type rank. Five types reach 92%; the remaining 62 types split the last 8%.",
+      "id": "block-11",
+      "kind": "line",
+      "series": [
+        {
+          "label": "cumulative share of corpus (%)",
+          "points": [
+            48.3,
+            77.6,
+            83.9,
+            90,
+            91.8,
+            93.3,
+            94.6,
+            95.6,
+            96.2,
+            96.7
+          ]
+        }
+      ],
+      "type": "chart"
+    }
+  ],
+  "paper": "portabledoc-potential-study",
+  "type": "chart"
+}

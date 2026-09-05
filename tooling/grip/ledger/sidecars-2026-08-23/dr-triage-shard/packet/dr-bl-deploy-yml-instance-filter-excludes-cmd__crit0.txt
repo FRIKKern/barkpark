@@ -1,0 +1,1 @@
+Either cmd/ is added to the instance filter, or a comment in deploy.yml records that the exclusion is deliberate and why.

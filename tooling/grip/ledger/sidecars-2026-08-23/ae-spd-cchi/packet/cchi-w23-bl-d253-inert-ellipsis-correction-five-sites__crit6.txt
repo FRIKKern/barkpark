@@ -1,0 +1,1 @@
+NO REGRESSION: the full guard (all legs, no --defect, with an explicit OVERFLOW_GUARD_PORT) exits 0, and `node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs` exits 0. Quote both.

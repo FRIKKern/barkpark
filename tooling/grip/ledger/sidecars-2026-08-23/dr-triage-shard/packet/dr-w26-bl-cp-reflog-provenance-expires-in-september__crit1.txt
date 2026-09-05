@@ -1,0 +1,1 @@
+The 2026-09-25 horizon is either eliminated or has an alarm that fires before it, not after.

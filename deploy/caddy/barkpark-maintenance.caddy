@@ -3,9 +3,15 @@
 # the backend is unreachable (the seconds-long restart window of a deploy),
 # Caddy serves this branded 503 + Retry-After instead of a raw 502.
 #
-# `handle_errors` fires ONLY on errors Caddy itself raises (dial failure /
-# gateway timeout) — a 4xx/5xx the app returns is proxied through untouched, so
-# this never masks a real application error.
+# The STATUS LIST is load-bearing. A bare `handle_errors {` catches every error
+# the SITE raises — including the 404 a `file_server` raises on a miss inside an
+# armed `handle_path /sites/<slug>/*` static-site route. Measured on guerrilla:
+# every miss on every spawned static site answered this 503 instead of 404, so
+# the whole 4xx surface of the static sites was indistinguishable from a deploy
+# window. `handle_errors 502 503 504` keeps the branded page on the gateway
+# errors it is for (dial failure / gateway timeout) and lets a 404 be a 404.
+# A 4xx/5xx the app RETURNS is proxied through untouched either way, so this
+# never masks a real application error.
 #
 # deploy/instance-deploy.sh injects this automatically (idempotent, validated,
 # auto-reverting). For a hand-managed Caddyfile, paste the block below into each
@@ -16,7 +22,7 @@
 #
 #   guerrilla.barkpark.cloud {
 #       reverse_proxy localhost:4000
-#       handle_errors {
+#       handle_errors 502 503 504 {
 #           header Retry-After "15"
 #           respond 503 {
 #               body <<BARKPARK_MAINTENANCE
@@ -25,7 +31,7 @@
 #           }
 #       }
 #   }
-handle_errors {
+handle_errors 502 503 504 {
 	header Retry-After "15"
 	respond 503 {
 		body <<BARKPARK_MAINTENANCE

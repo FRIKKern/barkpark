@@ -79,6 +79,16 @@ defmodule BarkparkCloud.Notifications.DeliveryReasonTest do
        {:send, {:missing_requirement, host, :auth}}, :auth_not_offered},
       {"gen_smtp option validation (no host in the term at all) — no socket was opened",
        :no_credentials, :not_configured},
+      # cch-w35-followup. ONE ROW PER NEW ARM. Each is mutation-proved on its
+      # own: reverting only its `classify/1` clause reds only this row, naming it.
+      {"gen_smtp option validation: no relay host configured — no socket was opened", :no_relay,
+       :relay_not_configured},
+      {"gen_smtp option validation: the relay port is not a port — no socket was opened",
+       :invalid_port, :relay_port_invalid},
+      {"posix ehostdown — the destination host reported itself down, not unrouted",
+       {:retries_exceeded, {:network_failure, host, {:error, :ehostdown}}}, :network_down},
+      {"posix enetdown — the network reported itself down, not unrouted",
+       {:no_more_hosts, {:network_failure, host, {:error, :enetdown}}}, :network_down},
       # NOBODY ANSWERED is not a refusal: the peer that refuses ANSWERS
       # (:econnrefused, above, is the unmoved control).
       {"gen_smtp host unreachable — no route, nobody answered",
@@ -121,6 +131,9 @@ defmodule BarkparkCloud.Notifications.DeliveryReasonTest do
             :auth_rejected,
             :auth_not_offered,
             :not_configured,
+            :relay_not_configured,
+            :relay_port_invalid,
+            :network_down,
             :rate_limited,
             :destination_temporary_error,
             :recipient_rejected,
@@ -213,6 +226,67 @@ defmodule BarkparkCloud.Notifications.DeliveryReasonTest do
                "#{inspect(term)} still publishes #{inspect(forbidden)} — #{why}. " <>
                  "Sentence was #{inspect(sentence)}"
       end
+    end
+
+    # cch-w35-followup — the CRITERION, mechanical: each of the two option-
+    # validation siblings must name ITS OWN missing configuration. Not the
+    # generic :unknown sentence (which sends the reader to a server log for a
+    # fault the console can fix), and not :not_configured's (which names the
+    # username and password — the wrong missing setting for both).
+    test "the validate_options siblings each name their own missing configuration" do
+      relay = DeliveryReason.summarize(:no_relay)
+      port = DeliveryReason.summarize(:invalid_port)
+
+      for {atom, sentence} <- [no_relay: relay, invalid_port: port] do
+        refute sentence == DeliveryReason.label(:unknown),
+               "#{atom} still falls to the generic :unknown sentence: #{inspect(sentence)}"
+
+        refute sentence == DeliveryReason.label(:not_configured),
+               "#{atom} borrows the credentials sentence, which names the wrong missing " <>
+                 "setting: #{inspect(sentence)}"
+
+        assert sentence =~ "never started",
+               "#{atom} no longer says the send never started: #{inspect(sentence)}"
+
+        refute sentence =~ ~r/destination|rejected|refused|reach/,
+               "#{atom} publishes a REMOTE verdict for a local option-validation fault, " <>
+                 "which no socket was opened to observe: #{inspect(sentence)}"
+      end
+
+      assert relay =~ "relay host", "no_relay does not name the relay host: #{inspect(relay)}"
+      assert port =~ "port", "invalid_port does not name the port: #{inspect(port)}"
+      assert relay != port, "the two siblings publish one sentence for two settings"
+    end
+
+    # The two `down` reports are nobody-answered like ehostunreach/enetunreach,
+    # but neither observed a ROUTE — and :unreachable's sentence names one. This
+    # arm reds if a later pass folds them into it.
+    test "a `down` report does not borrow :unreachable's route sentence" do
+      for atom <- [:ehostdown, :enetdown] do
+        sentence = DeliveryReason.summarize(atom)
+
+        assert DeliveryReason.classify(atom) == :network_down
+
+        refute sentence =~ "no route",
+               "#{atom} publishes a routing mechanism nothing observed: #{inspect(sentence)}"
+
+        refute sentence == DeliveryReason.label(:unknown),
+               "#{atom} still falls to :unknown: #{inspect(sentence)}"
+      end
+    end
+
+    # THE RULING, pinned so it stays a decision rather than a gap. `:eacces` is
+    # OUR host refusing the socket (a local sandbox/firewall policy, or an
+    # unprivileged bind). It names no destination behaviour and no console
+    # setting, so every sentence in this vocabulary would claim something
+    # nothing observed; :unknown points at the server log, where the raw term is.
+    test "eacces is RULED OUT, not overlooked — it stays :unknown on purpose" do
+      assert DeliveryReason.classify(:eacces) == :unknown
+
+      assert DeliveryReason.summarize(:eacces) == DeliveryReason.label(:unknown),
+             "eacces was given a sentence. If that is deliberate, the class must name what " <>
+               "the code observed — a LOCAL permission denial — and this ruling must be " <>
+               "rewritten, not deleted."
     end
 
     test "the controls keep their meaning — a refusal and a real throttle are answers" do

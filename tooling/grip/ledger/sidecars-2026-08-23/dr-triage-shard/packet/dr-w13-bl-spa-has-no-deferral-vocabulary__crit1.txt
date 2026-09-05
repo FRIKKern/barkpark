@@ -1,0 +1,1 @@
+siteStatusChip shows a waiting state when the newest row is deferred, instead of falling through to the old live row

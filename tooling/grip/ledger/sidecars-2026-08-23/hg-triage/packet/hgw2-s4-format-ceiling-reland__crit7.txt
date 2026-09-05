@@ -1,0 +1,1 @@
+.format-drift-ceiling is regenerated on the PINNED 1.18.1 against the rebased tree, never the stale 42-file roster. Evidence: the CI run id it was derived from and the new count.

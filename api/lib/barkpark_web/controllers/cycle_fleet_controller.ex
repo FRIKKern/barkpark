@@ -176,7 +176,12 @@ defmodule BarkparkWeb.CycleFleetController do
         {:ok, gate, candidate} ->
           html =
             candidate.content["blocks"]
-            |> Barkpark.PortableDoc.Render.render_blocks(%{})
+            # task-c46967eb3dc49e77: this candidate Paper is sent straight to a
+            # BROWSER as `text/html` below — it is never mailed — so the caller
+            # names `:article` instead of inheriting
+            # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default,
+            # which was stamping mail typography onto a screen.
+            |> Barkpark.PortableDoc.Render.render_blocks(%{style: :article})
             |> ensure_release_paper_title(candidate.title)
 
           conn

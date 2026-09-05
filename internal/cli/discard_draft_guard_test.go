@@ -108,15 +108,21 @@ func (h *discardHarness) sent(want string) bool {
 	return false
 }
 
-// Both routes are FLAT. manifest.BuildURL composes scoped_prefix only for the
-// scoped_admin / scoped_read tiers (or under a full ScopedMirror); doc.get is
-// tier `none` and doc.discard-draft is tier `write`, so the prefix stays a
-// future mirror hint and the live routes are the bare ones — which is exactly
-// what makes the guard's probe land on the same route the operator's own
-// `bp doc get` would.
+// Both routes carry the SCOPED PREFIX here, and that is the point of the
+// harness ctx: it states -w acme -p site, and both doc.get and
+// doc.discard-draft advertise a scoped_prefix in the fixture manifest, so
+// manifest.BuildURL composes the mirror for both (internal/manifest/scope.go —
+// a stated, non-floor scope must reach the wire or be refused, never silently
+// dropped onto the flat route that answers about the DEFAULT workspace).
+//
+// What these tests actually pin is that the guard's probe lands on the SAME
+// route the operator's own `bp doc get` would: probe and mutation move together
+// under the prefix or stay together without it. Leave the ctx at the baked
+// floor instead and both constants revert to their bare form.
 const (
-	discardMutatePath = "/v1/data/mutate/production"
-	discardTwinPath   = "/v1/data/doc/production/task/" + theDraftOnlyRow
+	discardScopePrefix = "/w/acme/p/site"
+	discardMutatePath  = discardScopePrefix + "/v1/data/mutate/production"
+	discardTwinPath    = discardScopePrefix + "/v1/data/doc/production/task/" + theDraftOnlyRow
 )
 
 // runDiscardWith drives the real runCommand — the whole guarded path, not the

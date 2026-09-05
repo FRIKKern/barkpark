@@ -1,0 +1,1 @@
+The standing RESIDUAL test in failure_copy_test.exs is deleted or inverted in the SAME PR — a residual guard that survives its own fix is a lie.

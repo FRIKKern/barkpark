@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR is merged AFTER dr-w24-s1 and AFTER dr-w24-s7, and a live `bp cloud deliveries <sha>` run against prod with a PAT (not an operator grant) is pasted showing a real recorded delivery.

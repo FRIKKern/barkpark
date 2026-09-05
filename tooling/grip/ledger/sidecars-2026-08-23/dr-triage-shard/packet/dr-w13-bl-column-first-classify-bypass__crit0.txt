@@ -1,0 +1,1 @@
+A ruling is recorded and implemented: either consecutive_deferrals/2 is threaded the real row, or the bypass is pinned deliberate by a test that fails if classify/1 goes column-first without threading

@@ -1,0 +1,1 @@
+The fork-PR boundary is documented and the lane fails LOUDLY there rather than warn-and-passing. Evidence: the code path and the note.

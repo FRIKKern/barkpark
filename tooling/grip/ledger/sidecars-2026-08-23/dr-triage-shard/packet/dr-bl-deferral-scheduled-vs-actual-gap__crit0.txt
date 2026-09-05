@@ -1,0 +1,1 @@
+Every deferral records the window the backoff ladder scheduled AND the gap that actually elapsed, in the same row, durably.

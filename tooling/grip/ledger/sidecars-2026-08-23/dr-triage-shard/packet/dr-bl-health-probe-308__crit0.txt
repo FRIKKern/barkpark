@@ -1,0 +1,1 @@
+The 308 is reproduced from the box and its cause named (basePath, trailing slash, or Caddy routing) rather than guessed.

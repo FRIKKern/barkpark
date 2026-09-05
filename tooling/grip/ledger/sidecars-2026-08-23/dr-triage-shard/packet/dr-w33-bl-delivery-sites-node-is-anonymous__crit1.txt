@@ -1,0 +1,1 @@
+The Go reader renders it in the same PR and the counter pins are re-derived from the gate's printed numbers. Evidence: the render output and the gate output naming the new floors.

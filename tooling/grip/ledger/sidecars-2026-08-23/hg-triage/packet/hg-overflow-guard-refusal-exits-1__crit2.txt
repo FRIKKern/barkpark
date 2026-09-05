@@ -1,0 +1,1 @@
+Proven by MUTATION, not by assertion: occupy the guard port with a foreign server, run the predicate, and show it reports a mechanical refusal rather than three false defect claims. Paste verbatim stdout of the before and after.

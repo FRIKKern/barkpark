@@ -1,0 +1,1 @@
+The paper pane exposes a control whose accessible name is Publish when the open document is a draft - asserted in a test, and absent when it is not applicable.

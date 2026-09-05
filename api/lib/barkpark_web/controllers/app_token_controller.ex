@@ -410,8 +410,10 @@ defmodule BarkparkWeb.AppTokenController do
   # bucket keyed on the single Cloud egress IP — provided that egress address is
   # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
   defp revoke_rate_limited?(conn) do
+    key = {:app_token_revoke, RateLimiter.client_ip(conn)}
+
     RateLimiter.check(
-      {:app_token_revoke, RateLimiter.client_ip(conn)},
+      RateLimiter.scoped_key(conn, key),
       capacity: @revoke_bucket_capacity,
       refill_per_sec: @revoke_bucket_capacity / 60
     ) == :rate_limited

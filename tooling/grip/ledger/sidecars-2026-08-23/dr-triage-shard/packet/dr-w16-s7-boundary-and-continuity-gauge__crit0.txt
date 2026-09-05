@@ -1,0 +1,1 @@
+The census envelope carries a declared vocabulary boundary as DATA — the instant, its reason, and its DERIVATION METHOD — derived from `min(inserted_at) where status='deferred'`, not hardcoded. Paste the emitted node and the value 2026-08-05 21:27:11.41321

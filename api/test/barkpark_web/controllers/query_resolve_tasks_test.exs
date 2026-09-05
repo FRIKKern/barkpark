@@ -11,7 +11,7 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     * both the list (index) and single-doc (show) routes resolve
     * fail-closed: rows come only from the request's tenant scope
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 

@@ -1,0 +1,1 @@
+The corrected reconcile is proven able to fail: a NEW finding with no inline annotation still reaches the baseline / still reds the fresh-finding guard

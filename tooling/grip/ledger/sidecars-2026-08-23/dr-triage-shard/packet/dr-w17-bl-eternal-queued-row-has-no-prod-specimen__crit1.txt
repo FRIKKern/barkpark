@@ -1,0 +1,1 @@
+The Oban cancelled/discarded zero is quoted WITH its 7-day Pruner window (config.exs:262; oldest retained row exactly 7 days old), never as an all-time zero

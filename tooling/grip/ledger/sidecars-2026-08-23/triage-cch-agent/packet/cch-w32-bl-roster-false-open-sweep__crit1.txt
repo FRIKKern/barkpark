@@ -1,0 +1,1 @@
+Each of the five mis-sized rows is re-scoped to its live residue, with the already-paid criteria stamped rather than silently dropped.

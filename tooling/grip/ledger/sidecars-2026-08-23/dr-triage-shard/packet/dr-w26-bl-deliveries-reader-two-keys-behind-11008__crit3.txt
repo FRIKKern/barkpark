@@ -1,0 +1,1 @@
+MUTATION: dropping Transition from the struct reds exactly one named test. Paste the failure.

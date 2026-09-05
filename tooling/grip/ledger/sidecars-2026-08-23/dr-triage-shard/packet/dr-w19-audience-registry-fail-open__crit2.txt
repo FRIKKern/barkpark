@@ -1,0 +1,1 @@
+GATE: cd cloud && CC=clang mix test test/barkpark_cloud/deploy_signal_audience_census_test.exs green, and scripts/cloud-path-escape-check.sh rc 0.

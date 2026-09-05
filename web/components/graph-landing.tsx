@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
+import { readerHref } from "@/lib/find";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { truncationNotice } from "@/lib/graph-truncation";
 
@@ -56,7 +57,7 @@ export function GraphLanding({
       // renderer already suppresses their click, but guard here too.
       if (node.phantom || !node.doc_id || !node.type) return;
       const qs = sp.toString();
-      const href = `/d/${node.type}/${node.doc_id}`;
+      const href = readerHref(node.type, node.doc_id);
       router.push(qs ? `${href}?${qs}` : href);
     },
     [router, sp],

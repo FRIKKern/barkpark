@@ -1,0 +1,1 @@
+The Decide agent's commit includes tooling/grip/ledger/*.json by EXPLICIT path, with no git add -A anywhere - evidence: the amended instruction

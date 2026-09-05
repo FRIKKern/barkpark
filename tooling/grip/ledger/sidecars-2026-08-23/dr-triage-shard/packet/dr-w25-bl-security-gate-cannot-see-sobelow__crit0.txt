@@ -1,0 +1,1 @@
+Either `sobelow` joins Security gate's needs and the stale baseline is reconciled in the same sequenced change, or the exclusion is documented in security.yml with a reason and an owner.

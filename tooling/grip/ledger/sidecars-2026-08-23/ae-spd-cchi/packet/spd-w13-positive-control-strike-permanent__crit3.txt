@@ -1,0 +1,1 @@
+scripts/studio-desk-measure.mjs is NOT modified: git diff --stat against it is empty.

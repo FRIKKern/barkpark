@@ -1,0 +1,1 @@
+All studio_live_*_test.exs files on origin/main are scanned and each is classified as behaviour-asserting or exact-markup-asserting, with the list published

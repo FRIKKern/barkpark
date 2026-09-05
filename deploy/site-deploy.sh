@@ -425,10 +425,20 @@ PY
   fi
 
   # Content-truth: the markers in the SERVED html must be the ones we ship.
-  local got_build got_rev got_doc
+  local got_build got_rev got_doc got_corpus
   got_build="$(meta_value "$body" bp-build-id)"
   got_rev="$(meta_value "$body" bp-content-rev)"
   got_doc="$(meta_value "$body" bp-doc-id)"
+  # bp-corpus-status (cause-truth) — the SAME marker site-deploy-node.sh reads.
+  # The template emits it ONLY when it could not anchor a content document, and
+  # it carries the upstream condition that stopped it ("graph 403: …",
+  # "graph 401: …", "graph 200: corpus read OK but carried 0 node(s)…"). Read it
+  # BEFORE the body is deleted — it is what turns the empty bp-doc-id refusal
+  # below from a symptom into a diagnosis. Without it a static build could only
+  # ever say "no content document", and `DeployLedger.classify/2` had nothing to
+  # match but the symptom, so EVERY static corpus failure landed in the causeless
+  # DOC_ID_EMPTY bucket regardless of what actually went wrong upstream.
+  got_corpus="$(meta_value "$body" bp-corpus-status)"
   rm -f "$body"
   if [ "$got_build" != "$BUILD_ID" ]; then
     HEALTH_DETAIL="bp-build-id marker is '${got_build:-<missing>}' but this deploy ships '$BUILD_ID' — the served html is not this build"
@@ -443,7 +453,23 @@ PY
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ -z "$got_doc" ]; then
-    HEALTH_DETAIL="bp-doc-id marker is empty — the build rendered no content document"
+    # STILL REFUSES — fail-closed on an empty bp-doc-id is correct (D72) and is
+    # NOT relaxed here. What changes is legibility: when the build recorded WHY
+    # it could not read its corpus, that cause rides the failure_reason, so a
+    # 403 (public-read token), a 401 (no token), a wrong host and a genuinely
+    # empty corpus stop collapsing into one illegible row.
+    #
+    # THE SENTENCE IS A CONSUMER CONTRACT. `cloud/lib/barkpark_cloud/deploy_ledger.ex`
+    # reads the upstream status out of the stored failure_reason with the regex
+    #   could not read a content document: graph (\d+):
+    # anchored on this exact English. Reword it and every static row silently
+    # degrades back to DOC_ID_EMPTY with nothing anywhere failing — so the
+    # self-test asserts the anchor against these emitted bytes.
+    if [ -n "$got_corpus" ]; then
+      HEALTH_DETAIL="bp-doc-id marker is empty — the build could not read a content document: $got_corpus"
+    else
+      HEALTH_DETAIL="bp-doc-id marker is empty — the build rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract, so the upstream cause went unrecorded)"
+    fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ -z "${CONTENT_REV:-}" ]; then
@@ -635,6 +661,45 @@ stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
 # SELF-TEST — fixtures in a tmpdir; proves the real primitives, no npm/caddy.
 # ---------------------------------------------------------------------------
 if [ "$MODE" = selftest ]; then
+  # -------------------------------------------------------------------------
+  # SELF-TEST FLOOR — two LITERAL, COMMITTED constants (task-7843c92e00b0a13a).
+  #
+  # The verdict below used to be `[ "$FAILS" -eq 0 ]` and nothing else, so a run
+  # that executed three checks and a run that executed 391 both printed
+  # `[selftest] PASS`. Three blocks in this file drop out on a toolchain/tree
+  # condition (python3+curl for the HEALTH probes and the engine e2e, a real
+  # flock(1) for the fleet admission gate, api/lib/barkpark/sites/deploy_runner.ex
+  # for the DeployRunner doctrine rows). Each one is already a HARD failure when
+  # BARKPARK_SELFTEST_REQUIRE_E2E=1 — but a block can also vanish for a reason
+  # nobody wrote a guard for (a refactor drops an `if`, a fixture stops being
+  # created, an `exit 0` lands mid-suite). The floor catches THAT class: a suite
+  # that stopped running rows must not report PASS.
+  #
+  # The numbers are LITERALS, never derived from the run — a floor computed from
+  # the same run is exactly the vacuity it is meant to catch. Measured
+  # 2026-09-03 at origin/main 0cb244bfb:
+  #
+  #   MIN  =  76  every optional block skipped (no python3/curl, no flock, no api/)
+  #   FULL = 458  all blocks run — this is what CI gets (430 + the 10 rows of
+  #                the static-miss 404 block + the 18 rows of the already-armed
+  #                hide-UPGRADE block, both of which need a real caddy(1))
+  #
+  # 2026-09-04: +25 (67->76, 433->458) for the three failure arms that had no row
+  # at all — the disarm's awk/mv revert (9, unconditional, so BOTH floors move),
+  # the arm's lock-never-taken branch (8) and the arm's awk/mv revert (8), the
+  # last two inside the python3/curl e2e block so they land on FULL only.
+  #
+  # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
+  # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
+  # env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest: python3, curl and
+  # util-linux flock all present, api/ checked out). There is no platform branch
+  # inside this self-test, so under that flag the row count is deterministic.
+  # MIN applies to a bare laptop run, where the SKIPs are honest.
+  #
+  # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
+  # the same commit. A red here is either a missing block or an unraised floor.
+  SELFTEST_FLOOR_MIN=76
+  SELFTEST_FLOOR_FULL=458
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -925,6 +990,55 @@ RCF
     cmp -s "$TR/Caddyfile" "$TL/Caddyfile"
 
   # -------------------------------------------------------------------------
+  # TEARDOWN, THE REWRITE ITSELF FAILED (D77) — the THIRD way disarm_caddy_site_route
+  # returns 2, and the only one no fixture reached. The two blocks above both
+  # drive the `caddy validate` revert; the awk/mv arm
+  # (`awk … > "$tmp" && mv "$tmp" "$CADDYFILE" || { … mv "$bak" … ; return 2; }`)
+  # fires when the Caddyfile could not be REWRITTEN at all — a full /tmp, a
+  # read-only filesystem, an ENOSPC — and on origin/main nothing asserted that it
+  # too refuses TORN_DOWN=, restores the backup and keeps the tree.
+  #
+  # THE FIXTURE: a bare `mktemp` (no arguments) is called by exactly the two
+  # Caddyfile rewriters in this engine — the arm and the disarm. Every OTHER
+  # mktemp caller passes an explicit template (the health body, the build log,
+  # this self-test's own scratch dir), so a stub that only redirects the ZERO-ARG
+  # form and execs the real binary otherwise arms this one branch and nothing
+  # else. Pointed at a path under a directory that does not exist, the
+  # `awk … > "$tmp"` redirect fails, the `&&` chain short-circuits and the revert
+  # arm runs — the same state an ENOSPC produces, without needing a full disk or
+  # a root-owned mount (a chmod-based fixture would be a no-op under a root CI).
+  # -------------------------------------------------------------------------
+  echo "[selftest] --teardown REFUSES to claim TORN_DOWN when the Caddyfile REWRITE itself fails (D77)"
+  TM="$TD/teardown-mv"; mkdir -p "$TM/bin" "$TM/sites/stuck/releases/b1"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/caddy"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/systemctl"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TM/bin/flock"
+  printf '#!/usr/bin/env bash\nif [ "$#" = 0 ]; then echo "%s/no-such-dir/tmp"; exit 0; fi\nif [ -x /usr/bin/mktemp ]; then exec /usr/bin/mktemp "$@"; fi\nexec /bin/mktemp "$@"\n' "$TM" > "$TM/bin/mktemp"
+  chmod +x "$TM/bin/"*
+  ln -sfn releases/b1 "$TM/sites/stuck/current"
+  cp "$TL/Caddyfile" "$TM/Caddyfile"
+  cp "$TM/Caddyfile" "$TM/Caddyfile.orig"
+  env PATH="$TM/bin:$PATH" SITE_SLUG=stuck BARKPARK_SITES_DIR="$TM/sites" \
+    BARKPARK_CADDYFILE="$TM/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TM/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TM/cflock" BARKPARK_SITE_LOG_FILE="$TM/log" \
+    bash "$SELF" --teardown > "$TM/out" 2>&1; tdrc5=$?
+  check "un-rewritable teardown exits 25 (not 0)"   [ "$tdrc5" = 25 ]
+  check "un-rewritable teardown names the REWRITE as what failed (not caddy validate)" \
+    grep -q 'could not rewrite .* for the /sites/stuck disarm — restoring the backup' "$TM/out"
+  check "un-rewritable teardown printed NO TORN_DOWN= on stdout" absent 'TORN_DOWN=' "$TM/out"
+  check "un-rewritable teardown logged NO TORN_DOWN= to the durable log" absent 'TORN_DOWN=' "$TM/log"
+  check "un-rewritable teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=stuck detail="' "$TM/out"
+  check "un-rewritable teardown claims a MEASURED still-live route (the disarm DID run)" \
+    grep -q 'STILL LIVE' "$TM/out"
+  check "un-rewritable teardown KEPT the release tree (recoverable)" \
+    [ -d "$TM/sites/stuck/releases/b1" ]
+  check "un-rewritable teardown left the Caddyfile byte-identical (the backup was restored)" \
+    cmp -s "$TM/Caddyfile" "$TM/Caddyfile.orig"
+  check "un-rewritable teardown left no .bak.teardown turd beside the Caddyfile" \
+    sh -c "! ls '$TM'/Caddyfile.bak.teardown.* >/dev/null 2>&1"
+
+  # -------------------------------------------------------------------------
   # HEALTH finder integrity — the gate must refuse a finder build whose seed is
   # corrupt (the #4020 class) or whose island lost its error boundary (#4047),
   # while leaving plain (seedless) templates untouched. Drives the REAL
@@ -1156,16 +1270,25 @@ if [ -f ./.fail-build ]; then
   echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
   exit 1
 fi
-bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"
+bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; corpus=""
 # The exact build that WENT LIVE on guerrilla: a wrong build id and an EMPTY
 # content rev, both of which the old name-only gate waved through.
 [ -f ./.lie ] && { bid=TOTALLY-WRONG; rev=""; }
+# A STATIC build that could NOT read its corpus: empty bp-doc-id (the gate must
+# still refuse) PLUS the bp-corpus-status marker naming the upstream condition.
+[ -f ./.no-corpus ] && { doc=""; corpus="graph 403: public-read tokens may only read published public documents"; }
+# The legacy shape: empty bp-doc-id and NO status marker (a template built before
+# the corpus-status contract) — the gate must refuse AND say the cause is unknown.
+[ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
 mkdir -p dist
 {
   printf '<!doctype html><html><head>\n'
   printf '<meta name="bp-build-id" content="%s">\n' "$bid"
   printf '<meta name="bp-content-rev" content="%s">\n' "$rev"
   printf '<meta name="bp-doc-id" content="%s">\n' "$doc"
+  # Emitted ONLY when there is something to record — same conditional the
+  # template uses (a healthy build carries no bp-corpus-status at all).
+  [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>hello</h1></body></html>\n'
 } > dist/index.html
 exit 0
@@ -1189,6 +1312,9 @@ FAKENPM
     # The stage protocol is a STDOUT contract — assert against stdout alone.
     saw()   { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$E2E/out.log"; }
     nosaw() { ! grep -q "^BPSTAGE name=$1 " "$E2E/out.log"; }
+    # A NEGATIVE log assertion needs its own helper: `check` runs its arguments
+    # as a command, so a bare `!` cannot be passed through.
+    no_log_match() { ! grep -Eq "$1" "$E2E/out.log"; }
     livenow() { readlink "$E2E_SITE/current" 2>/dev/null || true; }
 
     echo "[selftest] e2e: a full deploy walks all six stages"
@@ -1247,6 +1373,46 @@ FAKENPM
     check "no SWITCH stage line at all"        nosaw SWITCH
     check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
     check "the poisoned release is purged"     [ ! -d "$E2E_SITE/releases/e3" ]
+
+    echo "[selftest] e2e: an UNREADABLE CORPUS fails HEALTH and the reason NAMES the upstream condition (403), not just the empty marker"
+    : > "$SRC/.no-corpus"
+    rc="$(E2E_REV=rev-3b e2e_deploy e3b)"
+    rm -f "$SRC/.no-corpus"
+    check "unreadable-corpus build exit 14"    [ "$rc" = 14 ]
+    check "HEALTH failed"                      saw HEALTH failed e3b
+    check "the reason names the UPSTREAM 403, read out of bp-corpus-status" \
+      grep -q 'bp-doc-id marker is empty .* graph 403: public-read tokens may only read published public documents' "$E2E/out.log"
+    # Dual-channel, same contract as the lying build: the cause must ride the
+    # plain human log too, because the run-level reason_tail is the copy the
+    # user actually sees at the verdict line.
+    check "the cause ALSO rides the plain human log (dual-channel)" \
+      grep -q '\[site-deploy .*HEALTH: bp-doc-id marker is empty .* graph 403: ' "$E2E/out.log"
+    # THE CLASSIFIER'S ANCHOR, asserted by the PRODUCER.
+    # `cloud/lib/barkpark_cloud/deploy_ledger.ex` reads the upstream status out
+    # of the stored failure_reason with the regex
+    #   could not read a content document: graph (\d+):
+    # and routes it to CONTENT_API_403 / _500 / _503 / _UNREACHABLE. Reword the
+    # English a few hundred lines above and every static row silently degrades
+    # back to the causeless DOC_ID_EMPTY bucket with nothing anywhere failing.
+    # So the producer asserts the consumer's anchor against its own bytes: a
+    # reflow reds HERE, on the shell side, at edit time.
+    check "the emitted reason still matches the CLASSIFIER's anchor (cloud deploy_ledger.ex)" \
+      grep -Eq 'could not read a content document: graph [0-9]+:' "$E2E/out.log"
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "current did NOT move (the gate STILL fails closed)" [ "$(livenow)" = releases/e1 ]
+    check "the corpus-less release is purged"  [ ! -d "$E2E_SITE/releases/e3b" ]
+
+    echo "[selftest] e2e: an empty bp-doc-id with NO status marker still refuses, and SAYS the cause went unrecorded"
+    : > "$SRC/.no-corpus-legacy"
+    rc="$(E2E_REV=rev-3c e2e_deploy e3c)"
+    rm -f "$SRC/.no-corpus-legacy"
+    check "legacy empty-marker build exit 14"  [ "$rc" = 14 ]
+    check "HEALTH failed"                      saw HEALTH failed e3c
+    check "the reason admits the cause is UNRECORDED (never invents one)" \
+      grep -q 'no bp-corpus-status marker: this build predates the corpus-status contract' "$E2E/out.log"
+    check "it does NOT claim a 403"            no_log_match 'graph 403'
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: redeploying the SAME build_id after a health failure REBUILDS"
     : > "$SRC/.npm-calls"
@@ -1909,6 +2075,83 @@ FAKECP
     check "the release still went live on disk (the flip is independent of Caddy)" \
       [ "$(readlink "$E2E/sites/routefail/current" 2>/dev/null)" = releases/rf2 ]
     check "SWITCH still ok"                              grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf2' "$RF/bad.out"
+
+    # -----------------------------------------------------------------------
+    # (c) THE ARM'S LOCK-NEVER-TAKEN BRANCH. `with_caddy_lock` returns 1 out of
+    #     its OWN guard, so arm_caddy_site_route is never entered and the route's
+    #     state is UNKNOWN to this run — a DIFFERENT claim from (b)'s "tried, was
+    #     rejected, reverted". The teardown direction has had this row since D77
+    #     ("lock-starved teardown says the route was NEVER CHECKED"); the arm
+    #     direction inherited the MESSAGE at the flip site but never the test, so
+    #     collapsing the arm's two non-zero details into one string was invisible.
+    #     Same fixture as the teardown's: a flock that grants the non-blocking
+    #     DEPLOY lock (`flock -n 9`, whose refusal is the separate exit 23) and
+    #     refuses the WAITING Caddyfile lock (`flock -w 120 8`).
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an arm whose Caddyfile lock is NEVER TAKEN says UNKNOWN, not NOT ARMED (engine-D77, arm direction)"
+    mkdir -p "$RF/lockbin"
+    cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$RF/lockbin/"
+    printf '#!/usr/bin/env bash\ncase "$1" in -w) exit 1;; *) exit 0;; esac\n' > "$RF/lockbin/flock"
+    chmod +x "$RF/lockbin/"*
+    # NB: NOT `Caddyfile.lock` — rf_deploy pins BARKPARK_CADDYFILE_LOCK to
+    # "$RF/caddyfile.lock", and on a case-INSENSITIVE filesystem (macOS APFS by
+    # default) that is the SAME inode: `exec 8>"$CADDY_LOCK"` would truncate the
+    # fixture Caddyfile, and this block would red on a platform difference
+    # instead of on the branch it exists to pin.
+    rf_caddyfile "$RF/Caddyfile.locked"
+    cp "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
+    rc="$(rf_deploy "$RF/lockbin" rf3 "$RF/Caddyfile.locked" "$RF/lock.out")"
+    check "lock-starved arm STILL exits 0 (a lock we could not take must not fail a healthy build)" \
+      [ "$rc" = 0 ]
+    check "lock-starved arm speaks a ROUTE failure on the machine channel" \
+      grep -q '^BPSTAGE name=ROUTE status=failed build_id=rf3 detail="' "$RF/lock.out"
+    check "lock-starved arm says the route was NEVER CHECKED" \
+      grep -q 'NEVER CHECKED' "$RF/lock.out"
+    check "lock-starved arm does NOT claim it tried and was rejected (it never read the file)" \
+      absent 'this run tried to add it' "$RF/lock.out"
+    check "lock-starved arm left the Caddyfile byte-identical (never opened)" \
+      cmp -s "$RF/Caddyfile.locked" "$RF/Caddyfile.locked.orig"
+    check "lock-starved arm wrote NO route marker" \
+      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.locked"
+    check "lock-starved arm STOPS advertising the public URL in the sign-off" \
+      absent "live at build rf3 (https://" "$RF/lock.out"
+    check "lock-starved arm still switched the release live on disk" \
+      grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf3' "$RF/lock.out"
+
+    # -----------------------------------------------------------------------
+    # (d) THE ARM'S AWK/MV REVERT ARM. (b) drives the `caddy validate` revert;
+    #     this drives the OTHER one — the Caddyfile could not be REWRITTEN at all
+    #     (full /tmp, read-only fs, ENOSPC), so the `awk … > "$tmp" && mv` chain
+    #     short-circuits, the backup goes back and the function returns 2 WITHOUT
+    #     caddy ever being consulted. Both arms end in the same NOT ARMED detail,
+    #     which is why the distinguishing assertion is the log line only this arm
+    #     writes. Fixture: the zero-arg `mktemp` stub (see the teardown block
+    #     above for why that targets exactly the two Caddyfile rewriters).
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an arm whose Caddyfile REWRITE fails reverts, reports NOT ARMED, and never consults caddy"
+    mkdir -p "$RF/mvbin"
+    cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$RF/mvbin/"
+    printf '#!/usr/bin/env bash\nif [ "$#" = 0 ]; then echo "%s/no-such-dir/tmp"; exit 0; fi\nif [ -x /usr/bin/mktemp ]; then exec /usr/bin/mktemp "$@"; fi\nexec /bin/mktemp "$@"\n' "$RF" > "$RF/mvbin/mktemp"
+    chmod +x "$RF/mvbin/"*
+    rf_caddyfile "$RF/Caddyfile.mv"
+    cp "$RF/Caddyfile.mv" "$RF/Caddyfile.mv.orig"
+    rc="$(rf_deploy "$RF/mvbin" rf4 "$RF/Caddyfile.mv" "$RF/mv.out")"
+    check "un-rewritable arm STILL exits 0 (charter-D327: report, do not fail a healthy build)" \
+      [ "$rc" = 0 ]
+    check "un-rewritable arm names the REWRITE as what failed, not caddy validate" \
+      grep -q 'could not rewrite .* for the /sites/routefail arm — restoring the backup' "$RF/mv.out"
+    check "un-rewritable arm reports ROUTE failed on the machine channel" \
+      grep -q '^BPSTAGE name=ROUTE status=failed build_id=rf4 detail="' "$RF/mv.out"
+    check "un-rewritable arm left the Caddyfile byte-identical (the backup was restored)" \
+      cmp -s "$RF/Caddyfile.mv" "$RF/Caddyfile.mv.orig"
+    check "un-rewritable arm left no .bak.site turd beside the Caddyfile" \
+      sh -c "! ls '$RF'/Caddyfile.mv.bak.site.* >/dev/null 2>&1"
+    check "un-rewritable arm wrote NO route marker" \
+      absent 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.mv"
+    check "un-rewritable arm STOPS advertising the public URL in the sign-off" \
+      absent "live at build rf4 (https://" "$RF/mv.out"
+    check "un-rewritable arm still switched the release live on disk" \
+      grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf4' "$RF/mv.out"
     # The ROUTE line is deliberately OUTSIDE DeployRunner's @stage_names
     # whitelist (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE): parse_stage_line/2 skips
     # it, so it can never reach stage_exit_code/1 and flip a green run to -1.
@@ -1934,6 +2177,104 @@ FAKECP
     fi
     check "every OTHER BPSTAGE name+status on the wire is still whitelisted" \
       sh -c "! grep '^BPSTAGE ' '$RF/bad.out' | grep -v '^BPSTAGE name=ROUTE ' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
+
+    # -----------------------------------------------------------------------
+    # A MISS ON A SPAWNED STATIC SITE IS A 404, NOT THE MAINTENANCE 503
+    # (ssw11-bl-static-miss-503-not-404). Measured on guerrilla from outside:
+    # /sites/<slug>/nope-missing/ answered 503, an accented miss answered 503,
+    # and the NFC form of an NFD-stored directory answered 503 — so the Unicode
+    # seam this epic cares about was INDISTINGUISHABLE from every other miss.
+    #
+    # THE CAUSE, read off the box's own Caddyfile rather than inferred from the
+    # status code: the FQDN site block ends with the maintenance handler
+    # deploy/instance-deploy.sh arms —
+    #
+    #     reverse_proxy localhost:4001
+    #     handle_errors {
+    #         header Retry-After "15"
+    #         respond 503 { body <<BARKPARK_MAINTENANCE … }
+    #     }
+    #
+    # `handle_errors` with NO status list catches EVERY error raised anywhere in
+    # the site, and a `file_server` miss inside this engine's own armed
+    # `handle_path /sites/<slug>/*` raises 404 AS AN ERROR. So the branded "Back
+    # in a moment" page ate the entire 4xx surface of every static site on the
+    # box. The block's header comment asserted the opposite — "fires ONLY on
+    # errors Caddy itself raises (dial failure / gateway timeout)" — which is
+    # true and irrelevant: a file_server 404 IS an error Caddy itself raises.
+    #
+    # The fix is `handle_errors 502 503 504` in instance-deploy.sh. This block
+    # is the REGRESSION PIN, and it pins the SEAM rather than either half: it
+    # takes the site route THIS engine generated (Caddyfile.ok, written by the
+    # real arm above), splices in the maintenance handler INSTANCE-DEPLOY.SH
+    # ITSELF arms (extracted from that file, never re-typed here), and drives the
+    # result through a REAL caddy on a real port with real requests. Re-widen
+    # either side and rows 4/5/6 go red.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a miss on a spawned static site 404s through REAL caddy (the maintenance 503 no longer eats it)"
+    MS="$E2E/misscode"; mkdir -p "$MS/bin" "$MS/root"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$MS/bin/systemctl"; chmod +x "$MS/bin/systemctl"
+    printf '<!doctype html><title>index</title>\n' > "$MS/root/index.html"
+    MS_INSTANCE="$(cd "$(dirname "$SELF")" && pwd)/instance-deploy.sh"
+    if ! command -v caddy >/dev/null 2>&1 || [ ! -f "$MS_INSTANCE" ]; then
+      if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+        echo "[selftest] FAIL - the static-miss 404 proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but a real caddy binary and deploy/instance-deploy.sh are both needed and one is missing — the only rows that drive a real Caddy did not run"
+        exit 1
+      fi
+      echo "[selftest] SKIP static-miss 404 through real caddy — needs a real caddy(1) and deploy/instance-deploy.sh in the tree"
+    else
+      # The maintenance handler EXACTLY as instance-deploy.sh arms it: the
+      # heredoc body between `<<'MAINT'` and the closing MAINT sentinel.
+      awk "/<<'MAINT'/{f=1;next} /^MAINT\$/{f=0} f" "$MS_INSTANCE" > "$MS/maint.caddy"
+      check "the maintenance handler instance-deploy.sh arms was extracted (non-empty)" \
+        [ -s "$MS/maint.caddy" ]
+      check "…and it is STATUS-SCOPED, so a file_server 404 is not one of its errors" \
+        grep -qE '^[[:space:]]*handle_errors[[:space:]]+502[[:space:]]+503[[:space:]]+504[[:space:]]*\{' "$MS/maint.caddy"
+      check "the reference copy deploy/caddy/barkpark-maintenance.caddy carries the same scoping" \
+        sh -c "[ ! -f '$(cd "$(dirname "$SELF")" && pwd)/caddy/barkpark-maintenance.caddy' ] || grep -qE '^handle_errors +502 +503 +504 *\{' '$(cd "$(dirname "$SELF")" && pwd)/caddy/barkpark-maintenance.caddy'"
+      # Build the BOX SHAPE: global opts, this engine's real armed handle_path
+      # (root repointed at a fixture tree), a DEAD app fallback, then the
+      # maintenance handler — the exact nesting /etc/caddy/Caddyfile has.
+      MS_PORT=0; MS_PID=""
+      for MS_TRY in 39211 39307 39419 39523 39631; do
+        {
+          printf '{\n\tadmin off\n\tauto_https off\n}\n'
+          printf ':%s {\n' "$MS_TRY"
+          sed -n '/BARKPARK_SITE_ROUTE:routefail/,/^\t}$/p' "$RF/Caddyfile.ok" \
+            | sed "s|root \* .*|root * $MS/root|"
+          printf '\treverse_proxy localhost:1 {\n\t\tlb_try_duration 1s\n\t}\n'
+          cat "$MS/maint.caddy"
+          printf '}\n'
+        } > "$MS/Caddyfile"
+        caddy run --config "$MS/Caddyfile" --adapter caddyfile >"$MS/caddy.log" 2>&1 &
+        MS_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$MS_TRY/sites/routefail/" 2>/dev/null)" = 200 ]; then
+            MS_PORT="$MS_TRY"; break
+          fi
+          sleep 0.25
+        done
+        [ "$MS_PORT" != 0 ] && break
+        kill "$MS_PID" 2>/dev/null; wait "$MS_PID" 2>/dev/null; MS_PID=""
+      done
+      ms_code() { curl -s -o "$MS/body.out" --max-time 5 -w '%{http_code}' "http://127.0.0.1:$MS_PORT$1"; }
+      check "the box-shaped fixture (engine site route + armed maintenance handler) came up on a real caddy" \
+        [ "$MS_PORT" != 0 ]
+      check "real caddy: the static site index serves 200" \
+        [ "$(ms_code /sites/routefail/)" = 200 ]
+      check "real caddy: a MISSING ASCII path is 404, NOT the maintenance 503" \
+        [ "$(ms_code /sites/routefail/nope-missing/)" = 404 ]
+      check "real caddy: a MISSING ACCENTED path is 404, NOT the maintenance 503" \
+        [ "$(ms_code /sites/routefail/bl%C3%A5b%C3%A6r/)" = 404 ]
+      ms_code /sites/routefail/nope-missing/ >/dev/null
+      check "real caddy: the miss body is not the branded maintenance page" \
+        sh -c "! grep -q 'Back in a moment' '$MS/body.out'"
+      check "real caddy: a DEAD app upstream STILL gets the maintenance 503 (the scoping did not disarm it)" \
+        [ "$(ms_code /anything-the-app-owns)" = 503 ]
+      check "…and THAT body really is the branded maintenance page" \
+        grep -q 'Back in a moment' "$MS/body.out"
+      [ -n "$MS_PID" ] && { kill "$MS_PID" 2>/dev/null; wait "$MS_PID" 2>/dev/null; }
+    fi
 
     # -----------------------------------------------------------------------
     # THE PREFIX COLLISION (D345) — the case NO test in either engine could see.
@@ -2071,6 +2412,134 @@ FAKECP
       grep -qE 'BARKPARK_SITE_ROUTE:pfx-capstone([[:space:]]|$)' "$PX/Caddyfile"
     check "prefix/disarm: the sibling still proxies its own release tree" \
       grep -q "root \* $E2E/sites/pfx-capstone/current" "$PX/Caddyfile"
+
+    # -----------------------------------------------------------------------
+    # AN ALREADY-ARMED BLOCK IS UPGRADED TO HIDE THE RELEASE MARKERS
+    # (task-5d7bb5b283ac27d0). The three "the armed file_server HIDES …" rows
+    # above pin what a FRESH arm emits — and that is ALL they pin. The arm is
+    # marker-guarded, so a block armed BEFORE the hide landed keeps its bare
+    # `file_server` on every subsequent deploy, forever. Measured read-only on
+    # guerrilla 157.180.90.121 (2026-09-03, `cat /etc/caddy/Caddyfile`): all FOUR
+    # armed STATIC blocks (the other six site routes are node reverse_proxy
+    # blocks, no file_server) are that pre-hide shape, so .bp-prebuilt-sha256 and
+    # .bp-health-failed are fetchable over HTTPS on every live static site.
+    #
+    # This block is the REGRESSION PIN for the in-place UPGRADE branch, and it
+    # pins the OUTCOME, not the text: a pre-hide Caddyfile (marker present, bare
+    # file_server) plus a real release tree carrying both markers is driven
+    # through the REAL engine and then through a REAL caddy on a real port with
+    # real requests. Remove the upgrade branch and rows "…is upgraded in place",
+    # "…returns 404" and "…returns 404 too" go red BY NAME while the index row
+    # stays green — the marker guard alone cannot tell the two shapes apart.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an already-armed PRE-HIDE static block is upgraded in place and its markers stop being fetchable (REAL caddy)"
+    HU="$E2E/hideup"; HUSRC="$HU/src"
+    mkdir -p "$HU/bin" "$HUSRC"
+    printf '{"name":"selftest-hideup","private":true}\n' > "$HUSRC/package.json"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$HU/bin/systemctl"
+    chmod +x "$HU/bin/systemctl"
+    if ! command -v caddy >/dev/null 2>&1; then
+      if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+        echo "[selftest] FAIL - the already-armed hide UPGRADE proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but there is no real caddy(1) on PATH — a fake caddy validates nothing and serves nothing, so the only rows that prove the markers actually stop being fetchable did not run"
+        exit 1
+      fi
+      echo "[selftest] SKIP already-armed hide upgrade — needs a REAL caddy(1) on PATH"
+    else
+      HUROOT="$HU/sites/hideup/current"
+      # THE PRE-HIDE SHAPE, byte for byte as guerrilla carries it: this engine's
+      # own marker comment, the handle_path, the root, and a BARE file_server.
+      { printf 'example.com {\n'
+        printf "\t# BARKPARK_SITE_ROUTE:hideup — static site 'hideup' served from its immutable current release.\n"
+        printf '\t# handle_path strips the /sites/hideup prefix; root follows the symlink.\n'
+        printf '\thandle_path /sites/hideup/* {\n'
+        printf '\t\troot * %s\n' "$HUROOT"
+        printf '\t\tfile_server\n'
+        printf '\t}\n'
+        printf '\treverse_proxy localhost:4000\n'
+        printf '}\n'; } > "$HU/Caddyfile"
+      check "the pre-hide fixture really is the un-hidden shape (no hide anywhere)" \
+        sh -c "! grep -q 'hide ' '$HU/Caddyfile'"
+      check "the pre-hide fixture validates on a REAL caddy (it is a shape the box runs)" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      # A deploy of the SAME slug: the marker is present, so this run takes the
+      # already-armed branch — the one that said nothing and rewrote nothing.
+      hu_rc="$(env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu1 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up.out" 2> "$HU/up.err"; echo $?)"
+      check "the re-deploy over the pre-hide block still exits 0 (never fatal)" \
+        [ "$hu_rc" = 0 ]
+      check "the pre-hide block is upgraded in place: the file_server now HIDES the prebuilt digest marker" \
+        grep -qE 'hide .*\.bp-prebuilt-sha256' "$HU/Caddyfile"
+      check "…and the health-failed marker" \
+        grep -qE 'hide .*\.bp-health-failed' "$HU/Caddyfile"
+      check "…INSIDE a file_server block, not loose in the site" \
+        grep -qE 'file_server \{' "$HU/Caddyfile"
+      check "…and NOT by re-arming: this site's marker still appears exactly once" \
+        sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:hideup' '$HU/Caddyfile')\" = 1 ]"
+      check "…and the handle_path is still there exactly once (no duplicate route)" \
+        sh -c "[ \"\$(grep -c 'handle_path /sites/hideup/\\*' '$HU/Caddyfile')\" = 1 ]"
+      check "the upgraded Caddyfile is brace-balanced and REAL-caddy valid" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      check "the upgrade is announced on the DURABLE machine channel, naming the outcome" \
+        grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu1 detail="already armed, UPGRADED: ' "$HU/up.out"
+      check "the upgrade left no backup file behind on the happy path" \
+        sh -c "! ls '$HU'/Caddyfile.bak.* >/dev/null 2>&1"
+      # A SECOND re-deploy: the block now has the hide, so nothing is rewritten
+      # and the detail goes back to the plain already-armed line (idempotent).
+      cp "$HU/Caddyfile" "$HU/Caddyfile.after1"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu2 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up2.out" 2> "$HU/up2.err" || true
+      check "a SECOND re-deploy rewrites nothing (the upgrade is idempotent)" \
+        cmp -s "$HU/Caddyfile.after1" "$HU/Caddyfile"
+      check "…and it reports the plain already-armed detail, not another upgrade" \
+        grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu2 detail="already armed: ' "$HU/up2.out"
+      # ---- THE OUTCOME, through a real caddy on a real port -----------------
+      # The engine's own markers live INSIDE the served tree. .bp-prebuilt-sha256
+      # is written by the prebuilt path; .bp-health-failed by a failed gate. Put
+      # both in the LIVE release the way the box has them, then ask for them.
+      printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$HUROOT/.bp-prebuilt-sha256"
+      printf 'hu1\n' > "$HUROOT/.bp-health-failed"
+      check "both release markers really are inside the served tree (the fixture is non-vacuous)" \
+        sh -c "[ -f '$HUROOT/.bp-prebuilt-sha256' ] && [ -f '$HUROOT/.bp-health-failed' ] && [ -f '$HUROOT/index.html' ]"
+      HU_PORT=0; HU_PID=""
+      for HU_TRY in 38211 38307 38419 38523 38631; do
+        { printf '{\n\tadmin off\n\tauto_https off\n}\n'
+          printf ':%s {\n' "$HU_TRY"
+          sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$HU/Caddyfile"
+          printf '}\n'; } > "$HU/serve.caddy"
+        caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
+        HU_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
+            HU_PORT="$HU_TRY"; break
+          fi
+          sleep 0.25
+        done
+        [ "$HU_PORT" != 0 ] && break
+        kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
+      done
+      hu_code() { curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$HU_PORT$1"; }
+      # A false 200/404 off a port a PEER holds is the trap here: assert the
+      # fixture itself came up before believing any status code below.
+      check "the upgraded block came up on a REAL caddy (this suite owns the port)" \
+        [ "$HU_PORT" != 0 ]
+      check "real caddy: the site index still serves 200 (the upgrade did not break the route)" \
+        [ "$(hu_code /sites/hideup/)" = 200 ]
+      check "real caddy: .bp-prebuilt-sha256 returns 404 — the artifact digest is no longer fetchable" \
+        [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 404 ]
+      check "real caddy: .bp-health-failed returns 404 too — the failed-gate state is no longer disclosed" \
+        [ "$(hu_code /sites/hideup/.bp-health-failed)" = 404 ]
+      [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }
+    fi
   fi
 
   # -------------------------------------------------------------------------
@@ -2329,6 +2798,16 @@ GATENPM
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # The floor (see SELFTEST_FLOOR_* at the top of this block). `FAILED (1)` is
+  # the shape internal/cli/cloud_site_preflight.go recognises as terminal.
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_FULL"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_FULL (BARKPARK_SELFTEST_REQUIRE_E2E=1: every block is required here)"
+  else
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_MIN"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_MIN (bare run: the optional blocks may skip honestly)"
+  fi
+  [ "$TESTS" -ge "$SELFTEST_FLOOR" ] || { echo "[selftest] FAILED (1) - only $TESTS checks ran, the floor is $SELFTEST_FLOOR from $SELFTEST_FLOOR_NAME: a block went missing, and a suite that stopped running rows must not report PASS. If rows were removed on purpose, lower the literal in the same commit."; exit 1; }
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
   echo "[selftest] PASS"
   exit 0
@@ -2814,7 +3293,82 @@ arm_caddy_site_route() {
   # matched a prefix SIBLING's marker and returned "already armed" for a site
   # that had never been armed at all.
   if has_site_route_marker "$CADDYFILE"; then
-    ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+    # ---------------------------------------------------------------------
+    # UPGRADE, NOT RE-ARM (the marker guard freezes the FIRST shape forever).
+    #
+    # The arm below emits `file_server { hide … }` and the self-test pins it —
+    # but the pin only proves what a FRESH arm writes. A block armed BEFORE the
+    # hide landed carries a BARE `file_server`, and the guard above returns
+    # "already armed" for it on every subsequent deploy, forever. Measured
+    # read-only on guerrilla 157.180.90.121 (2026-09-03, `cat /etc/caddy/Caddyfile`):
+    # all FOUR armed STATIC blocks (the other six routes are node reverse_proxy
+    # blocks and carry no file_server) are the pre-hide shape —
+    #
+    #     handle_path /sites/perfect-proof/* {
+    #         root * /opt/barkpark/sites/perfect-proof/current
+    #         file_server
+    #     }
+    #
+    # so $PREBUILT_MARK and $HEALTH_FAIL_MARK are fetchable over HTTPS on every
+    # one of them: the artifact digest, and the fact that the LIVE release is one
+    # this engine already knows failed its health gate.
+    #
+    # Re-arming is not the remedy (that is the duplicate-handle defect D345
+    # guards against), so upgrade THAT ONE BLOCK in place, under the same
+    # contract as the arm: backup, rewrite, `caddy validate`, revert on reject,
+    # reload. Scoped by the delimiter-anchored marker + brace count (the same
+    # walk disarm_caddy_site_route uses), so a prefix sibling's block is never
+    # the one rewritten. Non-fatal in every direction: a rejected or unwritable
+    # upgrade leaves the route exactly as it was and the deploy still succeeds —
+    # the site was already being served.
+    # Idempotent by construction: the awk demands EXACTLY ONE bare `file_server`
+    # inside this site's block, so an already-hidden block (and every node-route
+    # block, which has no file_server at all) rewrites nothing.
+    # ---------------------------------------------------------------------
+    local upgraded=0
+    local utmp; utmp="$(mktemp)"
+    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$PREBUILT_MARK $HEALTH_FAIL_MARK" awk '
+      BEGIN { m = ENVIRON["BP_MARK"]; hide = ENVIRON["BP_HIDE"]; n = 0 }
+      !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; print; next }
+      inb {
+        if ($0 ~ /^[ \t]*file_server[ \t]*$/) {
+          match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
+          printf "%sfile_server {\n%s\thide %s\n%s}\n", ind, ind, hide, ind
+          n++
+        } else print
+        o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
+        if (o > 0) opened = 1
+        if (opened && depth <= 0) inb = 0
+        next
+      }
+      { print }
+      END { exit (n == 1 ? 0 : 1) }
+    ' "$CADDYFILE" > "$utmp"; then
+      local ubak; ubak="${CADDYFILE}.bak.hide.${SITE_SLUG}.$(date -u +%Y%m%d%H%M%S)"
+      cp -a "$CADDYFILE" "$ubak"
+      if cp "$utmp" "$CADDYFILE"; then
+        chmod --reference="$ubak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+        chown --reference="$ubak" "$CADDYFILE" 2>/dev/null || true
+        if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+          rm -f "$ubak"
+          upgraded=1
+          systemctl reload caddy 2>/dev/null || true
+          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $PREBUILT_MARK $HEALTH_FAIL_MARK"
+        else
+          cp -a "$ubak" "$CADDYFILE" && rm -f "$ubak"
+          log "caddy validate rejected the /sites/$SITE_SLUG hide upgrade — reverted, Caddy untouched"
+        fi
+      else
+        cp -a "$ubak" "$CADDYFILE" 2>/dev/null; rm -f "$ubak"
+        log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG hide upgrade — Caddy untouched"
+      fi
+    fi
+    rm -f "$utmp"
+    if [ "$upgraded" = 1 ]; then
+      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block with a bare file_server (armed before the hide landed), so this run rewrote that one block in place to hide $PREBUILT_MARK and $HEALTH_FAIL_MARK, validated it and reloaded Caddy — those markers are no longer fetchable over /sites/$SITE_SLUG/"
+    else
+      ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+    fi
     log "caddy /sites/$SITE_SLUG route already armed"
     return 0
   fi

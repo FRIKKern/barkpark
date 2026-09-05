@@ -147,9 +147,7 @@ func TestChatGoldenTranscriptParity(t *testing.T) {
 			// (2) No fallback: every block type has a real renderer.
 			out := reg.RenderDoc(blocks, ctx)
 			stripped := ansi.Strip(out)
-			if strings.Contains(stripped, "unknown block") {
-				t.Fatalf("variant %q fell through to the unknown-block box:\n%s", v.Name, stripped)
-			}
+			assertNoUnknownBlock(t, "chat transcript variant "+v.Name, stripped)
 
 			// (3) Realization: every block's key projection text appears in the
 			// render (whitespace-collapsed, case-insensitive per-word presence).

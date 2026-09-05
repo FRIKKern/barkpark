@@ -1,0 +1,1 @@
+A guard that can lose ships with the fix: it reds when the two counts disagree, mutation-proved by breaking the filter. Evidence: the mutant run.

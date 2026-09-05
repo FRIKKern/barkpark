@@ -1,0 +1,1 @@
+The median is emitted as deferral_wait_median_seconds_at_least with its sample count beside it, segmented by RUN (maximal run over site_id ordered by inserted_at, terminated by the next live/failed row) and never by rev group

@@ -1,0 +1,1 @@
+If last_deployment is widened to carry stage and failure_reason, the bp-search-template D24 HONESTY LAW is amended by an explicit numbered decision rather than silently overridden.

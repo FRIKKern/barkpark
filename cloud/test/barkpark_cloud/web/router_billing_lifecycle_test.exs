@@ -159,7 +159,7 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
 
       {:ok, _} =
         Billing.mark_past_due(sub, %{
-          current_period_end: DateTime.add(DateTime.utc_now(), 5, :day)
+          grace_ends_at: DateTime.add(DateTime.utc_now(), 5, :day)
         })
 
       conn = call(:post, "/v1/launch", %{name: "My Prod"}, token)
@@ -172,7 +172,7 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
 
       {:ok, _} =
         Billing.mark_past_due(sub, %{
-          current_period_end: DateTime.add(DateTime.utc_now(), -1, :day)
+          grace_ends_at: DateTime.add(DateTime.utc_now(), -1, :day)
         })
 
       conn = call(:post, "/v1/launch", %{name: "My Prod"}, token)

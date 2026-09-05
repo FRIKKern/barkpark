@@ -14,7 +14,7 @@ defmodule BarkparkWeb.TasksRailTest do
       an unchanged rail (only the worker's own action) → no notice.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

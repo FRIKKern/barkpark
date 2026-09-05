@@ -43,6 +43,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   use BarkparkWeb, :live_view
 
+  import BarkparkWeb.Studio.PageScroll
+
   import BarkparkWeb.StudioComponents.Controls
 
   require Logger
@@ -603,6 +605,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <%!-- studio-shell child contract (BarkparkWeb.Studio.PageScroll): the
+          shell is height:100vh + overflow:hidden, so a bare centred column
+          here is CLIPPED and its tail is unreachable by any input. This
+          wrapper fills the shell and owns the scroll; the centred column
+          below is unchanged, so the reading measure is too. --%>
+    <.studio_page_scroll>
     <div class="settings-live" style="max-width: 720px; margin: 32px auto; padding: 0 24px; font-family: var(--font);">
       <h1 class="h1" style="margin-bottom: 4px;">Workspace Settings</h1>
       <%= if @current_workspace do %>
@@ -678,6 +686,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         </p>
       </.bp_card>
     </div>
+    </.studio_page_scroll>
     """
   end
 

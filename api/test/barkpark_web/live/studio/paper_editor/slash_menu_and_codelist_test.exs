@@ -46,7 +46,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
     assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
              ["h-1", "p-intro", "p-second"]
 
-    render_hook(view, "paper-slash-insert", %{"type" => "heading", "afterId" => "p-intro"})
+    render_hook(
+      view,
+      "paper-slash-insert",
+      wire_params(view, %{"type" => "heading", "afterId" => "p-intro"})
+    )
 
     blocks = Content.paper_blocks(@slug, @dataset)
     ids = Enum.map(blocks, & &1["id"])
@@ -77,7 +81,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
 
     before_count = Content.paper_blocks(@slug, @dataset) |> length()
 
-    render_hook(view, "paper-slash-insert", %{"type" => "paragraph", "afterId" => ""})
+    render_hook(
+      view,
+      "paper-slash-insert",
+      wire_params(view, %{"type" => "paragraph", "afterId" => ""})
+    )
 
     blocks = Content.paper_blocks(@slug, @dataset)
     assert length(blocks) == before_count + 1
@@ -234,9 +242,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
     assert edit_html =~ ~s(data-codelist-variant="flat")
     assert edit_html =~ ~s(data-codelist-id="onixedit:onixedit:list_15")
     # Selecting another code through the inner form persists via patch-block.
-    view
-    |> element(~s([data-block-id="cl-flat"] form))
-    |> render_change(%{"value" => "05"})
+    flush_form(view, ~s([data-block-id="cl-flat"] form), %{"value" => "05"})
 
     render(view)
 
@@ -279,11 +285,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
 
     render(view)
 
+    flush_form(view, ~s([data-block-id="cl-tree"] form), %{"value" => "FB"})
+
     block =
       Content.paper_blocks(@codelist_tree_slug, @dataset) |> Enum.find(&(&1["id"] == "cl-tree"))
 
     assert block["type"] == "codelist"
     assert block["value"] == "FB"
     assert block["variant"] == "tree"
+  end
+
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
+  defp wire_params(view, params) do
+    Map.merge(params, %{"request_id" => Ecto.UUID.generate(), "if_rev" => paper_rev(view)})
+  end
+
+  defp flush_form(view, selector, values) do
+    target = element(view, selector)
+    render_change(target, values)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => values
+    })
   end
 end

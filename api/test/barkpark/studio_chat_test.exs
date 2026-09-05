@@ -1413,6 +1413,9 @@ defmodule Barkpark.StudioChatTest do
 
       assert rail["a"]["status"] == "running"
       assert rail["b"]["status"] == "running"
+      assert rail["a"]["workflow"] == []
+      assert Map.has_key?(rail["a"], "usage")
+      assert rail["a"]["usage"] == nil
 
       # "a" drops from the snapshot ⇒ completed; entries are never deleted
       rail2 =
@@ -1424,6 +1427,25 @@ defmodule Barkpark.StudioChatTest do
 
       assert rail2["a"]["status"] == "completed"
       assert rail2["b"]["status"] == "running"
+    end
+
+    test "local workflow background rows seed an explicit stable envelope without inventing telemetry" do
+      rail =
+        StudioChat.rail_apply_background(%{}, %{
+          "tasks" => [
+            %{"task_id" => "wf", "task_type" => "local_workflow", "description" => "cycle"},
+            %{"task_id" => "plain", "task_type" => "shell", "description" => "command"}
+          ]
+        })
+
+      assert Map.take(rail["wf"], ["status", "workflow", "usage"]) == %{
+               "status" => "running",
+               "workflow" => [],
+               "usage" => nil
+             }
+
+      refute Map.has_key?(rail["plain"], "workflow")
+      refute Map.has_key?(rail["plain"], "usage")
     end
 
     test "rail_apply_background never resurrects an interrupted entry" do
@@ -1464,6 +1486,19 @@ defmodule Barkpark.StudioChatTest do
 
       assert rail["t"]["workflow"] == [%{"type" => "workflow_phase", "title" => "Plan"}]
       assert rail["t"]["usage"]["total_tokens"] == 5
+
+      # A progress frame may beat background_tasks_changed and may omit usage.
+      # The owned envelope is still explicit; nil means genuinely unreported.
+      progress_first =
+        StudioChat.rail_capture_progress(%{}, %{
+          "task_id" => "early",
+          "workflow_progress" => [%{"type" => "workflow_phase", "title" => "Plan"}]
+        })
+
+      assert progress_first["early"]["status"] == "running"
+      assert progress_first["early"]["workflow"] != []
+      assert Map.has_key?(progress_first["early"], "usage")
+      assert progress_first["early"]["usage"] == nil
     end
 
     test "rail_stamp_status only stamps a task that already has an entry" do
@@ -1593,6 +1628,7 @@ defmodule Barkpark.StudioChatTest do
   # the wire assumptions the agents rail was built on are now PERMANENT
   # regression tests, not one-off probe notes (wave-10 fixture law).
   @fixtures_dir Path.expand("../fixtures/claude_chat", __DIR__)
+  @go_rail_fixtures_dir Path.expand("../../../internal/chat/testdata", __DIR__)
 
   defp load_ndjson(name) do
     @fixtures_dir
@@ -1788,6 +1824,95 @@ defmodule Barkpark.StudioChatTest do
           rail
       end
     end)
+  end
+
+  # Produce the Go rail mirrors from EMPTY state through the same public folds
+  # the Recorder calls. Barkpark owns and locks the entry envelope
+  # (workflow/status/usage); the workflow node payloads are Claude Code
+  # telemetry forwarded verbatim from the real ndjson captures and are not a
+  # Barkpark field contract.
+  defp fold_rail_wire_event(rail, ev) do
+    case ev["subtype"] do
+      "background_tasks_changed" ->
+        StudioChat.rail_apply_background(rail, ev)
+
+      "task_progress" ->
+        StudioChat.rail_capture_progress(rail, ev)
+
+      "task_updated" ->
+        StudioChat.rail_stamp_status(
+          rail,
+          ev["task_id"],
+          get_in(ev, ["patch", "status"]),
+          get_in(ev, ["patch", "end_time"])
+        )
+
+      "task_notification" ->
+        StudioChat.rail_stamp_status(rail, ev["task_id"], ev["status"])
+
+      _ ->
+        rail
+    end
+  end
+
+  defp live_rail_fixture do
+    load_ndjson("epic_cycle_progress.ndjson")
+    |> Enum.reduce_while(%{}, fn ev, rail ->
+      rail = fold_rail_wire_event(rail, ev)
+
+      agents =
+        case ev["workflow_progress"] do
+          nodes when is_list(nodes) -> Enum.count(nodes, &(&1["type"] == "workflow_agent"))
+          _ -> 0
+        end
+
+      if ev["subtype"] == "task_progress" and get_in(ev, ["usage", "total_tokens"]) == 1_552_004 and
+           agents == 28,
+         do: {:halt, rail},
+         else: {:cont, rail}
+    end)
+  end
+
+  defp completed_rail_fixture,
+    do:
+      "epic_cycle_progress.ndjson"
+      |> load_ndjson()
+      |> Enum.reduce(%{}, &fold_rail_wire_event(&2, &1))
+
+  defp interrupted_rail_fixture do
+    rail =
+      "epic_cycle_interrupted.ndjson"
+      |> load_ndjson()
+      |> Enum.reduce(%{}, &fold_rail_wire_event(&2, &1))
+
+    [{task_id, _entry}] = Map.to_list(rail)
+    StudioChat.rail_stamp_status(rail, task_id, "interrupted")
+  end
+
+  describe "Go rail fixture producer freshness" do
+    test "the three Go rail fixtures equal fresh StudioChat producer folds" do
+      fresh = %{
+        "rail_workflow_live.json" => live_rail_fixture(),
+        "rail_workflow_interrupted.json" => interrupted_rail_fixture(),
+        "rail_workflow_completed.json" => completed_rail_fixture()
+      }
+
+      Enum.each(fresh, fn {name, produced} ->
+        committed = @go_rail_fixtures_dir |> Path.join(name) |> File.read!() |> Jason.decode!()
+
+        assert committed == produced,
+               "#{name} is stale against StudioChat's rail producer folds"
+      end)
+
+      nodes =
+        fresh |> Map.values() |> Enum.flat_map(&Map.values/1) |> Enum.flat_map(& &1["workflow"])
+
+      assert Enum.any?(nodes, &(&1["type"] == "workflow_phase")),
+             "rail fixture lock must exercise at least one workflow phase"
+
+      assert Enum.any?(nodes, &(&1["type"] == "workflow_agent")),
+             "rail fixture lock must exercise at least one workflow agent"
+    end
   end
 
   # The teardown interrupt flip (interrupt_rail_entries): every still-"running"

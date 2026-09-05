@@ -73,7 +73,18 @@ describe('transport — caller AbortSignal listener hygiene', () => {
   // also grows within a single request() call.
   it('does not accumulate listeners across retries within one request', async () => {
     const ac = new AbortController()
-    const fetchSpy = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
+    // A retryable SERVED fault (500 + `internal_error`) — the one thing the
+    // default read policy repeats. It used to be a rejected fetch, but a
+    // transport fault is no longer retried (see src/retry.ts), and a test that
+    // makes one attempt cannot prove anything about listeners across retries.
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: { code: 'internal_error', message: 'transient' } }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
 
     await request(cfg(fetchSpy), PATH, {
       method: 'GET',

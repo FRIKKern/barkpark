@@ -1,0 +1,1 @@
+Every such row whose PR squash sha is an ancestor of origin/main is closed by the proven recipe, with the sha named in the evidence — never a builder-branch sha, which is squash-orphaned.

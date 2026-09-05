@@ -1,0 +1,1 @@
+If the CI option is taken: one seal reading is produced by a machine on a full-history checkout at origin/main, through scripts/seal-run.sh, with head= and b-unavailable= quoted alongside the verdict.

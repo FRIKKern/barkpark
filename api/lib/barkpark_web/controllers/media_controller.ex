@@ -45,15 +45,46 @@ defmodule BarkparkWeb.MediaController do
   # RESIDUAL, stated rather than left implicit: a NEW flat read action added to
   # this controller fails open again until that boundary work lands. Route any
   # new read through `confine_one/2` or `confine_many/2`.
-  defp scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
+  #
+  # ── THE SENTINEL INVERTED THIS PREDICATE (task-5ca36b127acf9cbd) ────────────
+  #
+  # `not is_nil(...)` was written when an unresolved request produced NO
+  # `:workspace_id` key at all, so `nil` was the one and only way to say "this
+  # caller resolved no tenant". `ScopeHelpers.put_workspace_scope/3` later gave
+  # that state a NAME — `workspace_id: :shared_only` (task-3e2a70930c6df723,
+  # its `:sentinel` clause) — and every HTTP conn on this controller's flat
+  # routes now carries the atom instead of the omission.
+  #
+  # `not is_nil(:shared_only)` is TRUE. So the predicate read the sentinel as
+  # "scope bound", and `confine_one/2` + `confine_many/2` NO-OPPED on exactly
+  # the request they were added to confine — the unresolved one. The guard did
+  # not merely stop helping; it reported the opposite of the truth.
+  #
+  # `is_binary/1` is the honest test, and it is the same guard the interpreters
+  # this class is about already use (`Content.Scope`, `Media.Delivery.Search`,
+  # `Media.Delivery.Retriever`): a workspace is BOUND when a UUID says which
+  # one. `nil` still means bound-by-absence for the internal callers that pass
+  # no scope at all — unchanged, because `is_binary(nil)` is false exactly as
+  # `not is_nil(nil)` was.
+  #
+  # NO EXPLOITABLE LEAK IS CLAIMED. Every read below narrows correctly on its
+  # own today: `Media.get_file/2` and `Media.list_files/2` both route the
+  # sentinel through `Content.Scope.scope_to_workspace_or_global/3`, which owns
+  # a `:shared_only` arm (`workspace_id IS NULL`). This layer is
+  # defence-in-depth, and the point of repairing it is that a fail-open SHAPE
+  # left in place is the thing the next reader trusts.
+  @doc false
+  def scope_bound?(opts), do: is_binary(Keyword.get(opts, :workspace_id))
 
-  defp confine_one(opts, %MediaFile{} = file) do
+  @doc false
+  def confine_one(opts, %MediaFile{} = file) do
     if scope_bound?(opts) or is_nil(file.workspace_id),
       do: {:ok, file},
       else: {:error, :not_found}
   end
 
-  defp confine_many(opts, files) do
+  @doc false
+  def confine_many(opts, files) do
     if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
   end
 
@@ -229,7 +260,41 @@ defmodule BarkparkWeb.MediaController do
       # instead of the attacker-typed segment removes any raw-input flow into
       # `send_file` / the presigned key. A `../…` URL never matches a stored row
       # → {:error, :not_found}.
-      mime = MIME.from_path(file.path)
+      # THE ROW IS THE EVIDENCE, NOT THE PATH (task-57ee9fff4aae9217 #4).
+      # This used to be `MIME.from_path(file.path)` — a SECOND, independent
+      # derivation of the type from a filename, which could only ever agree
+      # with the persisted `mime_type` when the extension happened to be
+      # right. Ingest now content-sniffs (`Media.Probe.sniff_mime/2`), so for
+      # an extensionless blob (Gyldendal's `remote.axd`) the row knows
+      # `image/png` while the path still says octet-stream. Reading the row is
+      # what makes the ingest fix observable at the edge — it is the same
+      # shape `tickets_attachments_controller.ex:334` already uses.
+      #
+      # THE COLLAPSE STILL HAPPENS HERE. `mime` is not served raw: it goes
+      # through `MediaFile.serve_content_type/1` below (and into the presigned
+      # `response-content-*` for the redirect branch), so even a row whose
+      # `mime_type` column was written to a dangerous value out of band is
+      # served as a non-executable octet-stream with `nosniff` + an
+      # `attachment` disposition. Trusting the row for the TYPE does not mean
+      # trusting it for SAFETY.
+      #
+      # AND THE PATH SIGNAL IS NOT DISCARDED, it is the STRICTER of two.
+      # `mime` here drives BOTH the served content-type and the
+      # `content-disposition`, so switching wholesale to the row would have
+      # QUIETLY WEAKENED an honestly-named `.svg`: its row is already
+      # neutralized to octet-stream by `neutralize_dangerous_mime/1`, which is
+      # not in the dangerous family, so `disposition/1` would have flipped it
+      # from `attachment` back to `inline`. Fixing octet-stream must not cost
+      # a defence. When the PATH says dangerous, the path wins and the old
+      # attachment+collapse answer is preserved byte-for-byte; otherwise the
+      # row's sniffed type is used, and `MIME.from_path/1` remains the floor
+      # for a legacy row with no `mime_type` at all.
+      path_mime = MIME.from_path(file.path)
+
+      mime =
+        if MediaFile.dangerous_mime?(path_mime),
+          do: path_mime,
+          else: file.mime_type || path_mime
 
       # The stored-XSS defense travels with the strategy: the LOCAL branch sets
       # collapse/nosniff/disposition headers itself (maybe_send_file), and the
@@ -747,13 +812,19 @@ defmodule BarkparkWeb.MediaController do
     # this door used to answer 200 while blanking a live page. Consult usage
     # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
-         :ok <- refuse_if_referenced(conn, file, params),
+         {:ok, override} <- refuse_if_referenced(conn, file, params),
          # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
-         # `Repo.delete/2` removed (media.ex:425-452). This used to discard it
+         # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
+      # `override` is nil unless the caller disarmed the where-used guard, so an
+      # ordinary delete's receipt is byte-for-byte what it always was and only a
+      # FORCED one grows `forced` + `referencedByCount`.
+      receipt = %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset}
+
+      json(conn, Map.merge(receipt, override || %{}))
     end
   end
 
@@ -761,13 +832,19 @@ defmodule BarkparkWeb.MediaController do
   # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
   # envelope reuses the public `conflict` code but carries a `details` census
   # that no shared builder would know how to assemble.
+  #
+  # Returns `{:ok, override}` — `override` is `nil` on the unforced path and the
+  # witness receipt fields on the forced one (task-ef676cfc88e71fae). The forced
+  # branch used to return a bare `:ok` and skip the census, so an override left
+  # no trace anywhere: no log line, and a 200 indistinguishable from an unforced
+  # delete of an unreferenced blob.
   defp refuse_if_referenced(conn, file, params) do
     if WhereUsed.forced?(params) do
-      :ok
+      {:ok, WhereUsed.witness_forced_delete(conn, file)}
     else
       case WhereUsed.referrers(file) do
         %{count: 0} ->
-          :ok
+          {:ok, nil}
 
         census ->
           env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)

@@ -1,0 +1,1 @@
+The published catalog document `barkpark--console-hook-zones--js` no longer carries the 'registration order is semantics-free' claim — quote its body after the fix.

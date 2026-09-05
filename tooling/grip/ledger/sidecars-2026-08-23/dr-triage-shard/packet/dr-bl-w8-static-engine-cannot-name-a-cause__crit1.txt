@@ -1,0 +1,1 @@
+A static-engine failure row carries a named CONTENT_API_* class rather than DOC_ID_EMPTY. Evidence: the produced string run through DeployLedger.classify.

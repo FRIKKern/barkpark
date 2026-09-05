@@ -101,10 +101,54 @@ fi
 #     Server Error" HTML card, which is the same crash served by the HTML
 #     routes) is retried;
 #   - a 4xx (422 invalid_blocks/semantic_empty …), a 200 with a hollow body,
-#     a timeout, and any OTHER 500 body are never retried — they stay exactly
-#     as loud as before;
+#     and any OTHER 500 body are never retried — they stay exactly as loud as
+#     before;
 #   - at most 3 retries (0.25s / 1s / 4s backoff), then the last answer stands,
 #     so a PERSISTENT 500 still fails the paper.
+#
+# 2026-09-03, scheduled run 33740962470: the audit went red on exactly ONE
+# paper (`optical-compression-research-report`) with `gui:{status:0}` while its
+# email and source edges answered 200 and its CLI leg was clean — and the same
+# URL answered 200 in 0.2s twice by hand minutes later. status 0 is what this
+# script writes when curl reports `%{http_code}` 000: the request produced NO
+# HTTP answer at all (connection refused/reset, TLS handshake, or the 30s
+# --max-time), so there is no verdict to be loud about. The witness could not
+# even say WHICH of those it was, because the curl exit code was thrown away by
+# `|| true`. Two consequences, and the sentence above about "a timeout … never
+# retried" is amended by them:
+#   - every HTTP edge now records the curl exit code and a named arm, so the
+#     next such red names itself (this is the sibling of the CLI leg's
+#     exit/arm/attempts witness, PR #15760, for the same class of red);
+#   - a NO-ANSWER transport failure is retried on the same narrow terms as the
+#     internal_error 500 — same 3 retries, same backoff, and the LAST answer
+#     stands, so a persistent outage still fails the paper. Nothing that
+#     carried an HTTP status changed: a 4xx, a hollow 200 and any other 500
+#     body are refused exactly as before.
+#
+# transport_retryable <curl exit code> — true for the codes that mean "no HTTP
+# answer was produced", i.e. the request is safe to repeat and there is nothing
+# to judge if we don't:
+#     7  CURLE_COULDNT_CONNECT   connection refused/reset before any request
+#     28 CURLE_OPERATION_TIMEDOUT --connect-timeout or --max-time expired
+#     35 CURLE_SSL_CONNECT_ERROR TLS handshake failed
+#     52 CURLE_GOT_NOTHING       server closed the connection, empty reply
+#     56 CURLE_RECV_ERROR        failure receiving data (reset mid-response)
+# Deliberately EXCLUDED, so they stay as loud as they are today:
+#     6  couldn't resolve host — a broken base URL / DNS, persistent by nature;
+#        retrying would only delay a config fault we must see.
+#     18 partial file — a body DID arrive; the content checks are the right
+#        judge of a truncated render, not a retry.
+#     55 send error — a GET has no body to send, so this points at a local
+#        socket fault worth surfacing rather than a server-side blip.
+#     60 SSL cert problem, 22, 47 and every other code — a real, reproducible
+#        refusal or misconfiguration, never a flake.
+transport_retryable() {
+  case "$1" in
+    7 | 28 | 35 | 52 | 56) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 retryable_500() {
   local code="$1" body="$2"
   [[ "$code" == "500" ]] || return 1
@@ -113,18 +157,53 @@ retryable_500() {
   return 1
 }
 
+# Set by fetch_route for the leg it just fetched (a command substitution could
+# not carry them out of a subshell, and the exit code is the whole point).
+fr_code=0
+fr_exit=0
+fr_first_exit=0
+fr_attempts=0
+fr_arm="ok"
+
 fetch_route() {
-  # fetch_route <outfile> <url> [extra curl args…] — echoes the final HTTP code.
-  local out="$1" url="$2" code delay
+  # fetch_route <outfile> <url> [extra curl args…]
+  # Sets fr_code (normalised HTTP status, 0 when there was no answer), fr_exit
+  # (curl's exit code for the LAST attempt — the one whose answer stands),
+  # fr_first_exit (attempt 1's, so a green that survived a blip still says what
+  # it survived), fr_attempts and fr_arm.
+  local out="$1" url="$2" delay
   shift 2
-  code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url" || true)"
+  fr_attempts=1
+  fr_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url")"
+  fr_exit=$?
+  fr_first_exit=$fr_exit
   for delay in 0.25 1 4; do
-    retryable_500 "$code" "$out" || break
+    if retryable_500 "$fr_code" "$out"; then
+      : # the server's internal_error 500 — the pre-existing narrow retry
+    elif ((fr_exit != 0)) && transport_retryable "$fr_exit"; then
+      : # no HTTP answer at all — nothing to judge, so ask again
+    else
+      break
+    fi
     sleep "$delay"
     : >"$out"
-    code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url" || true)"
+    fr_attempts=$((fr_attempts + 1))
+    fr_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url")"
+    fr_exit=$?
   done
-  printf '%s' "$code"
+  [[ "$fr_code" =~ ^[0-9]{3}$ ]] || fr_code=0
+  [[ "$fr_code" == "000" ]] && fr_code=0
+  # Which clause said no. `http` means the server answered and the answer was
+  # refused elsewhere (the ok-gate) — not a transport problem.
+  if ((fr_exit == 28)); then
+    fr_arm="timeout"
+  elif ((fr_exit != 0)) || [[ "$fr_code" == 0 ]]; then
+    fr_arm="transport_failed"
+  elif [[ "$fr_code" == "200" ]]; then
+    fr_arm="ok"
+  else
+    fr_arm="http"
+  fi
 }
 
 jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r id; do
@@ -143,16 +222,15 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   : >"$tmp/gui"
   : >"$tmp/email"
   : >"$tmp/source"
-  gui_code="$(fetch_route "$tmp/gui" "$public_url")"
-  email_code="$(fetch_route "$tmp/email" "$public_url/email")"
-  source_code="$(fetch_route "$tmp/source" "$public_url/source" -H 'accept: */*')"
-
-  [[ "$gui_code" =~ ^[0-9]{3}$ ]] || gui_code=0
-  [[ "$email_code" =~ ^[0-9]{3}$ ]] || email_code=0
-  [[ "$source_code" =~ ^[0-9]{3}$ ]] || source_code=0
-  [[ "$gui_code" == "000" ]] && gui_code=0
-  [[ "$email_code" == "000" ]] && email_code=0
-  [[ "$source_code" == "000" ]] && source_code=0
+  fetch_route "$tmp/gui" "$public_url"
+  gui_code="$fr_code" gui_exit="$fr_exit" gui_first_exit="$fr_first_exit"
+  gui_attempts="$fr_attempts" gui_arm="$fr_arm"
+  fetch_route "$tmp/email" "$public_url/email"
+  email_code="$fr_code" email_exit="$fr_exit" email_first_exit="$fr_first_exit"
+  email_attempts="$fr_attempts" email_arm="$fr_arm"
+  fetch_route "$tmp/source" "$public_url/source" -H 'accept: */*'
+  source_code="$fr_code" source_exit="$fr_exit" source_first_exit="$fr_first_exit"
+  source_attempts="$fr_attempts" source_arm="$fr_arm"
 
   source_ok=false
   source_kind="unavailable"
@@ -174,16 +252,28 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   # command failed AND its stderr carries the server's internal_error envelope.
   # A CLI failure for any other reason (bad render, empty body, auth, usage)
   # is never retried.
+  # The CLI leg fails three distinguishable ways and the witness used to record
+  # only `cli:{ok:false}` for all three — widthcheck on an empty file reports
+  # 0/0, so a failed command and an empty render left byte-identical evidence
+  # and the 2026-08-28 / 2026-09-02 reds could not be told apart after the fact
+  # (both healed on the next run, cause unrecoverable). The fields below are
+  # PURELY additive witness: `cli_ok` is computed exactly as before.
   cli_reader_ok=false
+  cli_exit=0
+  cli_attempts=0
   for cli_delay in 0 0.25 1 4; do
     [[ "$cli_delay" == 0 ]] || sleep "$cli_delay"
-    if "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-      paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err"; then
+    cli_attempts=$((cli_attempts + 1))
+    "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
+      paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err"
+    cli_exit=$?
+    if ((cli_exit == 0)); then
       [[ -s "$tmp/cli" ]] && cli_reader_ok=true
       break
     fi
     grep -q '"code":"internal_error"' "$tmp/cli.err" 2>/dev/null || break
   done
+  cli_stderr="$(head -c 600 "$tmp/cli.err" 2>/dev/null)" || cli_stderr=""
 
   tui_metrics="$("$tmp/widthcheck" "$tmp/cli" 80)"
   tui_max_display_width="$(jq -r '.max_display_width' <<<"$tui_metrics")"
@@ -191,6 +281,16 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   cli_ok=false
   if [[ "$cli_reader_ok" == true && "$tui_overflow_lines" == "0" ]]; then
     cli_ok=true
+  fi
+  # Which clause said no — reported in the same precedence the gate applies.
+  if ((cli_exit != 0)); then
+    cli_arm="command_failed"
+  elif [[ "$cli_reader_ok" != true ]]; then
+    cli_arm="empty_output"
+  elif [[ "$cli_ok" != true ]]; then
+    cli_arm="tui_overflow"
+  else
+    cli_arm="ok"
   fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
@@ -216,17 +316,33 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
     --arg id "$id" \
     --arg source_kind "$source_kind" \
     --argjson gui_code "$gui_code" \
+    --argjson gui_exit "$gui_exit" \
+    --argjson gui_first_exit "$gui_first_exit" \
+    --arg gui_arm "$gui_arm" \
+    --argjson gui_attempts "$gui_attempts" \
     --argjson email_code "$email_code" \
+    --argjson email_exit "$email_exit" \
+    --argjson email_first_exit "$email_first_exit" \
+    --arg email_arm "$email_arm" \
+    --argjson email_attempts "$email_attempts" \
     --argjson source_code "$source_code" \
+    --argjson source_exit "$source_exit" \
+    --argjson source_first_exit "$source_first_exit" \
+    --arg source_arm "$source_arm" \
+    --argjson source_attempts "$source_attempts" \
     --argjson email_bytes "$email_bytes" \
     --argjson source_ok "$source_ok" \
     --argjson cli_ok "$cli_ok" \
+    --argjson cli_exit "$cli_exit" \
+    --arg cli_arm "$cli_arm" \
+    --argjson cli_attempts "$cli_attempts" \
+    --arg cli_stderr "$cli_stderr" \
     --argjson gui_content "$gui_content" \
     --argjson email_content "$email_content" \
     --argjson tui_max_display_width "$tui_max_display_width" \
     --argjson tui_overflow_lines "$tui_overflow_lines" \
     --argjson ok "$ok" \
-    '{id:$id,ok:$ok,gui:{status:$gui_code,content:$gui_content},email:{status:$email_code,bytes:$email_bytes,content:$email_content},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
+    '{id:$id,ok:$ok,gui:{status:$gui_code,exit:$gui_exit,first_exit:$gui_first_exit,arm:$gui_arm,attempts:$gui_attempts,content:$gui_content},email:{status:$email_code,exit:$email_exit,first_exit:$email_first_exit,arm:$email_arm,attempts:$email_attempts,bytes:$email_bytes,content:$email_content},source:{status:$source_code,exit:$source_exit,first_exit:$source_first_exit,arm:$source_arm,attempts:$source_attempts,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok,exit:$cli_exit,arm:$cli_arm,attempts:$cli_attempts,stderr:$cli_stderr},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
     >>"$results"
 done
 

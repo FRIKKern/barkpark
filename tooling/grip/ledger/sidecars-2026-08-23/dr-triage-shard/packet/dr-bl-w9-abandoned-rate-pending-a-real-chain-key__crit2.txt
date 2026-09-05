@@ -1,0 +1,1 @@
+If built, the rate is not computed on a fleet whose sites share one content projection, or it names that limitation on the same line. Evidence: the rendered output.

@@ -1,0 +1,1 @@
+A delivery matched beyond the ceiling is reported in a NAMED bucket rather than folded into delivered, and a fixture proves it never enters a percentile

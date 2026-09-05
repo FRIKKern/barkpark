@@ -301,9 +301,7 @@ func TestChatStableFramesRender(t *testing.T) {
 					t.Fatalf("frame %d: a stable frame with no blocks settles nothing", i)
 				}
 				out := ansi.Strip(reg.RenderDoc(blocks, ctx))
-				if strings.Contains(out, "unknown block") {
-					t.Fatalf("frame %d fell through to the unknown-block box:\n%s", i, out)
-				}
+				assertNoUnknownBlock(t, "stable frame "+itoa(i), out)
 				renderedBlocks += len(blocks)
 			}
 		})

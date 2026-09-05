@@ -1,0 +1,1 @@
+Inspector open/closed survives a reload via localStorage without any flash of wrong layout

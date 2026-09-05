@@ -9,12 +9,17 @@ defmodule Barkpark.Content.CodelistsBulkWriteTest do
   (`ERROR 57014 (query_canceled)`), rolling the whole seed back while the
   server carried on serving 200s.
 
-  Synchronous: the statement counter attaches to the global
+  Synchronous: the statement counter attaches to the node-global
   `[:barkpark, :repo, :query]` telemetry event, and several `async: true`
-  suites write `codelist_values` of their own.
+  suites write `codelist_values` of their own. `async: false` alone was never
+  enough — it fences sibling TEST processes, not the application's own
+  supervision tree — so the count is lineage-scoped through
+  `Barkpark.QueryCounter`.
   """
 
   use Barkpark.DataCase, async: false
+
+  alias Barkpark.QueryCounter
 
   alias Barkpark.Content.Codelists
   alias Barkpark.Content.Codelists.{Translation, Value}
@@ -43,37 +48,18 @@ defmodule Barkpark.Content.CodelistsBulkWriteTest do
     end
   end
 
+  # LINEAGE-SCOPED, via the shared `Barkpark.QueryCounter`. The SQL prefix is
+  # the only thing that made the old node-global handler look safe — any
+  # process in the VM issuing an `INSERT INTO "codelist_value…"` inside the
+  # window would have entered this count. Ownership is now decided by process
+  # lineage (this test and anything it spawned), so a background writer cannot.
   defp count_inserts(fun) do
-    test_pid = self()
-    handler = "codelist-bulk-write-#{System.unique_integer([:positive])}"
+    {result, sqls} = QueryCounter.sql(fun)
 
-    :telemetry.attach(
-      handler,
-      [:barkpark, :repo, :query],
-      fn _event, _measurements, meta, _config ->
-        query = Map.get(meta, :query, "")
+    inserts =
+      Enum.count(sqls, &String.starts_with?(&1, "INSERT INTO \"codelist_value"))
 
-        if is_binary(query) and String.starts_with?(query, "INSERT INTO \"codelist_value") do
-          send(test_pid, {handler, :insert})
-        end
-      end,
-      nil
-    )
-
-    try do
-      result = fun.()
-      {result, drain(handler, 0)}
-    after
-      :telemetry.detach(handler)
-    end
-  end
-
-  defp drain(handler, acc) do
-    receive do
-      {^handler, :insert} -> drain(handler, acc + 1)
-    after
-      0 -> acc
-    end
+    {result, inserts}
   end
 
   describe "register/3 — statement count" do

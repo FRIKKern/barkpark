@@ -1,0 +1,1 @@
+The order dependency is REPRODUCED with a named command plus seed, and the mutating sibling suite (or global) is named.

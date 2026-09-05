@@ -1,0 +1,1 @@
+The FLIP_FROM fallback no-op is either fenced (a flip must assert the Caddyfile now contains TARGET_PORT) or explicitly ruled acceptable with its second-order nature stated; the PR body records that it has never been observed in production.

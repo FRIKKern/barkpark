@@ -1,0 +1,1 @@
+`bash -n deploy/cp-deploy.sh && bash -n deploy/instance-deploy.sh` is green and pasted, plus any self-test the files carry.

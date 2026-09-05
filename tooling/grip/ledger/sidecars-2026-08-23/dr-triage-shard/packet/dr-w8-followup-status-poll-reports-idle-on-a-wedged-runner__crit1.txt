@@ -1,0 +1,1 @@
+A wedged Runner no longer reports a running build as :idle — the unknown state is distinguishable from a real idle, proven by a test that wedges the Runner

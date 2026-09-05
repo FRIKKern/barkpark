@@ -1,0 +1,1 @@
+THE BREAK-GLASS CONSEQUENCE IS RESOLVED BEFORE MERGE, not discovered after: after `required-checks-apply.sh --disable` writes enforced=false, CI goes RED as soon as protection is restored without flipping the flag back. Check docs/ops/merge-gates.md and breakglass.sh first and update the break-glass close procedure to include the flag flip — quote the doc change.

@@ -1,0 +1,1 @@
+The scoped_media_api pipeline plug list is read and it is stated explicitly whether Plugs.PublicRead is mounted, with the router.ex line numbers pasted.
