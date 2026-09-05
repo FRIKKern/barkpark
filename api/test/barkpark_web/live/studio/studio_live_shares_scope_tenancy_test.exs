@@ -266,6 +266,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
       {:ok, view, _html} = mount_on(conn, ws_a, proj_a)
       render_hook(view, "shares-open", %{})
 
+      # THE ACCOUNT ARM, NAMED (task-87c43ffa0be7ad95). This principal carries no
+      # `:api_token`, so `instance_declare_authority?/1` is false for it by the
+      # struct match, not by a permission lookup. Narrowing the TOKEN arm's
+      # foreign clamp must leave this side exactly where it is — this assertion
+      # is what makes that a pin rather than a coincidence.
+      refute assigns(view)[:api_token],
+             "this arm must be an ACCOUNT principal, or it proves nothing about the account arm"
+
       rows = assigns(view).shares_rows
 
       assert length(rows) == 1, "expected exactly A's one row, got #{inspect(rows)}"
@@ -278,12 +286,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
              "a foreign share's anonymous reader URL survived the clamp"
     end
 
-    # OVER-CLAMP CONTROL, the by-design arm: a token carrying the global `admin`
-    # permission is exactly what `/v1/shares` (`:require_admin`) demands, so it
-    # holds instance-wide declare authority and MUST still see the whole
-    # inventory. Without this arm the cheapest way to pass every test above is
-    # to return [].
-    test "a token with instance declare authority still sees EVERY workspace's shares", %{
+    # OVER-CLAMP CONTROL, the by-design arm. REWRITTEN by task-87c43ffa0be7ad95:
+    # the qualifying authority for a FOREIGN scope is no longer the bare global
+    # `admin` bit but `Tenancy.Auth.workspace_admin?/2` on that scope's own
+    # workspace — the predicate `POST/DELETE /v1/shares` and both write halves
+    # already demand. So this token now holds a REAL `admin` membership in ws-B
+    # as well as ws-A, and MUST still see the whole inventory. Without this arm
+    # the cheapest way to pass every test above is to return [].
+    test "a token that ADMINISTERS both workspaces still sees EVERY workspace's shares", %{
       conn: conn,
       ws_a: ws_a,
       proj_a: proj_a,
@@ -304,6 +314,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
         )
 
       {:ok, _} = Tenancy.Auth.create_membership(ws_a.id, token.id, "admin", "api_token")
+      {:ok, _} = Tenancy.Auth.create_membership(ws_b.id, token.id, "admin", "api_token")
+
+      # The authority under test, stated: an admin SEAT in the foreign
+      # workspace, not merely the global bit.
+      assert TenancyAuth.workspace_admin?(token, ws_b.id)
 
       conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
       {:ok, view, _html} = mount_on(conn, ws_a, proj_a)
@@ -312,6 +327,83 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
 
       assert html =~ ws_b.slug,
              "instance declare authority was over-clamped out of its own inventory"
+    end
+  end
+
+  # ─── THE LIST HALF, TOKEN ARM (task-87c43ffa0be7ad95) ───────────────────────
+  #
+  # THE FOURTH DOOR, and the one #15025 left open. That PR clamped both WRITE
+  # halves: `Handlers.Shares.target_workspace_admits?/2` resolves the scope's
+  # workspace and demands `Tenancy.Auth.workspace_admin?/2`. The READ half kept
+  # filtering on `Shared.declarable_scope?/2`, whose foreign arm is
+  # `instance_declare_authority?/1` — `Auth.has_permission?(token, "admin")`,
+  # the bare global bit.
+  #
+  # WHY THAT WAS VACUOUS RATHER THAN MERELY WEAK: `Caps.admin?/1`'s token arm
+  # already requires the SAME global bit to open the panel at all. So every
+  # token principal that could reach the listing already satisfied the foreign
+  # arm for EVERY scope, and the read clamp filtered nothing on the token arm —
+  # while the same actor's declare and remove over that scope were refused. The
+  # panel LISTED what it would not let you TOUCH, which is exactly the drift
+  # `load_share_rows/1`'s own comment says the shared predicate exists to
+  # prevent.
+  #
+  # The actor is `instance_admin_token!/4` — the SAME non-vacuous fixture the
+  # write halves use, with `token_preconditions!/3` asserting
+  # `authorize(tok, B, :admin) == :ok` while
+  # `refute workspace_admin?(tok, B)`. A fix that swapped the clamp for
+  # `authorize/3` would leave this test RED.
+  describe "the LIST half — the TOKEN arm" do
+    test "LEAK CLOSED: a global-admin token seated as a plain MEMBER of ws-B cannot SEE B's share rows",
+         %{
+           conn: conn,
+           ws_a: ws_a,
+           proj_a: proj_a,
+           ws_b: ws_b,
+           default_ws: default_ws
+         } do
+      seed_shares!(ws_a, proj_a, ws_b)
+
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+
+      # BY NODE, not by page: `element/2 |> render/1` renders only the shares
+      # modal and raises if the selector stops matching, so this cannot go
+      # vacuous against unrelated Studio chrome.
+      panel = shares_panel(view)
+
+      refute panel =~ ws_b.slug,
+             "a global-admin token holding only a plain member row in #{ws_b.slug} was shown " <>
+               "#{ws_b.slug}'s share inventory — the scope it is REFUSED declare and remove over"
+
+      # OVER-CLAMP CONTROL, same render: the panel is not simply empty.
+      assert panel =~ "#{ws_a.slug}/#{proj_a.slug}/#{@dataset}",
+             "the clamp hid the caller's OWN administered share"
+    end
+
+    # EXISTENCE, not just bodies — the token twin of the account-arm assign
+    # test above. The row COUNT and each row's anonymous reader URL derive from
+    # the same list, so a clamped render over an unclamped list still leaks.
+    test "the assign holds no foreign row for that token, URL included", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws
+    } do
+      seed_shares!(ws_a, proj_a, ws_b)
+
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+
+      rows = assigns(view).shares_rows
+
+      refute Enum.any?(rows, &String.contains?(&1.scope, ws_b.slug)),
+             "expected only #{ws_a.slug}'s row, got #{inspect(rows)}"
+
+      refute Enum.any?(rows, fn r -> is_binary(r.url) and String.contains?(r.url, ws_b.slug) end),
+             "a foreign share's anonymous reader URL survived the clamp"
+
+      assert Enum.any?(rows, &(&1.scope == "#{ws_a.slug}/#{proj_a.slug}/#{@dataset}")),
+             "the clamp hid the caller's OWN administered share"
     end
   end
 
