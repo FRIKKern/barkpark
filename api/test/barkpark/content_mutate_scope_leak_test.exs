@@ -248,7 +248,9 @@ defmodule Barkpark.ContentMutateScopeLeakTest do
       ws_b: ws_b,
       file_a: file_a
     } do
-      assert {:error, :not_found} = Media.delete_file(file_a.id, workspace_id: ws_b.id, where_used: :cascade)
+      assert {:error, :not_found} =
+               Media.delete_file(file_a.id, workspace_id: ws_b.id, where_used: :cascade)
+
       # A's blob row survives.
       assert {:ok, _} = Media.get_file(file_a.id, workspace_id: ws_a.id)
     end

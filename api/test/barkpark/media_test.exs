@@ -504,7 +504,8 @@ defmodule Barkpark.MediaTest do
 
       file_a = insert_file!(%{workspace_id: ws_a.id, project_id: proj_a.id})
 
-      assert {:error, :not_found} = Media.delete_file(file_a.id, workspace_id: ws_b.id, where_used: :cascade)
+      assert {:error, :not_found} =
+               Media.delete_file(file_a.id, workspace_id: ws_b.id, where_used: :cascade)
 
       # The file must still exist — it was not deleted
       assert {:ok, _} = Media.get_file(file_a.id, workspace_id: ws_a.id)

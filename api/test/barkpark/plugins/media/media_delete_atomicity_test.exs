@@ -215,7 +215,8 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
       {:ok, stale_struct} = Media.get_file(file.id)
       {:ok, _} = Media.delete_file(file.id, where_used: :cascade)
 
-      assert Barkpark.Media.delete_file(stale_struct.id, where_used: :cascade) == {:error, :not_found}
+      assert Barkpark.Media.delete_file(stale_struct.id, where_used: :cascade) ==
+               {:error, :not_found}
     end
   end
 
@@ -270,7 +271,9 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
   defp delete_file_source! do
     source = File.read!(Path.join(__DIR__, "../../../../lib/barkpark/media.ex"))
 
-    [_head, tail] = String.split(source, "def delete_file(id, opts) when is_list(opts) do", parts: 2)
+    [_head, tail] =
+      String.split(source, "def delete_file(id, opts) when is_list(opts) do", parts: 2)
+
     [body, _rest] = String.split(tail, "# ── Deferred media-delete effects", parts: 2)
     body
   end

@@ -338,6 +338,7 @@ defmodule BarkparkWeb.V1.MediaController do
   # `nextOffset` only when a next page genuinely exists — an exhausted result
   # set never hands back an offset onto an empty page.
   defp maybe_next_offset(result, false, _offset, _returned), do: result
+
   defp maybe_next_offset(result, true, offset, returned),
     do: Map.put(result, :nextOffset, offset + returned)
 
