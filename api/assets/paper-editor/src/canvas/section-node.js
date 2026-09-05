@@ -469,30 +469,40 @@ export const Section = Node.create({
       // onUpdate → run-convert diffs it. A cleared title writes null (round-trips
       // ABSENT). Re-entrancy-guarded: never fire while paint() is the one writing.
       let writeTimer = null;
+      const commitTitleWrite = () => {
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_SECTION_NODE_NAME) return;
+        const raw = titleEl.textContent || "";
+        const nextTitle = raw === "" ? null : raw;
+        if ((cur.attrs.title || null) === nextTitle) return;
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, title: nextTitle });
+            return true;
+          })
+          .run();
+      };
       const scheduleWrite = () => {
         if (syncingTitle) return;
         if (!editor.isEditable) return;
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur || cur.type.name !== BP_SECTION_NODE_NAME) return;
-          const raw = titleEl.textContent || "";
-          const nextTitle = raw === "" ? null : raw;
-          if ((cur.attrs.title || null) === nextTitle) return; // nothing changed
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, { ...cur.attrs, title: nextTitle });
-              return true;
-            })
-            .run();
+          commitTitleWrite();
         }, 250);
       };
+      const flushTitleWrite = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitTitleWrite();
+      };
       titleEl.addEventListener("input", scheduleWrite);
+      dom.addEventListener("bp-flush-node", flushTitleWrite);
 
       // ── STEP-2: write node.attrs.layout via the SAME re-entrancy-guarded
       // setNodeMarkup the title uses. `mutate` receives the current layout (or a
@@ -600,6 +610,7 @@ export const Section = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          dom.removeEventListener("bp-flush-node", flushTitleWrite);
           titleEl.removeEventListener("focus", onTitleFocus);
           titleEl.removeEventListener("blur", onTitleBlur);
           titleEl.removeEventListener("keydown", onTitleKeydown);

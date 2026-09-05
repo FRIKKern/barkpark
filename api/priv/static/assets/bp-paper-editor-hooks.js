@@ -15,6 +15,90 @@
 (function () {
   const Hooks = {};
 
+  // Finish local edits and wait for their save replies before unmounting the
+  // editor. A refused save leaves the paper open with its server halt message.
+  Hooks.BarkparkPaperEditToggle = {
+    mounted() {
+      this._dirtyForms = new Set();
+      this._formVersions = new WeakMap();
+      this._main = this.el.closest("main");
+      this._onFormInput = (event) => {
+        const form = event.target.closest?.(".bp-paper-edit-form[phx-change]");
+        if (form && this._main.contains(form)) {
+          this._formVersions.set(form, (this._formVersions.get(form) || 0) + 1);
+          this._dirtyForms.add(form);
+        }
+      };
+      this._main.addEventListener("input", this._onFormInput);
+      this._main.addEventListener("change", this._onFormInput);
+      this._onClick = async (event) => {
+        if (this.el.dataset.editing !== "true") return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (this._saving) return;
+        this._saving = true;
+        this.el.disabled = true;
+        this.el.setAttribute("aria-busy", "true");
+        try {
+          // Input can continue while a previous save is in flight. Drain again
+          // after its acknowledgement before allowing the editor to unmount.
+          while (this.el.isConnected) {
+            const pending = [];
+            this._main.querySelectorAll('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], [phx-hook="BarkparkFieldBlockBridge"], [phx-hook="BarkparkFieldBridge"]').forEach((wrapper) => {
+              wrapper.dispatchEvent(new CustomEvent("bp-flush-pending", {
+                detail: { waitUntil: (promise) => pending.push(promise) },
+              }));
+            });
+            const dirtyForms = [...this._dirtyForms];
+            dirtyForms.forEach((form) => {
+              this._dirtyForms.delete(form);
+              if (!form.isConnected) return;
+              const changeEvent = form.getAttribute("phx-change");
+              if (!changeEvent) return;
+              const target = form.getAttribute("phx-target") || form;
+              const params = Object.fromEntries(new FormData(form));
+              const version = this._formVersions.get(form) || 0;
+              pending.push(
+                this.pushEventTo(target, changeEvent, params)
+                  .then((results) => results.length > 0 && results.every((result) =>
+                    result.status === "fulfilled" && result.value?.reply?.saved !== false
+                  ))
+                  .catch(() => false)
+                  .then((saved) => {
+                    if (
+                      !saved && form.isConnected &&
+                      this._formVersions.get(form) === version
+                    ) this._dirtyForms.add(form);
+                    return saved;
+                  })
+              );
+            });
+            if (pending.length === 0) {
+              try {
+                await this.pushEvent("paper-toggle-edit", {});
+              } catch (_) {
+                // A disconnected toggle is still editing; the finally block
+                // restores the button so the user can explicitly retry.
+              }
+              break;
+            }
+            if (!(await Promise.all(pending)).every(Boolean)) break;
+          }
+        } finally {
+          this._saving = false;
+          this.el.disabled = false;
+          this.el.removeAttribute("aria-busy");
+        }
+      };
+      this.el.addEventListener("click", this._onClick, true);
+    },
+    destroyed() {
+      this.el.removeEventListener("click", this._onClick, true);
+      this._main?.removeEventListener("input", this._onFormInput);
+      this._main?.removeEventListener("change", this._onFormInput);
+    },
+  };
+
     // BarkparkPaperEditor — LV↔WC bridge for the per-block paper editor
     // (<bp-paper-editor>). Mounted on the phx-update="ignore" wrapper that
     // holds one custom element per rich-text block. The element emits a
@@ -24,10 +108,30 @@
     // state, no echo back into the WC.
     Hooks.BarkparkPaperEditor = {
       mounted() {
-        this._onOp = (e) => {
-          this.pushEvent("paper-op", e.detail);
+        this._pendingSaves = new Set();
+        this._retryOp = null;
+        const pushOp = (op) => {
+          this._retryOp = op;
+          const pending = this.pushEvent("paper-op", op)
+            .then((reply) => reply?.saved !== false)
+            .catch(() => false)
+            .then((saved) => {
+              if (saved && this._retryOp === op) this._retryOp = null;
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
         };
+        this._onOp = (e) => pushOp(e.detail);
         this.el.addEventListener("bp-op", this._onOp);
+        this._onFlushPending = (event) => {
+          this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
+          if (!this._pendingSaves.size && this._retryOp) pushOp(this._retryOp);
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // Slash menu (P3.3): the WC emits a bubbling/composed `bp-slash-insert`
         // CustomEvent {detail:{type, afterId}} when the user picks a block type
@@ -103,6 +207,7 @@
       },
       destroyed() {
         this.el.removeEventListener("bp-op", this._onOp);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-slash-insert", this._onSlash);
       }
     };
@@ -140,18 +245,19 @@
         // riding this run mounts its client-side picker WC (bp-media-picker /
         // bp-reference-picker) inside a canvas node-view; the node-view reads the
         // dataset + bearer token off the <bp-paper-canvas> HOST element (data-dataset
-        // / data-token) — the SAME scope the per-block picker render uses
-        // (dataset + data-token={@api_token_raw}). Stamp them from the wrapper's
-        // data-canvas-dataset / data-canvas-token so the picker fetches / uploads
-        // exactly as it does in the per-block path. (scope-prefix is intentionally
-        // unset — the per-block picker render omits it too, defaulting to the flat
-        // surface.) A run with no picker carries them harmlessly.
+        // / data-token / data-scope-prefix) — the SAME scope the per-block picker
+        // render uses. Item-share-only editors carry data-picker-browse=false so
+        // they retain the current value without gaining a dataset browser.
         const seedScope = (el) => {
           if (!el) return;
           const ds = this.el.dataset.canvasDataset;
           const tok = this.el.dataset.canvasToken;
+          const prefix = this.el.dataset.canvasScopePrefix;
+          const pickerBrowse = this.el.dataset.canvasPickerBrowse;
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
+          if (prefix != null) el.setAttribute("data-scope-prefix", prefix);
+          if (pickerBrowse != null) el.setAttribute("data-picker-browse", pickerBrowse);
           // pdd-t2: the block AFTER this run in the full document is template-
           // locked (e.g. the featured image right after the title run). The WC's
           // filterTransaction reads data-locked-tail LIVE and vetoes any run
@@ -167,6 +273,7 @@
           if (constraints != null) el.setAttribute("data-constraints", constraints);
         };
         const wc = this.el.querySelector("bp-paper-canvas");
+        if (wc) wc.acknowledgedSaves = true;
         seedScope(wc);
         seedBlocks(wc);
 
@@ -200,19 +307,73 @@
         customElements.whenDefined("bp-paper-canvas").then(() => {
           const el = this.el.querySelector("bp-paper-canvas");
           if (el) {
+            el.acknowledgedSaves = true;
             seedScope(el);
             seedBlocks(el);
             wireWikilinkSource(el);
             wireTagSource(el);
+            this._repaintFleet?.();
           }
         });
 
         // Outbound: the canvas's debounced op batch → the server's paper-ops
         // handler. detail is {ops:[…]}; forward it verbatim.
+        this._pendingSaves = new Set();
+        this._opsQueue = [];
+        this._sendingOps = false;
+        this._opsFailed = false;
+        this._saveBridgeDestroyed = false;
+        const sendNextOps = () => {
+          if (
+            this._saveBridgeDestroyed || this._sendingOps ||
+            this._opsFailed || !this._opsQueue.length
+          ) return;
+          const entry = this._opsQueue[0];
+          this._sendingOps = true;
+          const pending = this.pushEvent("paper-ops", { ops: entry.ops })
+            .then((reply) => reply?.saved !== false)
+            .catch(() => false)
+            .then((saved) => {
+              this._sendingOps = false;
+              if (saved && this._opsQueue[0] === entry) {
+                // Remove the acknowledged head before notifying the WC. That
+                // notification may synchronously emit the next dirty delta.
+                this._opsQueue.shift();
+              }
+              const canvas = this.el.querySelector("bp-paper-canvas");
+              if (entry.seq != null && typeof canvas?.acknowledgeOps === "function") {
+                canvas.acknowledgeOps(entry.seq, saved);
+              }
+              if (saved) {
+                sendNextOps();
+              } else {
+                // Retain the failed head and every later delta behind it. The
+                // next explicit View retries in order, so a later source-mode
+                // success can never erase an earlier unsatisfied rich batch.
+                this._opsFailed = true;
+              }
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+        };
         this._onCanvasOps = (e) => {
-          this.pushEvent("paper-ops", e.detail);
+          this._opsQueue.push({ ops: e.detail.ops, seq: e.detail.seq });
+          sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+        this._onFlushPending = (event) => {
+          const wc = this.el.querySelector("bp-paper-canvas");
+          wc?.flushPendingChanges?.();
+          if (this._opsFailed && !this._sendingOps) {
+            this._opsFailed = false;
+            sendNextOps();
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // Inbound bridge (S4a): the echo-driven baseline advance — the
         // bp:block-update successor for the continuous canvas. After the server
@@ -315,6 +476,11 @@
           );
         };
 
+        // A deferred custom-element upgrade can mount the paint holes AFTER
+        // the server reply. Replay the cached HTML as soon as they exist.
+        this._onCanvasReady = () => this._repaintFleet();
+        this.el.addEventListener("bp-ready", this._onCanvasReady);
+
         // Request the initial preview once the hook (and its listener above) is
         // mounted, so the live rows land even if the server's setup-time push
         // raced ahead of this handler's registration. Guarded to run-0 so a
@@ -333,7 +499,11 @@
         if (typeof this._repaintFleet === "function") this._repaintFleet();
       },
       destroyed() {
+        this._saveBridgeDestroyed = true;
+        this._opsQueue = [];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
+        this.el.removeEventListener("bp-ready", this._onCanvasReady);
       }
     };
 
@@ -350,13 +520,46 @@
         const blockId = this.el.dataset.blockId;
         const fieldType = this.el.dataset.fieldType;
 
-        const push = (value) => {
-          this.pushEvent("paper-op", {
-            op: "patch-block",
-            id: blockId,
-            patch: { value: value }
-          });
+        this._pendingSaves = new Set();
+        this._retryOp = null;
+        const pushOp = (op) => {
+          this._retryOp = op;
+          const pending = this.pushEvent("paper-op", op)
+            .then((reply) => reply?.saved !== false)
+            .catch(() => false)
+            .then((saved) => {
+              if (saved && this._retryOp === op) this._retryOp = null;
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
         };
+        const push = (value) => pushOp({
+          op: "patch-block",
+          id: blockId,
+          patch: { value: value }
+        });
+
+        // The edit→view boundary dispatches this while the wrapper is still
+        // connected. Commit any native text input still inside the 300 ms timer,
+        // then contribute every in-flight save reply to the toggle's wait set.
+        // Repeated flushes are safe: consuming `_t` before send means the same
+        // local edit is never pushed twice, while a newly typed value schedules a
+        // fresh timer for the toggle's next drain pass.
+        this._onFlushPending = (event) => {
+          if (this._t) {
+            clearTimeout(this._t);
+            this._t = null;
+            this._sendPending?.();
+          }
+          if (!this._pendingSaves.size && this._retryOp) pushOp(this._retryOp);
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(
+              Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean))
+            );
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
 
         // PICKER field blocks (field-reference / field-image, P2.2) are driven
         // by a bp-* Web Component (bp-reference-picker / bp-media-picker) that
@@ -396,7 +599,7 @@
                 src = raw;
               }
             }
-            this.pushEvent("paper-op", {
+            pushOp({
               op: "patch-block",
               id: blockId,
               patch: { src: src, alt: meta.alt || "" }
@@ -420,6 +623,7 @@
           }
           push(value);
         };
+        this._sendPending = send;
 
         // datetime / color / select / boolean commit on `change`; free-text
         // (string / slug / text) debounce on `input` so we don't flood the
@@ -428,7 +632,10 @@
         if (debounced) {
           this._onInput = () => {
             clearTimeout(this._t);
-            this._t = setTimeout(send, 300);
+            this._t = setTimeout(() => {
+              this._t = null;
+              send();
+            }, 300);
           };
           control.addEventListener("input", this._onInput);
         } else {
@@ -438,6 +645,8 @@
       },
       destroyed() {
         clearTimeout(this._t);
+        this._t = null;
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         const fieldType = this.el.dataset.fieldType;
         // Picker blocks (field pickers + image content blocks) bind `bp-change`
         // on the wrapper (this.el); leaf blocks bind input/change on the inner
@@ -827,6 +1036,180 @@
         if (menu && menu._ownerEl === this.el) bpPaperCtxMenuClose();
       },
     };
+
+    // BarkparkFieldBridge — generic LV↔WC bridge (Task #11 WI4).
+    // Mounted on a wrapper div containing a hidden <input> + a bp-*
+    // custom element. Listens for bubbled `bp-change` events, mirrors
+    // detail.value into the hidden input identified by the WC's
+    // data-bridge-target, and dispatches a synthetic `input` event so
+    // Phoenix's existing phx-change="autosave" debounce + form
+    // serialise + push round-trip fires exactly as for native inputs.
+    // Reusable for future bp-media-picker / bp-reference-picker /
+    // bp-document-preview / bp-json-inspector — no per-widget hook.
+    Hooks.BarkparkFieldBridge = {
+      mounted() {
+        this._dirty = false;
+        this._formVersion = 0;
+        this._pendingSaves = new Set();
+        this._paperForm = this.el.matches("form[data-paper-field-flush]")
+          ? this.el
+          : this.el.closest("form[data-paper-field-flush]");
+        this._ownsPaperForm = this._paperForm === this.el;
+        this._pendingRequests = new Map();
+
+        const trackFormChange = () => {
+          this._formVersion += 1;
+          this._dirty = true;
+        };
+        if (this._ownsPaperForm) {
+          this._onFormInput = trackFormChange;
+          this._onFormChange = trackFormChange;
+          this.el.addEventListener("input", this._onFormInput);
+          this.el.addEventListener("change", this._onFormChange);
+          this._onPaperFieldSaveResult = (payload) => {
+            const request = payload && this._pendingRequests.get(payload.request_id);
+            if (request) request.finish(payload.saved === true);
+          };
+          this._paperSaveResultRef = this.handleEvent(
+            "bp:paper-field-save-result",
+            this._onPaperFieldSaveResult,
+          );
+          this._onArrayOpClick = (event) => {
+            const button = event.target.closest?.('[phx-click="inner-array-op"]');
+            if (!button || !this.el.contains(button) || button.disabled) return;
+
+            // In reader edit mode, own the structural event so its parent write
+            // participates in the same correlated barrier as field changes.
+            // Studio has no Edit/View barrier, so its ordinary LiveView click
+            // binding remains untouched.
+            const toggle = this.el.closest("main")?.querySelector(
+              '[phx-hook="BarkparkPaperEditToggle"]',
+            );
+            if (!toggle) return;
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            this._formVersion += 1;
+            const version = this._formVersion;
+            this._dirty = false;
+            const params = { action: button.getAttribute("phx-value-action") };
+            const index = button.getAttribute("phx-value-index");
+            if (index != null) params.index = index;
+            this._pushCorrelated("inner-array-op", params, version);
+          };
+          this.el.addEventListener("click", this._onArrayOpClick, true);
+        }
+
+        this._trackSave = (save, version) => {
+          const pending = save
+            .then((saved) => {
+              if (!saved && this._formVersion === version) this._dirty = true;
+              return saved;
+            })
+            .finally(() => this._pendingSaves.delete(pending));
+          this._pendingSaves.add(pending);
+          return pending;
+        };
+
+        this._pushCorrelated = (event, params, version) => {
+          window.__bpPaperFieldFlushSeq = (window.__bpPaperFieldFlushSeq || 0) + 1;
+          const requestId = `bp-field-${Date.now()}-${window.__bpPaperFieldFlushSeq}`;
+          params.request_id = requestId;
+          const target = this.el.getAttribute("phx-target") || this.el;
+          const save = new Promise((resolve) => {
+            let finished = false;
+            const finish = (saved) => {
+              if (finished) return;
+              finished = true;
+              clearTimeout(timeout);
+              this._pendingRequests.delete(requestId);
+              resolve(saved === true);
+            };
+            const timeout = setTimeout(() => finish(false), 10000);
+            this._pendingRequests.set(requestId, { finish });
+            try {
+              Promise.resolve(this.pushEventTo(target, event, params))
+                .then((results) => {
+                  if (!Array.isArray(results) || results.length === 0 ||
+                      results.some((result) => result.status !== "fulfilled")) {
+                    finish(false);
+                  }
+                })
+                .catch(() => finish(false));
+            } catch (_err) {
+              finish(false);
+            }
+          });
+          return this._trackSave(save, version);
+        };
+
+        this._pushForm = () => {
+          const input = this._bridgeInput;
+          const form = this._ownsPaperForm ? this._paperForm : input && input.form;
+          const event = form &&
+            ((input && input.getAttribute("phx-change")) || form.getAttribute("phx-change"));
+          if (!form || !event) return null;
+
+          const params = Object.fromEntries(new FormData(form));
+          const version = this._formVersion;
+          const target = (input && input.getAttribute("phx-target")) ||
+            form.getAttribute("phx-target") || form;
+
+          let save;
+          if (this._ownsPaperForm) {
+            return this._pushCorrelated("inner-flush", { values: params }, version);
+          } else {
+            save = this.pushEventTo(target, event, params)
+              .then((results) => results.length > 0 && results.every((result) =>
+                result.status === "fulfilled" && result.value?.reply?.saved !== false
+              ))
+              .catch(() => false);
+          }
+
+          return this._trackSave(save, version);
+        };
+        this._on = (e) => {
+          const nearestBridge = e.target.closest &&
+            e.target.closest('[phx-hook="BarkparkFieldBridge"]');
+          if (nearestBridge && nearestBridge !== this.el) return;
+          const targetId = e.target.dataset.bridgeTarget;
+          if (!targetId) return;
+          const input = document.getElementById(targetId);
+          if (!input) return;
+          this._bridgeInput = input;
+          this._formVersion += 1;
+          this._dirty = true;
+          input.value = e.detail.value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        this.el.addEventListener("bp-change", this._on);
+        this._onFlushPending = (event) => {
+          // A nested picker bridge mirrors its hidden input; the hook mounted
+          // on the surrounding PaperFieldBlock form owns the correlated save.
+          if (this._paperForm && !this._ownsPaperForm) return;
+          if (this._dirty) {
+            this._dirty = false;
+            this._pushForm();
+          }
+          if (this._pendingSaves.size) {
+            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          }
+        };
+        this.el.addEventListener("bp-flush-pending", this._onFlushPending);
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-change", this._on);
+        this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
+        if (this._onFormInput) this.el.removeEventListener("input", this._onFormInput);
+        if (this._onFormChange) this.el.removeEventListener("change", this._onFormChange);
+        if (this._onArrayOpClick) this.el.removeEventListener("click", this._onArrayOpClick, true);
+        if (this._paperSaveResultRef != null && typeof this.removeHandleEvent === "function") {
+          this.removeHandleEvent(this._paperSaveResultRef);
+        }
+        this._pendingRequests.forEach((request) => request.finish(false));
+      }
+    };
+
 
   window.BarkparkPaperEditorHooks = Hooks;
 })();

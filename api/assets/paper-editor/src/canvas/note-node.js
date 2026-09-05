@@ -204,32 +204,50 @@ export const Note = Node.create({
       // Debounced write-back per field (cleared → null → round-trips ABSENT).
       let labelTimer = null;
       let leadTimer = null;
+      const commitLabel = () => {
+        const raw = labelInput.value || "";
+        const next = raw === "" ? null : raw;
+        writeAttr((attrs) => {
+          if ((attrs.label || null) === next) return attrs;
+          attrs.label = next;
+          return attrs;
+        });
+      };
+      const commitLead = () => {
+        const raw = leadInput.value || "";
+        const next = raw === "" ? null : raw;
+        writeAttr((attrs) => {
+          if ((attrs.lead || null) === next) return attrs;
+          attrs.lead = next;
+          return attrs;
+        });
+      };
       const scheduleWrite = (which) => {
         if (!editor.isEditable) return;
         if (which === "label") {
           if (labelTimer) clearTimeout(labelTimer);
           labelTimer = setTimeout(() => {
             labelTimer = null;
-            const raw = labelInput.value || "";
-            const next = raw === "" ? null : raw;
-            writeAttr((attrs) => {
-              if ((attrs.label || null) === next) return attrs;
-              attrs.label = next;
-              return attrs;
-            });
+            commitLabel();
           }, 250);
         } else {
           if (leadTimer) clearTimeout(leadTimer);
           leadTimer = setTimeout(() => {
             leadTimer = null;
-            const raw = leadInput.value || "";
-            const next = raw === "" ? null : raw;
-            writeAttr((attrs) => {
-              if ((attrs.lead || null) === next) return attrs;
-              attrs.lead = next;
-              return attrs;
-            });
+            commitLead();
           }, 250);
+        }
+      };
+      const flushPending = () => {
+        if (labelTimer) {
+          clearTimeout(labelTimer);
+          labelTimer = null;
+          commitLabel();
+        }
+        if (leadTimer) {
+          clearTimeout(leadTimer);
+          leadTimer = null;
+          commitLead();
         }
       };
 
@@ -246,6 +264,7 @@ export const Note = Node.create({
       leadInput.addEventListener("input", onLeadInput);
       labelInput.addEventListener("keydown", onIslandKeydown);
       leadInput.addEventListener("keydown", onIslandKeydown);
+      dom.addEventListener("bp-flush-node", flushPending);
 
       paint(node);
 
@@ -277,6 +296,7 @@ export const Note = Node.create({
           leadInput.removeEventListener("input", onLeadInput);
           labelInput.removeEventListener("keydown", onIslandKeydown);
           leadInput.removeEventListener("keydown", onIslandKeydown);
+          dom.removeEventListener("bp-flush-node", flushPending);
         },
       };
     };

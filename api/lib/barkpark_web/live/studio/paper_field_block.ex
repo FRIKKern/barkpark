@@ -33,12 +33,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   `patch-block` op, `paper_op/2` re-syncs `paper_doc` and re-renders the
   assign-driven editor, which re-sends `update/2` to this component with the
   fresh block. To avoid clobbering an in-flight edit / losing input focus the
-  component updates its OWN `:value` assign locally on every inner change
-  BEFORE sending `:paper_op`. So when the server echo lands, the value the
-  component re-derives from `block["value"]` already matches what is in the
-  DOM — LiveView's diff is a no-op for the touched input and the caret is
-  preserved. `update/2` is idempotent: it always re-derives from `assigns.block`
-  but the local-first update means the echo never moves the cursor.
+  component updates its OWN `:value` assign locally before sending `:paper_op`.
+  It retains that pending value across older or refused parent renders, and
+  clears the pending marker only when the block carries the exact value back.
+  The successful echo is therefore a no-op DOM diff for the touched input, so
+  it does not move the cursor; a refused save remains available for retry.
 
   ## Config-carrying blocks
 
@@ -76,6 +75,22 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   @impl true
   def update(%{block: block} = assigns, socket) do
     field_type = Map.get(block, "type")
+    persisted_value = derive_value(block)
+
+    # A rejected parent write re-renders this component with the last persisted
+    # block. Keep the user's local value until the parent eventually echoes that
+    # exact value after a successful retry. An older successful echo likewise
+    # cannot overwrite a newer pending edit.
+    {value, pending_value?} =
+      if socket.assigns[:pending_value?] do
+        local_value = socket.assigns.value
+
+        if persisted_value == local_value,
+          do: {persisted_value, false},
+          else: {local_value, true}
+      else
+        {persisted_value, false}
+      end
 
     socket =
       socket
@@ -88,10 +103,8 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       # ("flat" → CodelistField <select>/<datalist>; "tree" → TreeCodelistField).
       |> assign(:plugin, Map.get(block, "plugin", "core"))
       |> assign(:variant, block_variant(block))
-      # Always re-derive value from the block. The local-first update on inner
-      # change means the server echo carries the value already in the DOM, so
-      # this re-derive is a no-op diff for the edited input (focus preserved).
-      |> assign(:value, derive_value(block))
+      |> assign(:value, value)
+      |> assign(:pending_value?, pending_value?)
       |> assign(:field, build_field(block))
 
     {:ok, socket}
@@ -124,7 +137,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "composite"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="composite" data-block-id={@block_id}>
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <CompositeField.composite_field field={@field} value={@value} on_change="inner-change" path="" />
       </form>
     </div>
@@ -140,7 +153,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "arrayOf", variant: "chips"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="arrayOf" data-block-id={@block_id} data-array-variant="chips">
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <ul class="bp-paper-chips">
           <li :for={{chip, i} <- Enum.with_index(@value)} class="bp-paper-chip">
             <input type="text" name={"[#{i}]"} value={chip} aria-label="Edit value" />
@@ -168,7 +181,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "arrayOf"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="arrayOf" data-block-id={@block_id}>
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <ArrayField.array_field
           field={@field}
           value={@value}
@@ -202,7 +215,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "codelist", variant: "tree"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id} data-codelist-variant="tree">
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <.live_component
           module={TreeCodelistField}
           id={"tree-" <> @block_id}
@@ -222,7 +235,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "codelist"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id} data-codelist-variant="flat">
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <CodelistField.codelist_field
           field={@field}
           value={@value}
@@ -238,7 +251,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "localizedText"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="localizedText" data-block-id={@block_id}>
-      <form phx-change="inner-change" phx-target={@myself}>
+      <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <LocalizedTextField.localized_text_field
           field={@field}
           value={@value}
@@ -275,6 +288,22 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     {:noreply, persist(socket, new_value)}
   end
 
+  # The Edit→View boundary cannot use the ordinary phx-change reply as a save
+  # acknowledgement: this component only forwards the op, while the parent
+  # LiveView performs the actual persistence. Carry a correlation id to that
+  # parent so it can report the result after applying this exact operation.
+  def handle_event(
+        "inner-flush",
+        %{"request_id" => request_id, "values" => params},
+        socket
+      )
+      when is_map(params) do
+    params = Map.drop(params, ["_target", "_csrf_token"])
+    new_value = merge_change(socket.assigns.field_type, socket.assigns.value, params)
+
+    {:noreply, persist(socket, new_value, request_id)}
+  end
+
   # arrayOf structural op (add / remove / move_up / move_down) on THIS block's
   # own list value, replicating the parent `array_op` list helpers. We operate
   # on the component's own value, then send the same patch-block op.
@@ -291,7 +320,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
         _ -> list
       end
 
-    {:noreply, persist(socket, new_list)}
+    {:noreply, persist(socket, new_list, params["request_id"])}
   end
 
   # Fall-through: a stale/forged phx event must not FunctionClauseError-crash
@@ -308,15 +337,22 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   # then notify the paper LiveView with a patch-block op carrying the new
   # value. The parent routes it through the canonical `paper_op/2` pipeline
   # (Content.apply_paper_block_op → persist + broadcast + re-sync).
-  defp persist(socket, new_value) do
+  defp persist(socket, new_value, request_id \\ nil) do
     op = %{
       "op" => "patch-block",
       "id" => socket.assigns.block_id,
       "patch" => %{"value" => new_value}
     }
 
-    send(self(), {:paper_op, op})
-    assign(socket, :value, new_value)
+    if request_id do
+      send(self(), {:paper_op, op, request_id})
+    else
+      send(self(), {:paper_op, op})
+    end
+
+    socket
+    |> assign(:value, new_value)
+    |> assign(:pending_value?, true)
   end
 
   # ── value derivation + merge ────────────────────────────────────────────────

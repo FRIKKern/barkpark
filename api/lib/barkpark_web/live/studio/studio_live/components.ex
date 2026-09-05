@@ -313,6 +313,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   paper_rev={@paper_rev}
                   dataset={@dataset}
                   api_token_raw={@api_token_raw}
+                  scope_prefix={@scope_prefix}
                   canvas_eligible={true}
                   task_previews={@task_previews}
                   save_status={@save_status}
@@ -1711,6 +1712,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     paper_rev={0}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
+                    scope_prefix={Map.get(assigns, :scope_prefix, "")}
                   />
                 </main>
               </div>

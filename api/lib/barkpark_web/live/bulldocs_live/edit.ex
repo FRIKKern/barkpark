@@ -32,18 +32,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   re-check `can_edit?` anyway (`writable?/1`), so a future caller that reaches
   them without the hook still cannot write.
 
-  ## Refused for now
+  ## Canvas contract
 
-  The gate covers the full Studio `paper-*` roster, but the reader WIRES only
-  the MVP set: `paper-toggle-edit`, `paper-op`, `paper-ops`, `paper-edit-block`,
-  `paper-block-autosave`, `paper-add-block`, `paper-delete-block`,
-  `paper-move-block`, `paper-move-block-to`. The rest
-  (`paper-materialize-slot`, `paper-slash-insert`, `paper-wikilink-search`,
-  `paper-tag-search`, `paper-add-property`, `paper-unbind-property`,
-  `paper-callout-fold`, `paper-valueref-inspect`, `paper-publish`) are listed
-  so a denied socket is refused identically, and fall into the reader's calm
-  unhandled-event log for a permitted one — they read Studio pane assigns
-  (`:paper_doc`, `:editor_view`, an Expectation) the reader does not carry.
+  The reader carries the fetched paper as `:paper_doc`, allowing it to reuse
+  Studio's continuous-canvas echo, task-preview, and server-rendered block paint
+  helpers without a second protocol. It wires slash insertion, optional-slot
+  materialization, callout folding, and scoped wikilink/tag autocomplete in
+  addition to the core op events. Item-share editors receive empty autocomplete
+  results because their grant binds one paper and does not grant dataset-wide
+  discovery. Events that require Studio-only pane/schema state remain gated and
+  fall through as calm no-ops for a permitted reader.
 
   ## State
 
@@ -58,7 +56,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
-  alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
   # Every `paper-*` event Studio wires. Membership here means "an edit event":
   # refused for a socket without `:can_edit?`, whether or not the reader wires
@@ -73,6 +72,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-delete-block
     paper-move-block
     paper-move-block-to
+    task-preview-refresh
     paper-materialize-slot
     paper-slash-insert
     paper-wikilink-search
@@ -104,8 +104,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     socket
     |> assign(:editing?, false)
     |> assign(:edit_blocks, blocks_of(paper))
+    |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
     |> assign(:save_status, "")
+    |> assign(:last_save_ok?, true)
     |> assign(:paper_halt, nil)
     |> assign(:task_previews, %{})
   end
@@ -135,14 +137,19 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   the stored blocks, not on a buffer that a broadcast may have left behind.
   """
   def toggle(socket) do
-    if writable?(socket) do
-      editing? = socket.assigns[:editing?] != true
+    cond do
+      not writable?(socket) ->
+        refuse(socket)
 
-      socket = assign(socket, :editing?, editing?)
+      socket.assigns[:editing?] == true and
+          (is_binary(socket.assigns[:paper_halt]) or socket.assigns[:last_save_ok?] == false) ->
+        socket
 
-      if editing?, do: sync(socket), else: socket
-    else
-      refuse(socket)
+      true ->
+        editing? = socket.assigns[:editing?] != true
+        socket = assign(socket, :editing?, editing?)
+
+        if editing?, do: socket |> sync() |> refresh_canvas(), else: socket
     end
   end
 
@@ -274,6 +281,79 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   def move_block_to(socket, _params), do: socket
 
+  @doc "Refresh the canvas' display-only task previews and server-rendered block HTML."
+  def refresh_canvas(socket) do
+    if writable?(socket) do
+      socket
+      |> Shared.push_task_previews()
+      |> Shared.push_block_renders()
+      |> then(fn refreshed ->
+        assign(refreshed, :task_previews, socket_task_previews(refreshed))
+      end)
+    else
+      refuse(socket)
+    end
+  end
+
+  @doc "Echo confirmed blocks and repaint display-only canvas content after a refetch."
+  def reconcile_canvas(socket) do
+    if writable?(socket) and socket.assigns[:editing?] == true do
+      socket
+      |> SharedPaper.push_canvas_echo()
+      |> refresh_canvas()
+    else
+      socket
+    end
+  end
+
+  @doc "Materialize one supported optional template slot through the canonical op path."
+  def materialize_slot(socket, %{"kind" => kind} = params) do
+    case materialize_slot_block(kind) do
+      nil ->
+        socket
+
+      block ->
+        op =
+          case params["after"] do
+            after_id when is_binary(after_id) and after_id != "" ->
+              %{"op" => "insert-after", "afterId" => after_id, "block" => block}
+
+            _ ->
+              %{"op" => "append-block", "block" => block}
+          end
+
+        apply_op(socket, op)
+    end
+  end
+
+  def materialize_slot(socket, _params), do: socket
+
+  @doc "Insert a slash-menu block after its anchor, or append it for a blank anchor."
+  def slash_insert(socket, %{"type" => type} = params) when is_binary(type) do
+    id = Blocks.new_block_id()
+
+    block =
+      type
+      |> Blocks.default_block(id)
+      |> maybe_put_field_name(params)
+      |> maybe_merge_callout_shortcut(type, params)
+
+    apply_op(socket, Shared.slash_insert_op(params["afterId"], block))
+  end
+
+  def slash_insert(socket, _params), do: socket
+
+  @doc "Persist a callout's native details fold state through one patch-block op."
+  def callout_fold(socket, %{"block_id" => id} = params) when is_binary(id) do
+    apply_op(socket, %{
+      "op" => "patch-block",
+      "id" => id,
+      "patch" => %{"collapsed" => Map.get(params, "collapsed") == true}
+    })
+  end
+
+  def callout_fold(socket, _params), do: socket
+
   # ── buffer derivation ───────────────────────────────────────────────────────
 
   @doc """
@@ -295,6 +375,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def sync(socket, paper) do
     socket
     |> assign(:edit_blocks, blocks_of(paper))
+    |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
   end
 
@@ -313,7 +394,9 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp handle_result({:ok, _result}, socket) do
     socket
     |> sync()
+    |> reconcile_canvas()
     |> assign(:save_status, "Auto-saved")
+    |> assign(:last_save_ok?, true)
     # A prior halt cleared: the next accepted edit dismisses the banner.
     |> assign(:paper_halt, nil)
   end
@@ -324,6 +407,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     socket
     |> put_flash(:error, constraint_flash(message))
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
   end
 
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
@@ -335,12 +419,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:paper_halt, message)
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
   end
 
   defp handle_result({:error, _reason}, socket) do
     socket
     |> put_flash(:error, "Edit failed")
     |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
   end
 
   defp constraint_flash(message) when is_binary(message),
@@ -390,6 +476,39 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
 
   defp locked_block_id?(socket, id), do: socket |> block_by_id(id) |> locked_block?()
+
+  defp socket_task_previews(socket), do: socket.assigns[:paper_task_previews] || %{}
+
+  defp materialize_slot_block("featured") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "image",
+      "role" => "featured",
+      "locked" => true
+    }
+  end
+
+  defp materialize_slot_block("ingress") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "paragraph",
+      "role" => "ingress",
+      "content" => []
+    }
+  end
+
+  defp materialize_slot_block(_kind), do: nil
+
+  defp maybe_put_field_name(block, %{"fieldName" => name})
+       when is_binary(name) and name != "",
+       do: Map.put(block, "fieldName", name)
+
+  defp maybe_put_field_name(block, _params), do: block
+
+  defp maybe_merge_callout_shortcut(block, "callout", params),
+    do: Map.merge(block, Map.take(params, ["tone", "collapsible", "collapsed"]))
+
+  defp maybe_merge_callout_shortcut(block, _type, _params), do: block
 
   defp blocks_of(%{content: %{"blocks" => blocks}}) when is_list(blocks), do: blocks
   defp blocks_of(_paper), do: []

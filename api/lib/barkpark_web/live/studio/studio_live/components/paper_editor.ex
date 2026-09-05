@@ -102,6 +102,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_rev, :integer, default: 0)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  attr(:scope_prefix, :string, default: "")
+  attr(:picker_browse, :boolean, default: true)
   # EX2 — the expected fields STILL recommendable for THIS doc's current block
   # list (Content.available_expected_fields/3). Each entry carries name/type/
   # label; the slash menu reads it from `data-expected-fields` to render its
@@ -227,6 +229,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         unbound={Enum.filter(@descriptors, fn d -> d.count == 0 end)}
         dataset={@dataset}
         api_token_raw={@api_token_raw}
+        scope_prefix={@scope_prefix}
+        picker_browse={@picker_browse}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -265,6 +269,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 constraints={@paper_constraints}
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
+                scope_prefix={@scope_prefix}
+                picker_browse={@picker_browse}
               />
             <% {:seg, {:block, block, index}} -> %>
               <.edit_block
@@ -277,6 +283,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 }
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
+                scope_prefix={@scope_prefix}
+                picker_browse={@picker_browse}
                 task_previews={@task_previews}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
@@ -364,7 +372,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >🔒 Locked</span>
             </span>
           </div>
-          <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
+          <.paper_block_fields
+            block={block}
+            dataset={@dataset}
+            api_token_raw={@api_token_raw}
+            scope_prefix={@scope_prefix}
+            picker_browse={@picker_browse}
+          />
         </div>
       <% end %>
 
@@ -660,6 +674,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # harmlessly (the canvas reads them only when mounting a picker node-view).
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  attr(:scope_prefix, :string, default: "")
+  attr(:picker_browse, :boolean, default: true)
   # pdd-t20c: the doc's constraint vocabulary (JSON-encoded
   # Template.paper_declarations()), stamped only for docs that carry locked blocks —
   # additive. Rides to the canvas WC as data-constraints via the hook; the WC's
@@ -678,6 +694,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-blocks={Jason.encode!(@run_blocks)}
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
+      data-canvas-scope-prefix={@scope_prefix}
+      data-canvas-picker-browse={@picker_browse && "true" || "false"}
       data-canvas-locked-tail={@locked_tail && "true"}
       data-canvas-constraints={@constraints}
       data-test-id="paper-canvas-run"
@@ -753,6 +771,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:prev_locked, :boolean, default: false)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  attr(:scope_prefix, :string, default: "")
+  attr(:picker_browse, :boolean, default: true)
   # t9 — the id-keyed live-preview map (paper_block_editor passes it through);
   # only a task-type block reads its own entry. Default keeps every other call
   # site (and every non-task block) byte-identical.
@@ -837,7 +857,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         block={@block}
         preview={Map.get(@task_previews, Map.get(@block, "id"))}
       />
-      <.paper_block_fields block={@block} dataset={@dataset} api_token_raw={@api_token_raw} />
+      <.paper_block_fields
+        block={@block}
+        dataset={@dataset}
+        api_token_raw={@api_token_raw}
+        scope_prefix={@scope_prefix}
+        picker_browse={@picker_browse}
+      />
     </div>
     """
   end
@@ -969,6 +995,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:unbound, :list, default: [])
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  attr(:scope_prefix, :string, default: "")
+  attr(:picker_browse, :boolean, default: true)
 
   def properties_panel(assigns) do
     ~H"""
@@ -995,7 +1023,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-unbind-property"
           >×</button>
         </div>
-        <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
+        <.paper_block_fields
+          block={block}
+          dataset={@dataset}
+          api_token_raw={@api_token_raw}
+          scope_prefix={@scope_prefix}
+          picker_browse={@picker_browse}
+        />
       </div>
 
       <form
@@ -1043,6 +1077,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:block, :map, required: true)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  attr(:scope_prefix, :string, default: "")
+  attr(:picker_browse, :boolean, default: true)
 
   def paper_block_fields(assigns) do
     assigns =
@@ -1315,24 +1351,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
              data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
-          <bp-reference-picker
-            value={Map.get(@block, "value", "")}
-            ref-type={Map.get(@block, "refType", "")}
-            dataset={Map.get(@block, "dataset", @dataset)}
-            data-test-id="paper-field-field-reference"
-          ></bp-reference-picker>
+          <%= if @picker_browse do %>
+            <bp-reference-picker
+              value={Map.get(@block, "value", "")}
+              ref-type={Map.get(@block, "refType", "")}
+              dataset={Map.get(@block, "dataset", @dataset)}
+              scope-prefix={@scope_prefix}
+              data-test-id="paper-field-field-reference"
+            ></bp-reference-picker>
+          <% else %>
+            <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
+              {Map.get(@block, "value", "")}
+            </output>
+          <% end %>
         </div>
 
       <% "field-image" -> %>
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
              data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
-          <bp-media-picker
-            value={Map.get(@block, "value", "")}
-            dataset={Map.get(@block, "dataset", @dataset)}
-            data-token={@api_token_raw}
-            data-test-id="paper-field-field-image"
-          ></bp-media-picker>
+          <%= if @picker_browse do %>
+            <bp-media-picker
+              value={Map.get(@block, "value", "")}
+              dataset={Map.get(@block, "dataset", @dataset)}
+              scope-prefix={@scope_prefix}
+              data-token={@api_token_raw}
+              data-test-id="paper-field-field-image"
+            ></bp-media-picker>
+          <% else %>
+            <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
+              {Map.get(@block, "value", "")}
+            </output>
+          <% end %>
         </div>
 
       <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
@@ -1352,12 +1402,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <label class="bp-paper-edit-fieldlabel">
             <%= if image_block_role(@block) == "featured", do: "Featured image", else: "Image" %>
           </label>
-          <bp-media-picker
-            value={image_block_src(@block)}
-            dataset={@dataset}
-            data-token={@api_token_raw}
-            data-test-id="paper-block-image-picker"
-          ></bp-media-picker>
+          <%= if @picker_browse do %>
+            <bp-media-picker
+              value={image_block_src(@block)}
+              dataset={@dataset}
+              scope-prefix={@scope_prefix}
+              data-token={@api_token_raw}
+              data-test-id="paper-block-image-picker"
+            ></bp-media-picker>
+          <% else %>
+            <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
+              {image_block_src(@block)}
+            </output>
+          <% end %>
         </div>
 
       <%!-- v2 COMPOSITE field blocks (P2.3). composite / arrayOf / codelist /

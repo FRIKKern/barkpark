@@ -409,4 +409,58 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
                socket
              )
   end
+
+  test "a correlated field save keeps its local value until the parent echoes persistence" do
+    block = %{
+      "id" => "c-price",
+      "type" => "composite",
+      "label" => "Price",
+      "fields" => [%{"name" => "amount", "title" => "Amount", "type" => "string"}],
+      "value" => %{"amount" => "299"}
+    }
+
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}}}
+
+    assert {:ok, socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: block},
+               socket
+             )
+
+    assert {:noreply, pending_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.handle_event(
+               "inner-flush",
+               %{"request_id" => "field-request-1", "values" => %{"amount" => "399"}},
+               socket
+             )
+
+    assert_receive {:paper_op,
+                    %{
+                      "op" => "patch-block",
+                      "id" => "c-price",
+                      "patch" => %{"value" => %{"amount" => "399"}}
+                    }, "field-request-1"}
+
+    # A refused write causes the parent to render the old persisted block. The
+    # component keeps the draft so the next View attempt can retry it.
+    assert {:ok, refused_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: block},
+               pending_socket
+             )
+
+    assert refused_socket.assigns.value == %{"amount" => "399"}
+    assert refused_socket.assigns.pending_value?
+
+    echoed_block = put_in(block, ["value", "amount"], "399")
+
+    assert {:ok, confirmed_socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.update(
+               %{id: "paper-fb-c-price", block: echoed_block},
+               refused_socket
+             )
+
+    assert confirmed_socket.assigns.value == %{"amount" => "399"}
+    refute confirmed_socket.assigns.pending_value?
+  end
 end

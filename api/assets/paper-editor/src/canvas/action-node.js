@@ -329,10 +329,17 @@ export const Action = Node.create({
           commitNow();
         }, DEBOUNCE_MS);
       };
+      const flushPending = () => {
+        if (!writeTimer) return;
+        clearTimeout(writeTimer);
+        writeTimer = null;
+        commitNow();
+      };
 
       labelInput.addEventListener("input", scheduleWrite);
       hrefInput.addEventListener("input", scheduleWrite);
       prioritySelect.addEventListener("change", commitNow);
+      dom.addEventListener("bp-flush-node", flushPending);
 
       return {
         dom,
@@ -352,6 +359,7 @@ export const Action = Node.create({
           labelInput.removeEventListener("input", scheduleWrite);
           hrefInput.removeEventListener("input", scheduleWrite);
           prioritySelect.removeEventListener("change", commitNow);
+          dom.removeEventListener("bp-flush-node", flushPending);
         },
       };
     };
