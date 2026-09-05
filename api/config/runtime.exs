@@ -1322,3 +1322,32 @@ if config_env() == :dev do
       :ok
   end
 end
+
+# MUTATE-PATH SCHEMA VALIDATION — the per-dataset ENFORCE opt-in
+# (task-41a740fd6701ec28). See `Barkpark.Content.Validation`'s moduledoc for the
+# ruling and the migration story. Unset (the default everywhere) leaves the
+# compile-time `enforce_datasets: []` in place, so EVERY dataset advises and no
+# write is refused on schema grounds. Set to a comma-separated list of dataset
+# slugs to opt those datasets into 422 refusal, or to "all" for every dataset.
+#
+#   BARKPARK_SCHEMA_ENFORCE_DATASETS=production,staging
+#
+# Runtime, not compile-time, and deliberately: an operator opts a dataset in
+# (or backs it out again, if a clean-up run was optimistic) with a restart
+# rather than a deploy.
+case System.get_env("BARKPARK_SCHEMA_ENFORCE_DATASETS") do
+  "all" ->
+    config :barkpark, Barkpark.Content.Validation, enforce_datasets: :all
+
+  value when is_binary(value) and value != "" ->
+    slugs =
+      value
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    config :barkpark, Barkpark.Content.Validation, enforce_datasets: slugs
+
+  _ ->
+    :ok
+end

@@ -537,6 +537,19 @@ config :barkpark, Barkpark.Crypto.LocalKek,
   key: Base.encode64(:crypto.hash(:sha256, "barkpark-dev-kek-not-for-prod")),
   version: 1
 
+# MUTATE-PATH SCHEMA VALIDATION (Barkpark.Content.Validation,
+# task-41a740fd6701ec28). Every create-family and update write runs the
+# validator at the Writer chokepoint. The DEFAULT is ADVISE: findings ride the
+# mutate success envelope as `warnings` (code `schema_validation`) and NEVER
+# block — status and stored bytes are unchanged from before the mount.
+#
+# ENFORCE (422 `validation_failed`) is opt-in PER DATASET: list the dataset
+# slugs here, or the atom `:all`. Empty list = nobody enforces. Flipping the
+# default is the owner's call, announced, with its own row — not a config edit.
+# runtime.exs maps BARKPARK_SCHEMA_ENFORCE_DATASETS (comma-separated slugs, or
+# "all") over this, so an operator opts a dataset in without shipping code.
+config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
