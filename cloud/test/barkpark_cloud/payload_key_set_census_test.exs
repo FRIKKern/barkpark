@@ -1715,6 +1715,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "pinned_release" => 3,
     "population" => 2,
     "port" => 4,
+    "pressure" => 2,
     "project" => 2,
     "provider" => 3,
     "quantile" => 2,
@@ -1759,6 +1760,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # unmeasured — the field that stops an absent root rendering as 0 bytes) and
     # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
     # field a reader BRANCHES on, so only this row can notice a site dying.
+    "state" => 2,
     "status" => 16,
     "team" => 4,
     "team_id" => 6,
@@ -1785,6 +1787,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # W6 S4: MetricsSpaceRoot.TotalBytes joined MetricsSwap.TotalBytes.
     "total_bytes" => 2,
     "trigger" => 3,
+    "unit" => 2,
     "unmetered" => 2,
     "unreadable" => 2,
     "unresolved" => 2,
