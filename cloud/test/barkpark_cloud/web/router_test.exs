@@ -481,6 +481,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       fixture = fixture_path |> File.read!() |> Jason.decode!()
       fixture_rows = fixture["barkparks"]
       stalled_fixture = Enum.find(fixture_rows, &(&1["name"] == "stall-1"))
+      young_fixture = Enum.find(fixture_rows, &(&1["name"] == "Zeta"))
       empty_fixture = Enum.find(fixture_rows, &(&1["name"] == "alpha"))
 
       assert length(fixture_rows) == 16
@@ -562,15 +563,41 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert Map.take(normalized_producer_row, projection_keys) ==
                Map.take(stalled_fixture, projection_keys)
 
-      # Status filter has TEETH: once every queued row leaves "queued" the field
-      # returns to nil — a "building" row is the reaper's business, not this
-      # alarm's. (This is the arm that reds if the WHERE clause is dropped.)
+      # Once the stalled rows leave "queued", a real young row supplies the
+      # fixture's below-fence arm through the same producer serialization.
       {:ok, _} = Registry.transition_deployment(d_old, %{status: "building"})
       {:ok, _} = Registry.transition_deployment(d_new, %{status: "building"})
 
+      {:ok, site_young} = Registry.create_site(bp, %{name: "S3", slug: "s3"})
+
+      {:ok, d_young} =
+        Registry.create_deployment(site_young, %{
+          git_ref: "young-sha",
+          artifact_url: "file:///tmp/c.tgz"
+        })
+
+      backdate.(d_young.id, 90)
+
       conn3 = call(:get, "/v1/barkparks", nil, token)
       [row3] = json_body(conn3)["barkparks"]
-      assert is_nil(row3["queued_deploy_age_seconds"])
+      young_age = row3["queued_deploy_age_seconds"]
+      assert is_integer(young_age), "expected a number, got: #{inspect(young_age)}"
+      assert young_age >= 90 and young_age < 150, "young row is ~90s old, got #{young_age}"
+
+      normalized_young_row =
+        Map.put(row3, "queued_deploy_age_seconds", young_fixture["queued_deploy_age_seconds"])
+
+      assert Map.take(normalized_young_row, ["queued_deploy_age_seconds"]) ==
+               Map.take(young_fixture, ["queued_deploy_age_seconds"])
+
+      # Status filter has TEETH: once every queued row leaves "queued" the field
+      # returns to nil — a "building" row is the reaper's business, not this
+      # alarm's. (This is the arm that reds if the WHERE clause is dropped.)
+      {:ok, _} = Registry.transition_deployment(d_young, %{status: "building"})
+
+      conn4 = call(:get, "/v1/barkparks", nil, token)
+      [row4] = json_body(conn4)["barkparks"]
+      assert is_nil(row4["queued_deploy_age_seconds"])
     end
 
     test "no token → 401" do
