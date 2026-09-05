@@ -323,8 +323,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # has a THIRD authority that predates both and that neither can see — the
   # media permission set, `Media.Storage.Access`, which guards the same
   # `altText`/`caption` fields on the HTTP door
-  # (`V1.MediaController.patch_metadata` -> `Access.allowed?/4`,
-  # `media_controller.ex:561`) and withholds `edit_metadata` from a non-admin
+  # (`V1.MediaController.patch_metadata` -> `Access.allowed?/4` in
+  # media_controller.ex) and withholds `edit_metadata` from a non-admin
   # who does not hold the asset's CHECKOUT lock.
   #
   # PR #16066 made `mediaAsset` documents openable in this editor, so those
