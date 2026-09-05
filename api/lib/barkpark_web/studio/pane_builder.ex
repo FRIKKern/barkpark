@@ -137,8 +137,37 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
           # Absent from the gated display — resolve against the ungated tree so
           # the panes / editor still open (top-menu Media, a disabled plugin).
+          #
+          # The ungated tree needs the SAME normalization the gated one just
+          # got, and for the same reason. Handing back the RAW `nav_path` only
+          # works when `head` names a ROOT item of that tree; a type that
+          # `Barkpark.Structure` nests under a group node is still unreachable,
+          # because `walk_path/7` looks for `head` among the root's children,
+          # finds nothing, and drops the editor to nil.
+          #
+          # `mediaAsset` is exactly that case, and it is the whole reason an
+          # editor cannot write alt text (S9 crit 3, task-6d80c6cc7d97b1d1).
+          # `build_media_group/2` nests it under the `media-desk` node, so
+          # `/studio/mediaAsset/<id>` — the canonical deep link into an asset's
+          # metadata — rendered the "Studio could not open this document" card
+          # for EVERY asset. The `altText` field is on the schema and the
+          # `localizedText` input already exists; the walk simply never reached
+          # the form. This restores the #1851 never-unreachable guarantee for
+          # the one type that only lives off the top menu.
           nil ->
-            {Structure.build(dataset, [gating: :none] ++ scope(opts)), nav_path}
+            ungated = Structure.build(dataset, [gating: :none] ++ scope(opts))
+
+            cond do
+              root_has_segment?(ungated, head) ->
+                {ungated, nav_path}
+
+              true ->
+                case find_type_node(ungated.items || [], head, []) do
+                  {node_path, %{type: :document}} -> {ungated, node_path}
+                  {node_path, _node} -> {ungated, node_path ++ tail}
+                  nil -> {ungated, nav_path}
+                end
+            end
         end
     end
   end
