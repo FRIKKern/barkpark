@@ -1112,6 +1112,67 @@ defmodule BarkparkCloud.Accounts do
   end
 
   @doc """
+  cch-w30-bl — the PATs whose expiry warning is DUE right now: `context = "pat"`
+  rows that are still live (not revoked), carry a bounded `expires_at` that has
+  not yet passed, fall inside `[now, now + horizon_seconds]`, and have never been
+  warned (`expiry_warned_at IS NULL`). Newest deadline first, with the owning
+  `:user` preloaded — the worker mails `user.email` and nobody else.
+
+  EVERY CLAUSE IS LOAD-BEARING, and the two nobody would think to write are the
+  ones this doc exists for:
+
+    * `is_nil(t.revoked_at)` — a revoked token has no future to warn about, and
+      mailing about one tells its owner to go rotate a credential that is
+      already dead.
+    * `t.expires_at > ^now` — a token that expired while the worker was down is
+      PAST, not expiring. A future-tense warning about a lapsed credential is
+      the same class of lie `TrialExpiryWorker`'s `:trial_expired` event was
+      split out to stop telling.
+
+  There is NO `team_id` filter and there must never be one. The audience of this
+  query is a set of USERS, one per row, reached through `user_id`; a team fence
+  here would be the first step back toward the team fan-out this whole feature
+  is defined against.
+  """
+  @spec pats_expiring_within(DateTime.t(), pos_integer()) :: [UserToken.t()]
+  def pats_expiring_within(%DateTime{} = now, horizon_seconds)
+      when is_integer(horizon_seconds) and horizon_seconds > 0 do
+    deadline = DateTime.add(now, horizon_seconds, :second)
+
+    from(t in UserToken,
+      where:
+        t.context == "pat" and is_nil(t.revoked_at) and is_nil(t.expiry_warned_at) and
+          not is_nil(t.expires_at) and t.expires_at > ^now and t.expires_at <= ^deadline,
+      order_by: [asc: t.expires_at, asc: t.id],
+      preload: [:user]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Atomically claim the one-shot expiry-warning budget on ONE PAT row. Returns
+  true iff THIS call won it — the `UPDATE … WHERE expiry_warned_at IS NULL`
+  can match at most once, so two overlapping worker passes send one email
+  between them, never two.
+
+  The caller stamps AFTER deciding the mail can leave the building, for the
+  reason `TrialExpiryWorker.receivable?/1` documents at length: the stamp is the
+  ENTIRE budget for this warning and nothing anywhere reads it back, so spending
+  it on a send that never happened costs the owner their only notice with no
+  surface to show the loss.
+  """
+  @spec claim_pat_expiry_warning(binary(), DateTime.t()) :: boolean()
+  def claim_pat_expiry_warning(token_id, %DateTime{} = now) when is_binary(token_id) do
+    {count, _} =
+      from(t in UserToken,
+        where: t.id == ^token_id and t.context == "pat" and is_nil(t.expiry_warned_at)
+      )
+      |> Repo.update_all(set: [expiry_warned_at: now])
+
+    count == 1
+  end
+
+  @doc """
   Delete ALL of `user`'s SESSION tokens — an immediate logout everywhere. The
   Cloud analogue of Coolify's `RevokeUserTeamTokens` (it deletes session rows
   rather than flag a `revoked_at` column we don't have).

@@ -181,7 +181,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
   # THE CRONTAB, PINNED HERE AND COMPARED BY EQUALITY. Declared by neither the
   # console nor the config: that is the only reason an ABSENT clock verdict can
-  # lose. Fourteen rows today.
+  # lose. Sixteen rows today (cch-w30-bl added the PAT expiry warning).
   @scheduled_crontab [
     {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
     {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
@@ -197,6 +197,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
     {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
     {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+    {"10 7 * * *", BarkparkCloud.Workers.TokenExpiryWarningWorker},
     {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
   ]
 
@@ -1614,7 +1615,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # ArrearsWorker slips past a heuristic and the register would keep claiming
     # ABSENT while the clock had arrived.
     assert {:ok, detail} = crontab_agrees()
-    assert detail =~ "15 rows"
+    assert detail =~ "16 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 
