@@ -824,15 +824,15 @@ The Studio shell is the single most gate-dense file in the repo — **four**
 of the steps above read it, and no card names them all, which is how a
 one-line CSS edit turns into three surprise reds:
 
-- **10 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
+- **12 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
   colour in Studio chrome; `var(--…)` only.
-- **9 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
+- **11 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
   colour literals per file against a frozen baseline in
   `design/exemptions.json` (`root.html.heex` is entry #1).
-- **6 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
+- **8 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
   mirror. When the surface legitimately changes, re-stamp it with
   `bash scripts/paper-editor-mirror-check.sh --write` in the same diff.
-- **11 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
+- **13 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
   scope/dataset Studio URL literal; build paths through
   `StudioLive.Paths`.
 
