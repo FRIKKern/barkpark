@@ -76,7 +76,10 @@ defmodule Barkpark.Content.Errors do
     "workspace_suspended" =>
       "This workspace is suspended — no writes are accepted until an operator reinstates it. Contact your workspace admin; details.reason names why.",
     "quota_exceeded" =>
-      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.",
+    # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a, main 2026-09-05).
+    "workspace_scope_required" =>
+      "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
@@ -381,6 +384,45 @@ defmodule Barkpark.Content.Errors do
       message: "workspace is suspended",
       status: 403,
       details: %{reason: reason}
+    }
+
+  # ── The unscoped-WRITE refusal (task-6fa023cdabdc5f6a) ──────────────────────
+  #
+  # A write arrived with NO workspace scope and its principal could have meant
+  # zero workspaces (a platform / global-admin token) or several. The ruling is
+  # infer-when-unambiguous, REFUSE-when-ambiguous: nothing is written and the
+  # caller is told which door to send it through.
+  #
+  # 422, not 400/409/403 — read off this module's own vocabulary:
+  #
+  #   * `malformed` (400) is a BODY-SHAPE failure ("send a well-formed JSON body
+  #     matching the endpoint's expected shape"). This body is perfectly well
+  #     formed; the request is unprocessable for a reason the parser cannot see.
+  #   * `conflict` (409) is a resource-STATE collision ("the document already
+  #     exists"). Nothing collided; no state is involved.
+  #   * `forbidden` (403) would be a lie: the caller is very likely ENTITLED to
+  #     write — to one of several workspaces. It must choose, not be denied.
+  #
+  # 422 is the slot this codebase already uses for "well-formed, but I cannot
+  # act on it as sent" — `slug_mismatch`, `create_wall`, `invalid_grant`,
+  # `batch_too_large`. This is that.
+  #
+  # `details.workspaces` carries the slugs the caller CAN write to (empty for a
+  # platform token), so the refusal is actionable in one hop instead of a
+  # round-trip to GET /v1/workspaces.
+  defp build({:error, :workspace_scope_required}),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422
+    }
+
+  defp build({:error, {:workspace_scope_required, workspaces}}) when is_list(workspaces),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422,
+      details: %{workspaces: workspaces}
     }
 
   defp build({:error, :quota_exceeded}),

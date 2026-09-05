@@ -62,6 +62,12 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
+      # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a): 422, well-formed but
+      # unactionable as sent. The list arm carries the writable slugs.
+      {"workspace_scope_required", {:error, :workspace_scope_required},
+       "workspace_scope_required", 422, []},
+      {"workspace_scope_required/workspaces", {:error, {:workspace_scope_required, ["a", "b"]}},
+       "workspace_scope_required", 422, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
