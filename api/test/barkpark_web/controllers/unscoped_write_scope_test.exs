@@ -25,6 +25,8 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -83,6 +85,18 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
     token
   end
 
+  # A `create` mutation lands a DRAFT, so the row's `doc_id` is `drafts.<id>`.
+  # Both forms are queried so an absence assertion cannot pass by looking in the
+  # wrong place — the failure mode that makes a "nothing was written" claim
+  # vacuous.
+  defp find_doc(doc_id) do
+    Repo.one(
+      from d in Document,
+        where: d.type == "post" and d.doc_id in ^["drafts.#{doc_id}", doc_id],
+        limit: 1
+    )
+  end
+
   defp send_create(conn, raw_token, doc_id) do
     conn
     |> put_req_header("authorization", "Bearer #{raw_token}")
@@ -117,7 +131,7 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
 
       assert body["resolvedScope"]["workspaceSlug"] == ws_a.slug
 
-      doc = Repo.get_by(Document, doc_id: doc_id, type: "post")
+      doc = find_doc(doc_id)
       assert doc, "the inferred write must have landed a row"
 
       assert doc.workspace_id == ws_a.id,
@@ -150,7 +164,7 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
       assert Enum.sort(body["error"]["details"]["workspaces"]) ==
                Enum.sort([ws_a.slug, ws_b.slug])
 
-      refute Repo.get_by(Document, doc_id: doc_id, type: "post"),
+      refute find_doc(doc_id),
              "a REFUSED write must leave no row — not in Default, not anywhere"
     end
 
@@ -167,7 +181,7 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
       assert body["error"]["code"] == "workspace_scope_required"
       assert body["error"]["details"]["workspaces"] == []
 
-      refute Repo.get_by(Document, doc_id: doc_id, type: "post")
+      refute find_doc(doc_id)
     end
   end
 
@@ -192,7 +206,8 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
       refute Map.has_key?(body, "resolvedScope"),
              "a request that said where it goes must get a byte-identical body"
 
-      doc = Repo.get_by(Document, doc_id: doc_id, type: "post")
+      doc = find_doc(doc_id)
+      assert doc, "the workspace-bound write must have landed a row"
       assert doc.workspace_id == ws_a.id
     end
   end
