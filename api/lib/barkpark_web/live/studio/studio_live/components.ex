@@ -1708,7 +1708,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <div class="editor-body editor-panel-main bp-paper-body">
                 <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-doc-beta-shell">
                   <.paper_block_editor
-                    slug={@editor_doc.doc_id}
+                    slug={Content.published_id(@editor_doc.doc_id)}
                     doc_type={@editor_doc.type}
                     blocks={@editor_blocks}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}

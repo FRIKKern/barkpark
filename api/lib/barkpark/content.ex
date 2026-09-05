@@ -765,6 +765,27 @@ defmodule Barkpark.Content do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
 
+  @doc "Request-identified exact-once document block op; see `Content.Papers`."
+  def apply_document_block_op_once(
+        doc_id,
+        type,
+        op,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      ),
+      do:
+        Papers.apply_document_block_op_once(
+          doc_id,
+          type,
+          op,
+          dataset,
+          request_id,
+          principal_key,
+          opts
+        )
+
   @doc "Field-scoped block ops for a `richText` field with `editor: blocks` — see `Papers.apply_field_block_ops/6`."
   def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
     do: Papers.apply_field_block_ops(doc_id, type, field, ops, dataset, opts)

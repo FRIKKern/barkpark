@@ -79,6 +79,9 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     beta_html = view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
     assert beta_html =~ ~s(data-test-id="studio-doc-beta-editor")
     assert beta_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert beta_html =~ ~s(id="paper-editor-toggle-demo-p3")
+    assert beta_html =~ ~s(data-paper-doc-key="production:post:toggle-demo-p3")
+    refute beta_html =~ ~s(id="paper-editor-drafts.toggle-demo-p3")
     # A bound field-block + the free body block both render.
     assert beta_html =~ ~s(data-test-id="paper-add-block")
   end

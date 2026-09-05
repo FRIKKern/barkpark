@@ -1063,11 +1063,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def document_op(socket, op) do
     socket = failed_result(socket, op)
+    {socket, revoked_token?} = refresh_replay_token(socket)
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
 
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
     cond do
+      invalid_credential? ->
+        refuse_write_denied(socket)
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        refuse_write_denied(socket)
+
       # pds-w42 — paper_op/2's OTHER branch. The `{:paper_op, …}` message is
       # routed by the same handle_info regardless of which branch it lands in,
       # so the Beta document block editor is reachable from the same
@@ -1083,6 +1094,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       not (is_binary(op["if_rev"]) and op["if_rev"] != "") ->
         failed_result(socket, op)
+
+      is_binary(op["request_id"]) ->
+        document_op_once(socket, doc, type, dataset, op)
 
       true ->
         case Content.apply_document_block_op(
@@ -1128,6 +1142,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
+  defp document_op_once(socket, doc, type, dataset, op) do
+    case Content.apply_document_block_op_once(
+           doc.doc_id,
+           type,
+           Map.drop(op, ["if_rev", "request_id"]),
+           dataset,
+           op["request_id"],
+           replay_principal_key(socket),
+           Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
+         ) do
+      {:ok, receipt, outcome} ->
+        socket
+        |> sync_editor_blocks()
+        |> assign(last_paper_save_ok?: true)
+        |> assign(
+          last_paper_save_result: %{
+            saved: true,
+            request_id: op["request_id"],
+            replayed: outcome == :replayed,
+            rev: receipt.rev
+          }
+        )
+
+      {:error, {:rev_mismatch, current_rev}} ->
+        document_conflict(socket, op["request_id"], current_rev)
+
+      {:error, _reason} ->
+        socket
+        |> put_flash(:error, "Edit failed")
+        |> assign(last_paper_save_ok?: false)
+        |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
+    end
+  end
+
+  defp document_conflict(socket, request_id, current_rev) do
+    socket
+    |> sync_editor_blocks()
+    |> assign(last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        conflict: true,
+        current_rev: current_revision(current_rev)
+      }
+    )
+  end
+
   defp paper_revision(n) when is_integer(n) and n >= 0, do: {:ok, n}
 
   defp paper_revision(s) when is_binary(s) do
@@ -1155,8 +1217,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     with %{doc_id: doc_id} <- doc,
-         {:ok, fresh} <-
-           Content.get_document(doc_id, type, dataset, ScopeHelpers.scope_opts(socket)) do
+         target_doc_id = Content.draft_id(Content.published_id(doc_id)),
+         {:ok, fresh} <- get_fresh_editor_doc(target_doc_id, doc_id, type, dataset, socket) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
 
       assign(socket,
@@ -1167,6 +1229,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       )
     else
       _ -> socket
+    end
+  end
+
+  defp get_fresh_editor_doc(target_doc_id, original_doc_id, type, dataset, socket) do
+    opts = ScopeHelpers.scope_opts(socket)
+
+    case Content.get_document(target_doc_id, type, dataset, opts) do
+      {:ok, fresh} -> {:ok, fresh}
+      {:error, :not_found} -> Content.get_document(original_doc_id, type, dataset, opts)
+      {:error, _reason} = err -> err
     end
   end
 
