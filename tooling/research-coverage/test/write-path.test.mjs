@@ -28,6 +28,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..");                       // tooling/research-coverage
 const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
 
+// Removing a fixture tree can lose a race with the writers that just used it: a
+// child that has exited may still have an unreaped git subprocess, or the OS may
+// not have released a directory entry yet, and the recursive walk then throws
+// ENOTEMPTY on `.git` — which is how run 33958978109 reddened main from the
+// CLEANUP of test 32, not from any assertion in it. Retrying is exactly what
+// maxRetries is for; the concurrency test additionally waits for both children
+// to CLOSE (not merely exit) before it gets here.
+const rmDir = (d) => rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+
 // A throwaway git repo carrying its own copy of the tool. `nfiles` sets the
 // corpus size, which is what sets the width of record()'s critical section.
 function makeRepo(nfiles = 400) {
@@ -53,7 +62,7 @@ function makeRepo(nfiles = 400) {
       return `${p.stdout}${p.stderr}`;
     },
     results: (name, arr) => writeFileSync(join(cd, "results", name), JSON.stringify(arr)),
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    cleanup: () => rmDir(root),
   };
 }
 
@@ -144,7 +153,12 @@ test("two concurrent `coverage.mjs record` runs with disjoint results BOTH survi
     'const go = (root, cd, tag) => new Promise((done) => {',
     '  const t0 = Date.now();',
     '  const p = spawn(process.execPath, [cd + "/coverage.mjs", "record"], { cwd: root, env, stdio: "ignore" });',
-    '  p.on("exit", (code) => done([tag, t0, Date.now(), code ?? 1]));',
+    '  let code = 1;',
+'  p.on("exit", (c) => { code = c ?? 1; });',
+'  // close, not exit: it fires only once the child has exited AND every',
+'  // stdio handle it owns is released, so nothing of it is still writing',
+'  // into the fixture repo when the test tears that repo down.',
+'  p.on("close", () => done([tag, t0, Date.now(), code]));',
     '});',
     'const rows = await Promise.all([go(aRoot, aCd, "a"), go(bRoot, bCd, "b")]);',
     'for (const [tag, t0, t1, code] of rows) writeFileSync(`${out}/${tag}.txt`, `${t0} ${t1} ${code}`);',
@@ -171,7 +185,7 @@ test("two concurrent `coverage.mjs record` runs with disjoint results BOTH survi
   assert.equal(nB, 200, `writer B lost ${200 - nB} of 200 entries`);
   assert.equal(existsSync(`${shared}.lock`), false, "the lock outlived both writers");
   a.cleanup(); b.cleanup();
-  rmSync(dirname(shared), { recursive: true, force: true });
+  rmDir(dirname(shared));
 });
 
 // ===========================================================================
