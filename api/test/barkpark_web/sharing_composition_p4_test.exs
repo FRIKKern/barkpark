@@ -28,6 +28,16 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
   @dataset "production"
   @ingest_token "barkpark-test-ingest-token"
 
+  # The two fixture bodies below are deliberately DIFFERENT and deliberately
+  # LITERAL. The rendition cache is seeded with @thumb_bytes at a path keyed by
+  # `file.id`; the same row's upload blob holds @original_bytes. A success-path
+  # test that asserted only `status == 200` could not tell the two apart — nor
+  # tell either apart from a FOREIGN row's cached bytes served back under this
+  # row's id. Comparing the served body to these literals is what makes "the
+  # rendition for THIS file.id came back" falsifiable.
+  @thumb_bytes "JPGBYTES"
+  @original_bytes "PNGBYTES"
+
   setup %{conn: conn} do
     ws = create_workspace!("p4-share-ws")
     {:ok, proj} = Tenancy.create_project_with_dataset(ws, %{name: "p4-share-proj"})
@@ -235,7 +245,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
     rel = Path.join(["_renditions", file.id, "thumb.jpg"])
     full = Media.file_path(rel)
     File.mkdir_p!(Path.dirname(full))
-    File.write!(full, "JPGBYTES")
+    File.write!(full, @thumb_bytes)
     on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
     :ok
   end
@@ -246,7 +256,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       rel = "uploads/p4-rendition/#{name}"
       full = Media.file_path(rel)
       File.mkdir_p!(Path.dirname(full))
-      File.write!(full, "PNGBYTES")
+      File.write!(full, @original_bytes)
       on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
 
       file =
@@ -290,6 +300,13 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
       assert conn.status == 200
+      # WHICH file's bytes, not merely THAT bytes arrived. @thumb_bytes exists
+      # only inside the `_renditions/<file.id>/` cache seeded above;
+      # @original_bytes is this row's upload blob. A cache-path composition bug
+      # that served any other path — a foreign row's rendition, or this row's
+      # original — still answers 200, so the status alone proves nothing.
+      assert conn.resp_body == @thumb_bytes
+      refute conn.resp_body == @original_bytes
     end
 
     test "a member's Bearer header serves the scoped rendition", %{
@@ -306,6 +323,8 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
       assert conn.status == 200
+      assert conn.resp_body == @thumb_bytes
+      refute conn.resp_body == @original_bytes
     end
 
     test "a foreign workspace's file id 404s within the scope (scope-bounded)", %{
