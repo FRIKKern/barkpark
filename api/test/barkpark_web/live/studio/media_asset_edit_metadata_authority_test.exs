@@ -88,7 +88,11 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
 
     {:ok, _} = Barkpark.Auth.create_token(raw, label, @dataset, ["read", "write"])
 
-    {build_conn() |> Plug.Test.init_test_session(%{"api_token" => raw}), label}
+    # ConnCase.scoped_conn/0, not a bare build_conn/0: this conn reaches a route
+    # the RateLimit plug meters before any credential plug, and the suite-wide
+    # tripwire (rate_limit_test_conn_scope_test.exs) refuses an unscoped conn
+    # that would share the one ip:127.0.0.1 bucket with every other test.
+    {scoped_conn() |> Plug.Test.init_test_session(%{"api_token" => raw}), label}
   end
 
   # The HTTP seam's own question, asked with the same principal shape the
