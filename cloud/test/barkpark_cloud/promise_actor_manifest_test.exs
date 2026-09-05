@@ -1060,18 +1060,35 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
          "a bare mark_past_due/2 DID suspend the box — the grace branch is reachable after all, " <>
            "so this row's ACTOR verdict must be re-derived"}
 
-      is_nil(sub.current_period_end) ->
+      # cch-w57-bl RE-POINTED these three arms from `current_period_end` to
+      # `grace_ends_at`. They assert the SAME property — the attr-less path
+      # anchors a FUTURE grace window, which is why maybe_enforce/1's suspend is
+      # unreachable — off the column that now actually carries the dunning
+      # anchor. Leaving them on `current_period_end` would have turned the
+      # verdict's whole basis into a read of a column mark_past_due/2 no longer
+      # writes: the FIRST arm would fire on every run and the row would report a
+      # missing anchor that is in fact present, one column over.
+      is_nil(sub.grace_ends_at) ->
         {:error, "the grace anchor was not written at all — re-derive this row"}
 
-      DateTime.compare(sub.current_period_end, DateTime.utc_now()) != :gt ->
+      DateTime.compare(sub.grace_ends_at, DateTime.utc_now()) != :gt ->
         {:error,
-         "the grace anchor landed in the PAST (#{inspect(sub.current_period_end)}) — the " <>
+         "the grace anchor landed in the PAST (#{inspect(sub.grace_ends_at)}) — the " <>
            "re-anchor this verdict rests on is gone"}
+
+      # The SPLIT itself, pinned here rather than in a new row: the dunning path
+      # must leave `current_period_end` — the TRIAL expiry — untouched. A future
+      # re-merge of the two clocks reds this arm.
+      not is_nil(sub.current_period_end) ->
+        {:error,
+         "mark_past_due/2 wrote current_period_end (#{inspect(sub.current_period_end)}) — the " <>
+           "dunning anchor is back on the trial-expiry column, so cch-w57-bl's split is gone"}
 
       true ->
         {:ok,
          "UNREACHABLE — two deliveries of the only event that reaches maybe_enforce/1 left the " <>
-           "box live and pushed the grace anchor forward to #{inspect(sub.current_period_end)}"}
+           "box live and pushed grace_ends_at forward to #{inspect(sub.grace_ends_at)}, with " <>
+           "current_period_end still nil"}
     end
   end
 

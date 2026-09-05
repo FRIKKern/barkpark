@@ -7839,17 +7839,25 @@
   // both promising an actor that does not exist:
   //
   //   * "Your payment failed on {day}" was back-computed as current_period_end
-  //     minus a client-side 3-day constant — and mark_past_due/2 re-anchors
-  //     current_period_end to now+3d on EVERY webhook delivery
-  //     (billing.ex:827, put_new_lazy(:current_period_end, &default_grace_anchor/0)),
-  //     so that "failed on" day is approximately TODAY, forever.
+  //     minus a client-side 3-day constant — and mark_past_due/2 re-anchors the
+  //     grace window to now+3d on EVERY webhook delivery
+  //     (put_new_lazy(:grace_ends_at, &default_grace_anchor/0)), so that
+  //     "failed on" day is approximately TODAY, forever.
   //   * "keep running until {day}, then they're suspended" named a suspension
-  //     with NO EXECUTOR. maybe_enforce/1 (billing.ex:883) is the only
-  //     grace-elapse suspender; its sole caller is mark_past_due/2, which has
-  //     just pushed the period end three days out, so the `:gt -> :ok` arm
-  //     always fires and Registry.suspend_team_barkparks(tid, "billing_past_due")
-  //     is unreachable on every production path. No worker, route, task or CLI
-  //     reaches it either.
+  //     with NO EXECUTOR. maybe_enforce/1 is the only grace-elapse suspender;
+  //     its sole caller is mark_past_due/2, which has just pushed the anchor
+  //     three days out, so the in-window arm always fires and
+  //     Registry.suspend_team_barkparks(tid, "billing_past_due") is unreachable
+  //     on every production path. No worker, route, task or CLI reaches it
+  //     either.
+  //
+  //  cch-w57-bl: the anchor those two bullets describe moved off
+  //  current_period_end — three clocks in one column — onto its own
+  //  grace_ends_at. The console reads NEITHER for this banner (it names no day
+  //  at all, which is the whole point of cch-w54-s5), so nothing here changes
+  //  behaviourally; the pointers are corrected so a reader who follows them
+  //  lands on the column mark_past_due/2 actually writes. Line numbers are
+  //  dropped rather than re-pinned — they were already stale.
   //
   // What grace elapse ACTUALLY does is flip Billing.entitled?/1, whose only lib
   // call site outside billing.ex is router.ex:8744 (entitled_or_trial_started?/1,
