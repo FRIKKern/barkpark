@@ -273,4 +273,91 @@ defmodule Barkpark.Tasks.Edges do
   defp scope_twin(query, field, value),
     do: from(d in query, where: field(d, ^field) == ^value)
 
+
+  @doc """
+  Re-point every existing `task_edges` endpoint that binds a DRAFT twin at the
+  PUBLISHED twin of the same slug, and return `%{from: {moved, deduped}, to:
+  {moved, deduped}}`.
+
+  `add_dep/3` canonicalises NEW edges; this repairs the ones written before it.
+  It lives HERE rather than inside the migration for two reasons: a migration
+  body needs a runner process and so cannot be driven from a test, and an
+  operator needs a re-runnable arm for edges written by an older release still
+  in flight. Migration
+  `20260905160000_backfill_twin_canonical_task_edges` is a thin caller.
+
+  IDEMPOTENT: after a run there are no draft-bound endpoints left with a
+  published twin, so a second run matches nothing.
+
+  COLLISIONS ARE DELETED, NOT UPDATED, and the ordering is the trick.
+  `task_edges` is unique on `(from_id, to_id, kind)`. If the canonical edge
+  already exists, re-pointing its draft-bound sibling onto the same triple would
+  violate that index and abort the whole run — so each side DELETEs the
+  redundant row FIRST and only then UPDATEs what remains. The deleted row is not
+  lost information; it is the same dependency stated twice.
+
+  SET-BASED, never per-row (slow-migration law): two DELETEs and two UPDATEs in
+  total, whatever the corpus size.
+  """
+  @spec backfill_twin_canonical_edges() :: %{from: {integer(), integer()}, to: {integer(), integer()}}
+  def backfill_twin_canonical_edges do
+    from_deduped = delete_colliding_twin_edges("from_id", "to_id")
+    from_moved = repoint_twin_edges("from_id")
+    to_deduped = delete_colliding_twin_edges("to_id", "from_id")
+    to_moved = repoint_twin_edges("to_id")
+
+    %{from: {from_moved, from_deduped}, to: {to_moved, to_deduped}}
+  end
+
+  # The twin join, scoped on every axis the `(doc_id, type, dataset_id)`
+  # uniqueness index carries. `IS NOT DISTINCT FROM` treats NULL as a VALUE
+  # rather than as "unknown", so an untenanted row matches only another
+  # untenanted row. A looser join would silently move a blocker across a
+  # tenancy boundary — worse than the unenforced blocker it is fixing.
+  #
+  # `substring(d.doc_id from 8)` strips the literal "drafts." (7 chars, so the
+  # remainder starts at 8); `LIKE 'drafts.%'` confines it to shadow rows. An
+  # UNPAIRED draft simply finds no published row and is left alone, which is
+  # correct rather than incidental: queue.ex axis 3 serves an unpaired draft as
+  # itself, so its edges must keep pointing at it.
+  @twin_predicate """
+    AND d.doc_id LIKE 'drafts.%'
+    AND pub.doc_id = substring(d.doc_id from 8)
+    AND pub.type = d.type
+    AND pub.dataset = d.dataset
+    AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+    AND pub.project_id IS NOT DISTINCT FROM d.project_id
+  """
+
+  defp delete_colliding_twin_edges(side, other) do
+    %{num_rows: n} =
+      Repo.query!("""
+      DELETE FROM task_edges e
+      USING documents d, documents pub
+      WHERE e.#{side} = d.id
+      #{@twin_predicate}
+        AND EXISTS (
+          SELECT 1 FROM task_edges c
+          WHERE c.#{side} = pub.id
+            AND c.#{other} = e.#{other}
+            AND c.kind = e.kind
+        )
+      """)
+
+    n
+  end
+
+  defp repoint_twin_edges(side) do
+    %{num_rows: n} =
+      Repo.query!("""
+      UPDATE task_edges e
+      SET #{side} = pub.id
+      FROM documents d, documents pub
+      WHERE e.#{side} = d.id
+      #{@twin_predicate}
+      """)
+
+    n
+  end
+
 end

@@ -215,6 +215,89 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
     end
   end
 
+  # THE BACKFILL (criterion 2). The write-path fix only canonicalises NEW edges;
+  # every edge written before it still binds a draft twin. The migration
+  # 20260905160000_backfill_twin_canonical_task_edges re-points them. These
+  # tests drive the SAME set-based SQL against edges planted directly, because
+  # going through add_dep/3 would canonicalise them on the way in and there
+  # would be nothing left to back-fill.
+  describe "the backfill" do
+    defp plant_edge!(from_id, to_id, kind \\ "blocks") do
+      {:ok, edge} =
+        Repo.insert(
+          Ecto.Changeset.change(%Edge{}, %{from_id: from_id, to_id: to_id, kind: kind})
+        )
+
+      edge
+    end
+
+    # The MIGRATION is a thin caller around this function; a migration body
+    # needs a runner process and cannot be driven from a test, so the logic is
+    # tested where it lives.
+    defp run_backfill!, do: Barkpark.Tasks.Edges.backfill_twin_canonical_edges()
+
+    test "re-points a pre-existing draft-bound edge onto the published twin",
+         %{scope: scope} do
+      {draft, published} = mk_twins!(scope, uniq("blocker"))
+      dependent = mk_draft!(scope, uniq("dependent"))
+
+      plant_edge!(dependent.id, draft.id)
+      assert [{_f, to}] = edge_endpoints(dependent.id)
+      assert to == draft.id, "the fixture must start DRAFT-bound or it back-fills nothing"
+
+      run_backfill!()
+
+      assert [{_f, to_after}] = edge_endpoints(dependent.id)
+      assert to_after == published.id
+    end
+
+    test "leaves an UNPAIRED draft's edge alone", %{scope: scope} do
+      lonely = mk_draft!(scope, uniq("lonely"))
+      dependent = mk_draft!(scope, uniq("dependent"))
+      plant_edge!(dependent.id, lonely.id)
+
+      run_backfill!()
+
+      assert [{_f, to}] = edge_endpoints(dependent.id)
+      assert to == lonely.id
+    end
+
+    test "DELETES the redundant duplicate instead of colliding on the unique index",
+         %{scope: scope} do
+      # The canonical edge already exists, so re-pointing its draft-bound
+      # sibling onto the same (from_id, to_id, kind) triple would violate the
+      # index and abort the whole migration. The duplicate must be removed
+      # first — it is the same dependency stated twice, not lost information.
+      {draft, published} = mk_twins!(scope, uniq("blocker"))
+      dependent = mk_draft!(scope, uniq("dependent"))
+
+      plant_edge!(dependent.id, published.id)
+      plant_edge!(dependent.id, draft.id)
+      assert length(edge_endpoints(dependent.id)) == 2
+
+      run_backfill!()
+
+      assert [{_f, to}] = edge_endpoints(dependent.id),
+             "the collision was not de-duplicated — the migration would have aborted"
+
+      assert to == published.id
+    end
+
+    test "is IDEMPOTENT — a second run changes nothing", %{scope: scope} do
+      {draft, published} = mk_twins!(scope, uniq("blocker"))
+      dependent = mk_draft!(scope, uniq("dependent"))
+      plant_edge!(dependent.id, draft.id)
+
+      run_backfill!()
+      first = edge_endpoints(dependent.id)
+      run_backfill!()
+
+      assert edge_endpoints(dependent.id) == first
+      assert [{_f, to}] = first
+      assert to == published.id
+    end
+  end
+
   describe "the gate the whole fix exists for" do
     test "a blocks edge filed on the draft twin GATES the published row",
          %{scope: scope} do
