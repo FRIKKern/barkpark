@@ -53,6 +53,13 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   it can no longer lose that race, and it still `flunk/1`s loudly if the repro
   ever stops being able to observe the defect.
 
+  The 30x loop that proved route 1 also caught a SECOND, independent flake
+  this file had all along: both arms matched the disconnect string against the
+  WHOLE captured log, and the sandbox owner's connection is shared, so
+  `Barkpark.Pulse.Metrics` sampling on its own timer reddened the POST-FIX arm
+  5 times in 30 while the Bridge was correctly quiesced. `@disconnect` now
+  names the client.
+
   Route 2 (tag `@tag :flaky` and drop the arm to elixir-nightly.yml) was NOT
   taken: it would leave main's only proof that the barrier fixes something to a
   once-a-day job.
@@ -65,8 +72,15 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   alias Ecto.Adapters.SQL.Sandbox
 
   # The exact string Postgrex logs when a non-owner client still holds the
-  # owner's connection at stop_owner/1 — what CI recorded.
-  @disconnect "is still using a connection from owner"
+  # owner's connection at stop_owner/1 — what CI recorded, NARROWED TO THE
+  # BRIDGE. The bare substring is not enough: the owner's connection is shared,
+  # and `Barkpark.Pulse.Metrics` samples on its own timer through
+  # `Pulse.storage/0`, so a whole-log match reports ITS disconnect as this
+  # test's. Measured on a quiet box, 2026-09-05: 5 of 30 runs of the POST-FIX
+  # arm reddened on a `Barkpark.Pulse.Metrics` block while the Bridge was
+  # correctly quiesced. Naming the client makes each arm answer about the
+  # process it is actually about.
+  @disconnect "(Barkpark.Quiz.Bridge) is still using a connection from owner"
 
   # How long the armed seam holds the owner's connection open INSIDE
   # apply_now/3. Every wait below is bounded well under this, so the stop lands
@@ -107,7 +121,7 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
     assert log =~ @disconnect,
            """
-           The unbarriered path did not reproduce the CI disconnect.
+           The unbarriered path did not reproduce the CI disconnect for the Bridge.
 
            A green here does NOT mean the defect is gone — it means this test
            stopped being able to observe it. The read is HELD (see the moduledoc):
@@ -117,9 +131,6 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
            Captured log:
            #{log}
            """
-
-    assert log =~ "Barkpark.Quiz.Bridge",
-           "the disconnect must name the Bridge as the client still holding the connection"
 
     assert log =~ "apply_now",
            "the disconnect must carry the bridge.ex apply_now/3 frame from the CI stack"
@@ -149,7 +160,7 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
     refute log =~ @disconnect,
            """
-           The barrier did not prevent the disconnect.
+           The barrier did not prevent the Bridge's disconnect.
 
            Captured log:
            #{log}
