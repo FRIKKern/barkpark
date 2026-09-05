@@ -5,7 +5,7 @@
   "type": "module",
   "description": "TipTap-vanilla per-block premium editor for Barkpark papers. Bundles to a single committed Web Component artifact, mirroring the bp-* vendoring pattern.",
   "scripts": {
-    "posttest": "node src/canvas/__control_matrix.test.mjs",
+    "posttest": "node src/canvas/__control_matrix.test.mjs && node src/__public_layout_bootstrap.test.mjs",
     "build": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --minify && esbuild src/styles.css --bundle --outfile=../../priv/static/assets/bp-paper-editor.css --minify",
     "build:dev": "esbuild src/index.js --bundle --format=iife --outfile=../../priv/static/assets/bp-paper-editor.bundle.js --sourcemap && esbuild src/styles.css --bundle --outfile=../../priv/static/assets/bp-paper-editor.css --sourcemap",
     "build:web": "npm run build && cp ../../priv/static/assets/bp-paper-editor.bundle.js ../../../web/public/bp-paper-editor.bundle.js && mkdir -p ../../../web/public/assets && cp ../../priv/static/assets/bp-paper-editor.css ../../../web/public/assets/bp-paper-editor.css",

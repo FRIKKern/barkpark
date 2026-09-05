@@ -1,6 +1,6 @@
 {
-  "population": 385,
-  "mapped": 377,
+  "population": 386,
+  "mapped": 378,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -453,6 +453,52 @@
           "kind": "file",
           "p": "priv/static/assets/bp-media-picker.js",
           "evidence": "api/assets/paper-editor/src/__picker_focal.test.mjs:21"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "lib/barkpark_web/layouts/bulldocs.html.heex",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:6"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:6"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-paper-editor.bundle.js",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:16"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-media-picker.js",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:17"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-reference-picker.js",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:18"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-rich-text-editor.js",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:19"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:20"
+        },
+        {
+          "kind": "file",
+          "p": "assets/bp-paper-editor-shell.css",
+          "evidence": "api/assets/paper-editor/src/__public_layout_bootstrap.test.mjs:22"
         }
       ]
     },
