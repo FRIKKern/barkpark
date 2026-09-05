@@ -13,9 +13,22 @@ defmodule Barkpark.Tasks.Stage do
 
   ## What one stage does, in one Postgres transaction
 
-    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || doc_id))`,
-       the same per-task key the close/pulse/move family uses, so a stage
-       serializes with any concurrent CAS write on the same row.
+    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext("task:" <> task_id))`,
+       where `task_id` is the document's UUID PRIMARY KEY, not its `doc_id`
+       slug. That is the same per-task key the close/pulse/move/stamp family
+       uses, so a stage serializes with any concurrent CAS write on the same row.
+
+       THE KEY IS THE INVARIANT, and it is easy to break by reading this
+       sentence rather than the code. Until this correction the line above said
+       `hashtext('task:' || doc_id)`. Keying a stage on the SLUG while close and
+       stamp key on the UUID hashes to a different lock, so the two would no
+       longer exclude each other, the read-modify-write on
+       `content.acceptance_criteria` would stop being serialized — and NO TEST
+       WOULD RED, because the Ecto sandbox cannot express a two-connection race
+       (see `test/barkpark/tasks/stamp_serialization_test.exs`). A wrong
+       docstring on a lock, a key or an index is as urgent as wrong code:
+       nothing downstream re-derives it, and the next person to touch this
+       function will.
     2. **Legality gate** — read the current `lifecycle_status` (`from`); refuse
        with `{:error, {:illegal_transition, from, to}}` when `to` is neither a
        staging target nor the row's own current state, OR when
