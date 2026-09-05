@@ -22,6 +22,7 @@ defmodule Barkpark.Content.Writer do
     Document,
     DraftId,
     Encryption,
+    LabelSpine,
     Labels,
     SchemaDefinition,
     Sheets,
@@ -143,10 +144,47 @@ defmodule Barkpark.Content.Writer do
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
            |> maybe_ensure_block_ids(),
-         :ok <- validate_task_kind(type, attrs) do
+         :ok <- validate_task_kind(type, attrs),
+         :ok <- refuse_malformed_label_spine(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
     end
   end
+
+  # ── The label spine's CREATE-time half (task-e89f4a9ed2f5ce0b) ─────────────
+  #
+  # THE DEFECT WAS THE PARTIAL WRITE, NOT THE VALIDATION. `LabelSpine.validate/1`
+  # was mounted at the publish wall ONLY (`AuthoringWall.enforce/5`'s
+  # `label_gate`, reached from `Lifecycle.publish_document/4`). So
+  # `bp task create --publish` — one caller intention, two server halves —
+  # committed the create and THEN 422'd `label_spine` on the publish, stranding a
+  # `drafts.<id>` no published-first reader can see while rc=0 and a printed
+  # receipt read as success. A wall that rejects AFTER creating the draft is not
+  # validating a write; it is committing half of one.
+  #
+  # This runs the SHAPE half BEFORE any row is persisted. It sits here — inside
+  # `create_document/4`'s pre-write `with`, beside `validate_task_kind/2` — for
+  # the same reason the two collision gates sit at the top of that function: all
+  # four create-family verbs (create / createOrReplace / createIfNotExists /
+  # replace) funnel through this one function, so the gate covers the family
+  # rather than one instance.
+  #
+  # SCOPED TO `type:task`. The other walled type (`paper`) births published
+  # through `Papers.BlockOps.upsert_paper/2`, which enforces the FULL wall on a
+  # synthesized ref before its own Repo write and therefore never half-writes.
+  #
+  # NOT the full `validate/1`: a draft with no description and no tags is
+  # unfinished, not malformed, and drafts stay free. `validate_shape/1` is the
+  # judgeable subset — see its @doc and the LabelSpine moduledoc's RULING on why
+  # the registry (`unknown_tag`) half stays publish-time.
+  #
+  # The tuple is `LabelSpine`'s own, so `Content.Errors.build/1` renders the
+  # SAME 422 `label_spine` body (code / message / details) the publish wall
+  # emits — one error shape for one rule, whichever door refused it.
+  defp refuse_malformed_label_spine("task", attrs) do
+    LabelSpine.validate_shape(Map.get(attrs, "content") || Map.get(attrs, :content) || %{})
+  end
+
+  defp refuse_malformed_label_spine(_type, _attrs), do: :ok
 
   # ── The transient-connection seam on the CREATE path ───────────────────────
   #
