@@ -120,7 +120,7 @@ defmodule BarkparkWeb.WorkspaceExportOperatorAuthorityTest do
       assert TenancyAuth.workspace_admin?(token, ws.id)
 
       restored =
-        build_conn()
+        scoped_conn()
         |> authed(raw)
         |> get("/api/workspaces/#{ws.slug}/export")
 
@@ -128,7 +128,7 @@ defmodule BarkparkWeb.WorkspaceExportOperatorAuthorityTest do
              "the `admin` grant did not restore export (got #{restored.status}) — the known-good endpoint PR #12854 pinned"
 
       relisted =
-        build_conn()
+        scoped_conn()
         |> authed(raw)
         |> get("/api/workspaces")
         |> json_response(200)
