@@ -139,6 +139,7 @@ defmodule Barkpark.Tasks.Stamp do
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Criteria
+  alias Barkpark.Tasks.EvidenceDurability
 
   @event_task_criterion "task.criterion"
 
@@ -195,6 +196,7 @@ defmodule Barkpark.Tasks.Stamp do
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
   `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
   `:note_required`, `:invalid_criteria`, `:merge_gated_criterion`,
+  `:branch_only_evidence`,
   `:observed_rev_required`, `:criterion_not_met`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
@@ -237,9 +239,20 @@ defmodule Barkpark.Tasks.Stamp do
        when not (is_integer(index) and index >= 0),
        do: {:error, :invalid_criteria}
 
+  # THE DURABILITY CHECK sits here, on the ONE clause that writes a met
+  # criterion's evidence, so every caller of every stamp surface meets it. It
+  # runs BEFORE the transaction: a refusal costs the stamper one line while the
+  # missing sha is still in their hands, which is the whole economics of
+  # task-f6fba9a87369ce8e. Six weeks later no audit can recover it.
   defp build_update(index, {:met, evidence}, _worker, text)
        when is_binary(evidence) and evidence != "" do
-    {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
+    case EvidenceDurability.check(evidence) do
+      :ok ->
+        {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
+
+      {:error, :branch_only_evidence} = err ->
+        err
+    end
   end
 
   defp build_update(_index, {:met, _no_evidence}, _worker, _text),

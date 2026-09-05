@@ -1194,6 +1194,15 @@ defmodule BarkparkWeb.TasksController do
             help: Params.mutation_help(:stamp, doc, worker_id)
           })
 
+        # task-f6fba9a87369ce8e: evidence that locates its proof on a BRANCH and
+        # names nothing durable is a SHAPE refusal, not a state conflict — the
+        # row is fine, the proof is not — so it renders 400 like the other shape
+        # errors rather than 409. The message names the missing thing AND how to
+        # supply it, because the whole point of refusing at stamp time is that
+        # the sha is still in the stamper's hands right now.
+        {:error, :branch_only_evidence} ->
+          bad_request(conn, Barkpark.Tasks.EvidenceDurability.message())
+
         {:error, reason} ->
           # Every failure here is a state conflict (not_holder / fenced_off /
           # stale_claim / index out of range / criterion-text guard / not
