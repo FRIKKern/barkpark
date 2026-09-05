@@ -470,8 +470,6 @@ defmodule Barkpark.Plugins.Capabilities do
     |> Map.update("flags", [], fn flags -> Enum.map(flags || [], &stringify_shallow/1) end)
   end
 
-  # @canonical capability:plugin-command-writes-fail-closed aka:writes,readonlyhint,plugin mutator,fail closed
-  #
   # `writes` is a SAFETY bit and this is its ONLY runtime owner for
   # plugin-contributed commands. CORE commands get theirs from the core builder's
   # `Keyword.fetch!(opts, :writes)` — a hard crash at compile time if omitted.
