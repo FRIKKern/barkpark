@@ -71,8 +71,19 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   # promise-with-no-mechanism wave 30 deleted three columns to kill. It defaults
   # ON: it is a FAILURE (a publish that did not deploy), and the moduledoc's
   # rule above is failures-on / successes-off.
+  #
+  # cch-w30-bl — EIGHT. `deployment_succeeded` comes BACK, and only because the
+  # thing wave 30 said it lacked now exists: `Registry`'s
+  # `dispatch_deployment_terminal/2` fires it on the EDGE into `live` from BOTH
+  # writers that can land that terminal — the fenced one and the
+  # `with_site_update` one `Sites.Deploy.settle_live/2` drives on every static
+  # build. The comment above says "the deployment-success terminal is written by
+  # `Sites.Deploy.settle_live/2`, which legally re-reports live"; that re-report
+  # is handled, by an edge guard on the PRIOR status, not by leaving the toggle
+  # deleted. It defaults OFF — it is a SUCCESS, and the rule above is
+  # failures-on / successes-off.
   @events ~w(provision_succeeded provision_failed
-             deployment_failed deployment_refused
+             deployment_succeeded deployment_failed deployment_refused
              agent_reachable agent_unreachable
              subscription_past_due)a
 
@@ -90,6 +101,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
 
     field :provision_succeeded, :boolean, default: false
     field :provision_failed, :boolean, default: true
+    field :deployment_succeeded, :boolean, default: false
     field :deployment_failed, :boolean, default: true
     field :deployment_refused, :boolean, default: true
     field :agent_reachable, :boolean, default: false

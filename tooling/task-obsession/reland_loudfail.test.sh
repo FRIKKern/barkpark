@@ -344,5 +344,38 @@ else
   check "extract the id:ref step from the workflow" 0 1
   cat "$tmp/extract.err" >&2
 fi
+echo "== 9. the FETCH's verdict wins over a scannable body =="
+# THE FIFTH SILENT MODE, and the one closest to the first: here the body IS a
+# healthy documents list, so every shape-based reader downstream sees a clean
+# scan. The only thing that knows the read never really happened is the fetch
+# step's own verdict, written into `reland_fetch.status` — it saw the HTTP code,
+# which reland_check.py never can. So the verdict must WIN over the body.
+#
+# Sections 1-2 pin the case where the body itself is broken (an error envelope,
+# unparseable HTML). Section 5 pins the FETCHER assigning skipped/infra. NEITHER
+# crosses the seam: nothing asserted that reland_check.py, handed a skipped/infra
+# artifact that still carries documents, refuses to re-read it as `ok`. Disarming
+# that branch (reland_check.py classify(): `meta.get("status") in (STATUS_INFRA,
+# STATUS_SKIPPED)`) left all 76 assertions above green.
+#
+# NON-VACUITY: the same four documents, under an `ok` verdict, DO scan to a real
+# finding — that is ledger-two-pages.json in section 3 (status ok, findings 1).
+# So a 0 here is the verdict winning, not an inert fixture.
+check "same docs under an ok verdict DO flag"  1       "$(line RELAND_FINDINGS "$FIX/ledger-two-pages.json" --strict)"
+
+check "skipped fetch + clean body -> status"   skipped "$(line RELAND_STATUS "$FIX/ledger-skipped-fetch-clean-docs.json" --strict)"
+check "skipped fetch + clean body -> findings" 0       "$(line RELAND_FINDINGS "$FIX/ledger-skipped-fetch-clean-docs.json" --strict)"
+check "infra fetch + clean body -> status"     infra   "$(line RELAND_STATUS "$FIX/ledger-infra-fetch-clean-docs.json" --strict)"
+check "infra fetch + clean body -> findings"   0       "$(line RELAND_FINDINGS "$FIX/ledger-infra-fetch-clean-docs.json" --strict)"
+
+# And the exit codes follow the verdict, not the body: `skipped` is a deliberate
+# non-evaluation (exit 0), `infra` is a broken pipeline (exit 2 under --strict).
+python3 reland_check.py --files "$tmp/files.txt" --tasks "$FIX/ledger-skipped-fetch-clean-docs.json" \
+  --out "$tmp/f9.json" --strict >/dev/null 2>&1
+check "skipped fetch: --strict exits 0"        0       "$?"
+python3 reland_check.py --files "$tmp/files.txt" --tasks "$FIX/ledger-infra-fetch-clean-docs.json" \
+  --out "$tmp/f9.json" --strict >/dev/null 2>&1
+check "infra fetch: --strict exits 2"          2       "$?"
+
 echo "---"; echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]

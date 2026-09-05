@@ -366,6 +366,26 @@ defmodule BarkparkCloud.Registry.Site do
   end
 
   @doc """
+  task-b3e3ec0f433b217d: NARROW changeset for a public-read credential ROTATION —
+  `Registry.rotate_site_read_token/1` and nothing else.
+
+  Casts ONE column, and deliberately not through `changeset/2`: the rotate runs
+  against a site row loaded some time earlier, so a wide cast would write back
+  whatever that stale struct happened to hold for `domains`, `env_encrypted` or
+  `current_deployment_id`. A credential swap must move the credential and
+  nothing else.
+
+  `read_token_encrypted` is required here: an unset (or explicitly `nil`) value
+  would blank the site's credential — the "site goes dark" outcome the rotate
+  exists to make impossible.
+  """
+  def read_token_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:read_token_encrypted])
+    |> validate_required([:read_token_encrypted])
+  end
+
+  @doc """
   site-spawner W6 (charter D51): NARROW changeset for the Cloudflare-in-front
   edge binding. Casts ONLY the CF columns — it can never rename, re-team, or
   re-point the site's runtime (containment, mirroring `custom_host_changeset`).

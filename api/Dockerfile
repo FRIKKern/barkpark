@@ -6,14 +6,19 @@
 # `api/Dockerfile.dockerignore` is the BuildKit per-Dockerfile ignore file and
 # takes precedence over the root `.dockerignore` (which excludes api/ wholesale
 # for the web image).
-FROM elixir:1.19-alpine AS build
+# PINNED to the TESTED toolchain, not a floating minor: `.tool-versions` says
+# elixir 1.18.4-otp-27 and elixir.yml's mix-test / mix-prod-compile matrices run
+# 1.18.4, so the self-host image is now built on the Elixir the suite actually
+# exercises (task-729be45412588f07). `elixir:1.19-alpine` was smoke-booted only.
+# scripts/toolchain-skew-check.sh reds if this line and those matrices part ways.
+FROM elixir:1.18.4-otp-27-alpine AS build
 
 # build-base (gcc/make/musl-dev) is REQUIRED to compile native NIFs — argon2_elixir
 # (password hashing) builds a C NIF, so a `git`-only image fails `mix deps.compile`.
 # cmake is required by expty's vendored libuv.
 RUN apk add --no-cache git build-base cmake
 
-# alpine 3.23 ships cmake 4.x, which refuses projects declaring
+# alpine 3.24 ships cmake 4.x, which refuses projects declaring
 # `cmake_minimum_required(VERSION 3.x)` below 3.5 — expty's vendored libuv does.
 # This floor keeps that build compatible.
 ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -62,10 +67,20 @@ RUN mix release
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 
-# MUST match the build stage's alpine (elixir:1.19-alpine = 3.23): the crypto
-# NIF compiled there links the build OpenSSL, so an older runtime alpine
-# (e.g. 3.20) fails at boot with "EVP_PKEY_sign_message_init: symbol not found".
-FROM alpine:3.23
+# MUST match the build stage's alpine: the crypto NIF compiled there links the
+# build OpenSSL, so an older runtime alpine (e.g. 3.20) fails at boot with
+# "EVP_PKEY_sign_message_init: symbol not found".
+#
+# MEASURED, not assumed (task-729be45412588f07, `docker run` on linux/arm64):
+#
+#   elixir:1.18.4-otp-27-alpine  alpine 3.24.1  openssl-3.5.8-r0  Elixir 1.18.4/OTP 27
+#   elixir:1.19-alpine           alpine 3.23.5  openssl-3.5.8-r0  Elixir 1.19.5/OTP 28
+#   alpine:3.24                  alpine 3.24.1  openssl-3.5.8-r0
+#
+# So pinning the build stage down to the suite-tested Elixir moved its alpine UP
+# a minor, and this line moved with it. Read the table before touching either:
+# the two stages are one decision, and the build tag is what picks the alpine.
+FROM alpine:3.24
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs
 

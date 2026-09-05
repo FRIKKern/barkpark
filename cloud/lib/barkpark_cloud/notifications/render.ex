@@ -93,6 +93,14 @@ defmodule BarkparkCloud.Notifications.Render do
       "provision_succeeded" ->
         {"Provisioning succeeded", "#{site} finished provisioning and is live.", :info}
 
+      # cch-w30-bl — the success terminal. `:info` is correct here and is the one
+      # place in this table where Discord's green is the honest colour: the build
+      # IS live. It carries `identity/1` for the same reason the failure does —
+      # a team that deploys on every publish needs to know WHICH deployment went
+      # live — and no `cause/1`, because there is no cause to state.
+      "deployment_succeeded" ->
+        {"Deployment live", "A deployment for #{site} is live.#{identity(payload)}", :info}
+
       "deployment_failed" ->
         {"Deployment failed",
          "A deployment for #{site} failed.#{identity(payload)}#{cause(payload)}", :error}

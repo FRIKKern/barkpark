@@ -235,7 +235,7 @@ func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
 		return ref, nil
 	}
 	if !cfg.HasCloudToken() {
-		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id), or set BARKPARK_CLOUD_TOKEN for a CI job", ref)
 	}
 	list, err := cfg.CloudClient().ListBarkparks(cloudCtx())
 	if err != nil {
@@ -266,7 +266,7 @@ func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
 		return ref, nil
 	}
 	if !cfg.HasCloudToken() {
-		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id), or set BARKPARK_CLOUD_TOKEN for a CI job", ref)
 	}
 	list, err := cfg.CloudClient().ListSites(cloudCtx())
 	if err != nil {
