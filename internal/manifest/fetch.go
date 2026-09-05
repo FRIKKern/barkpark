@@ -21,7 +21,10 @@ const CapabilitiesPath = "/v1/capabilities"
 // ETag-validated layer:
 //
 //  1. Compute the cache key from the client's base URL + token salt.
-//  2. If a cached entry exists, send GET /v1/capabilities with If-None-Match.
+//     1a. If the cache has a FRESH WINDOW (NewCacheWithTTL) and the entry is
+//     inside it, return the cached manifest and make NO REQUEST AT ALL.
+//  2. Otherwise, if a cached entry exists, send GET /v1/capabilities with
+//     If-None-Match.
 //  3. On 304 Not Modified, return the cached manifest (the server confirmed it
 //     is still current) — zero re-parse of a fresh body, the whole point of the
 //     ETag dance.
@@ -63,6 +66,18 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	)
 	if cache != nil {
 		key = CacheKey(client.BaseURL(), client.Token())
+
+		// THE FRESH WINDOW: ZERO REQUESTS, NOT A CHEAP ONE.
+		// A 304 is cheap in bytes and free of nothing else — it is still a
+		// request, and on the measured box GET /v1/capabilities was 166,039
+		// requests over 5.04 days (32% of everything served) precisely because
+		// every invocation revalidated. Inside the window we do not ask at all.
+		// Caches with no window (NewCache, ttl 0) never take this branch, so
+		// every pre-existing caller keeps revalidating exactly as before.
+		if freshM, fresh := cache.LoadFresh(key); fresh {
+			return freshM, nil
+		}
+
 		cachedM, cachedETag, haveCacheHit = cache.Load(key)
 	}
 
@@ -103,6 +118,13 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	switch res.StatusCode {
 	case http.StatusNotModified:
 		if haveCacheHit {
+			// The server just CONFIRMED this body is current, so the fresh
+			// window legitimately restarts from now. Without this re-stamp an
+			// entry would revalidate on every single invocation once its first
+			// window lapsed, and the request count would be bounded by nothing
+			// — a 304-forever cache costs the same round trip as no cache.
+			// Best-effort: a failed touch only means the next call revalidates.
+			_ = cache.Touch(key)
 			return cachedM, nil
 		}
 		// 304 without a cached body is a server/contract violation — we sent
