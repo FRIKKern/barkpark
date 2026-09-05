@@ -519,6 +519,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
 
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
+  def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
 
   # Gyldendal parity E1 — a block-configured richText FIELD's canvas ops.

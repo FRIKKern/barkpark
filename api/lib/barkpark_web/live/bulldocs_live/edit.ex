@@ -205,7 +205,11 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     end
   end
 
-  def apply_ops(socket, _ops), do: socket
+  def apply_ops(socket, _ops) do
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+  end
 
   # ── the MVP editor events, each mapping to exactly ONE op ───────────────────
 

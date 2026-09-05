@@ -645,7 +645,10 @@ defmodule BarkparkWeb.BulldocsLive do
     {:reply, %{saved: socket.assigns.last_save_ok?}, socket}
   end
 
-  def handle_event("paper-ops", _params, socket), do: {:noreply, socket}
+  def handle_event("paper-ops", _params, socket) do
+    socket = Edit.apply_ops(socket, nil)
+    {:reply, %{saved: false}, socket}
+  end
 
   def handle_event("paper-edit-block", params, socket),
     do: {:noreply, Edit.edit_block(socket, params)}

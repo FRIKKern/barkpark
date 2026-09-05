@@ -111,6 +111,7 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
   end
 
   defp assigns_of(view), do: :sys.get_state(view.pid).socket.assigns
+  defp socket_of(view), do: :sys.get_state(view.pid).socket
 
   defp flash_of(view), do: assigns_of(view).flash || %{}
 
@@ -461,6 +462,39 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       reload_html = render_click(reloaded, "paper-toggle-edit", %{})
       assert reload_html =~ "Batch body"
       assert reload_html =~ ~s(data-test-id="paper-canvas-run")
+    end
+
+    test "paper-ops invalid payloads reject a prior successful save without mutating", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "b-body",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Saved first"}]}
+          }
+        ]
+      })
+
+      assert assigns_of(view).last_save_ok? == true
+      assert block_text(slug, "b-body") == "Saved first"
+      before = stored_blocks(slug)
+
+      Enum.reduce([%{"ops" => []}, %{"ops" => "not-a-list"}, %{}], socket_of(view), fn
+        params, socket ->
+          assert {:reply, %{saved: false}, rejected_socket} =
+                   BulldocsLive.handle_event("paper-ops", params, socket)
+
+          assert rejected_socket.assigns.last_save_ok? == false
+          assert rejected_socket.assigns.save_status == "Save failed"
+          assert stored_blocks(slug) == before
+          rejected_socket
+      end)
     end
 
     test "canvas readiness refresh pushes the shared display channels", %{conn: conn, slug: slug} do
