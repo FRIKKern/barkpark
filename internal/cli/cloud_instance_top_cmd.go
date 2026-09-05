@@ -175,6 +175,19 @@ func renderInstanceTop(out *writer, ref string, res cloudclient.MetricsResult) {
 	out.outf("%s", head)
 	out.outf("%s", metricsBeatLine(res.Beat))
 
+	// The VERDICT, above the plot — the whole complaint this answers is that
+	// "struggling" had to be INFERRED from four sparklines. It prints before
+	// the absent-beat arm below on purpose: a box with no readings must read
+	// "unknown", and an omission is exactly how absence gets taken for health.
+	// A control plane that sends no `pressure` block prints nothing at all —
+	// that is a fact about the CP, not a verdict about the box.
+	if lines := pressureLines(res.Pressure); len(lines) > 0 {
+		out.outf("")
+		for _, line := range lines {
+			out.outf("%s", line)
+		}
+	}
+
 	// Absent beat → nothing real to plot; say so, never a zeroed chart.
 	if strings.EqualFold(strings.TrimSpace(res.Beat.Status), "absent") {
 		out.outf("")
@@ -466,9 +479,7 @@ func spaceLines(res cloudclient.MetricsResult) ([]string, []pdrender.Block) {
 	if sp.JournalBytes != nil {
 		lines = append(lines, "  journal: "+humanBytes(*sp.JournalBytes))
 	}
-	if sp.DBSize != nil {
-		lines = append(lines, "  database: "+humanBytes(*sp.DBSize))
-	}
+	lines = append(lines, spaceDatabaseLines(sp)...)
 
 	lines = append(lines, spaceSitesLine(sp))
 	lines = append(lines, spaceConsumerLines(sp)...)
@@ -498,6 +509,49 @@ func spaceLines(res cloudclient.MetricsResult) ([]string, []pdrender.Block) {
 	return lines, []pdrender.Block{
 		{Type: "bar-chart", Attrs: map[string]any{"bars": bars, "max": max}},
 	}
+}
+
+// spaceDatabaseLines is postgres AS A NAMED CONSUMER inside the space report —
+// the total, and then the relations that make it up, one per line.
+//
+// The space payload carries `top_relations` beside its `db_size` and until now
+// this surface decoded them and rendered none: an operator reading "database:
+// 3.3 GB" learned a number, not a diagnosis, while the names that turn it into
+// one sat in the same response. The console has rendered them since #12988
+// (spacePanelHtml's Database group); this is that group, in this surface's
+// vocabulary.
+//
+// It keeps storageLines' nil/empty split, one level up: nil is "this agent did
+// not measure the breakdown", an EMPTY list is "it measured and there is
+// nothing to name", and those are different facts an operator resolves
+// differently. Nothing at all measured → no line, never a zeroed one.
+func spaceDatabaseLines(sp *cloudclient.MetricsSpace) []string {
+	if sp.DBSize == nil && sp.TopRelations == nil {
+		return nil
+	}
+	head := "  database: size not reported"
+	if sp.DBSize != nil {
+		head = "  database: " + humanBytes(*sp.DBSize)
+	}
+	switch {
+	case sp.TopRelations == nil:
+		return []string{head + "  ·  biggest relations not reported"}
+	case len(sp.TopRelations) == 0:
+		return []string{head + "  ·  no relations reported"}
+	}
+
+	named := 0.0
+	for _, rel := range sp.TopRelations {
+		named += rel.Bytes
+	}
+	if sp.DBSize != nil && *sp.DBSize > 0 {
+		head += fmt.Sprintf("  ·  top %d = %s of it", len(sp.TopRelations), pctOf(named, *sp.DBSize))
+	}
+	lines := []string{head}
+	for _, rel := range sp.TopRelations {
+		lines = append(lines, "    "+sanitizeCell(rel.Name)+" "+humanBytes(rel.Bytes))
+	}
+	return lines
 }
 
 // spaceRootLine renders the root filesystem pair. A used figure without a total
@@ -544,13 +598,33 @@ func spaceSitesLine(sp *cloudclient.MetricsSpace) string {
 		line += humanBytes(*sp.Sites.Bytes)
 	}
 
+	// THE CAP, AND WHETHER IT BINDS — the same three answers the console gives
+	// (app.js spacePanelHtml's sitesNote), in this surface's words.
+	//
+	// The agent caps the per-slug list at ten and reports how many slugs the
+	// walk FOUND. Ten rows and a total read identically whether the tree holds
+	// ten or forty, and the operator's next action differs: delete a site, or
+	// go look at a tree that has grown a shape nobody watches. A cap that does
+	// not say when it binds is worse than no cap, because a partial answer gets
+	// read as a complete one.
+	//
+	// And with NO count, NEITHER claim is made. "all N" would be the strongest
+	// statement this line can make and it must not be reachable from an unknown
+	// — which is why the -1 sentinel and the absent count both fall short of it
+	// here, exactly as they do in the console.
 	switch {
 	case sp.Sites.Count == nil:
 		line += "  ·  site count not reported by this agent"
 	case *sp.Sites.Count < 0:
 		line += "  ·  site count UNKNOWN: the walk failed (this is not a count of zero)"
-	default:
+	case sp.Sites.Top == nil:
+		// A count with no rendered list: the number is real and says so, but
+		// there is no list for it to be "all" or "top N" OF.
 		line += fmt.Sprintf("  ·  %d sites", int(*sp.Sites.Count))
+	case int(*sp.Sites.Count) > len(sp.Sites.Top):
+		line += fmt.Sprintf("  ·  top %d of %d sites", len(sp.Sites.Top), int(*sp.Sites.Count))
+	default:
+		line += fmt.Sprintf("  ·  all %d sites", int(*sp.Sites.Count))
 	}
 
 	switch {
@@ -820,4 +894,156 @@ OUTPUT
   -o json    the metrics envelope verbatim: {ok, collected_at, instance, beat,
              points, series, latest, service_health}`
 	out.outf("%s", help)
+}
+
+// ── The pressure verdict ─────────────────────────────────────────────────────
+//
+// RENDERED HERE, COMPUTED IN THE CONTROL PLANE. BarkparkCloud.Metrics.pressure/1
+// bands every signal against thresholds whose evidence is written down beside
+// them (@pressure_signals); this file formats the answer and re-derives nothing.
+// A threshold duplicated per surface is a threshold that drifts per surface, and
+// the console (app.js pressureBannerHtml) is the twin that reads the same block.
+//
+// The rule that shapes every branch below: an unmeasured signal decides nothing,
+// in either direction. It cannot raise an alarm and it cannot talk one down.
+
+// pressureHeadlines is the sentence per verdict. "unknown" is deliberately NOT
+// worded as reassurance — reading absence as health is the failure this block
+// exists to end. The state WORD itself is printed beside it so the verdict is
+// greppable, not only readable.
+var pressureHeadlines = map[string]string{
+	"struggling": "this box is struggling",
+	"watch":      "this box is under pressure",
+	"calm":       "no resource pressure",
+	"unknown":    "no vitals to judge",
+}
+
+// pressureSignalLabels words the control plane's signal keys for this surface.
+// A key that is NOT in this table still renders, as itself — an unknown signal
+// must appear rather than vanish, which is the same silent-drop trap
+// metricTopSpecs carries for the series half of this envelope.
+var pressureSignalLabels = map[string]string{
+	"swap": "swap",
+	"mem":  "memory",
+	"load": "load",
+	"disk": "disk",
+}
+
+// pressureState folds the wire's word onto the closed set. Anything unrecognised
+// becomes "unknown" — the only safe direction, because coercing a word we do not
+// know toward "calm" would let a future control-plane state read as a clean bill.
+func pressureState(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "struggling":
+		return "struggling"
+	case "watch":
+		return "watch"
+	case "calm":
+		return "calm"
+	}
+	return "unknown"
+}
+
+func pressureSignalLabel(key string) string {
+	if label, ok := pressureSignalLabels[strings.TrimSpace(key)]; ok {
+		return label
+	}
+	return sanitizeCell(strings.TrimSpace(key))
+}
+
+// pressureNumber prints a threshold or a reading without trailing zero noise:
+// 50 stays "50", 1.5 stays "1.5". The control plane sends JSON numbers, so 50
+// and 50.0 are the same value and must read the same.
+func pressureNumber(v float64) string {
+	return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64)
+}
+
+// pressureSignalValue is one signal's reading, carrying its unit. A nil value is
+// "not measured" — never a 0, which would read as a healthy floor. `per_core` is
+// printed as given: the control plane already divided load15 by the core count
+// (2.0 is idle on 16 cores and a queue two deep on 2), and re-deriving it here
+// would be a second definition of the same judgement.
+func pressureSignalValue(sig cloudclient.MetricsPressureSignal) string {
+	if sig.Value == nil || math.IsNaN(*sig.Value) || math.IsInf(*sig.Value, 0) {
+		return "not measured"
+	}
+	if strings.TrimSpace(sig.Unit) == "per_core" {
+		return pressureNumber(*sig.Value) + " per core"
+	}
+	return fmt.Sprintf("%d%%", int(math.Round(*sig.Value)))
+}
+
+// pressureSignalLine is one signal AS THE OPERATOR CHECKS IT: the name, the
+// number, the band that number fell in, and the two boundaries it was judged
+// against. A verdict whose numbers are not on screen is a verdict a reader
+// learns to ignore, so the word and its reading always travel together.
+func pressureSignalLine(sig cloudclient.MetricsPressureSignal) string {
+	line := "  " + pressureSignalLabel(sig.Key) + ": " + pressureSignalValue(sig)
+	// AN UNMEASURED SIGNAL STOPS HERE. It has no band and no share of the
+	// verdict, and printing the thresholds it WOULD have been judged against
+	// dresses an absent reading in the furniture of a measured one.
+	if pressureState(sig.State) == "unknown" {
+		return line
+	}
+	line += " — " + pressureState(sig.State)
+	if sig.WatchAt != nil && sig.StrugglingAt != nil {
+		line += " (watch at " + pressureNumber(*sig.WatchAt) +
+			", struggling at " + pressureNumber(*sig.StrugglingAt) + ")"
+	}
+	return line
+}
+
+// pressureLines is the verdict block for the terminal view, or nil when the
+// control plane sent no `pressure` at all.
+//
+// NIL IS NOT "unknown". A control plane too old to compute a verdict has said
+// nothing about this box, and printing "unknown" for it would state a fact about
+// the BOX that we actually hold about the CP. A present block whose signals
+// could not be read IS "unknown", and that one prints — loudly, as its own line,
+// never as an omission.
+func pressureLines(p *cloudclient.MetricsPressure) []string {
+	if p == nil {
+		return nil
+	}
+	state := pressureState(p.State)
+	lines := []string{"pressure: " + state + " — " + pressureHeadlines[state]}
+
+	if state == "unknown" {
+		lines = append(lines, "  this box has not reported the numbers this verdict is made of.")
+	}
+
+	// EVERY signal, always — including the calm ones and the ones that could not
+	// be read. A verdict that lists only what fired is a verdict whose
+	// confidence cannot be judged.
+	unread := make([]string, 0, len(p.Signals))
+	measured := 0
+	for _, sig := range p.Signals {
+		lines = append(lines, pressureSignalLine(sig))
+		if pressureState(sig.State) == "unknown" {
+			unread = append(unread, pressureSignalLabel(sig.Key))
+		} else {
+			measured++
+		}
+	}
+
+	// The measured/of caveat. It prints whenever the verdict was made on an
+	// incomplete reading, INCLUDING a calm one: a clean bill drawn from one of
+	// four signals is the exact shape that let a sick box read healthy.
+	// measured/of are taken from the control plane when it sent them and
+	// derived from the signal list only when it did not — never invented.
+	of := len(p.Signals)
+	if p.Of != nil {
+		of = int(*p.Of)
+	}
+	if p.Measured != nil {
+		measured = int(*p.Measured)
+	}
+	if of > 0 && measured < of {
+		caveat := fmt.Sprintf("  judged on %d of %d signals", measured, of)
+		if len(unread) > 0 {
+			caveat += " — no reading for " + strings.Join(unread, ", ")
+		}
+		lines = append(lines, caveat)
+	}
+	return lines
 }
