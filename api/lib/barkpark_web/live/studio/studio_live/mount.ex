@@ -291,6 +291,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # banner (studio_editor_shell). "reload-remote-doc" reloads from the DB.
       editor_dirty: false,
       doc_conflict: false,
+      # The dotted form keys (`doc[altText].nob`) whose input the author has
+      # actually touched this buffer, accumulated from `phx-change`'s
+      # `_target`. `Handlers.Fields.fold_dot_paths/2` folds an EMPTY value only
+      # for a path in here, which is what lets a cleared localized value
+      # persist as cleared while the empty subfields a composite renderer posts
+      # on every render stay ignored. Emptied wherever `editor_dirty` is.
+      editor_touched_paths: MapSet.new(),
       # ── Server-owned save-halt mirror (p-hollow-studio-mirror) ────────
       # nil = no active halt. Set to the verbatim `{:error, {:halted, reason}}`
       # string by the paper handlers (shared/paper.ex paper_pane_op/paper_ops)

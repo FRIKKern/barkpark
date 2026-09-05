@@ -71,7 +71,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def save(params, socket) when is_map(params) do
-    case fold_dot_paths(params) do
+    socket = track_touched(socket, params)
+
+    case fold_dot_paths(params, touched_paths(socket)) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -92,6 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> put_flash(:info, "Saved")
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false)
+          |> clear_touched()
 
         {:noreply, socket}
 
@@ -107,6 +110,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       socket
       |> Shared.rebuild_panes()
       |> assign(editor_dirty: false, doc_conflict: false)
+      |> clear_touched()
 
     {:noreply, socket}
   end
@@ -129,7 +133,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def autosave(params, socket) when is_map(params) do
-    case fold_dot_paths(params) do
+    socket = track_touched(socket, params)
+
+    case fold_dot_paths(params, touched_paths(socket)) do
       %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
       _ -> {:noreply, socket}
     end
@@ -163,25 +169,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # Fold only when there is something to fold: an untouched params map must
   # come back byte-identical, or a payload with no `"doc"` key at all would
   # gain an empty one and save a blank document over a real one.
-  # EMPTY VALUES ARE LEFT OUT, deliberately and narrowly.
+  #
+  # ── Which EMPTY values fold (task-bf3c7b7af0071f0d) ────────────────────────
   #
   # A composite field renders EVERY subfield on every render, so a task form
   # posts `doc[purpose].importance.score=""` and eighteen siblings whether or
-  # not the author touched them. Today all of those are dropped on the floor
-  # together with the real ones. Folding them in as `""` submits empty strings
-  # into typed composite slots and the write is REFUSED — two task-editor saves
-  # regressed to "Save failed" when this fold was unconditional.
+  # not the author touched them. Folding all of those in as `""` submits empty
+  # strings into typed composite slots and the write is REFUSED — two
+  # task-editor saves regressed to "Save failed" when this fold was
+  # unconditional, which is why #16066 skipped every empty value.
   #
-  # Skipping empty values makes this change strictly ADDITIVE: a key that is
-  # dropped today and carries nothing is still dropped, and a key that carries
-  # an actual keystroke starts persisting. The cost is stated plainly — CLEARING
-  # a localized value back to empty still does not persist, exactly as it does
-  # not today. That is the same defect, not a new one, and it wants its own row
-  # alongside the empty-subfield validation question this uncovered.
-  defp fold_dot_paths(params) do
+  # Skipping ALL empties has its own cost, and it is the defect this function
+  # now closes: an author who CLEARS a localized value (alt text, caption) back
+  # to empty had the clear dropped on the floor and the OLD value survived the
+  # save.
+  #
+  # The distinction the two cases actually turn on is not the VALUE — both are
+  # `""` — it is whether the author TOUCHED that input. LiveView already
+  # carries that: `phx-change` sends `_target`, the name of the input that
+  # fired the change, and `Phoenix.LiveView.Channel.decode_merge_target/1`
+  # hands it to `handle_event/3` as a list. A dotted field name does not end in
+  # `]`, so `Plug.Conn.Query.decode/1` leaves it whole and `_target` arrives as
+  # `["doc[altText].nob"]` — the exact params key being folded, no re-parsing.
+  #
+  # `track_touched/2` accumulates those keys in `editor_touched_paths` as the
+  # autosaves arrive (a `phx-submit` carries no `_target`, so the set must
+  # OUTLIVE the change event that cleared the field), and the fold admits an
+  # empty value only for a key in that set. An untouched empty subfield the
+  # renderer posted is still dropped exactly as before, so the composite saves
+  # are unaffected; a cleared field the author actually typed in now persists
+  # as cleared. The set is emptied wherever the buffer becomes clean again —
+  # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
+  # — so a touched path can never leak onto the NEXT document opened.
+  defp fold_dot_paths(params, touched) do
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
-        is_binary(k) and String.starts_with?(k, "doc[") and v != "" and not is_nil(v)
+        is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched)
       end)
 
     if dotted == [] do
@@ -201,6 +224,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       Map.put(rest, "doc", doc)
     end
   end
+
+  defp foldable?(_key, value, _touched) when is_nil(value), do: false
+  defp foldable?(key, "", touched), do: MapSet.member?(touched, key)
+  defp foldable?(_key, _value, _touched), do: true
+
+  # `_target` names the ONE input that fired this change. Only dotted `doc[...]`
+  # keys are tracked, and only when the key is actually present in this payload
+  # — a `_target` for a plain bracket name decodes to segments (`["doc",
+  # "title"]`) that are not params keys at all, and those fields never needed
+  # the fold.
+  defp track_touched(socket, params) do
+    targets =
+      params
+      |> Map.get("_target")
+      |> List.wrap()
+      |> Enum.filter(fn t ->
+        is_binary(t) and String.starts_with?(t, "doc[") and Map.has_key?(params, t)
+      end)
+
+    if targets == [] do
+      socket
+    else
+      assign(socket,
+        editor_touched_paths: MapSet.union(touched_paths(socket), MapSet.new(targets))
+      )
+    end
+  end
+
+  defp touched_paths(socket), do: socket.assigns[:editor_touched_paths] || MapSet.new()
+
+  defp clear_touched(socket), do: assign(socket, editor_touched_paths: MapSet.new())
 
   def toggle_content_preview(socket) do
     {:noreply, assign(socket, content_preview_visible: !socket.assigns.content_preview_visible)}

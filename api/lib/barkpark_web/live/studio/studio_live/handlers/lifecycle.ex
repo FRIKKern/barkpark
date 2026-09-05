@@ -34,8 +34,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
-      # clear the dirty flag + any stale concurrent-edit banner.
-      |> assign(editor_dirty: false, doc_conflict: false)
+      # clear the dirty flag, any stale concurrent-edit banner, and the
+      # touched-path set (`Handlers.Fields`) — a path touched on the previous
+      # document must not license folding an empty value on the next one.
+      |> assign(editor_dirty: false, doc_conflict: false, editor_touched_paths: MapSet.new())
 
     {:noreply, socket}
   end
