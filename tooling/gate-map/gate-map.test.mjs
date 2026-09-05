@@ -18,6 +18,7 @@ import {
   loadMap,
   instrumentsUnderPrefix,
   runCommandFor,
+  NEEDS_ARGV,
 } from "./gate-map.mjs";
 
 const SWEEP = "cloud/priv/static/__preview__/breakpoint-sweep.mjs";
@@ -147,4 +148,16 @@ test("the snapshot on disk is the derivation, byte for byte", () => {
   const fresh = derive();
   assert.equal(onDisk.population, fresh.population);
   assert.equal(onDisk.mapped, fresh.mapped);
+});
+
+test("NEEDS-INVOCATION is told apart from a finding (both shapes measured on this tree)", () => {
+  assert.equal(NEEDS_ARGV.test("console-export-tree: --dest is required (or pass --selftest)\n"), true);
+  assert.equal(NEEDS_ARGV.test("usage: node scripts/preview-census-gate-check.mjs [--changed-from <ref>]\n"), true);
+  // A real finding must NOT be swallowed — this is the wave-16 red verbatim.
+  assert.equal(
+    NEEDS_ARGV.test('FAIL  E11 __preview__/breakpoint-sweep.mjs:2475  banned source line citation "app.js:25"\n'),
+    false
+  );
+  // seal-run.sh's environmental refusal (exit 5) is not exit 2 and stays RED.
+  assert.equal(NEEDS_ARGV.test("seal-run: the predicate was NOT executed.\n"), false);
 });

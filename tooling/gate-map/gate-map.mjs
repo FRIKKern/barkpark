@@ -161,6 +161,10 @@ export function scanSites(rel, src) {
   return sites;
 }
 
+// A bare-run refusal for want of argv, told apart from a finding. Both shapes
+// were MEASURED on this tree, not guessed.
+export const NEEDS_ARGV = /^\s*usage:|is required \(or pass|^\s*Usage:/m;
+
 export function runCommandFor(rel) {
   if (rel.endsWith(".test.mjs")) return `node --test ${rel}`;
   if (rel.endsWith(".mjs")) return `node ${rel}`;
@@ -331,6 +335,7 @@ function main(argv) {
   if (!has("--run")) return 0;
 
   let bad = 0;
+  const needsArgv = [];
   for (const r of req) {
     const parts = r.run.split(" ");
     console.log(`\n─── ${r.run}`);
@@ -338,15 +343,32 @@ function main(argv) {
     const out = (res.stdout || "") + (res.stderr || "");
     process.stdout.write(out);
     if (res.status !== 0) {
-      bad++;
-      console.log(`RED  ${r.run}  exit ${res.status}`);
+      // NEEDS-INVOCATION is not a red. MEASURED: console-export-tree.sh ("--dest
+      // is required") and preview-census-gate-check.mjs ("usage: …") both exit 2
+      // on a bare run. The map says WHICH instrument reads a path; it does not
+      // know that instrument's argv. Counting those as failures would make the
+      // composed gate cry wolf on its first use, and a gate nobody believes is
+      // the wave-16 failure wearing the opposite mask. They are printed, loudly,
+      // and the operator must supply the arguments.
+      if (res.status === 2 && NEEDS_ARGV.test(out)) {
+        needsArgv.push(r.run);
+        console.log(`NEEDS-INVOCATION  ${r.run}  exit 2 — it refused for want of arguments, not for a finding`);
+      } else {
+        bad++;
+        console.log(`RED  ${r.run}  exit ${res.status}`);
+      }
     }
+  }
+  if (needsArgv.length) {
+    console.log(`\nNEEDS INVOCATION — ${needsArgv.length} instrument(s) read this slice but refused a bare run:`);
+    for (const n of needsArgv) console.log(`  ${n}`);
+    console.log("  Supply their arguments; the map cannot.");
   }
   if (bad) {
     console.log(`\nCOMPOSED GATE RED — ${bad} of ${req.length} instrument(s) failed`);
     return 1;
   }
-  console.log(`\nCOMPOSED GATE GREEN — ${req.length} instrument(s)`);
+  console.log(`\nCOMPOSED GATE GREEN — ${req.length - needsArgv.length} of ${req.length} instrument(s) ran and passed`);
   return 0;
 }
 
