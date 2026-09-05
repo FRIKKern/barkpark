@@ -547,7 +547,9 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # standing right beside it, refuses to confirm.
   defp rate_clause(w) do
     attempted = basis_clause(Map.get(w, :rate), w.failed, w.door, "attempted")
-    settled = basis_clause(Map.get(w, :terminal_rate), w.failed, Map.get(w, :settled, 0), "settled")
+
+    settled =
+      basis_clause(Map.get(w, :terminal_rate), w.failed, Map.get(w, :settled, 0), "settled")
 
     attempted <> "; " <> settled
   end

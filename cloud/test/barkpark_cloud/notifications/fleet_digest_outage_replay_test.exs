@@ -123,7 +123,9 @@ defmodule BarkparkCloud.Notifications.FleetDigestOutageReplayTest do
     # computed by `DeployLedger.census/3` over real rows and rendered by the real
     # email — not a fixture map handed to the renderer.
     assert body =~ "758 attempted, of which 502 deferred by a busy box"
-    assert body =~ "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
+
+    assert body =~
+             "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
 
     # A DOOR WITH ROWS IN IT IS NAMED AS SUCH, and the window is stated, so the
     # rate can never be read without the hours it was taken over.
@@ -200,7 +202,9 @@ defmodule BarkparkCloud.Notifications.FleetDigestOutageReplayTest do
     assert_email_sent(fn email ->
       assert Enum.any?(email.to, fn {_name, address} -> address == user.email end)
       assert email.text_body =~ "758 attempted, of which 502 deferred by a busy box"
-      assert email.text_body =~ "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
+
+      assert email.text_body =~
+               "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
     end)
 
     # And the receipt exists, owned by the team it concerns — the row type that
@@ -231,8 +235,12 @@ defmodule BarkparkCloud.Notifications.FleetDigestOutageReplayTest do
 
     without = team_body(team, @read_at)
 
-    assert with_failures =~ "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
-    assert without =~ "0.0% failed on attempted (0 of 740 attempted); 0.0% failed on settled (0 of 238 settled)"
+    assert with_failures =~
+             "2.37% failed on attempted (18 of 758 attempted); 7.03% failed on settled (18 of 256 settled)"
+
+    assert without =~
+             "0.0% failed on attempted (0 of 740 attempted); 0.0% failed on settled (0 of 238 settled)"
+
     refute without =~ "18 of 758 attempted"
     refute with_failures == without
   end
