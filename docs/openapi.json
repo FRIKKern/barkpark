@@ -7042,6 +7042,15 @@
         "operationId": "doc.patch.scoped",
         "parameters": [
           {
+            "description": "Opaque client-generated key that makes this write safe to retry. The FIRST request carrying a given key executes; a later request with the same key replays that original response byte-for-byte (with `Idempotency-Replay: true`) instead of applying the mutation again — so a client whose request timed out can retry without double-filing. A concurrent request holding the same key is refused 409 `idempotency_key_in_use`; the handler never runs twice. Keys are scoped to the presenting token AND the request path, so two tenants cannot collide on one key, and they expire after 24h. Generate ONE key per logical operation and reuse it across that operation's retries — a fresh key per attempt is exactly the double-write this header prevents.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "workspace_slug",
             "required": true,
@@ -10731,6 +10740,15 @@
       "post": {
         "operationId": "doc.patch",
         "parameters": [
+          {
+            "description": "Opaque client-generated key that makes this write safe to retry. The FIRST request carrying a given key executes; a later request with the same key replays that original response byte-for-byte (with `Idempotency-Replay: true`) instead of applying the mutation again — so a client whose request timed out can retry without double-filing. A concurrent request holding the same key is refused 409 `idempotency_key_in_use`; the handler never runs twice. Keys are scoped to the presenting token AND the request path, so two tenants cannot collide on one key, and they expire after 24h. Generate ONE key per logical operation and reuse it across that operation's retries — a fresh key per attempt is exactly the double-write this header prevents.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset",
