@@ -227,6 +227,19 @@ config :barkpark, Barkpark.StudioChat,
 # Sync.PushWorker `enabled?` gate. (Auth is lazy and stays boot-started.)
 config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
 
+# The StudioChat BlockedSweeper runs a DB-touching sweep in `init/1` and re-arms
+# it every 60s. Boot-started under test, that tick fires from a process that owns
+# no ExUnit sandbox connection, so every tick raises ownership and logs a warning
+# on an exact 60s period for the whole `mix test` run (CI run 33720395852:
+# 05:51:06.88, 05:52:06.88, 05:53:06.88, 05:58:06.89, 06:03:06.90). Pure noise in
+# every CI log, and a foreign statement inside every telemetry-counting test's
+# window. Keep the boot-started singleton dormant in test — the sweeper's own
+# tests drive the pure `sweep(now)` directly, and a test that WANTS the process
+# starts its own instance via `start_supervised/1` under the sandbox owner.
+# Same shape as the DrainWorker gate above. Defaults ON, so dev/prod are
+# unaffected (`Barkpark.StudioChat.Supervisor.children/0` proves it).
+config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false
+
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process
 # Port lifecycle in test: `:auto` would flip to the systemd transient-unit path
 # on any host where `systemd-run` happens to resolve (some Linux CI images),
