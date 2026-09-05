@@ -188,13 +188,96 @@ on:
       # command files themselves, plus the only two anchored target surfaces NOT
       # already covered by a glob above: cloud/priv/static/app.js + __app.test.mjs
       # (there is no **/*.js / **/*.mjs trigger, and app.css is triggered but the
-      # .js/.mjs pair is not). Every OTHER anchored surface in the corpus rides a
-      # trigger above (.ex/.exs/.go/.ts/.tsx/.md ride the code globs; root.html.heex
-      # rides api/lib/barkpark_web/**/*.heex; pd-parity-completeness.sh has its own
-      # trigger), so an anchor drift there already runs this job.
+      # .js/.mjs pair is not).
+      #
+      # BOUNDED 2026-09-05 (cgsiw-s5). The sentence that stood here — "Every
+      # OTHER anchored surface in the corpus rides a trigger above" — was a
+      # STANDING, unqualified claim over an OPEN-ENDED corpus, and nothing
+      # enforces it. Re-derived: the scaffy `IN` targets are 40 distinct paths
+      # across scaffy/commands/, 2 of them templated (`{{.TargetFile}}` and
+      # `api/lib/barkpark/plugins/{{.plugin}}.ex`); all 38 literal ones matched
+      # at least one glob in this list on 2026-09-05. That is a MEASUREMENT WITH
+      # A DATE, not an invariant: scaffy/commands/** is a hot corpus and a new
+      # command anchoring into a .py/.css/.json target reopens the gap the day
+      # it lands. The claim was ALSO too broad about the docs-anchors corpus,
+      # which it did not measure — 15 of that corpus's 95 targets matched no
+      # glob at all. Those are handled by the anchor-TARGET block at the very
+      # end of this list; do not restate a whole-corpus claim here.
       - "scaffy/commands/**"
       - "cloud/priv/static/app.js"
       - "cloud/priv/static/__app.test.mjs"
+      # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
+      # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
+      # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
+      # priv/static/.git — NOT api/priv/templates/ or api/rel/. Five live
+      # specimens on origin/main today (api/rel/env.sh.eex and four under
+      # api/priv/templates/plugin_new/), and `.eex` matched NO glob in either
+      # block. PR SHAPE CLOSED: a retired term reintroduced into the plugin
+      # scaffold templates — so every plugin generated from then on carries dead
+      # vocabulary — fired nothing at all. (The guard's other input surface,
+      # tooling/doc-truth/**, already has its own trigger above.)
+      - "**/*.eex"
+      # ── .heex tree-wide, and this one is PROSPECTIVE — say so rather than
+      # inflate it. `git ls-tree -r origin/main | grep '\.heex$' |
+      # grep -v '^api/lib/barkpark_web/'` is EMPTY (0 of 13), so every live
+      # .heex already rides api/lib/barkpark_web/**/*.heex above. But two
+      # guards' SUBJECT SETS are broader than that path: preview-parity-check.sh
+      # part 3 scans .heex tree-wide, and studio-literal-check.sh walks
+      # api/lib/barkpark/plugins for .heex as well as .ex. PR SHAPE CLOSED: the
+      # first plugin-owned .html.heex, or any .heex under cloud/, would land
+      # invisible to both. One line retires the class before the specimen
+      # exists; it costs nothing while the count is zero.
+      - "**/*.heex"
+      # ── anchor-TARGET existence: docs-anchors-check.sh §3 (cards) and §3b
+      # (non-card agent docs) resolve every `## Code anchors` bullet's path and
+      # red when it no longer exists — the docs/media/DISCOVERY.md scar §3b was
+      # written for. That guard's subject set is the ANCHOR CORPUS, which is
+      # open-ended and NOT extension-shaped, so the code globs above do not
+      # bound it. PR SHAPE CLOSED: `git mv scripts/pdrender-dump.sh
+      # scripts/pdrender-render.sh` as a ONE-FILE PR matched no glob here, so
+      # docs/cards/tui.md kept pointing at a deleted path and the next unrelated
+      # .md PR ate the red.
+      #
+      # WHICH OPTION, AND WHY NOT THE OTHER. The two honest fixes were (a)
+      # enumerate the corpus's surfaces here, or (b) split §3/§3b onto its own
+      # job with `paths: ['**']`, which retires the CLASS instead of the
+      # instances. (b) is the better shape and is deliberately NOT taken: the
+      # workflow-trigger freeze (task-33742276cf0a35b1) forbids adding a job or
+      # a trigger, and this slice may widen an existing `paths:` arm and nothing
+      # else. So (a) is instance-scoped BY CONSTRUCTION and the class stays
+      # open — an anchor into a surface none of the globs below cover reopens
+      # it. If the freeze lifts, prefer (b).
+      #
+      # DERIVED 2026-09-05 against the live corpus: 95 distinct anchor targets
+      # across docs/cards/*.md plus the non-card agent docs, of which 15 matched
+      # no glob in either block. The globs below cover all TWELVE file
+      # specimens. The other three are DIRECTORY anchors
+      # (api/lib/barkpark_web/components/fields,
+      # api/lib/barkpark/plugins/onixedit/bokbasen,
+      # js/packages/create-barkpark-app/templates/blog-starter/) and need no
+      # glob: renaming a directory necessarily moves the .ex/.md/.tsx files
+      # inside it, and those ride the code globs at the top of this list.
+      # scripts/media-smoke.sh, scripts/pdrender-dump.sh
+      - "scripts/**"
+      # api/scripts/prod-postcheck.sh
+      - "api/scripts/**"
+      - "api/start.sh"
+      - "Makefile"
+      # .githooks/post-merge
+      - ".githooks/**"
+      # api/assets/paper-editor/src/convert.js
+      - "api/assets/**"
+      # bp-asset-explorer.js, bp-rich-text-editor.js, bp-search-intel.js
+      - "api/priv/static/assets/**"
+      # ONIX_BookProduct_3.0_reference.xsd
+      - "api/priv/onix/**"
+      # docs/cli/manifest.schema.json — a .json, so **/*.md misses it
+      - "docs/**"
+      # `scripts/**` subsumes the twelve named scripts/*.sh lines above and
+      # `api/priv/static/assets/**` subsumes two named files. Those lines STAY:
+      # each records WHICH guard needs it and WHY, and that reasoning is what
+      # this file is for. Trading a documented trigger for an anonymous broad
+      # one is how the next reader loses the argument.
   pull_request:
     paths:
       - "**/*.md"
@@ -344,8 +427,8 @@ on:
       - "scripts/nil-polarity-check.sh"
       # Preview-env isolation gate — a NEW test that mutates the process-global
       # Application.put_env(:barkpark, :preview, …) must declare `async: false`
-      # + an `on_exit` restore (preview-route pollution tripwire). `**/*.exs`
-      # already triggers; the script path re-runs the gate on a scanner edit.
+      # + an `on_exit` restore (preview-route pollution tripwire).
+      - "api/test/**/*.exs"
       - "scripts/preview-env-isolation-check.sh"
       # Site templates (search-template epic D12) — a standalone template tree
       # (its own package.json, vendored CSS/theme slice + bp-graph snapshot). Its
@@ -365,13 +448,96 @@ on:
       # command files themselves, plus the only two anchored target surfaces NOT
       # already covered by a glob above: cloud/priv/static/app.js + __app.test.mjs
       # (there is no **/*.js / **/*.mjs trigger, and app.css is triggered but the
-      # .js/.mjs pair is not). Every OTHER anchored surface in the corpus rides a
-      # trigger above (.ex/.exs/.go/.ts/.tsx/.md ride the code globs; root.html.heex
-      # rides api/lib/barkpark_web/**/*.heex; pd-parity-completeness.sh has its own
-      # trigger), so an anchor drift there already runs this job.
+      # .js/.mjs pair is not).
+      #
+      # BOUNDED 2026-09-05 (cgsiw-s5). The sentence that stood here — "Every
+      # OTHER anchored surface in the corpus rides a trigger above" — was a
+      # STANDING, unqualified claim over an OPEN-ENDED corpus, and nothing
+      # enforces it. Re-derived: the scaffy `IN` targets are 40 distinct paths
+      # across scaffy/commands/, 2 of them templated (`{{.TargetFile}}` and
+      # `api/lib/barkpark/plugins/{{.plugin}}.ex`); all 38 literal ones matched
+      # at least one glob in this list on 2026-09-05. That is a MEASUREMENT WITH
+      # A DATE, not an invariant: scaffy/commands/** is a hot corpus and a new
+      # command anchoring into a .py/.css/.json target reopens the gap the day
+      # it lands. The claim was ALSO too broad about the docs-anchors corpus,
+      # which it did not measure — 15 of that corpus's 95 targets matched no
+      # glob at all. Those are handled by the anchor-TARGET block at the very
+      # end of this list; do not restate a whole-corpus claim here.
       - "scaffy/commands/**"
       - "cloud/priv/static/app.js"
       - "cloud/priv/static/__app.test.mjs"
+      # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
+      # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
+      # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
+      # priv/static/.git — NOT api/priv/templates/ or api/rel/. Five live
+      # specimens on origin/main today (api/rel/env.sh.eex and four under
+      # api/priv/templates/plugin_new/), and `.eex` matched NO glob in either
+      # block. PR SHAPE CLOSED: a retired term reintroduced into the plugin
+      # scaffold templates — so every plugin generated from then on carries dead
+      # vocabulary — fired nothing at all. (The guard's other input surface,
+      # tooling/doc-truth/**, already has its own trigger above.)
+      - "**/*.eex"
+      # ── .heex tree-wide, and this one is PROSPECTIVE — say so rather than
+      # inflate it. `git ls-tree -r origin/main | grep '\.heex$' |
+      # grep -v '^api/lib/barkpark_web/'` is EMPTY (0 of 13), so every live
+      # .heex already rides api/lib/barkpark_web/**/*.heex above. But two
+      # guards' SUBJECT SETS are broader than that path: preview-parity-check.sh
+      # part 3 scans .heex tree-wide, and studio-literal-check.sh walks
+      # api/lib/barkpark/plugins for .heex as well as .ex. PR SHAPE CLOSED: the
+      # first plugin-owned .html.heex, or any .heex under cloud/, would land
+      # invisible to both. One line retires the class before the specimen
+      # exists; it costs nothing while the count is zero.
+      - "**/*.heex"
+      # ── anchor-TARGET existence: docs-anchors-check.sh §3 (cards) and §3b
+      # (non-card agent docs) resolve every `## Code anchors` bullet's path and
+      # red when it no longer exists — the docs/media/DISCOVERY.md scar §3b was
+      # written for. That guard's subject set is the ANCHOR CORPUS, which is
+      # open-ended and NOT extension-shaped, so the code globs above do not
+      # bound it. PR SHAPE CLOSED: `git mv scripts/pdrender-dump.sh
+      # scripts/pdrender-render.sh` as a ONE-FILE PR matched no glob here, so
+      # docs/cards/tui.md kept pointing at a deleted path and the next unrelated
+      # .md PR ate the red.
+      #
+      # WHICH OPTION, AND WHY NOT THE OTHER. The two honest fixes were (a)
+      # enumerate the corpus's surfaces here, or (b) split §3/§3b onto its own
+      # job with `paths: ['**']`, which retires the CLASS instead of the
+      # instances. (b) is the better shape and is deliberately NOT taken: the
+      # workflow-trigger freeze (task-33742276cf0a35b1) forbids adding a job or
+      # a trigger, and this slice may widen an existing `paths:` arm and nothing
+      # else. So (a) is instance-scoped BY CONSTRUCTION and the class stays
+      # open — an anchor into a surface none of the globs below cover reopens
+      # it. If the freeze lifts, prefer (b).
+      #
+      # DERIVED 2026-09-05 against the live corpus: 95 distinct anchor targets
+      # across docs/cards/*.md plus the non-card agent docs, of which 15 matched
+      # no glob in either block. The globs below cover all TWELVE file
+      # specimens. The other three are DIRECTORY anchors
+      # (api/lib/barkpark_web/components/fields,
+      # api/lib/barkpark/plugins/onixedit/bokbasen,
+      # js/packages/create-barkpark-app/templates/blog-starter/) and need no
+      # glob: renaming a directory necessarily moves the .ex/.md/.tsx files
+      # inside it, and those ride the code globs at the top of this list.
+      # scripts/media-smoke.sh, scripts/pdrender-dump.sh
+      - "scripts/**"
+      # api/scripts/prod-postcheck.sh
+      - "api/scripts/**"
+      - "api/start.sh"
+      - "Makefile"
+      # .githooks/post-merge
+      - ".githooks/**"
+      # api/assets/paper-editor/src/convert.js
+      - "api/assets/**"
+      # bp-asset-explorer.js, bp-rich-text-editor.js, bp-search-intel.js
+      - "api/priv/static/assets/**"
+      # ONIX_BookProduct_3.0_reference.xsd
+      - "api/priv/onix/**"
+      # docs/cli/manifest.schema.json — a .json, so **/*.md misses it
+      - "docs/**"
+      # `scripts/**` subsumes the twelve named scripts/*.sh lines above and
+      # `api/priv/static/assets/**` subsumes two named files. Those lines STAY:
+      # each records WHICH guard needs it and WHY, and that reasoning is what
+      # this file is for. Trading a documented trigger for an anonymous broad
+      # one is how the next reader loses the argument.
 
 concurrency:
   # One group per PUSH SHA on main, per REF everywhere else. GitHub keeps ONE
