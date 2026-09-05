@@ -22,6 +22,10 @@ ahead of the money- and infra-destructive Cloud routes. **No new table, no migra
 - Five one-line route swaps gating billing/checkout (owner), go-live/launch,
   barkpark DELETE + retry, and provider-connect (admin). Reads and site CRUD stay at
   `member`.
+  The instance-webhook proxy family (`/v1/barkparks/:id/api/webhooks*`, nine routes) is
+  deliberately member-tier for list/show/create/update/delete/replay/test-send, and
+  team-admin for exactly two credential verbs — `rotate` (mints a new signing secret)
+  and `deliveries` (returns payload bodies) — per the task-a0f4f8757ba28e76 ruling.
 
 ## Why
 
