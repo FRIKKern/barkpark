@@ -376,10 +376,24 @@
 # correct, but it never said WHOSE read was ignored -- so on a host whose shell
 # BARKPARK_TOKEN is published-pinned, the DEFAULT invocation measured the
 # never-published class as nothing, said so honestly, and gave the reader no way
-# to tell a broken permission from a broken lens. Measured 2026-08-04 on this
-# box: the shell token reports UNREAD while the operator token in
-# ~/.config/barkpark/config.json reads the lens and names
-# drafts.pds-bl-wrongpath-arm-blind-to-wrong-id and drafts.task-85d64913a19c0d70.
+# to tell a broken permission from a broken lens.
+#
+# Measured 2026-09-05 on this box, both sides re-run rather than quoted, because
+# a by-hand measurement written into a header ROTS and this one already had:
+#   - `env -u BARKPARK_TOKEN bash scripts/pds-ledger-census.sh` -> EXIT 0, lens
+#     READ, `credential ~/.config/barkpark/config.json (bp login)   (DRAFT-
+#     CAPABLE: the source answered perspective:drafts)`, and it names
+#     drafts.pds-bl-wrongpath-arm-blind-to-wrong-id as hidden work.
+#   - the shell BARKPARK_TOKEN on this box is NOT published-pinned today, it is
+#     EXPIRED: HTTP 401 at offset 0, and the run fails closed BEFORE the drafts
+#     lens is ever reached. So the pinned side of the comparison is exercised
+#     from the harness's `blind-lens-ignored` fixture, not live. STATED, not
+#     glossed: a 401 and a published pin are different faults, and only the
+#     second one this clause is about. The earlier 2026-08-04 note in this
+#     header claimed the shell token reported UNREAD; that claim no longer
+#     reproduces, which is exactly why the fixture is the durable oracle and
+#     the harness -- not this comment -- is what pins the behaviour.
+#
 # An instrument that reports the same UNREAD for "the server has no drafts
 # perspective" and for "you asked with the wrong token" is one an operator
 # cannot act on.
