@@ -13401,6 +13401,63 @@
     return base;
   }
 
+  // ── THE BACKUP TRISTATE, RENDERED WITHOUT COLLAPSING IT ───────────────────
+  //
+  // Pure: the one honest backup sentence for a beat payload, or "" when the
+  // payload says nothing about backups at all (so a beat without the fields
+  // renders exactly as it did before).
+  //
+  // WHY A FUNCTION AND NOT A TERNARY ON backup_ok. For the whole life of the
+  // beat, `backup_ok:false` was the Go ZERO VALUE on every box in the fleet —
+  // ReportConfig.BackupProbe was declared and wired NOWHERE — so `false` meant
+  // "no probe was ever wired", "the probe ran and the backup is missing", and
+  // "the probe itself errored" all at once, with a free-text detail as the only
+  // discriminator no consumer is allowed to parse. A console that renders that
+  // `false` as "Backup failed" invents a measurement nobody made, on every
+  // instance at once. `backup_state` (internal/agent/report.go BackupState) is
+  // the discriminator; this reads it and REFUSES to invent one when it is not
+  // there. Same ruling, same five names, as BarkparkCloud.Telemetry.backup_state/1
+  // — the cloud-side reader this console sits downstream of.
+  //
+  //   ok / failed    the ONLY MEASURED backup facts. Only these two may be
+  //                  worded as a verdict about this box's backups.
+  //   unconfigured   the probe RAN; this box has no backup location. "You never
+  //                  set backups up" and "your backups are broken" are different
+  //                  sentences with different next actions.
+  //   error          the probe itself failed. A fact about the INSTRUMENT; the
+  //                  box's backup state is unknown.
+  //   unmeasured     no probe wired — nobody looked. Carries the agent's own
+  //                  sentinel verbatim, which is what the empty state quotes
+  //                  and what __app.test.mjs pins against report.go.
+  //
+  // TWO VERSION-SKEW ARMS, because the fleet upgrades one box at a time:
+  //   * no backup_state, backup_ok:true → OK. `true` is unambiguous: only a
+  //     wired probe that measured a backup can produce it.
+  //   * no backup_state, anything else, OR a state string from a producer newer
+  //     than this reader → UNKNOWN. Never coerced into a backup fact, and
+  //     never worded as a failure: on today's fleet that would report a backup
+  //     failure on every box in it.
+  function backupStateText(payload) {
+    var p = payload && typeof payload === "object" ? payload : {};
+    var hasState = typeof p.backup_state === "string" && p.backup_state !== "";
+    var hasLegacy = typeof p.backup_ok === "boolean" ||
+      (typeof p.backup_detail === "string" && p.backup_detail !== "");
+    if (!hasState && !hasLegacy) return "";
+    var detail = typeof p.backup_detail === "string" && p.backup_detail !== ""
+      ? " — " + p.backup_detail
+      : "";
+    var state = hasState ? p.backup_state : (p.backup_ok === true ? "ok" : "");
+    if (state === "ok") return "Backup: measured present and fresh" + detail;
+    if (state === "failed") return "Backup: measured missing" + detail;
+    if (state === "unconfigured") return "Backup: no backup location configured on this box" + detail;
+    if (state === "error") return "Backup: the probe errored, so the backup state is unknown" + detail;
+    if (state === "unmeasured") {
+      return "Backup: “no backup probe wired” — nobody looked, so this is not a statement about backups" + detail;
+    }
+    // An old agent's ambiguous `false`, or a state this reader does not know.
+    return "Backup: this agent did not report a backup state, so nobody here looked" + detail;
+  }
+
   // Pure: does the entry carry anything worth an inline expansion?
   function tlvHasDetail(entry) {
     var p = entry && entry.payload;
@@ -13422,10 +13479,17 @@
           (pr.evidence ? " — " + String(pr.evidence) : ""));
       }).join("\n");
     }
+    // A health beat's backup fields get ONE plain sentence above the raw
+    // record, because the raw record is `backup_ok:false` — the value that
+    // means three different things — and an operator reading it unaided will
+    // read a backup failure that nobody measured. The raw JSON stays: this
+    // line interprets it, it does not replace it.
+    var backup = backupStateText(p);
+    var head = backup ? esc(backup) + "\n\n" : "";
     try {
-      return esc(JSON.stringify(p, null, 2));
+      return head + esc(JSON.stringify(p, null, 2));
     } catch (e) {
-      return esc(String(p));
+      return head + esc(String(p));
     }
   }
 
@@ -13467,17 +13531,31 @@
       : "";
     if (!entries.length) {
       // The enumeration names ONLY what a producer can write (charter D578):
-      // health + space beats, verify runs, team audit rows. The second sentence
-      // is ADJUDICATED WORDING — it states the absence of a MEASUREMENT, never
-      // "No backup" and never "Backup failed", because backup_ok on the wire is
-      // a plain Go bool whose `false` conflates three realities (no probe wired
-      // / probe ran and failed / probe errored) and the only discriminator is
-      // the agent's free-text detail, which today says exactly one thing.
+      // health + space beats, verify runs, team audit rows.
+      //
+      // THE BACKUP SENTENCE WAS REWRITTEN WHEN THE PROBE LANDED (wave 51 s2 →
+      // this PR). It used to state, in the console's own voice, that the on-box
+      // agent reports “no backup probe wired” and that nothing here could tell
+      // you whether this instance is backed up. That was TRUE BY CONSTRUCTION —
+      // ReportConfig.BackupProbe was a declared-but-never-wired seam, so every
+      // beat in the fleet carried the Go zero value — and it went FALSE the day
+      // cmd/barkpark-agent/main.go wired agent.NewBackupProbe. Keeping it would
+      // have been the console asserting a measurement outcome it no longer
+      // knows, on a screen whose entire point is that it has no beats yet.
+      //
+      // What replaces it is still ADJUDICATED WORDING: never "No backup" and
+      // never "Backup failed" here, because an EMPTY feed has observed nothing.
+      // It names the five states a health report can carry (see
+      // backupStateText, and internal/agent/report.go BackupState) so the three
+      // realities the old bool conflated — a real verdict, a real negative, and
+      // nobody-looked — stay three sentences rather than one.
       return quiet + '<div class="empty-state"><h2>Nothing here yet</h2>' +
         "<p>Events will appear here as this Barkpark works &mdash; health reports, disk-space reports, " +
-        "verification runs, and team actions, in order. Backups are not among them: the on-box agent " +
-        "reports “no backup probe wired”, so nothing here can tell you whether this " +
-        "instance is backed up.</p></div>";
+        "verification runs, and team actions, in order. Backups ride the health report rather than a " +
+        "line of their own: nothing has been reported yet, so nothing here has looked at this " +
+        "instance’s backups. When a health report arrives it says which of five it is — a backup " +
+        "measured present and fresh, one measured missing, no backup location configured, a probe " +
+        "that errored, or “no backup probe wired”, which means nobody looked.</p></div>";
     }
     var open = opts.expandedKeys || [];
     var openGroups = opts.openGroups || [];
@@ -18267,9 +18345,13 @@
   //
   // TWO BULLETS WERE DELETED HERE (cch-w50-s1), not reworded:
   //   * "Daily backups" — no backup worker exists, the crontab has zero backup
-  //     rows, no BackupProbe is wired into the agent (so production's own
-  //     health beats have carried backup_ok=false forever), and the remote
-  //     "backup" verb shells a make target that does not exist.
+  //     rows, and the remote "backup" verb shells a make target that does not
+  //     exist. THE PROBE HALF OF THIS SENTENCE IS NOW STALE AND THE RULING IS
+  //     NOT: cmd/barkpark-agent wires agent.NewBackupProbe, so the beat can
+  //     finally SAY whether a backup artifact is there (it used to carry
+  //     backup_ok=false on every box because nothing ever looked). Observing a
+  //     backup is not TAKING one; nothing in this plane still makes them, so
+  //     the bullet stays deleted.
   //   * "Priority support" / "Standard support" — no support route, address,
   //     inbox, SLA or docs page exists anywhere in the plane.
   // An unbacked bullet is a promise the plane cannot keep; the honest move is
@@ -27376,6 +27458,7 @@
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
       mergeTimeline: mergeTimeline, auditMirrorsEvent: auditMirrorsEvent,
       tlvEntryTitle: tlvEntryTitle, tlvRowHtml: tlvRowHtml, tlvDetailHtml: tlvDetailHtml,
+      backupStateText: backupStateText,
       // The LIVE title vocabulary, read by running (never by parsing the
       // literal) — __agent_event_vocabulary_census.mjs's render side.
       tlvEventTitles: Object.keys(TLV_EVENT_TITLES),
