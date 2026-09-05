@@ -107,6 +107,10 @@ defmodule BarkparkWeb.Studio.DeskDeadDestinationTest do
     end
   end
 
+  # The list row is keyed by the PUBLISHED doc id; a draft's `doc_id` carries a
+  # "drafts." prefix that never reaches the DOM.
+  defp row_id(doc), do: String.replace_prefix(doc.doc_id, "drafts.", "")
+
   defp studio_path(suffix),
     do: "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio" <> suffix
 
@@ -116,13 +120,13 @@ defmodule BarkparkWeb.Studio.DeskDeadDestinationTest do
 
     # The row is there and is not selected yet — the click below is a real one.
     assert html =~ @doc_title
-    assert tag = doc_row_tag(html, doc.doc_id)
+    assert tag = doc_row_tag(html, row_id(doc))
     refute tag =~ "aria-current"
     assert html =~ ~s(data-reason="nothing_selected")
 
     break_the_destination!()
 
-    after_click = view |> element("#doc-#{doc.doc_id} .bp-doc-row-body") |> render_click()
+    after_click = view |> element("#doc-#{row_id(doc)} .bp-doc-row-body") |> render_click()
 
     # THE NAMED STATE. Both halves of the failing shape are refuted here: there
     # IS a message, and it NAMES the row that failed. Asserted on the FLASH
@@ -137,7 +141,7 @@ defmodule BarkparkWeb.Studio.DeskDeadDestinationTest do
     # …and the desk does not pretend the document opened: the dead row is still
     # rendered and wears NO aria-current, so what the surface claims matches
     # what actually loaded.
-    assert after_tag = doc_row_tag(after_click, doc.doc_id)
+    assert after_tag = doc_row_tag(after_click, row_id(doc))
     refute after_tag =~ "aria-current"
     assert after_click =~ ~s(data-reason="nothing_selected")
   end
@@ -146,10 +150,10 @@ defmodule BarkparkWeb.Studio.DeskDeadDestinationTest do
        %{conn: conn, doc: doc} do
     {:ok, view, _html} = live(conn, studio_path("/author"))
 
-    after_click = view |> element("#doc-#{doc.doc_id} .bp-doc-row-body") |> render_click()
+    after_click = view |> element("#doc-#{row_id(doc)} .bp-doc-row-body") |> render_click()
 
     refute after_click =~ "Could not open"
-    assert tag = doc_row_tag(after_click, doc.doc_id)
+    assert tag = doc_row_tag(after_click, row_id(doc))
     assert tag =~ ~s(aria-current="true")
   end
 end
