@@ -221,8 +221,7 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
       legacy_content = %{
         "kind" => "task",
         "lifecycle_status" => "open",
-        "description" =>
-          "A legacy row filed before the pre-create gate existed, with flat tags.",
+        "description" => "A legacy row filed before the pre-create gate existed, with flat tags.",
         "tags" => ["barkpark", "tasks"]
       }
 
@@ -265,8 +264,24 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
       for bad <- [
             %{"tags" => ["flat"]},
             %{"tags" => "scalar"},
-            %{"tags" => [%{"tag" => "UPPER", "strength" => 9, "rationale" => "x" <> String.duplicate("y", 30)}]},
-            %{"tags" => [%{"tag" => "ok", "strength" => 900, "rationale" => "x" <> String.duplicate("y", 30)}]},
+            %{
+              "tags" => [
+                %{
+                  "tag" => "UPPER",
+                  "strength" => 9,
+                  "rationale" => "x" <> String.duplicate("y", 30)
+                }
+              ]
+            },
+            %{
+              "tags" => [
+                %{
+                  "tag" => "ok",
+                  "strength" => 900,
+                  "rationale" => "x" <> String.duplicate("y", 30)
+                }
+              ]
+            },
             %{"tags" => [%{"tag" => "ok", "strength" => 9, "rationale" => "short"}]}
           ] do
         assert {:error, {:label_spine, _}} = LabelSpine.validate_shape(bad),
@@ -284,5 +299,4 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
                LabelSpine.validate_shape(%{"tags" => thirteen})
     end
   end
-
 end
