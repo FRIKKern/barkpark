@@ -108,9 +108,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
   end
 
   defp edge_endpoints(from_id) do
-    Repo.all(
-      from(e in Edge, where: e.from_id == ^from_id, select: {e.from_id, e.to_id})
-    )
+    Repo.all(from(e in Edge, where: e.from_id == ^from_id, select: {e.from_id, e.to_id}))
   end
 
   describe "an edge filed on a DRAFT twin" do
@@ -224,9 +222,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
   describe "the backfill" do
     defp plant_edge!(from_id, to_id, kind \\ "blocks") do
       {:ok, edge} =
-        Repo.insert(
-          Ecto.Changeset.change(%Edge{}, %{from_id: from_id, to_id: to_id, kind: kind})
-        )
+        Repo.insert(Ecto.Changeset.change(%Edge{}, %{from_id: from_id, to_id: to_id, kind: kind}))
 
       edge
     end

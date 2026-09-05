@@ -207,7 +207,12 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
 
       # ...and the style string the local mirror produces is the SAME one the
       # plugin-calling version produced: accepted `#rrggbb` in, rejection out.
-      styled = %{"kind" => "PdSheet", "rows" => [["x"]], "styles" => %{"0,0" => %{"bg" => "#aabbcc"}}}
+      styled = %{
+        "kind" => "PdSheet",
+        "rows" => [["x"]],
+        "styles" => %{"0,0" => %{"bg" => "#aabbcc"}}
+      }
+
       assert Render.render_html(styled, @opts) =~ "background:#aabbcc"
     end
   end

@@ -298,6 +298,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
       "paper-move-block",
       wire_params(view, %{"id" => "lk-body2", "dir" => "up"})
     )
+
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 5) A stale delete on a locked block is a calm no-op.

@@ -273,7 +273,6 @@ defmodule Barkpark.Tasks.Edges do
   defp scope_twin(query, field, value),
     do: from(d in query, where: field(d, ^field) == ^value)
 
-
   @doc """
   Re-point every existing `task_edges` endpoint that binds a DRAFT twin at the
   PUBLISHED twin of the same slug, and return `%{from: {moved, deduped}, to:
@@ -299,7 +298,10 @@ defmodule Barkpark.Tasks.Edges do
   SET-BASED, never per-row (slow-migration law): two DELETEs and two UPDATEs in
   total, whatever the corpus size.
   """
-  @spec backfill_twin_canonical_edges() :: %{from: {integer(), integer()}, to: {integer(), integer()}}
+  @spec backfill_twin_canonical_edges() :: %{
+          from: {integer(), integer()},
+          to: {integer(), integer()}
+        }
   def backfill_twin_canonical_edges do
     from_deduped = delete_colliding_from_edges()
     from_moved = repoint_from_edges()
@@ -417,5 +419,4 @@ defmodule Barkpark.Tasks.Edges do
 
     n
   end
-
 end

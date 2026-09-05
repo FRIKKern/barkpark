@@ -35,7 +35,10 @@ defmodule Barkpark.StudioChat.ContextIdentityVocabularyTest do
 
   alias Barkpark.StudioChat.ContextIdentity
 
-  @vocabulary_fixture Path.expand("../../support/fixtures/chat_context_band_vocabulary.json", __DIR__)
+  @vocabulary_fixture Path.expand(
+                        "../../support/fixtures/chat_context_band_vocabulary.json",
+                        __DIR__
+                      )
 
   # Read once, at compile time, so a missing or malformed fixture is a LOUD
   # failure of the whole module rather than a quiet nil flowing into an
