@@ -23,18 +23,46 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   Both tests drive the identical scenario and differ in exactly ONE line:
   whether `Barkpark.PubSubSingletons.drain!/1` runs before `stop_owner/1`.
 
-  ## Why this does not sleep for the race
+  ## THE DECISION (row task-954f4dc7f924c359 — route 1, DETERMINISTIC)
 
-  A first draft slept a calibrated 15ms after the broadcast and asserted the
-  disconnect. It reproduced only with a cold prepared-statement cache: run
-  second in the file, the Bridge finished all its reads inside 15ms and sat in
-  `{:gen_server, :loop, 5}`, so the owner stopped with nothing in flight and the
-  test failed for a reason unrelated to the fix. A sleep cannot express "is
-  mid-query"; it can only guess.
+  The PRE-FIX arm is a NEGATIVE CONTROL: it must REPRODUCE a race, so any
+  version of it that reproduces *by racing* is load-sensitive by construction.
+  It flaked on `push:main` run 33946170394 (sha 4c50a59650, a workflow-only
+  commit — nothing in `api/` changed) with
 
-  `await_mid_query!/1` instead POLLS the Bridge's stacktrace until it is
-  demonstrably inside Postgrex, and `flunk/1`s if it never gets there. That
-  turns "the repro stopped reproducing" from a silent green into a red.
+      The unbarriered path did not reproduce the CI disconnect
+
+  even though rows task-1114657f292c59c8 and task-17d79a8df10e8ef5 were closed
+  as fixed by 92e9cec60 on 2026-09-03. That fix hardened the *precondition*
+  (`await_mid_query!/1` now demands an `apply_now/3` frame, not just any socket
+  read); it did not remove the race it precedes. The old shape bound `@pins 150`
+  so the read loop would still be running when `stop_owner/1` landed — a length
+  bet against a shared, contended CI box. Under load the Bridge can finish all
+  150 reads between the barrier observing one and the test calling
+  `stop_owner/1`, and then there is nothing in flight to disconnect.
+
+  So the stop is no longer raced against the read — the READ IS HELD OPEN. The
+  Bridge calls a test-only seam (`Barkpark.Quiz.Bridge`'s `before_read/2`,
+  compiled to `:ok` outside `MIX_ENV=test`) from inside `apply_now/3`; the test
+  arms it with a callback that runs `SELECT pg_sleep/1` on the sandbox owner's
+  connection for 2000ms (`@hold_ms`). `@pins` and the 150-binding length bet are gone:
+  ONE binding is enough, because the window is now created rather than hoped
+  for. `assert_receive` gives a real happens-before ("the Bridge is inside
+  `apply_now/3` and is about to read"), and `await_mid_query!/1` survives only
+  as a barrier that confirms the socket read inside a ≥2s guaranteed window —
+  it can no longer lose that race, and it still `flunk/1`s loudly if the repro
+  ever stops being able to observe the defect.
+
+  The 30x loop that proved route 1 also caught a SECOND, independent flake
+  this file had all along: both arms matched the disconnect string against the
+  WHOLE captured log, and the sandbox owner's connection is shared, so
+  `Barkpark.Pulse.Metrics` sampling on its own timer reddened the POST-FIX arm
+  5 times in 30 while the Bridge was correctly quiesced. `@disconnect` now
+  names the client.
+
+  Route 2 (tag `@tag :flaky` and drop the arm to elixir-nightly.yml) was NOT
+  taken: it would leave main's only proof that the barrier fixes something to a
+  once-a-day job.
   """
   use ExUnit.Case, async: false
 
@@ -44,22 +72,29 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   alias Ecto.Adapters.SQL.Sandbox
 
   # The exact string Postgrex logs when a non-owner client still holds the
-  # owner's connection at stop_owner/1 — what CI recorded.
-  @disconnect "is still using a connection from owner"
+  # owner's connection at stop_owner/1 — what CI recorded, NARROWED TO THE
+  # BRIDGE. The bare substring is not enough: the owner's connection is shared,
+  # and `Barkpark.Pulse.Metrics` samples on its own timer through
+  # `Pulse.storage/0`, so a whole-log match reports ITS disconnect as this
+  # test's. Measured on a quiet box, 2026-09-05: 5 of 30 runs of the POST-FIX
+  # arm reddened on a `Barkpark.Pulse.Metrics` block while the Bridge was
+  # correctly quiesced. Naming the client makes each arm answer about the
+  # process it is actually about.
+  @disconnect "(Barkpark.Quiz.Bridge) is still using a connection from owner"
 
-  # The Bridge reloads EVERY pin bound to the changed quiz, sequentially, in one
-  # handle_info/2. Binding many pins makes the read loop long enough that after
-  # await_mid_query!/1 observes a query in flight there are still ~100 more to
-  # go, so stop_owner/1 lands squarely inside the loop rather than at its edge.
-  # No rooms are created: Quiz.apply_question/2 no-ops on a dead pin
-  # (room.ex:192 call_existing/3 returns its default), so a binding alone drives
-  # the read this test is about.
-  @pins 150
+  # How long the armed seam holds the owner's connection open INSIDE
+  # apply_now/3. Every wait below is bounded well under this, so the stop lands
+  # inside the read by construction. Kept at 2s (not 10s) so `drain!/1`'s own
+  # 5_000ms first window in the POST-FIX arm is not tripped into its retry path.
+  @hold_ms 2_000
 
-  @mid_query_timeout_ms 5_000
+  # Strictly less than @hold_ms: the barrier cannot outlive the window it looks
+  # into, so a timeout here means the repro broke, never that it was unlucky.
+  @mid_query_timeout_ms 1_500
 
   setup do
     restart_bridge!()
+    on_exit(fn -> Application.delete_env(:barkpark, :quiz_bridge_before_read) end)
     :ok
   end
 
@@ -69,8 +104,11 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
         owner = Sandbox.start_owner!(Barkpark.Repo, shared: true)
         qid = seed_and_bind!()
 
+        arm_held_read!()
         broadcast_quiz_changed(qid)
-        await_mid_query!(Process.whereis(Barkpark.Quiz.Bridge))
+        assert_receive {:bridge_in_apply_now, bridge}, @hold_ms
+
+        await_mid_query!(bridge)
 
         # NO barrier — this is main's behaviour before this task. on_exit drains
         # only the two Task supervisors, which cannot see a GenServer, so the
@@ -83,18 +121,16 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
     assert log =~ @disconnect,
            """
-           The unbarriered path did not reproduce the CI disconnect.
+           The unbarriered path did not reproduce the CI disconnect for the Bridge.
 
            A green here does NOT mean the defect is gone — it means this test
-           stopped being able to observe it. Check that Quiz.Bridge still reads
-           inside handle_info/2, then widen @pins.
+           stopped being able to observe it. The read is HELD (see the moduledoc):
+           check that Quiz.Bridge still calls before_read/2 from apply_now/3 and
+           that apply_now/3 still runs inside handle_info/2.
 
            Captured log:
            #{log}
            """
-
-    assert log =~ "Barkpark.Quiz.Bridge",
-           "the disconnect must name the Bridge as the client still holding the connection"
 
     assert log =~ "apply_now",
            "the disconnect must carry the bridge.ex apply_now/3 frame from the CI stack"
@@ -106,12 +142,16 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
         owner = Sandbox.start_owner!(Barkpark.Repo, shared: true)
         qid = seed_and_bind!()
 
+        arm_held_read!()
         broadcast_quiz_changed(qid)
-        await_mid_query!(Process.whereis(Barkpark.Quiz.Bridge))
+        assert_receive {:bridge_in_apply_now, bridge}, @hold_ms
+
+        await_mid_query!(bridge)
 
         # THE ONE LINE THAT DIFFERS. `:sys.get_state/2` is answered only after the
         # Bridge has processed the {:document_changed, …} already in its mailbox,
-        # so every read it triggered is complete before the owner goes away.
+        # so every read it triggered — including the held one — is complete
+        # before the owner goes away.
         Barkpark.PubSubSingletons.drain!()
 
         Sandbox.stop_owner(owner)
@@ -120,7 +160,7 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
     refute log =~ @disconnect,
            """
-           The barrier did not prevent the disconnect.
+           The barrier did not prevent the Bridge's disconnect.
 
            Captured log:
            #{log}
@@ -128,6 +168,21 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
+
+  # THE DETERMINIZER. Arms the Bridge's test-only seam so the NEXT read it
+  # performs announces itself and then parks on a real query against the sandbox
+  # owner's connection for @hold_ms. One-shot: the callback disarms itself
+  # first, so only the read driven by broadcast_quiz_changed/1 is held (the
+  # seeding binds below must not be).
+  defp arm_held_read!() do
+    test = self()
+
+    Application.put_env(:barkpark, :quiz_bridge_before_read, fn _quiz_id, _dataset ->
+      Application.delete_env(:barkpark, :quiz_bridge_before_read)
+      send(test, {:bridge_in_apply_now, self()})
+      Barkpark.Repo.query!("SELECT pg_sleep($1)", [@hold_ms / 1000])
+    end)
+  end
 
   defp seed_and_bind!() do
     Content.upsert_schema(
@@ -152,9 +207,13 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
     {:ok, _} = Content.publish_document(qid, "quiz", "production")
 
-    for i <- 1..@pins do
-      :ok = Quiz.bind_quiz("CS#{n}#{i}", qid)
-    end
+    # ONE binding. The old shape bound 150 to make the read loop long enough to
+    # still be running when stop_owner/1 landed; arm_held_read!/0 makes the
+    # window explicit, so the length bet is no longer needed.
+    # No room is created: Quiz.apply_question/2 no-ops on a dead pin
+    # (room.ex:192 call_existing/3 returns its default), so a binding alone
+    # drives the read this test is about.
+    :ok = Quiz.bind_quiz("CS#{n}", qid)
 
     qid
   end
@@ -170,8 +229,11 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
     )
   end
 
-  # Block until the Bridge is provably executing a query, so the stop below is
-  # mid-flight by observation rather than by hope.
+  # Confirm — inside the ≥@hold_ms window arm_held_read!/0 opened — that the
+  # Bridge is provably executing a query FROM apply_now/3, so the stop below is
+  # mid-flight by observation rather than by hope. Before the seam existed this
+  # barrier had to win a race against a 150-pin read loop; now it only has to
+  # notice a state that is being held for it.
   defp await_mid_query!(pid),
     do: await_mid_query!(pid, System.monotonic_time(:millisecond) + @mid_query_timeout_ms)
 
@@ -183,11 +245,12 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
       System.monotonic_time(:millisecond) > deadline ->
         flunk("""
         Barkpark.Quiz.Bridge never entered a query FROM apply_now/3 within
-        #{@mid_query_timeout_ms}ms.
+        #{@mid_query_timeout_ms}ms, despite the held-read seam announcing itself.
 
         The repro can no longer observe the defect. Do NOT treat this as a fix:
-        check that handle_info/2 still reads per bound pin through apply_now/3,
-        and raise @pins. If apply_now/3 was renamed or lost its rescue clause
+        check that before_read/2 is still called from apply_now/3 in
+        lib/barkpark/quiz/bridge.ex and that @read_hook_enabled is true under
+        MIX_ENV=test. If apply_now/3 was renamed or lost its rescue clause
         (which is what keeps its frame on the stack), teach applying?/1 the new
         symbol rather than relaxing the barrier back to "any socket read" —
         that weaker barrier is what made this test flake.
@@ -217,11 +280,10 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   # every time — only the frame it carried was a coin flip.)
   #
   # Requiring `apply_now` here makes the precondition equal the postcondition,
-  # so the stop lands inside the read the test is about. The @pins loop is
-  # ~entirely apply_now, so the barrier is reached just as fast; and
-  # `apply_now/3` carries a rescue/catch, so it is compiled with a try frame
-  # and CANNOT be tail-call eliminated off the stack while the read runs.
-  # flunk-on-timeout is unchanged: a repro that stops reproducing still reds.
+  # so the stop lands inside the read the test is about. `apply_now/3` carries a
+  # rescue/catch, so it is compiled with a try frame and CANNOT be tail-call
+  # eliminated off the stack while the read runs. flunk-on-timeout is unchanged:
+  # a repro that stops reproducing still reds.
   defp in_query?(pid) do
     case Process.info(pid, :current_stacktrace) do
       {:current_stacktrace, stack} ->
