@@ -84,7 +84,9 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   # in or out of the returned list.
   #
   # Order is rendering-order inside the editor-header `bp-overflow-menu`:
-  # Publish/Unpublish (primary CTA leads) → History → Show/Hide preview →
+  # Publish/Unpublish (primary CTA leads) → Preview (the type's draft-mode
+  # URL, only when the type declares one — see `preview_doc_action/2`) →
+  # History → Show/Hide preview →
   # Diff toggle → Discard draft → Duplicate → Open another → View blast radius →
   # Delete (destructive, held to the TAIL — separated from the CTA so it is
   # out of the misclick zone) → schema actions.
@@ -132,6 +134,20 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
           }
         }
       end,
+      # 'Preview' — a per-TYPE link to the page's draft-mode URL on the
+      # consumer site (S9 criterion 4). Present ONLY when the type declares a
+      # template at `desk.preview`; a type without one renders no Preview
+      # button at all rather than a dead link to a guessed URL.
+      #
+      # HONEST SCOPE: this ships the AFFORDANCE, not the preview pipeline.
+      # The link carries NO secret and mints NO token — the Next.js
+      # draft-mode route (`js/packages/nextjs/src/draft-mode/index.ts`)
+      # verifies an HMAC over `path`+`expiry`, and the drafts-readable token
+      # tier that signing needs is S1 #7 (task-3a5a2a0662b0a661): every
+      # mintable token is public-tier today. Until that tier lands the route
+      # answers 401 `missing`. Signing here would mean inventing a tier this
+      # row is explicitly forbidden to invent.
+      preview_doc_action(editor_schema, editor_doc),
       %{
         "name" => "show-history",
         "label" => "History",
@@ -264,6 +280,92 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     (base ++ schema_entries)
     |> Enum.reject(&is_nil/1)
   end
+
+  @doc """
+  The per-type Preview link-action, or `nil` when the type declares no
+  preview template.
+
+  The template lives at the schema's `desk["preview"]` — a URL string in the
+  same placeholder vocabulary the editor already interpolates for
+  schema-declared `"link"` actions (`:slug` · `:id` · `:dataset` ·
+  `:workspace` · `:project`), e.g.
+
+      desk: %{"preview" => "https://site.example/api/draft?path=/blog/:slug"}
+
+  Two things make it render, both required:
+
+    * the type declares a non-empty template, AND
+    * every placeholder the template uses can actually be filled — a
+      template naming `:slug` against a document with no slug produces a
+      URL that points at the wrong page, so no button is better than a
+      wrong one (the same reasoning the row applies to the "may live in
+      another workspace" hint).
+
+  Interpolation itself is `BarkparkWeb.StudioComponents.Editor`'s — the
+  action carries the raw template on `opts.href` exactly like an OnixEdit
+  `"link"` action does.
+  """
+  def preview_doc_action(schema, doc) do
+    with template when is_binary(template) <- preview_template(schema),
+         true <- template != "",
+         true <- placeholders_resolvable?(template, doc) do
+      %{
+        "name" => "preview",
+        "label" => "Preview",
+        "kind" => "link",
+        "scope" => "editor_header",
+        "opts" => %{
+          "href" => template,
+          "class" => "btn btn-ghost btn-sm",
+          "data_test_id" => "preview-draft",
+          "icon" => "external-link",
+          # A preview leaves the Studio for the consumer site; opening it in
+          # the same tab would tear down the LiveView (and any unsaved edit)
+          # behind the editor's back.
+          "target" => "_blank",
+          "rel" => "noopener"
+        }
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp preview_template(nil), do: nil
+
+  defp preview_template(schema) do
+    desk = Map.get(schema, :desk) || Map.get(schema, "desk") || %{}
+
+    case desk do
+      %{} = d -> Map.get(d, "preview") || Map.get(d, :preview)
+      _ -> nil
+    end
+  end
+
+  # `:slug` is the only placeholder that can be UNFILLABLE — the others are
+  # either always present (`:dataset`) or already resolve to "" by design for
+  # every schema-declared link action (`:workspace` / `:project` on a flat
+  # deployment), and `:id` is the doc's own identity.
+  defp placeholders_resolvable?(template, doc) do
+    not String.contains?(template, ":slug") or is_binary(doc_slug(doc))
+  end
+
+  @doc false
+  def doc_slug(%{} = doc) do
+    content = Map.get(doc, :content) || %{}
+
+    candidates = [
+      if(is_map(content), do: Map.get(content, "slug")),
+      Map.get(doc, :slug_text)
+    ]
+
+    Enum.find(candidates, fn
+      s when is_binary(s) -> s != ""
+      _ -> false
+    end)
+  end
+
+  def doc_slug(_), do: nil
 
   @doc false
   def find_resolved_doc_action(socket, name) do

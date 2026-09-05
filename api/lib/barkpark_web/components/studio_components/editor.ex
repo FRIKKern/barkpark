@@ -762,6 +762,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class={action_button_class(@action)}
           title={@action["label"]}
           aria-label={@action["label"]}
+          target={action_link_opt(@action, "target")}
+          rel={action_link_opt(@action, "rel")}
           data-test-id={doc_action_test_id(@action)}
         ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
@@ -856,6 +858,19 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
+  # `target` / `rel` for `"link"` actions. Absent from `opts` → nil → the
+  # attribute is not emitted at all, so every link action that predates this
+  # (OnixEdit's Export ONIX) keeps rendering byte-identically. The Preview
+  # action sets `_blank` + `noopener`: it navigates to a DIFFERENT origin (the
+  # consumer site), and doing that in the Studio's own tab would kill the
+  # LiveView the editor is running in.
+  defp action_link_opt(action, key) do
+    case action["opts"] do
+      %{^key => v} when is_binary(v) and v != "" -> v
+      _ -> nil
+    end
+  end
+
   defp action_button_style(action) do
     case action["opts"] do
       %{"style" => s} when is_binary(s) -> s
@@ -892,7 +907,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
-  # Placeholder vocabulary: :dataset · :id · :workspace · :project
+  # Placeholder vocabulary: :dataset · :id · :workspace · :project · :slug
   # (tsk-url-p2 added the scope pair — a plugin action can address the
   # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
   # :workspace is replaced before :w-anything ambiguity can arise because
@@ -904,11 +919,24 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         _ -> ""
       end
 
+    # `:slug` (S9 criterion 4) — the consumer site addresses a page by slug,
+    # not by doc id, so a preview template interpolates the document's own
+    # slug. Replaced BEFORE `:id` for the same longest-token-first reason the
+    # scope pair is: neither is a prefix of the other today, but the ordering
+    # is the invariant this list is built on.
     href
     |> String.replace(":workspace", to_string(ws_slug || ""))
     |> String.replace(":project", to_string(proj_slug || ""))
     |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":slug", doc_slug_for_href(doc))
     |> String.replace(":id", id)
+  end
+
+  defp doc_slug_for_href(doc) do
+    case BarkparkWeb.Studio.StudioLive.DocActions.doc_slug(doc) do
+      slug when is_binary(slug) -> slug
+      _ -> ""
+    end
   end
 
   @doc """
