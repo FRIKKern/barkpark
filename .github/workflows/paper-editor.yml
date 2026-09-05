@@ -64,8 +64,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: api/assets/paper-editor/package-lock.json
+          # No npm cache on purpose: with it (#15747) the median run went 45 s -> 76 s
+          # over 10 runs each; restoring+saving ~/.npm costs more than this one-dep npm ci.
 
       - name: Install (pinned via lockfile)
         run: npm ci
