@@ -70,7 +70,6 @@ defmodule Barkpark.Media.WhereUsed do
   (`get("/files/*path", MediaController, :serve)`), so it is the string an author
   or an editor pastes into a block.
   """
-  # @canonical capability:media-where-used aka:where-used,media references,orphan blob,referenced?,referrers,silent erasure,media delete guard doc:docs/cards/search-media.md
   def delivery_path(%MediaFile{path: path}) when is_binary(path), do: "/media/files/" <> path
   def delivery_path(path) when is_binary(path), do: "/media/files/" <> path
 
@@ -84,6 +83,7 @@ defmodule Barkpark.Media.WhereUsed do
   A blob with no `path` (which cannot be referenced by URL at all) yields a zero
   census rather than an error, so a caller never has to special-case it.
   """
+  # @canonical capability:media-where-used aka:where-used,media references,orphan blob,referenced?,referrers,silent erasure,media delete guard doc:docs/cards/search-media.md
   def referrers(file_or_path)
 
   def referrers(%MediaFile{path: nil}), do: %{count: 0, sample: []}
