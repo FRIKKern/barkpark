@@ -8,17 +8,18 @@ name: architecture
 # cycle. Existing known debt is grandfathered by the baseline, so it never
 # breaks CI; only NEW debt does.
 #
-# BLOCKING, as of 2026-09-05 (task-6891e8f620c1bdea). It was advisory
-# (continue-on-error: true) for its whole life, and the promotion path this
-# header documented — "flip continue-on-error to false" — is now taken.
+# RED ON REGRESSION, as of 2026-09-05 (task-6891e8f620c1bdea): a regression now
+# FAILS this workflow's own check-run. It was advisory (continue-on-error: true)
+# for its whole life, and the promotion path this header documented — "flip
+# continue-on-error to false" — is now taken.
 #
-# BLOCKING, NOT REQUIRED, and the difference matters. "Boundary gate" reds the
-# PR check and is meant to be read as a stop sign, but it is NOT in the required
-# set: .github/required-checks.json requires only Cloud gate / Console gate /
+# NOT A REQUIRED CONTEXT, and the difference matters: "Boundary gate" reds its
+# own PR check and is meant to be read as a stop sign, but it CANNOT stop a merge
+# by itself — it is NOT in the required set: .github/required-checks.json requires only Cloud gate / Console gate /
 # Elixir gate / "PR references an active task", and this change does not touch
 # that file or those four context names.
 #
-# WHAT MAKES BLOCKING POSSIBLE AT ALL is tooling/concept-map/accepted-until-fixed.json:
+# WHAT MAKES THE RED HONEST AT ALL is tooling/concept-map/accepted-until-fixed.json:
 # today's tree carries real regressions, so a bare flip would have reddened every
 # PR for debt nobody on that PR added. That file names each tolerated identity
 # WITH THE bp TASK ROW THAT OWES THE FIX, and ci-boundary.mjs runs three arms
@@ -392,7 +393,8 @@ jobs:
             echo "feature→feature, kernel→feature, or cycle debt vs the committed"
             echo "baseline."
             echo ""
-            echo "BLOCKING, NOT REQUIRED: this check reds the PR, and it is not in"
+            echo "NOT A REQUIRED CONTEXT: this check reds its own PR check-run, but"
+            echo "it cannot stop a merge by itself — it is not in"
             echo "the required set (Cloud gate / Console gate / Elixir gate / PR"
             echo "references an active task). Known debt is tolerated only by a"
             echo "named, row-backed entry in tooling/concept-map/accepted-until-fixed.json."
