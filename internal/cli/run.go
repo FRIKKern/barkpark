@@ -453,6 +453,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return code
 	}
 
+	// Stale-cite advisory (publish_cites_guard.go), PRE-WRITE half: read the
+	// DRAFT's prose now, because a successful publish removes the drafts.<id>
+	// twin this text lives on. Candidate ids only — the status lookups and the
+	// printing happen after the 2xx, so this cannot delay or influence the
+	// write. Silent, and does no network work at all, for every command that is
+	// not `doc publish` on a task.
+	var publishCites []publishCite
+	if typeName, bareID, ok := publishCitesArgs(cmd, tail); ok {
+		publishCites = readDraftCites(g, ctx, m, typeName, bareID)
+	}
+
 	// Paginated reads with --all loop over offset pages. A non-empty --match
 	// hands the walk a row filter; every other caller passes nil and the walk
 	// behaves exactly as it always has.
@@ -495,6 +506,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// stderr in every output mode, silent on a row with no ruling
 		// (tasks_ruling.go).
 		emitTaskRuling(out, cmd, respBody)
+		// The stale-cite advisory's POST-WRITE half: the publish has already
+		// landed, so this is pure commentary — one stderr line per cited task
+		// id with its CURRENT lifecycle_status. It never refuses, never
+		// changes `code`, and never touches stdout, so `-o json` stays one
+		// byte-identical document (publish_cites_guard.go).
+		emitPublishCiteAdvisory(out, g, ctx, m, publishCites)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
