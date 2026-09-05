@@ -2,11 +2,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
   @moduledoc """
   In-Studio paper BLOCK EDITOR — article-chrome + diagram blocks + autosave.
 
-    * article-chrome (barkpark-54kh) — eyebrow / byline / ingress / pullquote
-      RENDER but had no Beta editor path. These prove default_block/2 + the
-      per-block edit form + build_block_patch/2 land the correct portable-doc
-      shape through the SAME paper-edit-block → patch-block pipeline the
-      callout/code forms use.
+    * article-chrome (barkpark-54kh) — eyebrow / byline use scalar forms;
+      ingress / pullquote use the rich WC. These prove both paths land the
+      correct portable-doc shape through the shared patch-block pipeline.
     * diagram (barkpark-woxx) — the diagram block RENDERS (`<pre class="mermaid">`)
       but had no Beta editor path; default_block("diagram", …) yields the flat
       {source:"", caption:""} default and build_block_patch maps a
@@ -17,13 +15,31 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
       pipeline the explicit Save uses, WITHOUT a Save submit. The Save button
       stays a fallback.
 
-  All three sections share `insert_chrome_block`, `submit_edit_form`,
-  `block_after_edit`, `autosave_edit_form` and the `@slug` base paper — those
-  helpers are section-local and live here. The shared base paper + `open_editor`
-  come from `BarkparkWeb.PaperEditorTestHelpers`.
+  Shared helpers are section-local and live here. The base paper and
+  `open_editor` come from `BarkparkWeb.PaperEditorTestHelpers`.
   """
   use BarkparkWeb.ConnCase, async: false
   use BarkparkWeb.PaperEditorTestHelpers
+
+  @marked_ingress [
+    %{
+      "type" => "strong",
+      "children" => [
+        %{
+          "type" => "link",
+          "href" => "https://example.com/lead",
+          "children" => [%{"type" => "text", "value" => "The lead paragraph."}]
+        }
+      ]
+    }
+  ]
+
+  @marked_pullquote [
+    %{
+      "type" => "em",
+      "children" => [%{"type" => "text", "value" => "A quote worth pulling."}]
+    }
+  ]
 
   # ── article-chrome blocks (barkpark-54kh): insert + edit round-trips ───────
 
@@ -71,28 +87,37 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
     assert block["items"] == ["Ada Lovelace", "Grace Hopper"]
   end
 
-  test "editing an ingress block wraps text in an inline content array", %{conn: conn} do
+  test "editing an ingress through the rich WC preserves marks and links across reload", %{
+    conn: conn
+  } do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "ingress")
 
-    submit_edit_form(view, id, %{"text" => "The lead paragraph."})
+    submit_rich_body(view, id, @marked_ingress)
 
     block = block_after_edit(id)
     assert block["type"] == "ingress"
-    assert block["content"] == [%{"type" => "text", "value" => "The lead paragraph."}]
+    assert block["content"] == @marked_ingress
+
+    {:ok, reloaded, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+    reloaded_html = open_editor(reloaded)
+    assert reloaded_html =~ ~s(id="paper-ed-#{id}")
+    assert reloaded_html =~ "https://example.com/lead"
   end
 
-  test "editing a pullquote block wraps text in an inline content array", %{conn: conn} do
+  test "editing a pullquote through the rich WC preserves its inline mark", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     open_editor(view)
     id = insert_chrome_block(view, "pullquote")
 
-    submit_edit_form(view, id, %{"text" => "A quote worth pulling."})
+    submit_rich_body(view, id, @marked_pullquote)
 
     block = block_after_edit(id)
     assert block["type"] == "pullquote"
-    assert block["content"] == [%{"type" => "text", "value" => "A quote worth pulling."}]
+    assert block["content"] == @marked_pullquote
   end
 
   test "a byline edit pre-fills its input from the items list joined by ' · '",
@@ -168,6 +193,16 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
     view
     |> element(~s([data-edit-block-id="#{id}"] form.bp-paper-edit-form))
     |> render_change(wire_params(view, Map.put(params, "block_id", id)))
+  end
+
+  defp submit_rich_body(view, id, content) do
+    render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "op" => "patch-block",
+      "id" => id,
+      "patch" => %{"content" => content}
+    })
   end
 
   test "a callout block auto-saves on change (no Save submit)", %{conn: conn} do

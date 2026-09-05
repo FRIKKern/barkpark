@@ -26,7 +26,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def build_block_patch(%{"type" => "callout"}, params) do
     %{}
     |> put_if_present("tone", params["tone"])
-    |> Map.put("content", text_to_inline(params["text"] || ""))
+    # The fallback editor now owns the body through the rich WC. A chrome-only
+    # form change therefore carries no `text` key and must not replace the
+    # existing marked inline tree. Keep the explicit legacy text-param path so
+    # older callers can still edit or clear a plain body.
+    |> put_inline_text_if_present(params)
     |> put_callout_title(params["title"])
     # Unchecked checkbox sends no param → parse_bool(nil)=false (clears a prior
     # true so the toggle un-checks). Map.put = always-write semantics.
@@ -109,6 +113,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def put_callout_title(patch, _), do: patch
 
+  defp put_inline_text_if_present(patch, %{"text" => text}) when is_binary(text),
+    do: Map.put(patch, "content", text_to_inline(text))
+
+  defp put_inline_text_if_present(patch, _params), do: patch
+
   @doc false
   def put_if_present(map, _key, nil), do: map
   def put_if_present(map, _key, ""), do: map
@@ -143,9 +152,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def to_int(_, default), do: default
 
   @doc false
-  # MVP inline handling: wrap plain text as a single text inline node. This
-  # DROPS pre-existing marks (bold/italic/link) on the block when re-saved —
-  # accepted for the MVP block editor (rich inline marks are deferred).
+  # Legacy inline handling: wrap an explicitly submitted plain-text body as a
+  # single text inline node. Current rich-body UI paths use the WC and submit
+  # canonical inline trees directly; this remains for older form callers.
   def text_to_inline(text) when is_binary(text) do
     [%{"type" => "text", "value" => text}]
   end

@@ -24,7 +24,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
-  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   # t9 — the task block types whose boundary widget paints a LIVE preview
@@ -1105,10 +1104,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp prop_at_cap?(%{count: count, max: max}) when is_integer(max), do: count >= max
   defp prop_at_cap?(_), do: false
 
-  # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
-  # carries a hidden `id` and submits its changed field(s); the handler maps
-  # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
-  # the MVP (inline marks dropped on save).
+  attr(:block, :map, required: true)
+
+  defp rich_body_editor(assigns) do
+    ~H"""
+    <div
+      phx-update="ignore"
+      id={"paper-ed-" <> Map.fetch!(@block, "id")}
+      phx-hook="BarkparkPaperEditor"
+      class="bp-paper-edit-wc"
+      data-test-id="paper-block-editor-wc"
+    >
+      <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
+    </div>
+    """
+  end
+
+  # Per-block-type edit fields. Rich bodies use the canonical WC so its
+  # PortableDoc conversion preserves marks and links while text changes.
+  # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
   attr(:block, :map, required: true)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
@@ -1124,25 +1138,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     ~H"""
     <%= case @type do %>
-      <%!-- Rich-text blocks (paragraph / heading / list) are edited by the
+      <%!-- Rich-text blocks are edited by the
             <bp-paper-editor> Web Component. The phx-update="ignore" wrapper
             keeps LiveView from re-diffing the WC's internal DOM (preserving
             the caret across server updates); its id is stable per block id so
             it survives re-renders. The WC reads its initial block from
             data-block and emits debounced `bp-op` events that the
             BarkparkPaperEditor hook forwards to the server's paper-op handler.
-            field-type blocks (callout/code/list-as-fields/section/divider/…)
-            keep their existing form-based editors below — out of scope here. --%>
+            Callout keeps a separate form for its scalar chrome, while its body
+            joins ingress/pullquote on this same rich seam. --%>
       <% t when t in ["paragraph", "heading", "list"] -> %>
-        <div
-          phx-update="ignore"
-          id={"paper-ed-" <> @id}
-          phx-hook="BarkparkPaperEditor"
-          class="bp-paper-edit-wc"
-          data-test-id="paper-block-editor-wc"
-        >
-          <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
-        </div>
+        <.rich_body_editor block={@block} />
       <% "callout" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1169,13 +1175,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             placeholder="Title (optional)"
             value={Map.get(@block, "title", "")}
           />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-text"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
         </form>
+        <.rich_body_editor block={@block} />
       <% "code" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1225,9 +1226,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
-      <%!-- article-chrome blocks (barkpark-54kh). eyebrow + byline are a single
-            text input; ingress + pullquote are a textarea (plain-text MVP, like
-            the callout body). They mirror the callout/code form markup. --%>
+      <%!-- Article-chrome blocks. Eyebrow + byline remain flat scalar inputs;
+            ingress + pullquote use the same rich body WC as paragraphs. --%>
       <% "eyebrow" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1263,35 +1263,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           />
         </form>
       <% "ingress" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-ingress"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-        </form>
+        <.rich_body_editor block={@block} />
       <% "pullquote" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-pullquote"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-        </form>
+        <.rich_body_editor block={@block} />
       <% "section" -> %>
         <form
           class="bp-paper-edit-form"
