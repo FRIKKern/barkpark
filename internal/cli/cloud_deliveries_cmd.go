@@ -100,7 +100,7 @@ func runCloudDeliveries(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to read the platform delivery record", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to read the platform delivery record, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	page, derr := cfg.CloudClient().PlatformDeliveries(cloudCtx(), sha, limit)

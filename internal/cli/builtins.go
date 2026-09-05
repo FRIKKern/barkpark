@@ -470,7 +470,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	case "unverified":
 		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session%s", cloudURL, sourceSuffix)
 	default:
-		out.outf("cloud:     not logged in — run 'bp login'")
+		out.outf("cloud:     not logged in — run 'bp login' (or set BARKPARK_CLOUD_TOKEN for a CI job)")
 	}
 
 	if reachable {
