@@ -7350,7 +7350,7 @@ test("inviteStateHtml is total over unknown states and escapes hostile team name
 
 test("C8: the timeline + verify pure helpers are exported", () => {
   for (const name of ["mergeTimeline", "auditMirrorsEvent", "tlvEntryTitle",
-    "tlvRowHtml", "tlvDetailHtml", "timelineFeedHtml", "timelineTabShellHtml",
+    "tlvRowHtml", "tlvDetailHtml", "backupStateText", "timelineFeedHtml", "timelineTabShellHtml",
     "mountTimelineTab", "latestVerifyOf", "probeChipsModel", "verifySummaryText",
     "verifyChipHtml", "verifyCardHtml", "verifyNoteHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
@@ -7551,15 +7551,26 @@ test("C8: the empty feed teaches, never apologises", () => {
 
 test("C8: the empty feed states the backup ABSENCE, never a backup verdict", () => {
   const html = hooks.timelineFeedHtml([], {});
-  // Quotes the agent verbatim and states the absence of a MEASUREMENT. Never
-  // "No backup" and never "Backup failed": backup_ok is a plain bool whose
-  // false conflates no-probe / probe-failed / probe-errored.
+  // REWRITTEN WHEN THE PROBE LANDED. The old copy quoted the agent verbatim
+  // and asserted, in the console's own voice, that no probe was wired — true
+  // by construction while ReportConfig.BackupProbe was a dead seam, false the
+  // moment cmd/barkpark-agent wired agent.NewBackupProbe. What must NOT change
+  // is the ruling underneath: an EMPTY feed has observed nothing, so never
+  // "No backup" and never "Backup failed" here. It may ENUMERATE the states a
+  // health report can carry; it may not report one. cch-w51-s2 arm C is the
+  // guard that reds if the old universal claim comes back.
   assert.match(
     html,
-    /Backups are not among them: the on-box agent reports “no backup probe wired”, so nothing here can tell you whether this instance is backed up\./,
+    /Backups ride the health report rather than a line of their own: nothing has been reported yet, so nothing here has looked at this instance’s backups\./,
   );
   assert.doesNotMatch(html, /No backup\b/);
   assert.doesNotMatch(html, /Backup failed/);
+  // The enumeration is present and NAMES the three realities separately: a
+  // measured verdict, a measured negative, and nobody-looked. Collapsing any
+  // two of them back into one sentence is the defect this copy replaced.
+  assert.match(html, /measured present and fresh/);
+  assert.match(html, /measured missing/);
+  assert.match(html, /“no backup probe wired”, which means nobody looked/);
 });
 
 test("C8: an audit 403 degrades to ONE quiet line, not an error state", () => {
@@ -16532,7 +16543,10 @@ test("D-04: the quiet line and teaching empty state survive the coalescing rewri
   assert.match(html, /tlv-quiet/);
   assert.match(html, /tlv-coalesce/);
   // The FULL enumeration + the adjudicated backup-absence sentence, not the
-  // opening clause: the clause alone survives a rewrite of both (wave 51).
+  // opening clause: the clause alone survives a rewrite of both (wave 51). The
+  // backup sentence was rewritten when a real BackupProbe was wired; the pin
+  // moved with it rather than being dropped, so the coalescing rewrite is still
+  // held to rendering the empty state whole.
   const empty = hooks.timelineFeedHtml([], {});
   assert.match(
     empty,
@@ -16540,7 +16554,7 @@ test("D-04: the quiet line and teaching empty state survive the coalescing rewri
   );
   assert.match(
     empty,
-    /Backups are not among them: the on-box agent reports “no backup probe wired”, so nothing here can tell you whether this instance is backed up\./,
+    /Backups ride the health report rather than a line of their own: nothing has been reported yet, so nothing here has looked at this instance’s backups\./,
   );
 });
 
@@ -24115,12 +24129,21 @@ test("cch-w50-s3: the cancel copy promises a BOUNDED restore and no stop it cann
 //
 // Wave 51 s1 (#10613) made the Timeline empty state say, in the console's own
 // voice, that the on-box agent reports "no backup probe wired" and that nothing
-// here can tell you whether this instance is backed up. That sentence is TRUE
-// BY CONSTRUCTION today — internal/agent/report.go:588-597 takes the else
-// branch whenever cfg.BackupProbe is nil, and nothing under internal/ or cmd/
-// ever sets that field — and it goes FALSE the day someone wires a real probe.
-// A sentence with no guard is not a fix. These three arms are the guard, and
-// the interesting one reads ACROSS the deploy-reliability fence.
+// here can tell you whether this instance is backed up. That sentence was TRUE
+// BY CONSTRUCTION then — GatherReport took the else branch whenever
+// cfg.BackupProbe was nil, and nothing under internal/ or cmd/ ever set that
+// field — and arm C existed to red the day someone wired a real probe.
+//
+// ARM C FIRED, AND THIS IS THE OTHER SIDE OF IT. cmd/barkpark-agent/main.go now
+// wires agent.NewBackupProbe, GatherReport emits a five-valued `backup_state`,
+// and the console's empty state was rewritten in the same PR to stop asserting
+// a measurement outcome it no longer knows. So arm C is INVERTED: it used to
+// assert the ABSENCE of a wiring, it now asserts the PRESENCE of one AND that
+// the console is not back to the old universal claim. Both halves must be able
+// to red — ripping the probe back out and restoring the stale copy are two
+// different regressions, and this arm catches either alone.
+//
+// The interesting one still reads ACROSS the deploy-reliability fence.
 //
 // internal/agent/** is READ here, NEVER edited. The price of that read is paid
 // in scripts/console-path-escape-check.sh: `internal/agent/report.go` is now
@@ -24182,30 +24205,44 @@ test("cch-w51-s2 arm B: internal/agent/report.go still emits the quoted sentinel
   );
 });
 
-// ARM C — nobody has wired a probe yet, in EITHER Go idiom.
+// ARM C — a real probe IS wired, in EITHER Go idiom, AND the console says so.
 //
-// This is the arm that reds the day the console's sentence becomes stale FOR
-// THE RIGHT REASON, and it forces the copy to change in the same PR.
+// THIS ARM IS INVERTED FROM ITS ORIGINAL DIRECTION, on purpose and in the PR
+// that made the original direction false. It used to assert `wirings === []`
+// and its failure message was the instruction: "a BackupProbe is now wired …
+// so the console's no-backup-probe-wired empty state is stale and must change
+// in THIS PR". It is now the standing guard on the world that instruction
+// produced, and it is deliberately TWO-SIDED:
 //
-// TWO REFINEMENTS, both measured, both the difference between a guard and a
-// decoration:
+//   * the Go half reds if the probe wiring is removed — a revert that would
+//     put every beat in the fleet back on the ambiguous Go zero value while
+//     the console kept promising a real verdict;
+//   * the console half reds if the empty state goes back to asserting, in the
+//     console's own voice, that the on-box agent reports no probe. An empty
+//     feed has observed NOTHING; that sentence is a measurement claim and the
+//     console is not entitled to it.
+//
+// A one-sided rewrite would have been the cheap move and a worse guard: each
+// half was mutated on its own below and each reds alone.
+//
+// THE TWO ORIGINAL REFINEMENTS SURVIVE THE INVERSION UNCHANGED, and they are
+// what make the Go half mean anything:
 //   1. The predicate is /BackupProbe\s*[:=]\s*\S/, NOT /BackupProbe:\s*\S/. The
-//      struct-literal-only form was planted with `c.BackupProbe = func() …` in a
-//      non-test Go file and stayed GREEN. The alternation reds on both idioms.
+//      struct-literal-only form was blind to `c.BackupProbe = func() …` in a
+//      non-test Go file. The alternation sees both idioms — and it is the
+//      struct-literal idiom the real wiring landed in.
 //   2. The walk covers cmd/ as well as internal/. cmd/barkpark-agent/main.go is
-//      where the other twelve probes (Root, Journal, PGSize, …) are actually
-//      wired; an internal/-only walk is blind to the exact file a real probe
-//      would land in.
-// `cfg.BackupProbe != nil` and `BackupProbe func() (bool, string, error)` are
-// correctly NOT matches. `== nil` WOULD have been a false positive under the
-// bare `[:=]` form (the second `=` satisfies \S), so the `=` alternative
-// carries a `(?!=)`: a COMPARISON is not a wiring, and a guard that reds on
-// `if cfg.BackupProbe == nil` would be reding on the very line that proves no
-// probe is wired. The narrowing is strict — `BackupProbe: fn` and
-// `BackupProbe = fn` both still match, and both plants below were re-run.
-// Comment lines are skipped so a doc line like `// BackupProbe: …` cannot red
-// it either.
-test("cch-w51-s2 arm C: no non-test BackupProbe assigner exists under internal/ or cmd/", () => {
+//      where the other twelve probes (Root, Journal, PGSize, …) are wired, and
+//      it is exactly where the real BackupProbe landed; an internal/-only walk
+//      would not see the wiring it now demands.
+// `cfg.BackupProbe != nil` and `BackupProbe func() (BackupState, string, error)`
+// are correctly NOT matches, and the `=` alternative still carries a `(?!=)` so
+// `== nil` is not read as a wiring. Under the INVERTED assertion those
+// narrowings buy something new: a false positive would now let the arm pass on
+// a codebase with no probe at all, which is the vacuous green this whole epic
+// exists to remove. Comment lines are skipped, so a doc line naming the field
+// cannot satisfy it either — the wiring has to be CODE.
+test("cch-w51-s2 arm C: a real non-test BackupProbe is wired, and the console no longer reports it as unwired", () => {
   const ASSIGNER = /BackupProbe\s*(?::|=(?!=))\s*\S/;
   const wirings = [];
   let scanned = 0;
@@ -24220,15 +24257,44 @@ test("cch-w51-s2 arm C: no non-test BackupProbe assigner exists under internal/ 
     }
   }
   // ANTI-BLINDNESS FLOOR: a lower bound, never a pin. A walk that resolved to
-  // nothing would report a confident "zero wirings" — the vacuous pass this
-  // whole epic exists to remove.
+  // nothing would report a confident "zero wirings" — which, under the
+  // inverted assertion, would red loudly rather than pass, but with the wrong
+  // diagnosis. The floor names the real cause.
   assert.ok(scanned >= 100,
     `the Go walk must actually reach a corpus (scanned ${scanned} files under ${BACKUP_GO_TREES.join("/ + ")}/)`);
-  assert.deepEqual(
-    wirings,
-    [],
-    "a BackupProbe is now wired — backup_ok/backup_detail carry a real verdict, so the console's no-backup-probe-wired empty state is stale and must change in THIS PR",
+  assert.ok(
+    wirings.length >= 1,
+    "no non-test BackupProbe wiring exists under internal/ or cmd/ any more — GatherReport is back on the else branch, every beat carries the ambiguous Go zero value, and the console's Timeline copy (backupStateText + the empty state) is promising a verdict nothing produces. Restore the wiring or revert the console copy in the SAME PR",
   );
+  // The console half. An empty feed has observed nothing, so it may enumerate
+  // the states a health report can carry but must never assert, in its own
+  // voice, what the on-box agent reports.
+  const emptyFeed = hooks.timelineFeedHtml([], {});
+  assert.doesNotMatch(
+    emptyFeed,
+    /the on-box agent reports/,
+    "the Timeline empty state is asserting what the on-box agent reports again — with a real BackupProbe wired that is a measurement claim the empty feed has not made; it may name the possible states, not report one",
+  );
+  assert.doesNotMatch(
+    emptyFeed,
+    /nothing here can tell you whether this[\s\S]{0,20}instance is backed up/,
+    "the stale wave-51-s1 sentence is back in the empty state; a wired probe means the health report CAN tell you, so this line is no longer true",
+  );
+  // And the tristate is actually rendered rather than merely described: the
+  // three realities the old bool conflated stay three sentences.
+  const measured = hooks.backupStateText({ backup_state: "failed", backup_ok: false });
+  const nobodyLooked = hooks.backupStateText({ backup_state: "unmeasured", backup_ok: false });
+  const legacyFalse = hooks.backupStateText({ backup_ok: false, backup_detail: "no backup probe wired" });
+  assert.notEqual(measured, nobodyLooked,
+    "a measured-missing backup and nobody-looked render identically — the console has collapsed the tristate the beat exists to carry");
+  assert.notEqual(measured, legacyFalse,
+    "an OLD agent's ambiguous backup_ok:false renders as the measured negative — that is a backup failure the console invented on every un-upgraded box in the fleet");
+  assert.doesNotMatch(nobodyLooked, /missing|failed/i,
+    "the unmeasured state is worded as a backup outcome; nobody looked is not a statement about backups");
+  assert.doesNotMatch(legacyFalse, /missing|failed/i,
+    "the legacy ambiguous false is worded as a backup outcome");
+  assert.match(measured, /missing/,
+    "the one MEASURED negative must actually say so, or the tristate collapses the other way and a real failure reads as a shrug");
 });
 
 // scaffy:zone console-tests (ensure-console-hook-zones) -- stable TAIL anchor

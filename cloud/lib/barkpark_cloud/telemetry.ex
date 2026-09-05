@@ -37,7 +37,11 @@ defmodule BarkparkCloud.Telemetry do
         load1: number | nil,      # 1-minute load average (agent `load1`, -1 verbatim)
         req_per_s: number | nil,  # request rate (instance-exposed; nil until it ships)
         p95_ms: number | nil,     # p95 request latency ms (instance-exposed; nil until it ships)
-        backup: %{ok: boolean | nil, detail: String.t() | nil},
+        backup: %{
+          state: :unmeasured | :unconfigured | :ok | :failed | :error | :unknown,
+          ok: boolean | nil,
+          detail: String.t() | nil
+        },
         checks: %{
           pass: non_neg_integer,
           skipped: non_neg_integer,
@@ -54,8 +58,10 @@ defmodule BarkparkCloud.Telemetry do
   view concern, not the normalizer's), `pg_size_bytes` (int64),
   `pg_top_relations` (a list of `%{"name","bytes"}` `RelationSize`s, or JSON
   null when unmeasured), `swap_used_percent` (int) + `swap_total_bytes` (int64),
-  `beam_pss_bytes` + `beam_swap_bytes` (int64), `backup_ok` (bool) +
-  `backup_detail` (string), `dirty_tree` (bool), and `health_checks` (a list of
+  `beam_pss_bytes` + `beam_swap_bytes` (int64), `backup_state` (one of
+  `"unmeasured" | "unconfigured" | "ok" | "failed" | "error"`) beside the legacy
+  `backup_ok` (bool) + `backup_detail` (string), `dirty_tree` (bool), and
+  `health_checks` (a list of
   `%{"name","pass","detail"}` `CheckResult`s — note the boolean key is `"pass"`,
   with `"ok"` accepted as a defensive alias).
 
@@ -130,6 +136,7 @@ defmodule BarkparkCloud.Telemetry do
       req_per_s: num_or_nil(Map.get(payload, "req_per_s")),
       p95_ms: num_or_nil(Map.get(payload, "p95_ms")),
       backup: %{
+        state: backup_state(payload),
         ok: bool_or_nil(Map.get(payload, "backup_ok")),
         detail: str_or_nil(Map.get(payload, "backup_detail"))
       },
@@ -478,6 +485,43 @@ defmodule BarkparkCloud.Telemetry do
 
   defp bool_or_nil(b) when is_boolean(b), do: b
   defp bool_or_nil(_), do: nil
+
+  # The beat's backup verdict, and the ONE place the fleet's version skew is
+  # decided. `backup_ok` alone can never answer it: for the whole life of the
+  # beat, `false` was emitted for "no probe was wired" (the Go zero value — the
+  # only thing every box in production ever sent), "the probe ran and the backup
+  # is missing", and "the probe errored", with a free-text detail string as the
+  # only discriminator. `backup_state` (report.go `BackupState`) is that
+  # discriminator; this function reads it and REFUSES to invent one when it is
+  # absent.
+  #
+  #   * A NEW agent sends `backup_state` → its value, verbatim, as an atom.
+  #   * An OLD agent sends no `backup_state`. `backup_ok:true` is still
+  #     unambiguous (only a wired probe that measured a backup can produce it),
+  #     so it maps to `:ok`. `backup_ok:false` is the ambiguous one and maps to
+  #     `:unknown` — NOT `:failed`. Reading it as a failure would let this
+  #     module manufacture the exact false measurement the state field exists to
+  #     kill, and on today's fleet it would report a backup failure on every box
+  #     in it.
+  #   * An unknown state string (a producer newer than this reader) is
+  #     `:unknown` too, never silently coerced into a backup fact.
+  #
+  # `:unknown` therefore has a REACHABLE producer — an old agent, which is every
+  # agent in the fleet until it is upgraded — unlike the `ok: nil` arm, which
+  # requires an absent `backup_ok` key no real agent has ever sent.
+  defp backup_state(payload) when is_map(payload) do
+    case Map.get(payload, "backup_state") do
+      "unmeasured" -> :unmeasured
+      "unconfigured" -> :unconfigured
+      "ok" -> :ok
+      "failed" -> :failed
+      "error" -> :error
+      _ -> legacy_backup_state(Map.get(payload, "backup_ok"))
+    end
+  end
+
+  defp legacy_backup_state(true), do: :ok
+  defp legacy_backup_state(_), do: :unknown
 
   defp str_or_nil(s) when is_binary(s), do: s
   defp str_or_nil(_), do: nil
