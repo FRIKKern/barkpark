@@ -2,9 +2,9 @@ package cli
 
 import (
 	"os"
-	"strconv"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -55,4 +55,3 @@ func TestEveryNotLoggedInRefusalNamesTheEnvCredential(t *testing.T) {
 			len(missing), seen, strings.Join(missing, "\n  "))
 	}
 }
-
