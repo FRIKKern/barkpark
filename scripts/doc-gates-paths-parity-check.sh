@@ -451,7 +451,15 @@ run_case() {
   local out rc=0
   out="$(DOC_GATES_PATHS_PARITY_TARGET="$fixture" DOC_GATES_PATHS_PARITY_PINS="$pins" \
         bash "${BASH_SOURCE[0]}" 2>&1)" || rc=$?
-  if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$needle"; then
+  # HERE-STRING, NOT A PIPE (cgsiw-s5). `printf ... | grep -qF` is an
+  # EARLY-EXIT pipe reader under `set -o pipefail` (line 153): grep -q exits on
+  # the first match, printf takes SIGPIPE, the pipeline reports 141, and this
+  # `&&` reads a REAL MATCH AS A MISS. It is load-dependent, so it presents as a
+  # flaky selftest — measured on origin/main at ~1 spurious FAIL in 3 runs on a
+  # busy box, always on whichever arm's `$out` is longest. Same defect class as
+  # #16182 in the two doc gates. A here-string has no second process and cannot
+  # SIGPIPE.
+  if [ "$rc" -eq "$want" ] && grep -qF -- "$needle" <<<"$out"; then
     st_ok "$label (rc=$rc)"
   else
     st_no "$label — expected rc=$want with '$needle', got rc=$rc"
@@ -474,14 +482,14 @@ write_fixture() {
     echo "    branches: [main]"
     echo "    paths:"
     printf '%s\n' "$push" | grep . | sed 's/^/      - "/; s/$/"/' || true
-    if printf '%s\n' "$push_ign" | grep -q .; then
+    if grep -q . <<<"$push_ign"; then
       echo "    paths-ignore:"
       printf '%s\n' "$push_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
     fi
     echo "  pull_request:"
     echo "    paths:"
     printf '%s\n' "$pr" | grep . | sed 's/^/      - "/; s/$/"/' || true
-    if printf '%s\n' "$pr_ign" | grep -q .; then
+    if grep -q . <<<"$pr_ign"; then
       echo "    paths-ignore:"
       printf '%s\n' "$pr_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
     fi
@@ -631,7 +639,7 @@ selftest() {
   # fall through into the full gate.
   local out rc=0
   out="$(bash "${BASH_SOURCE[0]}" --bogus 2>&1)" || rc=$?
-  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF -- "unknown argument '--bogus'"; then
+  if [ "$rc" -eq 2 ] && grep -qF -- "unknown argument '--bogus'" <<<"$out"; then
     st_ok "an unknown argument refuses at exit 2 (rc=$rc)"
   else
     st_no "an unknown argument should exit 2 with a usage line — got rc=$rc"
