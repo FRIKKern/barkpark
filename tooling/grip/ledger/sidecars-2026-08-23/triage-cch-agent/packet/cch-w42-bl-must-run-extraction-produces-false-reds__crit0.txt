@@ -1,0 +1,1 @@
+The must-run extraction recipe is corrected at its source, with the four measured pass/fail pairs quoted so the correction proves itself.

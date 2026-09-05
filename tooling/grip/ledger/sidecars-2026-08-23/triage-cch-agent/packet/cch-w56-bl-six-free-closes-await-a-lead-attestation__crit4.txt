@@ -1,0 +1,1 @@
+The post-pass live denominator is re-derived from `bp task ls --all` (published-only, drafts excluded by status and doc_id prefix, NOT by dataset) and stated with its reason. Evidence: the command and the number.

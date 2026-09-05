@@ -1,0 +1,1 @@
+Without the flag, a deferred deploy still exits 0 and still polls exactly once — the default path is byte-identical to wave 32, proven by the existing D543 tests staying green and unmodified.

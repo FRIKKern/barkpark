@@ -1,0 +1,1 @@
+The English comment at __app.test.mjs that currently carries the invariant alone is updated to name the guard that now enforces it, so a reader is not left believing prose is the mechanism.

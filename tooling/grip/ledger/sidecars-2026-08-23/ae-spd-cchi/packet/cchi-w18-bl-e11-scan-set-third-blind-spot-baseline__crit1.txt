@@ -1,0 +1,1 @@
+All three blind-spot classes are covered or explicitly refused in writing: cssom-heads.baseline (3 citations, 2 drifted), shoot.sh (3 cites, 1 drifted) and app.css (2 self-cites, 1 with no anchor at all). Evidence: the per-file hit list with each anchor adjudicated ACCURATE or DRIFTED.

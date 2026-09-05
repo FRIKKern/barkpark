@@ -74,10 +74,12 @@ defmodule BarkparkWeb.ChatController do
 
   require Logger
 
+  alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Attachments, FleetHub, PlanPapers, QuestionAnswer, Recorder, Runtime}
+  alias Barkpark.Tenancy
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -1524,8 +1526,127 @@ defmodule BarkparkWeb.ChatController do
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at,
+      # WHO IS RUNNING THIS SESSION, WHERE (chat-local-cloud-context-w3,
+      # criterion 2) — the facts a client cannot measure for itself. See
+      # session_context_json/1.
+      context: session_context_json(s),
       messages: Enum.map(messages, &message_json/1)
     }
+  end
+
+  # ── the session's connection identity (chat-local-cloud-context-w3) ─────────
+  #
+  # WHICH HOST RUNS THIS SESSION, IN WHICH WORKSPACE, OUT OF WHICH DIRECTORY.
+  # The server-side half of the context band every chat surface paints: the CLI
+  # half is `internal/chat/context.go`, the Studio half is
+  # `Barkpark.StudioChat.ContextIdentity`. A remote client (the mobile app, the
+  # TUI) can measure NONE of this for itself — the execution host is a lease
+  # row, the workspace is a slug behind a UUID, and the cwd is a path on a
+  # machine the client has never seen. So the wire carries them.
+  #
+  # FACTS ONLY. This projects; it never renders and it never judges. The typed
+  # absence vocabulary — `(not set)` / `(unknown)` / `(not a git repo)` /
+  # `(server-local)` — is the CLIENT's, applied to these nils, and each nil here
+  # is a DIFFERENT fact the client must be able to tell apart:
+  #
+  #   * `host` nil        — MEASURED: no enrolled host holds a live lease, so
+  #                         the server itself runs the session. The band says
+  #                         `(server-local)`, never a blank.
+  #   * `workspace` nil   — MEASURED: a legacy `nil`-owned session.
+  #   * `repo_root` nil   — see `repo_status`, which says WHICH kind of nil.
+  #
+  # Additive to the D14 full-session shape: a client that does not know the key
+  # ignores it, exactly as the Go decoder and this app's `wire.ts` already do.
+  defp session_context_json(%StudioChat.Session{} = s) do
+    {repo_root, repo_status} = session_repo_root(s)
+
+    %{
+      host: execution_host_name(s.id),
+      execution_target: s.execution_target,
+      cwd: s.cwd,
+      workspace: workspace_slug(s.owner_workspace_id),
+      repo_root: repo_root,
+      repo_status: repo_status
+    }
+  end
+
+  # The host holding the session's LIVE execution lease, BY NAME. It reads the
+  # one canonical fence selector (`ChatHosts.live_report_fence/1`) so "who runs
+  # this session" cannot mean something here that it does not mean to the report
+  # gate — a band answering off `session.execution_host_id` would keep naming a
+  # host whose lease expired an hour ago.
+  #
+  # A NAME is the only part of a registered host that is safe to paint: never
+  # the id, never the credential.
+  defp execution_host_name(session_id) do
+    with %{host_id: host_id, workspace_id: ws_id} <- ChatHosts.live_report_fence(session_id),
+         %{name: name} when is_binary(name) <- ChatHosts.get_host(ws_id, host_id) do
+      name
+    else
+      _ -> nil
+    end
+  end
+
+  defp workspace_slug(ws_id) do
+    case Tenancy.get_workspace_by_id(ws_id) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
+
+  # The repository root the session's cwd sits in — three DETERMINATE answers,
+  # never a guess:
+  #
+  #   {root, "set"}        — the cwd is inside a work tree, and this is its top.
+  #   {nil, "not_a_repo"}  — MEASURED: walked to the filesystem root and found
+  #                          no `.git`. A real, useful answer ("you are chatting
+  #                          from outside a checkout"), not a failure.
+  #   {nil, "unknown"}     — nobody can answer. A `registered_host` session's
+  #                          cwd lives on a machine this server cannot stat, and
+  #                          the chat-host protocol carries no work-tree report:
+  #                          a host declares name / approved_roots / provider
+  #                          capabilities at enrollment and afterwards emits
+  #                          only execution events. Probing the server's own
+  #                          filesystem for someone else's path would answer
+  #                          confidently and WRONGLY, which is worse than
+  #                          `(unknown)`.
+  #
+  # The walk is `File.exists?` up the ancestor chain, NOT `git rev-parse`: this
+  # rides the session GET that every turn-boundary refetch performs, and a
+  # subprocess per read would be a real cost for a fact that changes never.
+  # `.git` is accepted as a FILE as well as a directory — a linked worktree's
+  # `.git` is a gitfile, and a dir-only test walks straight past the repository
+  # it is standing in.
+  @repo_walk_limit 64
+
+  defp session_repo_root(%StudioChat.Session{cwd: cwd}) when not is_binary(cwd),
+    do: {nil, "unknown"}
+
+  defp session_repo_root(%StudioChat.Session{execution_target: "registered_host"}),
+    do: {nil, "unknown"}
+
+  defp session_repo_root(%StudioChat.Session{cwd: cwd}) do
+    dir = String.trim(cwd)
+
+    cond do
+      dir == "" -> {nil, "unknown"}
+      not File.dir?(dir) -> {nil, "unknown"}
+      true -> walk_for_git(Path.expand(dir), @repo_walk_limit)
+    end
+  end
+
+  defp walk_for_git(_dir, 0), do: {nil, "unknown"}
+
+  defp walk_for_git(dir, budget) do
+    cond do
+      File.exists?(Path.join(dir, ".git")) -> {dir, "set"}
+      # `Path.dirname/1` is a fixpoint at the filesystem root ("/" -> "/"), so
+      # THAT is the terminating condition — a `budget` exhaustion would report
+      # `unknown` for a genuinely repo-less deep path, which is a different and
+      # false claim. The budget only bounds a pathological symlinked chain.
+      Path.dirname(dir) == dir -> {nil, "not_a_repo"}
+      true -> walk_for_git(Path.dirname(dir), budget - 1)
+    end
   end
 
   # The sidebar shape (D14 vacuous-green trap — NO draft/rail/choices here).

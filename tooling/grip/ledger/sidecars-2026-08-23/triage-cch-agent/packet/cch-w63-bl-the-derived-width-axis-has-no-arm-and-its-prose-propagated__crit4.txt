@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): PR merged, compare returns `ahead`, four required contexts green on head.

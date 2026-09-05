@@ -1,0 +1,1 @@
+dr-w11-s5-waiting-alert cannot emit a waiting alert whose sole cause is a cancelled row: proved by a fixture, not by reading the query

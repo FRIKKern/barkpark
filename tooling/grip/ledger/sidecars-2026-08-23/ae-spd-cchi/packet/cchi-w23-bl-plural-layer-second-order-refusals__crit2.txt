@@ -1,0 +1,1 @@
+THE `.fleet-meta` 240-vs-330 GAP IS MADE VISIBLE AND ADJUDICATED: the ok-line no longer implies 330 hosts were measured for a selector present on 240 rows, and the legitimate-emptiness cause (fleetMetaHtml returning "" at app.js:4703) is stated in the code. Quote the corrected ok-line.

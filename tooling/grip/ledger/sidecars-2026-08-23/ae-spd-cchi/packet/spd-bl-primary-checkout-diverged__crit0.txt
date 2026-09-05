@@ -1,0 +1,1 @@
+Every unpushed local-main commit is either landed via a PR or explicitly discarded with a written reason (inventory quoted)

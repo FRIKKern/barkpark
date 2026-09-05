@@ -177,11 +177,13 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
       # Exactly ONE classed wrapper — the framed section's own box div.
       assert length(String.split(html, ~s(class="bp-section--framed"))) == 2
 
-      # The neighbour's wrapper is the CLASSLESS flex-column div with the h2
-      # inside — the exact DOM shape the paper-surface.css section-head rule
-      # (`div:not([class]) > h2` → border-top 2px beat) selects on.
+      # The neighbour's wrapper is the CLASSLESS flex-column div with the h2 as
+      # its FIRST child — the exact DOM shape the paper-surface.css section-head
+      # rule (`div:not([class]) > h2:first-child` → border-top beat) selects on.
+      # No leading hairline: a section that opens with a heading lets the heading
+      # carry the boundary alone (compose_section_stack/2).
       assert html =~
-               ~s(<div style="display:flex;flex-direction:column"><hr class="bp-hr" style="border-top-width:1px"><h2>Next section</h2>)
+               ~s(<div style="display:flex;flex-direction:column"><h2>Next section</h2>)
     end
   end
 end

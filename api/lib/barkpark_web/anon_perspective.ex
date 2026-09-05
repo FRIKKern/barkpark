@@ -52,8 +52,24 @@ defmodule BarkparkWeb.AnonPerspective do
   @spec anon_pinned?(Plug.Conn.t()) :: boolean()
   def anon_pinned?(conn) do
     public_read_token?(conn) or
-      (not authed?(conn) and not preview?(conn) and
-         not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit))
+      (not authed?(conn) and not preview?(conn) and not edit_share?(conn))
+  end
+
+  # The edit-share unpin, and the ONE grant shape it deliberately excludes.
+  #
+  # A SCOPE-wide edit grant (`RequireShareEditToken`, or a section share whose
+  # `Sharing.access_for/3` is `:edit`) legitimately reads drafts: the whole
+  # surface is the grant, and the editor behind it needs the unpublished view.
+  #
+  # An ITEM link is not that. Since slice 3 (task-8ac4f3918da1c433) it carries
+  # its OWN access level into `:share_access`, so an `access: "edit"` item link
+  # would otherwise land in this arm and unpin `?perspective=drafts` on every
+  # share-reachable read route (`/papers/:slug/source`, the query/search reads).
+  # Its edit grant is confined to the reader's LiveView op path for one slug;
+  # it is not a drafts unlock, so `:item` stays pinned to published.
+  defp edit_share?(conn) do
+    conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit and
+      conn.assigns[:share_grant] != :item
   end
 
   # MEMBERSHIP, never list equality (`== ["public-read"]` misses the unordered
@@ -70,6 +86,15 @@ defmodule BarkparkWeb.AnonPerspective do
     end
   end
 
+  # The LENIENT parser: it maps every unrecognised value to `:published` so a
+  # caller reached by some path other than a declared `?perspective` route
+  # degrades CLOSED. That catch-all is NOT the strictness layer — an unsupported
+  # value on a route that declares the param is refused at the edge by
+  # `BarkparkWeb.ReadPerspective` before this ever runs. `SearchController` used
+  # to carry a byte-identical private copy of these three clauses; it now calls
+  # this one. `TasksController.Params.parse_perspective/1` stays separate and
+  # that is deliberate — see its own comment.
+  # @canonical capability:read-perspective-parse aka:perspective,parse_perspective,drafts,raw,lenient perspective
   @spec parse(term()) :: :published | :drafts | :raw
   def parse("drafts"), do: :drafts
   def parse("raw"), do: :raw

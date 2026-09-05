@@ -1,0 +1,1 @@
+The test that proves it does NOT assert against the in-process Port path (dev/CI/macOS fallback, deploy_runner.ex ~:1034) where ROUTE would land in run.log — that arm is vacuous against production, which uses systemd-run + reconstruct/2.

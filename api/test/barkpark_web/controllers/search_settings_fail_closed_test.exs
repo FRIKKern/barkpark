@@ -21,7 +21,7 @@ defmodule BarkparkWeb.SearchSettingsFailClosedTest do
   RED before the fix: the nil-token PUT below returned 200 (writing Default)
   instead of 422.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 
@@ -63,7 +63,7 @@ defmodule BarkparkWeb.SearchSettingsFailClosedTest do
   end
 
   defp put_settings(raw, path) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
     |> put(path, %{"highlightFields" => ["title"]})

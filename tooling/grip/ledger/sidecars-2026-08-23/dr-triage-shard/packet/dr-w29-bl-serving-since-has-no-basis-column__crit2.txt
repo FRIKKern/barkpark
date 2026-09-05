@@ -1,0 +1,1 @@
+A live read quotes at least one row per target with its basis, with the read timestamp beside it. Evidence: the query and its output.

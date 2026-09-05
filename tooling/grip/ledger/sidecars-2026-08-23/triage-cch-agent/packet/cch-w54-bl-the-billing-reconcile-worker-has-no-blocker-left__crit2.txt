@@ -1,0 +1,1 @@
+If it does not ship, billing.ex states the REAL reason for the deferral

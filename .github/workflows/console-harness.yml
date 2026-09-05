@@ -67,7 +67,9 @@ on:
     branches: [main]
 
 concurrency:
-  group: console-harness-${{ github.ref }}
+  # per-sha on main: a per-ref group evicts the PENDING main run when the next merge lands,
+  # so the older sha never gets a verdict (same fix as security.yml; measured 2026-09-02).
+  group: console-harness-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -98,10 +100,39 @@ jobs:
           # they must test the merged result, not the head in isolation.
           # `github.sha` is the fallback for `push` events, which have no PR.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history: the PR base sha must be resolvable locally for the
-          # three-dot diff below. A shallow checkout makes `git cat-file -e`
-          # miss it, which this step treats as a hard failure.
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
           fetch-depth: 0
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set
@@ -309,8 +340,8 @@ jobs:
     # `FAIL console-unit: failure` with no verdict at all, because it had
     # `outputs:` None and its `decide` line took no verdict argument.
     #
-    # SEVEN of this job's steps can exit 2 (ten exit(2) sites: breakpoint-sweep
-    # 4, member-authority-sweep 1, and one each in the five censuses). Each of
+    # EIGHT of this job's steps can exit 2 (eleven exit(2) sites: breakpoint-sweep
+    # 4, member-authority-sweep 1, and one each in the six censuses). Each of
     # those steps classifies its own exit code and publishes the verdict BEFORE
     # exiting — the shape proven to survive `exit 1` on run 31136979488. A step
     # that PASSES publishes nothing, so the chain below reduces to the one
@@ -324,6 +355,7 @@ jobs:
         ${{ steps.sweep.outputs.verdict
         || steps.member-authority.outputs.verdict
         || steps.binding-census.outputs.verdict
+        || steps.refusal-copy-census.outputs.verdict
         || steps.unknown-census.outputs.verdict
         || steps.reason-arm-census.outputs.verdict
         || steps.me-envelope-census.outputs.verdict
@@ -499,13 +531,68 @@ jobs:
       # the wave's evidence engine, deliberately not a CI step.
       #
       # It belongs HERE, in the node-20 job, precisely because it needs no
-      # Chrome and no port — so it cannot join the class of instruments nothing
-      # runs. (That class had exactly one member, overflow-guard.mjs, and it is
-      # empty as of the `overflow-guard` job below. Note the old proof offered
-      # here — "`grep -rn overflow-guard .github/` still exits 1" — was
-      # self-refuting the moment this comment named the file: the honest
-      # predicate is always "no `run:` step invokes it", never a grep over
-      # prose.)
+      # Chrome and no port — so this LEG cannot join the class of instruments
+      # nothing runs. (Note the old proof once offered here — "`grep -rn
+      # overflow-guard .github/` still exits 1" — was self-refuting the moment
+      # the comment named the file: the honest predicate is always "no `run:`
+      # step invokes it", never a grep over prose.)
+      #
+      # THE CLASS IS NOT EMPTY, AND THIS COMMENT USED TO SAY IT WAS (D209,
+      # corrected by cch-w22-s1-residue-modal-oracle-uninvoked). It read "That
+      # class had exactly one member, overflow-guard.mjs, and it is empty as of
+      # the `overflow-guard` job below" — a committed sentence contradicting a
+      # grep, the exact defect this epic exists to kill. It was false when
+      # written and it stayed false for two waves. modal-oracle.mjs was a
+      # member the whole time and is wired by the same commit that corrects
+      # this paragraph; these are the members that REMAIN, named because a
+      # count is a sentence nobody re-derives and a name is one somebody can
+      # check:
+      #
+      #   * breakpoint-sweep.mjs `--tiers5` (Leg T) — a leg of a file that DOES
+      #     run. The file's own header says so at its Leg T banner; the
+      #     `--render` cell below drives exactly ONE cell (901px, billing-trial)
+      #     and the full render matrix is likewise unreached, deliberately
+      #     (minutes, not seconds — see the paragraph above).
+      #   * cssom-parity.test.mjs, defect-selection.test.mjs,
+      #     exit-vocabulary.test.mjs, font-pin.test.mjs — four unit suites with
+      #     NO runner. The other four `__preview__` suites (seal-predicate,
+      #     breakpoint-sweep, bringup-retry, ready-host-paint) do run, above.
+      #     `scripts/console-export-tree.sh` lists three of these four in its
+      #     VERIFY_GATES array, but that script is itself invoked by no `run:`
+      #     step, so it is a list, not an invocation.
+      #   * shoot.sh and reap-orphans.sh — the screenshot rig and its orphan
+      #     reaper. `shoot.sh` is reachable through a Makefile target only;
+      #     `reap-orphans.sh` through neither.
+      #   * the seven `__*_dump.mjs` extractors — no `run:` line anywhere. They
+      #     are NOT importer-less, which is the trap: __plan_catalog_dump.mjs is
+      #     imported by five of its own siblings, and __plan_features_dump.mjs
+      #     and __lifecycle_state_dump.mjs by two more. That buys them nothing —
+      #     every one of those importers is itself a member, so the cluster
+      #     imports only itself and no run: step reaches any door into it. The
+      #     honest predicate is transitive: reached-from-a-run-step, never
+      #     has-an-importer.
+      #
+      # NOT members, checked rather than assumed: serve.mjs, scenarios.mjs,
+      # font-pin.mjs, bringup-retry.mjs, defect-selection.mjs,
+      # exit-vocabulary.mjs, ready-host-paint.mjs, seal-predicate.mjs and
+      # mock.js carry no `run:` line of their own but are IMPORTED by
+      # instruments that do, so their bytes execute on every console run.
+      # (smoke.mjs, member-authority-sweep.mjs, breakpoint-sweep.mjs,
+      # cssom-parity.mjs, overflow-guard.mjs, fixtures/ready-host-paint/proof.mjs
+      # and four `.test.mjs` suites are invoked outright, above — they were never
+      # candidates.) Together with the members named here that is every
+      # executable file in this directory, accounted for one by one; the class
+      # is enumerated, not sampled.
+      #
+      # RE-DERIVE, never inherit — this list is dated (2026-09-05, origin/main
+      # 6c6e88821) and the honest predicate is per-file, not a grep over prose:
+      #
+      #   git grep -nE '(^|[^#[:alnum:]_-])(node|bash|sh)[[:space:]]+[^|;&]*__preview__/' \
+      #     -- .github/ scripts/ Makefile package.json
+      #
+      # That prints every command line in the merge path that reaches this
+      # directory. Anything under `__preview__` absent from its output, and
+      # absent from the importer set of something present in it, is a member.
       #
       # Its unit tests run alongside it: the refusal's parser is where a blind
       # spot would hide (a width token the parser eats but cannot resolve
@@ -631,6 +718,54 @@ jobs:
           esac
           if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
           echo "::error title=console-unit ${v} — __binding_census.mjs::__binding_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE REFUSAL-COPY CENSUS (charter D383/D441, wave 40) ────────────────
+      #
+      # Sibling to the binding census above, and the same law one axis over. That
+      # one asks whether an affordance the console DRAWS is one the server will
+      # honour. This one asks whether a CAUSE the console NAMES is one the server
+      # can send.
+      #
+      #   A CAUSE THE CONSOLE NAMES IS A CAUSE THE SERVER SENT — or it is a
+      #   sentence somebody invented, and nobody judged.
+      #
+      # An ADD/REMOVE set diff over 339 pinned refusal-copy sites in app.js, in
+      # three kinds: MAP (a member of a copy map that a fence body consults), FN
+      # (a cause literal in copy position inside a refusal renderer) and ARG (a
+      # fallback handed to friendly/faultCopy/ctl.fail — delegated by
+      # construction). ADD is the disease: a new invented cause. REMOVE is the
+      # decay: a pin that has quietly become fiction. Two further arms REFUSE TO
+      # MEASURE with exit 2 — a missing fence, and a derived key two distinct
+      # function bodies can both produce.
+      #
+      # A SEPARATE STEP, NOT A CASE IN __app.test.mjs, for the reason this
+      # workflow already gives for the binding census: other slices are editing
+      # that file, and a census that has to merge with them is a census that gets
+      # weakened to land.
+      #
+      # THIS GATE IS EXPENSIVE ON PURPOSE, AND THE FILE SAYS SO IN ITS OWN HEADER.
+      # The FN and ARG keys hash the sentence, so ANY copy edit inside a refusal
+      # renderer's return reds this step and has to be re-pinned deliberately.
+      # That is the point — a changed cause sentence is a judgment somebody should
+      # make on purpose — and it is a real recurring cost. If that cost stops
+      # being worth paying, narrow the population or retire the file. Do not keep
+      # the file and stop letting it red.
+      - name: Refusal-copy census (ADD + REMOVE over app.js cause vocabulary)
+        id: refusal-copy-census
+        run: |
+          # Verdict wrapper — same contract as the censuses above.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__refusal_copy_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __refusal_copy_census.mjs::__refusal_copy_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
       # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
@@ -918,6 +1053,37 @@ jobs:
           test "$rc" -eq 0
           node cloud/priv/static/__binding_census.mjs --add-check \
             cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "remove fixture under --add-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+
+      # ── the refusal-copy census's own 2x2 ──────────────────────────────────
+      # Same shape and same reasoning as the four cells above: the matching cells
+      # prove each arm CAN fire, and the cross cells prove it can tell the two
+      # arms apart. Both fixtures declare their own @must-flag / @must-clear rows
+      # in their own bytes, two and two, so a cell that fires for an UNDECLARED
+      # reason exits 2 exactly like one that stays silent.
+      - name: Refusal-copy census fixture control — ADD arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --add-check \
+            cloud/priv/static/__refusal_copy.add.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Refusal-copy census fixture control — REMOVE arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --remove-check \
+            cloud/priv/static/__refusal_copy.remove.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Refusal-copy census fixture control — the cross cells stay silent (exit 0)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --remove-check \
+            cloud/priv/static/__refusal_copy.add.fixture.js && rc=0 || rc=$?
+          echo "add fixture under --remove-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+          node cloud/priv/static/__refusal_copy_census.mjs --add-check \
+            cloud/priv/static/__refusal_copy.remove.fixture.js && rc=0 || rc=$?
           echo "remove fixture under --add-check: rc=$rc (expect 0)"
           test "$rc" -eq 0
 
@@ -1276,6 +1442,96 @@ jobs:
               ;;
           esac
 
+  # modal-oracle (cch-w22-s1-residue-modal-oracle-uninvoked): the CSSOM oracle
+  # for `.modal-root` — and, until this job existed, the last browser instrument
+  # in cloud/priv/static/__preview__ that no `run:` step in this repository
+  # invoked. Its exit 1 (a measured modal defect) and its exit 2 (a refusal —
+  # an unknown SCEN/THEME, no usable Chrome, or a font pin that would not take)
+  # were read by NOBODY: `git grep -n modal-oracle -- .github/ scripts/ Makefile
+  # package.json` exited 1 with no output on origin/main 6c6e88821.
+  #
+  # THE FORK THIS SETTLES, AND WHY IT SETTLES THIS WAY. The row is a genuine
+  # fork — (a) wire it, or (b) keep it hand-run and say so in its own header —
+  # because the instrument's header cited charter GR93(b) as the reason it was
+  # unwired. GR93(b) is a SHIP-TIME rule, not a standing ban, and its own
+  # sibling already proves it: cssom-parity.mjs carried the identical sentence
+  # and now runs as its own job above, its header reading "It had been unwired
+  # on purpose (GR93(b)): a gate promoted before it is trusted is a gate that
+  # gets disabled. It has now survived a wave of real use." The oracle has now
+  # had the same wave. So (a), and the instrument's header is corrected in this
+  # same commit — an oracle whose banner still says "invoked by ZERO CI jobs"
+  # while a job invokes it is the exact species of committed sentence that
+  # contradicts a grep, which is the defect this epic exists to kill.
+  #
+  # Modelled on `overflow-guard` above, deliberately: node 22 (node 20 has no
+  # global `WebSocket` and CDP bring-up exits 2 there), an explicit CHROME,
+  # `actions/checkout@v4` with no `ref:`, and the same 0/1/2/* ladder. Never
+  # `continue-on-error` — `needs.<job>.result` reads `success` for such a job
+  # even when it failed, laundering the lie straight into `Console gate`.
+  #
+  # ONE INVOCATION, THE DEFAULT ROSTER, NO `SCEN`/`THEME` NARROWING. The default
+  # is 4 account scenarios x 2 themes x 1 cell + the token reveal x 2 themes x 2
+  # cells = 12 states, and the oracle prints that arithmetic itself on every
+  # run. A cell list baked into a step name is a number nothing re-derives; read
+  # the guard's own roster line, not this comment. Measured on a developer host
+  # at 58.4s wall for all 12 states INCLUDING one bring-up refusal and its
+  # retry, which is the same order as `overflow-guard`'s single run.
+  #
+  # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
+  # protection through, is a REQUIRED context on `main` — a red here BLOCKS the
+  # merge. `.github/required-checks.json` is the single committed source of
+  # truth for what protection enforces, and scripts/required-checks-verify.sh
+  # reds when a workflow's prose contradicts that file. Nothing is registered
+  # here.
+  modal-oracle:
+    name: Modal CSSOM oracle (rendered)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.oracle.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Modal oracle — does the authored .modal-root rule survive into the CSSOM?
+        id: oracle
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/modal-oracle.mjs || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "Modal oracle: every state it declared asserted clean in a real browser (the roster and the state count are printed above)."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=Modal oracle REFUSED::The oracle refused to measure (exit 2) — an ENVIRONMENT, VOCABULARY or FONT-PIN fault, not a modal defect. NO claim is being made about .modal-root in either direction: nothing here says the CSSOM kept the rule and nothing here says it lost it. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the oracle's port, an unknown SCEN or THEME (the roster guard aborts BEFORE a browser is spawned, because SCEN=account-modal-taII once measured the right CSS on the wrong screen and exited 0), or a font pin that would not take. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=Modal oracle DEFECT::A measured modal defect in a real browser (exit 1) — this IS about the console's own bytes. The mechanism is named on stderr above and it is one of THREE detectors that reproduce bug #4592: a rule whose selectorText is EXACTLY '.modal-root' is no longer reachable in document.styleSheets or no longer declares position:fixed; getComputedStyle(#modal-root) no longer reads position:fixed / overflow-y:auto; or a card taller than the viewport sits in a root that is NOT scrollable, which puts the modal's footer permanently out of reach. Read the per-state line — it prints the exact-rule count, the computed values and the measured scrollHeight/clientHeight."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=Modal oracle UNINTERPRETABLE::modal-oracle.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
   console-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
     #
@@ -1307,7 +1563,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Console gate
     if: always()
-    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, path-escape]
+    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, modal-oracle, path-escape]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -1317,6 +1573,7 @@ jobs:
           R_CSSOM: ${{ needs.cssom-parity.result }}
           R_TIER: ${{ needs.tier-floor-render.result }}
           R_OVERFLOW: ${{ needs.overflow-guard.result }}
+          R_MODAL: ${{ needs.modal-oracle.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CONSOLE: ${{ needs.changes.outputs.console }}
           # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ──────────────
@@ -1330,6 +1587,7 @@ jobs:
           V_CSSOM: ${{ needs.cssom-parity.outputs.verdict }}
           V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
           V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
+          V_MODAL: ${{ needs.modal-oracle.outputs.verdict }}
           # D776: the ratchet is the LAST exit-2-capable job to get a channel.
           V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
         run: |
@@ -1491,7 +1749,7 @@ jobs:
           # `set -u` (LOUD); OMITTING THE `decide` LINE IS SILENTLY IGNORED —
           # this gate then greens over a job it never read. So the review
           # instruction is a COUNT, independently re-derived, not a reading:
-          # `decide` calls must equal the length of `needs:`. Today: 6 and 6.
+          # `decide` calls must equal the length of `needs:`. Today: 7 and 7.
           # (The D36 emitter in scripts/console-path-escape-check.test.sh walks
           # that whole chain per job and is mutation-proven in four directions.)
           #
@@ -1511,6 +1769,7 @@ jobs:
           decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"   "${V_CSSOM:-}"
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
           decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}" "${V_OVERFLOW:-}"
+          decide "modal-oracle"            "${R_MODAL}"     "${O_CONSOLE}" "${V_MODAL:-}"
 
           echo
           if [ "$bad" -ne 0 ]; then

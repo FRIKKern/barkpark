@@ -1,0 +1,1 @@
+The gauge either sees drafts or names them as unseen - a count that silently differs from the ledger's own is refused. Mutation-prove with a draft child.

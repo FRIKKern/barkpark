@@ -1,0 +1,1 @@
+Every recipe in the tree that scans journald for barkpark deploy events names both slot units, and a scan that returns zero prints a sanity total proving the query was capable of matching.

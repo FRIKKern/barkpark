@@ -1,0 +1,1 @@
+Target discovery selects the intended document deterministically when the first Papers page no longer contains the committed default.

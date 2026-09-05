@@ -1,0 +1,1 @@
+THE REGISTER IS ABLE TO FAIL: adding an un-dispositioned `querySelector(` call to the guard makes the register's check exit non-zero naming that site. Quote the mutation, the failure, and its revert.

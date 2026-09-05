@@ -1,0 +1,1 @@
+Go.struct_tags/2 returns an EMPTY set for a fieldless struct, proven with a fixture where the fieldless struct sits between two tagged ones

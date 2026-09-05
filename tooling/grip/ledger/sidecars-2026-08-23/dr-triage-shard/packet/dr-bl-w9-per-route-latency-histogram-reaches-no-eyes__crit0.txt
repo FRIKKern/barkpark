@@ -1,0 +1,1 @@
+A consumer reads the per-route histogram and can name WHICH route is slow, rather than quoting a box-level scalar. Evidence: the rendered output.

@@ -194,7 +194,7 @@ defmodule BarkparkWeb.Router do
   #
   # Sobelow triage (task-f76e9b7b):
   #   * Config.Headers — FIXED. SamlController.slo renders a real HTML page (the
-  #     esaml HTTP-POST LogoutResponse auto-submit form, saml_controller.ex:118)
+  #     esaml HTTP-POST LogoutResponse auto-submit form, SamlController.slo/2)
   #     that was served with NO secure headers. put_secure_browser_headers now
   #     adds X-Frame-Options/nosniff/referrer-policy on every response this
   #     pipeline emits (redirects included) — clickjacking + MIME-sniff + Referer
@@ -829,6 +829,16 @@ defmodule BarkparkWeb.Router do
   # the api-token/tenancy plugs (auth is pre-tenant) and WITH :fetch_session so
   # login can set the signed `user_session` cookie. RateLimit keys on IP here
   # (anonymous), which is the brute-force defense for login.
+  #
+  # THE SHARED IP BUDGET ON THESE ROUTES IS THE CONTROL, NOT A GAP. RateLimit
+  # runs BEFORE :fetch_session, so no caller on /v1/auth/* (or /v1/access/claim
+  # downstream) has an identity this server can verify yet — that is the point
+  # of the route. #15677 made the bucket key derive from a VERIFIED token and
+  # left this IP fallback exactly as it was: giving these callers their own
+  # resolver would hand every attacker a private budget on precisely the
+  # endpoints where sharing is the defence. When a TEST needs isolation here it
+  # takes it from `BarkparkWeb.ConnCase.scoped_conn/0`, never from the limiter —
+  # see BarkparkWeb.Plugs.RateLimitTestConnScopeTest.
   #
   # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): this is a
   # JSON API (accepts ["json"] + AcceptBarkparkVendor), so a cross-site HTML form
@@ -2579,6 +2589,18 @@ defmodule BarkparkWeb.Router do
     delete("/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # ── Paper access trail — who viewed and edited one paper ────────────────
+  # Edit-on-the-link slice 4 (task-e99a8e946f80f52c). `:flat_admin_api`, not
+  # `[:api, :require_admin]`: the trail is workspace-scoped off `scope_opts`, so
+  # on the naive pipeline every caller would have been served the SEEDED DEFAULT
+  # workspace's rows (D45/D49). The pipeline also supplies the refusals — no
+  # token 401s at RequireToken, a non-admin token 403s at RequireAdmin.
+  scope "/v1/papers", BarkparkWeb do
+    pipe_through(:flat_admin_api)
+
+    get("/:slug/access", PaperAccessController, :index)
+  end
+
   # ── Desk structure — the canonical Studio tree, served for the TUI ──────
   # `:flat_admin_api`, not `[:api, :require_admin]`: the desk tree is built from
   # `Structure.build(dataset, scope_opts(conn))`, so on the naive pipeline every
@@ -2916,7 +2938,7 @@ defmodule BarkparkWeb.Router do
     # scopes. The dead-render ScopedPaperController is retired from routing
     # (its HTML view lives on under /s/:token).
     live_session :scoped_paper_reader,
-      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}],
+      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}, {BarkparkWeb.PaperViewer, :viewer}],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       root_layout: {BarkparkWeb.Layouts, :bulldocs} do
       live("/papers/:slug", BulldocsLive, :index)
@@ -3031,6 +3053,26 @@ defmodule BarkparkWeb.Router do
   # are served HERE, never on the Default-pinned flat route). upload/delete
   # (writes) stay excluded. Without a matching :media share this is
   # byte-identical to a normal scoped request.
+  #
+  # NO `:media_public_cors` HERE — the recorded decision, not an oversight
+  # (jf-w1-scoped-media-cors-followup). The four FLAT media serve GETs took
+  # `access-control-allow-origin: *` in jf-w1-media-cors-upstream under a rule
+  # with three conditions: GET/HEAD only, never credentialed, and authorization
+  # BY URL rather than by an ambient browser credential. These four scoped GETs
+  # satisfy the first two and FAIL the third, permanently and by design:
+  # `:shared_media_api` opens with `:fetch_session` + `OptionalSessionToken`,
+  # which assigns `:api_token` from `session["api_token"]` AND `:current_user`
+  # from `session["user_session"]` — so `Media.Storage.Access.authenticated?/1`
+  # (hence the visibility clamp, hence the body) varies on the cookie. That
+  # mount is load-bearing: bare Studio `<img>` tags carry the cookie and can
+  # never attach a Bearer header, so it cannot be removed to earn the wildcard.
+  # A static `*` carries no `Vary`, over a body that varies by Cookie with no
+  # `Vary: Cookie` — a shared cache could hand a member's private listing to an
+  # anonymous cross-origin reader. Cross-origin here is served instead by
+  # `Plugs.DatasetCors` at the endpoint, which strips this `/w/_/p/_` prefix and
+  # reflects any allowlisted `Origin` on the dataset, with `Vary: Origin`: a
+  # per-tenant opt-in. Pinned (absence AND the reflector) by
+  # `test/barkpark_web/controllers/scoped_media_cors_test.exs`.
   scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
     pipe_through(:shared_media_api)
 

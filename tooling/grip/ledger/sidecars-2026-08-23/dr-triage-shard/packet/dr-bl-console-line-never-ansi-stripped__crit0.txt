@@ -1,0 +1,1 @@
+router.ex scrub_entry routes the console entry line through FailureCopy.raw/1 rather than a bare scrub/1. Evidence: the diff.

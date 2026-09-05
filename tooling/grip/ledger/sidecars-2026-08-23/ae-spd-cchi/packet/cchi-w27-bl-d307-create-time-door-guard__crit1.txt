@@ -1,0 +1,1 @@
+Every open child of both epics is backfilled with a `surface` value before any refusal is armed, so the guard's first act on main is not to refuse legitimate filings.

@@ -1,0 +1,1 @@
+Any frame-level oracle MATCHES type:click and never counts frames - stated in the code and in the report.

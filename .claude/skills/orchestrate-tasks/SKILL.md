@@ -94,6 +94,90 @@ held). Install the UNAVOIDABLE one: copy `helpers/mix-slot-wrapper.sh` to `~/.lo
 shell picks them up), 3 slots each, `BP_NO_SLOT=1` bypasses, delete the files to disable. Tell the
 owner: their own `mix test` waits for a slot too while the campaign runs.
 
+## 2c. When main goes red — one owner, one fix, then update-branch
+
+Main red is the orchestrator's, not a lane's: every lane sees green on its own head and nobody
+owns the combination (2026-09-02: a REPRODUCTION test from one PR met the fix from another;
+main red for 2.5 h, every open PR's required gate red with it). Playbook, in order:
+
+1. **Diagnose by shape, not by lane.** One failing test whose file arrived in one merged PR and
+   whose subject a LATER merged PR changed = green-apart-red-together. Flip or reconcile; do not
+   investigate as a regression.
+2. **Fix from main in a tiny PR** carrying the campaign row as its trailer; cancel the queued
+   Elixir runs on campaign PR branches (they will all fail on the same test and they starve the
+   fix's own run); cancel the fix's advisory runs too.
+3. **Tell every lane to HOLD** (decisions files): a red or cancelled Elixir run right now is not a
+   signal.
+4. **After the merge: `gh pr update-branch` on every open, non-DIRTY campaign PR.** NEVER
+   `gh run rerun` — a rerun re-checks out the run's ORIGINAL merge sha and cannot see the new
+   main (34 reruns, 0 useful, measured). DIRTY PRs go back to their lane for a real rebase.
+   The main-green watcher does this mechanically; the orchestrator does not remember it at 4 a.m.
+5. **Rule broadcast:** a test that asserts a hole is OPEN ships in the same PR as the fix, or
+   `@tag :skip` with the row id — never green on its own.
+
+## 2d. CI is the ceiling — measure it before you add lanes
+
+Measured 2026-09-02 on a 30-agent campaign: GitHub executed ~10 JOBS AT ONCE for the repo while
+133 runs queued behind them. An Elixir run took 53 min MEDIAN wall clock for ~3 min of job work —
+the rest was waiting for a machine. Open→merge was 139 min median, 434 p90. Merge throughput
+peaked at 48/hr and that WAS the ceiling: more lanes made the queue longer, not the day faster.
+
+**Measure this on day one**, before deciding how many lanes to run:
+
+    gh run list -R <repo> --status queued  --limit 600 --json databaseId --jq 'length'
+    gh run list -R <repo> --status in_progress --limit 60 --json databaseId --jq 'length'
+    # then per-job minutes across recent runs of your heaviest workflow
+
+Then look at WHAT runs, not just how much. The same measurement showed only 34% of the heaviest
+workflow's minutes were tests; 66% was scaffolding — a path lint that ran on every run and was
+never skipped cost more than everything except the test job. Moving advisory and
+release-shaped jobs off the per-PR path is free throughput; buying runners to carry scaffolding
+is paying for waste.
+
+**Two orchestrator habits that follow from the ceiling:**
+- After a main-red fix, update-branch ONLY the PRs at 3/4 or better. Refreshing all of them
+  turned a 60-run queue into 368 in one step, ~9 hours at the measured rate, and the PRs that
+  were failing their own tests gained nothing from a fresh base.
+- Tell lanes to BATCH small same-file fixes. Every PR costs ~10 job slots whether it changes one
+  line or fifty, so three one-line PRs cost three times a single PR that closes three rows.
+
+## 2e. Past the CI ceiling, convert builders into thinkers
+
+Once you have measured the ceiling (§2d), lanes beyond it produce queue, not merges. The fix is
+not fewer lanes — it is fewer BUILDERS per lane and more of everything that needs no runner:
+
+| CI-capped (≤2 workers/lane) | CI-free (spend the rest here) |
+|---|---|
+| writing a PR | verifying a filing's premise on origin/main |
+| rebasing, re-running | triaging the backlog to a verdict |
+| anything that opens a PR | auditing a fence for mirrors / producer-consumer drift |
+| | reviewing another lane's open PR by diff |
+| | designing a detector, then measuring its false-positive rate |
+
+Measured 2026-09-02: the day's most valuable outputs — a ten-defect craft audit, a
+producer/consumer detector with its noise rate, and a 419-row triage that found the "unknown
+backlog" was a keyword artefact — all came from workers that never touched CI. Meanwhile the
+Mac sat at load 52 with builders waiting on a 10-job pipe.
+
+Run ONE local build throttle, not two: a machine-wide `mix` wrapper on PATH queues every agent;
+a second per-lane wrapper on top of it just splits the queue and hides the contention.
+
+## 2f. Cap WIP across the FLEET, not per lane
+
+Per-lane caps do not bound the fleet: 18 lanes x 6 = 108 possible open PRs against ~10 concurrent
+CI jobs. Throughput is fixed by the runners, so every PR past the point where the pipe stays full
+buys nothing and costs everyone latency — work-in-progress and waiting time move together at a
+fixed service rate.
+
+Measured 2026-09-02: 50 ready PRs, ~10 concurrent jobs, open→merge 139 min median / 434 p90.
+Set the fleet cap at roughly 3-4x the concurrent-job count, not at what the lanes would like:
+3 ready PRs per lane, everything else DRAFT, promote one draft per merge. Exempt a main-red fix,
+a CI-diet PR and a P0 — those unblock others, so holding them behind a cap is backwards.
+
+The lever nobody reaches for first is the right one: a lane that is saturated on FILES is idle
+anyway (§2e), so the drafts cost nothing real. `gh pr ready --undo <pr>` is free; a nine-hour
+queue is not.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
@@ -140,3 +224,8 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   leases lapsed; stamp + close what the sweep merged; continue).
 - **Notify the owner once** (PushNotification): quota is theirs (`cswap`); relaunch on their word or at
   the reset time. Do not spend the outage idle: sweeps, triage reads, and the resume plan are free.
+- **Stand the originals down when you relaunch.** A lead that died on quota is only *paused*: when the
+  limit resets, its queued inbox messages and its own background loops wake it, and now two leads
+  drive one lane (measured 2026-09-02: the original deploy lead re-instructed a worker 90 min after its
+  successor took over). At relaunch, send every original a one-line stand-down (stop loops, no ledger
+  writes, no worker instructions, note it in status.md, end turn) in the same message as the launches.

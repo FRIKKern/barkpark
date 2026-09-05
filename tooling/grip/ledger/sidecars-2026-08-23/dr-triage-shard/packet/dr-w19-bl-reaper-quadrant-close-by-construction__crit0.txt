@@ -1,0 +1,1 @@
+`list_orphaned_static_deployments/0` no longer requires claim_epoch > 0, so a never-claimed bound queued row is reachable by the existing resume pass.

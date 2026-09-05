@@ -1,0 +1,1 @@
+.editor-body.bp-paper-body scrollWidth <= clientWidth is measured at a container width just above the gate under a non-Iowan fallback font

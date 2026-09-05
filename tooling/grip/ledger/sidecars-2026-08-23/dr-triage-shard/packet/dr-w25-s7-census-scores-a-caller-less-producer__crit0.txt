@@ -1,0 +1,1 @@
+A CALLER arm is added to cloud/test/barkpark_cloud/payload_key_set_census_test.exs (not a new file, not a ninth instrument) that censuses /v1/internal/** write routes against a DECLARED corpus. Paste the arm's test names and the measured route count.

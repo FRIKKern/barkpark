@@ -1,0 +1,1 @@
+Whatever instrument owns the chip now measures it across the band rather than at the single width 768, and that widening is proven able to fail.

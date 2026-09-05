@@ -1,0 +1,1 @@
+Measured evidence at three viewports (900 / 1280 / 2560px) showing the surface stays inside the clamp at both ends

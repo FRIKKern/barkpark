@@ -1,12 +1,18 @@
 name: twoslash
 
+# Venue (2026-09-05, task-33742276cf0a35b1): push-to-main + nightly, NOT pull_request.
+# 1.45 min per execution checking doc snippets, not the PR's code; the issue-filer job below is its reader.
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - "js/docs/**"
       - "tooling/twoslash-mocks/**"
       - "js/packages/**"
       - ".github/workflows/twoslash.yml"
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
 
 jobs:
   gate:
@@ -28,17 +34,20 @@ jobs:
         if: steps.detect.outputs.present != 'true'
         run: echo "Docs app (js/docs/) not present — twoslash gate skipped."
 
-      - name: Setup Node
-        if: steps.detect.outputs.present == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         if: steps.detect.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence pnpm/action-setup runs above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install JS workspace deps
         if: steps.detect.outputs.present == 'true'
@@ -54,3 +63,25 @@ jobs:
         run: |
           npm install --no-audit --no-fund --silent
           npx --no-install tsc --noEmit --project tooling/twoslash-mocks/tsconfig.json
+
+  report-main-failure:
+    name: Report main-push failure to a human
+    needs: [gate]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: twoslash-main
+          CI_FAILURE_DETAIL: |
+            `twoslash` is RED on main. It left the pull_request path on 2026-09-05
+            (docs/ops/ci-workflow-verdicts.md, task-33742276cf0a35b1), so this
+            issue is its only reader: nobody sees a red here on a PR any more.
+            Read the failed job's log, fix or revert on main, and close this issue
+            once the next main-push or nightly run is green.
+        run: bash scripts/file-ci-failure-issue.sh

@@ -1,0 +1,1 @@
+The root cause is recorded in a durable venue the fix carries (commit body or a code comment at the ready-pool query): why the ghost row outlived the doc update, or that the query now dedups by doc_id keeping the freshest.

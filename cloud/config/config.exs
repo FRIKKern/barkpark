@@ -326,12 +326,27 @@ config :barkpark_cloud, Oban,
        # Runs off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a
        # missed tick is harmless (max_attempts: 1 — the next day catches up).
        {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
+       # cch-w54-bl: the daily archive-bundle purge — the erasure path a
+       # decommission did not have. A bundle is kept 30 days past the teardown
+       # that made it, then deleted from object storage; a still-live team
+       # NEVER loses its most recent bundle. Runs at 03:45, after the agent
+       # prune and before the 06:00 digest, so the two off-peak sweeps do not
+       # overlap. max_attempts: 1 — the window is 30 days wide, so a missed
+       # tick costs nothing.
+       {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
        # isu-w5: the daily fleet-update digest — one plain-text operator email
        # summarizing where every instance stands against the newest release the
        # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
        # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
        # a missed tick is harmless and a double-enqueue must not double-send.
        {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+       # cch-w30-bl: the daily PAT expiry warning — mail the token's OWNER (and
+       # ONLY the owner, on the user-scoped transactional path) 7 days before a
+       # personal access token's bounded `expires_at`. Runs at 07:10: after the
+       # 06:00 operator digest, off every on-the-hour sweep. DAILY, not hourly —
+       # the deadline is day-grained and the per-token stamp
+       # (`user_tokens.expiry_warned_at`) makes the notice one-shot anyway.
+       {"10 7 * * *", BarkparkCloud.Workers.TokenExpiryWarningWorker},
        # stw9 (charter D57b): the hourly TEMPLATE-freshness sweep — re-enqueue an
        # UNFORCED "template-auto" build for every deployed content-bound site, so
        # a merged template change reaches live sites with no human in the loop.

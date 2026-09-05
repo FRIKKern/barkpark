@@ -1,0 +1,1 @@
+internal/agent/report.go decodes window_s and carries it through to the outbound beat, with a test proving a beat built from a body carrying window_s preserves it

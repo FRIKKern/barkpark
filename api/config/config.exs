@@ -359,6 +359,12 @@ config :barkpark, Oban,
        # nightly reads never kick off in the same tick.
        {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # edit-on-the-link slice 4 — retention sweep for the paper view/edit
+       # trail (`paper_access_log`). Daily, fifteen minutes after the search
+       # prune so the two range deletes never open their scans in one tick.
+       # Window: `:paper_access_log_ttl_days` below. Core (not a plugin), so it
+       # lives in this static crontab and rides the `default` queue.
+       {"15 4 * * *", Barkpark.Content.Workers.PaperAccessSweeper},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -370,6 +376,17 @@ config :barkpark, Oban,
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
        {"* * * * *", Barkpark.Audit.ExportWorker},
+       # bl-api-task-create-idempotency C4 — GC for the `idempotency_keys`
+       # dedup store. `Idempotency.sweep/1` has existed since the table was
+       # created and, until this entry, was called by NOTHING outside its own
+       # test: the store was append-only in production, each row carrying a
+       # full cached response body. Hourly (not per-minute) because the TTL is
+       # 24h — an hour of lateness on a 24h expiry costs nothing, and the sweep
+       # is an index scan, not a recovery path. Runs on the static `default`
+       # queue alongside the webhook/audit sweepers; the worker bounds one tick
+       # by construction (`Idempotency.sweep_batch/1`), so a cold first pass
+       # over a long-unswept table cannot become one giant transaction.
+       {"17 * * * *", Barkpark.Idempotency.Sweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
@@ -408,6 +425,15 @@ config :barkpark, Oban,
 # higher than the rest of the fleet (Search.Crystallize / Prune are
 # daily).
 config :barkpark, :task_lease_ttl_seconds, 2700
+
+# edit-on-the-link slice 4 — retention window for `paper_access_log`, the paper
+# view/edit trail. 90 days is a quarter: long enough to answer "who has been on
+# this link" for the period anybody actually asks about, short enough that an
+# unbounded per-mount series stays bounded. Swept daily by
+# Barkpark.Content.Workers.PaperAccessSweeper; tests pass an explicit `days` in
+# the job args rather than overriding this. Runtime override:
+# BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS (see runtime.exs).
+config :barkpark, :paper_access_log_ttl_days, 90
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`
@@ -525,6 +551,19 @@ config :barkpark, Barkpark.Sites.Provisioner,
 config :barkpark, Barkpark.Crypto.LocalKek,
   key: Base.encode64(:crypto.hash(:sha256, "barkpark-dev-kek-not-for-prod")),
   version: 1
+
+# MUTATE-PATH SCHEMA VALIDATION (Barkpark.Content.Validation,
+# task-41a740fd6701ec28). Every create-family and update write runs the
+# validator at the Writer chokepoint. The DEFAULT is ADVISE: findings ride the
+# mutate success envelope as `warnings` (code `schema_validation`) and NEVER
+# block — status and stored bytes are unchanged from before the mount.
+#
+# ENFORCE (422 `validation_failed`) is opt-in PER DATASET: list the dataset
+# slugs here, or the atom `:all`. Empty list = nobody enforces. Flipping the
+# default is the owner's call, announced, with its own row — not a config edit.
+# runtime.exs maps BARKPARK_SCHEMA_ENFORCE_DATASETS (comma-separated slugs, or
+# "all") over this, so an operator opts a dataset in without shipping code.
+config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

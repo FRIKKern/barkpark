@@ -1,0 +1,1 @@
+TENANCY: a scoped team read cannot name a foreign team's site - a two-team test asserts the second team's site never appears in the list. Evidence: the test name and its assertion.

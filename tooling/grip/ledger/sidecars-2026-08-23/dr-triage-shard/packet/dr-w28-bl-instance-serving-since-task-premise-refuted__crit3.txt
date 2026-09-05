@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the ledger holds exactly ONE description of the instance serving_since gap, and a re-read of the epic roster confirms no open row still points a builder at deploy/instance-deploy.sh.

@@ -1,0 +1,1 @@
+PAIRED POSITIVE CONTROL in the same test: the owner scenario still renders both mounts enabled, so the absence assertion cannot be satisfied by the card vanishing. Evidence: the owner render.

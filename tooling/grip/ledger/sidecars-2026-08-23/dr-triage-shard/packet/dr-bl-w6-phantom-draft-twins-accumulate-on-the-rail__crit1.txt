@@ -1,0 +1,1 @@
+The rail stops accumulating them: the write is fixed, or children excludes status:draft rows. Evidence: zero drafts.* children after a full wave runs.

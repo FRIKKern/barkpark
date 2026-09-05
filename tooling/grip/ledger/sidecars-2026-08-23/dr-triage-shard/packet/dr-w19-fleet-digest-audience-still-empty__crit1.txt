@@ -1,0 +1,1 @@
+dr-w18-s4's empty-audience census allowlist row for fleet_operator_digest is DELETED IN THE SAME COMMIT, and the rot assertion goes green because the audience is non-empty rather than because the row was removed. Evidence: the allowlist diff plus the census run before and after.

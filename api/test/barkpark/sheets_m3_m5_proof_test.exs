@@ -94,13 +94,13 @@ defmodule Barkpark.SheetsM3M5ProofTest do
       content_type: "application/octet-stream"
     }
 
-    build_conn()
+    scoped_conn()
     |> ingest_authed()
     |> post(@import_path, Map.put(params, "file", upload))
   end
 
   defp fetch_sheet(doc_id) do
-    build_conn()
+    scoped_conn()
     |> write_authed()
     |> get("/v1/data/doc/#{@dataset}/sheet/#{doc_id}")
     |> json_response(200)
@@ -108,25 +108,25 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   end
 
   defp mutate(mutations) do
-    build_conn()
+    scoped_conn()
     |> write_authed()
     |> put_req_header("content-type", "application/json")
     |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => mutations}))
   end
 
   defp ingest_paper(body) do
-    build_conn()
+    scoped_conn()
     |> ingest_authed()
     |> put_req_header("content-type", "application/json")
     |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
   end
 
   defp read_paper do
-    build_conn() |> get("/papers/#{@paper_slug}") |> html_response(200)
+    scoped_conn() |> get("/papers/#{@paper_slug}") |> html_response(200)
   end
 
   defp export(slug, ext, query \\ "") do
-    build_conn() |> ingest_authed() |> get("/v1/plugins/sheets/#{slug}/export.#{ext}#{query}")
+    scoped_conn() |> ingest_authed() |> get("/v1/plugins/sheets/#{slug}/export.#{ext}#{query}")
   end
 
   # ── the workbook ─────────────────────────────────────────────────────────────

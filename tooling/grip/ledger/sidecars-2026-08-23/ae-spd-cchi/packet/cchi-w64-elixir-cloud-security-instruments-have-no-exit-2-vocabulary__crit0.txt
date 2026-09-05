@@ -1,0 +1,1 @@
+Each exit-2-capable job in the three workflows publishes an `outputs.verdict` and the aggregate's `decide` takes it. Name which jobs are genuinely exit-2-capable and which are not — a verdict channel for a job that can only pass or fail is vacuous.

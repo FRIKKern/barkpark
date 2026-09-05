@@ -1,0 +1,1 @@
+An anonymous /v1/capabilities request performs zero database queries, proved by instrumentation or a test, with cache invalidation handled on tenancy writes (a pinned nil from a pre-backfill DB is a fail).

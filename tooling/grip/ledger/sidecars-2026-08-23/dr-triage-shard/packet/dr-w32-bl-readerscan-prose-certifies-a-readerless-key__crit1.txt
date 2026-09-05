@@ -1,0 +1,1 @@
+The wave-32 mutation is added as a regression arm: enrolling a key whose only hits are prose must RED on :has_reader, not pass.

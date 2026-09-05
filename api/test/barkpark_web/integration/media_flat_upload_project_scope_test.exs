@@ -68,7 +68,7 @@ defmodule BarkparkWeb.Integration.MediaFlatUploadProjectScopeTest do
       )
 
     conn =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{raw}")
 
     %{

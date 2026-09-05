@@ -37,9 +37,12 @@ describe('transport — user-initiated abort', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
-  // A genuine fetch-level failure (DNS/offline/TLS) stays a retryable
-  // BarkparkNetworkError — guard against the fix over-reaching.
-  it('still wraps a real network failure as a retryable BarkparkNetworkError', async () => {
+  // A genuine fetch-level failure (DNS/offline/TLS) still gets CLASSIFIED as a
+  // BarkparkNetworkError — guard against the abort fix over-reaching. It is no
+  // longer re-attempted: a transport fault is not a served fault, and the
+  // default read policy refuses it (src/retry.ts). The classification is what
+  // this test guards; the attempt count moved with the narrowing.
+  it('still wraps a real network failure as a classified BarkparkNetworkError', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
 
     let caught: unknown
@@ -51,7 +54,7 @@ describe('transport — user-initiated abort', () => {
     })
 
     expect(caught).toBeInstanceOf(BarkparkNetworkError)
-    // read policy = 3 attempts, so a real network error is retried
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    // One request: a transport fault is handed straight back, unrepeated.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 })

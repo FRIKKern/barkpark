@@ -1,0 +1,1 @@
+The 48 measured keys are each resolved, not just counted: the 26 unread fleet-row keys (including the whole 14-signal pressure block), the 10 unread deployment keys and the 3 unread site keys are either DECODED or listed in the check's allowlist with a written reason. An allowlist entry with no reason is the silence again, in a file.

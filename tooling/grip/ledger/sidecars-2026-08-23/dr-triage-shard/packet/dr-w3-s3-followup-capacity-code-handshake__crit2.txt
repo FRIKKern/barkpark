@@ -1,0 +1,1 @@
+The cause-aware chain takes the CAPACITY bound of 12, not the SHORT busy bound of 6, for a refusal carrying that verbatim body — assert the bound directly, so a site under sustained cap pressure cannot lose a publish to a bound aimed at a different failure. The assertion must fail if the fixture reverts to the invented string.

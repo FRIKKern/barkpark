@@ -1,0 +1,1 @@
+One cache store (or documented write-through) backs both the update notice and the whoami freshness leg; the redundant store is removed — evidenced by the diff

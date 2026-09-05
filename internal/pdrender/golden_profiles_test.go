@@ -76,6 +76,9 @@ func assertStripComplete(t *testing.T, name string, render func(width int, p Pro
 			for i, p := range profiles {
 				lipgloss.SetColorProfile(lipglossProfileFor(p))
 				stripped := ansi.Strip(render(w, p))
+				// Shared blind-spot guard (unknown_block_guard_test.go): assert it at
+				// EVERY profile, not just the NoColor golden.
+				assertNoUnknownBlock(t, name+" "+profileName(p), stripped)
 				if i == 0 {
 					base = stripped
 					if strings.TrimSpace(base) == "" {

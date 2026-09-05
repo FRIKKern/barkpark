@@ -18,6 +18,25 @@
 # such PR would otherwise flood this verdict into noise. Only CONFLICTING rows
 # are candidates.
 #
+# A DRAFT PULL REQUEST ASSERTS NOTHING ANYONE CAN ACT ON
+#
+# GitHub refuses to merge a draft and the merge sweep skips it, so a DRAFT
+# CONFLICTING PR carries no verdict a human can act on: the hazard this watch
+# exists for — one update-branch makes a stale-green conflicted PR 4/4-eligible
+# and the sweep lands it out of order — cannot happen while the row is a draft.
+# Worse, the LEAD-BRIEF's own prescribed remedy for a stale conflicted PR is
+# "draft it instead", so a red that survives drafting is a red whose own remedy
+# does not clear it. MEASURED: main drafted #15631 at 2026-09-04T02:31Z; run
+# 33837151186 at 04:31Z still printed "NOVEL 1 — #15631 … DIRTY head cbbe4a639
+# [NOVEL]" and failed main, because this file never read isDraft.
+#
+# So drafts are EXCLUDED from the NOVEL / RED set — and never silenced. Every
+# draft that would otherwise be reported is printed on its own labelled line
+# ("DRAFT, not counted: #N …") and counted on the DRAFT line of the ratchet
+# block, so the population stays fully visible. Marking it ready makes it NOVEL
+# on the very next run. A pinned row that goes draft is NOT called healed
+# either; see $DRAFTN in RATCHET_JQ.
+#
 # IT COUNTS ALL-OF-PRESENT, NEVER OCCURRENCES-OF-SUCCESS
 #
 # The obvious jq — count rollup entries whose name is required and whose
@@ -161,6 +180,16 @@
 #   scripts/stale-verdict-watch.sh --fixture prs.json --commits main-commits.txt
 #   scripts/stale-verdict-watch.sh --baseline scripts/stale-verdict-watch.baseline
 #   scripts/stale-verdict-watch.sh --selftest
+#   scripts/stale-verdict-watch.sh --page-size 10 --page-attempts 6
+#
+# THE READ IS PAGED. The pull-request population is walked with a GraphQL
+# cursor, PAGE_SIZE rows at a time, and a page that fails is retried AS A PAGE.
+# `gh pr list --limit 100 --json …statusCheckRollup` — the read this replaced —
+# asks for a hundred rows and a hundred check rollups in ONE request, and at
+# this repository's open-PR population that request answers HTTP 504 every
+# time. Every scheduled run of the workflow was rc=6 UNREACHABLE on it. The
+# refusal is unchanged: a read that still cannot complete returns non-zero and
+# the run still FAILS. See the block above fetch_prs for the measurement.
 #
 # The two fixture flags make every classification hermetically provable; see
 # scripts/stale-verdict-watch.test.sh. `--selftest` is a self-contained,
@@ -219,6 +248,19 @@ SELFTEST_CHILD="${SVW_SELFTEST_CHILD:-0}"
 # going live. Left unchanged on that evidence; re-measure if a BLIND run
 # recurs rather than re-guessing the number.
 ATTEMPTS=3
+# THE TRANSPORT BUDGET, which is a different budget from ATTEMPTS above and was
+# the actual cause of the permanent rc=6 red. See the block above fetch_prs for
+# the measurement. PAGE_SIZE=25 is chosen with margin: 50 still answered at 72
+# open pull requests, 25 answered in ~4s, and the page count is cheap.
+PAGE_SIZE="${SVW_PAGE_SIZE:-25}"
+PAGE_ATTEMPTS="${SVW_PAGE_ATTEMPTS:-4}"
+# Backoff BETWEEN page retries. The old budget spent all three of its attempts
+# inside ~60 seconds against a deterministic 504 — three shots at the same wall.
+PAGE_SLEEPS="${SVW_PAGE_SLEEP:-3 8 20 0}"
+# A ceiling so a cursor that never terminates cannot spin forever. At the
+# default page size this is 1000 pull requests — ten times what the read it
+# replaces could see at all — and exhausting it is SAID, never silent.
+MAX_PAGES="${SVW_MAX_PAGES:-40}"
 MIN_COMMITS=1
 # The TREND state (dr-w29): a line-oriented file the workflow persists between
 # runs. Two verbs only. `START <iso>` is appended the moment a run knows its
@@ -260,26 +302,170 @@ is_config_fault() { # body
   grep -qE 'HTTP 401|HTTP 403|Bad credentials|Resource not accessible by integration|Requires authentication|requires authentication' <<<"$1"
 }
 
-PR_FIELDS="number,mergeable,mergeStateStatus,headRefOid,updatedAt,statusCheckRollup"
+# ── THE READ, AND WHY IT IS PAGED ────────────────────────────────────────────
+#
+# THE DEFECT THIS OWNS. Every scheduled run of this workflow was RED for weeks
+# with rc=6 UNREACHABLE, and the cause was not the token and not permissions:
+# the read itself had outgrown GitHub's own timeout. `gh pr list --limit 100
+# --json …statusCheckRollup` asks GitHub, in ONE GraphQL request, for a hundred
+# pull requests AND each one's full check rollup. Measured against this
+# repository on 2026-09-02 with 72 open pull requests, three consecutive
+# attempts at limit=100:
+#
+#     limit=100 + rollup  → HTTP 504 after ~11s   (3 of 3 attempts)
+#     limit=50  + rollup  → 50 rows in ~10s
+#     limit=25  + rollup  → 25 rows in ~4s
+#     limit=100, NO rollup→ 72 rows in ~4s
+#
+# So the fault is the PRODUCT of page size and the rollup, and it is
+# DETERMINISTIC at this population — every attempt failed, which is why raising
+# the attempt budget alone would have bought nothing. The rollup cannot be
+# dropped: VERDICT_JQ below reads $pr.statusCheckRollup for every required
+# context, and without it there is no verdict at all.
+#
+# THE FIX IS THE PAGE, NOT THE BUDGET. This asks for PAGE_SIZE rows at a time
+# and walks the population with a cursor. A page that 504s is retried AS A
+# PAGE, so the pages already read are never thrown away, and the population is
+# no longer capped at the 100 `gh pr list` would have silently truncated to.
+#
+# WHAT IS DELIBERATELY UNCHANGED. The refusal. A read that cannot complete
+# still returns non-zero here, still exits 6 UNREACHABLE upstream, and still
+# fails the run. Nothing below falls back to an empty population, and no arm
+# added here can turn a failed read into a green: the ONLY success return is
+# the one that printed a payload GitHub actually answered with.
+PR_QUERY='
+query($owner:String!,$name:String!,$first:Int!,$after:String){
+  repository(owner:$owner,name:$name){
+    pullRequests(states:OPEN, first:$first, after:$after,
+                 orderBy:{field:CREATED_AT,direction:DESC}){
+      pageInfo{ hasNextPage endCursor }
+      nodes{
+        number mergeable mergeStateStatus updatedAt headRefOid isDraft
+        commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
+          __typename
+          ... on CheckRun { name conclusion completedAt status }
+          ... on StatusContext { context state createdAt }
+        }}}}}}
+      }
+    }
+  }
+}'
 
-# One call returns every field the verdict needs (measured at 6.28s over 40 open
-# PRs). Re-polled while any row is still UNKNOWN.
+# The page payload, rendered into exactly the shape `gh pr list --json` used to
+# hand the verdict — same keys, same values, including the Go zero time gh
+# substitutes for a check run that has not completed. Nothing downstream had to
+# change, which is the point: this slice replaces the TRANSPORT, not the
+# verdict.
+PR_NORMALISE_JQ='
+[ .data.repository.pullRequests.nodes[]
+  | { number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+      isDraft: (.isDraft // false),
+      statusCheckRollup:
+        [ (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
+          | { __typename,
+              name:        (.name // .context),
+              status:      (.status // ""),
+              conclusion:  (.conclusion // .state // ""),
+              completedAt: (.completedAt // "0001-01-01T00:00:00Z") } ] } ]'
+
+# ONE full pass over the population: pages until GitHub says there is no next
+# page. Retries a PAGE that fails, up to PAGE_ATTEMPTS, so a transient 504 on
+# page 3 does not discard pages 1 and 2.
+#   0 = the whole population was read   (prints the JSON array)
+#   2 = a page could not be read        (prints the last error body)
+#   3 = credential fault                (prints the error body)
+fetch_pr_pages() { # <repo> -> JSON array | error body
+  local repo="$1" owner name after="" rows="[]" page=0 attempt out body
+  local sleep_for got next
+  owner="${repo%%/*}"; name="${repo##*/}"
+  [ -n "$owner" ] && [ -n "$name" ] && [ "$owner" != "$repo" ] || {
+    printf '%s' "not an owner/name repository: '$repo'"
+    return 3
+  }
+  while :; do
+    page=$((page + 1))
+    if [ "$page" -gt "$MAX_PAGES" ]; then
+      # NEVER silent. The old read truncated at 100 rows and said nothing; a
+      # truncation this one cannot avoid is stated in the log.
+      red "  the population did not end within $MAX_PAGES page(s) of $PAGE_SIZE — this read is TRUNCATED at $(jq 'length' <<<"$rows") row(s) and any pull request past that point was NOT examined."
+      break
+    fi
+    attempt=0
+    while :; do
+      attempt=$((attempt + 1))
+      if [ -n "$after" ]; then
+        out="$(gh api graphql -f query="$PR_QUERY" -F owner="$owner" -F name="$name" \
+                 -F first="$PAGE_SIZE" -F after="$after" 2>&1)" && break
+      else
+        out="$(gh api graphql -f query="$PR_QUERY" -F owner="$owner" -F name="$name" \
+                 -F first="$PAGE_SIZE" 2>&1)" && break
+      fi
+      if is_config_fault "$out"; then
+        printf '%s' "$out"
+        return 3
+      fi
+      body="$(printf '%s' "$out" | head -1)"
+      if [ "$attempt" -ge "$PAGE_ATTEMPTS" ]; then
+        red "  page $page failed $attempt/$PAGE_ATTEMPTS times, giving up on this pass: $body"
+        printf '%s' "$out"
+        return 2
+      fi
+      sleep_for="$(printf '%s\n' $PAGE_SLEEPS | sed -n "${attempt}p")"
+      [ -n "${sleep_for:-}" ] || sleep_for=0
+      red "  page $page attempt $attempt/$PAGE_ATTEMPTS failed, retrying the PAGE in ${sleep_for}s: $body"
+      [ "$sleep_for" = "0" ] || sleep "$sleep_for"
+    done
+    got="$(jq -c "$PR_NORMALISE_JQ" <<<"$out" 2>/dev/null)" || {
+      # A page GitHub answered 200 to and jq could not read is NOT a transport
+      # silence — but it is also not a population, so it must not be reported
+      # as one. It leaves as an unreadable page, which upstream calls
+      # UNREACHABLE rather than green.
+      red "  page $page came back 200 and could not be parsed as a pull-request page"
+      printf '%s' "$out"
+      return 2
+    }
+    [ -n "$got" ] || { red "  page $page normalised to nothing"; printf '%s' "$out"; return 2; }
+    # Both arrays go through STDIN, never argv: `--argjson a "$rows"` put the whole
+    # accumulated population on the command line and, past a few hundred PRs of
+    # check-rollup rows, execve refused it — "jq: Argument list too long" on
+    # every run from 2026-09-03 06:08Z, read as UNREACHABLE (task-0a48c7b64d5ab0f1).
+    rows="$(printf '%s\n%s\n' "$rows" "$got" | jq -c -s '.[0] + .[1]')" || {
+      red "  page $page could not be appended to the population"
+      return 2
+    }
+    next="$(jq -r '.data.repository.pullRequests.pageInfo.hasNextPage' <<<"$out" 2>/dev/null)"
+    [ "$next" = "true" ] || break
+    after="$(jq -r '.data.repository.pullRequests.pageInfo.endCursor' <<<"$out" 2>/dev/null)"
+    [ -n "$after" ] && [ "$after" != "null" ] || {
+      red "  page $page says there is a next page and names no cursor for it"
+      return 2
+    }
+  done
+  printf '%s' "$rows"
+  return 0
+}
+
+# The population, re-polled while any row is still mergeable=UNKNOWN (GitHub
+# computes that lazily). The outer budget is about UNKNOWN; the inner
+# PAGE_ATTEMPTS budget above is about transport. They are separate on purpose:
+# the 2026-08-23 measurement of 368 scheduled runs found ZERO rc=5 BLIND runs,
+# so the UNKNOWN budget was never the problem — the transport was.
 fetch_prs() { # -> prints JSON array, or the error body on failure
-  local repo="$1" out i=0 sleep_for unknown
+  local repo="$1" out i=0 rc sleep_for unknown
   while [ "$i" -lt "$ATTEMPTS" ]; do
     i=$((i + 1))
-    if out="$(gh pr list --repo "$repo" --state open --limit 100 --json "$PR_FIELDS" 2>&1)"; then
+    out="$(fetch_pr_pages "$repo")"; rc=$?
+    if [ "$rc" = "0" ]; then
       unknown="$(jq '[.[] | select(.mergeable == "UNKNOWN")] | length' <<<"$out" 2>/dev/null || echo 0)"
       if [ "${unknown:-0}" = "0" ] || [ "$i" -ge "$ATTEMPTS" ]; then
         printf '%s' "$out"
         return 0
       fi
       red "  poll $i/$ATTEMPTS: $unknown row(s) answered mergeable=UNKNOWN (lazily computed) — re-polling"
+    elif [ "$rc" = "3" ]; then
+      printf '%s' "$out"
+      return 3
     else
-      if is_config_fault "$out"; then
-        printf '%s' "$out"
-        return 3
-      fi
       red "  poll $i/$ATTEMPTS could not list pull requests: $(printf '%s' "$out" | head -1)"
     fi
     sleep_for="$(printf '%s\n' $SLEEPS | sed -n "${i}p")"
@@ -316,6 +502,7 @@ def commits_since($t):
   . as $pr
   | {
       number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+      isDraft: (.isDraft // false),
       ctx: [ $req[] as $n
              | { name: $n,
                  hits: [ $pr.statusCheckRollup[]?
@@ -366,7 +553,13 @@ def commits_since($t):
                            | select((.missing | length) > 0 and (.rendered | length) > 0
                                     and (.green_all | length) == (.rendered | length))
                            | { number, green: (.green_all | length), rendered: (.rendered | length) } ]
-| .reported            = [ .conflicting[] | select((.stale_greens | length) > 0) ]
+# A DRAFT PR IS NOT AN ACTIONABLE VERDICT. See the header block. The stale
+# green is still computed, still printed — on its own line — and it is kept out
+# of `.reported`, which is the set the ratchet, the trend and every exit code
+# are computed from.
+| .stale               = [ .conflicting[] | select((.stale_greens | length) > 0) ]
+| .reported            = [ .stale[] | select(.isDraft != true) ]
+| .reported_draft      = [ .stale[] | select(.isDraft == true) ]
 '
 
 # ── THE PIN ──────────────────────────────────────────────────────────────────
@@ -436,6 +629,11 @@ RATCHET_JQ='
   . as $v
   | ($v.reported | map({number, head: .headRefOid})) as $R
   | ($v.unknown  | map(.number))                     as $UNK
+  # A pinned row that went DRAFT is still reported — on the draft line — so it
+  # has not healed. Without this it would vanish from $R and red rc 8 BASELINE
+  # DRIFT, telling a human to delete a line the PR would re-earn the moment it
+  # is marked ready. Drafting is reversible; the pin outlives it.
+  | ($v.reported_draft | map(.number))               as $DRAFTN
   | ($v.all_numbers)                                 as $SEEN
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length > 0) ] as $known
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length == 0) ] as $novel
@@ -448,7 +646,9 @@ RATCHET_JQ='
           pinned_head: ([ $base[] | select(.number == $r.number) | .head ] | first) } ] as $head_moved
   | [ $base[] | . as $b | select([ $R[] | select(.number == $b.number) ] | length == 0) ] as $unreported
   | [ $unreported[] | . as $b | select(($UNK | index($b.number)) != null) ] as $pinned_unread
-  | [ $unreported[] | . as $b | select(($UNK | index($b.number)) == null)
+  | [ $unreported[] | . as $b | select(($DRAFTN | index($b.number)) != null) ] as $pinned_draft
+  | [ $unreported[] | . as $b
+      | select(($UNK | index($b.number)) == null and ($DRAFTN | index($b.number)) == null)
       | . + { gone: (($SEEN | index($b.number)) == null) } ] as $healed
   | . + { ratchet: {
       pinned:        ($base | length),
@@ -458,6 +658,7 @@ RATCHET_JQ='
       novel:         $novel,
       head_moved:    $head_moved,
       healed:        $healed,
+      pinned_draft:  $pinned_draft,
       pinned_unread: $pinned_unread } }
 '
 
@@ -495,6 +696,13 @@ render() { # reads the verdict JSON on stdin
       (if (.ratchet.known | length) > 0 then " — \(.ratchet.known | map(.number) | sort | map("#\(.)") | join(", "))  (standing debt, printed in full below, NOT failed on)" else " — no pinned row is still reporting" end),
     "  HEALED \(.ratchet.healed | length)" +
       (if (.ratchet.healed | length) > 0 then " — \(.ratchet.healed | map(.number) | sort | map("#\(.)") | join(", "))  ← this run FAILS: the baseline must shrink" else " — every pinned entry is still earning its line" end),
+    "  DRAFT  \(.reported_draft | length)" +
+      (if (.reported_draft | length) > 0 then " — \(.reported_draft | map(.number) | sort | map("#\(.)") | join(", "))  (a draft cannot be merged, so it asserts no actionable verdict — printed below, NOT counted, NOT failed on)" else " — no draft pull request is asserting a stale green" end),
+    (.reported_draft | sort_by(.number)[] |
+      "  DRAFT, not counted: #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt) — GitHub refuses to merge a draft and the merge sweep skips it, so this stale green cannot reach main. Mark it ready and it is NOVEL on the very next run."),
+    (if (.ratchet.pinned_draft | length) > 0
+     then "  ^ PINNED-DRAFT \(.ratchet.pinned_draft | length) — \(.ratchet.pinned_draft | map(.number) | sort | map("#\(.)") | join(", ")): pinned, still asserting a stale green, and now a DRAFT. NOT called healed — drafting is reversible and the pin outlives it. Delete the line only when the row stops reporting entirely."
+     else empty end),
     (if (.ratchet.pinned_unread | length) > 0
      then "  UNREAD \(.ratchet.pinned_unread | length) — \(.ratchet.pinned_unread | map(.number) | sort | map("#\(.)") | join(", ")): pinned, and this run could not classify the row. NOT called healed on a read that did not happen."
      else empty end),
@@ -783,6 +991,20 @@ main() {
       # ASKED, described as a run that asked and was not answered. A
       # non-numeric value did worse: `[ "$i" -lt three ]` printed a bash
       # "integer expression expected" error and took the same exit.
+      --page-size)
+        PAGE_SIZE="${2:-}"; shift 2 || true
+        case "$PAGE_SIZE" in
+          ''|*[!0-9]*) red "--page-size must be a positive integer, got: '${PAGE_SIZE}'"; exit 3 ;;
+        esac
+        [ "$PAGE_SIZE" -ge 1 ] && [ "$PAGE_SIZE" -le 100 ] || { red "--page-size must be between 1 and 100: GitHub's connection cap is 100, and 0 rows per page is not a read."; exit 3; }
+        ;;
+      --page-attempts)
+        PAGE_ATTEMPTS="${2:-}"; shift 2 || true
+        case "$PAGE_ATTEMPTS" in
+          ''|*[!0-9]*) red "--page-attempts must be a positive integer, got: '${PAGE_ATTEMPTS}'"; exit 3 ;;
+        esac
+        [ "$PAGE_ATTEMPTS" -ge 1 ] || { red "--page-attempts must be at least 1: a page nobody asks for is not a read."; exit 3; }
+        ;;
       --attempts)
         ATTEMPTS="${2:-}"
         case "$ATTEMPTS" in

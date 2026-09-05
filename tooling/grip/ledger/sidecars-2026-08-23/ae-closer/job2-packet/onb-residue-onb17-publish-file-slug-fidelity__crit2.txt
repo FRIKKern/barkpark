@@ -1,0 +1,1 @@
+The publish receipt names the final slug so a substitution can never be silent

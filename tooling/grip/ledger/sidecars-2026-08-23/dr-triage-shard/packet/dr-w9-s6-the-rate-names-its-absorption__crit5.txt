@@ -1,0 +1,1 @@
+cloudclient.DeployCensus decodes deferred_total and absorption as pointers, and the human headline prints absorption ON THE SAME LINE as the rate. Evidence: the diff and a golden-output test.

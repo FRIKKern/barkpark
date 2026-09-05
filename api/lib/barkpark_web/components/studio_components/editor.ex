@@ -138,6 +138,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :required, :boolean, default: false
   attr :errors, :list, default: []
   attr :onix_element, :string, default: nil
+  # Gyldendal parity E1.5 — the schema field's `description`, rendered as
+  # Sanity does: muted helper text directly under the title, above the input.
+  attr :description, :string, default: nil
   slot :inner_block, required: true
 
   def editor_field(assigns) do
@@ -148,6 +151,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label>
+      <p :if={@description} class="editor-field-description"><%= @description %></p>
       <%= if @onix_element do %>
         <span class="bp-onix-hint" data-onix-element>
           ONIX: <code><%= @onix_element %></code>
@@ -242,6 +246,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # in which case the primary control falls back to the desk root.
   attr :list_href, :string, default: nil
   attr :desk_href, :string, required: true
+  # `:not_found` triage (Gyldendal 35c, `Shared.triage_not_found/2`): the CAUSE
+  # the card names — `:absent` | `:elsewhere` | `:out_of_reach` | nil (untriaged,
+  # renders as absent). Only `:elsewhere` may mention another workspace, and
+  # then it NAMES it and links to the document there.
+  attr :cause, :atom, default: nil
+  attr :elsewhere_name, :string, default: nil
+  attr :elsewhere_href, :string, default: nil
+  attr :grant_scope, :string, default: nil
 
   def unresolved_document_notice(%{reason: :nothing_selected} = assigns) do
     ~H"""
@@ -265,28 +277,46 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       data-reason={@reason}
       data-doc-id={@doc_id}
       data-doc-type={@doc_type}
+      data-cause={@cause}
     >
       <p class="bp-paper-unrenderable-title">
         Studio could not open this document.
       </p>
-      <p :if={@reason == :not_found} class="bp-paper-unrenderable-reason">
+      <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
+        No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this workspace —
+        but a document with that id lives in the workspace <strong><%= @elsewhere_name %></strong>.
+      </p>
+      <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
+        <%= if @reason == :unknown_node do %>The type <code><%= @doc_type %></code> exists in this dataset<% else %>A <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset<% end %>, but your
+        access grant does not cover it<%= if @grant_scope && @grant_scope != "" do %> (it covers <%= @grant_scope %>)<% end %>.
+        Ask whoever shared access with you to widen the grant.
+      </p>
+      <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
         No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset. It may
-        have been deleted, or it may live in another workspace or project.
+        have been deleted.
       </p>
       <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
         No schema for <code><%= @doc_type %></code> is installed in this dataset, so Studio has no
         fields to show its documents with<%= if @doc_id && @doc_id != @doc_type do %> (you asked for <code><%= @doc_id %></code>)<% end %>.
         Whatever is stored under that type is untouched.
       </p>
-      <p :if={@reason == :unknown_node} class="bp-paper-unrenderable-reason">
+      <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
         This desk has no section named <code><%= @doc_type %></code>, so the path could not be
         walked to a document<%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
         The link may predate a structure change, or the plugin that owned it may be disabled.
       </p>
       <div class="bp-paper-unrenderable-actions">
         <a
-          href={@list_href || @desk_href}
+          :if={@cause == :elsewhere and @elsewhere_href}
+          href={@elsewhere_href}
           class="btn btn-primary btn-sm"
+          data-test-id="studio-unresolved-open-elsewhere"
+        >
+          Open it in <%= @elsewhere_name %>
+        </a>
+        <a
+          href={@list_href || @desk_href}
+          class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
           data-test-id="studio-unresolved-recovery"
         >
           <%= if @list_href, do: "Back to the #{@doc_type} list", else: "Back to the desk" %>
@@ -330,6 +360,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :dataset, :string, default: "production"
   attr :validation_errors, :map, default: %{}
   attr :parent_assigns, :map, default: %{}
+  attr :doc_key, :string, default: "doc"
+  attr :doc_type, :string, default: "document"
+  attr :document_rev, :string, default: nil
 
   def studio_field_renderer(assigns) do
     ~H"""
@@ -351,6 +384,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            doc_key={@doc_key}
+            doc_type={@doc_type}
+            document_rev={@document_rev}
           />
         <% end %>
         <%= if onix = onix_element(@field) do %>
@@ -363,12 +399,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <% end %>
       </div>
     <% else %>
+      <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
+           label any more ("Kort-layout select" read as a label leak); Sanity
+           never surfaces a field's type to the author. --%>
       <.editor_field
         label={@field["title"] || field_name}
-        type={type}
         required={required?}
         errors={errors}
         onix_element={onix_element(@field)}
+        description={field_description(@field)}
       >
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
@@ -379,6 +418,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            doc_key={@doc_key}
+            doc_type={@doc_type}
+            document_rev={@document_rev}
           />
         <% end %>
       </.editor_field>
@@ -510,7 +552,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || "Untitled"}
+          title={@editor_doc.title || singleton_title(@editor_schema) || "Untitled"}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -592,13 +634,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
-                  ><span class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span></button>
+                  ><span :if={tab_icon(grp) != "circle"} class="bp-tab-icon" aria-hidden="true"><.icon name={tab_icon(grp)} /></span><span class="bp-tab-label"><%= grp["title"] || grp["name"] %></span></button>
                 <% end %>
               </div>
             <% end %>
 
             <form phx-submit="save" phx-change="autosave" id="editor-form">
+              <%!-- The synthetic Title input backs the `title` column every
+                    list row shows. A SINGLETON that declares no `title`
+                    field (the twin's Forside — Sanity's `preview.prepare`
+                    gives it a fixed name) has nothing for an author to type
+                    there, so it renders no Title input and the header falls
+                    back to the schema title instead (Gyldendal parity E1.5). --%>
               <.editor_field
+                :if={title_input?(@editor_schema)}
                 label="Title"
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
@@ -614,6 +663,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     dataset={@dataset}
                     validation_errors={@validation_errors}
                     parent_assigns={@parent_assigns}
+                    doc_key={@editor_doc.doc_id}
+                    doc_type={@editor_doc.type}
+                    document_rev={@editor_doc.rev}
                   />
                 <% end %>
               <% end %>
@@ -715,6 +767,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class={action_button_class(@action)}
           title={@action["label"]}
           aria-label={@action["label"]}
+          target={action_link_opt(@action, "target")}
+          rel={action_link_opt(@action, "rel")}
           data-test-id={doc_action_test_id(@action)}
         ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
@@ -809,6 +863,19 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
+  # `target` / `rel` for `"link"` actions. Absent from `opts` → nil → the
+  # attribute is not emitted at all, so every link action that predates this
+  # (OnixEdit's Export ONIX) keeps rendering byte-identically. The Preview
+  # action sets `_blank` + `noopener`: it navigates to a DIFFERENT origin (the
+  # consumer site), and doing that in the Studio's own tab would kill the
+  # LiveView the editor is running in.
+  defp action_link_opt(action, key) do
+    case action["opts"] do
+      %{^key => v} when is_binary(v) and v != "" -> v
+      _ -> nil
+    end
+  end
+
   defp action_button_style(action) do
     case action["opts"] do
       %{"style" => s} when is_binary(s) -> s
@@ -845,7 +912,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
-  # Placeholder vocabulary: :dataset · :id · :workspace · :project
+  # Placeholder vocabulary: :dataset · :id · :workspace · :project · :slug
   # (tsk-url-p2 added the scope pair — a plugin action can address the
   # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
   # :workspace is replaced before :w-anything ambiguity can arise because
@@ -857,11 +924,24 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         _ -> ""
       end
 
+    # `:slug` (S9 criterion 4) — the consumer site addresses a page by slug,
+    # not by doc id, so a preview template interpolates the document's own
+    # slug. Replaced BEFORE `:id` for the same longest-token-first reason the
+    # scope pair is: neither is a prefix of the other today, but the ordering
+    # is the invariant this list is built on.
     href
     |> String.replace(":workspace", to_string(ws_slug || ""))
     |> String.replace(":project", to_string(proj_slug || ""))
     |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":slug", doc_slug_for_href(doc))
     |> String.replace(":id", id)
+  end
+
+  defp doc_slug_for_href(doc) do
+    case BarkparkWeb.Studio.StudioLive.DocActions.doc_slug(doc) do
+      slug when is_binary(slug) -> slug
+      _ -> ""
+    end
   end
 
   @doc """
@@ -972,6 +1052,22 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <% end %>
     """
   end
+
+  # Gyldendal parity E1.5 — see the Title input comment in the shell.
+  defp title_input?(nil), do: true
+
+  defp title_input?(schema) do
+    not (singleton?(schema) and is_nil(Enum.find(schema.fields, &(&1["name"] == "title"))))
+  end
+
+  defp singleton_title(schema) do
+    if schema && singleton?(schema) && title_input?(schema) == false, do: schema.title, else: nil
+  end
+
+  defp singleton?(schema), do: Map.get(schema, :singleton) == true
+
+  defp field_description(%{"description" => d}) when is_binary(d) and d != "", do: d
+  defp field_description(_), do: nil
 
   defp get_title_validation(nil), do: nil
 

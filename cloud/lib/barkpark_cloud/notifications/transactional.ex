@@ -80,6 +80,53 @@ defmodule BarkparkCloud.Notifications.Transactional do
   end
 
   @doc """
+  cch-w30-bl — build the PAT expiry warning, addressed to the token's OWNER.
+
+  IT IS TRANSACTIONAL, NOT AN ALERT, and that is a routing decision rather than
+  a filing one. A token's lifecycle is a fact about ONE user; the alert path
+  (`Notifications.dispatch_event/3`) fans to `team_member_emails/1` with no role
+  predicate, so an alert-shaped token warning would publish one member's
+  credential inventory, its user-chosen NAME and its rotation deadline to every
+  other member of the team it was minted under. Riding this module instead makes
+  the audience a single address by construction.
+
+  THE BODY NAMES THE TOKEN AND ITS DEADLINE. `event_email.ex` used to render
+  `token_expiring` as a bare `detail(payload)`, so a producer that shipped no
+  body sent an honest but EMPTY email (`text_body == ""`). The `name` and the
+  `expires_at` are the whole content of the notice: without them the mail says
+  "something of yours expires soon" to a user who may hold a dozen tokens.
+
+  The name is a USER-CHOSEN string echoed back to the user who chose it — the
+  one recipient for whom it is not a disclosure.
+  """
+  @spec token_expiring_email(String.t(), String.t(), DateTime.t()) :: Swoosh.Email.t()
+  def token_expiring_email(to, token_name, %DateTime{} = expires_at) when is_binary(to) do
+    name = if is_binary(token_name) and token_name != "", do: token_name, else: "(unnamed)"
+    when_ = format_expiry(expires_at)
+
+    base_email(to, "Your Barkpark Cloud API token \"#{name}\" expires soon", """
+    Your personal access token "#{name}" expires on #{when_}.
+
+    After that it stops authenticating and any script still presenting it will
+    start getting 401s. If you still need it, mint a replacement in Barkpark
+    Cloud under Settings -> API tokens and swap it in; if you don't, you can
+    ignore this — the token expires on its own.
+
+    You are getting this because you own that token. Nobody else on your team
+    was told.
+    """)
+  end
+
+  # The deadline as a plain UTC date + time. Deliberately not localised: this
+  # module has no recipient timezone to localise TO, and a wrong local time on a
+  # credential deadline is worse than an explicit UTC one.
+  defp format_expiry(%DateTime{} = at) do
+    at
+    |> DateTime.truncate(:second)
+    |> Calendar.strftime("%Y-%m-%d at %H:%M UTC")
+  end
+
+  @doc """
   Build the test email the settings page's "Send test" button fires.
 
   cch-w40-bl. The body used to read "If you received it, your notification email
@@ -148,6 +195,11 @@ defmodule BarkparkCloud.Notifications.Transactional do
   @spec deliver_email_change_code(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def deliver_email_change_code(to, code),
     do: email_change_code_email(to, code) |> Mailer.deliver()
+
+  @spec deliver_token_expiring(String.t(), String.t(), DateTime.t()) ::
+          {:ok, term()} | {:error, term()}
+  def deliver_token_expiring(to, token_name, %DateTime{} = expires_at),
+    do: token_expiring_email(to, token_name, expires_at) |> Mailer.deliver()
 
   # cch-w40-bl: `opts` is passed to `test_email/2` for COPY only. Arity 1 still
   # exists and still means exactly what it always meant — build, then

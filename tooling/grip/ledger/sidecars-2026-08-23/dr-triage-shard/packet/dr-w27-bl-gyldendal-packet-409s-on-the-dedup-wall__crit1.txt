@@ -1,0 +1,1 @@
+The publish path used is recorded (the mutation shape), since bp task has no publish verb and /v1/data/publish does not exist.

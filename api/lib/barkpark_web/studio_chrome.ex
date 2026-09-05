@@ -113,6 +113,7 @@ defmodule BarkparkWeb.StudioChrome do
 
   alias Barkpark.{Content, Tenancy}
   alias BarkparkWeb.Studio.Caps
+  alias BarkparkWeb.Studio.ScopeResolver
 
   @studio_live BarkparkWeb.Studio.StudioLive
 
@@ -264,10 +265,27 @@ defmodule BarkparkWeb.StudioChrome do
     assign(socket, :create_open, next)
   end
 
+  # BOTH create affordances decide on the SAME principal the scope menu itself
+  # is built from (`ScopeResolver.principal_from_assigns/1`: a token, else the
+  # account session's %User{}, else nil) — not on `:api_token` alone. Reading
+  # the token was the #34 follow-up defect: an ACCOUNT session is signed in, so
+  # `create-workspace` fell through to a silent-ish "Sign in to create a
+  # workspace" and `create-project` answered "Sign in to create a project" to a
+  # person who IS signed in. The message was false and the affordance dead.
+  #
+  # The authority is REUSED, never invented: `create_workspace_with_owner/2`
+  # already has a `%User{}` head that writes a `principal_type: "user"` owner
+  # membership (tenancy.ex, pinned by tenancy_test.exs:246), which is exactly
+  # what `/api/workspaces` gives a token creator. Only a `nil` principal — a
+  # genuinely anonymous / public-demo session — still gets "Sign in", and for
+  # that one it is TRUE.
   defp chrome_fallback("create-workspace", %{"name" => name}, socket) do
-    case socket.assigns[:api_token] do
-      %Barkpark.Auth.ApiToken{} = token ->
-        case Tenancy.create_workspace_with_owner(%{name: name}, token) do
+    case principal(socket) do
+      nil ->
+        put_flash(socket, :error, "Sign in to create a workspace")
+
+      principal ->
+        case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
           {:ok, ws} ->
             case project_for(ws) do
               %{} = project ->
@@ -280,9 +298,6 @@ defmodule BarkparkWeb.StudioChrome do
           {:error, _changeset} ->
             put_flash(socket, :error, "Could not create workspace")
         end
-
-      _ ->
-        put_flash(socket, :error, "Sign in to create a workspace")
     end
   end
 
@@ -290,11 +305,21 @@ defmodule BarkparkWeb.StudioChrome do
     ws = socket.assigns[:current_workspace]
 
     cond do
-      not match?(%Barkpark.Auth.ApiToken{}, socket.assigns[:api_token]) ->
+      is_nil(principal(socket)) ->
         put_flash(socket, :error, "Sign in to create a project")
 
-      is_nil(ws) or not can_reach?(socket, ws) ->
+      is_nil(ws) ->
         socket
+
+      not can_create_in?(socket, ws) ->
+        # NOT "sign in" — this principal IS signed in, it simply holds no
+        # membership here. The silent no-op this replaces was not a lie, but it
+        # was not an answer either: the form just did nothing.
+        put_flash(
+          socket,
+          :error,
+          "You are not a member of this workspace — ask an owner to add you before creating a project"
+        )
 
       true ->
         case Tenancy.create_project_with_dataset(ws, %{name: name}) do
@@ -474,6 +499,27 @@ defmodule BarkparkWeb.StudioChrome do
       # desk catch-all would swallow.
       "/settings" -> "/w/#{ws.slug}/p/#{project.slug}/studio/settings"
       subpath -> studio_root(ws, project, dataset) <> subpath
+    end
+  end
+
+  # Who is asking, by the ONE precedence rule the flat->scoped funnel and the
+  # scope menu already share. Never re-encoded here (two copies of "token wins
+  # over user" drift, and a create gate that disagrees with the menu that
+  # rendered it is #34 all over again).
+  defp principal(socket), do: ScopeResolver.principal_from_assigns(socket.assigns)
+
+  # May THIS principal mint sibling tenancy inside `ws`? Membership, asked of
+  # the principal's OWN kind — `Tenancy.Auth.member?/2` reads a token id out of
+  # the "api_token" row space and a %User{} id out of the "user" row space, so
+  # this widens nothing. For a token it is byte-identical to `can_reach?/2`
+  # (that arm already IS `member?/2`); it exists so the account arm asks the
+  # SAME question instead of `can_reach?/2`'s anonymous fallback ("is this the
+  # workspace I am already mounted in?"), which every mounted account session
+  # answers yes to and which therefore gates nothing.
+  defp can_create_in?(socket, %{id: ws_id}) do
+    case principal(socket) do
+      nil -> false
+      principal -> Tenancy.Auth.member?(principal, ws_id)
     end
   end
 

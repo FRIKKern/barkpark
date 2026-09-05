@@ -148,7 +148,7 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
   end
 
   defp fetch(raw, path) do
-    r = get(put_req_header(build_conn(), "authorization", "Bearer " <> raw), path)
+    r = get(put_req_header(scoped_conn(), "authorization", "Bearer " <> raw), path)
     {r.status, if(is_binary(r.resp_body), do: r.resp_body, else: inspect(r.resp_body))}
   end
 
@@ -272,18 +272,72 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
   # ── the write path must not be handed an atom ───────────────────────────────
 
   describe "write path" do
-    test "an unscoped write does not stamp the sentinel as a workspace id" do
+    # SUPERSEDED, deliberately (task-6fa023cdabdc5f6a, ruled on main 2026-09-05).
+    #
+    # This arm used to assert that an unscoped WRITE still succeeded — it only
+    # pinned that the `:shared_only` atom was not stamped into `workspace_id`
+    # (which would be an Ecto cast error, a 500). PR #12899 left writes alone on
+    # purpose: it was a read-path row. The ruling answers the write question —
+    # INFER-WHEN-UNAMBIGUOUS, REFUSE-WHEN-AMBIGUOUS, never log-only — so the
+    # write no longer lands in the seeded Default.
+    #
+    # The ORIGINAL property is not dropped, it is strengthened: the sentinel
+    # still never reaches the stamp, and now it cannot reach a ROW either. The
+    # refusal is the TYPED atom, which is exactly the evidence the old assertion
+    # was reaching for — a cast crash would surface as an `Ecto.ChangeError`,
+    # not as `{:error, :workspace_scope_required}`.
+    test "an unscoped write by an UNATTRIBUTABLE caller is refused, never stamped" do
       vacate!()
       opts = ScopeHelpers.scope_opts(%Plug.Conn{assigns: %{}})
 
-      {:ok, doc} =
-        Content.create_document("post", %{"_id" => "esl-write", "title" => "W"}, @ds, opts)
+      assert Keyword.get(opts, :workspace_id) == :shared_only,
+             "the fixture is not exercising the sentinel — this arm would be vacuous"
+
+      # Bound first, asserted on a BOOLEAN: `assert pattern = expr, "msg"` raises
+      # MatchError before assert/2 ever sees the message
+      # (scripts/unreachable-assert-message-check.sh).
+      result = Content.create_document("post", %{"_id" => "esl-write", "title" => "W"}, @ds, opts)
+
+      assert result == {:error, :workspace_scope_required},
+             "an unscoped write from a principal that names no workspace must be a " <>
+               "NAMED refusal, never a silent write into the seeded Default — got " <>
+               inspect(result)
+
+      refute Repo.get_by(Document, doc_id: "drafts.esl-write") ||
+               Repo.get_by(Document, doc_id: "esl-write"),
+             "a REFUSED write must leave no row at all"
+    end
+
+    test "an unscoped write by a caller that can mean ONE workspace lands THERE" do
+      vacate!()
+      ws_a = Repo.get_by(Workspace, slug: "esl-a")
+
+      {:ok, token} =
+        %Barkpark.Auth.ApiToken{}
+        |> Barkpark.Auth.ApiToken.changeset(%{
+          token_hash:
+            Barkpark.Auth.ApiToken.hash_token("esl-infer-#{System.unique_integer([:positive])}"),
+          label: "esl-infer",
+          dataset: @ds,
+          permissions: ["read", "write"],
+          workspace_id: nil
+        })
+        |> Repo.insert()
+
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_a.id, token.id, "member", "api_token")
+
+      opts =
+        ScopeHelpers.scope_opts(%Plug.Conn{
+          assigns: %{api_token: %{id: token.id, permissions: ["read", "write"]}}
+        })
+
+      assert {:ok, doc} =
+               Content.create_document("post", %{"_id" => "esl-infer", "title" => "I"}, @ds, opts)
 
       row = Repo.get_by(Document, doc_id: doc.doc_id)
 
-      assert is_nil(row.workspace_id) or is_binary(row.workspace_id),
-             "the :shared_only sentinel reached the write path and was stamped as a " <>
-               "workspace_id — WriteScope must translate it, not pass it through"
+      assert row.workspace_id == ws_a.id,
+             "the ONE workspace the token can mean must be inferred — not the Default seat"
     end
   end
 

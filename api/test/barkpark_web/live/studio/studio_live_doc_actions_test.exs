@@ -22,6 +22,22 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
   alias BarkparkWeb.Studio.StudioLive.DocActions
 
   @dataset "production"
+  @admin_token "doc-actions-admin"
+
+  # `bulk-publish` / `bulk-unpublish` are ADMIN-tier Caps events
+  # (arpss-schema-action-write-tier-ruling), and the :admin tier is enforced on
+  # EVERY Studio socket including the anonymous public-demo one. This suite is
+  # about the ACTION, not the gate, so it mounts an admin principal.
+  defp admin_conn(conn) do
+    {:ok, _} =
+      Barkpark.Auth.create_token(@admin_token, "doc actions admin", @dataset, [
+        "read",
+        "write",
+        "admin"
+      ])
+
+    Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
+  end
 
   setup %{conn: conn} do
     {:ok, _post_schema} =
@@ -145,7 +161,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
     end
 
     test "bulk-publish publishes every selected draft", %{conn: conn} do
-      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post"))
+      {:ok, view, _html} = live(admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/post"))
 
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p1"})
       _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p2"})

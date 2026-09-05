@@ -1,0 +1,1 @@
+The PR body records that this is a HAZARD PROVEN BY CONSTRUCTION and not a landed defect, citing the sweep that found zero anomalies across 18 main commits, 448 origin refs and 110 local worktrees — no commit is cited as having carried the bad shape.

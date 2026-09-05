@@ -153,7 +153,7 @@ defmodule BarkparkWeb.StudioComponentsTest do
 
       html =
         render_component(&StudioComponents.studio_editor_shell/1, %{
-          editor_doc: %{doc_id: "b1", title: "T", status: "published"},
+          editor_doc: %{doc_id: "b1", type: "book", rev: 1, title: "T", status: "published"},
           editor_schema: schema,
           editor_form: @editor_form,
           editor_is_draft: false,
@@ -188,7 +188,7 @@ defmodule BarkparkWeb.StudioComponentsTest do
 
       html =
         render_component(&StudioComponents.studio_editor_shell/1, %{
-          editor_doc: %{doc_id: "p1", title: "T", status: "published"},
+          editor_doc: %{doc_id: "p1", type: "post", rev: 1, title: "T", status: "published"},
           editor_schema: schema,
           editor_form: @editor_form,
           editor_is_draft: false,

@@ -16,15 +16,32 @@ defmodule Barkpark.Sharing.Links do
   revocation + expiry in the query, so a dead link looks identical to a missing
   one.
 
-  THE RAW TOKEN IS STORED, unlike `Barkpark.Auth.ApiToken`: `create/1` writes
-  BOTH `token_hash` and the PLAINTEXT `token`, because P7's stable re-copyable
-  link needs a later read to re-emit `/s/<token>` (see
-  `Barkpark.Sharing.ShareLink`). A ShareLink row is therefore a LIVE CREDENTIAL
-  at rest and every read path that serialises one must be AUTHORISED BEFORE it
-  serialises — arpss-w8 closed exactly that hole in
-  `BarkparkWeb.ShareLinkController.list/2`. The older "returned once, only the
-  SHA256 is stored" wording that stood here was false, and believing it is what
-  made the leak look harmless.
+  THE RAW TOKEN IS RETURNED ONCE AND NEVER STORED, exactly like
+  `Barkpark.Auth.ApiToken`: `create/1` persists only `token_hash` and hands the
+  plaintext back in its `{:ok, {raw, link}}`; the mint 201 is the ONE place a
+  raw token leaves this system. No read path can re-emit `/s/<token>`, because
+  no row carries it.
+
+  THIS IS A DELIBERATE, RULED TRADEOFF, recorded here and at the schema so the
+  next auditor finds the reasoning instead of re-opening it
+  (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED by team-lead 2026-09-02:
+  "RETIRE the plaintext token column"). Until
+  `20260904020000_drop_token_from_share_links.exs`, `create/1` wrote BOTH the
+  hash and the PLAINTEXT token, so that P7's stable re-copyable link could be
+  re-shown by a later read. The migration that added it argued plaintext at
+  rest from "a self-hosted/LAN context — anyone who can read this column can
+  already read the shared content directly". THE MULTI-TENANT THREAT MODEL
+  VOIDS THAT PREMISE: on a shared install the readers of the column are not the
+  readers of the content, so every row was a LIVE CREDENTIAL at rest and every
+  serialising read path was one tenancy bug away from handing a stranger
+  working access — arpss-w8 closed exactly that hole in
+  `BarkparkWeb.ShareLinkController.list/2`, one path at a time. Retiring the
+  column closes the disclosure CLASS instead: there is no secret left on the
+  row for a future regression to leak. WHAT IT COSTS, plainly: a link can be
+  listed, labelled and revoked, but its URL cannot be RE-DISPLAYED. An operator
+  who has lost the URL revokes and mints a new one. (An older wording here
+  claimed "returned once, only the SHA256 is stored" while the code stored
+  both; that is now true of the code, not just of the sentence.)
 
   THIS CONTEXT OWNS TWO INVARIANTS THAT ITS CALLERS USED TO RE-DERIVE, because
   both doors onto the share surface (the HTTP controller and the Studio
@@ -101,7 +118,7 @@ defmodule Barkpark.Sharing.Links do
 
     * `BarkparkWeb.Plugs.RequireShareScope.maybe_grant_item_token/4` — the
       conn-side gate, passing `conn.path_params`;
-    * `BarkparkWeb.PluginScopeSession.on_mount(:scope, …)` — the socket-side
+    * `BarkparkWeb.PluginScopeSession.on_mount/4`, at `:scope` — the socket-side
       gate, passing the mount params, re-derived on EVERY mount because a
       `live_redirect` / reconnect replays no router pipeline
       (task-9e74fdbdf0242c22).
@@ -150,11 +167,24 @@ defmodule Barkpark.Sharing.Links do
   candidates (a Studio socket can carry both an api_token session and a
   logged-in account; either may legitimately hold the seat).
 
-  TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on most shapes that can
-  reach here — `FunctionClauseError` on a nil principal, an `%ApiToken{id: nil}`
-  or a nil workspace id, and `Ecto.Query.CastError` on `""` / any non-UUID
-  binary. Both sides are narrowed first and ANYTHING unmatched is a DENIAL: a
-  500 here would trade a leak for a crash oracle.
+  TOTALITY, split by side (task-83ceffc9e7e32174). The PRINCIPAL side is
+  narrowed HERE: `principal_admin?/2` admits only an `%ApiToken{}` / `%User{}`
+  with a binary id (or a list of them) and denies every other shape, because
+  bare `TenancyAuth.workspace_admin?/2` would `FunctionClauseError` on a nil
+  principal or an `%ApiToken{id: nil}`. The WORKSPACE-ID side is the
+  CHOKEPOINT's: `Tenancy.Auth.membership/3` runs both ids through
+  `Barkpark.Repo.uuid_or_nil/1` (the uuid-guarded-fetch canonical) and answers
+  `nil` — a denial — on a nil, `""` or any non-UUID binary, so no malformed id is
+  ever bound to a `:binary_id` column and no `Ecto.Query.CastError` can surface
+  here. This function used to wrap the call in its own
+  `case Repo.uuid_or_nil(workspace_id)`; that copy was redundant since
+  #12710 made the chokepoint total and was dropped for the same reason #15341
+  dropped `ShareController`'s — a second guard is how the next reader concludes
+  the chokepoint is partial and adds a third. Pinned by
+  `test/barkpark/sharing/links_test.exs` ("workspace_admin?/2 …"), whose
+  mutation arm reds with `Ecto.Query.CastError` when `Repo.uuid_or_nil/1` is
+  disarmed by hand. Anything unmatched on either side is a DENIAL: a 500 here
+  would trade a leak for a crash oracle.
 
   The predicate is `workspace_admin?/2` (the membership ROLE), NEVER
   `TenancyAuth.authorize/3` — authorize/3's api_token arm ORs the token's GLOBAL
@@ -163,12 +193,7 @@ defmodule Barkpark.Sharing.Links do
   committed cross-tenant tests, so swapping the call turns them RED.
   """
   @spec workspace_admin?(term(), term()) :: boolean()
-  def workspace_admin?(principal, workspace_id) do
-    case Repo.uuid_or_nil(workspace_id) do
-      nil -> false
-      ws_id -> principal_admin?(principal, ws_id)
-    end
-  end
+  def workspace_admin?(principal, workspace_id), do: principal_admin?(principal, workspace_id)
 
   defp principal_admin?(principals, ws_id) when is_list(principals),
     do: Enum.any?(principals, &principal_admin?(&1, ws_id))
@@ -208,8 +233,9 @@ defmodule Barkpark.Sharing.Links do
   Create an item link. `attrs` must carry `:workspace_id`, `:project_id`,
   `:dataset`, `:kind` (`"doc"`/`"media"`), `:ref_id`, `:access`; `:ref_type`
   for docs; optional `:label`, `:ttl` (seconds — omit / nil for no expiry).
-  Returns `{:ok, {raw_token, %ShareLink{}}}`. The raw token is ALSO persisted on
-  the row (see the moduledoc), so this is not a show-once secret.
+  Returns `{:ok, {raw_token, %ShareLink{}}}`. THIS RETURN IS THE ONLY PLACE THE
+  RAW TOKEN EXISTS — only its SHA256 digest is persisted (see the moduledoc), so
+  a caller that discards it cannot recover the URL from any later read.
 
   `:workspace_id` and `:project_id` are REQUIRED and a nil is a 422-shaped
   `{:error, changeset}`, not a persisted row (`task-2da739b78e938be0`). This is
@@ -241,7 +267,6 @@ defmodule Barkpark.Sharing.Links do
       attrs
       |> Map.drop([:ttl, "ttl"])
       |> Map.put(:token_hash, hash_token(raw))
-      |> Map.put(:token, raw)
       |> Map.put(:expires_at, expires_at)
       |> normalize_ref_id()
 
@@ -364,19 +389,33 @@ defmodule Barkpark.Sharing.Links do
   end
 
   @doc """
-  List the links for ONE item (newest first). RETURNS LIVE CREDENTIALS: each row
-  carries the PLAINTEXT `token` (and its hash), so a caller must be authorised
-  against `workspace_id` BEFORE it serialises anything this returns — the raw is
-  NOT unrecoverable. `ref_type` may be nil (media).
+  List the links for ONE item (newest first). Rows carry `token_hash`, never a
+  plaintext token, so this no longer returns live credentials — but a caller
+  must still be authorised against `workspace_id` before it serialises anything
+  here, because a link's existence, label, access level and revocability are
+  themselves tenant facts. `ref_type` may be nil (media).
+
+  `opts` NARROWS the workspace to one tenant slice: `:project_id` and
+  `:dataset`. A row is bound to a `(workspace_id, project_id, dataset)` triple
+  (see `Barkpark.Sharing.ShareLink`), but the workspace-only filter answers a
+  scoped question with every sibling project's rows — a response that
+  contradicts its own `scope=`. Callers that KNOW their project and dataset
+  (`GET /v1/shares/links`, whose `scope=` names both) must pass them; the
+  4-arity stays for the callers that legitimately have only a workspace.
   """
-  @spec list_for(binary(), binary(), binary() | nil, binary()) :: [ShareLink.t()]
-  def list_for(workspace_id, kind, ref_type, ref_id) do
+  @spec list_for(binary(), binary(), binary() | nil, binary(), keyword()) :: [ShareLink.t()]
+  def list_for(workspace_id, kind, ref_type, ref_id, opts \\ []) do
     ShareLink
     |> where([l], l.workspace_id == ^workspace_id and l.kind == ^kind and l.ref_id == ^ref_id)
     |> ref_type_filter(ref_type)
+    |> scope_filter(:project_id, Keyword.get(opts, :project_id))
+    |> scope_filter(:dataset, Keyword.get(opts, :dataset))
     |> order_by([l], desc: l.inserted_at)
     |> Repo.all()
   end
+
+  defp scope_filter(query, _field, nil), do: query
+  defp scope_filter(query, field, value), do: where(query, [l], field(l, ^field) == ^value)
 
   # `attrs` reaches create/1 with either atom or string keys depending on the
   # door, so both are normalised; a map carrying neither is left alone for the

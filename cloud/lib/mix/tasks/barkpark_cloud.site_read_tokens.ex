@@ -17,10 +17,25 @@ defmodule Mix.Tasks.BarkparkCloud.SiteReadTokens do
 
       mix barkpark_cloud.site_read_tokens                  # audit the whole fleet
       mix barkpark_cloud.site_read_tokens BOX              # audit one instance
+      mix barkpark_cloud.site_read_tokens --census         # EVERY live token, with its ceiling
+      mix barkpark_cloud.site_read_tokens BOX --census     # ditto, one instance
       mix barkpark_cloud.site_read_tokens BOX --revoke ID  # revoke ONE orphan
 
   `BOX` is an instance id (UUID) or slug. `ID` is the box-side token id printed
   by the audit.
+
+  ## The two questions, and why `--census` is the second one
+
+  The default audit answers "which credentials outlived their SITE?". `--census`
+  answers "which credentials outlived THEMSELVES?" — every live `site-read-*`
+  row, with the lifetime ceiling
+  `Registry.site_read_token_max_age_days/0` draws and whether it has been
+  crossed. The orphan set is a strict subset: a token for a site that still
+  exists can be far past its ceiling and never show up in the audit above.
+
+  A ceiling that cannot be COMPUTED (the box returns neither `expires_at` nor a
+  readable `inserted_at`) prints `unknown`, and those rows are counted
+  separately. "I could not tell" is not "it is inside the ceiling".
 
   ## Rails
 
@@ -48,15 +63,19 @@ defmodule Mix.Tasks.BarkparkCloud.SiteReadTokens do
     # data-touching task does this.
     Mix.Task.run("app.start")
 
-    case OptionParser.parse(args, strict: [revoke: :string]) do
+    case OptionParser.parse(args, strict: [revoke: :string, census: :boolean]) do
       {opts, [box_ref], []} ->
-        case Keyword.get(opts, :revoke) do
-          nil -> audit([box_ref])
-          token_id -> revoke(box_ref, token_id)
+        cond do
+          token_id = Keyword.get(opts, :revoke) -> revoke(box_ref, token_id)
+          Keyword.get(opts, :census, false) -> census([box_ref])
+          true -> audit([box_ref])
         end
 
       {[], [], []} ->
         audit(:fleet)
+
+      {[census: true], [], []} ->
+        census(:fleet)
 
       {opts, [], []} when opts != [] ->
         Mix.shell().error(
@@ -90,6 +109,26 @@ defmodule Mix.Tasks.BarkparkCloud.SiteReadTokens do
   def audit_boxes(refs) when is_list(refs) do
     for ref <- refs, bp = resolve_barkpark(ref) do
       {bp, Registry.orphan_site_read_tokens(bp)}
+    end
+  end
+
+  @doc """
+  The LIFETIME census (task-b3e3ec0f433b217d): every live `site-read-*`
+  credential on one instance or the whole fleet, each carrying the ceiling
+  `Registry.site_read_token_max_age_days/0` draws and whether it is past it.
+
+  Same `{barkpark, {:ok, rows} | {:error, reason}}` shape as `audit_boxes/1`, and
+  for the same reason: an unreadable instance must stay distinguishable from a
+  clean one. Public so a test can drive it without spawning a Mix process.
+  """
+  @spec census_boxes(:fleet | [String.t()]) :: [{struct(), {:ok, [map()]} | {:error, atom()}}]
+  def census_boxes(:fleet) do
+    Registry.all_barkparks() |> Enum.map(&{&1, Registry.site_read_token_census(&1)})
+  end
+
+  def census_boxes(refs) when is_list(refs) do
+    for ref <- refs, bp = resolve_barkpark(ref) do
+      {bp, Registry.site_read_token_census(bp)}
     end
   end
 
@@ -136,6 +175,114 @@ defmodule Mix.Tasks.BarkparkCloud.SiteReadTokens do
     end
   end
 
+  # ── the LIFETIME census ─────────────────────────────────────────────────────
+
+  defp census(scope) do
+    case census_boxes(scope) do
+      [] -> Mix.shell().info("No instances to audit.")
+      results -> Enum.each(census_lines(results), fn line -> Mix.shell().info(line) end)
+    end
+  end
+
+  @doc """
+  Render a `census_boxes/1` result as the lines the task prints — pure, so the
+  OUTPUT an operator reads is what a test can assert on. The printer only
+  forwards these to `Mix.shell/0`; nothing is formatted twice.
+  """
+  @spec census_lines([{struct(), {:ok, [map()]} | {:error, atom()}}]) :: [String.t()]
+  def census_lines(results) when is_list(results) do
+    Enum.flat_map(results, &census_box_lines/1) ++ census_summary_lines(results)
+  end
+
+  defp census_box_lines({bp, {:ok, []}}), do: ["#{bp.slug}: no live site-read tokens"]
+
+  defp census_box_lines({bp, {:ok, rows}}) do
+    expired = Enum.count(rows, & &1.expired?)
+
+    header =
+      "#{bp.slug}: #{length(rows)} live site-read token(s), #{expired} past the " <>
+        "#{Registry.site_read_token_max_age_days()}-day ceiling"
+
+    [header | Enum.map(rows, &census_row_lines/1)]
+  end
+
+  defp census_box_lines({bp, {:error, :no_scope}}),
+    do: ["#{bp.slug}: no workspace/project scope to look under — not audited"]
+
+  defp census_box_lines({bp, {:error, :unreadable}}),
+    do: [
+      "#{bp.slug}: UNREADABLE — its token inventory could not be read. This is NOT a clean " <>
+        "bill of health; its tokens' ceilings are unknown, not met."
+    ]
+
+  defp census_row_lines(r) do
+    "  #{r.label}#{if r.expired?, do: "   *** EXPIRED ***", else: ""}\n" <>
+      "    id            #{r.id}\n" <>
+      "    scope         #{r.workspace}/#{r.project}\n" <>
+      "    site          #{r.site_slug}#{if r.orphan?, do: " (ORPHAN — no such site)", else: ""}\n" <>
+      "    minted        #{r.inserted_at || "unknown"}\n" <>
+      "    expires       #{expiry_line(r)}\n" <>
+      "    last used     #{r.last_used_at || "never"}"
+  end
+
+  # The denominator rides with every count, exactly as `summarise/1` does it: an
+  # audit that prints "0 expired" while two boxes were unreadable and three
+  # tokens carry no computable ceiling is the same false green the orphan sweep
+  # refuses to print.
+  defp census_summary_lines(results) do
+    rows = for {_bp, {:ok, rs}} <- results, r <- rs, do: r
+    unreadable = for {bp, {:error, :unreadable}} <- results, do: bp.slug
+    expired = Enum.filter(rows, & &1.expired?)
+    unknown = Enum.filter(rows, &(&1.expiry_source == :unknown))
+
+    total =
+      "\n#{length(rows)} live site-read token(s) across #{length(results)} instance(s); " <>
+        "#{length(expired)} past the #{Registry.site_read_token_max_age_days()}-day ceiling"
+
+    [total] ++
+      unknown_line(unknown) ++ unreadable_line(unreadable) ++ rotate_line(expired)
+  end
+
+  defp unknown_line([]), do: []
+
+  defp unknown_line(unknown),
+    do: [
+      "#{length(unknown)} token(s) carry NO computable ceiling (no expires_at, no readable " <>
+        "inserted_at) — they are not in that count, and they are not known to be inside it."
+    ]
+
+  defp unreadable_line([]), do: []
+
+  defp unreadable_line(slugs),
+    do: [
+      "#{length(slugs)} instance(s) could not be read (#{Enum.join(slugs, ", ")}) — their " <>
+        "tokens are UNKNOWN and are not in that count."
+    ]
+
+  defp rotate_line([]), do: []
+
+  defp rotate_line(_expired),
+    do: [
+      "Nothing was rotated. Rotating a live credential is an owner decision: " <>
+        "`Registry.rotate_site_read_token/1` mints the replacement BEFORE it revokes the " <>
+        "incumbent, so the site never goes dark."
+    ]
+
+  # ONE rendering of a ceiling, used by both the orphan report and the census, so
+  # the two can never print a different verdict for the same row. A row whose
+  # ceiling could not be computed says so — it never renders as blank (which
+  # reads as "none") or as a date nobody derived.
+  defp expiry_line(%{expiry_source: :unknown}),
+    do: "unknown (no expires_at and no readable inserted_at)"
+
+  defp expiry_line(%{expires_at: %DateTime{} = at, expiry_source: source, expired?: expired?}),
+    do:
+      "#{DateTime.to_iso8601(at)} (#{source})#{if expired?, do: " — PAST THE CEILING", else: ""}"
+
+  # A row from a caller that predates the census fields carries no ceiling at
+  # all; say that rather than crash an operator's audit.
+  defp expiry_line(_), do: "unknown"
+
   defp report({bp, {:ok, []}}), do: Mix.shell().info("#{bp.slug}: no orphan site-read tokens")
 
   defp report({bp, {:ok, orphans}}) do
@@ -148,6 +295,7 @@ defmodule Mix.Tasks.BarkparkCloud.SiteReadTokens do
           "    scope         #{o.workspace}/#{o.project}\n" <>
           "    deleted site  #{o.site_slug}\n" <>
           "    minted        #{o.inserted_at || "unknown"}\n" <>
+          "    expires       #{expiry_line(o)}\n" <>
           "    last used     #{o.last_used_at || "never"}\n" <>
           "    revoke with   mix barkpark_cloud.site_read_tokens #{bp.slug} --revoke #{o.id}"
       )

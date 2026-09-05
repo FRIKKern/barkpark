@@ -98,6 +98,12 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 
 		for _, p := range picks {
 			resources := sortedFiles(taskboard.FilesOf(p.Task))
+			// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie). This
+			// is the built-in the filing named FIRST, and it is already
+			// structurally unable to lie: TaskClaimResources reports a WON
+			// claim only on env.OK==true AND a decoded doc.claim.epoch>0. An
+			// empty 200, a proxy page, null, {} or an error envelope produce a
+			// decode failure or ok:false — a SKIP, never an epoch.
 			outcome, err := client.TaskClaimResources(p.Task.DocID, worker, resources)
 			if err != nil {
 				// Transport failure OR a won claim with no fencing epoch (epoch<=0):

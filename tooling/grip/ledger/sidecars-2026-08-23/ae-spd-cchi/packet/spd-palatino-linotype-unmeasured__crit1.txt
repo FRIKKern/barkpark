@@ -1,0 +1,1 @@
+The em figure is compared against the per-width thresholds (0.6020 at 1280, 0.6051 at 1024, 0.5727 at 700) and a MEET/FAIL verdict is stated for each of D107's seven widths

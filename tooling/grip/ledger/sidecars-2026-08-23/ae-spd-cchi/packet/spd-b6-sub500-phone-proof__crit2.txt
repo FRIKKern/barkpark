@@ -1,0 +1,1 @@
+Screenshots plus computed geometry record viewport width, pane widths, and scrollWidth so the proof cannot be satisfied by a clipped or hidden reader.

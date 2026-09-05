@@ -1,0 +1,1 @@
+Breaking either arm's planting step reds the selftest with 'this arm would have proven nothing'.

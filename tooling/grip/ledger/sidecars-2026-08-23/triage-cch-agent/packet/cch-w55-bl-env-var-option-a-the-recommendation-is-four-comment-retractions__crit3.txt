@@ -1,0 +1,1 @@
+The Go decoy is named in writing so a future reader does not mistake `boot.Env` (bootstrap outputs flowing worker -> plane) for this feature. Evidence: quote the note.

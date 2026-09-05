@@ -84,6 +84,46 @@ defmodule Barkpark.Tasks.Stamp do
   # lock, appends a signed record, and leaves the seal, the close_reason and
   # the original evidence exactly as they were.
 
+  # THE POST-CLOSE ATTEMPT (task-d68754135a6a9f66). `--miss` on a TERMINAL row
+  # (`done` / `cancelled`) is admitted on the same fence as a withdrawal, and
+  # for the same measured reason. A closer who has legitimately verified
+  # something about a sealed row had NO sanctioned per-criterion write — every
+  # stamp came back `not_in_progress:done` — so they reached for a raw
+  # `/v1/data/mutate` that pastes ONE evidence string across every remaining
+  # criterion. That substitution is measurable: roughly 43-57 tasks and 95-130
+  # criteria carry it, and one row confesses it verbatim in its own evidence
+  # ("stamp failed on already-closed task, criteria corrected via mutate").
+  #
+  # ONLY the attempt shape is admitted. `{:met, _}` on a terminal row is still
+  # `{:not_in_progress, status}` — a met-flip after close rewrites the very
+  # verdict the close sealed, and it OVERWRITES `evidence`, which is precisely
+  # what makes the met path unsafe behind the seal. An attempt overwrites
+  # nothing: `Internal.apply_entry_update`'s attempt clause PINS `met` to its
+  # stored value and touches neither `evidence` nor the criterion text, so a
+  # post-close miss is append-only by construction rather than by convention.
+  #
+  # `cancelled` is NOT distinguished from `done`. Both are terminal, both keep
+  # their claim as a receipt, and the harm the seal guards against — a rewritten
+  # verdict — is identical under either label; a rule that split them would only
+  # invite the raw mutate back on whichever side it refused.
+  #
+  # OPEN and BLOCKED rows are deliberately NOT admitted. They keep
+  # `{:not_in_progress, status}`: those rows can still be CLAIMED and stamped
+  # under a live lease, so the instrument is not missing there, and this change
+  # stays as narrow as the defect it cures.
+  #
+  # The attempts bound stays SHARED at 5 (`Internal.@attempts_bound`) rather
+  # than getting a separate post-close bucket. A second list is a second thing
+  # every board, renderer and reader must know about, and the eviction it would
+  # buy is theoretical: a post-close annotator writes ONE attempt per criterion,
+  # so evicting a builder's five mid-claim attempts takes five separate sweeps
+  # over the same criterion. If that ever happens, a separate bound is a purely
+  # additive change with no migration.
+  #
+  # The `task.criterion` event carries `"post_close" => true` when the STORED
+  # row was terminal at stamp time, so a board can select post-close annotation
+  # out of live progress on a boolean instead of joining against lifecycle.
+
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
@@ -99,8 +139,15 @@ defmodule Barkpark.Tasks.Stamp do
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Criteria
+  alias Barkpark.Tasks.EvidenceDurability
 
   @event_task_criterion "task.criterion"
+
+  # The TERMINAL lifecycles — sealed by close, and the only statuses on which
+  # a post-close `--miss` attempt is admitted. `open` / `blocked` stay refused:
+  # they can still be claimed, so the per-criterion instrument is not missing
+  # there. Kept as a literal list because it is used in a guard.
+  @terminal_statuses ~w(done cancelled)
 
   @doc """
   Stamp one acceptance criterion on a claimed task.
@@ -124,9 +171,11 @@ defmodule Barkpark.Tasks.Stamp do
         not match the row is REJECTED (`:criteria_mismatch`) instead of flipping
         the neighbour. OPTIONAL for `{:miss, _}` — a miss flips nothing.
       * `:observed_rev` (optional string) — REQUIRED for `{:withdraw, _}` on a
-        row that carries no claim (a sealed / released row): the `rev` the
+        row that carries no claim (a sealed / released row) AND for
+        `{:miss, _}` on a TERMINAL row (`done` / `cancelled`): the `rev` the
         caller read. It is CAS'd against the stored rev inside the lock. Unused
-        on any row with a live claim, where the epoch fence applies instead.
+        on any row stamped under a live claim, where the epoch fence applies
+        instead.
       * `:merge_gated` (optional boolean, default `false`) — the LEAD-ONLY
         override that releases the MERGE-GATE refusal below. Without it a
         `{:met, _}` on a merge-gated row fails with `:merge_gated_criterion`.
@@ -147,6 +196,7 @@ defmodule Barkpark.Tasks.Stamp do
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
   `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
   `:note_required`, `:invalid_criteria`, `:merge_gated_criterion`,
+  `:branch_only_evidence`,
   `:observed_rev_required`, `:criterion_not_met`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
@@ -189,9 +239,20 @@ defmodule Barkpark.Tasks.Stamp do
        when not (is_integer(index) and index >= 0),
        do: {:error, :invalid_criteria}
 
+  # THE DURABILITY CHECK sits here, on the ONE clause that writes a met
+  # criterion's evidence, so every caller of every stamp surface meets it. It
+  # runs BEFORE the transaction: a refusal costs the stamper one line while the
+  # missing sha is still in their hands, which is the whole economics of
+  # task-f6fba9a87369ce8e. Six weeks later no audit can recover it.
   defp build_update(index, {:met, evidence}, _worker, text)
        when is_binary(evidence) and evidence != "" do
-    {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
+    case EvidenceDurability.check(evidence) do
+      :ok ->
+        {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
+
+      {:error, :branch_only_evidence} = err ->
+        err
+    end
   end
 
   defp build_update(_index, {:met, _no_evidence}, _worker, _text),
@@ -282,6 +343,14 @@ defmodule Barkpark.Tasks.Stamp do
                             do: Map.put(p, "withdrawn", true),
                             else: p
                         end)
+                        |> then(fn p ->
+                          # (d) of task-d68754135a6a9f66: a board must be able
+                          # to tell an annotation of a SEALED row from live
+                          # progress, on a boolean, without joining lifecycle
+                          # or string-matching. Read from the STORED row as it
+                          # was inside the lock — `doc`, not `updated`.
+                          if terminal?(doc), do: Map.put(p, "post_close", true), else: p
+                        end)
                     },
                     caller_stamp(caller_token_id)
                   )
@@ -313,6 +382,29 @@ defmodule Barkpark.Tasks.Stamp do
   #
   # `--met` / `--miss` keep their contract EXACTLY: in_progress, holder-only,
   # epoch-fenced.
+  # THE POST-CLOSE ATTEMPT (task-d68754135a6a9f66). A `--miss` on a TERMINAL
+  # row is fenced exactly like a withdrawal on one: there is no live lease, so
+  # the rev the caller READ is the fence. This clause sits ahead of the shared
+  # met/miss clause below, so ONLY the attempt shape reaches it — a `{:met, _}`
+  # on the same row falls to that clause and is refused
+  # `{:not_in_progress, status}`, which is the whole safety property.
+  #
+  # The worker id is still recorded (it signs the attempt) but it is NOT
+  # checked: a closed row keeps its claim as a RECEIPT, so a holder test would
+  # force an annotator to type the departed closer's worker id — impersonating
+  # them to record an observation about their row. Liveness, not presence, picks
+  # the arm, exactly as D745 decided for the withdrawal.
+  defp authorize(
+         %Document{content: %{"lifecycle_status" => status}} = doc,
+         _worker_id,
+         _observed_epoch,
+         observed_rev,
+         "miss"
+       )
+       when status in @terminal_statuses do
+    check_observed_rev(doc, observed_rev)
+  end
+
   defp authorize(doc, worker_id, observed_epoch, _observed_rev, tag)
        when tag in ["met", "miss"] do
     with :ok <- check_in_progress(doc),
@@ -347,6 +439,13 @@ defmodule Barkpark.Tasks.Stamp do
   # very worker whose proof they are refuting. The holder gate exists to stop
   # exactly that, so it is not repurposed to require it.
   defp authorize(%Document{} = doc, _worker_id, _observed_epoch, observed_rev, "withdrawn") do
+    check_observed_rev(doc, observed_rev)
+  end
+
+  # THE READ-BEFORE-WRITE FENCE, shared by the sealed-row withdrawal (D745) and
+  # the post-close attempt (task-d68754135a6a9f66): you cannot annotate a row
+  # you did not read. Same CAS close already spells `--set observed_rev=...`.
+  defp check_observed_rev(%Document{} = doc, observed_rev) do
     cond do
       not (is_binary(observed_rev) and observed_rev != "") -> {:error, :observed_rev_required}
       observed_rev != doc.rev -> {:error, :stale_claim}
@@ -356,15 +455,25 @@ defmodule Barkpark.Tasks.Stamp do
 
   # Only an in-flight task has a live claim to stamp under. Mirrors
   # Release.check_in_progress — a done/cancelled task's ledger is sealed by
-  # close; stamping it would rewrite history behind the seal. A WITHDRAWAL is
-  # exempt (see authorize/5): it never raises a lock, never touches the seal or
-  # the close_reason, and only ever appends a signed correction.
+  # close; RAISING a lock there would rewrite history behind the seal. Two
+  # append-only verbs are exempt on a terminal row (see authorize/5), and
+  # `{:met, _}` is deliberately not one of them:
+  #
+  #   * a WITHDRAWAL never raises a lock, never touches the seal or the
+  #     close_reason, and only appends a signed correction;
+  #   * a post-close `--miss` ATTEMPT pins `met` to its stored value and writes
+  #     neither `evidence` nor any criterion text.
+  #
+  # Both then answer to the observed_rev CAS instead of holder + epoch.
   defp check_in_progress(%Document{content: content}) do
     case Map.get(content || %{}, "lifecycle_status") do
       "in_progress" -> :ok
       other -> {:error, {:not_in_progress, other}}
     end
   end
+
+  defp terminal?(%Document{content: content}),
+    do: Map.get(content || %{}, "lifecycle_status") in @terminal_statuses
 
   # EXACTLY Close.check_fencing (D7): epoch must match a present claim; a
   # missing claim would pass here but is unreachable — check_holder already

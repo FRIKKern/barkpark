@@ -1,0 +1,1 @@
+The provision-rail slice row-provenance behaviour is pinned on those surfaces too, so a future change cannot alter them invisibly.

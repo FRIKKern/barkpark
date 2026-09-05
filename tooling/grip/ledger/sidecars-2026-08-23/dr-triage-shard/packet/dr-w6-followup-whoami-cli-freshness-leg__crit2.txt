@@ -1,0 +1,1 @@
+The Go gate is green: CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/... && gofmt -l ./internal. Evidence: paste the full output.

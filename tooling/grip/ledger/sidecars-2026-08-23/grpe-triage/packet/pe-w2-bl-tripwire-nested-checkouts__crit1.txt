@@ -1,0 +1,1 @@
+The owner-liveness check fails when the real formula (not its comment) is removed — mutation proof recorded, evidence names the venue

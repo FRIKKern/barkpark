@@ -1,0 +1,1 @@
+Each PR's checks are re-fired by a push, and the fact that its previous green predated the census is recorded in the PR body.

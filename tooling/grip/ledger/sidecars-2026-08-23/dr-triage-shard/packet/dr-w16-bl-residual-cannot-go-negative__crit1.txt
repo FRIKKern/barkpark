@@ -1,0 +1,1 @@
+residual is asserted non-negative on every census fixture, or computed positively so it cannot be; state which and why

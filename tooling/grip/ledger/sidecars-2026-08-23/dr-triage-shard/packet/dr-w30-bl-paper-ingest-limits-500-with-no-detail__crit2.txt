@@ -1,0 +1,1 @@
+`bp doc publish` prints `details.failures` when the publish-quality floor rejects a document, so an author can act on it. Evidence: the CLI output on a rejected publish.

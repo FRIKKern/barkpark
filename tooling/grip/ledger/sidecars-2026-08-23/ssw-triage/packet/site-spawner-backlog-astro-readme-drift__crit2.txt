@@ -1,0 +1,1 @@
+The focused template/documentation gate passes and the correction is merged with provenance recorded.

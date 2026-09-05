@@ -1,0 +1,4702 @@
+{
+ "commands": [
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "perspective"
+    },
+    {
+     "name": "expand"
+    },
+    {
+     "name": "fields"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/doc/:dataset/:type/:doc_id"
+   },
+   "id": "doc.get",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    },
+    {
+     "name": "all"
+    },
+    {
+     "name": "perspective"
+    },
+    {
+     "name": "expand"
+    },
+    {
+     "name": "fields"
+    },
+    {
+     "name": "order"
+    },
+    {
+     "name": "count"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/query/:dataset/:type"
+   },
+   "id": "doc.ls",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/backlinks/:dataset/:id"
+   },
+   "id": "doc.backlinks",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "backlinks",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "limit"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/related/:dataset/:id"
+   },
+   "id": "doc.related",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "related",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "type"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/tags/:dataset"
+   },
+   "id": "tag.browse",
+   "noun": "tag",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "browse",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "tag",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "type"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/tags/:dataset/:tag"
+   },
+   "id": "tag.docs",
+   "noun": "tag",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "docs",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "limit"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/history/:dataset/:type/:doc_id"
+   },
+   "id": "doc.history",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "history",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "rev_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/revision/:dataset/:rev_id"
+   },
+   "id": "doc.revision",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "revision",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "rev_id",
+     "required": true
+    },
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/revision/:dataset/:rev_id/restore"
+   },
+   "id": "doc.restore-revision",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "restore-revision",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/analytics/:dataset"
+   },
+   "id": "dataset.stats",
+   "noun": "dataset",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "stats",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/counts/:dataset"
+   },
+   "id": "data.counts",
+   "noun": "data",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "counts",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "filter"
+    },
+    {
+     "name": "fields"
+    },
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    },
+    {
+     "name": "perspective"
+    },
+    {
+     "name": "expand"
+    },
+    {
+     "name": "order"
+    },
+    {
+     "name": "count"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/query/:dataset/:type"
+   },
+   "id": "doc.query",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "query",
+   "writes": false
+  },
+  {
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "quiet"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.mutate",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "mutate",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.publish",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "publish",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.unpublish",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "unpublish",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.discard-draft",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "discard-draft",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.delete",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "delete",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.create",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.create-or-replace",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create-or-replace",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.create-if-not-exists",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create-if-not-exists",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "type",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/mutate/:dataset"
+   },
+   "id": "doc.patch",
+   "noun": "doc",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "patch",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/schemas/:dataset"
+   },
+   "id": "schema.ls",
+   "noun": "schema",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/schemas/:dataset/:name"
+   },
+   "id": "schema.get",
+   "noun": "schema",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "file"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/schemas/:dataset"
+   },
+   "id": "schema.apply",
+   "noun": "schema",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "apply",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/schemas/:dataset/:name"
+   },
+   "id": "schema.delete",
+   "noun": "schema",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "delete",
+   "writes": true
+  },
+  {
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset"
+   },
+   "id": "media.ls",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "file",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/upload"
+   },
+   "id": "media.upload",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "upload",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/:id"
+   },
+   "id": "media.get",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/media/:dataset/:id"
+   },
+   "id": "media.delete",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "delete",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/:id/relations"
+   },
+   "id": "media.relations",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "relations",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/:id/checkout"
+   },
+   "id": "media.checkout",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "checkout",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/:id/undo-checkout"
+   },
+   "id": "media.undo-checkout",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "undo-checkout",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": false
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    },
+    {
+     "name": "cursor"
+    },
+    {
+     "name": "type"
+    },
+    {
+     "name": "kind"
+    },
+    {
+     "name": "status"
+    },
+    {
+     "name": "collection"
+    },
+    {
+     "name": "tags"
+    },
+    {
+     "name": "sort"
+    },
+    {
+     "name": "facets"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search"
+   },
+   "id": "media.search",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "search",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": false
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search/suggestions"
+   },
+   "id": "media.suggest",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "suggest",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "PATCH",
+    "path_template": "/v1/media/:dataset/:id"
+   },
+   "id": "media.update",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "update",
+   "writes": true
+  },
+  {
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/collections"
+   },
+   "id": "media.collections",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "collections",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/collections/:id"
+   },
+   "id": "media.collection",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "collection",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/collections/:id/assets"
+   },
+   "id": "media.collection-assets",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "collection-assets",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "assetId",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/collections/:id/members"
+   },
+   "id": "media.add-member",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "add-member",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "asset_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/media/:dataset/collections/:id/members/:asset_id"
+   },
+   "id": "media.remove-member",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "remove-member",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "ttl"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/collections/:id/share"
+   },
+   "id": "media.share-collection",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "share-collection",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/media/:dataset/collections/:id/share"
+   },
+   "id": "media.revoke-share",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "revoke-share",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search/settings"
+   },
+   "id": "media.search-settings",
+   "noun": "media",
+   "verb": "search-settings",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "PUT",
+    "path_template": "/v1/media/:dataset/search/settings"
+   },
+   "id": "media.update-search-settings",
+   "noun": "media",
+   "verb": "update-search-settings",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "period"
+    },
+    {
+     "name": "periodStart"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search/insights"
+   },
+   "id": "media.search-insights",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "search-insights",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search/synonyms"
+   },
+   "id": "media.search-synonyms",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "search-synonyms",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "to"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/search/synonyms/preview"
+   },
+   "id": "media.search-synonym-preview",
+   "noun": "media",
+   "verb": "search-synonym-preview",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "from",
+     "required": true
+    },
+    {
+     "name": "to",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "kind"
+    },
+    {
+     "name": "source"
+    },
+    {
+     "name": "enabled"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/search/synonyms"
+   },
+   "id": "media.create-search-synonym",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create-search-synonym",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "from",
+     "required": true
+    },
+    {
+     "name": "to",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "kind"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/search/synonyms/promote"
+   },
+   "id": "media.promote-search-synonym",
+   "noun": "media",
+   "verb": "promote-search-synonym",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/media/:dataset/search/synonyms/:id"
+   },
+   "id": "media.delete-search-synonym",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "delete-search-synonym",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "queryEventId",
+     "required": true
+    },
+    {
+     "name": "objectId",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "type"
+    },
+    {
+     "name": "position"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/media/:dataset/search/interaction"
+   },
+   "id": "media.search-interaction",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "search-interaction",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/media/:dataset/share/:token"
+   },
+   "id": "media.share-view",
+   "noun": "media",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "share-view",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "engine"
+    },
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    },
+    {
+     "name": "type"
+    },
+    {
+     "name": "types"
+    },
+    {
+     "name": "fields"
+    },
+    {
+     "name": "perspective"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset"
+   },
+   "id": "search.query",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "query",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": false
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "limit"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset/suggestions"
+   },
+   "id": "search.suggestions",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "suggestions",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "queryEventId",
+     "required": true
+    },
+    {
+     "name": "objectId",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "type"
+    },
+    {
+     "name": "position"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/search/:dataset/interaction"
+   },
+   "id": "search.interaction",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "interaction",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "from",
+     "required": true
+    },
+    {
+     "name": "to",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/search/:dataset/correction"
+   },
+   "id": "search.correction",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "correction",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "types"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/search/:dataset/reindex"
+   },
+   "id": "search.reindex",
+   "noun": "search",
+   "verb": "reindex",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset/settings"
+   },
+   "id": "search.settings",
+   "noun": "search",
+   "verb": "settings",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "PUT",
+    "path_template": "/v1/data/search/:dataset/settings"
+   },
+   "id": "search.update-settings",
+   "noun": "search",
+   "verb": "update-settings",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "period"
+    },
+    {
+     "name": "periodStart"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset/insights"
+   },
+   "id": "search.insights",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "insights",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset/synonyms"
+   },
+   "id": "search.synonyms",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "synonyms",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "q",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "to"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/data/search/:dataset/synonyms/preview"
+   },
+   "id": "search.synonym-preview",
+   "noun": "search",
+   "verb": "synonym-preview",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "from",
+     "required": true
+    },
+    {
+     "name": "to",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "kind"
+    },
+    {
+     "name": "source"
+    },
+    {
+     "name": "enabled"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/search/:dataset/synonyms"
+   },
+   "id": "search.create-synonym",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create-synonym",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "from",
+     "required": true
+    },
+    {
+     "name": "to",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "kind"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/data/search/:dataset/synonyms/promote"
+   },
+   "id": "search.promote-synonym",
+   "noun": "search",
+   "verb": "promote-synonym",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/data/search/:dataset/synonyms/:id"
+   },
+   "id": "search.delete-synonym",
+   "noun": "search",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "delete-synonym",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/api/workspaces"
+   },
+   "id": "workspace.ls",
+   "noun": "workspace",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "slug"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/api/workspaces"
+   },
+   "id": "workspace.create",
+   "noun": "workspace",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/api/workspaces/:workspace_slug/projects"
+   },
+   "id": "workspace.project-create",
+   "noun": "workspace",
+   "verb": "project-create",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/api/workspaces/:workspace_slug/projects"
+   },
+   "id": "workspace.project-ls",
+   "noun": "workspace",
+   "verb": "project-ls",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/api/workspaces/:workspace_slug/projects/:project_slug/datasets"
+   },
+   "id": "workspace.dataset-ls",
+   "noun": "workspace",
+   "verb": "dataset-ls",
+   "writes": false
+  },
+  {
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/members"
+   },
+   "id": "workspace.member-ls",
+   "noun": "workspace",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "member-ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "email",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "flags": [
+    {
+     "name": "role"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/members"
+   },
+   "id": "workspace.member-add",
+   "noun": "workspace",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "member-add",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "principal_ref",
+     "required": true
+    },
+    {
+     "name": "role",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "flags": [
+    {
+     "name": "principal_type"
+    }
+   ],
+   "http": {
+    "method": "PATCH",
+    "path_template": "/v1/members/:principal_ref"
+   },
+   "id": "workspace.member-role",
+   "noun": "workspace",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "member-role",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "principal_ref",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "flags": [
+    {
+     "name": "principal_type"
+    }
+   ],
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/members/:principal_ref"
+   },
+   "id": "workspace.member-rm",
+   "noun": "workspace",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "member-rm",
+   "writes": true
+  },
+  {
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tokens"
+   },
+   "id": "token.ls",
+   "noun": "token",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/tokens/:id"
+   },
+   "id": "token.revoke",
+   "noun": "token",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "revoke",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "label",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "flags": [
+    {
+     "name": "permissions"
+    },
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tokens"
+   },
+   "id": "token.create",
+   "noun": "token",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/webhooks/:dataset"
+   },
+   "id": "webhook.ls",
+   "noun": "webhook",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "url",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/webhooks/:dataset"
+   },
+   "id": "webhook.create",
+   "noun": "webhook",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/webhooks/:dataset/:id"
+   },
+   "id": "webhook.get",
+   "noun": "webhook",
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/webhooks/:dataset/:id"
+   },
+   "id": "webhook.delete",
+   "noun": "webhook",
+   "verb": "delete",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "url",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "PUT",
+    "path_template": "/v1/webhooks/:dataset/:id"
+   },
+   "id": "webhook.update",
+   "noun": "webhook",
+   "verb": "update",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/webhooks/:dataset/:id/deliveries"
+   },
+   "id": "webhook.deliveries",
+   "noun": "webhook",
+   "verb": "deliveries",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "event_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay"
+   },
+   "id": "webhook.replay",
+   "noun": "webhook",
+   "verb": "replay",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/webhooks/:dataset/:id/rotate"
+   },
+   "id": "webhook.rotate",
+   "noun": "webhook",
+   "verb": "rotate",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/webhooks/:dataset/:id/reenable"
+   },
+   "id": "webhook.reenable",
+   "noun": "webhook",
+   "verb": "reenable",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/webhooks/:dataset/:id/test-send"
+   },
+   "id": "webhook.test-send",
+   "noun": "webhook",
+   "verb": "test-send",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins"
+   },
+   "id": "plugin.ls",
+   "noun": "plugin",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "plugin_name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "set"
+    }
+   ],
+   "http": {
+    "method": "PUT",
+    "path_template": "/v1/plugins/settings/:plugin_name"
+   },
+   "id": "plugin.settings",
+   "noun": "plugin",
+   "verb": "settings",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/secrets"
+   },
+   "id": "secret.ls",
+   "noun": "secret",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/secrets/:name"
+   },
+   "id": "secret.get",
+   "noun": "secret",
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    },
+    {
+     "name": "value",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "PUT",
+    "path_template": "/v1/secrets/:name"
+   },
+   "id": "secret.set",
+   "noun": "secret",
+   "verb": "set",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/secrets/:name"
+   },
+   "id": "secret.rm",
+   "noun": "secret",
+   "verb": "rm",
+   "writes": true
+  },
+  {
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets"
+   },
+   "id": "secret.scoped-ls",
+   "noun": "secret",
+   "verb": "scoped-ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+   },
+   "id": "secret.scoped-get",
+   "noun": "secret",
+   "verb": "scoped-get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    },
+    {
+     "name": "value",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "PUT",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+   },
+   "id": "secret.scoped-set",
+   "noun": "secret",
+   "verb": "scoped-set",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+   },
+   "id": "secret.scoped-rm",
+   "noun": "secret",
+   "verb": "scoped-rm",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/shares"
+   },
+   "id": "share.ls",
+   "noun": "share",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "scope",
+     "required": true
+    },
+    {
+     "name": "surfaces",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "access"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/shares"
+   },
+   "id": "share.add",
+   "noun": "share",
+   "verb": "add",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "scope",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/shares"
+   },
+   "id": "share.rm",
+   "noun": "share",
+   "verb": "rm",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "scope"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/shares/tokens"
+   },
+   "id": "share.token-ls",
+   "noun": "share",
+   "verb": "token-ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "scope",
+     "required": true
+    },
+    {
+     "name": "surfaces",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "access"
+    },
+    {
+     "name": "ttl"
+    },
+    {
+     "name": "label"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/shares/tokens"
+   },
+   "id": "share.token-mint",
+   "noun": "share",
+   "verb": "token-mint",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/shares/tokens/:token_id"
+   },
+   "id": "share.token-revoke",
+   "noun": "share",
+   "verb": "token-revoke",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "scope",
+     "required": true
+    },
+    {
+     "name": "kind",
+     "required": true
+    },
+    {
+     "name": "ref_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "ref_type"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/shares/links"
+   },
+   "id": "share.link-ls",
+   "noun": "share",
+   "verb": "link-ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "scope",
+     "required": true
+    },
+    {
+     "name": "kind",
+     "required": true
+    },
+    {
+     "name": "ref_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "ref_type"
+    },
+    {
+     "name": "access"
+    },
+    {
+     "name": "label"
+    },
+    {
+     "name": "ttl"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/shares/links"
+   },
+   "id": "share.link-mint",
+   "noun": "share",
+   "verb": "link-mint",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/shares/links/:id"
+   },
+   "id": "share.link-revoke",
+   "noun": "share",
+   "verb": "link-revoke",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "types"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/graph"
+   },
+   "id": "graph.corpus",
+   "noun": "graph",
+   "verb": "corpus",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "depth"
+    },
+    {
+     "name": "direction"
+    },
+    {
+     "name": "kinds"
+    },
+    {
+     "name": "sources"
+    },
+    {
+     "name": "perspective"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/graph/:id"
+   },
+   "id": "graph.show",
+   "noun": "graph",
+   "verb": "show",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/graph/:id/tasks"
+   },
+   "id": "graph.tasks",
+   "noun": "graph",
+   "verb": "tasks",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/graph/orphans"
+   },
+   "id": "graph.orphans",
+   "noun": "graph",
+   "verb": "orphans",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/graph/dangling"
+   },
+   "id": "graph.dangling",
+   "noun": "graph",
+   "verb": "dangling",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "email",
+     "required": true
+    },
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/register"
+   },
+   "id": "auth.register",
+   "noun": "auth",
+   "verb": "register",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "email",
+     "required": true
+    },
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "flags": [
+    {
+     "name": "totp_code"
+    },
+    {
+     "name": "recovery_code"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/login"
+   },
+   "id": "auth.login",
+   "noun": "auth",
+   "verb": "login",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/verify-email"
+   },
+   "id": "auth.verify-email",
+   "noun": "auth",
+   "verb": "verify-email",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "email",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/request-reset"
+   },
+   "id": "auth.request-reset",
+   "noun": "auth",
+   "verb": "request-reset",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token",
+     "required": true
+    },
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "none",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/reset"
+   },
+   "id": "auth.reset",
+   "noun": "auth",
+   "verb": "reset",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/auth/me"
+   },
+   "id": "auth.me",
+   "noun": "auth",
+   "verb": "me",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/auth/logout"
+   },
+   "id": "auth.logout",
+   "noun": "auth",
+   "verb": "logout",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/mfa/enroll"
+   },
+   "id": "auth.mfa-enroll",
+   "noun": "auth",
+   "verb": "mfa-enroll",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "secret",
+     "required": true
+    },
+    {
+     "name": "code",
+     "required": true
+    },
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/mfa/verify"
+   },
+   "id": "auth.mfa-verify",
+   "noun": "auth",
+   "verb": "mfa-verify",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "password",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/mfa/disable"
+   },
+   "id": "auth.mfa-disable",
+   "noun": "auth",
+   "verb": "mfa-disable",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "grantee_email",
+     "required": true
+    },
+    {
+     "name": "workspace_id",
+     "required": true
+    },
+    {
+     "name": "capabilities",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "flags": [
+    {
+     "name": "project_id"
+    },
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "type"
+    },
+    {
+     "name": "doc_id"
+    },
+    {
+     "name": "single_use"
+    },
+    {
+     "name": "expires_at"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/access"
+   },
+   "id": "access.grant",
+   "noun": "access",
+   "verb": "grant",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "workspace_id"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/access"
+   },
+   "id": "access.ls",
+   "noun": "access",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/access/:id"
+   },
+   "id": "access.show",
+   "noun": "access",
+   "verb": "show",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "scoped_admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/access/:id"
+   },
+   "id": "access.revoke",
+   "noun": "access",
+   "verb": "revoke",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/access/claim"
+   },
+   "id": "access.claim",
+   "noun": "access",
+   "verb": "claim",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/access/mine"
+   },
+   "id": "access.mine",
+   "noun": "access",
+   "verb": "mine",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id"
+   },
+   "id": "cycle.show",
+   "noun": "cycle",
+   "verb": "show",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "profile",
+     "required": false
+    },
+    {
+     "name": "inventory_json",
+     "required": false
+    },
+    {
+     "name": "scale_contract_json",
+     "required": false
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "experiment_contract_json"
+    },
+    {
+     "name": "correction_of_json"
+    },
+    {
+     "name": "correction_of_digest"
+    },
+    {
+     "name": "release_gate_receipt_json"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open"
+   },
+   "id": "cycle.open",
+   "noun": "cycle",
+   "verb": "open",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "correction_of_json",
+     "required": true
+    },
+    {
+     "name": "correction_of_digest",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open"
+   },
+   "id": "cycle.release-gate-open",
+   "noun": "cycle",
+   "verb": "release-gate-open",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "release_gate_id",
+     "required": true
+    },
+    {
+     "name": "role",
+     "required": true
+    },
+    {
+     "name": "document_id",
+     "required": true
+    },
+    {
+     "name": "title",
+     "required": true
+    },
+    {
+     "name": "content_json",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage"
+   },
+   "id": "cycle.release-paper-stage",
+   "noun": "cycle",
+   "verb": "release-paper-stage",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "release_gate_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "b1_experiment_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate"
+   },
+   "id": "cycle.release-gate-activate",
+   "noun": "cycle",
+   "verb": "release-gate-activate",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "proven_batch_capacity",
+     "required": true
+    },
+    {
+     "name": "chosen_format",
+     "required": true
+    },
+    {
+     "name": "pilot_evidence",
+     "required": true
+    },
+    {
+     "name": "pilot_evidence_revision",
+     "required": true
+    },
+    {
+     "name": "failure_rate",
+     "required": true
+    },
+    {
+     "name": "failure_threshold",
+     "required": true
+    },
+    {
+     "name": "golden_fixtures_json",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal"
+   },
+   "id": "cycle.seal",
+   "noun": "cycle",
+   "verb": "seal",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "assignment_id",
+     "required": true
+    },
+    {
+     "name": "phase",
+     "required": true
+    },
+    {
+     "name": "agent_type",
+     "required": true
+    },
+    {
+     "name": "effort",
+     "required": true
+    },
+    {
+     "name": "snapshot_json",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "task_id"
+    },
+    {
+     "name": "replaces_assignment_id"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments"
+   },
+   "id": "cycle.assign",
+   "noun": "cycle",
+   "verb": "assign",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "assignment_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "status",
+     "required": true
+    },
+    {
+     "name": "summary",
+     "required": true
+    },
+    {
+     "name": "evidence",
+     "required": true
+    },
+    {
+     "name": "evidence_revision",
+     "required": true
+    },
+    {
+     "name": "payload_json",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results"
+   },
+   "id": "cycle.result",
+   "noun": "cycle",
+   "verb": "result",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "reason",
+     "required": true
+    },
+    {
+     "name": "correction_receipt_json",
+     "required": true
+    },
+    {
+     "name": "evidence",
+     "required": true
+    },
+    {
+     "name": "evidence_revision",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine"
+   },
+   "id": "cycle.quarantine",
+   "noun": "cycle",
+   "verb": "quarantine",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "correction_receipt_json",
+     "required": true
+    },
+    {
+     "name": "gate_receipt_json",
+     "required": true
+    },
+    {
+     "name": "evidence",
+     "required": true
+    },
+    {
+     "name": "evidence_revision",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "previous_event_id"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote"
+   },
+   "id": "cycle.promote",
+   "noun": "cycle",
+   "verb": "promote",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "epic_id",
+     "required": true
+    },
+    {
+     "name": "wave_id",
+     "required": true
+    },
+    {
+     "name": "idempotency_key",
+     "required": true
+    },
+    {
+     "name": "previous_event_id",
+     "required": true
+    },
+    {
+     "name": "restore_event_id",
+     "required": true
+    },
+    {
+     "name": "evidence",
+     "required": true
+    },
+    {
+     "name": "evidence_revision",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback"
+   },
+   "id": "cycle.rollback",
+   "noun": "cycle",
+   "verb": "rollback",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "provider"
+    },
+    {
+     "name": "execution_target"
+    },
+    {
+     "name": "execution_host_id"
+    },
+    {
+     "name": "mode"
+    },
+    {
+     "name": "model"
+    },
+    {
+     "name": "effort"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions"
+   },
+   "id": "chat.create_session",
+   "noun": "chat",
+   "verb": "create-session",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "archived"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/chat/sessions"
+   },
+   "id": "chat.list_sessions",
+   "noun": "chat",
+   "verb": "list-sessions",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "since"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/chat/sessions/:id"
+   },
+   "id": "chat.get_session",
+   "noun": "chat",
+   "verb": "get-session",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "draft"
+    },
+    {
+     "name": "mode"
+    },
+    {
+     "name": "model_choice"
+    },
+    {
+     "name": "effort_choice"
+    },
+    {
+     "name": "title"
+    }
+   ],
+   "http": {
+    "method": "PATCH",
+    "path_template": "/v1/chat/sessions/:id"
+   },
+   "id": "chat.update_session",
+   "noun": "chat",
+   "verb": "update-session",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "content",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/messages"
+   },
+   "id": "chat.send_message",
+   "noun": "chat",
+   "verb": "send-message",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/interrupt"
+   },
+   "id": "chat.interrupt",
+   "noun": "chat",
+   "verb": "interrupt",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "request_id",
+     "required": true
+    },
+    {
+     "name": "decision",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/approval"
+   },
+   "id": "chat.approve",
+   "noun": "chat",
+   "verb": "approve",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "request_id",
+     "required": true
+    },
+    {
+     "name": "answers",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/answer"
+   },
+   "id": "chat.answer",
+   "noun": "chat",
+   "verb": "answer",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/archive"
+   },
+   "id": "chat.archive",
+   "noun": "chat",
+   "verb": "archive",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/unarchive"
+   },
+   "id": "chat.unarchive",
+   "noun": "chat",
+   "verb": "unarchive",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "data",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/chat/sessions/:id/attachments"
+   },
+   "id": "chat.upload_attachment",
+   "noun": "chat",
+   "verb": "upload-attachment",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "attachment_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/chat/sessions/:id/attachments/:attachment_id"
+   },
+   "id": "chat.get_attachment",
+   "noun": "chat",
+   "verb": "get-attachment",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "email",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "workspace"
+    },
+    {
+     "name": "permissions"
+    },
+    {
+     "name": "label"
+    },
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/auth/app-tokens"
+   },
+   "id": "app_token.create",
+   "noun": "app_token",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "email"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/auth/app-tokens"
+   },
+   "id": "app_token.ls",
+   "noun": "app_token",
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "token"
+    },
+    {
+     "name": "email"
+    }
+   ],
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/auth/app-tokens"
+   },
+   "id": "app_token.revoke",
+   "noun": "app_token",
+   "verb": "revoke",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/auth/app-tokens/:id"
+   },
+   "id": "app_token.revoke-by-id",
+   "noun": "app_token",
+   "verb": "revoke-by-id",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/auth/app-tokens/current"
+   },
+   "id": "app_token.revoke-current",
+   "noun": "app_token",
+   "verb": "revoke-current",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/fleet/support-tokens"
+   },
+   "id": "fleet_support_token.create",
+   "noun": "fleet_support_token",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "token_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/fleet/support-tokens/:token_id"
+   },
+   "id": "fleet_support_token.revoke",
+   "noun": "fleet_support_token",
+   "verb": "revoke",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "title",
+     "required": true
+    },
+    {
+     "name": "started_at",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "flags": [
+    {
+     "name": "component"
+    },
+    {
+     "name": "impact"
+    },
+    {
+     "name": "status"
+    },
+    {
+     "name": "body"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/status/incidents"
+   },
+   "id": "incident.create",
+   "noun": "incident",
+   "verb": "create",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/status/incidents/:id/resolve"
+   },
+   "id": "incident.resolve",
+   "noun": "incident",
+   "verb": "resolve",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/papers"
+   },
+   "id": "bulldocs.publish",
+   "noun": "bulldocs",
+   "scoped_prefix": null,
+   "verb": "publish",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "if-rev"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/papers/:slug/ops"
+   },
+   "id": "bulldocs.patch",
+   "noun": "bulldocs",
+   "scoped_prefix": null,
+   "verb": "patch",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/papers/:slug/proposals"
+   },
+   "id": "bulldocs.propose",
+   "noun": "bulldocs",
+   "scoped_prefix": null,
+   "verb": "propose",
+   "writes": true
+  },
+  {
+   "auth_tier": "ingest",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/bulldocs/intents"
+   },
+   "id": "bulldocs.intents",
+   "noun": "bulldocs",
+   "scoped_prefix": null,
+   "verb": "intents",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/intents/:id/processed"
+   },
+   "id": "bulldocs.intent-processed",
+   "noun": "bulldocs",
+   "scoped_prefix": null,
+   "verb": "intent-processed",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/sessions"
+   },
+   "id": "session.open",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "open",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "kind"
+    },
+    {
+     "name": "ref"
+    },
+    {
+     "name": "note"
+    },
+    {
+     "name": "conversation"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/sessions/:slug/events"
+   },
+   "id": "session.log",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "log",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/sessions"
+   },
+   "id": "session.publish",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "publish",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/bulldocs/sessions/:slug"
+   },
+   "id": "session.view",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "view",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "add"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/sessions"
+   },
+   "id": "session.link-task",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "link-task",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "conversation"
+    },
+    {
+     "name": "harness"
+    },
+    {
+     "name": "account"
+    },
+    {
+     "name": "machine"
+    },
+    {
+     "name": "cwd"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/bulldocs/sessions/:slug/conversations"
+   },
+   "id": "session.touch",
+   "noun": "session",
+   "scoped_prefix": null,
+   "verb": "touch",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/github/adopt/:id"
+   },
+   "id": "github.adopt",
+   "noun": "github",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "adopt",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/github/status"
+   },
+   "id": "github.status",
+   "noun": "github",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "status",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "dataset",
+     "required": true
+    },
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/onixedit/export/:dataset/:id"
+   },
+   "id": "onixedit.export",
+   "noun": "onixedit",
+   "scoped_prefix": "/w/:workspace_slug/p/:project_slug",
+   "verb": "export",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "file",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "slug"
+    },
+    {
+     "name": "title"
+    },
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "sep"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/sheets/import"
+   },
+   "id": "sheets.import",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "import",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "file"
+    },
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "request_id"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/sheets/:slug/ops"
+   },
+   "id": "sheets.ops",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "ops",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/sheets/:slug/export.xlsx"
+   },
+   "id": "sheets.export-xlsx",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "export-xlsx",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "tab"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/sheets/:slug/export.csv"
+   },
+   "id": "sheets.export-csv",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "export-csv",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "dataset"
+    },
+    {
+     "name": "tab"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/sheets/:slug/export.tsv"
+   },
+   "id": "sheets.export-tsv",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "export-tsv",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/sheets/:slug/export.md"
+   },
+   "id": "sheets.export-md",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "export-md",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "slug",
+     "required": true
+    }
+   ],
+   "auth_tier": "ingest",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/sheets/:slug/export.html"
+   },
+   "id": "sheets.export-html",
+   "noun": "sheets",
+   "scoped_prefix": null,
+   "verb": "export-html",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tasks"
+   },
+   "id": "task.ls",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "limit"
+    },
+    {
+     "name": "offset"
+    },
+    {
+     "name": "order"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tasks/ready"
+   },
+   "id": "task.ready",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "ready",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "worker"
+    },
+    {
+     "name": "limit"
+    },
+    {
+     "name": "order"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tasks/prime"
+   },
+   "id": "task.prime",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "prime",
+   "writes": false
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "since"
+    },
+    {
+     "name": "limit"
+    },
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tasks/events"
+   },
+   "id": "task.events",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "events",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tasks/:doc_id"
+   },
+   "id": "task.get",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "get",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "worker_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "resources"
+    },
+    {
+     "name": "observed_rail_rev"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/claim"
+   },
+   "id": "task.claim",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "claim",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "worker_id",
+     "required": true
+    },
+    {
+     "name": "observed_epoch",
+     "required": true
+    },
+    {
+     "name": "lifecycle_status",
+     "required": false
+    },
+    {
+     "name": "reason",
+     "required": false
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "set"
+    },
+    {
+     "name": "observed_rail_rev"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/close"
+   },
+   "id": "task.close",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "close",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "worker_id",
+     "required": true
+    },
+    {
+     "name": "observed_epoch",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/release"
+   },
+   "id": "task.release",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "release",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "commit"
+    },
+    {
+     "name": "pr"
+    },
+    {
+     "name": "note"
+    },
+    {
+     "name": "criterion"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/landed"
+   },
+   "id": "task.landed",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "landed",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "worker_id",
+     "required": true
+    },
+    {
+     "name": "observed_epoch",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "criterion"
+    },
+    {
+     "name": "criterion-text"
+    },
+    {
+     "name": "met"
+    },
+    {
+     "name": "evidence"
+    },
+    {
+     "name": "miss"
+    },
+    {
+     "name": "note"
+    },
+    {
+     "name": "withdraw"
+    },
+    {
+     "name": "observed-rev"
+    },
+    {
+     "name": "merge-gated"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/stamp"
+   },
+   "id": "task.stamp",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "stamp",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "worker_id",
+     "required": true
+    },
+    {
+     "name": "phase_id",
+     "required": false
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "order"
+    },
+    {
+     "name": "observed_rail_rev"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/claim"
+   },
+   "id": "task.next",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "next",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "new_parent_id",
+     "required": false
+    }
+   ],
+   "auth_tier": "write",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/move"
+   },
+   "id": "task.move",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "move",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "state",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "object"
+    },
+    {
+     "name": "note"
+    },
+    {
+     "name": "worker"
+    },
+    {
+     "name": "disposition"
+    },
+    {
+     "name": "reopen-trigger"
+    },
+    {
+     "name": "rerun"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/stage"
+   },
+   "id": "task.stage",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "stage",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    },
+    {
+     "name": "worker_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "now"
+    },
+    {
+     "name": "criterion"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/pulse"
+   },
+   "id": "task.pulse",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "pulse",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "doc_id",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "pr"
+    },
+    {
+     "name": "state"
+    },
+    {
+     "name": "reason"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tasks/:doc_id/renew"
+   },
+   "id": "task.renew",
+   "noun": "task",
+   "scoped_prefix": null,
+   "verb": "renew",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/fleet/roster"
+   },
+   "id": "fleet.roster",
+   "noun": "fleet",
+   "scoped_prefix": null,
+   "verb": "roster",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "worker",
+     "required": true
+    }
+   ],
+   "auth_tier": "write",
+   "flags": [
+    {
+     "name": "status"
+    },
+    {
+     "name": "ttl"
+    },
+    {
+     "name": "agent"
+    },
+    {
+     "name": "scope"
+    },
+    {
+     "name": "capacity"
+    },
+    {
+     "name": "dataset"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/fleet/beat"
+   },
+   "id": "fleet.beat",
+   "noun": "fleet",
+   "scoped_prefix": null,
+   "verb": "beat",
+   "writes": true
+  },
+  {
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "limit"
+    }
+   ],
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tickets/inbox"
+   },
+   "id": "ticket.inbox",
+   "noun": "ticket",
+   "scoped_prefix": null,
+   "verb": "inbox",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/tickets/inbox/:id"
+   },
+   "id": "ticket.show",
+   "noun": "ticket",
+   "scoped_prefix": null,
+   "verb": "show",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    },
+    {
+     "name": "body",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "flags": [
+    {
+     "name": "close"
+    }
+   ],
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tickets/:id/answer"
+   },
+   "id": "ticket.answer",
+   "noun": "ticket",
+   "scoped_prefix": null,
+   "verb": "answer",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "read",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/tickets/:id/close"
+   },
+   "id": "ticket.close",
+   "noun": "ticket",
+   "scoped_prefix": null,
+   "verb": "close",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "name",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/tickets/keys"
+   },
+   "id": "ticket-key.mint",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "mint",
+   "writes": true
+  },
+  {
+   "auth_tier": "admin",
+   "http": {
+    "method": "GET",
+    "path_template": "/v1/plugins/tickets/keys"
+   },
+   "id": "ticket-key.ls",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "ls",
+   "writes": false
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/tickets/keys/:id/rotate"
+   },
+   "id": "ticket-key.rotate",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "rotate",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/tickets/keys/:id/pause"
+   },
+   "id": "ticket-key.pause",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "pause",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "POST",
+    "path_template": "/v1/plugins/tickets/keys/:id/unpause"
+   },
+   "id": "ticket-key.unpause",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "unpause",
+   "writes": true
+  },
+  {
+   "args": [
+    {
+     "name": "id",
+     "required": true
+    }
+   ],
+   "auth_tier": "admin",
+   "http": {
+    "method": "DELETE",
+    "path_template": "/v1/plugins/tickets/keys/:id"
+   },
+   "id": "ticket-key.revoke",
+   "noun": "ticket-key",
+   "scoped_prefix": null,
+   "verb": "revoke",
+   "writes": true
+  }
+ ],
+ "manifest_version": "1",
+ "server": {
+  "api_version": "1",
+  "base_url": "https://guerrilla.barkpark.cloud",
+  "min_cli": "1.0.0",
+  "name": "barkpark",
+  "version": "0.1.0"
+ }
+}

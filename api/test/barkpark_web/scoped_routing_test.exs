@@ -104,7 +104,7 @@ defmodule BarkparkWeb.ScopedRoutingTest do
   describe "back-compat flat routes" do
     test "flat /v1/data/query/:dataset/:type still works and gets the Default scope" do
       # Public schema, no token needed on the flat path (unchanged behavior).
-      resp = get(build_conn(), "/v1/data/query/#{@dataset}/post")
+      resp = get(scoped_conn(), "/v1/data/query/#{@dataset}/post")
 
       assert resp.status == 200
       # AssignDefaultScope populated the scope for downstream code.

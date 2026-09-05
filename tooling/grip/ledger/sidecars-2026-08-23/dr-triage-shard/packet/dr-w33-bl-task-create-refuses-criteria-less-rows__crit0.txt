@@ -1,0 +1,1 @@
+The refusal is scoped so it cannot break other epics' filing mid-flight — the scoping decision is written down before any code lands. Evidence: the chosen scope and its rationale.

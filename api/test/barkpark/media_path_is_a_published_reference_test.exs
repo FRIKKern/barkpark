@@ -60,7 +60,7 @@ defmodule Barkpark.MediaPathIsAPublishedReferenceTest do
   # The REAL scoped GET route, with the owning workspace's own membership — the
   # same route the exposure was proved on. Never a File.read.
   defp scoped_get(ctx, path) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> ctx.token)
     |> get("/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/media/files/#{path}")
   end

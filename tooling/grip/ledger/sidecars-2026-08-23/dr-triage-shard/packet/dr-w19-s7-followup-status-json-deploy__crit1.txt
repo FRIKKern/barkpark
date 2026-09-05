@@ -1,0 +1,1 @@
+TestRunCloudStatusJSON is re-cut to assert /v1/barkparks was hit (not that it was hit LAST) and a new test pins each of the four refusal shapes in the json output.

@@ -1,0 +1,1 @@
+The PR body states the bound: this names the class on the WIRE and does not reduce the 500 count by one. The repair is `jpf-bl-oban-pool-partition`'s (D28, D65, D75).

@@ -26,10 +26,6 @@ defmodule BarkparkWeb.ListenController do
         _ -> parse_int(params["lastEventId"])
       end
 
-    # Tenancy scope from the resolved workspace (ResolveWorkspace /
-    # AssignDefaultScope). nil → unfiltered stream (pre-tenancy back-compat).
-    workspace_id = scope_workspace_id(conn)
-
     # The subscriber's principal + read scope, captured ONCE at connect. Every
     # emitted event re-renders the current document through `Envelope.render/3`
     # under this caller, so a `private` / `owner_only` field is dropped before it
@@ -37,6 +33,30 @@ defmodule BarkparkWeb.ListenController do
     # invariant. An admin caller ⇒ render/3 is a no-op ⇒ byte-identical stream.
     scope = scope_opts(conn)
     caller_context = Keyword.get(scope, :caller_context)
+
+    # Tenancy scope for BOTH stream legs, read from the SAME `scope_opts/1` the
+    # field-visibility scope above comes from — not from a private re-read of
+    # `conn.assigns[:current_workspace]`.
+    #
+    # THE HOLE THIS CLOSES. `scope_opts(%Conn{})` emits the empty-scope sentinel
+    # `:shared_only` (`ScopeHelpers`, task-3e2a70930c6df723) when a REQUEST
+    # resolved no workspace — it means "the shared layer" (`workspace_id IS
+    # NULL`), never "every tenant". The old private `scope_workspace_id/1`
+    # hand-rolled a `case conn.assigns[:current_workspace]` and flattened that
+    # sentinel back to `nil`, so the atom the whole codebase added to separate
+    # "no tenant resolved" from "an internal caller wants everything" NEVER
+    # REACHED this door — a fourth sentinel-defeat shape: not a permissive
+    # catch-all that mishandles the atom, but a door the atom cannot reach.
+    # Both legs then went instance-wide: `replay_since/4`'s nil arm streamed
+    # every tenant's `mutation_events`, and `forward_event?/2`'s nil arm
+    # forwarded every tenant's live broadcast.
+    #
+    # `nil` is preserved verbatim for the internal/non-request callers of
+    # `EventLog.replay_since/4` and `forward_event?/2` (documented global read);
+    # only a REQUEST can produce `:shared_only`, and it now fails CLOSED to the
+    # shared layer. See the `:shared_only` arms on `forward_event?/2` below and
+    # on `EventLog.replay_since/4`.
+    workspace_id = stream_workspace_id(scope)
 
     # Subscribe to the workspace-scoped topic when we have a resolved
     # workspace, so this stream no longer receives (and discards via
@@ -113,6 +133,23 @@ defmodule BarkparkWeb.ListenController do
       send(forwarder, :stop)
     end
   end
+
+  # The tenancy filter BOTH stream legs run on, read out of the keyword list
+  # `ScopeHelpers.scope_opts/1` already built for field-visibility.
+  #
+  # A one-line function on purpose: it is the seam the isolation contract
+  # asserts on, because `listen/2` itself blocks in `send_chunked` +
+  # `listen_loop/5` and is not reachable from a test. Same `# comment` +
+  # `@doc false` convention as `format_event/2`, `forward_event?/2` and
+  # `redacted_result/4` in this module.
+  #
+  # Returns whatever `scope_opts/1` put there and FLATTENS NOTHING — that is
+  # the whole point. A REQUEST that resolved no workspace yields the empty-scope
+  # sentinel `:shared_only` (shared layer only); the deleted private
+  # `scope_workspace_id/1` re-read `conn.assigns[:current_workspace]` and
+  # collapsed that case to `nil`, which both legs read as "every tenant".
+  @doc false
+  def stream_workspace_id(scope) when is_list(scope), do: Keyword.get(scope, :workspace_id)
 
   @doc """
   Transport-thin delegate to `Barkpark.Content.EventLog.replay_since/4` — the
@@ -485,16 +522,19 @@ defmodule BarkparkWeb.ListenController do
   end
 
   defp fetch_schema(type, dataset, scope) do
-    case Content.get_schema(type, dataset, scope) do
+    case Content.Schema.get_schema_for_redaction(type, dataset, scope) do
       {:ok, schema} -> schema
       _ -> nil
     end
   end
 
-  # Workspace ownership gate for a live event. nil scope → forward everything
-  # (back-compat / unscoped listener). With a workspace, forward only when the
-  # broadcast msg's own denormalised `workspace_id` matches; a cross-workspace
-  # event is dropped.
+  # Workspace ownership gate for a live event. `:shared_only` (a REQUEST that
+  # resolved no workspace) forwards ONLY shared-layer events — `workspace_id IS
+  # NULL`; a literal `nil` scope still forwards everything (back-compat, and now
+  # reachable only from an INTERNAL caller, never from an HTTP request — see the
+  # `workspace_id =` derivation in `listen/2`). With a workspace, forward only
+  # when the broadcast msg's own denormalised `workspace_id` matches; a
+  # cross-workspace event is dropped.
   #
   # Reads `msg.workspace_id` (stamped from `doc.workspace_id` by `tap_broadcast`)
   # instead of a `Repo.exists?(Document …)` existence check. The existence check
@@ -516,6 +556,19 @@ defmodule BarkparkWeb.ListenController do
   # Ordered FIRST so it beats the nil-workspace forward-everything clause.
   def forward_event?(%{type: "listener"}, _workspace_id), do: false
 
+  # The empty-scope sentinel (`ScopeHelpers.scope_opts/1`, task-3e2a70930c6df723):
+  # a REQUEST that resolved no workspace sees the SHARED layer only, so forward
+  # a live event ONLY when the broadcast's own denormalised `workspace_id` is
+  # itself NULL. This is the live-leg twin of `EventLog.replay_since/4`'s
+  # `:shared_only` arm (`is_nil(e.workspace_id)`), and the reason the `nil`
+  # clause below can keep its documented meaning for internal callers.
+  # Ordered AFTER the listener exclusion so that exclusion still wins.
+  def forward_event?(%{workspace_id: event_ws}, :shared_only), do: is_nil(event_ws)
+
+  # Msg without a workspace_id key (defensive) — a shared-layer listener drops
+  # it, matching the scoped clause's defensive drop further below.
+  def forward_event?(_msg, :shared_only), do: false
+
   def forward_event?(_msg, nil), do: true
 
   def forward_event?(%{workspace_id: event_ws}, workspace_id)
@@ -525,16 +578,20 @@ defmodule BarkparkWeb.ListenController do
   # Msg without a workspace_id key (defensive) — a scoped listener drops it.
   def forward_event?(_msg, workspace_id) when is_binary(workspace_id), do: false
 
-  defp scope_workspace_id(conn) do
-    case conn.assigns[:current_workspace] do
-      %{id: id} -> id
-      _ -> nil
-    end
-  end
-
   # Resolve the PubSub topic for the document-list stream. With a workspace,
   # use the additive workspace-scoped topic broadcast by content.ex; without
   # one, fall back to the bare global topic (flat/Default back-compat).
+  #
+  # `:shared_only` deliberately lands on the BARE topic and NOT on a
+  # `documents:ws:shared_only:…` string: `tap_broadcast/5` only publishes a
+  # `documents:ws:<id>:…` topic for a write that HAS a workspace, so a
+  # shared-layer (workspace_id IS NULL) document is announced on the bare topic
+  # alone — subscribing anywhere else would silence the stream entirely. The
+  # bare topic still fans out every tenant's events; the DISCLOSURE half is
+  # closed one layer down by `forward_event?/2`'s `:shared_only` arm, which
+  # drops every event whose own `workspace_id` is non-NULL. Availability and
+  # disclosure are separate halves here — do not "fix" this by narrowing the
+  # topic and leaving the forward gate permissive.
   defp list_topic(dataset, workspace_id) when is_binary(workspace_id),
     do: "documents:ws:#{workspace_id}:#{dataset}"
 

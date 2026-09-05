@@ -1,0 +1,1 @@
+No coverage NUMBER is stored anywhere as a durable fact; only the re-run command is - evidence: paste the stored record

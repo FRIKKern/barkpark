@@ -1,0 +1,1 @@
+cp-deploy.sh detects the daemon's own strings ("has active endpoints", "is not connected to the network") and CLEARS the endpoint rather than sleeping and retrying once; the 0-for-65 measurement of the existing retry is cited as the reason.

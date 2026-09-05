@@ -1,0 +1,1 @@
+workspace_admin?/2 and membership_role/2 accept nil without raising. Evidence: the added clause plus the assertion.

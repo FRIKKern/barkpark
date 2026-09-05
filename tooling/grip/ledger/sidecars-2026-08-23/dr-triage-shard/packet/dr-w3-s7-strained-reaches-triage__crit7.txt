@@ -1,0 +1,1 @@
+attentionDetail carries the reading that caused the state — e.g. "load 5.5 on 2 cores (2.7x) — sustained", enriched by swap when present and reading 'none configured' on swapless boxes, never 0%. It does NOT say "CPU" (load1 counts uninterruptible-sleep, so an I/O-bound box is honestly load).

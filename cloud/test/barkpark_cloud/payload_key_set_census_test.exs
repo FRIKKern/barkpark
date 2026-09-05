@@ -1555,7 +1555,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@schema_unserialized_floor` (24) were NOT among them — neither #14795 nor
   # #14886 adds a barkparks column, so this branch's schema deltas stand
   # unchanged on top of both.
-  @go_tag_pinned 323
+  # #16101 (bp cloud instance top renders pressure + space): internal/cloudclient
+  # gained the `pressure` block decoders (MetricsPressure / MetricsPressureSignal)
+  # — seven new json tag NAMES (323 -> 330) at one site each, and three names
+  # that were declared once and now twice (`pressure`, `state`, `unit`) plus
+  # `value` 4 -> 5, so the SITE register below moves by four rows as well.
+  # Measured by this file's own arms on the rebased tree (their printed
+  # right-hand column), never summed.
+  @go_tag_pinned 330
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1669,7 +1676,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "domains" => 3,
     "email" => 3,
     "environment" => 4,
-    "error" => 8,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — the refusal envelope `decodeSelfUpdatePin/1` reads.
+    "error" => 9,
     "evidence" => 2,
     "failed" => 2,
     "failure_class" => 2,
@@ -1700,14 +1708,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "name" => 11,
     "never_covered" => 3,
     "next_cursor" => 2,
-    "ok" => 8,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
+    "ok" => 9,
     "oldest_pending_seconds" => 2,
     "p50" => 2,
     "p95" => 2,
     "pending" => 2,
-    "pinned_release" => 3,
+    # isu-backlog-cloud-update-trigger-verb: +2 in selfupdate.go — TWO sites: `decodeSelfUpdatePin/1` reads the field at BOTH positions it is known to ride (inside the error object, then at the envelope top level), mirroring the console's updateConflict().
+    "pinned_release" => 5,
     "population" => 2,
     "port" => 4,
+    "pressure" => 2,
     "project" => 2,
     "provider" => 3,
     "quantile" => 2,
@@ -1752,7 +1763,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # unmeasured — the field that stops an absent root rendering as 0 bytes) and
     # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
     # field a reader BRANCHES on, so only this row can notice a site dying.
-    "status" => 16,
+    "state" => 2,
+    # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
+    "status" => 17,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -1778,13 +1791,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # W6 S4: MetricsSpaceRoot.TotalBytes joined MetricsSwap.TotalBytes.
     "total_bytes" => 2,
     "trigger" => 3,
+    "unit" => 2,
     "unmetered" => 2,
     "unreadable" => 2,
     "unresolved" => 2,
     "updated_at" => 5,
     "url" => 5,
     "usage" => 2,
-    "value" => 4,
+    "value" => 5,
     "volume" => 2,
     "window" => 2,
     "workspace" => 2
@@ -1797,7 +1811,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # name on it instead of a floor that quietly means something else. (This also
   # corrects a fact in circulation: `client.go` has NOT been the whole corpus
   # since `deliveries.go` landed in W26 S3.)
-  @cloudclient_sources ~w(client.go deliveries.go)
+  # isu-backlog-cloud-update-trigger-verb: `selfupdate.go` is the THIRD non-test
+  # source — the client half of `bp cloud update <instance>`, the self-update
+  # TRIGGER the console has printed as a copy-pasteable chip with no backing verb.
+  # It moves this list and FOUR rows of the register below, and moves
+  # `@go_tag_pinned` NOT AT ALL: every tag it declares (`ok`, `status`, `error`,
+  # `pinned_release`) is already a NAME somewhere in the package, so all five new
+  # declarations ride free on the name union and land entirely in the SITE arm —
+  # which is the exact class of change `@go_tag_pinned` structurally cannot see,
+  # and the reason this register exists.
+  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
@@ -3602,5 +3625,567 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
       [] -> "(none)"
       rs -> Enum.map_join(rs, "\n", fn {verb, path} -> "  #{verb} #{path}" end)
     end
+  end
+end
+
+defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
+  @moduledoc """
+  THE HELPER-NESTED EMIT, CENSUSED (dr-w32-bl-census-helper-emit-escapes-both-gates).
+
+  ## The hole this closes
+
+  Every key census above this one reads the SOURCE. `Extract.payload/3` walks a
+  clause's result expression and collects literal map keys — top level, plus a
+  value that is itself a map LITERAL. A value that is a CALL contributes
+  nothing, by design: the moduledoc explains that following every local call
+  over-collects private shapes and turns the allowlist into a junk drawer.
+
+  The price of that bound is measured, not assumed. `census/3`'s payload hands
+  seven of its keys to named private helpers, and every key those helpers write
+  is invisible to the AST census. Wave 32 proved it by mutation: a probe key
+  added to `census/3`'s own top-level map reds `payload_key_set_census_test.exs`
+  on two arms, and the IDENTICAL key added one level down inside `class_rows/3`
+  — which really does reach the wire under `classes[]` — leaves BOTH censuses
+  green.
+
+  ## What this module does instead
+
+  It does not read the source at all. It EVALUATES `census/3` against a fixture
+  built to make every branch of the payload non-empty, walks the returned term
+  to its leaves, and compares the resulting set of key PATHS against
+  `@emitted_paths`. A path is `classes[].agency` — the `[]` marks a list, so a
+  key added inside a per-row producer is a new path and reds by name.
+
+  Two evaluations, UNIONED: a rich window (a deferral population above
+  `min_sample`, so `deferral_wait` names its quantiles) and a thin one (below
+  it, so the refusal arms run). `refused/2` writes the same three keys either
+  way, so the union is small — but a future refusal that grows a key would
+  otherwise be visible on one arm only.
+
+  ## Why an exact set and not a floor
+
+  A floor counts. This NAMES. `@emitted_paths` is compared both directions:
+  a key that appears without its row reds as UNREGISTERED (the wave-32 probe),
+  and a key that disappears reds as MISSING (a wire shape silently dropped).
+  Neither direction is a count, so neither can be satisfied by an accident of
+  arithmetic elsewhere in the payload.
+
+  ## The positive control
+
+  A walk that returns nothing agrees with an empty register. So
+  `@helper_produced` names, per helper, one path that ONLY that helper can
+  produce, and the walk must contain every one of them. A zero here is a broken
+  walk, never a clean payload.
+  """
+  use BarkparkCloud.DataCase, async: false
+
+  alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
+  alias BarkparkCloud.Registry.Deployment
+
+  @password "correct-horse-battery"
+
+  # PINNED, and wholly on the LATE side of the `deferred` vocabulary boundary
+  # (2026-08-05): a straddling window makes `census/3` refuse its rates, and a
+  # refusal rewrites values in place rather than adding keys — but pinning the
+  # window keeps this fixture's payload the same shape on every run regardless.
+  @from ~U[2026-08-06 00:00:00Z]
+  @to ~U[2026-08-10 00:00:00Z]
+
+  # Verbatim corpus samples, same provenance as DeployLedgerTest's.
+  @r409_coded "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight"
+  @r500 "the instance refused the deploy (HTTP 500)"
+  @gh_push "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+
+  # ── SIDE A: the register, one row per key PATH the wire carries ──────────
+  #
+  # `a.b` is a nested map, `a[].b` a key on every row of a list. Compared in
+  # BOTH directions, so this is a NAME check and never a count: a key that
+  # appears without a row reds UNREGISTERED (the wave-32 probe), and a key that
+  # stops appearing reds MISSING (a wire shape dropped in silence).
+  #
+  # Derived, not retyped: every entry below was printed by this module's own
+  # walk over a real `census/3` return, never transcribed from the source.
+  @emitted_paths [
+    "abandoned",
+    "abandoned_unreadable",
+    "boundaries",
+    "boundaries[].instant",
+    "boundaries[].method",
+    "boundaries[].source",
+    "boundaries[].subject",
+    "boundaries[].voids",
+    "cancelled",
+    "classes",
+    "classes[].agency",
+    "classes[].class",
+    "classes[].count",
+    "classes[].label",
+    "classes[].share",
+    "classes[].share.basis",
+    "classes[].share.min_sample",
+    "classes[].share.numerator",
+    "classes[].share.pct",
+    "classes[].share.reason",
+    "classes[].share.refused",
+    "classes[].share.sample",
+    "coalesced_attempts",
+    "coalesced_attempts.basis",
+    "coalesced_attempts.reason",
+    "coalesced_attempts.refused",
+    "coalesced_attempts.since",
+    "coalesced_attempts.value",
+    "completeness",
+    "completeness.accounted",
+    "completeness.audited",
+    "completeness.balanced",
+    "completeness.method",
+    "completeness.reason",
+    "completeness.unaccounted",
+    "coverage_cohorts",
+    "coverage_cohorts.as_of",
+    "coverage_cohorts.basis",
+    "coverage_cohorts.clock",
+    "coverage_cohorts.cohorts",
+    "coverage_cohorts.cohorts[].cohort",
+    "coverage_cohorts.cohorts[].covered",
+    "coverage_cohorts.cohorts[].matured",
+    "coverage_cohorts.cohorts[].never_covered",
+    "coverage_cohorts.cohorts[].never_covered_by_environment",
+    "coverage_cohorts.cohorts[].never_covered_by_environment[].environment",
+    "coverage_cohorts.cohorts[].never_covered_by_environment[].never_covered",
+    "coverage_cohorts.cohorts[].oldest_pending_seconds",
+    "coverage_cohorts.cohorts[].pending",
+    "coverage_cohorts.cohorts[].population",
+    "coverage_cohorts.cohorts[].status",
+    "coverage_cohorts.cohorts[].too_young",
+    "coverage_cohorts.cohorts[].unreadable",
+    "coverage_cohorts.covering_bound",
+    "coverage_cohorts.maturity_seconds",
+    "coverage_cohorts.never_covered_sites",
+    "coverage_cohorts.never_covered_sites[].environment",
+    "coverage_cohorts.never_covered_sites[].name",
+    "coverage_cohorts.never_covered_sites[].never_covered",
+    "coverage_cohorts.never_covered_sites[].site_id",
+    "coverage_cohorts.never_covered_sites[].slug",
+    "coverage_cohorts.never_covered_sites_total",
+    "coverage_cohorts.never_covered_sites_truncated",
+    "deferral_wait",
+    "deferral_wait.as_of",
+    "deferral_wait.basis",
+    "deferral_wait.clock",
+    "deferral_wait.max",
+    "deferral_wait.max.basis",
+    "deferral_wait.max.headroom",
+    "deferral_wait.max.label",
+    "deferral_wait.max.min_sample",
+    "deferral_wait.max.quantile",
+    "deferral_wait.max.reason",
+    "deferral_wait.max.refused",
+    "deferral_wait.max.sample",
+    "deferral_wait.max.seconds",
+    "deferral_wait.max.unresolved",
+    "deferral_wait.max.unresolved_fraction",
+    "deferral_wait.min_sample",
+    "deferral_wait.oldest_pending_seconds",
+    "deferral_wait.outcomes",
+    "deferral_wait.outcomes[].count",
+    "deferral_wait.outcomes[].label",
+    "deferral_wait.outcomes[].outcome",
+    "deferral_wait.p50",
+    "deferral_wait.p50.basis",
+    "deferral_wait.p50.headroom",
+    "deferral_wait.p50.label",
+    "deferral_wait.p50.min_sample",
+    "deferral_wait.p50.quantile",
+    "deferral_wait.p50.reason",
+    "deferral_wait.p50.refused",
+    "deferral_wait.p50.sample",
+    "deferral_wait.p50.seconds",
+    "deferral_wait.p50.unresolved",
+    "deferral_wait.p50.unresolved_fraction",
+    "deferral_wait.p95",
+    "deferral_wait.p95.basis",
+    "deferral_wait.p95.headroom",
+    "deferral_wait.p95.label",
+    "deferral_wait.p95.min_sample",
+    "deferral_wait.p95.quantile",
+    "deferral_wait.p95.reason",
+    "deferral_wait.p95.refused",
+    "deferral_wait.p95.sample",
+    "deferral_wait.p95.seconds",
+    "deferral_wait.p95.unresolved",
+    "deferral_wait.p95.unresolved_fraction",
+    "deferral_wait.population",
+    "deferral_wait.population.covered",
+    "deferral_wait.population.deferred",
+    "deferral_wait.population.pending",
+    "deferral_wait.population.unreadable",
+    "deferral_wait.sample",
+    "deferral_wait.unresolved",
+    "deferred",
+    "deferred[].agency",
+    "deferred[].class",
+    "deferred[].count",
+    "deferred[].label",
+    "deferred[].share",
+    "deferred[].share.basis",
+    "deferred[].share.min_sample",
+    "deferred[].share.numerator",
+    "deferred[].share.pct",
+    "deferred[].share.reason",
+    "deferred[].share.refused",
+    "deferred[].share.sample",
+    "deferred_total",
+    "failed",
+    "failure_rate",
+    "failure_rate.basis",
+    "failure_rate.min_sample",
+    "failure_rate.numerator",
+    "failure_rate.pct",
+    "failure_rate.reason",
+    "failure_rate.refused",
+    "failure_rate.sample",
+    "in_flight",
+    "live",
+    "live_rate",
+    "live_rate.basis",
+    "live_rate.min_sample",
+    "live_rate.numerator",
+    "live_rate.pct",
+    "live_rate.reason",
+    "live_rate.refused",
+    "live_rate.sample",
+    "min_sample",
+    "not_attempted",
+    "not_attempted[].agency",
+    "not_attempted[].class",
+    "not_attempted[].count",
+    "not_attempted[].label",
+    "not_attempted[].share",
+    "not_attempted[].share.basis",
+    "not_attempted[].share.min_sample",
+    "not_attempted[].share.numerator",
+    "not_attempted[].share.pct",
+    "not_attempted[].share.reason",
+    "not_attempted[].share.refused",
+    "not_attempted[].share.sample",
+    "residual",
+    "sites",
+    "sites[].deferred",
+    "sites[].failed",
+    "sites[].failure_rate",
+    "sites[].failure_rate.basis",
+    "sites[].failure_rate.min_sample",
+    "sites[].failure_rate.numerator",
+    "sites[].failure_rate.pct",
+    "sites[].failure_rate.reason",
+    "sites[].failure_rate.refused",
+    "sites[].failure_rate.sample",
+    "sites[].live",
+    "sites[].site_id",
+    "sites[].terminal_failure_rate",
+    "sites[].terminal_failure_rate.basis",
+    "sites[].terminal_failure_rate.min_sample",
+    "sites[].terminal_failure_rate.numerator",
+    "sites[].terminal_failure_rate.pct",
+    "sites[].terminal_failure_rate.reason",
+    "sites[].terminal_failure_rate.refused",
+    "sites[].terminal_failure_rate.sample",
+    "sites[].top_class",
+    "sites[].volume",
+    "terminal_failure_rate",
+    "terminal_failure_rate.basis",
+    "terminal_failure_rate.min_sample",
+    "terminal_failure_rate.numerator",
+    "terminal_failure_rate.pct",
+    "terminal_failure_rate.reason",
+    "terminal_failure_rate.refused",
+    "terminal_failure_rate.sample",
+    "total_sites",
+    "truncated",
+    "volume",
+    "window",
+    "window.from",
+    "window.to"
+  ]
+
+  # ── The positive control ─────────────────────────────────────────────────
+  #
+  # A walk that returns nothing agrees with an empty register, and a register
+  # compared against nothing is the vacuous green this file exists to refuse.
+  # So: one path per private helper whose map reaches the wire, each chosen so
+  # that NO other producer in the payload writes it. A blind walk loses these
+  # together, and the control reds before the register can go quiet.
+  #
+  # THIS LIST IS THE c0 ENUMERATION. Twelve producers reach `census/3`'s wire;
+  # eleven of them write at least one key of their own (`site_rows/1` writes
+  # none — it delegates every key to `site_row/2` — and `top_class/1` returns a
+  # scalar, so neither can be named here), and `refuse_across_boundary/2`,
+  # `refuse_class_rows/2` and `straddled_boundary/2` rewrite values in place
+  # without ever adding a name.
+  @helper_produced [
+    {"class_rows/3", "classes[].agency"},
+    {"rate_basis/3 → rate/2", "failure_rate.numerator"},
+    {"site_row/2", "sites[].top_class"},
+    {"coalesced_attempts/2", "coalesced_attempts.since"},
+    {"deferral_wait/2", "deferral_wait.outcomes[].outcome"},
+    {"deferral_wait_quantile/5", "deferral_wait.p95.headroom"},
+    {"coverage_cohorts/2", "coverage_cohorts.covering_bound"},
+    {"coverage_cohort/2", "coverage_cohorts.cohorts[].too_young"},
+    {"never_covered_by_environment/1",
+     "coverage_cohorts.cohorts[].never_covered_by_environment[].environment"},
+    {"coverage_site_row/1", "coverage_cohorts.never_covered_sites[].slug"},
+    {"completeness/3", "completeness.unaccounted"}
+  ]
+
+  # ── c0: how much of the wire the AST census cannot see ───────────────────
+  #
+  # The AST census above binds a Go decoder to a PATH through four pairs:
+  # `census/3` (top level), its `window` nested literal, `site_row/2`
+  # (`sites[]`) and `coverage_site_row/1`
+  # (`coverage_cohorts.never_covered_sites[]`). Every other path on the wire is
+  # written by a helper it does not follow.
+  #
+  # `DeployLedger.rate/2` is a fifth pair and is deliberately NOT credited here:
+  # it censuses the rate node's key set as a free-standing SHAPE, bound to no
+  # path, so it cannot tell `failure_rate` from `classes[].share` and a key
+  # added to one of them but not the other is invisible to it either way.
+  #
+  # PINNED, and the direction of travel is DOWN. Narrow the AST census's blind
+  # spot and this number falls; it must never rise without a reason written
+  # beside it.
+  @ast_blind_paths 161
+
+  @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
+
+  alias BarkparkCloud.PayloadKeySetCensus.Extract
+
+  defp user_fixture do
+    {:ok, user} =
+      Accounts.register_user(%{
+        email: "u-#{System.unique_integer([:positive])}@example.com",
+        password: @password
+      })
+
+    user
+  end
+
+  defp site_fixture do
+    user = user_fixture()
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "T #{n}", slug: "t-#{n}"})
+    {:ok, _} = Accounts.add_member(team, user, "owner")
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+    {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+    site
+  end
+
+  defp usec(%DateTime{microsecond: {us, _}} = dt), do: %{dt | microsecond: {us, 6}}
+
+  # STRUCT-SHAPED inserts through `insert_all`, for the same reason
+  # `DeployLedgerTest` uses them: `Deployment.changeset/2` refuses to cast
+  # `status`, and the census needs rows pinned to an exact `inserted_at`.
+  defp rows!(site, rows) do
+    entries =
+      Enum.map(rows, fn r ->
+        at = usec(Map.get(r, :inserted_at, @from))
+
+        %{
+          id: Ecto.UUID.generate(),
+          site_id: site.id,
+          status: Map.get(r, :status, "failed"),
+          stage: Map.get(r, :stage),
+          failure_reason: Map.get(r, :failure_reason),
+          environment: Map.get(r, :environment, "production"),
+          content_rev: Map.get(r, :content_rev),
+          inserted_at: at,
+          updated_at: at
+        }
+      end)
+
+    Repo.insert_all(Deployment, entries)
+  end
+
+  # EVERY cohort non-empty, on purpose. `classes`, `deferred`, `not_attempted`
+  # and `sites` are LISTS, and an empty list contributes no nested path at all —
+  # a fixture that left one empty would make this census blind to exactly the
+  # rows it exists to watch, and would look like a clean payload while doing it.
+  defp seed(site, deferrals) do
+    rows!(site, [
+      %{status: "failed", stage: "PLAN", failure_reason: @r500},
+      %{status: "failed", stage: "BUILD", failure_reason: nil},
+      %{status: "failed", stage: nil, failure_reason: @gh_push},
+      %{status: "live", stage: nil},
+      %{status: "queued", stage: nil},
+      %{status: "cancelled", stage: nil}
+    ])
+
+    rows!(
+      site,
+      for _ <- 1..deferrals do
+        %{status: "deferred", stage: "PLAN", failure_reason: @r409_coded}
+      end
+    )
+  end
+
+  # TWO sites, so `sites` carries more than one row and `total_sites` is a real
+  # population rather than the constant 1.
+  defp census(deferrals) do
+    seed(site_fixture(), deferrals)
+    seed(site_fixture(), 1)
+    DeployLedger.census(@from, @to)
+  end
+
+  # ── The walk ─────────────────────────────────────────────────────────────
+  #
+  # Depth-unbounded and producer-agnostic: it cannot know or care which function
+  # wrote a key, which is exactly why a helper cannot hide one from it. A struct
+  # (`DateTime`) is a LEAF — its fields are the struct's contract, not this
+  # payload's.
+  @doc "Every key path in a term: `a.b` for a nested map, `a[].b` for a list row."
+  @spec key_paths(term()) :: MapSet.t()
+  def key_paths(term), do: term |> paths("") |> MapSet.new()
+
+  defp paths(%_{}, _prefix), do: []
+
+  defp paths(map, prefix) when is_map(map) do
+    Enum.flat_map(map, fn {k, v} ->
+      path = join(prefix, to_string(k))
+      [path | paths(v, path)]
+    end)
+  end
+
+  defp paths(list, prefix) when is_list(list),
+    do: Enum.flat_map(list, &paths(&1, prefix <> "[]"))
+
+  defp paths(_leaf, _prefix), do: []
+
+  defp join("", key), do: key
+  defp join(prefix, key), do: prefix <> "." <> key
+
+  # The paths the AST census CAN bind to a Go decoder — computed from the same
+  # extractor that census runs, never retyped, so this number tracks the walker
+  # rather than a memory of it.
+  defp ast_visible do
+    census = Extract.payload(@ledger, {:census, 3})
+
+    [
+      MapSet.to_list(census.top),
+      census.nested |> Map.get("window", MapSet.new()) |> Enum.map(&("window." <> &1)),
+      @ledger
+      |> Extract.payload({:site_row, 2})
+      |> Map.fetch!(:top)
+      |> Enum.map(&("sites[]." <> &1)),
+      @ledger
+      |> Extract.payload({:coverage_site_row, 1})
+      |> Map.fetch!(:top)
+      |> Enum.map(&("coverage_cohorts.never_covered_sites[]." <> &1))
+    ]
+    |> List.flatten()
+    |> MapSet.new()
+  end
+
+  setup do
+    # ABOVE and BELOW `min_sample` in one setup, so `deferral_wait`'s named
+    # quantiles and its refusal arms are BOTH in the union. `refused/2` writes
+    # the same three keys either way, so the union is small — but a refusal that
+    # ever grows a key would otherwise be visible on one arm only.
+    rich = census(DeployLedger.min_sample() + 10)
+    thin = census(3)
+    {:ok, emitted: MapSet.union(key_paths(rich), key_paths(thin))}
+  end
+
+  test "the walk FINDS every helper's own key — a zero here is a broken walk", ctx do
+    missing =
+      Enum.reject(@helper_produced, fn {_h, path} -> MapSet.member?(ctx.emitted, path) end)
+
+    assert missing == [],
+           """
+           THE POSITIVE CONTROL FAILED. These helper-written paths are absent
+           from the evaluated payload, so the register below is being compared
+           against a walk that cannot see them:
+
+           #{Enum.map_join(missing, "\n", fn {h, p} -> "  #{h} → #{p}" end)}
+
+           Either the walk went blind, or the fixture stopped reaching a cohort
+           (an empty list emits NO nested path). Fix the walk before touching
+           the register — a green register over a blind walk is the exact
+           failure this module exists to end.
+           """
+
+    assert MapSet.size(ctx.emitted) > length(@helper_produced)
+  end
+
+  test "the EVALUATED key set is exactly the register — both directions", ctx do
+    registered = MapSet.new(@emitted_paths)
+    unregistered = ctx.emitted |> MapSet.difference(registered) |> Enum.sort()
+    missing = registered |> MapSet.difference(ctx.emitted) |> Enum.sort()
+
+    assert unregistered == [],
+           """
+           UNREGISTERED: `DeployLedger.census/3` put #{length(unregistered)} key
+           path(s) on the wire that @emitted_paths does not name:
+
+           #{Enum.map_join(unregistered, "\n", &("  " <> &1))}
+
+           A key inside a private helper reaches the wire exactly as a top-level
+           one does. Add the path AND give it a Go decoder, or stop emitting it.
+           """
+
+    assert missing == [],
+           """
+           MISSING: @emitted_paths names #{length(missing)} key path(s) the wire
+           no longer carries:
+
+           #{Enum.map_join(missing, "\n", &("  " <> &1))}
+
+           A dropped wire key is a reader that decodes nothing. Delete the row
+           only after the reader is gone too.
+           """
+  end
+
+  test "the register is a NAME check, not a count", _ctx do
+    assert length(@emitted_paths) == length(Enum.uniq(@emitted_paths)),
+           "@emitted_paths carries a duplicate path"
+
+    assert Enum.sort(@emitted_paths) == @emitted_paths,
+           "@emitted_paths is not sorted — a sorted register makes a diff readable"
+  end
+
+  test "c0: the AST census cannot see #{@ast_blind_paths} of the paths on this wire", ctx do
+    blind = ctx.emitted |> MapSet.difference(ast_visible()) |> Enum.sort()
+
+    assert length(blind) == @ast_blind_paths,
+           """
+           The AST census's blind spot moved: #{length(blind)} path(s) are
+           invisible to it, @ast_blind_paths says #{@ast_blind_paths}.
+
+           DOWN is the good direction and needs only a new pin. UP means a
+           helper started writing to the wire behind the source-reading census
+           — the shape dr-w32 filed — and needs a reason written beside the pin.
+
+           #{Enum.map_join(blind, "\n", &("  " <> &1))}
+           """
+
+    # NON-VACUITY: the difference is only meaningful if the extractor answered
+    # at all. A broken walker returns an empty payload and every path would look
+    # blind.
+    assert MapSet.size(ast_visible()) > 0,
+           "the AST extractor returned NO paths — the blind count is measuring its own failure"
+  end
+
+  test "MUTATION: a probe key inside class_rows/3 is UNREGISTERED", ctx do
+    # The wave-32 mutation, simulated at the walk rather than in the source: a
+    # key added inside `class_rows/3` lands on every `classes[]` row. The
+    # register must name it as UNREGISTERED, which is what both source-reading
+    # censuses failed to do.
+    refute MapSet.member?(ctx.emitted, "classes[].probe"),
+           "the probe key is already on the wire — this arm is measuring a real emit, not a mutation"
+
+    mutated = MapSet.put(ctx.emitted, "classes[].probe")
+    unregistered = MapSet.difference(mutated, MapSet.new(@emitted_paths))
+
+    assert MapSet.member?(unregistered, "classes[].probe"),
+           "a probe key on a `classes[]` row did not surface as UNREGISTERED"
   end
 end

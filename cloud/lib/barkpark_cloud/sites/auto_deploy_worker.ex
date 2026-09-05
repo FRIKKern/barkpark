@@ -88,6 +88,8 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
   import Ecto.Query, only: [from: 2]
 
+  alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.Withhold
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Repo
@@ -205,6 +207,21 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
   @refusal_detail "refused: this site's live release was uploaded (prebuilt), so a content publish must not trigger a box rebuild — it would replace bytes this fleet cannot reproduce. Ship new bytes with `bp cloud site deploy <site> --prebuilt <dir>`."
 
+  @doc """
+  The refusal sentence this worker writes into the `cancelled` deployment row's
+  `detail` and `failure_reason` — the exact string the console renders.
+
+  PUBLIC because the alert email must deliver THIS string rather than a re-typed
+  twin (cch-w29-bl). `Notifications.EventEmail`'s `:deployment_refused` arm
+  renders whatever the dispatch payload carries as `:detail`, and this is what
+  `refuse/1` puts there, so the inbox and the console name the same remedy by
+  construction. A second copy of the sentence is a second thing to forget to
+  update, and the surface a person reads when they were NOT at the console is
+  precisely the one that must not carry the stale copy.
+  """
+  @spec refusal_detail() :: String.t()
+  def refusal_detail, do: @refusal_detail
+
   # The USER-VISIBLE refusal (charter D92/D105). The webhook already answered 202,
   # so the refusal owes a row in the deployment stream — not just a job record.
   #
@@ -238,10 +255,33 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
       end)
 
     case result do
-      {:ok, _cancelled} ->
+      {:ok, cancelled} ->
         Logger.info(
           "auto-deploy refused for site #{site.id}: live release is prebuilt — cancelled row minted"
         )
+
+        # cch-w29-bl — THE REFUSAL LEAVES THE CONSOLE.
+        #
+        # The row above is a CONSOLE trace: it reaches the person who opens the
+        # deployment stream and nobody else. The content-publish webhook already
+        # answered `202 ok` before this guard could run, so a person who
+        # published and walked away had been promised a deploy and told nothing
+        # when it was refused. This is the first dispatch site this worker has
+        # ever had.
+        #
+        # `dispatch_site_event/3` and not `dispatch_event/3`: this module holds a
+        # Site, not a Team, and that helper owns the site → team hop (and puts
+        # the site's NAME in the payload, so the alert names what was refused).
+        # It is best-effort by contract — it never raises into a caller and a
+        # since-deleted site is a silent `:ok` — so the refusal below cannot be
+        # broken by the alert.
+        #
+        # OUTSIDE the transaction, deliberately: a send inside `Repo.transaction`
+        # would mail about a row a later rollback could still erase.
+        Notifications.dispatch_site_event(site.id, :deployment_refused, %{
+          detail: @refusal_detail,
+          deployment_id: cancelled.id
+        })
 
       {:error, reason} ->
         # The row is the courtesy; the REFUSAL is the contract. A row we could not
@@ -250,6 +290,30 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
         Logger.warning(
           "auto-deploy refusal row failed for site #{site.id}: #{inspect(reason)} — refusing anyway"
         )
+
+        # cch-w31-bl — AND THE PERSON STILL HEARS ABOUT IT.
+        #
+        # This arm used to end at the Logger line. The publish was refused, the
+        # transaction rolled back, so there was NO deployment row, NO alert (the
+        # `:ok` arm above is the only dispatch site) and nothing on any surface a
+        # person can read: their content simply never went live, silently,
+        # forever. An operator log is not a person-facing trace.
+        #
+        # It is routed through `Notifications.Withhold`, the funnel wave 32 built
+        # for exactly this shape, rather than through a second mechanism invented
+        # here: the system was positioned to send the `deployment_refused` alert,
+        # did not send it (it would name a deployment row that does not exist),
+        # and wrote nothing. That is this repo's definition of a silent withhold,
+        # and the answer to it is one `suppressed` `Delivery` row per team member
+        # carrying a CLOSED-VOCABULARY sentence — `Withhold.label/1`, no
+        # interpolation, so the changeset error never reaches a page a team admin
+        # reads.
+        #
+        # `record/4` never raises (it rescues to `0`) and its count is discarded
+        # here for the same reason the row above is a courtesy: the REFUSAL is
+        # the contract, and a trace must not be able to break the branch it
+        # traces.
+        Withhold.record(site.team_id, "deployment_refused", :deployment_refusal_unrecorded)
     end
 
     # NEVER {:error, _}: Oban would retry to max_attempts and then DISCARD, making

@@ -1,0 +1,1 @@
+The three cohorts are explicit - live / failed / deferred - plus the `building` count, and GITHUB_PUSH_UNBUILDABLE is reported as its measured value (zero) rather than omitted.

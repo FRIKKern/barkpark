@@ -1,0 +1,1 @@
+MUTATION PROOF of the exact failure this row names: reorder two of the six inline-cond sites in router.ex while keeping the count at six, and show that the overlay's labels follow the sites instead of sliding. Today check (2f) stays green, the derived lines stay correct, and every route NAME lands on the wrong line — quote the before/after.

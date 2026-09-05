@@ -1,0 +1,1 @@
+The harness fixture is widened so the floor can be raised, and the raise is proved by the 158/0 -> still-158/0 run rather than by the floor number alone

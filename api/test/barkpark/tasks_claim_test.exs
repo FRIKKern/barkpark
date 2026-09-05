@@ -400,7 +400,20 @@ defmodule Barkpark.TasksClaimTest do
       assert now.content["lifecycle_status"] == "open", "both blockers done; B must unblock"
     end
 
-    test "10 concurrent close(A) callers serialize via advisory lock — exactly ONE succeeds",
+    # task-17224f58d3bda3bd: this test used to read `exactly ONE succeeds`, and
+    # it was measuring the advisory lock through a proxy that stopped meaning
+    # what it said. All ten callers here are the SAME worker closing to the SAME
+    # status, which is precisely the RETRY the idempotent-replay arm now answers
+    # with a success receipt — so counting `{:ok, _}` returns 10, and would have
+    # returned 10 for a lock that had stopped serializing anything.
+    #
+    # What the advisory lock actually promises is that exactly one of the ten
+    # WRITES. That is what is asserted now, and it is asserted on the write
+    # itself rather than on the return shape: one `:closed` receipt, nine
+    # `:already_closed`, ONE `task.closed` event, and a rev the nine replays
+    # leave byte-unchanged. A lock that let two callers through reds on the
+    # event count and on the receipt split, both.
+    test "10 concurrent close(A) callers serialize via advisory lock — exactly ONE writes",
          %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
@@ -421,7 +434,7 @@ defmodule Barkpark.TasksClaimTest do
         1..10
         |> Task.async_stream(
           fn _ ->
-            Tasks.close(a.id, "w",
+            Barkpark.Tasks.Close.close_with_receipt(a.id, "w",
               observed_epoch: epoch,
               lifecycle_status: "done"
             )
@@ -432,14 +445,28 @@ defmodule Barkpark.TasksClaimTest do
         )
         |> Enum.map(fn {:ok, v} -> v end)
 
-      oks = Enum.count(results, &match?({:ok, _}, &1))
-      stales = Enum.count(results, &match?({:error, :stale_claim}, &1))
+      closed = Enum.count(results, &match?({:ok, _, :closed}, &1))
+      replays = Enum.count(results, &match?({:ok, _, :already_closed}, &1))
 
-      assert oks == 1,
-             "exactly ONE close should succeed under the advisory lock; got #{oks} (#{inspect(results)})"
+      assert closed == 1,
+             "exactly ONE close should WRITE under the advisory lock; got #{closed} (#{inspect(results)})"
 
-      assert oks + stales == 10,
-             "the other 9 should be :stale_claim (CAS rejected after the winner bumped rev); got #{inspect(results)}"
+      assert closed + replays == 10,
+             "the other 9 are the same worker retrying the same status — success receipts, never stale_claim; got #{inspect(results)}"
+
+      # The write count, read off the durable event log rather than off the
+      # return shape: nine replays emit nothing, so a second writer would show
+      # up here even if it somehow returned the same receipt.
+      assert length(events_for(a.doc_id, Tasks.event_kinds().closed)) == 1,
+             "exactly one task.closed event — the nine replays must write nothing"
+
+      [{:ok, winner, :closed}] = Enum.filter(results, &match?({:ok, _, :closed}, &1))
+      after_all = Repo.get!(Document, a.id)
+
+      assert after_all.rev == winner.rev,
+             "the nine replays must leave the row byte-unchanged (rev moved)"
+
+      assert after_all.content["claim"]["closed_by"] == "w"
 
       # And B is unblocked.
       reloaded_b = Repo.get!(Document, b.id)

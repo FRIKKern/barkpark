@@ -96,6 +96,13 @@ RESOLUTIONS = {
             "BARKPARK_RELEASE_CAPTURE_TOKEN",
             "BARKPARK_RELEASE_CAPTURE_BP_PATH",
             "BARKPARK_DEPLOYMENT_DIGEST",
+            # second for-comprehension over the same variable name (runtime.exs
+            # ~602, platform operator allowlists). It was written
+            # `env_name |> System.get_env("")`, which the census keyed as arg '""'
+            # and could not attribute; rewritten to System.get_env(env_name, "")
+            # so it lands here (2026-09-03).
+            "BARKPARK_OPERATOR_EMAILS",
+            "BARKPARK_OPERATOR_TOKEN_IDS",
         ],
     ),
     ("api/config/runtime.exs", "name"): dict(

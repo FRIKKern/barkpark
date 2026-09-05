@@ -71,6 +71,22 @@ workflow="${GITHUB_WORKFLOW:-unknown-workflow}"
 key="${CI_FAILURE_KEY:-$workflow}"
 label="${CI_FAILURE_LABEL:-ci-failure}"
 detail="${CI_FAILURE_DETAIL:-}"
+# REDACTION (task-6f18e71a351f8081, E). The issue this script files is PUBLIC and
+# the detail is pasted from CI logs by the caller. Anything shaped like a
+# credential is masked BEFORE it reaches the body: GitHub tokens (ghp_/gho_/
+# ghu_/ghs_/ghr_/github_pat_), Bearer/Basic authorization values, and
+# KEY=value pairs whose key names a TOKEN/SECRET/PASSWORD/KEY. The mask keeps
+# the key so the reader still learns WHICH thing leaked. Proven by mutation in
+# file-ci-failure-issue.test.sh ("redaction" case).
+redact() {
+  sed -E \
+    -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED:github-token]/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED:github-token]/g' \
+    -e 's/([Aa]uthorization:?[[:space:]]*)(Bearer|Basic|token)[[:space:]]+[^[:space:]"\x27]+/\1\2 [REDACTED]/g' \
+    -e 's/\b(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{16,}/\1 [REDACTED]/g' \
+    -e 's/([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|KEY_BASE|CLOAK_KEY|KEK)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*)[^[:space:]"\x27]+/\1[REDACTED]/g'
+}
+detail="$(printf '%s' "$detail" | redact)"
 run_id="${GITHUB_RUN_ID:-}"
 
 command -v jq >/dev/null || die "jq is not installed; cannot parse the GitHub API response"

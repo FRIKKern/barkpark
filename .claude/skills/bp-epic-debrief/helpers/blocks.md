@@ -10,7 +10,12 @@ Every block: unique string `id`. Rich text spans: `{"type":"text","value":"…"}
 - callout `{"type":"callout","content":[<spans>]}`
 - pullquote `{"type":"pullquote","text":"…"}`
 - divider `{"type":"divider"}`
-- list `{"type":"list","items":[[<spans>],[<spans>]]}` — items = array of span-arrays
+- list `{"type":"list","items":[[<spans>],[<spans>]]}` — items = array of span-arrays.
+  A span array holds INLINE leaves only. Do NOT wrap an item in a block node:
+  `items:[[{"type":"paragraph","content":[…]}]]` and the same with `"list-item"`
+  put the text one level too deep. Measured 2026-09-02: 75 items across 4
+  published papers rendered as EMPTY bullets that way. The reader now unwraps
+  one level (render/inline.ex), so old papers heal — but author the flat form.
 - table `{"type":"table","head":["…"],"rows":[["…","…"]]}` — plain strings in cells
 - stat-grid `{"type":"stat-grid","items":[{"label":"…","value":"…"}]}` (compact); stats = same shape, larger
 - gauge-list `{"type":"gauge-list","title":"…","max":75,"mode":"share","rows":[{"label":"…","value":60,"note":"…"}]}`

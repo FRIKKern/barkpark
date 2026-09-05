@@ -1,0 +1,1 @@
+A guard that can lose ships with it, proven by a NAMED mutation, and it is not of the [^>]* shape that swallows a disabled attribute. Evidence: the mutation, the failing test line, the restored green.

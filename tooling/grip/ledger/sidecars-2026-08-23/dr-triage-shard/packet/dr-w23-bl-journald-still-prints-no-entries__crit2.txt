@@ -1,0 +1,1 @@
+The corrected sum is reconciled against the DB's LIKE-predicate denominator across ALL statuses, and the two numbers are shown to agree.

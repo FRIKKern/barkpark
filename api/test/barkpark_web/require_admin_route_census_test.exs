@@ -323,6 +323,16 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
          "the payload names tenants, which is why it is admin-gated at all. RULING row 1; " <>
          "operator group 8."},
 
+    # ── /v1/papers ──
+    {:get, "/v1/papers/:slug/access"} =>
+      {:tenant_bound, "scope_opts(conn)",
+       "PaperAccessController.index/2 reads the workspace out of " <>
+         "ScopeHelpers.scope_opts/1 and passes it to PaperAccess.list/2, whose " <>
+         "workspace clause is NULL-tolerant but never absent. The route rides " <>
+         ":flat_admin_api, so DeriveWorkspaceFromToken has already resolved the " <>
+         "caller's OWN workspace before AssignDefaultScope can stamp Default — a " <>
+         "token seated in A reads A's trail for the slug, never B's."},
+
     # ── /v1/shares ──
     {:get, "/v1/shares"} =>
       {:tenant_bound, "visible_stored_shares",
@@ -820,7 +830,7 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp as(bearer) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
   end

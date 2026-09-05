@@ -4,6 +4,7 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
   question-id allowlisted, size-capped, honeypotted. Every test posts
   anonymously — the whole point of the `:public_api` bucket.
   """
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox
@@ -167,7 +168,7 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
       |> post(path(slug), %{"answers" => %{"q-fit" => "Yes"}})
       |> json_response(201)
 
-    anon = build_conn()
+    anon = scoped_conn()
     resp = anon |> get("/v1/data/doc/production/form_response/#{id}")
     assert resp.status in [401, 403, 404]
   end

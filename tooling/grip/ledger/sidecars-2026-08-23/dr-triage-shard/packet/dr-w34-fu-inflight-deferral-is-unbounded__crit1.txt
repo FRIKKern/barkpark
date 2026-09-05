@@ -1,0 +1,1 @@
+A harness case proves it: an in_progress run for the served sha whose first_seen is older than the bound exits 1, not 4.

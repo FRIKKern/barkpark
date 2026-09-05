@@ -4,12 +4,21 @@ defmodule Barkpark.Media.Delivery.SearchParams do
   @default_limit 50
   @max_limit 500
 
+  # The pagination ceiling, shared with the document route
+  # (`QueryController.index/2`, `SearchController`): `|> max(0) |> min(100_000)`.
+  # It is NOT cosmetic here. `Delivery.Search.paginate_ids/2` computes
+  # `fetch = limit + offset + 20`, issues `LIMIT <fetch>` with NO SQL OFFSET,
+  # `Repo.all`s the rows and only then `Enum.drop(offset)` — so an unclamped
+  # `?offset=5000000` materializes up to five million `{uuid, naive_datetime}`
+  # tuples in the BEAM to return nothing, on a route a tokenless caller reaches.
+  @max_offset 100_000
+
   @doc "Parse query params into search options for `Barkpark.Media.Delivery.Search`."
   @spec parse(map()) :: keyword()
   def parse(params) when is_map(params) do
     [
       limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-      offset: parse_int(params["offset"], 0),
+      offset: clamp_offset(parse_int(params["offset"], 0)),
       cursor: blank_to_nil(params["cursor"]),
       q: blank_to_nil(params["q"]),
       mime_type: blank_to_nil(params["type"] || params["mimeType"]),
@@ -24,6 +33,20 @@ defmodule Barkpark.Media.Delivery.SearchParams do
       facet_selections: parse_facet_selections(params)
     ]
   end
+
+  @doc """
+  Clamp a pagination offset into `0..#{@max_offset}`.
+
+  Public because the media read paths that do NOT go through `parse/1` —
+  `V1.MediaController.index/2` builds its own opts list — must land on the SAME
+  ceiling; a second hand-written literal is how one door keeps the hazard.
+  """
+  @spec clamp_offset(integer()) :: non_neg_integer()
+  def clamp_offset(offset) when is_integer(offset), do: offset |> max(0) |> min(@max_offset)
+
+  @doc "The pagination offset ceiling."
+  @spec max_offset() :: pos_integer()
+  def max_offset, do: @max_offset
 
   defp parse_facets(nil), do: []
   defp parse_facets(""), do: []

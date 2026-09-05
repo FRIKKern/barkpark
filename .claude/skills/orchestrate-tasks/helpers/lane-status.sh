@@ -13,6 +13,7 @@ SIG="$ORCH/.lane-status-sigs"; mkdir -p "$SIG"
 while true; do
   for f in "$ORCH"/lead-*/status.md; do
     [ -f "$f" ] || continue
+    [ -L "$(dirname "$f")" ] && continue   # skip symlinked resume aliases (lead-<lane>-r -> lead-<lane>)
     lane=$(basename "$(dirname "$f")")
     sig=$(stat -f '%m %z' "$f" 2>/dev/null || stat -c '%Y %s' "$f")
     prev=$(cat "$SIG/$lane" 2>/dev/null || true)

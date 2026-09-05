@@ -1,0 +1,1 @@
+The doctor's binary-staleness check is consultable by a gate (an opt-in strict mode, or a separate exit code) without breaking its advisory default. Prove it by MUTATION: a stale binary must produce the failing signal.

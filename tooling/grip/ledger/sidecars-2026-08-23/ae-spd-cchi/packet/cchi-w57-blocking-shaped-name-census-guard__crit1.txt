@@ -1,0 +1,1 @@
+A guard enumerates blocking-shaped job names from .github/workflows/ and reds on any name outside required ∪ exclusions ∪ transitive-needs.

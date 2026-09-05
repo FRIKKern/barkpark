@@ -1,0 +1,1 @@
+@inline_fixed_inventory and @backdrop_class_inventory are both updated to match, and the containment test is green

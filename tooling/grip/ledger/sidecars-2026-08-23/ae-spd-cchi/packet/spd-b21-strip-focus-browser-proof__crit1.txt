@@ -1,0 +1,1 @@
+The same run records whether phx-mounted fired on the patch-added pane node (tag change button->div), so the mechanism is observed rather than assumed

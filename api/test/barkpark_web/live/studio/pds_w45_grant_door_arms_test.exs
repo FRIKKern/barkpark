@@ -212,6 +212,7 @@ defmodule BarkparkWeb.Studio.PdsW45GrantDoorArmsTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
   # The ids of the hooks attached to the parent socket's `:handle_event` stage —
@@ -235,7 +236,14 @@ defmodule BarkparkWeb.Studio.PdsW45GrantDoorArmsTest do
   # THE DOOR ITSELF, called with a socket this test controls. `paper_pane_op/2`
   # is the chokepoint every hook-invisible paper write reaches, so this observes
   # product code, not a copy of it.
-  defp door(socket, value), do: Paper.paper_pane_op(socket, patch_op(value))
+  defp door(socket, value) do
+    op =
+      patch_op(value)
+      |> Map.put("request_id", Ecto.UUID.generate())
+      |> Map.put("if_rev", socket.assigns.paper_rev)
+
+    Paper.paper_pane_op(socket, op)
+  end
 
   # `with_target/2` on an id that is not in the DOM does NOT fail — the event
   # falls through to the parent, nothing is written, and "store unchanged" then
@@ -251,9 +259,14 @@ defmodule BarkparkWeb.Studio.PdsW45GrantDoorArmsTest do
   defp inner_change(view, params) do
     assert_editor_rendered!(view)
 
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok
@@ -407,7 +420,13 @@ defmodule BarkparkWeb.Studio.PdsW45GrantDoorArmsTest do
 
       # ROUTE A — the PARENT `handle_event`, which the hook DOES see. This is
       # producer B: `LiveScope.attach_write_gate/2`'s halt branch.
-      render_hook(parent_view, "paper-op", patch_op(@escalated))
+      render_hook(
+        parent_view,
+        "paper-op",
+        patch_op(@escalated)
+        |> Map.put("request_id", Ecto.UUID.generate())
+        |> Map.put("if_rev", paper_rev(parent_view))
+      )
 
       flash_a = flash_error(parent_view)
       status_a = socket_of(parent_view).assigns[:save_status]

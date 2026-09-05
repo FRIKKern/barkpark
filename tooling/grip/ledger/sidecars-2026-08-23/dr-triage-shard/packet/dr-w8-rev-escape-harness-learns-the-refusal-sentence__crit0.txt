@@ -1,0 +1,1 @@
+Case 9 accepts either aggregator red sentence and still FAILS when the step crashes instead of deciding — proved by mutation (break the step body, watch case 9 red).

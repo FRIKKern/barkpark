@@ -1,0 +1,1 @@
+The baseline lives somewhere a builder brief can point at (a doc or a tooling/grip/ledger row) rather than only in a transcript.

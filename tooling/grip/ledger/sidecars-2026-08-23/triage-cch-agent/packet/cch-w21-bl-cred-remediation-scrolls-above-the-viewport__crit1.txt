@@ -1,0 +1,1 @@
+THE REMEDY IS CHOSEN BETWEEN SCROLL-MANAGEMENT AND GEOMETRY, with the reason written down — a geometry change that only shrinks the copy is refused if the same content can simply be scrolled into view.

@@ -63,6 +63,8 @@ defmodule Barkpark.Plugins.Capabilities do
 
   alias Barkpark.Plugins.Registry
 
+  require Logger
+
   @typedoc "The six closed auth tiers from the frozen schema enum."
   @type tier :: String.t()
 
@@ -251,7 +253,10 @@ defmodule Barkpark.Plugins.Capabilities do
         cmd = normalize_command(cmd)
         name = Map.get(plugin_noun_to_name, cmd["noun"])
         source = if name, do: "plugin:#{name}", else: "plugin"
-        Map.put(cmd, "source", source)
+
+        cmd
+        |> declare_writes_fail_closed(name)
+        |> Map.put("source", source)
       end)
 
     core_nouns = core_nouns()
@@ -465,6 +470,46 @@ defmodule Barkpark.Plugins.Capabilities do
     |> Map.update("flags", [], fn flags -> Enum.map(flags || [], &stringify_shallow/1) end)
   end
 
+  # `writes` is a SAFETY bit and this is its ONLY runtime owner for
+  # plugin-contributed commands. CORE commands get theirs from the core builder's
+  # `Keyword.fetch!(opts, :writes)` — a hard crash at compile time if omitted.
+  # Plugin commands have no such door: `cli_commands/0` returns plain maps, and
+  # `Barkpark.Plugin`'s `required(:writes) => boolean()` lives in a @type, which
+  # is a DIALYZER claim with zero runtime force. So an out-of-tree plugin that
+  # forgets the key emitted a command with `writes` ABSENT.
+  #
+  # Absent is not neutral downstream. Go decodes a missing key into the zero
+  # value `false`, and `bridgeAnnotations` (internal/cli/mcp_bridge.go) maps
+  # false to `ReadOnlyHint: true` — so a plugin MUTATOR was advertised to every
+  # MCP client as a safe read, and `bp`'s prod write confirmation
+  # (`cmd.Writes && isProd(...)`, internal/cli/run.go) was skipped for it. Two
+  # safety gates failing OPEN on the same missing key.
+  #
+  # So: assume it mutates. An undeclared command is emitted `writes: true` and
+  # warned about by name. Over-declaring costs a spurious confirmation prompt;
+  # under-declaring costs an unconfirmed production write.
+  #
+  # It DEFAULTS, it does not OVERRIDE: an explicit `writes: false` is left
+  # exactly as the plugin wrote it, or the bit would stop carrying information.
+  # And it never raises — repo doctrine is that one malformed out-of-tree
+  # command must not brick the manifest for every other plugin and the core.
+  defp declare_writes_fail_closed(cmd, plugin_name) do
+    case Map.fetch(cmd, "writes") do
+      {:ok, w} when is_boolean(w) ->
+        cmd
+
+      _ ->
+        Logger.warning(
+          "plugin command declares no `writes` bit; assuming it MUTATES (writes: true). " <>
+            "plugin=#{plugin_name || "<unknown>"} noun=#{cmd["noun"]} verb=#{cmd["verb"]} " <>
+            "id=#{cmd["id"]} — declare `writes:` explicitly in cli_commands/0: an " <>
+            "undeclared mutator would be advertised to MCP clients as read-only."
+        )
+
+        Map.put(cmd, "writes", true)
+    end
+  end
+
   defp stringify_shallow(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
@@ -624,6 +669,16 @@ defmodule Barkpark.Plugins.Capabilities do
       %{
         "name" => "data",
         "summary" => "Bundled cross-type reads over a dataset (per-type counts).",
+        "plugin" => nil
+      },
+      # The `paper.access` verb (GET /v1/papers/:slug/access) is a core command
+      # whose noun is `paper` — the reader's own view/edit trail, served from
+      # core (Barkpark.Content.PaperAccess), not from the Bulldocs plugin.
+      # Declaring the noun keeps the manifest honest: every command's noun must
+      # resolve to a declared noun, the invariant dataset.stats' orphan tripped.
+      %{
+        "name" => "paper",
+        "summary" => "Published papers — the reader surface and its access trail.",
         "plugin" => nil
       },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
@@ -1493,6 +1548,30 @@ defmodule Barkpark.Plugins.Capabilities do
       # `scoped_prefix` is set ONLY where router.ex actually mounts a
       # `/w/:workspace_slug/p/:project_slug` mirror — settings, synonym-preview
       # and promote have none.
+      # ── paper access trail (edit-on-the-link slice 4, task-e99a8e946f80f52c).
+      # Behind `:flat_admin_api` (RequireToken + RequireAdmin) -> tier "admin",
+      # the same pipeline the media/documents search-config blocks below ride.
+      # No `scoped_prefix`: router.ex mounts no
+      # /w/:workspace_slug/p/:project_slug mirror for it — the workspace is
+      # derived from the token by DeriveWorkspaceFromToken instead.
+      core_cmd(
+        "paper.access",
+        "paper",
+        "access",
+        "Who has viewed and edited one paper — the append-only access trail, newest first. " <>
+          "Anonymous access is counted with no identity.",
+        "GET",
+        "/v1/papers/:slug/access",
+        "admin",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag("dataset", "string", "Narrow to one dataset (default: every dataset)."),
+          flag("limit", "int", "Max rows to return (capped at 500).", default: 100)
+        ],
+        writes: false,
+        paginated: false,
+        default_output: "table"
+      ),
       core_cmd(
         "media.search-settings",
         "media",
@@ -1695,7 +1774,11 @@ defmodule Barkpark.Plugins.Capabilities do
               "(e.g. title,slug) — a token-thrifty response shape. Already honored by the " <>
               "controller; declared here so agents can discover it."
           ),
-          flag("perspective", "string", "published (default) | drafts | raw.")
+          flag(
+            "perspective",
+            "string",
+            "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published."
+          )
         ],
         paginated: true,
         writes: false,
@@ -2571,7 +2654,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "perspective",
             "string",
-            "published (default) | drafts (live extract over the drafts corpus)."
+            "published (default) | drafts (live extract over the drafts corpus). raw is NOT offered on this route; any other value is a 400, never a silent downgrade to published."
           )
         ],
         writes: false,

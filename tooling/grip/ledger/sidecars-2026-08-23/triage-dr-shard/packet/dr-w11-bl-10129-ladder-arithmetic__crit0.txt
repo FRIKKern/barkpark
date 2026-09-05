@@ -1,0 +1,1 @@
+A decision or repair is recorded on this row with evidence, and the row is closed only when that evidence names landed code, a landed charter decision, or an explicit declination

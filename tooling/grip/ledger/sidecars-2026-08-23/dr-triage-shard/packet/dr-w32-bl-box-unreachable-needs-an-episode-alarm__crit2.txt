@@ -1,0 +1,1 @@
+The alarm's threshold is derived from a stated quiet baseline with its window pinned, not chosen by feel.

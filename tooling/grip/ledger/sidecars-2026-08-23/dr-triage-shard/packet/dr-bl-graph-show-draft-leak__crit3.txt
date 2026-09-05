@@ -1,0 +1,1 @@
+/v1/graph/orphans and /v1/graph/dangling apply the same schema-visibility filter the corpus does, and their unpaginated full-corpus shape is bounded or explicitly justified.

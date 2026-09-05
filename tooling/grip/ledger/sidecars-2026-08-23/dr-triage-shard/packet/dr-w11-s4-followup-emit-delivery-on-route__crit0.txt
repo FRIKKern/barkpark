@@ -1,0 +1,1 @@
+GET /v1/operator/deploy-ledger/census carries a delivery node whose key set matches deploy_ledger_test.exs's pinned set exactly

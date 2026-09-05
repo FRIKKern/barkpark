@@ -1,0 +1,1 @@
+A REFUSAL exists, not only a census: filing a task under this epic with no acceptance criteria is rejected or automatically flagged, and the mechanism is named.

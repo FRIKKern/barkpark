@@ -73,6 +73,15 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   @moduletag :studio_containment
 
   @root Path.expand("../../../lib/barkpark_web/layouts/root.html.heex", __DIR__)
+
+  # The editor SHELL stylesheet the root layout links. edit-on-the-link lifted it
+  # out of that layout's inline <style> so the public paper reader can link the
+  # same bytes; for this census it is still root-layout CSS, so `root_css/0`
+  # reads the two together and the inventory below is unchanged.
+  @root_shell_css Path.expand(
+                    "../../../priv/static/assets/bp-paper-editor-shell.css",
+                    __DIR__
+                  )
   @lib Path.expand("../../../lib/barkpark_web", __DIR__)
   @static_js Path.expand("../../../priv/static/assets", __DIR__)
 
@@ -183,7 +192,15 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     "live/studio/connectors_live.ex" => 2,
     # ConfirmModal is invoked at components.ex:940 — after the editor shell
     # closes (:913) and before `</.pane_layout>` (:1143): a layout sibling.
-    "components/confirm_modal.ex" => 1
+    "components/confirm_modal.ex" => 1,
+    # The Cmd/Ctrl+K session palette overlay. ChatLive is its own full-page
+    # route (router.ex "/chat" and "/chat/:session_id") and renders NEITHER
+    # `.pane-layout` NOR `.editor-panel` — grep both in chat_live.ex for zero
+    # hits — so, exactly like connectors_live.ex above, no panel containing
+    # block can reach it and the D33 carve-out does not apply. The overlay is a
+    # full-viewport scrim (inset: 0) that must cover the whole page, which is
+    # why it is fixed rather than absolute.
+    "live/studio/chat_live.ex" => 1
   }
 
   # Shipped studio JS that emits `position: fixed` from script. Each MUST portal
@@ -240,7 +257,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # ExUnit has no layout engine to recognise one any other way (see @moduledoc).
   @backdrop_name_shapes ~w(backdrop overlay scrim)
 
-  defp root_css, do: File.read!(@root)
+  # The Studio root layout's CSS is two files since edit-on-the-link: the
+  # remaining inline <style> plus the editor shell stylesheet it links
+  # (/assets/bp-paper-editor-shell.css, which the public paper reader links
+  # too). The census is over what the Studio page LOADS, so it reads both.
+  defp root_css, do: File.read!(@root) <> "\n" <> File.read!(@root_shell_css)
 
   # Strip CSS comments so prose about `position: fixed` is never censused.
   defp decommented(css), do: Regex.replace(~r|/\*.*?\*/|s, css, "")

@@ -1,0 +1,1 @@
+Either the `File.stat` site carries its own traced `# Reachability:` + `# sobelow_skip` block in the same house style, or the PR body records why it does not need one.

@@ -1,0 +1,1 @@
+HIGH-FLIP-RISK — ADMISSIBILITY: every NONE-POSSIBLE / INADMISSIBLE entry names the caller or route that decides it and labels its verdict L1 (a real write you ran) or L2 (a source derivation). Evidence: the entries with their labels. This epic has been wrong about reachability twice; an unlabelled verdict FAILS this criterion.

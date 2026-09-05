@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): the PR is merged to main, ordered BEFORE the clamp fix so the guard is red-then-green.

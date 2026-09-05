@@ -1,0 +1,1 @@
+A verdict is stated: either the guard catches wrong-but-real drift (with the evidence) or it does not (with the hole named and a proposed second check)

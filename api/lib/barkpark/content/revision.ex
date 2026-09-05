@@ -14,11 +14,34 @@ defmodule Barkpark.Content.Revision do
     field :content, :map
     field :action, :string
 
+    # [rev-hash-has-no-read] The source document's OPAQUE rev at snapshot time —
+    # the same string the envelope publishes as `"_rev"`. Without it a `_rev`
+    # cited by an acceptance criterion resolved to nothing: this table is keyed
+    # by its own UUID, so there was no path from the hash to the content it
+    # names. NULLABLE — history written before the column existed never recorded
+    # the hash and cannot be backfilled. Read via
+    # `Content.Revisions.get_revision_by_rev/3`.
+    field :rev, :string
+
     # WHO produced this revision — the actor threaded from the mutation's
     # `opts[:user_id]` (`ctx.user_id`). A plain string (an api-token / user id),
     # NULLABLE: system writes and pre-trail history have no actor. Turns version
     # history into a who-edited-what content trail.
     field :actor_user_id, :string
+
+    # WHO produced this revision, in the vocabulary the paper reader has
+    # (edit-on-the-link slice 4). `actor_user_id` above is a bare id with no
+    # kind — it cannot say whether the string names a user, an API token or a
+    # share link, and carries no display label. These three do, and they are
+    # written from ONE source: `CallerContext.actor_stamp/1`.
+    #
+    # `actor_kind` is "user" | "api_token" | "share" | "anonymous"; `actor_id`
+    # is nil for anonymous; `actor_label` is a display string (an email, a token
+    # name) or nil. ALL NULLABLE — history written before these columns existed
+    # recorded no kind and cannot be backfilled.
+    field :actor_kind, :string
+    field :actor_id, :string
+    field :actor_label, :string
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
@@ -43,7 +66,11 @@ defmodule Barkpark.Content.Revision do
       :status,
       :content,
       :action,
+      :rev,
       :actor_user_id,
+      :actor_kind,
+      :actor_id,
+      :actor_label,
       :document_id,
       :workspace_id,
       :project_id

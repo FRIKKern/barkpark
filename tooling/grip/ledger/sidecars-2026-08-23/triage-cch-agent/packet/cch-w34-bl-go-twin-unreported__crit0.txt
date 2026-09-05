@@ -1,0 +1,1 @@
+cloud_status_cmd.go statusOf either carries the unreported kind with the same relative ordering as app.js ATTENTION_RANK, or a written decision records that the CLI stays 8-state and why. Evidence: the diff or the decision text.

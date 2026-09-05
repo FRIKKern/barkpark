@@ -71,18 +71,12 @@ defmodule BarkparkWeb.SharedMediaTest do
   defp serve_path(ws, project, file), do: "#{media_root(ws, project)}/files/#{file.path}"
   defp meta_path(ws, project, file), do: "#{media_root(ws, project)}/#{file.id}/meta"
 
-  defp with_shares(env_string) do
-    prior = Application.get_env(:barkpark, :shares)
-    Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
-
-    :ok
-  end
+  # arpss-w8: shares are planted as STORED rows via `Barkpark.SharingFixtures`,
+  # so `Sharing.refresh/0` — fired by add_share/remove_share, POST/DELETE
+  # /v1/shares and the Studio shares handlers — REBUILDS this fixture instead of
+  # ERASING it (a bare `put_env(:barkpark, :shares, …)` is in neither refresh
+  # input). Snapshots and restores `:shares_env` as well as `:shares`.
+  defp with_shares(env_string), do: Barkpark.SharingFixtures.plant_shares!(env_string)
 
   defp share(ws, project, surface), do: "#{ws.slug}/#{project.slug}/#{@dataset}:#{surface}:read"
 
@@ -368,7 +362,7 @@ defmodule BarkparkWeb.SharedMediaTest do
         })
         |> Repo.insert!()
 
-      served = build_conn() |> get(serve_path(ws_a, proj_a, row))
+      served = scoped_conn() |> get(serve_path(ws_a, proj_a, row))
       assert served.status == 200
       assert served.resp_body == body
     end
@@ -589,7 +583,7 @@ defmodule BarkparkWeb.SharedMediaTest do
 
       # Read-back through the EXISTING GET blob path, not a File.read.
       with_shares(share(ws_a, proj_a, :media))
-      served = build_conn() |> get(serve_path(ws_a, proj_a, file_a))
+      served = scoped_conn() |> get(serve_path(ws_a, proj_a, file_a))
       assert served.status == 200
       assert served.resp_body == body
     end

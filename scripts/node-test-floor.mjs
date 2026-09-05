@@ -92,7 +92,7 @@ function summarize(line) {
 function fail(msg) {
   console.error(`\nnode-test floor FAILED: ${msg}`);
   summarize(`**node-test floor FAILED** — ${msg.split("\n")[0]}`);
-  process.exit(1);
+  process.exit(1); // pipe-exit-ok: this is the FAIL exit; every piping caller runs under `set -o pipefail` (pr-meta.yml) so the 1 propagates through tee
 }
 
 // ------------------------------------------------------------------ arguments

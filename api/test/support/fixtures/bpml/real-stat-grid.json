@@ -1,0 +1,46 @@
+{
+  "blocks": [
+    {
+      "id": "nt-014",
+      "items": [
+        {
+          "label": "block types classified (tiers.ex)",
+          "value": "75"
+        },
+        {
+          "label": "parity-locked across 3 surfaces",
+          "value": "60"
+        },
+        {
+          "denom": "75",
+          "label": "human-insertable in Studio",
+          "value": "33"
+        },
+        {
+          "label": "equation insert paths",
+          "value": "0"
+        },
+        {
+          "label": "macros in the equation grammar",
+          "value": "~44"
+        },
+        {
+          "label": "music blocks, wishlist entries, prior art",
+          "value": "0"
+        },
+        {
+          "denom": "12",
+          "label": "S-tier wishlist blocks built",
+          "value": "12"
+        },
+        {
+          "label": "email clients rendering MathML",
+          "value": "0"
+        }
+      ],
+      "type": "stat-grid"
+    }
+  ],
+  "paper": "papers-pro-toolkit-notation-typesetting",
+  "type": "stat-grid"
+}

@@ -1,0 +1,1 @@
+No src.stale or src.partial sibling survives the successful provision (ls of the slug dir is pasted).

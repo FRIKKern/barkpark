@@ -144,10 +144,32 @@
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
     }
+    /* GROUND (task-ddb1e0ab09a62466): the reader body stands on --paper-bg —
+       the SAME token the Studio editor paints on .bp-paper-surface
+       (root.html.heex) — so --paper-bg-deep is free to be the FILL tone under
+       pre / code / .bp-stat / .bp-card / figure. With both on bg-deep every
+       fill measured delta-L 0 against the page (2026-09-02 audit).
+       measure_parity_test.exs pins the two shells to one token. */
     body:has(.bp-paper-article) {
-      background: var(--paper-bg-deep);
+      background: var(--paper-bg);
       color: var(--paper-ink);
-      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
+      /* THE READING SERIF, on the reader's <body>. This used to be a FOURTH
+         hand-kept copy of the stack (paper-surface.css, root.html.heex and
+         the paper-editor bundle carry the other three). It is now emitted
+         from design/tokens.json `font.reading.stack` like every other
+         `--tok-*`, so the ratified order has ONE source and the eventual
+         Source-Serif-first cutover is still a one-token edit.
+
+         The token is DECLARED here rather than merely consumed: paper-surface.css
+         scopes `--tok-reading-font` to `.bp-paper-surface, .bp-paper-body`, and
+         <body> is neither — the reader's surface class rides the <main> inside
+         it. Declaring it on the reader body makes `var()` below resolve for
+         real instead of silently living on a fallback, and the value is
+         byte-identical to the one .bp-paper-surface re-declares, so the
+         inner scope is a no-op re-statement rather than an override.
+         view_edit_parity_test.exs §10 pins this against the other three. */
+      --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
+      font-family: var(--tok-reading-font);
     }
     @media (prefers-color-scheme: dark) {
       body:has(.bp-paper-article),
@@ -879,14 +901,42 @@
           The reader now takes size, leading, tracking and font-features from the
           one source like every other paper surface. --%>
     .bp-paper-shell.bp-paper-article {
+      --paper-gutter: 40px;
       max-width: 660px;
-      padding: 56px 40px 96px;
+      padding: 56px var(--paper-gutter) 96px;
       /* Client evidence needs more stage than prose. Keep the shared reading
          measure untouched while letting paired screenshots use the viewport. */
       --bp-evidence-band: 1180px;
       --bp-evidence-band-max: 1360px;
       --bp-evidence-fill: 0.74;
     }
+    /* WIDE PAPERS (`style: "article-wide"` → bulldocs_live.ex stamps
+       `.bp-paper-shell--wide`). A scorecard, matrix or dashboard paper improves
+       with width the way a table does, so the shell opens to the evidence
+       band's ceiling and every evidence block — table, stats, columns, cards,
+       heatmap — fills it through the SAME `--bp-evidence-width` law (at this
+       shell width the law resolves to 100%, so nothing is pulled or centred
+       twice). Prose keeps its measure: a paragraph in a wide paper is still a
+       paragraph, so p/h/list cap at 72ch, flush left with the panels. And the
+       section-head rule goes: the two `--bp-section-*` bridges are re-declared
+       at 0 on the shell so the head device reads as air + type only — a wide
+       paper is a page of panels, and a horizontal rule across 1300px is a
+       fence, not a boundary.
+
+       Tripled class on purpose: the article column above is (0,2,0), so the
+       wide shell needs one more class to outrank it, and the surface's own
+       `--bp-section-*` bridges sit on the same element, so the zeroes ride the
+       same selector. This block sits BELOW the surface embed so the
+       `.sobelow-skips` anchor on that `raw(...)` line keeps its line number. */
+    .bp-paper-shell.bp-paper-article.bp-paper-shell--wide { max-width: 1328px; --bp-section-rule: 0px; --bp-section-gap: 0px; }
+    .bp-paper-shell--wide #paper-body :is(p, h1, h2, h3, ul, ol, blockquote) { max-width: 72ch; margin-inline: 0; }
+    /* A scorecard's first column is the requirement itself; give it room so the
+       verdict columns do not squeeze it into five-line wraps. */
+    .bp-paper-shell--wide .bp-table__th:first-child,
+    .bp-paper-shell--wide .bp-table__td:first-child { min-width: 15em; }
+    /* Eight columns share the band: let a long header wrap instead of forcing the
+       whole table into its own scroll box. */
+    .bp-paper-shell--wide .bp-table__th { white-space: normal; }
 
     /* Recording links are supporting evidence, not a stack of form controls.
        Consecutive action blocks therefore read as a loose clip rail: compact,
@@ -1126,10 +1176,35 @@
       .bp-image-lightbox__caption { font-size: 0.74rem; }
     }
 
-    @media (max-width: 720px) {
+    <%!-- THE GUTTER LADDER — 40 / 24 / 16 at 767 / 479, THE SAME STEPS AND THE
+          SAME BREAKPOINTS as the Studio's `.bp-paper-surface`
+          (root.html.heex). They were 40 -> 24 at 720 here and 40/24/16 at
+          767/479 there, and below 720 a later rule pushed this shell's
+          `padding-inline` to 20px while the Studio's was 24 or 16. Two shells
+          that share one `.bp-paper-surface` type scale but pad differently
+          wrap a line at a DIFFERENT WORD in View than in Edit, which is the
+          one thing the parity work exists to prevent.
+
+          The 16px step is also what buys the narrow measure back: 390 - 2*16 =
+          a 358px column, 42 characters per line, inside the 40-46 the reader
+          is designed to. At 20px it was 350px and 41; at the 24px this file
+          used to stop at, 342px and 40.
+
+          Each step REDECLARES the token and CONSUMES it — the invariant
+          measure_parity_test.exs pins on both shells now, in both directions:
+          redeclare without consuming and the padding is stale, consume without
+          redeclaring and the ladder has a rung that renders the wrong gutter. --%>
+    @media (max-width: 767px) {
       .bp-paper-shell.bp-paper-article {
+        --paper-gutter: 24px;
         max-width: 100%;
-        padding: 36px 24px 72px;
+        padding: 36px var(--paper-gutter) 72px;
+      }
+    }
+    @media (max-width: 479px) {
+      .bp-paper-shell.bp-paper-article {
+        --paper-gutter: 16px;
+        padding: 32px var(--paper-gutter) 72px;
       }
     }
 
@@ -1643,12 +1718,18 @@
       .bp-paper-article figure > .bp-cols { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 720px) {
+    @media (max-width: 767px) {
       .bp-paper-shell.bp-paper-article {
-        --bp-evidence-gutter: 16px;
-        --bp-evidence-width: calc(100vw - 32px);
+        /* The band collapses onto the gutter ladder above rather than onto its
+           own literals. `padding-inline: 20px` used to live here and was the
+           source of the reader's 20px narrow gutter — a THIRD value, later in
+           the sheet than the ladder and therefore the winner, while these two
+           band literals were already written for a 16px gutter (32 = 2 x 16).
+           The band's edge and the prose's edge were 4px apart by construction.
+           Both now read the one token, so they cannot drift again. */
+        --bp-evidence-gutter: var(--paper-gutter);
+        --bp-evidence-width: calc(100vw - 2 * var(--paper-gutter));
         --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
-        padding-inline: 20px;
       }
       .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
         display: block;
@@ -1911,6 +1992,14 @@
       .bp-paper-article .bp-chart { break-inside: avoid; }
     }
   </style>
+  <%!-- EDIT-ON-THE-LINK: the Beta block editor's SHELL stylesheet — the same
+        /assets/bp-paper-editor-shell.css root.html.heex links, so Studio and the
+        reader paint the editor from ONE copy. Loaded LAST in <head>, after the
+        paper-surface embed + reader skin above, mirroring root.html.heex, where
+        it also sits after `paper_stylesheet()`. Gated on `@can_edit?` (nil/false
+        for an anonymous visitor, so a public read fetches nothing new); a
+        stylesheet is not a script, so Golden Rule #4 does not apply. --%>
+  <link :if={assigns[:can_edit?]} rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />
 </head>
 <body>
   {@inner_content}
@@ -2505,6 +2594,24 @@
         <head> and NOT blocking (Golden Rule #4) — the engine itself
         (mermaid.min.js) still loads `defer` above. --%>
   <script src="/assets/bp-paper-mermaid.js"></script>
+  <%!-- EDIT-ON-THE-LINK: the Beta block editor's browser half, loaded ONLY when
+        the viewer may edit (`@can_edit?` — nil/false for anonymous, so a public
+        read fetches none of it). Every file below is the SAME asset Studio's
+        root.html.heex loads; nothing is duplicated for the reader.
+
+        Order matters and is the same as Studio's: NO_INJECT first (the bundle
+        reads it in connectedCallback and skips self-injecting its standalone
+        bp-paper-editor.css — we ship the shell stylesheet in <head> instead),
+        then the custom-element bundles, then the hooks. Bottom of <body>, so
+        Golden Rule #4 holds; the hooks file is non-defer because
+        `window.BarkparkPaperEditorHooks` must exist before the inline boot
+        below folds it into PaperHooks and connects the LiveSocket. --%>
+  <script :if={assigns[:can_edit?]} nonce={assigns[:csp_nonce]}>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-paper-editor.bundle.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-media-picker.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-reference-picker.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-rich-text-editor.js" defer></script>
+  <script :if={assigns[:can_edit?]} src="/assets/bp-paper-editor-hooks.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     // PaperMermaid: the reader's per-<article> hook. Registered on the streamed
     // <article>, so mounted() fires once and updated() fires on every stream
@@ -2739,6 +2846,14 @@
     // hook itself (window.BarkparkGraph, the same object Studio registers as
     // GraphPane); guarded so a missing asset never breaks the reader's hooks.
     if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
+
+    // EDIT-ON-THE-LINK: the Beta block editor's hooks — BarkparkPaperEditor,
+    // BarkparkPaperCanvas, BarkparkFieldBlockBridge, BarkparkPaperSortable and
+    // BarkparkPaperContextMenu. THE SAME objects Studio registers, defined once
+    // in /assets/bp-paper-editor-hooks.js (loaded above only when @can_edit?).
+    // Guarded like FinderGraph: on an anonymous read the asset is not on the
+    // page at all, and a missing global must never break the reader's own hooks.
+    Object.assign(PaperHooks, window.BarkparkPaperEditorHooks || {});
 
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {

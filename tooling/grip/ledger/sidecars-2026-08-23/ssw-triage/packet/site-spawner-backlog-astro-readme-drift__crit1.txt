@@ -1,0 +1,1 @@
+A documentation or template contract test compares the documented marker set with Base.astro so count/name drift fails.

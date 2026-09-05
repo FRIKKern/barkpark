@@ -1,0 +1,1 @@
+dr-w25-bl-cp-keeps-no-deploy-provenance's premise is corrected: range sourcing works today; durability is the claim.

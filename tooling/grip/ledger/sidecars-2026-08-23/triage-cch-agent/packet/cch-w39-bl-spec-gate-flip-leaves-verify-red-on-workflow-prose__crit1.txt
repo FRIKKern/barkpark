@@ -1,0 +1,1 @@
+The prose-clause failure is proven to SURVIVE the PUT before any PUT is performed, using the --readback seam with a synthetic 5-context protection object: clause 1 goes green, clause 2 still fails, rc is still 1. Evidence: both runs quoted side by side.

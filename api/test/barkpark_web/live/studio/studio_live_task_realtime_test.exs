@@ -54,7 +54,17 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
         %{
           "doc_id" => @doc_id,
           "title" => "Wire the realtime bridge",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset
       )

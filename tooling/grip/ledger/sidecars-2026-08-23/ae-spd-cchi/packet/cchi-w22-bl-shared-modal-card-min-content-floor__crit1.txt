@@ -1,0 +1,1 @@
+Every body whose floor exceeds viewport-minus-48 gets BOTH halves of the remedy — the :has()-scoped track clamp AND a content reflow — proven by a post-fix probe showing .modal-root scrollWidth == clientWidth and zero descendants outside the viewport at all four widths.

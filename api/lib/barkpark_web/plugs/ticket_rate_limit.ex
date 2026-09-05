@@ -71,7 +71,15 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
         class = classify(conn)
         limit = limit_for(class)
 
-        case RateLimiter.check({:ticket, key_id, class}, bucket_opts(limit)) do
+        # Scoped like every other metered surface. This key is already
+        # test-distinct in practice — `key_id` is a sandboxed DB row minted per
+        # test — so the suffix changes nothing today; it is here so the C2
+        # coverage test's allow-list is the helper ALONE, and so a future test
+        # that pins a fixed `ticket_key` id cannot re-open the shared-bucket
+        # class through the one `check/2` site that opted out.
+        key = {:ticket, key_id, class}
+
+        case RateLimiter.check(RateLimiter.scoped_key(conn, key), bucket_opts(limit)) do
           :ok -> conn
           :rate_limited -> deny(conn, retry_after_seconds(limit))
         end

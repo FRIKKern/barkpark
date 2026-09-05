@@ -1,0 +1,1 @@
+Each EXISTS fragment is pinned so narrowing it reds independently — one test per fragment, mutation-proved.

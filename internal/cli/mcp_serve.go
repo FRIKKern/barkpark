@@ -294,7 +294,7 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 	// never a token byte: the process holds no credential to leak.
 	out.errf("bp mcp serve: %s tools over Streamable HTTP on %s (server %s, forward-through bearer) — Ctrl-C to stop", toolsetLabel(toolset, nouns), ln.Addr(), ctx.Server)
 
-	httpSrv := newMCPHTTPServer(handler)
+	httpSrv := newMCPHTTPServer(handler, newMCPRateLimiterFromEnv(out.errf))
 	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -343,7 +343,10 @@ const (
 )
 
 // newMCPHTTPServer wraps the Streamable-HTTP handler in an http.Server with
-// those deadlines armed.
+// those deadlines armed, behind the per-client-IP token bucket (limiter may be
+// nil — a nil limiter is a pass-through, which is what BARKPARK_MCP_RATE=0
+// produces). The deadlines bound per-CONNECTION time; the bucket is the only
+// thing here that bounds request RATE (mcp_ratelimit.go).
 //
 // WriteTimeout is DELIBERATELY LEFT ZERO. In stateless mode the SDK answers a
 // POST /mcp with Content-Type text/event-stream (streamable.go: jsonResponse is
@@ -357,9 +360,9 @@ const (
 // stalled peer's socket is reclaimed by IdleTimeout once the stream ends.
 // (GET /mcp — the standalone SSE stream — is 405 in stateless mode, so there is
 // no unbounded server-initiated stream to worry about.)
-func newMCPHTTPServer(handler http.Handler) *http.Server {
+func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Server {
 	return &http.Server{
-		Handler:           handler,
+		Handler:           limiter.middleware(handler),
 		ReadHeaderTimeout: mcpHTTPReadHeaderTimeout,
 		ReadTimeout:       mcpHTTPReadTimeout,
 		IdleTimeout:       mcpHTTPIdleTimeout,
@@ -579,6 +582,23 @@ flags:
                       curated task tools, --http logs ONE loud line and serves
                       what it can (chat tools, paper resources) rather than
                       exiting; stdio still fails fast.
+
+--http rate limit (env, in-process — Caddy's rate_limit is a third-party
+module the stock fleet caddy does not carry, so the clamp lives here):
+  BARKPARK_MCP_RATE=<req/s>       Sustained per-client-IP rate. Default 5.
+                                  0 DISABLES the limiter entirely.
+  BARKPARK_MCP_BURST=<requests>   Bucket depth. Default 20.
+  BARKPARK_MCP_TRUSTED_PROXIES=<cidr,…>
+                                  Peers whose X-Forwarded-For is believed.
+                                  Default 127.0.0.0/8,::1/128 (the loopback
+                                  deploy shape). From a trusted peer the LAST
+                                  XFF hop — the one the proxy appended — is the
+                                  key; from any other peer the header is
+                                  ignored and the TCP peer is the key, so no
+                                  client can mint buckets with a header it
+                                  writes itself. Over-limit requests get 429
+                                  with Retry-After; an SSE stream already
+                                  streaming is never cut off.
 
 Published papers are also exposed as read-only MCP resources
 (barkpark://papers/<id>), independent of --tools. In --http mode papers read

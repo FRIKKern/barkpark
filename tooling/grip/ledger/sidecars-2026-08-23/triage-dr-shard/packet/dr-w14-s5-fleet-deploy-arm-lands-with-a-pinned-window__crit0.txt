@@ -1,0 +1,1 @@
+#10129 is rebased onto origin/main with all SIX Go/JSON conflicts resolved by UNION; the PR body pastes the conflict list and states that semrole.go take-theirs would have DELETED strained/filling/unreported

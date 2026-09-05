@@ -1,0 +1,1 @@
+The shoot.sh blind spot is CLOSED or WRITTEN, and the PR says which: either citationScanFiles() reads *.sh (and shoot.sh's three mock.js cites are repaired, including :273 which is off by 3), or the header comment states the limit in terms. Evidence: the diff plus the gate run.

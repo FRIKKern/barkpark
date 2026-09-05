@@ -1,0 +1,1 @@
+A ruling is written: either route arming becomes fatal (with the expected effect on the failure numerator stated), or it stays exit-0-with-a-report and this row closes citing the measured incidence.

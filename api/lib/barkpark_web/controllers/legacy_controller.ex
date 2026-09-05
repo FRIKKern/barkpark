@@ -270,30 +270,14 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   # Resolve the type's schema for field-visibility redaction, under the SAME
-  # tenant scope as the read. On a scoped miss, fall back to the GLOBAL schema
-  # (mirroring QueryController.fetch_schema/3 and content/papers.ex
-  # value_schema/3) so a globally-declared non-encrypted private field still
-  # redacts — without this fallback the schema misses at the render site and the
-  # private field renders PUBLIC, because `Envelope.render/3` is lenient on a nil
-  # schema (raw_fields(nil) == [], and an undeclared field is treated as public
-  # for legacy parity). Nil on miss otherwise.
-  #
-  # TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant
-  # rows, so accept the fallback ONLY when its workspace_id is nil — the global
-  # schema. Any non-nil workspace_id would substitute a FOREIGN tenant's schema,
-  # turning a redaction fix into a cross-tenant schema leak.
+  # tenant scope as the read, with the GLOBAL-schema fallback. The two-step
+  # lookup and its load-bearing tenancy guard live in ONE place —
+  # `Content.Schema.get_schema_for_redaction/3` (@canonical
+  # capability:schema-resolution-for-redaction). Nil on miss.
   defp fetch_schema(conn, type) do
-    opts = scope_opts(conn)
-
-    case Content.get_schema(type, @dataset, opts) do
-      {:ok, schema} ->
-        schema
-
-      _ ->
-        case Content.get_schema(type, @dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
-          {:ok, %{workspace_id: nil} = schema} -> schema
-          _ -> nil
-        end
+    case Content.Schema.get_schema_for_redaction(type, @dataset, scope_opts(conn)) do
+      {:ok, schema} -> schema
+      :error -> nil
     end
   end
 

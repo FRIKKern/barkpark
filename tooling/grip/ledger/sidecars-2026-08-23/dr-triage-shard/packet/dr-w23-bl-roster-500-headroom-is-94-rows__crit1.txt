@@ -1,0 +1,1 @@
+A test seeds a roster past the page limit and proves the predicate still returns a verdict rather than an infra fault.

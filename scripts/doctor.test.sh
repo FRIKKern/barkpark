@@ -284,6 +284,64 @@ assert_has "11. hook mode NAMES the missing bp out loud" "$OUT11" "no bp on PATH
 if [ "$RC11" -eq 0 ]; then pass "11. missing bp stays advisory (exit 0)"; else
   fail "11. doctor exited $RC11 with no bp on PATH — it must never block a session"; fi
 
+# ── 12. migration membership survives large query output ────────────────────
+# The real report used printf | grep -q under pipefail. Once grep found an
+# early version, printf could receive SIGPIPE and turn a match into "pending".
+# Keep this fixture larger than a pipe buffer, with matches at both ends, and
+# drive the actual doctor. PostgreSQL is stubbed: no live DB is needed here.
+R12="$TMP/c12"; mkdir -p "$R12"; W12="$(base_repo "$R12")"
+make_bp "$R12/bin" "$($GIT -C "$W12" rev-parse HEAD)"
+mkdir -p "$W12/api/priv/repo/migrations"
+printf '# fixture\n' > "$W12/api/priv/repo/migrations/20260101000001_first.exs"
+printf '# fixture\n' > "$W12/api/priv/repo/migrations/20261231000000_last.exs"
+awk 'BEGIN {
+  print "20260101000001"
+  for (i = 0; i < 100000; i++) printf "202602%08d\n", i
+  print "202601010000020"
+  print "20261231000000"
+}' > "$R12/applied"
+cat > "$R12/bin/psql" <<'EOF'
+#!/bin/bash
+case "$*" in
+  *schema_migrations*) cat "$DOCTOR_TEST_APPLIED" ;;
+  *pg_database*) echo 250 ;;
+  *pg_stat_activity*) echo 0 ;;
+  *max_connections*) echo 100 ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$R12/bin/psql"
+OUT12="$(DOCTOR_TEST_APPLIED="$R12/applied" run_doctor "$W12" "$R12/bin")"
+assert_has "12. large applied list stays current" "$OUT12" "dev DB migration versions are current"
+assert_has "12. database count does not claim every row is orphaned" "$OUT12" \
+  "250 barkpark_test* databases (orphan status not established;"
+if has "$OUT12" "pending migrations:"; then
+  fail "12. applied versions were falsely reported pending"
+else
+  pass "12. no false pending migration at either end of the result"
+fi
+
+# A substring of another version is NOT membership. Only the missing file
+# should be named; applied versions must not be mixed into its warning.
+printf '# fixture\n' > "$W12/api/priv/repo/migrations/20260101000002_missing.exs"
+OUT12_MISSING="$(DOCTOR_TEST_APPLIED="$R12/applied" run_doctor "$W12" "$R12/bin")"
+assert_has "12. exact missing version is named" "$OUT12_MISSING" \
+  "pending migrations: 20260101000002_missing.exs — run:"
+if has "$OUT12_MISSING" "dev DB migration versions are current"; then
+  fail "12. a missing migration must not also report current"
+else
+  pass "12. missing version is not falsely current"
+fi
+
+OUT12_DOWN="$(DOCTOR_TEST_APPLIED="$R12/absent" run_doctor "$W12" "$R12/bin")"
+assert_has "12. failed migration query stays an explicit skip" "$OUT12_DOWN" \
+  "dev DB not reachable — migration check skipped"
+if has "$OUT12_DOWN" "dev DB migration versions are current" || has "$OUT12_DOWN" "pending migrations:"; then
+  fail "12. failed query must not invent a migration verdict"
+else
+  pass "12. failed query is neither current nor pending"
+fi
+
 # ── negative control: prove the harness can SEE a false-green ────────────────
 # If section 2 ever regresses to comparing against the ancestor-only diff and
 # calls the behind-Go binary current, sec2_green would fire on cell 2. We assert
@@ -296,4 +354,4 @@ if [ "$fails" -ne 0 ]; then
   echo "doctor tests: $fails failure(s)" >&2
   exit 1
 fi
-echo "doctor tests: PASS (11/11 verdict cells)"
+echo "doctor tests: PASS (11 staleness cells + migration membership matrix)"

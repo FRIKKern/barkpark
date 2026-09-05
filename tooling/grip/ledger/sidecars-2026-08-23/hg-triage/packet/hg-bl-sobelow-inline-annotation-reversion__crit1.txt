@@ -1,0 +1,1 @@
+A named inline-annotated finding is shown present in today's generated baseline and absent from the corrected one — the concrete before/after that proves the reversion was real

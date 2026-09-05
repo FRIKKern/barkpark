@@ -1,0 +1,1 @@
+POST /papers either honours ifRev with a 412 on mismatch, or refuses the request with an error naming the /ops route as the fenced path.

@@ -69,7 +69,21 @@ defmodule Barkpark.Tasks.LandedTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+          "content" =>
+            Map.merge(
+              %{
+                "kind" => "task",
+                "acceptance_criteria" => [
+                  %{
+                    "criterion" => "the fixture states its bar",
+                    "met" => true,
+                    "evidence" => "fixture"
+                  }
+                ],
+                "lifecycle_status" => "open"
+              },
+              content_extra
+            )
         },
         @dataset,
         scope
@@ -252,7 +266,12 @@ defmodule Barkpark.Tasks.LandedTest do
     end
 
     test "a task with no criteria at all refuses any index", %{scope: scope} do
-      doc = task!(scope)
+      # EXPLICITLY criteria-less: the default fixture now states a bar, because
+      # the claim-time gate (task-9554c64bf51a0f81) refuses a criteria-less work
+      # row and a fixture that omits them is a row nobody can claim. This test is
+      # about the landing verb's index bounds on a row that HAS none, so it opts
+      # back out by name rather than relying on the default.
+      doc = task!(scope, %{"acceptance_criteria" => []})
 
       assert {:error, :criteria_index_out_of_range} =
                Tasks.record_landing(doc.id, note: "merged to main", criterion: 0)

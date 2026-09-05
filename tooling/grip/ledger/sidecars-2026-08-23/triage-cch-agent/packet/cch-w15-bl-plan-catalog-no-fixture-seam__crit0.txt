@@ -1,0 +1,1 @@
+A fixture seam exists through which a scenario can supply the plan catalog, and at least one scenario renders five tiers.

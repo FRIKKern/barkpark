@@ -235,9 +235,21 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     hd(links)
   end
 
+  # A SHARED-LAYER event: `workspace_id: nil`, the value `tap_broadcast/5`
+  # stamps for a write that resolved no workspace. Stated EXPLICITLY, not
+  # omitted, because this fixture's conn carries no `:current_workspace` assign,
+  # so `ScopeHelpers.scope_opts/1` hands the listener the empty-scope sentinel
+  # `:shared_only` — and `forward_event?/2`'s `:shared_only` arm forwards a
+  # shared-layer event (`workspace_id` NULL) while DROPPING a msg that carries
+  # no `workspace_id` key at all (the defensive arm). Omitting the key used to
+  # work only because the old nil scope forwarded everything, including every
+  # other tenant's events — the cross-tenant leak this fixture must not depend
+  # on. This test's subject is BACKPRESSURE on a blocked sink; it needs its
+  # events forwarded, not the tenancy fence relaxed to forward them.
   defp event(id, document) do
     %{
       event_id: id,
+      workspace_id: nil,
       mutation: "update",
       type: "post",
       doc_id: "drafts.backpressure-#{id}",

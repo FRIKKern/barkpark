@@ -1,0 +1,1 @@
+A hermetic control proves the same contrast the live spawn proved (a live refusal never reaches the ladder; --ladder-only does), and it REDS when that contrast is broken. Evidence: the mutation and its failing output.

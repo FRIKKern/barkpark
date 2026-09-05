@@ -1,0 +1,1 @@
+A decision is recorded — keep pointer-events:none, or replace it with a guard that blocks activation without leaving the element out of hit-testing — and the chosen shape is proven on the deployed build.

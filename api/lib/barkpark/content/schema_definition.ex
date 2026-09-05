@@ -48,6 +48,11 @@ defmodule Barkpark.Content.SchemaDefinition do
     # Consumed generically by `BarkparkWeb.Studio.PaneBuilder` for every
     # doc type; empty map (default) → rows render unchanged.
     field :list_preview, :map, default: %{}
+    # Gyldendal parity E3 — the schema-level DESK block. `orderings` is a list of
+    # %{"field" => name, "direction" => "asc" | "desc"} the desk list applies
+    # (Sanity's `orderings`); the first entry is the default sort. Empty map ==
+    # no declaration, the list keeps today's order.
+    field :desk, :map, default: %{}
     field :initial_values, :map, default: %{}
     field :cross_validations, {:array, :map}, default: []
 
@@ -88,6 +93,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :actions,
       :groups,
       :desk_groups,
+      :desk,
       :list_preview,
       :initial_values,
       :cross_validations,
@@ -100,6 +106,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_desk_group_filters()
+    |> validate_desk_block()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -143,6 +150,46 @@ defmodule Barkpark.Content.SchemaDefinition do
   # write path, on the caller's OWN schema, so there is no field-visibility gate
   # to sit past (unlike the read-path envelope — see
   # `Barkpark.Content.InvalidFilterError`).
+  # `desk.orderings` must be a list of %{"field" => binary, "direction" =>
+  # "asc"|"desc"} — validated only when changed, like desk_groups, so an
+  # unrelated update never reds on a legacy value.
+  defp validate_desk_block(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "orderings") || Map.get(desk, :orderings) do
+          nil ->
+            changeset
+
+          list when is_list(list) ->
+            case Enum.find(list, &(not valid_ordering?(&1))) do
+              nil ->
+                changeset
+
+              bad ->
+                add_error(
+                  changeset,
+                  :desk,
+                  "orderings entries must be %{\"field\" => name, \"direction\" => \"asc\" | \"desc\"}, got #{inspect(bad)}"
+                )
+            end
+
+          other ->
+            add_error(changeset, :desk, "orderings must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp valid_ordering?(%{} = o) do
+    field = Map.get(o, "field") || Map.get(o, :field)
+    dir = Map.get(o, "direction") || Map.get(o, :direction) || "asc"
+    is_binary(field) and field != "" and dir in ["asc", "desc"]
+  end
+
+  defp valid_ordering?(_), do: false
+
   defp validate_desk_group_filters(changeset) do
     case get_change(changeset, :desk_groups) do
       groups when is_list(groups) ->

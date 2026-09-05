@@ -75,7 +75,7 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
 		},
 		ReqStatsProbe: func() (float64, int, float64, int, error) { return 12.5, 87, 0.22, 60, nil },
-		BackupProbe:   func() (bool, string, error) { return true, "last backup 2h ago", nil },
+		BackupProbe:   func() (BackupState, string, error) { return BackupStateOK, "last backup 2h ago", nil },
 
 		HealthBaseURL: "https://server.example.com",
 		runHealthGateFor: func(base, token string, opts setup.HealthGate) (setup.HealthReport, error) {
@@ -131,8 +131,8 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	if r.Err5xxPerS != 0.22 {
 		t.Errorf("Err5xxPerS = %v, want 0.22", r.Err5xxPerS)
 	}
-	if !r.BackupOK || r.BackupDetail != "last backup 2h ago" {
-		t.Errorf("Backup = (%v, %q), want (true, last backup 2h ago)", r.BackupOK, r.BackupDetail)
+	if r.BackupState != BackupStateOK || !r.BackupOK || r.BackupDetail != "last backup 2h ago" {
+		t.Errorf("Backup = (%q, %v, %q), want (ok, true, last backup 2h ago)", r.BackupState, r.BackupOK, r.BackupDetail)
 	}
 	if r.HealthStatus != "up" {
 		t.Errorf("HealthStatus = %q, want up", r.HealthStatus)
@@ -552,17 +552,194 @@ func TestExecRunnerDeadline(t *testing.T) {
 	})
 }
 
-// TestGatherReportBackupProbeError surfaces a backup probe error honestly.
+// TestGatherReportBackupProbeError surfaces a backup probe error honestly — and
+// as its OWN state, not as the same false a missing probe and a missing backup
+// both produce.
 func TestGatherReportBackupProbeError(t *testing.T) {
 	r := gatherReport(ReportConfig{
-		BackupProbe: func() (bool, string, error) { return false, "", errors.New("no cron") },
+		BackupProbe: func() (BackupState, string, error) { return "", "", errors.New("no cron") },
 	})
+	if r.BackupState != BackupStateError {
+		t.Errorf("BackupState = %q, want %q on probe error", r.BackupState, BackupStateError)
+	}
 	if r.BackupOK {
 		t.Error("BackupOK = true, want false on probe error")
 	}
 	if r.BackupDetail == "" {
 		t.Error("BackupDetail empty, want the error noted")
 	}
+}
+
+// TestBackupStateDiscriminatesUnwiredFromFailed is THE test this whole change
+// exists for, and it is written so it can only pass while the distinction is
+// real. Three ReportConfigs that a plain `backup_ok bool` renders IDENTICALLY —
+// no probe wired at all, a probe that measured a missing backup, and a probe
+// that blew up — must land three DIFFERENT values on the wire, and the
+// discrimination must survive a JSON round trip WITHOUT reading BackupDetail.
+//
+// The detail strings are deliberately never compared: a consumer that had to
+// parse English to tell "nobody looked" from "the backup failed" is exactly the
+// state this field replaces.
+func TestBackupStateDiscriminatesUnwiredFromFailed(t *testing.T) {
+	cases := []struct {
+		name  string
+		cfg   ReportConfig
+		want  BackupState
+		wantM bool // is this a statement about BACKUPS at all?
+	}{
+		{
+			name: "no probe wired — nobody looked",
+			cfg:  ReportConfig{},
+			want: BackupStateUnmeasured,
+		},
+		{
+			name: "probe ran, box has no backup location",
+			cfg: ReportConfig{BackupProbe: func() (BackupState, string, error) {
+				return BackupStateUnconfigured, "no backup location on this box", nil
+			}},
+			want: BackupStateUnconfigured,
+		},
+		{
+			name: "probe ran and MEASURED a missing backup",
+			cfg: ReportConfig{BackupProbe: func() (BackupState, string, error) {
+				return BackupStateFailed, "backup dir exists but holds no artifact", nil
+			}},
+			want:  BackupStateFailed,
+			wantM: true,
+		},
+		{
+			name: "probe ran and measured a fresh backup",
+			cfg: ReportConfig{BackupProbe: func() (BackupState, string, error) {
+				return BackupStateOK, "newest backup 2h old", nil
+			}},
+			want:  BackupStateOK,
+			wantM: true,
+		},
+		{
+			name: "the probe itself broke",
+			cfg: ReportConfig{BackupProbe: func() (BackupState, string, error) {
+				return "", "", errors.New("permission denied")
+			}},
+			want: BackupStateError,
+		},
+	}
+
+	seen := map[string]string{} // wire state -> the case that produced it
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gatherReport(tc.cfg)
+
+			// The wire, not the struct: marshal and read the raw key back, so
+			// a field that stops being serialized cannot pass this test.
+			b, err := json.Marshal(r)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var wire struct {
+				BackupState string `json:"backup_state"`
+				BackupOK    bool   `json:"backup_ok"`
+			}
+			if err := json.Unmarshal(b, &wire); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if wire.BackupState != string(tc.want) {
+				t.Errorf("wire backup_state = %q, want %q", wire.BackupState, tc.want)
+			}
+			// The legacy bool can never disagree with the state.
+			if wire.BackupOK != (tc.want == BackupStateOK) {
+				t.Errorf("wire backup_ok = %v, want %v (state %q)", wire.BackupOK, tc.want == BackupStateOK, tc.want)
+			}
+			if got := r.BackupState.Measured(); got != tc.wantM {
+				t.Errorf("Measured() = %v, want %v for %q", got, tc.wantM, tc.want)
+			}
+			if !r.BackupState.Valid() {
+				t.Errorf("BackupState %q is outside the declared set", r.BackupState)
+			}
+			if prev, dup := seen[wire.BackupState]; dup {
+				t.Errorf("backup_state %q is shared by %q and %q — the states are NOT distinguishable on the wire", wire.BackupState, prev, tc.name)
+			}
+			seen[wire.BackupState] = tc.name
+		})
+	}
+
+	// Non-vacuity: if the table ever shrinks to one arm, the distinctness check
+	// above proves nothing. Five cases, five distinct states.
+	if len(seen) != len(cases) {
+		t.Fatalf("%d cases produced %d distinct wire states, want %d", len(cases), len(seen), len(cases))
+	}
+}
+
+// TestNewBackupProbeReadsARealDirectory pins the PRODUCTION probe's four
+// answers against a real filesystem — the probe cmd/barkpark-agent now wires,
+// which before this change did not exist at all.
+func TestNewBackupProbeReadsARealDirectory(t *testing.T) {
+	t.Run("no location configured", func(t *testing.T) {
+		state, detail, err := NewBackupProbe("")()
+		if err != nil || state != BackupStateUnconfigured {
+			t.Fatalf("got (%q, %q, %v), want unconfigured", state, detail, err)
+		}
+	})
+
+	t.Run("configured location does not exist", func(t *testing.T) {
+		state, _, err := NewBackupProbe(filepath.Join(t.TempDir(), "nope"))()
+		if err != nil || state != BackupStateUnconfigured {
+			t.Fatalf("state = %q err = %v, want unconfigured", state, err)
+		}
+	})
+
+	t.Run("location exists and is empty — MEASURED failure", func(t *testing.T) {
+		state, _, err := NewBackupProbe(t.TempDir())()
+		if err != nil || state != BackupStateFailed {
+			t.Fatalf("state = %q err = %v, want failed", state, err)
+		}
+		if state == BackupStateUnconfigured {
+			t.Error("an existing-but-empty backup dir must not read as unconfigured")
+		}
+	})
+
+	t.Run("fresh artifact", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "dump-2026-09-02.sql.gz"), []byte("not empty"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		state, detail, err := NewBackupProbe(dir)()
+		if err != nil || state != BackupStateOK {
+			t.Fatalf("got (%q, %q, %v), want ok", state, detail, err)
+		}
+		if !strings.Contains(detail, "dump-2026-09-02.sql.gz") {
+			t.Errorf("detail %q does not name the artifact it measured", detail)
+		}
+	})
+
+	t.Run("stale artifact is a failure that says so", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "dump-old.sql.gz")
+		if err := os.WriteFile(f, []byte("not empty"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-BackupMaxAge - time.Hour)
+		if err := os.Chtimes(f, old, old); err != nil {
+			t.Fatal(err)
+		}
+		state, detail, err := NewBackupProbe(dir)()
+		if err != nil || state != BackupStateFailed {
+			t.Fatalf("got (%q, %q, %v), want failed", state, detail, err)
+		}
+		if !strings.Contains(detail, "old") {
+			t.Errorf("detail %q does not say the backup is stale", detail)
+		}
+	})
+
+	t.Run("zero-byte artifact is not a backup", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "dump.sql.gz"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		state, _, err := NewBackupProbe(dir)()
+		if err != nil || state != BackupStateFailed {
+			t.Fatalf("state = %q err = %v, want failed", state, err)
+		}
+	})
 }
 
 // TestGatherReportSwapAndBeamFailSoftAsPairs proves swap and the BEAM footprint

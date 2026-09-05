@@ -1,0 +1,1 @@
+The unverifiable phrase "all four required contexts green on the merge commit" is settled for future rows, given the measurement that PR references an active task is ABSENT on 52/52 merge shas

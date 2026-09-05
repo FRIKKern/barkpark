@@ -1,0 +1,1 @@
+Fixtures cover origin null AND origin stamped, so the provenance line is exercised in both states. Evidence: the fixture diff.

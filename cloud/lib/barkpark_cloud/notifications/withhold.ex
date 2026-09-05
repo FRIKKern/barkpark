@@ -86,7 +86,22 @@ defmodule BarkparkCloud.Notifications.Withhold do
   # caller cannot reach the quiet path by inventing a name.
   @consented_reasons [:no_recipient_by_construction]
 
-  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone] ++
+  #
+  # cch-w31-bl: `:deployment_refusal_unrecorded`. `Sites.AutoDeployWorker.refuse/1`
+  # refuses a content publish and mints a `cancelled` deployment row as the
+  # console's trace of it. When that INSERT fails the transaction rolls back, the
+  # publish is still refused, and there is no row for the refusal alert to name —
+  # so the alert is not sent. Positioned to send, did not send, wrote nothing:
+  # the definition at the top of this moduledoc, exactly. It gets a name here so
+  # the person reads a `suppressed` row instead of watching their content never
+  # go live, silently, forever.
+  @reasons [
+             :reap_alert_cap,
+             :dispatch_crashed,
+             :chat_enqueue_failed,
+             :chat_channel_gone,
+             :deployment_refusal_unrecorded
+           ] ++
              @consented_reasons
 
   @type reason ::
@@ -94,6 +109,7 @@ defmodule BarkparkCloud.Notifications.Withhold do
           | :dispatch_crashed
           | :chat_enqueue_failed
           | :chat_channel_gone
+          | :deployment_refusal_unrecorded
           | :no_recipient_by_construction
 
   @doc """
@@ -143,6 +159,19 @@ defmodule BarkparkCloud.Notifications.Withhold do
     do:
       "Withheld: the chat channel this alert was routed to was disconnected before " <>
         "it could be sent, so it was not delivered there."
+
+  # CLOSED VOCABULARY, no interpolation — the changeset error that failed the
+  # insert never reaches this sentence. It names the DECISION (the publish was
+  # refused and did not deploy) and the ONE action that changes the outcome,
+  # which is the same action `Sites.AutoDeployWorker.refusal_detail/0` names on
+  # the deployment row a reader would have had if the insert had worked.
+  def label(:deployment_refusal_unrecorded),
+    do:
+      "Withheld: a content publish was REFUSED because this site's live release " <>
+        "was uploaded, and the refusal could not be recorded — so no alert was " <>
+        "sent about it and the publish is not in the deployment list. The content " <>
+        "did not go live. Ship new bytes with the prebuilt site deploy command to " <>
+        "publish them."
 
   def label(:no_recipient_by_construction),
     do:
@@ -194,11 +223,14 @@ defmodule BarkparkCloud.Notifications.Withhold do
     kind = Keyword.get(opts, :kind, "alert")
     last_error = label(reason)
 
+    # ONE member-email query per call, and ONE insert for the whole fan-out. The
+    # grain is untouched: `list_team_member_emails/1` still decides how many rows
+    # there are, and there is still exactly one row per member with that member's
+    # own address.
     team_id
     |> Accounts.list_team_member_emails()
-    |> Enum.reduce(0, fn recipient, written ->
-      %Delivery{}
-      |> Delivery.changeset(%{
+    |> Enum.map(fn recipient ->
+      %{
         team_id: team_id,
         recipient: recipient,
         event: event,
@@ -209,21 +241,9 @@ defmodule BarkparkCloud.Notifications.Withhold do
         # failed — `attempts: 0` is the honest number.
         attempts: 0,
         last_error: last_error
-      })
-      |> Repo.insert()
-      |> case do
-        {:ok, _delivery} ->
-          written + 1
-
-        {:error, changeset} ->
-          Logger.error(
-            "Notifications.Withhold: failed to record a suppressed delivery: " <>
-              "#{inspect(changeset.errors)}"
-          )
-
-          written
-      end
+      }
     end)
+    |> insert_suppressed()
   rescue
     # A withhold trace must never be able to break the branch it is tracing.
     error ->
@@ -244,5 +264,89 @@ defmodule BarkparkCloud.Notifications.Withhold do
     )
 
     0
+  end
+
+  # The columns `record/4` fills, and the only ones a caller may hand this
+  # function. Taking a fixed set (rather than the caller's whole map) keeps a
+  # stray key from reaching `insert_all`, which would raise on an unknown field.
+  @insertable_fields [
+    :team_id,
+    :recipient,
+    :event,
+    :channel,
+    :kind,
+    :status,
+    :attempts,
+    :last_error,
+    :http_status
+  ]
+
+  @doc """
+  Write a batch of `suppressed` rows in ONE statement, VALIDATING each through
+  `Delivery.changeset/2` first. Returns the number of rows written.
+
+  This is the production write path `record/4` funnels into, made public so the
+  batched shape is testable at its own grain rather than only through a caller.
+
+  ## The clamp is not bypassed, which is the whole reason this is not a bare
+  ## `Repo.insert_all/2`
+
+  `Delivery.changeset/2` clamps `last_error` to a published vocabulary (see its
+  `validate_publishable_last_error/1`), and that clamp is the safety property
+  keeping a raw transport term — which carries the SMTP relay host — off a page
+  every team admin can read. A batched write that skipped the changeset would
+  delete that property silently while looking like a pure performance change. So
+  EVERY entry is run through the changeset and a row that does not validate is
+  DROPPED and logged; only the survivors are inserted.
+
+  The map that is validated is the map that is inserted — the entry is not
+  rebuilt from `changeset.changes`, because `cast/3` omits a value equal to the
+  schema's own default (`channel: "email"`, `attempts: 0`), and an insert built
+  from `changes` would therefore write a different row than the one that passed
+  validation.
+
+  `insert_all` runs no `assoc_constraint`, so an unknown `team_id` raises a
+  `Postgrex.Error` here where `Repo.insert/1` used to return an error tuple.
+  `record/4`'s `rescue` catches it and answers `0`, which is the same count that
+  path produced before.
+  """
+  @spec insert_suppressed([map()]) :: non_neg_integer()
+  def insert_suppressed([]), do: 0
+
+  def insert_suppressed(rows) when is_list(rows) do
+    now = DateTime.utc_now()
+
+    entries =
+      rows
+      |> Enum.filter(&publishable?/1)
+      |> Enum.map(fn attrs ->
+        attrs
+        |> Map.take(@insertable_fields)
+        |> Map.merge(%{id: Ecto.UUID.generate(), inserted_at: now, updated_at: now})
+      end)
+
+    case entries do
+      [] ->
+        0
+
+      entries ->
+        {written, _} = Repo.insert_all(Delivery, entries)
+        written
+    end
+  end
+
+  defp publishable?(attrs) do
+    case Delivery.changeset(%Delivery{}, attrs) do
+      %Ecto.Changeset{valid?: true} ->
+        true
+
+      %Ecto.Changeset{} = changeset ->
+        Logger.error(
+          "Notifications.Withhold: refused a suppressed delivery: " <>
+            "#{inspect(changeset.errors)}"
+        )
+
+        false
+    end
   end
 end

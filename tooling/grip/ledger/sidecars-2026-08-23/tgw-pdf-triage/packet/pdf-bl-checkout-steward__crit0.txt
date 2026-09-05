@@ -1,0 +1,1 @@
+All stray ahead-commits preserved as patches/branches BEFORE any reset (inventory listed as evidence)

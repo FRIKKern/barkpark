@@ -1,0 +1,1 @@
+If a second producer of trigger='content-auto' exists, it is named with its call site.

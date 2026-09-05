@@ -152,6 +152,146 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
                ~r{<bp-rich-text-editor[^>]*value="[^"]*"[^>]*data-bridge-target="bp-rt-hidden-body"}
     end
 
+    test "richText with editor: blocks renders the FIELD CANVAS — no hidden input, no bridge (Gyldendal E1)" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "richText",
+            "name" => "description",
+            "editor" => "blocks",
+            "blocks" => %{"styles" => ["normal", "h2"], "marks" => ["strong"]}
+          },
+          editor_form: %{
+            "description" => %{
+              "blocks" => [
+                %{
+                  "id" => "p1",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "hi"}]
+                }
+              ],
+              "html" => "<p>hi</p>"
+            }
+          },
+          doc_key: "pub-1"
+        })
+
+      assert html =~
+               ~r{<div[^>]*id="bp-fc-wrap-pub-1-description"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldCanvas"}
+
+      assert html =~ ~s(data-field="description")
+      assert html =~ ~s(data-doc-key="pub-1")
+      assert html =~ ~r{data-canvas-blocks="[^"]*p1[^"]*"}
+      assert html =~ ~r{data-canvas-vocabulary="[^"]*h2[^"]*"}
+      assert html =~ "<bp-paper-canvas></bp-paper-canvas>"
+      refute html =~ "bp-rich-text-editor"
+      refute html =~ ~s(type="hidden")
+      refute html =~ "BarkparkFieldBridge"
+    end
+
+    test "richText with editor: blocks seeds a legacy plain-string value as one paragraph" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "richText",
+            "name" => "description",
+            "editor" => "blocks",
+            "blocks" => %{}
+          },
+          editor_form: %{"description" => "Old prose"}
+        })
+
+      assert html =~ ~r{data-canvas-blocks="[^"]*paragraph[^"]*"}
+      assert html =~ ~r{data-canvas-blocks="[^"]*Old prose[^"]*"}
+    end
+
+    # OPTION A (S9 criterion 3, rich-text half): `"editor": "blocks"` ALONE is a
+    # complete opt-in. The expected value is DERIVED from the same function the
+    # renderer and the server-side write path read — never a retyped literal —
+    # so a change to the papers vocabulary moves the test with the code.
+    test "richText with editor: blocks and NO blocks config gets the papers DEFAULT vocabulary" do
+      html =
+        render_input(%{
+          field: %{"type" => "richText", "name" => "description", "editor" => "blocks"},
+          editor_form: %{},
+          doc_key: "pub-1"
+        })
+
+      expected = Barkpark.PortableDoc.FieldVocabulary.default_declaration()
+
+      refute expected == %{},
+             "the papers default vocabulary is empty — a field that opts in with " <>
+               "editor: blocks alone would get an editor that refuses every block"
+
+      refute Barkpark.PortableDoc.FieldVocabulary.from_field(%{"editor" => "blocks"})
+             |> Barkpark.PortableDoc.FieldVocabulary.allowed_block_types()
+             |> Enum.empty?(),
+             "the default vocabulary admits no block types at all"
+
+      encoded =
+        expected
+        |> Jason.encode!()
+        |> Phoenix.HTML.html_escape()
+        |> Phoenix.HTML.safe_to_string()
+
+      rendered =
+        case Regex.run(~r/data-canvas-vocabulary="([^"]*)"/, html) do
+          [_, v] -> v
+          nil -> "(no data-canvas-vocabulary attribute at all)"
+        end
+
+      assert html =~ ~s(data-canvas-vocabulary="#{encoded}"),
+             "an editor: blocks field with no blocks config rendered " <>
+               "data-canvas-vocabulary=#{inspect(rendered)}, not the papers default"
+
+      assert html =~ "<bp-paper-canvas></bp-paper-canvas>"
+    end
+
+    # The OTHER half of the same invariant: a field that NAMES a vocabulary keeps
+    # exactly that one. A declaration NARROWS the default; it is never widened.
+    test "richText with editor: blocks and a blocks config keeps EXACTLY that vocabulary" do
+      declared = %{"styles" => ["normal", "h2"], "marks" => ["strong"]}
+
+      html =
+        render_input(%{
+          field: %{
+            "type" => "richText",
+            "name" => "description",
+            "editor" => "blocks",
+            "blocks" => declared
+          },
+          editor_form: %{},
+          doc_key: "pub-1"
+        })
+
+      encoded =
+        declared |> Jason.encode!() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+      assert html =~ ~s(data-canvas-vocabulary="#{encoded}")
+
+      refute html =~ "h3",
+             "a declared vocabulary was WIDENED with the default — the declaration must narrow"
+    end
+
+    # OPTION A, NOT OPTION B: flipping the DEFAULT editor for every richText field
+    # is a product decision parked with main. This pins the unconfigured clause's
+    # render byte-for-byte so that flip cannot happen silently.
+    test "richText WITHOUT editor: blocks renders the Classic editor, byte-identical" do
+      html =
+        render_input(%{
+          field: %{"type" => "richText", "name" => "body"},
+          editor_form: %{"body" => "hello"}
+        })
+
+      assert String.trim(html) ==
+               ~s(<div id="bp-rt-wrap-body" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body"></bp-rich-text-editor>\n</div>),
+             "the unconfigured richText clause changed — Option A must not become " <>
+               "Option B (the blocks editor as the DEFAULT for every richText field)"
+
+      refute html =~ "bp-paper-canvas"
+      refute html =~ "data-canvas-vocabulary"
+    end
+
     test "explicit rows override wins" do
       html =
         render_input(%{
@@ -364,6 +504,47 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       refute html =~ ~s(phx-click="open-image-picker")
       refute html =~ ~s(phx-click="clear-image")
       refute html =~ ~s(class="image-field")
+    end
+
+    test "hotspot + alt opt-ins reach the picker as attributes; absent → no attribute at all (Gyldendal E1)" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover", "hotspot" => true, "alt" => true},
+          editor_form: %{"cover" => ""}
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
+      assert html =~ ~r{<bp-media-picker[^>]*\salt[^>]*>}
+
+      nested =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover", "options" => %{"hotspot" => true}},
+          editor_form: %{"cover" => ""}
+        })
+
+      assert nested =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
+
+      plain =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{"cover" => ""}
+        })
+
+      refute plain =~ ~r{<bp-media-picker[^>]*\shotspot}
+      refute plain =~ ~r{<bp-media-picker[^>]*\salt}
+    end
+
+    test "a decoded image map is handed to the picker as its JSON wire string" do
+      html =
+        render_input(%{
+          field: %{"type" => "image", "name" => "cover"},
+          editor_form: %{"cover" => %{"url" => "/x.png", "assetId" => "a1", "focalX" => 0.5}}
+        })
+
+      assert html =~ ~r{<bp-media-picker[^>]*value="\{[^"]*focalX[^"]*\}"}
+
+      assert html =~
+               ~r{<input type="hidden"[^>]*name="doc\[cover\]"[^>]*value="\{[^"]*focalX[^"]*\}"}
     end
 
     test "empty value still renders the WC wrapper (WC owns empty UX)" do

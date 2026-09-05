@@ -1,0 +1,1 @@
+The counter pins are re-DERIVED from the gate's own printed numbers, not guessed, and no floor was LOWERED. Evidence: the gate output naming the new @emitted_floor and @go_tag_floor beside the old 144/264.

@@ -1,0 +1,1 @@
+AUTODEPLOY_DEBOUNCE_S is set to a threshold-crossing value for a PINNED window, and the window's start and end are recorded.

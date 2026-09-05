@@ -1,0 +1,1 @@
+A COUNT(*) over agent_events confirms (or refutes) the 14-day depth before any promise is made

@@ -1,0 +1,1 @@
+A decision is recorded: merge-gates.md gets a byte cap in check-doc-budgets.sh, OR the doc-gates roster is generated from .github/workflows/doc-gates.yml with a drift check

@@ -1,0 +1,1 @@
+The four per-box prerequisites (npm on the BEAM PATH, flock(1), python3-or-caddy, >=2G free RAM) are checked by something that can FAIL, not by prose.

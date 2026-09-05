@@ -1,0 +1,1 @@
+The finding is re-derived against origin/main (or live prod) before any fix is designed — the file:line anchors and measurements in this brief are quoted back with a fresh run, not inherited.

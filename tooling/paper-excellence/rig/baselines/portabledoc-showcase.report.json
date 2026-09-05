@@ -19,7 +19,7 @@
       "cell": "portabledoc-showcase__light__1280",
       "file": "portabledoc-showcase__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2257496,
+      "bytes": 2341917,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -134,11 +134,11 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 71.8,
       "proseCplSamples": 14,
       "captionCpl": 69.5,
       "captionWidth": 453.5,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
@@ -151,92 +151,92 @@
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1008,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1148,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1008,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1148,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         }
       ],
@@ -284,22 +284,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        7
+        8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 195,
+        "total": 198,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 185,
+          "1": 188,
           "2": 10
         },
         "heavyRules": [
@@ -315,7 +323,7 @@
           },
           {
             "px": 2,
-            "y": 1658.2,
+            "y": 1667.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -325,7 +333,7 @@
           },
           {
             "px": 2,
-            "y": 3277.1,
+            "y": 3295.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -335,7 +343,7 @@
           },
           {
             "px": 2,
-            "y": 5261.2,
+            "y": 5329.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -345,7 +353,7 @@
           },
           {
             "px": 2,
-            "y": 6637.5,
+            "y": 6723.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -355,7 +363,7 @@
           },
           {
             "px": 2,
-            "y": 7644.3,
+            "y": 7734.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -365,7 +373,7 @@
           },
           {
             "px": 2,
-            "y": 8111.5,
+            "y": 8210.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -375,7 +383,7 @@
           },
           {
             "px": 2,
-            "y": 9414.3,
+            "y": 9564.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -385,7 +393,7 @@
           },
           {
             "px": 2,
-            "y": 11106.4,
+            "y": 11634.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -395,7 +403,7 @@
           },
           {
             "px": 2,
-            "y": 12944.6,
+            "y": 13523.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -411,7 +419,7 @@
       "cell": "portabledoc-showcase__light__1920",
       "file": "portabledoc-showcase__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2495355,
+      "bytes": 2570260,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -526,11 +534,11 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 72.2,
       "proseCplSamples": 14,
       "captionCpl": 69.5,
       "captionWidth": 453.5,
-      "evidenceBand": 1240,
+      "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
@@ -543,92 +551,92 @@
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1208,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1328,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1208,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1328,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         }
       ],
@@ -676,22 +684,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        8
+        9
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 195,
+        "total": 198,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 185,
+          "1": 188,
           "2": 10
         },
         "heavyRules": [
@@ -707,7 +723,7 @@
           },
           {
             "px": 2,
-            "y": 1658.2,
+            "y": 1667.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -717,7 +733,7 @@
           },
           {
             "px": 2,
-            "y": 3277.1,
+            "y": 3295.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -727,7 +743,7 @@
           },
           {
             "px": 2,
-            "y": 5261.2,
+            "y": 5329.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -737,7 +753,7 @@
           },
           {
             "px": 2,
-            "y": 6637.5,
+            "y": 6723.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -747,7 +763,7 @@
           },
           {
             "px": 2,
-            "y": 7644.3,
+            "y": 7734.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -757,7 +773,7 @@
           },
           {
             "px": 2,
-            "y": 8111.5,
+            "y": 8210.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -767,7 +783,7 @@
           },
           {
             "px": 2,
-            "y": 9473.7,
+            "y": 9617.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -777,7 +793,7 @@
           },
           {
             "px": 2,
-            "y": 11165.8,
+            "y": 11693.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -787,7 +803,7 @@
           },
           {
             "px": 2,
-            "y": 13063.3,
+            "y": 13635.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -803,7 +819,7 @@
       "cell": "portabledoc-showcase__dark__1280",
       "file": "portabledoc-showcase__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2251794,
+      "bytes": 2338975,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -918,11 +934,11 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 71.8,
       "proseCplSamples": 14,
       "captionCpl": 69.5,
       "captionWidth": 453.5,
-      "evidenceBand": 1040,
+      "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
@@ -935,92 +951,92 @@
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1008,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1148,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 999.6,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1139.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1008,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1148,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
-          "width": 1040,
+          "width": 1180,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
-          "inkWidth": 1040,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
           "inkOffCentre": 0
         }
       ],
@@ -1068,22 +1084,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        7
+        8
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 8,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 195,
+        "total": 198,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 185,
+          "1": 188,
           "2": 10
         },
         "heavyRules": [
@@ -1099,7 +1123,7 @@
           },
           {
             "px": 2,
-            "y": 1658.2,
+            "y": 1667.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1109,7 +1133,7 @@
           },
           {
             "px": 2,
-            "y": 3277.1,
+            "y": 3295.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1119,7 +1143,7 @@
           },
           {
             "px": 2,
-            "y": 5261.2,
+            "y": 5329.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1129,7 +1153,7 @@
           },
           {
             "px": 2,
-            "y": 6637.5,
+            "y": 6723.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1139,7 +1163,7 @@
           },
           {
             "px": 2,
-            "y": 7644.3,
+            "y": 7734.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1149,7 +1173,7 @@
           },
           {
             "px": 2,
-            "y": 8111.5,
+            "y": 8210.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1159,7 +1183,7 @@
           },
           {
             "px": 2,
-            "y": 9414.3,
+            "y": 9564.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1169,7 +1193,7 @@
           },
           {
             "px": 2,
-            "y": 11106.4,
+            "y": 11634.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1179,7 +1203,7 @@
           },
           {
             "px": 2,
-            "y": 12944.6,
+            "y": 13523.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1195,7 +1219,7 @@
       "cell": "portabledoc-showcase__dark__1920",
       "file": "portabledoc-showcase__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2490591,
+      "bytes": 2565416,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1310,11 +1334,11 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 72.2,
       "proseCplSamples": 14,
       "captionCpl": 69.5,
       "captionWidth": 453.5,
-      "evidenceBand": 1240,
+      "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
@@ -1327,92 +1351,92 @@
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1208,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1328,
           "inkOffCentre": 0
         },
         {
           "kind": "figure",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1199.6,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1319.6,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1208,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1328,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
-          "width": 1240,
+          "width": 1360,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
-          "inkWidth": 1240,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
           "inkOffCentre": 0
         }
       ],
@@ -1460,22 +1484,30 @@
         }
       },
       "h2Px": {
-        "fontSize": "27px",
-        "fontWeight": "600"
+        "fontSize": "36px",
+        "fontWeight": "400"
       },
       "statTracks": [
-        8
+        9
       ],
       "statTracksNote": null,
+      "statRemainder": [
+        {
+          "tracks": 9,
+          "cells": 4,
+          "emptyTracks": 0,
+          "probe": null
+        }
+      ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 195,
+        "total": 198,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 185,
+          "1": 188,
           "2": 10
         },
         "heavyRules": [
@@ -1491,7 +1523,7 @@
           },
           {
             "px": 2,
-            "y": 1658.2,
+            "y": 1667.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1501,7 +1533,7 @@
           },
           {
             "px": 2,
-            "y": 3277.1,
+            "y": 3295.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1511,7 +1543,7 @@
           },
           {
             "px": 2,
-            "y": 5261.2,
+            "y": 5329.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1521,7 +1553,7 @@
           },
           {
             "px": 2,
-            "y": 6637.5,
+            "y": 6723.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1531,7 +1563,7 @@
           },
           {
             "px": 2,
-            "y": 7644.3,
+            "y": 7734.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1541,7 +1573,7 @@
           },
           {
             "px": 2,
-            "y": 8111.5,
+            "y": 8210.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1551,7 +1583,7 @@
           },
           {
             "px": 2,
-            "y": 9473.7,
+            "y": 9617.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1561,7 +1593,7 @@
           },
           {
             "px": 2,
-            "y": 11165.8,
+            "y": 11693.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1571,7 +1603,7 @@
           },
           {
             "px": 2,
-            "y": 13063.3,
+            "y": 13635.3,
             "width": 580,
             "parts": 1,
             "structural": true,

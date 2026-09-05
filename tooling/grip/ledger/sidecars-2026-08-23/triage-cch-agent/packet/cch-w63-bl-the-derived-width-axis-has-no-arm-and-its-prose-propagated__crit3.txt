@@ -1,0 +1,1 @@
+The :76-80 media counts are either corrected or DELETED and replaced by a pointer at legA's runtime output (which already prints '25 preludes … raw grep counts 34'), and the 'cannot rot again' sentence is removed or made true. State which.

@@ -1,0 +1,1 @@
+If a new issue is created, its assignees array is non-empty - and if the assignee login was rejected, that warning is quoted rather than reported as success.

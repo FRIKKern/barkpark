@@ -1,0 +1,1 @@
+A standing instrument resolves every open MERGE-GATED criterion's PR number against GitHub, so this class stops accumulating.

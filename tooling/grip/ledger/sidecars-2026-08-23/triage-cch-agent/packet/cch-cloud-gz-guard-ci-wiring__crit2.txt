@@ -1,0 +1,1 @@
+MUTATION-PROVEN ON LIVE CI, not read off the yaml: a head that deletes the Dockerfile gzip RUN produces a RED check run (paste the url), and reverting it goes green.

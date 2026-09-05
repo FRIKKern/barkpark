@@ -1,0 +1,1 @@
+The remedy is OMIT and no disabled ghost was introduced anywhere on this surface (D428/D514), and the PR states why #support-go needs no arm of its own. Evidence: the diff and the PR text.

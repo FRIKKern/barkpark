@@ -16,6 +16,7 @@ import type {
   LoginOptions,
   MfaEnrollResult,
   MfaVerifyResult,
+  PasswordResetReceipt,
 } from './types'
 
 /**
@@ -213,13 +214,24 @@ export async function requestPasswordReset(
  * Set a new password using a reset token (`POST /v1/auth/reset`). Throws on an
  * invalid/expired token (serverCode `invalid_token`). Prefer
  * `client.auth.resetPassword()`.
+ *
+ * Returns the reset receipt. A successful reset revokes every other session for
+ * the user, and `sessionsRevoked` is how many the server actually stamped.
+ *
+ * `sessionsRevoked` is `number | null`, and the two are NOT the same fact:
+ * `0` means the server counted and there were no other sessions to kill;
+ * `null` means the server did not report a count at all (it predates the field),
+ * so the caller does not know. Folding the second into `0` would re-introduce
+ * exactly the unread receipt this endpoint was changed to stop discarding —
+ * a caller showing "0 other devices signed out" when nothing was measured is
+ * making a claim the server never made.
  */
 export async function resetPassword(
   config: BarkparkClientConfig,
   token: string,
   password: string,
   opts?: { signal?: AbortSignal },
-): Promise<void> {
+): Promise<PasswordResetReceipt> {
   const reqOpts: {
     method: 'POST'
     body: { token: string; password: string }
@@ -227,5 +239,12 @@ export async function resetPassword(
     signal?: AbortSignal
   } = { method: 'POST', body: { token, password }, kind: 'write' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-  await request<{ ok: boolean }>(config, `/v1/auth/reset`, reqOpts)
+  const { data } = await request<{ ok: boolean; sessionsRevoked?: number }>(
+    config,
+    `/v1/auth/reset`,
+    reqOpts,
+  )
+  return {
+    sessionsRevoked: typeof data?.sessionsRevoked === 'number' ? data.sessionsRevoked : null,
+  }
 }

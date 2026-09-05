@@ -1,0 +1,1 @@
+The packet nowhere quotes 8,631ms or 6.9x as today's customer experience, and nowhere quotes D351's 77-92ms as an idle floor (refuted: eight novel queries return 587-721ms).

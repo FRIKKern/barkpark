@@ -92,8 +92,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → show one instance webhook
       PUT     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → update one instance webhook
       DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → delete one instance webhook
-      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate user  proxy → rotate a webhook signing secret
-      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries user  proxy → a webhook's delivery log
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate admin proxy → rotate a webhook signing secret (team-admin: a credential verb)
+      GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries admin proxy → a webhook's delivery log (team-admin: payload bodies)
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
@@ -123,9 +123,6 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/github/installation      admin disconnect GitHub (require_team_admin; 404 if none)
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
-      GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
-      POST    /v1/env-vars         admin     create/update an env var (owner/admin)
-      DELETE  /v1/env-vars/:id     admin     delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  admin  update transport / per-event toggles / SMTP secrets
       PUT     /v1/notifications/channels admin  update per-channel transport settings
@@ -141,6 +138,8 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
+      DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
       POST    /v1/invitations/accept user    accept an invitation (join the team)
       POST    /v1/billing/checkout owner     open a hosted Checkout Session → {checkout_url}
@@ -682,13 +681,14 @@ defmodule BarkparkCloud.Web.Router do
   defp side_effecting_get?(["v1", "auth", "oauth", _provider, "callback"]), do: true
 
   # BURNS a live single-use SSE ticket. `require_user_sse` reads `?ticket=` and
-  # hands it to `Accounts.consume_sse_ticket/1`, which takes a BARE BINARY and
-  # stamps `revoked_at` unconditionally — structurally method-blind, and rightly
-  # so: the credential is spent by REDEMPTION, not by a verb. Without this clause
-  # any unfurler's `HEAD /v1/events?ticket=…` (the URL is in every access log,
-  # because EventSource cannot set headers) spends a ticket the real stream has
-  # not yet redeemed, and the user's own connect then 401s. There is exactly ONE
-  # call site of `consume_sse_ticket/1` in lib/, so this one clause is
+  # hands it to `Accounts.consume_sse_ticket_binding/1` (the same redemption as
+  # `consume_sse_ticket/1`, returning the stream's session binding as well), which
+  # takes a BARE BINARY and stamps `revoked_at` unconditionally — structurally
+  # method-blind, and rightly so: the credential is spent by REDEMPTION, not by a
+  # verb. Without this clause any unfurler's `HEAD /v1/events?ticket=…` (the URL is
+  # in every access log, because EventSource cannot set headers) spends a ticket
+  # the real stream has not yet redeemed, and the user's own connect then 401s.
+  # There is exactly ONE ticket-redeeming call site in lib/, so this one clause is
   # SUFFICIENT, not a sample — see `router_sse_ticket_head_burn_test.exs`.
   defp side_effecting_get?(["v1", "events"]), do: true
 
@@ -1266,7 +1266,7 @@ defmodule BarkparkCloud.Web.Router do
            true <- is_binary(code) and is_binary(state),
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
-           {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
+           {:ok, user, oauth_branch} <- Accounts.get_or_create_user_from_oauth(identity),
            # `provider` is already bound by this with-chain and IS the answer, so
            # it rides the code's own `sent_to` as "oauth:<provider>" — that is how
            # the honest `origin: "oauth:<provider>"` survives the mint moving to
@@ -1274,6 +1274,7 @@ defmodule BarkparkCloud.Web.Router do
            # rather than collapsing to a generic "oauth".
            {:ok, exchange_code} <- Accounts.create_oauth_exchange_code(user, provider) do
         team = Accounts.primary_team(user)
+        audit_oauth_linked(user, team, oauth_branch, provider)
         redirect_to(conn, "/#oauth_code=#{exchange_code}&team=#{team && team.id}")
       else
         _ -> redirect_to(conn, "/#oauth_error=oauth_failed")
@@ -1576,7 +1577,7 @@ defmodule BarkparkCloud.Web.Router do
         # Both booleans come from Authz — the same module the SEVENTEEN
         # `require_team_admin` routes call (auth.ex `&Authz.team_admin?/2`), so
         # against THOSE the wire and the gate are one read. They are NOT the
-        # only admin gate: the SEVEN `require_primary_team_admin` routes (1591,
+        # only admin gate: the SEVEN `require_current_team_admin` routes (1591,
         # 2020, 2059, 3081, 3218, 3342, 3638) go through `Accounts.team_admin?/2`
         # -> `TeamMembership.admin?/1`, a RANK THRESHOLD over `@ranks`, while
         # this boolean is SET MEMBERSHIP over `Authz.@admin_roles` — two
@@ -1647,6 +1648,59 @@ defmodule BarkparkCloud.Web.Router do
           {:ok, _event} -> push_event(team.id, "audit")
           {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
         end
+    end
+
+    :ok
+  end
+
+  # cch-w53-bl-oauth-linked-needs-a-branch-reporting-return — the `oauth.linked`
+  # producer, and the ONLY one.
+  #
+  # THE BRANCH GATE IS THE WHOLE POINT. `oauth.linked` says "an account that
+  # already existed gained a provider identity". Only
+  # `Accounts.get_or_create_user_from_oauth/1`'s `:linked` arm is that event:
+  # `:created` is a first-ever signup (there was no account to link ONTO) and
+  # `:existing` linked nothing at all — it recognised an identity we already
+  # held. Before that function reported its branch, a producer here could not
+  # tell the three apart, which is precisely why this verb sat unproduced and
+  # excused by name in audit_vocabulary_census_test.exs's @producerless.
+  #
+  # BEST-EFFORT AND POST-COMMIT, and the nil-team arm is REAL — both copied
+  # deliberately from `audit_account_security/2` above, for the same two reasons:
+  # the identity row is already committed by the time this runs, so nothing here
+  # may turn into a 500 (a user who cannot sign in because an audit insert failed
+  # is a far worse outcome than a missing row); and `Accounts.primary_team/1` is
+  # `list_user_teams() |> List.first()`, which is nil for a membership-less user
+  # while `audit_events.team_id` is `null: false`. A password account whose only
+  # membership was removed, then converged onto by an IdP, is exactly that user.
+  # It gets a LOGGED SKIP — never a crash, never a silent discard
+  # (cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site).
+  #
+  # The metadata is the provider name only. There is nothing else to say about a
+  # link that is not the IdP subject id (a durable correlator for an account we
+  # do not otherwise expose) or the user's own email, already on the row's actor.
+  defp audit_oauth_linked(_user, _team, branch, _provider) when branch != :linked, do: :ok
+
+  defp audit_oauth_linked(user, nil, :linked, provider) do
+    Logger.warning(
+      "audit oauth.linked SKIPPED for user #{user.id} (provider #{provider}): no primary_team " <>
+        "(Accounts.primary_team/1 returned nil) and audit_events.team_id is null: false"
+    )
+
+    :ok
+  end
+
+  defp audit_oauth_linked(user, team, :linked, provider) do
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: user.id,
+           action: "oauth.linked",
+           target_type: "user",
+           target_id: user.id,
+           metadata: %{provider: provider}
+         }) do
+      {:ok, _event} -> push_event(team.id, "audit")
+      {:error, cs} -> Logger.error("audit oauth.linked failed: #{inspect(cs)}")
     end
 
     :ok
@@ -1768,14 +1822,14 @@ defmodule BarkparkCloud.Web.Router do
   #   skip     — dismiss early (Coolify's skipBoarding) — stamps completed_at
   # RBAC: the mutations change TEAM state (they finish/dismiss the whole team's
   # onboarding + set the activation metric), so they are gated at owner/admin via
-  # `Auth.require_primary_team_admin/1` — a plain `member` gets 403. GET stays
+  # `Auth.require_current_team_admin/1` — a plain `member` gets 403. GET stays
   # readable to any member. (401 unauth, 403 no_team, 403 non-admin all handled
   # inside the gate.) Deliberate Coolify divergence: NO force-redirect middleware
   # — the checklist is a soft, dismissable SPA surface; the real launch gate stays
   # the existing 402 on /v1/go-live. On any state change we push an "onboarding"
   # invalidation so other tabs refetch.
   post "/v1/onboarding" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -1894,7 +1948,16 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Accounts.create_sse_ticket(conn.assigns.current_user) do
+      # The bearer here is the SESSION token of the device asking for a stream,
+      # and passing it BINDS the ticket to that session row (cch-w53-bl) — which
+      # is what makes revoking this one device from the sessions panel end this
+      # one stream. Drop the argument and the ticket mints unbound: every stream
+      # falls back to the user-wide liveness check and per-row revoke goes back to
+      # not ending anything.
+      case Accounts.create_sse_ticket(
+             conn.assigns.current_user,
+             Auth.bearer_token(conn)
+           ) do
         {:ok, ticket} ->
           json(conn, 200, %{
             ticket: ticket,
@@ -2224,12 +2287,12 @@ defmodule BarkparkCloud.Web.Router do
   # is a real page of matches, not a filtered slice of the newest 50.
   #
   # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
-  # require_primary_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
+  # require_current_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
   # member). This is the docstring-promised tightening the swarm candidate could
   # only hint at: main now ships the team-role gate, so a plain member can no
   # longer read the trail.
   get "/v1/audit" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -2263,12 +2326,12 @@ defmodule BarkparkCloud.Web.Router do
   # → still 202). NON-live box (host nil) → delete the row now, 200 {status:
   # "removed"} (no live server to tear down).
   # ADMIN-gated: removing an instance (and tearing down a billed box) is
-  # privileged. require_primary_team_admin halts 401 / 403 no_team / 403 for a
+  # privileged. require_current_team_admin halts 401 / 403 no_team / 403 for a
   # member; a non-admin can no longer deprovision the team's infrastructure.
   delete "/v1/barkparks/:id" do
-    # Infra-destructive → team admin (owner/admin) only. require_primary_team_admin
+    # Infra-destructive → team admin (owner/admin) only. require_current_team_admin
     # gates the user's PRIMARY team (401 / 403 no_team / 403), matching the doc above.
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -2587,9 +2650,10 @@ defmodule BarkparkCloud.Web.Router do
             cond do
               # The caller tore box + DNS down itself and says so (see above).
               fleet_support_detach?(conn) ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_detach") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed", mode: "detach"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2616,9 +2680,10 @@ defmodule BarkparkCloud.Web.Router do
               # Non-live, nothing in flight: no box, no record — the row IS the
               # whole resource, so removing it strands nothing.
               true ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_not_live") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2819,6 +2884,43 @@ defmodule BarkparkCloud.Web.Router do
       {:ok, _event} -> push_event(team.id, "audit")
       {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
     end
+  end
+
+  # EVERY OTHER LANE THAT DELETES A BARKPARK ROW (the destructive-lane arm of
+  # audit_vocabulary_census_test.exs). Five lanes removed a row and wrote
+  # nothing: both arms of `DELETE /v1/fleet/supports/:id`, both arms of
+  # `POST /v1/internal/barkparks/:id/deprovision`, and the resurrect
+  # enqueue-failure rollback. The first four are removals of a resource a team
+  # can see, so they belong on that team's trail exactly as the non-live arm of
+  # `DELETE /v1/barkparks/:id` already does. (The fifth is NOT routed here and is
+  # allowlisted in the census with its reason: it rolls back a row this same
+  # request created seconds earlier, and its paired `barkpark.resurrected` is
+  # written only on the success branch, so the trail stays consistent — a
+  # `deleted` for a box that never existed would be noise, not evidence.)
+  #
+  # `Accounts.audit/3`, not `record_audit/1`: the row delete and the audit insert
+  # share ONE transaction, so there is never a removal the trail cannot name and
+  # never a recorded removal that did not happen. Returns the wrapper's
+  # `{:ok, barkpark} | {:error, reason}` — the same shape the call sites already
+  # matched on `Registry.delete_barkpark/1`.
+  #
+  # `actor_user_id` is read defensively: the internal deprovision route is
+  # WORKER-authenticated and has no user at all, and a PAT caller on the fleet
+  # route may have none either. A nil actor is the documented shape for a
+  # system-caused event (`list_audit_events/2`'s actor filter never matches one),
+  # not a hole — `team_id` comes off the row itself and is always present.
+  defp audited_delete_barkpark(conn, %Barkpark{} = bp, lane) do
+    Accounts.audit(
+      %{
+        team_id: bp.team_id,
+        actor_user_id: conn.assigns[:current_user] && conn.assigns.current_user.id,
+        action: "barkpark.deleted",
+        target_type: "barkpark",
+        target_id: bp.id,
+        metadata: %{name: bp.name, lane: lane}
+      },
+      fn -> Registry.delete_barkpark(bp) end
+    )
   end
 
   # A REFUSED WRITE LEAVES A NAMED ROW (cch-w63-s8). When the plane refuses to
@@ -3281,9 +3383,15 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: this route sits AFTER
+      # Auth.require_user, so the caller's identity is already resolved — key
+      # the bucket on it, not on peer_ip. The limiter's own docstring makes the
+      # case for push_register: clients share carrier/corporate-NAT IPs, so a
+      # per-IP bucket lets one user starve strangers behind the same address.
+      # Limit (10), window (60 s) and the 429 shape are unchanged.
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
@@ -3375,9 +3483,11 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: per-USER, same reasoning as
+      # the app_token bucket above (authenticated route, NAT-shared IPs).
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
@@ -3698,13 +3808,13 @@ defmodule BarkparkCloud.Web.Router do
   #                                             admin endpoint).
   #
   # ADMIN-gated: rewriting a live box's running code is privileged infra, like
-  # DELETE above — require_primary_team_admin halts 401 / 403 no_team / 403 for
+  # DELETE above — require_current_team_admin halts 401 / 403 no_team / 403 for
   # a plain member. TEAM-SCOPED fail-closed: wrong-team / nonexistent /
   # malformed id is the SAME 404 (no existence leak). 409 not_live while
   # provisioning; 404 no_admin_token for pre-feature rows; 502 when the
   # instance is unreachable; 500 on tampered ciphertext.
   post "/v1/barkparks/:id/self-update" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -3882,7 +3992,7 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id → the SAME 404 (no existence leak); 409 not_live while
   # provisioning; 404 no_admin_token; 500 decrypt_failed; 502 unreachable.
   post "/v1/barkparks/:id/rollback" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4031,11 +4141,11 @@ defmodule BarkparkCloud.Web.Router do
   # absent keys are left unchanged (cast ignores them).
   #
   # ADMIN-gated: a policy that governs unattended production deploys is
-  # privileged, like self-update above — require_primary_team_admin halts 401 /
+  # privileged, like self-update above — require_current_team_admin halts 401 /
   # 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed: wrong-team /
   # nonexistent / malformed id is the SAME 404 (no existence leak).
   patch "/v1/barkparks/:id/autoupdate" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4675,14 +4785,18 @@ defmodule BarkparkCloud.Web.Router do
   # 409 taken when the host is already claimed by a site domain / another
   # instance's custom_host (exact, or nesting under a different team's host) /
   # a provisioning FQDN; 409 already_attaching while a previous attach is still
-  # in flight (the one-active-job-per-kind partial index).
+  # in flight (the one-active-job-per-kind partial index); 409 already_attached
+  # {custom_host, detail} when THIS instance already answers on a different
+  # host — a re-attach is refused, never an overwrite, because an overwrite
+  # strands the previous host's A record on a live box (cch-w54-bl). Attaching
+  # the SAME host again is still a 202 (the failed-attach recovery path).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
-  # privileged infra, like self-update above — require_primary_team_admin halts
+  # privileged infra, like self-update above — require_current_team_admin halts
   # 401 / 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed:
   # wrong-team / nonexistent / malformed id is the SAME 404 (no existence leak).
   post "/v1/barkparks/:id/domain" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4777,6 +4891,24 @@ defmodule BarkparkCloud.Web.Router do
           {:error, _changeset} ->
             json(conn, 422, %{error: "invalid"})
         end
+
+      # cch-w54-bl: this instance already answers on a DIFFERENT host. The
+      # persist is refused rather than overwritten — overwriting strands the
+      # previous host's A record on a live, billed box and drops the only
+      # pointer the plane had to it. There is no detach verb on this surface to
+      # sequence instead, so the refusal names the host that is in the way.
+      # Re-attaching the SAME host still succeeds (the failed-job recovery
+      # path) and never reaches this arm.
+      {:error, {:already_attached, existing}} ->
+        json(conn, 409, %{
+          error: "already_attached",
+          custom_host: existing,
+          detail:
+            "This instance already answers on #{existing}. Attaching a different " <>
+              "domain would leave #{existing}'s DNS record pointing at a live box " <>
+              "with nothing tracking it, so the attach is refused. Re-attaching " <>
+              "#{existing} itself is still allowed."
+        })
 
       {:error, :taken} ->
         json(conn, 409, %{error: "taken"})
@@ -5047,12 +5179,23 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.delete")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): rotating a signing secret is a CREDENTIAL
+  # verb, so it gates at team admin like /credentials and POST /v1/providers do —
+  # the plane spends the decrypted instance admin token on the caller's behalf,
+  # a token /credentials refuses to hand a plain member. The other seven proxy
+  # verbs stay member-tier beside site CRUD (rbac-roles). Cross-team stays 404
+  # inside proxy_instance_webhook; this only adds the role bar in front of it.
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/rotate" do
-    proxy_instance_webhook(conn, :"webhook.rotate")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.rotate")
   end
 
+  # task-a0f4f8757ba28e76 (ruled ARM B): delivery PAYLOAD BODIES are customer data
+  # the instance's own /v1/webhooks door withholds from non-admins, so the read
+  # gates at team admin too. Same shape as rotate above.
   get "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries" do
-    proxy_instance_webhook(conn, :"webhook.deliveries")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.deliveries")
   end
 
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
@@ -5472,18 +5615,19 @@ defmodule BarkparkCloud.Web.Router do
             # is a post-commit best-effort record_audit/1 (the repo already exists
             # on GitHub — an audit-insert failure must never 500 the success). The
             # detail carries the repo name + template + file count, no secrets.
-            _ =
-              Accounts.record_audit(%{
-                team_id: team.id,
-                actor_user_id: conn.assigns.current_user.id,
-                action: "github.repo_pushed",
-                target_type: "github_repo",
-                target_id: full,
-                metadata: %{repo_full_name: full, template: template, pushed: pushed}
-              })
+            case Accounts.record_audit(%{
+                   team_id: team.id,
+                   actor_user_id: conn.assigns.current_user.id,
+                   action: "github.repo_pushed",
+                   target_type: "github_repo",
+                   target_id: full,
+                   metadata: %{repo_full_name: full, template: template, pushed: pushed}
+                 }) do
+              {:ok, _event} -> push_event(team.id, "audit")
+              {:error, cs} -> Logger.error("audit github.repo_pushed failed: #{inspect(cs)}")
+            end
 
             push_event(team.id, "github")
-            push_event(team.id, "audit")
 
             json(conn, 201, %{
               repo_full_name: full,
@@ -5503,135 +5647,6 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:github_error, _reason}} ->
             json(conn, 502, %{error: "github_error"})
-        end
-    end
-  end
-
-  # GET /v1/env-vars → 200 {env_vars: [...]} for the user's team. Values are NEVER
-  # in the payload — only key + scope + flags + comment (the masking discipline).
-  # A secret is set-and-forget, surfaced by key, not value.
-  get "/v1/env-vars" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      true ->
-        vars = Registry.list_env_vars(conn.assigns.current_team)
-        json(conn, 200, %{env_vars: Enum.map(vars, &env_var_json/1)})
-    end
-  end
-
-  # POST /v1/env-vars {key, value, scope?, barkpark_id?, is_secret?, is_shown_once?,
-  # comment?} → 201 {env_var}. Write-gated to owner/admin (Accounts.team_admin?/2).
-  # The plaintext `value` is encrypted at rest and NEVER echoed. A write to a
-  # write-once var → 409. A barkpark_id NOT owned by the team → 403 (the FK checks
-  # existence, not ownership — the context fails the cross-tenant write closed).
-  post "/v1/env-vars" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      # cch-w37-s2: NAME THE AUTHORITY — writing an env var is admin-gated on the
-      # resolved team. Bare, this refusal read to the console as the owner-only
-      # billing one.
-      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        Auth.forbidden(conn, required: "admin", scope: "team")
-
-      not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
-        json(conn, 422, %{error: "key_required"})
-
-      true ->
-        attrs =
-          Map.take(
-            conn.body_params,
-            ~w(key value scope barkpark_id is_secret is_shown_once comment)
-          )
-
-        # activity-audit-log: the env-var insert + an `env_var.created` audit
-        # event commit atomically. Detail carries only the KEY NAME + scope —
-        # NEVER the plaintext value (which is Vault-encrypted at rest).
-        audited =
-          Accounts.audit(
-            %{
-              team_id: conn.assigns.current_team.id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "env_var.created",
-              target_type: "env_var"
-            },
-            fn -> Registry.put_env_var(conn.assigns.current_team, attrs) end,
-            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
-          )
-
-        case audited do
-          {:ok, ev} ->
-            push_event(conn.assigns.current_team.id, "audit")
-            json(conn, 201, %{env_var: env_var_json(ev)})
-
-          {:error, :write_once} ->
-            json(conn, 409, %{error: "write_once"})
-
-          # LEFT BARE ON PURPOSE — charter D396(5). This is the CROSS-TENANT arm:
-          # an ADMIN of team A is refused here on team B's barkpark_id, so it is
-          # not a role refusal at all and `required: "admin"` would be a NEW lie.
-          {:error, :barkpark_not_in_team} ->
-            json(conn, 403, %{error: "forbidden"})
-
-          {:error, changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
-        end
-    end
-  end
-
-  # DELETE /v1/env-vars/:id → 200 {ok: true} (owner/admin), 404 if not in the
-  # team (existence-leak protection — a wrong-team id is indistinguishable from
-  # a non-existent one).
-  delete "/v1/env-vars/:id" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      # cch-w37-s2: NAME THE AUTHORITY — the delete twin of POST /v1/env-vars.
-      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        Auth.forbidden(conn, required: "admin", scope: "team")
-
-      true ->
-        # activity-audit-log: the env-var delete + an `env_var.deleted` audit
-        # event commit atomically (key name only, never the value). A wrong-team
-        # / missing id rolls back with NO audit row.
-        audited =
-          Accounts.audit(
-            %{
-              team_id: conn.assigns.current_team.id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "env_var.deleted",
-              target_type: "env_var"
-            },
-            fn -> Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) end,
-            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
-          )
-
-        case audited do
-          {:ok, _} ->
-            push_event(conn.assigns.current_team.id, "audit")
-            json(conn, 200, %{ok: true})
-
-          {:error, :not_found} ->
-            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -5813,6 +5828,14 @@ defmodule BarkparkCloud.Web.Router do
   # a fan-out to nobody read as accepted to the console, to `bp` and to curl
   # alike. `ok: true` still means "the request was accepted"; `queued` is the
   # separate question of whether anything was sent, and the console reads it.
+  #
+  # cch-w32-bl: the CHAT leg spends the SAME per-team budget as the email leg —
+  # one `last_test_sent_at` stamp for the whole endpoint — so it too answers
+  # 429 {error: "rate_limited", retry_after}. One shared stamp means an email
+  # test holds the chat test for 10s and vice versa; that is the intent (one
+  # button, one team, one budget), and a per-leg stamp would have doubled the
+  # fan-out an admin token buys for free. A fan-out that reached ZERO channels
+  # does not burn the window — nothing was sent, so there is nothing to ration.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
@@ -5821,10 +5844,21 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       chat_test?(conn.body_params) ->
-        {:ok, queued} =
-          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+        # cch-w32-bl: the chat leg is reached BEFORE `test_email/1`, so it used
+        # to jump the 10s/team guard the email leg has honoured since day one —
+        # three rapid presses enqueued three fan-outs, each an outbound POST to
+        # a webhook URL of the caller's choosing. Both legs now spend the SAME
+        # per-team budget in `Notifications`, and this arm renders the SAME
+        # refusal `test_email/1` renders below, byte for byte: an already-shipped
+        # console arm reads `rate_limited` + `retry_after`, so a new reason key
+        # here would have been a new silent failure mode for an old one.
+        case Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"]) do
+          {:ok, queued} ->
+            json(conn, 202, %{ok: true, queued: queued})
 
-        json(conn, 202, %{ok: true, queued: queued})
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+        end
 
       true ->
         test_email(conn)
@@ -6318,6 +6352,12 @@ defmodule BarkparkCloud.Web.Router do
               actor_user_id: user.id,
               action: "token.minted",
               target_type: "token",
+              # ssw10: the metadata here is a PLACEHOLDER, overwritten by the
+              # `target_fun` below off the PERSISTED row. `attrs.abilities` is the
+              # REQUESTED list and `UserToken.normalize_abilities/1` has not run
+              # yet, so recording it here would have the issuance log claim a grant
+              # the credential does not hold. `Accounts.audit/3` merges
+              # `target_fun.(result)` OVER `base_attrs`, so the key is replaced.
               metadata: %{name: attrs.name, abilities: attrs.abilities}
             },
             fn ->
@@ -6326,7 +6366,9 @@ defmodule BarkparkCloud.Web.Router do
                 other -> other
               end
             end,
-            fn {_plaintext, pat} -> %{target_id: pat.id} end
+            fn {_plaintext, pat} ->
+              %{target_id: pat.id, metadata: mint_audit_metadata(attrs, pat)}
+            end
           )
 
         case audit_mint do
@@ -6383,6 +6425,82 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Team-scoped PAT visibility (admin) — the OTHER half of the surface above.
+  ##
+  ## Everything above this comment is CALLER-scoped: a PAT is listable and
+  ## revocable by exactly one principal, its holder. That made a still-current
+  ## member's leaked credential un-killable by anyone else — a team owner could
+  ## not even ENUMERATE the programmatic credentials that act on their team, let
+  ## alone kill one, and PATs may be minted with no expiry at all. The
+  ## membership-scoped eviction (`revoke_team_pats/2`, on removal / demotion)
+  ## covers only a MEMBERSHIP CHANGE; these two routes cover the leak with the
+  ## membership intact.
+  ##
+  ## Same session-only firewall (they ride `with_team_role/3`, which calls
+  ## `Auth.require_user/2`), same 404-no-leak convention as the caller-scoped
+  ## routes: a foreign team is 404 (never 403 — do not confirm it exists) and a
+  ## token id from another team is 404, not a 403 that would confirm the id.
+
+  # GET /v1/teams/:id/tokens → 200 {tokens: [...]} — every PAT minted against
+  # THIS team, whoever holds it, newest first. admin+ (a plain member gets 403;
+  # a non-member / nonexistent team gets 404). Carries the holder (user_id +
+  # email) so an admin can act on the row; NEVER a hash and never a plaintext.
+  get "/v1/teams/:id/tokens" do
+    with_team_role(conn, "admin", fn conn, team ->
+      tokens = Accounts.list_team_personal_access_tokens(team)
+      json(conn, 200, %{tokens: Enum.map(tokens, &team_pat_json/1)})
+    end)
+  end
+
+  # DELETE /v1/teams/:id/tokens/:token_id → 200 {ok: true} — an admin kills a
+  # team member's PAT (idempotent). A token id belonging to another team is the
+  # same 404 as a nonexistent one.
+  #
+  # The audit action is `token.revoked`, the SAME verb the caller-scoped revoke
+  # writes — one act, one verb; the admin case is distinguished by metadata
+  # (`admin_revoke: true` plus the holder), not by a second word for the same
+  # thing. That keeps the closed vocabulary in cloud/priv/audit-actions.json
+  # (and the console label generated from it) unchanged.
+  delete "/v1/teams/:id/tokens/:token_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      audit_revoke =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "token.revoked",
+            target_type: "token",
+            target_id: conn.path_params["token_id"]
+          },
+          fn ->
+            Accounts.revoke_team_personal_access_token(team, conn.path_params["token_id"])
+          end,
+          fn token ->
+            %{
+              metadata: %{
+                admin_revoke: true,
+                name: token.name,
+                user_id: token.user_id,
+                email: token.user && token.user.email
+              }
+            }
+          end
+        )
+
+      case audit_revoke do
+        {:ok, _token} ->
+          push_event(team.id, "audit")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
+    end)
+  end
+
   # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
   # Checkout Session for the AUTHED user's team on `plan` (the customer opens the
   # url in a browser to pay). team_id is the authed team, NEVER client-supplied.
@@ -6390,18 +6508,18 @@ defmodule BarkparkCloud.Web.Router do
   # when the user has no team to bill.
   # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
   # money / changing the plan is the team owner's call, not any member or admin.
-  # require_primary_team_owner halts with 401 (no auth), 403 no_team, or 403
+  # require_current_team_owner halts with 401 (no auth), 403 no_team, or 403
   # (not-owner) before we reach here.
   post "/v1/billing/checkout" do
     # Spends money / changes plan → owner-only. Gated to the user's PRIMARY team
     # owner (401 / 403 no_team / 403), matching `@action_min billing: [owner]`.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6467,13 +6585,13 @@ defmodule BarkparkCloud.Web.Router do
   # Coolify-anchor: getStripeCustomerPortalSession.
   # OWNER-gated: the portal exposes card/PII/cancel — owner-only, like checkout.
   post "/v1/billing/portal" do
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6506,7 +6624,7 @@ defmodule BarkparkCloud.Web.Router do
     # `confirm_password` check verifies the CALLER's own password (not authority),
     # so it must never be the sole gate on a destructive cancel. The owner gate
     # halts 401 / 403 no_team / 403 first.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -7384,9 +7502,10 @@ defmodule BarkparkCloud.Web.Router do
         %Barkpark{} = bp ->
           cond do
             detach? ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_detach") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
@@ -7413,9 +7532,10 @@ defmodule BarkparkCloud.Web.Router do
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_not_live") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
@@ -7979,107 +8099,176 @@ defmodule BarkparkCloud.Web.Router do
   # `Ecto.StaleEntryError` before, it is `teardown/2`'s function clause now.
   delete "/v1/sites/:id" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
-      bp = Registry.get_barkpark(site.barkpark_id)
-      teardown_result = Sites.Deploy.teardown(site, bp)
+      # THE AUDIT IS THE GATE, AND IT RUNS FIRST — the standing ruling on the
+      # `record_audit` discard class, applied to the one route where the row is
+      # the ONLY thing that survives the act it describes. `delete_site/1` is a
+      # hard `Repo.delete`, so once this request finishes nothing in this
+      # database can say the site existed or who removed it.
+      #
+      # It cannot be the transactional `Accounts.audit/3` the twenty-eight other
+      # fail-closed writes use, and the reason is ORDERING, not taste: the box
+      # teardown below is an outbound call that `Repo.rollback` cannot undo. An
+      # `audit/3` wrapper around `delete_site/1` would refuse the registration
+      # delete with the Caddy route already disarmed and the tree already gone —
+      # a site row pointing at a dead box, the exact inverse orphan the
+      # box-first ordering and the typed `registration_not_removed` 500 exist to
+      # prevent. So the gate moves EARLIER instead of wrapping: record the row
+      # BEFORE anything is torn down, and on a refused insert answer the same
+      # 422 shape the `barkpark.deleted` twin answers with NOTHING touched — no
+      # teardown, no delete, no orphan of either polarity.
+      #
+      # TWO COSTS, NAMED RATHER THAN DISCOVERED LATER.
+      #
+      # (1) The row now describes an INTENT, so it can outlive a delete that
+      # then fails. A refused teardown (a box that is down — routine, and the
+      # relay arms below exist for it) leaves a `site.deleted` row for a site
+      # that is still registered and still serving. That is the lesser evil the
+      # ruling accepts: a trail that occasionally over-reports a removal is
+      # recoverable, a removal with no trail at all is not. The arms are pinned
+      # by `router_sites_test.exs` so the over-report is a DECISION on the
+      # record, not a surprise.
+      #
+      # (2) The metadata can no longer carry `read_token`. That fact is the
+      # OUTCOME of `revoke_site_read_token/1`, which happens inside
+      # `delete_site/1` — it does not exist yet at this point in the request and
+      # `audit_events` is append-only, so there is no second write to add it.
+      # The 200 body below still reports it to the caller, and
+      # `Mix.Tasks.BarkparkCloud.SiteReadTokens` is the sweep that finds a
+      # credential nobody confirmed dead.
+      audit_attrs = %{
+        team_id: site.team_id,
+        actor_user_id: conn.assigns.current_user.id,
+        action: "site.deleted",
+        target_type: "site",
+        target_id: site.id,
+        metadata: %{slug: site.slug, kind: site.kind}
+      }
 
-      case teardown_result do
-        :ok ->
-          # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
-          # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
-          # `Repo.delete` on a struct with no declared constraint, so every child
-          # row is swept by the DATABASE. Three FKs reference `sites`
-          # (deployments, site_artifacts, content_publishes) and all three are ON
-          # DELETE CASCADE. If one were ever loosened to RESTRICT, `Repo.delete`
-          # RAISES `Ecto.ConstraintError` — AFTER the box teardown above already
-          # disarmed the Caddy route, so the box is gone and the site row SURVIVES:
-          # a dead site that is still registered. Under the old hard match that
-          # raise became `handle_errors`' `500 {"error":"server_error"}` with no
-          # `ok`, no `detail`, and no name for either half of the outcome. That
-          # was rejected as a lie by omission: the answer measured TWO facts (the
-          # instance IS torn down; the registration was NOT removed) and stated
-          # neither. `delete_site/1` now RESCUES the foreign_key case and returns
-          # `{:error, :foreign_key_constraint, constraint}`, so the nested case
-          # below answers a typed `500 registration_not_removed` whose detail
-          # names the blocking constraint and BOTH halves. It is still a 500 — the
-          # box being already gone means neither retry nor refuse is true, and a
-          # human (support) must remove the surviving row — but it is an HONEST
-          # 500 the console and CLI can read. The tripwire that keeps the branch
-          # from silently regressing is `site_cascade_census_test.exs` (an
-          # EXACT-SET census of the FKs referencing `sites` plus their confdeltype)
-          # backed by per-child delete-path tests in `router_sites_test.exs` and
-          # the behavioural 500 in `router_sites_destroy_failures_test.exs`.
-          #
-          # NB: the sibling `{:error, status, detail, code}` relay arm below
-          # matches `teardown_result` (the box seam), NOT this delete — it is
-          # unreachable from inside `:ok`, which is why the delete's own failure
-          # needs this nested case rather than a fourth outer arm.
-          case Registry.delete_site(site) do
-            {:ok, _, %{read_token: read_token}} ->
-              _ =
-                Accounts.record_audit(%{
-                  team_id: site.team_id,
-                  actor_user_id: conn.assigns.current_user.id,
-                  action: "site.deleted",
-                  target_type: "site",
-                  target_id: site.id,
-                  # ssw8: the credential half of the teardown is RECORDED, not
-                  # assumed. `read_token` is the one fact about this delete that
-                  # nothing else in the system can reconstruct afterwards — the
-                  # row that named the token is gone by the time anyone asks.
-                  metadata: %{
-                    slug: site.slug,
-                    kind: site.kind,
-                    read_token: to_string(read_token)
-                  }
-                })
+      case Accounts.record_audit(audit_attrs) do
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
 
-              push_event(site.team_id, "sites")
-              push_event(site.team_id, "audit")
-
-              # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
-              # The delete succeeded either way (the CP row is the truth, and a
-              # box that is down must not make its sites undeletable), but the
-              # 200 states which of the two happened. On `:error` it also NAMES
-              # the leftover, because this response is the last place the pointer
-              # exists: the site row that carried the box, the workspace scope and
-              # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
-              # is the sweep that finds it again if this line is missed.
-              body = %{
-                ok: true,
-                status: "deleted",
-                slug: site.slug,
-                read_token: read_token_status(read_token)
-              }
-
-              json(conn, 200, site_delete_token_warning(body, site, read_token))
-
-            {:error, :foreign_key_constraint, constraint} ->
-              json(conn, 500, %{
-                ok: false,
-                error: "registration_not_removed",
-                detail:
-                  "the instance was torn down, but the registration could not be removed: deleting " <>
-                    "the site row was refused by the foreign-key constraint #{constraint}. The site " <>
-                    "is no longer serving, yet it is still registered here — support must remove the " <>
-                    "row by hand. This is not something a retry can fix."
-              })
-          end
-
-        # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
-        # DEFERRAL IS OVER: the console gained its site-delete flow — and the
-        # reader for these two arms — in W67 S1
-        # (cch-w63-bl-teardown-failed-has-no-console-reader-at-all, cloud/priv/static
-        # only). Until then `teardown_failed` had ZERO readers in `app.js` and no
-        # console caller could even reach this route, so the refusal had no human
-        # surface at all. The wire shape below is unchanged by that slice; this
-        # comment is edited here because S2 owns router.ex this wave.
-        {:error, status, detail, code} ->
-          json(conn, status, %{ok: false, error: code, detail: detail})
-
-        {:error, status, detail} ->
-          json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
+        {:ok, _event} ->
+          push_event(site.team_id, "audit")
+          delete_site_after_audit(conn, site)
       end
     end)
+  end
+
+  # The act half of `DELETE /v1/sites/:id`, reached ONLY once the audit row is
+  # committed. Split out so the route above reads as gate-then-act rather than
+  # as five levels of nesting.
+  defp delete_site_after_audit(conn, site) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    teardown_result = Sites.Deploy.teardown(site, bp)
+
+    case teardown_result do
+      :ok ->
+        # THE DNS HALF, AND IT RUNS BEFORE THE ROW GOES (this row's fix; the
+        # ordering is borrowed wholesale from the support-remove sibling,
+        # task-688ebffc4b0aa50a / #14038). `site.cf_zone_id` + `site.cf_record_id`
+        # are the ONLY artefacts anywhere that name the Cloudflare A record
+        # `do_bind_cloudflare/5` created, and `delete_site/1` below is a hard
+        # `Repo.delete` — so a row deleted first takes the record's name with it
+        # and leaves the record LIVE, pointing at an origin that has just been
+        # torn down. Cloudflare zones here are per-team BYOA: there is no
+        # sweeper, no reaper and no second pointer that could ever reach it
+        # again. That is the dangling-DNS / subdomain-takeover shape.
+        #
+        # It does NOT gate the delete, and that is deliberate: `teardown/2`
+        # above has ALREADY disarmed the box, so refusing here would manufacture
+        # the exact inverse orphan the `registration_not_removed` arm below
+        # exists to describe — a dead site that is still registered. The
+        # precedent one seam over is `revoke_site_read_token/1`: do the outbound
+        # cleanup, then STATE its outcome in the 200 and NAME the leftover,
+        # because this response is the last place the pointer exists.
+        cf_record = release_cf_record(site)
+
+        # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
+        # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
+        # `Repo.delete` on a struct with no declared constraint, so every child
+        # row is swept by the DATABASE. Three FKs reference `sites`
+        # (deployments, site_artifacts, content_publishes) and all three are ON
+        # DELETE CASCADE. If one were ever loosened to RESTRICT, `Repo.delete`
+        # RAISES `Ecto.ConstraintError` — AFTER the box teardown above already
+        # disarmed the Caddy route, so the box is gone and the site row SURVIVES:
+        # a dead site that is still registered. Under the old hard match that
+        # raise became `handle_errors`' `500 {"error":"server_error"}` with no
+        # `ok`, no `detail`, and no name for either half of the outcome. That
+        # was rejected as a lie by omission: the answer measured TWO facts (the
+        # instance IS torn down; the registration was NOT removed) and stated
+        # neither. `delete_site/1` now RESCUES the foreign_key case and returns
+        # `{:error, :foreign_key_constraint, constraint}`, so the nested case
+        # below answers a typed `500 registration_not_removed` whose detail
+        # names the blocking constraint and BOTH halves. It is still a 500 — the
+        # box being already gone means neither retry nor refuse is true, and a
+        # human (support) must remove the surviving row — but it is an HONEST
+        # 500 the console and CLI can read. The tripwire that keeps the branch
+        # from silently regressing is `site_cascade_census_test.exs` (an
+        # EXACT-SET census of the FKs referencing `sites` plus their confdeltype)
+        # backed by per-child delete-path tests in `router_sites_test.exs` and
+        # the behavioural 500 in `router_sites_destroy_failures_test.exs`.
+        #
+        # NB: the sibling `{:error, status, detail, code}` relay arm below
+        # matches `teardown_result` (the box seam), NOT this delete — it is
+        # unreachable from inside `:ok`, which is why the delete's own failure
+        # needs this nested case rather than a fourth outer arm.
+        case Registry.delete_site(site) do
+          {:ok, _, %{read_token: read_token}} ->
+            # The `site.deleted` row is ALREADY COMMITTED — it gated this
+            # branch. Nothing is recorded here.
+            push_event(site.team_id, "sites")
+
+            # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
+            # The delete succeeded either way (the CP row is the truth, and a
+            # box that is down must not make its sites undeletable), but the
+            # 200 states which of the two happened. On `:error` it also NAMES
+            # the leftover, because this response is the last place the pointer
+            # exists: the site row that carried the box, the workspace scope and
+            # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
+            # is the sweep that finds it again if this line is missed.
+            body = %{
+              ok: true,
+              status: "deleted",
+              slug: site.slug,
+              read_token: read_token_status(read_token),
+              cf_record: cf_record_status(cf_record)
+            }
+
+            json(
+              conn,
+              200,
+              body
+              |> site_delete_token_warning(site, read_token)
+              |> site_delete_cf_warning(site, cf_record)
+            )
+
+          {:error, :foreign_key_constraint, constraint} ->
+            json(conn, 500, %{
+              ok: false,
+              error: "registration_not_removed",
+              detail:
+                "the instance was torn down, but the registration could not be removed: deleting " <>
+                  "the site row was refused by the foreign-key constraint #{constraint}. The site " <>
+                  "is no longer serving, yet it is still registered here — support must remove the " <>
+                  "row by hand. This is not something a retry can fix."
+            })
+        end
+
+      # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
+      # DEFERRAL IS OVER: the console gained its site-delete flow — and the
+      # reader for these two arms — in W67 S1
+      # (cch-w63-bl-teardown-failed-has-no-console-reader-at-all, cloud/priv/static
+      # only). Until then `teardown_failed` had ZERO readers in `app.js` and no
+      # console caller could even reach this route, so the refusal had no human
+      # surface at all. The wire shape below is unchanged by that slice; this
+      # comment is edited here because S2 owns router.ex this wave.
+      {:error, status, detail, code} ->
+        json(conn, status, %{ok: false, error: code, detail: detail})
+
+      {:error, status, detail} ->
+        json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
+    end
   end
 
   # POST /v1/sites/:id/deploy {git_ref?, artifact_url?} → 201 {deployment}.
@@ -8152,22 +8341,26 @@ defmodule BarkparkCloud.Web.Router do
                     # lost-race 200 re-uses an existing row and stamps nothing (no
                     # double-audit on a double-click). Detail carries git_ref + whether
                     # an artifact was supplied, never the artifact bytes.
-                    _ =
-                      Accounts.record_audit(%{
-                        team_id: site.team_id,
-                        actor_user_id: conn.assigns.current_user.id,
-                        action: "site.deploy_requested",
-                        target_type: "deployment",
-                        target_id: deployment.id,
-                        metadata: %{
-                          site_id: site.id,
-                          git_ref: attrs.git_ref,
-                          has_artifact: not is_nil(attrs.artifact_url)
-                        }
-                      })
+                    case Accounts.record_audit(%{
+                           team_id: site.team_id,
+                           actor_user_id: conn.assigns.current_user.id,
+                           action: "site.deploy_requested",
+                           target_type: "deployment",
+                           target_id: deployment.id,
+                           metadata: %{
+                             site_id: site.id,
+                             git_ref: attrs.git_ref,
+                             has_artifact: not is_nil(attrs.artifact_url)
+                           }
+                         }) do
+                      {:ok, _event} ->
+                        push_event(site.team_id, "audit")
+
+                      {:error, cs} ->
+                        Logger.error("audit site.deploy_requested failed: #{inspect(cs)}")
+                    end
 
                     push_event(site.team_id, "deployments")
-                    push_event(site.team_id, "audit")
                     json(conn, 201, %{deployment: deployment_json(deployment)})
 
                   {:error, %Ecto.Changeset{errors: errs} = cs} ->
@@ -8306,21 +8499,22 @@ defmodule BarkparkCloud.Web.Router do
 
           case Sites.Deploy.rollback(site, bp) do
             {:ok, result} ->
-              _ =
-                Accounts.record_audit(%{
-                  team_id: site.team_id,
-                  actor_user_id: conn.assigns.current_user.id,
-                  action: "site.rolled_back",
-                  target_type: "site",
-                  target_id: site.id,
-                  metadata: %{
-                    deployment_id: result.deployment_id,
-                    previous_deployment_id: result.previous_deployment_id
-                  }
-                })
+              case Accounts.record_audit(%{
+                     team_id: site.team_id,
+                     actor_user_id: conn.assigns.current_user.id,
+                     action: "site.rolled_back",
+                     target_type: "site",
+                     target_id: site.id,
+                     metadata: %{
+                       deployment_id: result.deployment_id,
+                       previous_deployment_id: result.previous_deployment_id
+                     }
+                   }) do
+                {:ok, _event} -> push_event(site.team_id, "audit")
+                {:error, cs} -> Logger.error("audit site.rolled_back failed: #{inspect(cs)}")
+              end
 
               push_event(site.team_id, "deployments")
-              push_event(site.team_id, "audit")
 
               json(conn, 200, %{
                 ok: true,
@@ -10015,7 +10209,7 @@ defmodule BarkparkCloud.Web.Router do
     #   * a PAT must carry the `deploy` ability (Coolify's exclusive deploy-token).
     #   * a SESSION carries ["root"], so `require_ability` is a no-op for it — gate
     #     the session branch on TEAM-ADMIN inline here. NOT
-    #     `require_primary_team_admin/1`, which re-runs `require_user` and discards
+    #     `require_current_team_admin/1`, which re-runs `require_user` and discards
     #     the resolved PAT/session assigns.
     # The ROLE check precedes the entitlement (402) check, so a plain member gets
     # 403 (not 402) and the deploy-PAT path still works.
@@ -11022,8 +11216,16 @@ defmodule BarkparkCloud.Web.Router do
   # wave 13 S2: each step's "detail" is a REMOTE capture (an ssh stderr fold, a
   # provider body) and reaches a person's screen verbatim, so it is scrubbed at
   # this boundary. The stored row keeps the raw bytes for ops.
+  #
+  # cchi-w26 / D310 tail: scrubbing is not the whole boundary. `app.js` paints the
+  # HUMANIZED `provision_error` as the timeline's failureDetail while the step
+  # rows directly beneath it carried raw provider jargon — one event, two stories,
+  # the exact asymmetry wave 26 S3 closed in the provision_failed email. A bare
+  # `FailureCopy.humanize/1` is the WRONG remedy here (and `Sites.Deploy`'s `stage_caption/2` moduledoc
+  # says so): it REPLACES the narration, and this payload holds the only copy of
+  # it. `class_then_capture/1` emits BOTH.
   defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
-    do: Map.put(map, :provision_steps, Enum.map(steps, &scrub_entry(&1, "detail")))
+    do: Map.put(map, :provision_steps, Enum.map(steps, &class_then_capture_entry(&1, "detail")))
 
   defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
 
@@ -11032,10 +11234,50 @@ defmodule BarkparkCloud.Web.Router do
   # on presence without an existence check.
   #
   # wave 13 S2: console lines are raw remote output — scrubbed here, raw in the DB.
+  # cchi-w26 / D310 tail: same both-not-either fold as the step details above.
   defp merge_provision_console(map, %{console: console}) when is_list(console),
-    do: Map.put(map, :provision_console, Enum.map(console, &scrub_entry(&1, "line")))
+    do: Map.put(map, :provision_console, Enum.map(console, &class_then_capture_entry(&1, "line")))
 
   defp merge_provision_console(map, _), do: Map.put(map, :provision_console, [])
+
+  # cchi-w26 / task-3b59e1ea682c03a1 (charter D310): CLASS ALONGSIDE CAPTURE, the
+  # shape `Notifications.EventEmail.cause_then_capture/1` already ships.
+  #
+  # A provision step's `detail` and a console `line` are the ONLY copy of the
+  # worker's narration on this payload — there is no sibling key holding the raw
+  # bytes, which is why `Sites.Deploy.stage_caption/2` (classify-or-scrub) is
+  # right on a deploy stage and wrong here: it would destroy the narration waves
+  # 12-14 built. So this fold emits the class AND keeps the capture, in one
+  # string, in the element group the person is already looking at.
+  #
+  # An entry whose capture does NOT classify is BYTE-IDENTICAL to what this
+  # boundary shipped before (`FailureCopy.raw/1` = strip_ansi |> scrub), so no
+  # existing narration moves.
+  defp class_then_capture_entry(%{} = entry, key) do
+    case Map.fetch(entry, key) do
+      {:ok, value} when is_binary(value) -> Map.put(entry, key, class_then_capture(value))
+      _ -> entry
+    end
+  end
+
+  defp class_then_capture_entry(entry, _key), do: entry
+
+  # STRIP FIRST, THEN CLASSIFY — the same order `cause_then_capture/1` documents
+  # and for the same load-bearing reason. `humanize/1` ends `scrub |> strip_ansi`,
+  # so on its PASS-THROUGH arm (an unclassified capture returns itself) it scrubs
+  # colourised bytes — the leaky order. Feeding it an already-stripped capture
+  # makes that arm land on exactly `capture`, which keeps the `^capture` equal-arm
+  # below firing (a colourised unclassified capture would otherwise fall to the
+  # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
+  defp class_then_capture(value) do
+    stripped = FailureCopy.strip_ansi(value)
+    capture = FailureCopy.scrub(stripped)
+
+    case FailureCopy.humanize(stripped) do
+      ^capture -> capture
+      cause -> "#{cause} — #{capture}"
+    end
+  end
 
   # wave 13 S2: redact secret-shaped substrings in the string-valued keys of a
   # step/console entry. No-ops on a non-map entry and on a non-binary value, so a
@@ -11299,6 +11541,11 @@ defmodule BarkparkCloud.Web.Router do
       attempts: d.attempts,
       last_error: d.last_error,
       http_status: d.http_status,
+      # cch-w52-s3: WHAT CARRIED IT. `channel` is the egress family (every email
+      # transport collapses to "email"); `carrier` is the mechanism. Emitted RAW,
+      # including `null` for rows written before the column existed — the console
+      # renders that absence as its own sentence rather than inventing a value.
+      carrier: d.carrier,
       inserted_at: d.inserted_at
     }
   end
@@ -12214,7 +12461,11 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id is the SAME 404 as a teamless caller (no existence leak). A
   # resolved instance dispatches through the catalog capability.
   defp proxy_instance_webhook(conn, capability) do
-    conn = Auth.require_user(conn, [])
+    # The two admin-gated verbs (rotate, deliveries) arrive with the principal
+    # already resolved by Auth.require_team_admin; do not verify the session a
+    # second time. Same skip gate_role/4 applies. Every other verb resolves here.
+    conn =
+      if conn.assigns[:current_user], do: conn, else: Auth.require_user(conn, [])
 
     cond do
       conn.halted ->
@@ -12516,6 +12767,31 @@ defmodule BarkparkCloud.Web.Router do
 
   defp valid_repo_name?(_), do: false
 
+  # ssw10: what the `token.minted` audit row records — read off the PERSISTED
+  # row, never off the request.
+  #
+  # `UserToken.normalize_abilities/1` is the server-side authority on ability
+  # EXCLUSIVITY: a mint asking for `["write", "deploy"]` stores `["deploy"]`, and
+  # `["read", "root"]` stores `["root"]`. Recording `attrs.abilities` wrote an
+  # issuance record for a grant that never existed — on the one surface an
+  # incident review reads to answer "what was this credential allowed to do".
+  #
+  # The collapse is also NAMED rather than silently absorbed: when the stored
+  # list is narrower than the requested one, the row carries the requested list
+  # and the dropped abilities alongside the granted one. Both keys are ABSENT
+  # when nothing was dropped, so an ordinary mint's row is unchanged.
+  defp mint_audit_metadata(attrs, pat) do
+    granted = pat.abilities || []
+    requested = attrs.abilities || []
+    dropped = Enum.uniq(requested -- granted)
+
+    base = %{name: attrs.name, abilities: granted}
+
+    if dropped == [],
+      do: base,
+      else: Map.merge(base, %{requested_abilities: requested, dropped_abilities: dropped})
+  end
+
   # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
   # token_hash and NEVER the plaintext (the plaintext is returned once, only in
   # the POST /v1/tokens mint response). `revoked_at` non-nil renders as a
@@ -12530,6 +12806,17 @@ defmodule BarkparkCloud.Web.Router do
       revoked_at: t.revoked_at,
       inserted_at: t.inserted_at
     }
+  end
+
+  # The admin (team-scoped) PAT shape: `pat_json/1` plus WHO HOLDS IT. An admin
+  # list is useless without the holder — "revoke this one" needs a name attached
+  # — and the two extra fields are already visible to any admin through
+  # GET /v1/teams/:id/members. Still NEVER a token_hash and never a plaintext.
+  defp team_pat_json(t) do
+    t
+    |> pat_json()
+    |> Map.put(:user_id, t.user_id)
+    |> Map.put(:email, t.user && t.user.email)
   end
 
   # Map the requested expiry to a bounded day-count (or nil = never). The set
@@ -12594,27 +12881,6 @@ defmodule BarkparkCloud.Web.Router do
       # exists to prevent.
       region: claim_region(barkpark),
       server_type: claim_server_type(barkpark),
-      # The decrypted team + instance env, merged most-specific-wins, sent ONLY
-      # over the worker-token-authed internal channel (TLS in prod). Resolved at
-      # CLAIM time so a retry / stale-claim re-pick would carry rotated values.
-      #
-      # RETRACTED ON REVIEW (wave 56): this comment used to say "The worker bakes
-      # these into the box's runtime env at provision time" and called this "the
-      # one place the plaintext must exist so the values can reach the instance".
-      # NO WORKER READS THIS KEY, and this repo already proves it mechanically:
-      # `cloud/test/barkpark_cloud/web/claim_payload_manifest_test.exs` (ARM 1)
-      # shows the worker DISCARDS `env` on all three claim shapes, because
-      # `internal/provisioner.JobSpec` declares no `env` field and every claim
-      # decode is a bare `json.Unmarshal`. So this comment asserted a delivery a
-      # merged guard in the same tree refutes — "an OLD worker simply ignores the
-      # key" is in fact EVERY worker. The console has said so since
-      # cch-w53-s1 ("Values are not delivered to any instance yet"); this comment
-      # and two moduledocs in cloud/lib were the last places claiming delivery.
-      # The key still ships (removing it is a contract change a future delivery
-      # slice would only have to re-add), but this is plaintext crossing a wire
-      # for nobody — which is its own reason to build delivery or drop the key.
-      # Filed separately.
-      env: Registry.resolved_env_for_barkpark(barkpark),
       # dwb-4: the content-template slug picked at launch (validated then). nil →
       # no bootstrap; an OLD worker ignores the key.
       template: barkpark.template
@@ -12624,10 +12890,30 @@ defmodule BarkparkCloud.Web.Router do
   # azh-w6 (S14c): the resurrect worker's claim payload = the FULL provision claim
   # (agent token minted at claim, azure creds decrypted, region/size nil-honest —
   # all unchanged) PLUS `bundle_ref`, the object-storage archive to pull +
-  # rehydrate onto the fresh box. Reusing claim_json keeps the provision claim
-  # bytes untouched (the `bundle_ref` key is additive and only present here).
+  # rehydrate onto the fresh box, MINUS `template`. Reusing claim_json keeps the
+  # provision claim bytes untouched (the `bundle_ref` key is additive and only
+  # present here).
+  #
+  # NO TEMPLATE (cch-w53-bl-the-resurrect-claim-discards-env-and-template). A
+  # resurrect is NOT a launch: the box's content comes from the BUNDLE, and the
+  # restore chain says so in its own header — `internal/provisioner/restore.go`'s
+  # `content` step is "fetch db.dump + media from the bundle store, DROP + CREATE
+  # the database the MANIFEST names, pg_restore --no-owner, unpack media,
+  # best-effort migrate. Template bootstrap is suppressed." The suppression is
+  # structural, not a flag: `translateResurrect`
+  # (internal/provisioner/restore_driver.go) builds its `JobSpec` field by field
+  # and never sets `Template`, and the only reader of `job.Template` —
+  # `provision.go`'s dwb-4 bootstrap branch — is on the provision chain the
+  # resurrect drain does not run. So `resurrectClaimSpec` declaring no `template`
+  # field is CORRECT, and the emission was the defect: the plane was shipping a
+  # content-bootstrap slug to a decoder that must never act on it, and
+  # `encoding/json` dropped it in silence. Giving the spec the field would have
+  # been the WRONG half of the either/or — it would model a value the restore
+  # path is documented to suppress. Provision + support still carry `template`;
+  # only this claim drops it.
   defp resurrect_claim_json(job, barkpark) do
     claim_json(job, barkpark)
+    |> Map.drop([:template])
     |> Map.put(:bundle_ref, job.bundle_ref)
   end
 
@@ -12769,23 +13055,6 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp add_provider_claim_fields(base, _barkpark), do: base
-
-  defp env_var_json(%Registry.EnvVar{} = e) do
-    # value_encrypted is NEVER serialized — the value stays at rest. The list
-    # view is metadata-only: a secret is set-and-forget, surfaced by key, not
-    # value (the masking discipline of provider_json/1 + site_json/1).
-    %{
-      id: e.id,
-      key: e.key,
-      scope: e.scope,
-      barkpark_id: e.barkpark_id,
-      is_secret: e.is_secret,
-      is_shown_once: e.is_shown_once,
-      comment: e.comment,
-      inserted_at: e.inserted_at,
-      updated_at: e.updated_at
-    }
-  end
 
   defp deprovision_claim_json(job, barkpark) do
     %{
@@ -13452,15 +13721,17 @@ defmodule BarkparkCloud.Web.Router do
                  cf_zone_id: zone_id,
                  cf_record_id: record_id
                }) do
-          _ =
-            Accounts.record_audit(%{
-              team_id: site.team_id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "site.cloudflare_bound",
-              target_type: "site",
-              target_id: site.id,
-              metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
-            })
+          case Accounts.record_audit(%{
+                 team_id: site.team_id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "site.cloudflare_bound",
+                 target_type: "site",
+                 target_id: site.id,
+                 metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
+               }) do
+            {:ok, _event} -> :ok
+            {:error, cs} -> Logger.error("audit site.cloudflare_bound failed: #{inspect(cs)}")
+          end
 
           {:cont, bound_site}
         else
@@ -13589,20 +13860,22 @@ defmodule BarkparkCloud.Web.Router do
 
         case Sites.Deploy.enqueue(site, bp, force, "manual", nil, source) do
           {:ok, deployment} ->
-            _ =
-              Accounts.record_audit(%{
-                team_id: site.team_id,
-                actor_user_id: conn.assigns.current_user.id,
-                action: "site.deploy_requested",
-                target_type: "deployment",
-                target_id: deployment.id,
-                metadata: %{
-                  site_id: site.id,
-                  kind: site.kind,
-                  build_id: deployment.build_id,
-                  source: deployment.source
-                }
-              })
+            case Accounts.record_audit(%{
+                   team_id: site.team_id,
+                   actor_user_id: conn.assigns.current_user.id,
+                   action: "site.deploy_requested",
+                   target_type: "deployment",
+                   target_id: deployment.id,
+                   metadata: %{
+                     site_id: site.id,
+                     kind: site.kind,
+                     build_id: deployment.build_id,
+                     source: deployment.source
+                   }
+                 }) do
+              {:ok, _event} -> :ok
+              {:error, cs} -> Logger.error("audit site.deploy_requested failed: #{inspect(cs)}")
+            end
 
             # MINT-THEN-UPLOAD (charter D86), and the order is FORCED, not
             # preferred: `build_id` is baked INTO the bytes at build time
@@ -13991,6 +14264,109 @@ defmodule BarkparkCloud.Web.Router do
   defp read_token_status(:ok), do: "revoked"
   defp read_token_status(:noop), do: "none"
   defp read_token_status(_), do: "not_revoked"
+
+  # The DNS half of `DELETE /v1/sites/:id`, called from `delete_site_after_audit/2`
+  # BEFORE `Registry.delete_site/1` — see the ordering comment at that call site.
+  # Three outcomes, all of them named rather than swallowed (this used to be no
+  # call at all, which is why the record survived its site):
+  #
+  #   * `:noop`  — this site was never cf-in-front bound (the overwhelming common
+  #                case: `serving_mode` "direct", `cf_record_id` nil). ZERO
+  #                Cloudflare calls, so a standalone delete is byte-identical to
+  #                before this arm existed.
+  #   * `:ok`    — Cloudflare confirmed the record is gone.
+  #   * `{:error, reason}` — it did NOT. The record may still be live and about to
+  #                be unnameable, so this is the loudest line this process will
+  #                ever say about it (mirroring `cloudflare_bind_ORPHANED_RECORD`
+  #                on the write path), and the 200 carries the same pointer out to
+  #                the caller.
+  #
+  # A row carrying a `cf_record_id` with NO `cf_zone_id` is its own error arm, not
+  # a `:noop`: the record exists and this process simply cannot address it, which
+  # is exactly the state that must be shouted rather than treated as "nothing to
+  # do". `registry.ex`'s cf-binding doc already names that pairing as the
+  # inconsistency to fear.
+  defp release_cf_record(%Registry.Site{} = site) do
+    record_id = cf_field(site.cf_record_id)
+    zone_id = cf_field(site.cf_zone_id)
+
+    cond do
+      is_nil(record_id) ->
+        :noop
+
+      is_nil(zone_id) ->
+        Logger.error(
+          "site_delete_DANGLING_RECORD: site #{site.slug} carries cf_record_id #{record_id} " <>
+            "with NO cf_zone_id — the A record cannot be addressed, and the row naming it is " <>
+            "about to be deleted. Find it by value in the team's Cloudflare zone."
+        )
+
+        {:error, :no_zone}
+
+      true ->
+        delete_cf_record(site, zone_id, record_id)
+    end
+  end
+
+  defp delete_cf_record(site, zone_id, record_id) do
+    case Registry.resolve_cloudflare_credential(site.team_id) do
+      {:ok, %{token: token}} when is_binary(token) and token != "" ->
+        case Cloudflare.delete_dns_record(token, zone_id, record_id) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "site_delete_DANGLING_RECORD: site #{site.slug} zone #{zone_id} record " <>
+                "#{record_id} (#{site.cf_domain}) — deleting the A record failed: " <>
+                "#{inspect(reason)}. The site row is about to be deleted; after that " <>
+                "nothing in this control plane can name this record again."
+            )
+
+            {:error, reason}
+        end
+
+      other ->
+        Logger.error(
+          "site_delete_DANGLING_RECORD: site #{site.slug} zone #{zone_id} record #{record_id} " <>
+            "(#{site.cf_domain}) — the team's Cloudflare credential could not be read " <>
+            "(#{inspect(other)}), so the A record was never deleted. The site row is about to " <>
+            "be deleted; after that nothing in this control plane can name this record again."
+        )
+
+        {:error, :cloudflare_credential_unreadable}
+    end
+  end
+
+  defp cf_field(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp cf_field(_), do: nil
+
+  defp cf_record_status(:ok), do: "deleted"
+  defp cf_record_status(:noop), do: "none"
+  defp cf_record_status(_), do: "not_deleted"
+
+  # The DNS twin of `site_delete_token_warning/3`, under its OWN key so the two
+  # leftovers never clobber each other (a delete can strand both). Same reason as
+  # the read-token one: the deleted row was the only thing that held zone +
+  # record id, so if this sentence does not carry them out, nothing does.
+  defp site_delete_cf_warning(body, _site, status) when status in [:ok, :noop], do: body
+
+  defp site_delete_cf_warning(body, site, _status) do
+    Map.put(
+      body,
+      :cf_warning,
+      "the site is deleted, but its Cloudflare DNS record could not be removed: record " <>
+        "#{site.cf_record_id} in zone #{site.cf_zone_id} (#{site.cf_domain}) may still be LIVE " <>
+        "and now points at an origin that has just been torn down. Delete it by hand in " <>
+        "Cloudflare — the site row that named it is gone, so nothing here can find it again."
+    )
+  end
 
   # On an unconfirmed revoke, hand the caller the pointer the deleted row can no
   # longer hold: which box, which workspace scope, which label. Without these
@@ -14522,30 +14898,44 @@ defmodule BarkparkCloud.Web.Router do
   # the SPA's job, not the browser's: app.js remints and reopens on every stream
   # error rather than letting the native retry replay a spent ticket.
   #
-  # Assigns :current_user + :current_team on success; halts 401 otherwise.
+  # Both credential paths also resolve the SESSION ROW behind the stream
+  # (cch-w53-bl): the header path knows it directly, the ticket path reads the
+  # binding stamped at mint. `nil` is legitimate — an unbound legacy ticket — and
+  # means the loop falls back to the user-wide liveness check.
+  #
+  # Assigns :current_user + :current_team + :sse_session_token_id on success;
+  # halts 401 otherwise.
   defp require_user_sse(conn) do
     conn = Plug.Conn.fetch_query_params(conn)
 
-    user =
+    {user, session_token_id, session_token} =
       case Auth.bearer_token(conn) do
         header when is_binary(header) and header != "" ->
-          Accounts.verify_user_session_token(header)
+          case Accounts.verify_user_session_token(header, touch: false) do
+            %{} = user -> {user, Accounts.live_session_token_id(header), header}
+            _ -> {nil, nil, nil}
+          end
 
         _ ->
           case conn.query_params["ticket"] do
             ticket when is_binary(ticket) and ticket != "" ->
-              Accounts.consume_sse_ticket(ticket)
+              case Accounts.consume_sse_ticket_binding(ticket) do
+                {user, session_token_id} -> {user, session_token_id, nil}
+                nil -> {nil, nil, nil}
+              end
 
             _ ->
-              nil
+              {nil, nil, nil}
           end
       end
 
     case user do
       %{} = user ->
         conn
+        |> defer_sse_session_touch(session_token)
         |> assign(:current_user, user)
         |> assign(:current_team, Accounts.primary_team(user))
+        |> assign(:sse_session_token_id, session_token_id)
 
       _ ->
         conn
@@ -14555,17 +14945,55 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # The SSE twin of `Web.Auth`'s deferred credential stamp, and it exists for the
+  # same reason: `last_used_at` is a LIVENESS claim the sessions card renders as
+  # "Active just now", but the header branch above runs during AUTHENTICATION —
+  # strictly before this route's own `no_team` ruling. The eager default stamped
+  # right there, so a TEAMLESS header client that was REFUSED 422 printed on the
+  # sessions card as a freshly active device. Measured: backdate the session row
+  # 3600s, fire ONE `GET /v1/events`, take the 422, and the stamp jumped a full
+  # hour past any throttle — a throttle cannot fix it, because an idle device
+  # satisfies any staleness window.
+  #
+  # `register_before_send/2` is the first point where the status is known and it
+  # runs for `send_chunked` too — so the served stream stamps at its 200, at the
+  # same instant the eager call used to, and NOTHING is deferred past the park.
+  # `status < 400` is the whole gate: served ⇒ claim activity, refused ⇒ claim
+  # nothing.
+  #
+  # The `nil` clause is the TICKET branch: `?ticket=` carries no session
+  # plaintext to stamp, and ticket redemption stamps nothing on the session row
+  # at all (driven). That is also the honest bound on this fix's reach — the
+  # console SPA opens this stream with `?ticket=`, so the over-stamp was only
+  # ever reachable by HEADER clients (curl, the CLI, an EventSource polyfill).
+  defp defer_sse_session_touch(conn, nil), do: conn
+
+  defp defer_sse_session_touch(conn, token) when is_binary(token) do
+    register_before_send(conn, fn sent ->
+      if is_integer(sent.status) and sent.status < 400 do
+        Accounts.touch_session_last_used(token)
+      end
+
+      sent
+    end)
+  end
+
   # Subscribe the request process to the team's event group, then hold the
   # connection open as an SSE stream: an opening comment, then one `data:` frame
   # per broadcast, with a heartbeat comment every 25s so an idle stream isn't
   # reaped by a fronting proxy. A failed chunk (client gone) ends the loop; :pg
   # auto-unsubscribes the dying process.
   #
-  # The loop carries the connecting user's id because it must OUTLIVE its own
-  # credential check — see `sse_loop/3`.
+  # The loop carries the connecting PRINCIPAL — the user's id and, when the
+  # credential carried one, the session row the stream belongs to — because it
+  # must OUTLIVE its own credential check. See `sse_loop/3`.
   defp stream_events(conn, team_id) do
     :ok = Events.subscribe(team_id)
-    user_id = conn.assigns.current_user.id
+
+    principal = %{
+      user_id: conn.assigns.current_user.id,
+      session_token_id: conn.assigns[:sse_session_token_id]
+    }
 
     conn =
       conn
@@ -14575,7 +15003,7 @@ defmodule BarkparkCloud.Web.Router do
       |> send_chunked(200)
 
     case Plug.Conn.chunk(conn, ": connected\n\n") do
-      {:ok, conn} -> sse_loop(conn, user_id, System.monotonic_time(:millisecond))
+      {:ok, conn} -> sse_loop(conn, principal, System.monotonic_time(:millisecond))
       {:error, _} -> conn
     end
   end
@@ -14583,8 +15011,10 @@ defmodule BarkparkCloud.Web.Router do
   # The parked stream, and the ONE thing to understand about it: authentication
   # happened once, at connect, and the credential is already gone by the time we
   # get here (an `?ticket=` is BURNED inside the connect transaction). So the loop
-  # cannot re-verify a token — it remembers `user_id` and re-asks the only
-  # question that survives: does this user still have a live session at all?
+  # cannot re-verify a token — it remembers a PRINCIPAL and re-asks the sharpest
+  # question that survives the burn: is the SESSION ROW this stream belongs to
+  # still live? (`session_token_id`; and where there is none, the older, blunter
+  # question — does this user still have any live session at all?)
   #
   # Before cch-w53-s4 it asked nothing. "Sign out everywhere" stamped every
   # session row revoked and this loop kept chunking team events to the signed-out
@@ -14601,23 +15031,29 @@ defmodule BarkparkCloud.Web.Router do
   # every broadcast into a query. Worst case a revoked stream sees frames for one
   # more window; before, it saw them for its whole life.
   #
-  # NOT COVERED, deliberately: per-row revoke (`DELETE /v1/account/sessions/:id`)
-  # does not end that device's stream, because the ACTING session keeps the count
-  # >= 1. Binding a stream to its minting session needs a `user_tokens` column
-  # that does not exist — filed as
-  # cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream.
-  defp sse_loop(conn, user_id, checked_at) do
+  # PER-ROW REVOKE IS NOW COVERED TOO (cch-w53-bl). The user-wide check could not
+  # see it: `DELETE /v1/account/sessions/:id` revokes ONE session and the ACTING
+  # session keeps the count >= 1, so a user who spotted an unfamiliar device and
+  # revoked it got a row that disappeared and a stream that did not. The
+  # `user_tokens.session_token_id` column binds a stream to the session that
+  # minted its credential, and `sse_principal_live?/1` rechecks THAT row — same
+  # one-heartbeat bound, now per device.
+  #
+  # A stream with NO binding (a ticket minted before the column existed) keeps the
+  # user-wide behaviour exactly: strictly weaker, never wrong, and it drains
+  # within one ticket TTL of a deploy.
+  defp sse_loop(conn, principal, checked_at) do
     receive do
       {:bpcloud_event, event} ->
-        case sse_session_check(user_id, checked_at, sse_recheck_ms()) do
+        case sse_session_check(principal, checked_at, sse_recheck_ms()) do
           :revoked ->
-            end_revoked_sse(conn, user_id)
+            end_revoked_sse(conn, principal)
 
           {:live, checked_at} ->
             case encode_sse_frame(event) do
               {:ok, frame} ->
                 case Plug.Conn.chunk(conn, frame) do
-                  {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+                  {:ok, conn} -> sse_loop(conn, principal, checked_at)
                   {:error, _} -> conn
                 end
 
@@ -14626,20 +15062,20 @@ defmodule BarkparkCloud.Web.Router do
                 # stream — the event is only an invalidation hint, safely dropped.
                 # Log and keep parking for the next (good) event / heartbeat.
                 Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
-                sse_loop(conn, user_id, checked_at)
+                sse_loop(conn, principal, checked_at)
             end
         end
     after
       sse_heartbeat_ms() ->
         # `0` forces the check: the heartbeat is the guaranteed recheck point,
         # and it is what makes the revocation bound a bound.
-        case sse_session_check(user_id, checked_at, 0) do
+        case sse_session_check(principal, checked_at, 0) do
           :revoked ->
-            end_revoked_sse(conn, user_id)
+            end_revoked_sse(conn, principal)
 
           {:live, checked_at} ->
             case Plug.Conn.chunk(conn, ": ping\n\n") do
-              {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+              {:ok, conn} -> sse_loop(conn, principal, checked_at)
               {:error, _} -> conn
             end
         end
@@ -14648,23 +15084,40 @@ defmodule BarkparkCloud.Web.Router do
 
   # `{:live, checked_at}` (possibly the SAME checked_at, when the throttle window
   # has not elapsed) or `:revoked`. Throttled by monotonic time, never wall clock.
-  defp sse_session_check(user_id, checked_at, recheck_ms) do
+  defp sse_session_check(principal, checked_at, recheck_ms) do
     now = System.monotonic_time(:millisecond)
 
     cond do
       now - checked_at < recheck_ms -> {:live, checked_at}
-      Accounts.user_has_live_session?(user_id) -> {:live, now}
+      sse_principal_live?(principal) -> {:live, now}
       true -> :revoked
     end
   end
+
+  # A BOUND stream asks about its own session row, so revoking that one device
+  # ends that one stream while every sibling device keeps streaming. An UNBOUND
+  # one asks the user-wide question, which is the pre-cch-w53-bl behaviour and
+  # still ends the stream on sign-out-everywhere / password change.
+  #
+  # The clause order is the whole fix: swap them and a bound stream falls back to
+  # the count that per-row revoke can never drive to zero.
+  defp sse_principal_live?(%{session_token_id: session_token_id})
+       when is_binary(session_token_id),
+       do: Accounts.session_token_live?(session_token_id)
+
+  defp sse_principal_live?(%{user_id: user_id}),
+    do: Accounts.user_has_live_session?(user_id)
 
   # End a stream whose user has no live session left. Returning `conn` ends the
   # chunked response, which the client sees as the stream closing; the SPA's
   # error handler remints and gets a 401, which is its normal path to /login.
   # Logged because a stream ending for AUTHORISATION reasons is otherwise
   # indistinguishable from a network drop in the access log.
-  defp end_revoked_sse(conn, user_id) do
-    Logger.info("sse_loop: ending stream, no live session for user #{user_id}")
+  defp end_revoked_sse(conn, %{user_id: user_id, session_token_id: session_token_id}) do
+    Logger.info(
+      "sse_loop: ending stream for user #{user_id}, session #{inspect(session_token_id)} not live"
+    )
+
     conn
   end
 
@@ -14852,22 +15305,26 @@ defmodule BarkparkCloud.Web.Router do
                 # record_audit/1 — an audit-insert failure must not strand a live
                 # GitHub webhook by rolling the local link back. Repo/branch only,
                 # never the webhook secret.
-                _ =
-                  Accounts.record_audit(%{
-                    team_id: team.id,
-                    actor_user_id: conn.assigns.current_user.id,
-                    action: "site.github_connected",
-                    target_type: "site",
-                    target_id: site.id,
-                    metadata: %{
-                      site_id: site.id,
-                      repo: updated.github_repo,
-                      branch: updated.github_branch
-                    }
-                  })
+                case Accounts.record_audit(%{
+                       team_id: team.id,
+                       actor_user_id: conn.assigns.current_user.id,
+                       action: "site.github_connected",
+                       target_type: "site",
+                       target_id: site.id,
+                       metadata: %{
+                         site_id: site.id,
+                         repo: updated.github_repo,
+                         branch: updated.github_branch
+                       }
+                     }) do
+                  {:ok, _event} ->
+                    push_event(team.id, "audit")
+
+                  {:error, cs} ->
+                    Logger.error("audit site.github_connected failed: #{inspect(cs)}")
+                end
 
                 push_event(team.id, "sites")
-                push_event(team.id, "audit")
 
                 json(conn, 200, %{
                   site: site_json(updated),
@@ -15399,15 +15856,17 @@ defmodule BarkparkCloud.Web.Router do
   defp start_prebuilt_deploy(conn, site, deployment, bytes, sha) do
     case Sites.Deploy.store_artifact(deployment, bytes, sha) do
       {:ok, stamped} ->
-        _ =
-          Accounts.record_audit(%{
-            team_id: site.team_id,
-            actor_user_id: conn.assigns.current_user.id,
-            action: "site.artifact_uploaded",
-            target_type: "deployment",
-            target_id: deployment.id,
-            metadata: %{site_id: site.id, sha256: sha, bytes: byte_size(bytes)}
-          })
+        case Accounts.record_audit(%{
+               team_id: site.team_id,
+               actor_user_id: conn.assigns.current_user.id,
+               action: "site.artifact_uploaded",
+               target_type: "deployment",
+               target_id: deployment.id,
+               metadata: %{site_id: site.id, sha256: sha, bytes: byte_size(bytes)}
+             }) do
+          {:ok, _event} -> :ok
+          {:error, cs} -> Logger.error("audit site.artifact_uploaded failed: #{inspect(cs)}")
+        end
 
         # ONLY NOW. The digest is committed, so the row can already name the
         # bytes it is about to serve; a driver started before this could reach

@@ -91,7 +91,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("usage-task"),
           "title" => "Usage task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         scope
@@ -244,7 +254,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("attempt-fence-task"),
           "title" => "Attempt fence task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         ctx.scope
@@ -648,7 +668,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("foreign-usage-task"),
           "title" => "Foreign usage task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         foreign_scope
@@ -682,7 +712,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("other-project-task"),
           "title" => "Other project task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         other_scope
@@ -764,7 +804,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("same-project-usage-task"),
           "title" => "Another valid usage task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         ctx.scope
@@ -1137,7 +1187,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
         %{
           "doc_id" => unique("#{suffix}-task"),
           "title" => "Runtime authority #{suffix}",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" => %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "open"
+          }
         },
         @dataset,
         scope

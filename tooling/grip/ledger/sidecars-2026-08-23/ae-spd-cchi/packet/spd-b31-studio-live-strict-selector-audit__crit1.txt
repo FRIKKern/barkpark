@@ -1,0 +1,1 @@
+Every exact-markup assertion that this epic attribute additions can break is either loosened or explicitly justified as an intentional pin

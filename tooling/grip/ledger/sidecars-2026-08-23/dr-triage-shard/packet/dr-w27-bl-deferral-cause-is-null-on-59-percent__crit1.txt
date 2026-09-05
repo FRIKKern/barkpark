@@ -1,0 +1,1 @@
+Any rate this epic publishes states which vocabulary window it covers, and refuses to span 2026-08-05T21:27:11 or the 2026-08-07 cause switch silently.

@@ -1,0 +1,1 @@
+Both refusals are reproduced first-hand against a fixture document, and the response payloads are quoted in full to show that no details key is present while the hint names one. Evidence: the two raw payloads.

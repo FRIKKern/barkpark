@@ -1,0 +1,1 @@
+The `git pull --ff-only` sha-fabrication mechanism is re-derived from cp-deploy.sh itself rather than quoted from prior epic record. Evidence: the file:line.

@@ -1,0 +1,1 @@
+The guard also asserts the shell's accessible name (aria-label) is present at flag 0, since the flag-OFF arm currently loses it too.

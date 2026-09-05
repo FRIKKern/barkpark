@@ -1,0 +1,1 @@
+The trial-LENGTH numeral (app.js:6313) is either derived from a server signal or omitted, and the countdown numeral is shown by diff to be untouched because it is already server-derived.

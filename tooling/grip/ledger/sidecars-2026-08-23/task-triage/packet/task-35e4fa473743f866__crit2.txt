@@ -1,0 +1,1 @@
+MUTATION, the guard can LOSE: reverting the paging loop to a single request reds a named test with ROSTER-TRUNCATED (or a length mismatch), and restoring it greens. Quote both runs.

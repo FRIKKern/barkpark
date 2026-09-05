@@ -153,8 +153,11 @@ func TestFetchRegisteredTagsIsBlindOnEveryUnreliableAnswer(t *testing.T) {
 	}
 }
 
-// A blind registry read is REPORTED and the create proceeds — never a silent
-// clearance, never a veto.
+// A blind registry read is REPORTED and produces no refusal from the CLASSIFIER
+// — never a silent clearance. checkTagRegistry stays a pure classifier (the MCP
+// task_create path reads the same function); what to DO about a blind read is
+// the caller's decision, and `bp task create --publish` now fails closed on it
+// (TestTaskCreatePublishRefusesWhenTheRegistryIsUnreadable, below).
 func TestCheckTagRegistryFailsOpenAndSaysSo(t *testing.T) {
 	prior := registeredTagReader
 	defer func() { registeredTagReader = prior }()
@@ -169,9 +172,16 @@ func TestCheckTagRegistryFailsOpenAndSaysSo(t *testing.T) {
 	}
 }
 
-// The behavioural half of the same contract: when the registry cannot be read,
-// `--publish` still creates and publishes, and stderr SAYS the check did not run.
-func TestTaskCreatePublishProceedsWhenTheRegistryIsUnreadable(t *testing.T) {
+// The behavioural half of the same contract, INVERTED by
+// task-ede6e18e8c397ee0. checkTagRegistry still reports `blind` rather than
+// refusing (it is a pure classifier and the MCP path reads it too), but
+// `bp task create --publish` now FAILS CLOSED on that report: it refuses before
+// the create instead of writing blind. This test used to assert the opposite —
+// creates=1, publishes=1, exit 0 — and that behaviour is what minted 6 of the
+// 23 stranded `drafts.` rows on the rail: an unreadable registry under load is
+// the same state in which the server's own unknown_tag wall then refuses, and
+// the draft stays.
+func TestTaskCreatePublishRefusesWhenTheRegistryIsUnreadable(t *testing.T) {
 	var creates, publishes int
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.URL.Path, "/v1/data/query/") {
@@ -200,14 +210,22 @@ func TestTaskCreatePublishProceedsWhenTheRegistryIsUnreadable(t *testing.T) {
 	w := &writer{stdout: &so, stderr: &se}
 	code := runTaskCreate(w, globals{yes: true}, manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"},
 		[]string{"a task", "--publish", "--description", wallPassingDescription, "--set", wallPassingTags})
-	if code != exitOK {
-		t.Fatalf("an unreadable registry vetoed a legitimate publish (exit %d): %s", code, se.String())
+	if code == exitOK {
+		t.Fatalf("a blind registry read still published: %s", so.String())
 	}
-	if creates != 1 || publishes != 1 {
-		t.Fatalf("creates=%d publishes=%d, want 1 and 1", creates, publishes)
+	// THE LOAD-BEARING ASSERTION: nothing was written. A refusal that still
+	// POSTed the create would be the defect with a nicer message on top.
+	if creates != 0 || publishes != 0 {
+		t.Fatalf("creates=%d publishes=%d, want 0 and 0 — the refusal must land BEFORE the create", creates, publishes)
 	}
-	if !strings.Contains(se.String(), "NOT checked") {
-		t.Errorf("the caller was not told the tag check did not run:\n%s", se.String())
+	for _, want := range []string{
+		tagRegistryUnreadableCode,
+		"nothing was created — no draft was left behind.",
+		tagRegistryCommand,
+	} {
+		if !strings.Contains(se.String(), want) {
+			t.Errorf("the refusal does not carry %q:\n%s", want, se.String())
+		}
 	}
 }
 
@@ -241,11 +259,19 @@ func TestOrphanedDraftRemedyNamesTheDraftAndBothExits(t *testing.T) {
 	}
 }
 
-// The failure arm prints that remedy — the old message named only the bare id,
-// which is the id of a row that does not exist yet.
-func TestTaskCreatePublishFailureNamesTheDraftItLeft(t *testing.T) {
+// THE SERVER-ONLY REFUSAL ARM, REWRITTEN BY task-ede6e18e8c397ee0. A 4xx from
+// the publish is a refusal the server evaluated and committed nothing for, so
+// the draft this run created seconds earlier is the whole row — and it is now
+// DISCARDED in the same run rather than named and left. The old assertion here
+// ("the caller is given no way to dispose of the draft that was left" ->
+// `bp doc delete task task-77`) encoded leaving it; the remedy text still
+// exists and is still printed, but only on the residue arms below, where the
+// publish may actually have landed.
+func TestTaskCreatePublishDiscardsTheDraftOnAServerOnlyRefusal(t *testing.T) {
 	// A refusal the pre-flight CANNOT predict: the body clears the label spine and
 	// every tag is registered, and the server still refuses (duplicate_of).
+	var discards int
+	var gotDiscardID string
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.URL.Path, "/v1/data/query/") {
 			_, _ = rw.Write([]byte(`{"result":{"documents":[{"_id":"cli"},{"_id":"tasks"}],"hasMore":false}}`))
@@ -255,6 +281,22 @@ func TestTaskCreatePublishFailureNamesTheDraftItLeft(t *testing.T) {
 			Mutations []map[string]json.RawMessage `json:"mutations"`
 		}
 		_ = json.NewDecoder(req.Body).Decode(&body)
+		if raw, isDiscard := body.Mutations[0]["discardDraft"]; isDiscard {
+			discards++
+			var op struct {
+				ID   string `json:"id"`
+				Type string `json:"type"`
+			}
+			_ = json.Unmarshal(raw, &op)
+			gotDiscardID = op.ID
+			if op.Type != "task" {
+				t.Errorf("discardDraft type = %q, want task", op.Type)
+			}
+			_ = json.NewEncoder(rw).Encode(map[string]any{"results": []any{
+				map[string]any{"id": "drafts.task-77"},
+			}})
+			return
+		}
 		if _, isPublish := body.Mutations[0]["publish"]; isPublish {
 			rw.Header().Set("Content-Type", "application/json")
 			rw.WriteHeader(http.StatusConflict)
@@ -278,7 +320,19 @@ func TestTaskCreatePublishFailureNamesTheDraftItLeft(t *testing.T) {
 	if !strings.Contains(got, "drafts.task-77") {
 		t.Errorf("the failure names no draft id a re-read could resolve:\n%s", got)
 	}
-	if !strings.Contains(got, "bp doc delete task task-77") {
-		t.Errorf("the caller is given no way to dispose of the draft that was left:\n%s", got)
+	if !strings.Contains(got, "duplicate_of") {
+		t.Errorf("the refusal reason was not printed:\n%s", got)
+	}
+	if discards != 1 {
+		t.Fatalf("discardDraft mutations = %d, want exactly 1 — the draft was left stranded", discards)
+	}
+	if gotDiscardID != "task-77" {
+		t.Fatalf("discardDraft targeted %q, want the bare id task-77", gotDiscardID)
+	}
+	if !strings.Contains(got, "discarded drafts.task-77") {
+		t.Errorf("the discard was not reported:\n%s", got)
+	}
+	if strings.Contains(got, "NOT ON THE BOARD") || strings.Contains(got, "bp doc delete task task-77") {
+		t.Errorf("the orphaned-draft remedy was printed for a draft that no longer exists:\n%s", got)
 	}
 }

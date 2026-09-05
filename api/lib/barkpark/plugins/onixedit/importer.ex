@@ -76,6 +76,118 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
       {:error, {:xml_parse_failed, Exception.message(error)}}
   end
 
+  @typedoc """
+  A per-product failure recorded by `parse_feed/1`: the 1-based position of
+  the `<Product>` node in the feed, and a human-readable reason.
+  """
+  @type feed_error :: %{index: pos_integer(), reason: String.t()}
+
+  @doc """
+  Resilient sibling of `parse/1`.
+
+  `parse/1` maps every `<Product>` node under ONE function-level `rescue`, so
+  a single bad node discards the entire publisher feed — and its `rescue`
+  does not catch `exit`, which is what xmerl actually does on a malformed
+  character reference or an undeclared entity (`&nbsp;` is the common one in
+  real publisher ONIX). `parse_feed/1` fixes both: it isolates each
+  `<Product>` node behind its own `try`, and it catches `exit`/`throw` as
+  well as `raise` at the document level.
+
+  Returns:
+
+    * `{:ok, %{products: [map()], skipped: non_neg_integer(), errors: [feed_error()]}}`
+      when at least one product parsed. `skipped` counts the nodes that did
+      not, and `errors` names each one by position so an operator can find it
+      in the source feed.
+    * `{:error, :no_products}` — the document parsed but declared no
+      `<Product>` at all (a mis-fetched or empty feed).
+    * `{:error, {:all_products_failed, errors}}` — every `<Product>` failed.
+    * `{:error, {:xml_parse_failed, reason}}` — the document itself is not
+      usable (DOCTYPE, malformed XML, bad entity).
+
+  `parse/1` is deliberately left untouched so its existing callers carry zero
+  risk from this addition.
+
+  ## Options
+
+    * `:product_parser` — a 1-arity fun applied to each `<Product>` node
+      instead of the built-in walk. This exists for fault injection: every
+      helper in the built-in walk has a defensive catch-all clause, so no
+      real ONIX fixture makes it raise, and the per-node isolation cannot
+      otherwise be exercised by a test. It is defense-in-depth against a
+      FUTURE non-defensive helper, and this option is how that arm stays
+      covered rather than being asserted about and never run.
+  """
+  @spec parse_feed(binary(), keyword()) ::
+          {:ok, %{products: [map()], skipped: non_neg_integer(), errors: [feed_error()]}}
+          | {:error, :no_products}
+          | {:error, {:all_products_failed, [feed_error()]}}
+          | {:error, {:xml_parse_failed, term()}}
+  def parse_feed(xml, opts \\ []) when is_binary(xml) do
+    parser = Keyword.get(opts, :product_parser, &parse_product/1)
+
+    with {:ok, nodes} <- product_nodes(xml) do
+      nodes
+      |> Enum.with_index(1)
+      |> Enum.reduce(%{products: [], errors: []}, fn {node, index}, acc ->
+        case isolated_parse(parser, node, index) do
+          {:ok, product} -> %{acc | products: [product | acc.products]}
+          {:error, error} -> %{acc | errors: [error | acc.errors]}
+        end
+      end)
+      |> finish_feed()
+    end
+  end
+
+  defp product_nodes(xml) do
+    if Regex.match?(@doctype_re, xml) do
+      {:error, {:xml_parse_failed, "DOCTYPE/DTD is not permitted in ONIX input"}}
+    else
+      nodes =
+        xml
+        |> strip_default_namespace()
+        |> SweetXml.parse(namespace_conformant: false, dtd: :none)
+        |> xpath(~x"//Product"l)
+
+      case nodes do
+        [] -> {:error, :no_products}
+        nodes -> {:ok, nodes}
+      end
+    end
+  rescue
+    error -> {:error, {:xml_parse_failed, Exception.message(error)}}
+  catch
+    # xmerl signals a malformed character reference or an undeclared entity
+    # with `exit`, not a raise — `parse/1`'s `rescue` misses it entirely and
+    # the crash escapes to the caller.
+    :exit, reason -> {:error, {:xml_parse_failed, format_reason(reason)}}
+    :throw, value -> {:error, {:xml_parse_failed, format_reason(value)}}
+  end
+
+  defp isolated_parse(parser, node, index) do
+    {:ok, parser.(node)}
+  rescue
+    error -> {:error, %{index: index, reason: Exception.message(error)}}
+  catch
+    :exit, reason -> {:error, %{index: index, reason: format_reason(reason)}}
+    :throw, value -> {:error, %{index: index, reason: format_reason(value)}}
+  end
+
+  defp finish_feed(%{products: [], errors: errors}),
+    do: {:error, {:all_products_failed, Enum.reverse(errors)}}
+
+  defp finish_feed(%{products: products, errors: errors}) do
+    {:ok,
+     %{
+       products: Enum.reverse(products),
+       skipped: length(errors),
+       errors: Enum.reverse(errors)
+     }}
+  end
+
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
+
   defp strip_default_namespace(xml) do
     Regex.replace(@onix_xmlns_re, xml, "")
   end
@@ -83,8 +195,15 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
   @doc """
   Derive a document id from a parsed product map. Prefers the
   `_publishedId` field (set by `parse/1` from `<RecordReference>`),
-  falls back to the first `productIdentifiers[].idValue`, and finally to
-  a random `imported-<n>` placeholder.
+  falls back to the first `productIdentifiers[].idValue`, and finally to a
+  DETERMINISTIC `imported-<hash>` derived from the record's own content.
+
+  The fallback used to be a random `imported-<n>` placeholder. A random id
+  is a data-integrity bug in an import pipeline: a record with no
+  `<RecordReference>` and no `<ProductIdentifier>` drew a fresh id on every
+  re-sync, so it could never dedupe through the upsert path and instead
+  accumulated one duplicate draft per import run. `imported-<hash>` maps the
+  same record to the same id every time, which is what the upsert path needs.
   """
   @spec doc_id_for(map()) :: String.t()
   def doc_id_for(product) when is_map(product) do
@@ -100,10 +219,92 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
             value
 
           _ ->
-            "imported-#{:rand.uniform(999_999)}"
+            "imported-#{fallback_hash(product)}"
         end
     end
   end
+
+  # ── Deterministic fallback id ───────────────────────────────────────────
+  #
+  # Identity key, in order of preference:
+  #
+  #   1. The NARROW key — title + first contributor name + productForm.
+  #      These three are the record's bibliographic identity: an ONIX
+  #      record that keeps describing the same book keeps the same title,
+  #      the same lead contributor and the same product form across
+  #      re-syncs, while descriptive fields (blurbs, prices, availability,
+  #      supply detail) churn constantly. Keying on the narrow set is what
+  #      makes a re-sync a NO-OP rather than a duplicate — hashing the whole
+  #      record would re-duplicate on every price change, i.e. it would
+  #      re-introduce the very bug this replaces, only less often.
+  #
+  #   2. If all three are empty, the record carries no bibliographic
+  #      identity at all, so we fall back to a canonical encoding of the
+  #      WHOLE product map. That is still deterministic (same bytes in →
+  #      same id out) and it keeps two genuinely different content-free
+  #      records from colliding onto one id.
+  #
+  # Two id-less records that agree on title AND contributor AND product form
+  # collide by design: with no `<RecordReference>` and no
+  # `<ProductIdentifier>`, that is the same book as far as ONIX can say.
+  defp fallback_hash(product) do
+    key =
+      case narrow_identity(product) do
+        [] -> ["whole:", canonical_iodata(product)]
+        parts -> parts
+      end
+
+    :sha256
+    |> :crypto.hash(IO.iodata_to_binary(key))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
+  defp narrow_identity(product) do
+    parts = [
+      ["title:", to_string(title_for(product) || "")],
+      ["contributor:", first_contributor_name(product)],
+      ["productForm:", to_string(Map.get(product, "productForm") || "")]
+    ]
+
+    if Enum.all?(parts, fn [_label, value] -> value == "" end), do: [], else: parts
+  end
+
+  defp first_contributor_name(product) do
+    with [contributor | _] <- Map.get(product, "contributors", []),
+         %{} = person <- Map.get(contributor, "personName") do
+      Map.get(person, "personNameInverted") || Map.get(person, "personName") || ""
+    else
+      _ ->
+        case Map.get(product, "contributors", []) do
+          [%{"corporateName" => %{} = corp} | _] ->
+            Map.get(corp, "corporateNameInverted") || Map.get(corp, "corporateName") || ""
+
+          _ ->
+            ""
+        end
+    end
+  end
+
+  # Order-independent, type-tagged encoding. Elixir map iteration order is an
+  # implementation detail, so keys are sorted before encoding; the type tags
+  # (`m`/`l`/`s`) keep a map from hashing the same as a list that happens to
+  # flatten to the same bytes.
+  defp canonical_iodata(%{} = map) do
+    inner =
+      map
+      |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
+      |> Enum.map(fn {k, v} -> [to_string(k), "=", canonical_iodata(v), ";"] end)
+
+    ["m(", inner, ")"]
+  end
+
+  defp canonical_iodata(list) when is_list(list) do
+    ["l(", Enum.map(list, &[canonical_iodata(&1), ";"]), ")"]
+  end
+
+  defp canonical_iodata(value) when is_binary(value), do: ["s(", value, ")"]
+  defp canonical_iodata(value), do: ["s(", inspect(value), ")"]
 
   @doc """
   Best-effort title extraction. Walks `titleDetails[0].titleElements[0].titleText`.

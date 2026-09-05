@@ -1,0 +1,1 @@
+HONEST AT n=1: a fixture with a site at att=1, live=1 asserts the per-site live rate node is `refused: true, pct: nil` with the sample in its reason — NOT 100.0%. Paste the assertion and the run

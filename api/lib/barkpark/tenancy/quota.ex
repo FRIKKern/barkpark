@@ -37,22 +37,31 @@ defmodule Barkpark.Tenancy.Quota do
   @audit_category "access"
 
   @doc """
-  The write-admission decision for a workspace.
+  The write-admission decision for a workspace, for a request that will consume
+  `needed` room-consuming writes (default `1` — the historical one-token check).
 
     * `{:error, :suspended}` — the hard suspend flag is set (checked first).
     * `{:error, :quota_exceeded}` — a cap is configured and the workspace's
-      document count has reached it.
-    * `:ok` — otherwise (including the common uncapped, un-suspended case).
+      document count leaves less than `needed` room.
+    * `:ok` — otherwise (including the common uncapped, un-suspended case, and
+      `needed == 0`: a batch that only deletes/patches never consumes room, so a
+      quota must never refuse it).
 
   Reads the `suspended` flag off the passed struct (fresh from `ResolveWorkspace`
   at request time — no extra query); only a configured, non-nil `quota` triggers
   a count query.
-  """
-  @spec check(Workspace.t()) :: :ok | {:error, :suspended | :quota_exceeded}
-  def check(%Workspace{suspended: true}), do: {:error, :suspended}
 
-  def check(%Workspace{} = ws) do
-    if within_quota?(ws), do: :ok, else: {:error, :quota_exceeded}
+  `check(ws)` is `check(ws, 1)` and is byte-identical to the pre-batch-cap
+  behaviour: `usage + 1 <= quota` ⟺ `usage < quota`.
+  """
+  @spec check(Workspace.t(), non_neg_integer()) ::
+          :ok | {:error, :suspended | :quota_exceeded}
+  def check(ws, needed \\ 1)
+
+  def check(%Workspace{suspended: true}, _needed), do: {:error, :suspended}
+
+  def check(%Workspace{} = ws, needed) when is_integer(needed) and needed >= 0 do
+    if room_for?(ws, needed), do: :ok, else: {:error, :quota_exceeded}
   end
 
   @doc """
@@ -63,11 +72,26 @@ defmodule Barkpark.Tenancy.Quota do
   is compared against the cap.
   """
   @spec within_quota?(Workspace.t()) :: boolean()
-  def within_quota?(%Workspace{suspended: true}), do: false
-  def within_quota?(%Workspace{quota: nil}), do: true
+  def within_quota?(%Workspace{} = ws), do: room_for?(ws, 1)
 
-  def within_quota?(%Workspace{id: id, quota: quota}) when is_integer(quota) do
-    usage(id) < quota
+  @doc """
+  Whether the workspace has room for `needed` MORE documents.
+
+  This is the invariant the batch gate needs and `within_quota?/1` could not
+  express: "room for at least one more" admitted a request that then wrote N,
+  overshooting the cap by N-1. A suspended workspace has room for nothing; an
+  uncapped (`NULL` quota) workspace has room for everything; `needed == 0` (a
+  delete-only / patch-only batch) is always admitted — a document-count quota
+  has no business refusing a write that cannot raise the count.
+  """
+  @spec room_for?(Workspace.t(), non_neg_integer()) :: boolean()
+  def room_for?(%Workspace{suspended: true}, _needed), do: false
+  def room_for?(%Workspace{quota: nil}, _needed), do: true
+  def room_for?(%Workspace{}, 0), do: true
+
+  def room_for?(%Workspace{id: id, quota: quota}, needed)
+      when is_integer(quota) and is_integer(needed) and needed > 0 do
+    usage(id) + needed <= quota
   end
 
   @doc """

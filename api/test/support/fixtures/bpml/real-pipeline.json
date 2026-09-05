@@ -1,0 +1,37 @@
+{
+  "blocks": [
+    {
+      "id": "sc-024",
+      "nodes": [
+        {
+          "detail": "per-workspace limits, live usage meters, freeze/unfreeze — the same build Estate and playground wait on",
+          "files": "tenancy context + scope.ex",
+          "kind": "slice 1 — shared with Estate",
+          "source": true,
+          "title": "quota + meter + suspend"
+        },
+        {
+          "detail": "bundle one workspace (docs · media · schemas · memberships) to object storage; import twin on any instance",
+          "files": "tenancy + media + bundles",
+          "kind": "slice 2 — keystone",
+          "title": "per-workspace export/import"
+        },
+        {
+          "detail": "boot profile: tmux console off, admin surfaces fenced, RLS policies on, webhook egress filter, sandboxed media queue",
+          "files": "runtime.exs + Caddy + RLS migration",
+          "kind": "slice 3 — hardening",
+          "title": "shared-cell profile"
+        },
+        {
+          "detail": "rebalance + graduate on pressure score: export → import → domains-table cutover → verify → retire source",
+          "files": "cloud/ registry + worker",
+          "kind": "slice 4 — the payoff",
+          "title": "mobility orchestrator"
+        }
+      ],
+      "type": "pipeline"
+    }
+  ],
+  "paper": "shared-cells",
+  "type": "pipeline"
+}

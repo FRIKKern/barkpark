@@ -52,9 +52,12 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   ## Limits, stated so nobody over-reads a green run
 
     * It proves a verb HAS a producer, not that the producer is REACHABLE or
-      that the row is actually persisted. `Accounts.record_audit/1` errors are
-      discarded at 8 of 12 call sites — filed separately as
-      `cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site`.
+      that the row is actually persisted. The eight silent `_ =` discards this
+      note used to name are gone — every `Accounts.record_audit/1` call site in
+      the router now binds its `{:error, changeset}` and logs it, and
+      `router_audit_discard_census_test.exs` is the tripwire that keeps the
+      discard idiom out. A row can still fail to persist; the difference is that
+      an operator now gets a line when it does.
     * It is a SOURCE scan, not a call graph: dead code counts as a producer.
     * ARM (c) IS ONE VERB WIDE, ON PURPOSE, AND THAT IS A LIMIT NOT A DESIGN.
       It pins the lanes of `barkpark.deleted` because that is the pair a wave
@@ -118,20 +121,17 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   # green run): a regex pair proves the cited code exists and the cited blocker
   # does not. It does not prove the SENTENCE is a good reason. It catches decay
   # and fabrication, which is exactly the pair of failures wave 51 shipped.
+  # `oauth.linked` LEFT THIS MAP under cch-w53-bl-oauth-linked-needs-a-branch-
+  # reporting-return, and its exit is the shape working as designed rather than a
+  # loosened guard. Its `blocker_absent: ~r/:linked\b/` said, mechanically, "this
+  # verb is unproduced because nothing in cloud/lib reports a :linked branch". The
+  # slice made `Accounts.get_or_create_user_from_oauth/1` return
+  # `{:ok, user, :existing | :linked | :created}`, so that regex started matching
+  # code — the census RED that demanded the verb be produced and this entry
+  # deleted. The producer is `audit_oauth_linked/4` in router.ex, gated on the
+  # `:linked` arm alone, and arm (a) below now resolves the verb through
+  # `literal_producers/0` with no allowlist help.
   @producerless %{
-    "oauth.linked" => %{
-      reason:
-        "NOT unbuilt — the OAuth callback (router.ex, `/v1/auth/oauth/:provider/callback`) " <>
-          "really does link identities: Accounts.get_or_create_user_from_oauth/1 -> " <>
-          "birth_or_link_oauth/3 -> link_external_identity/2 inserts a durable " <>
-          "external_identities row. It is unproduced because the callback cannot tell a LINK " <>
-          "from a BIRTH: get_or_create_user_from_oauth/1 returns a bare {:ok, user}, so a " <>
-          "producer there would stamp oauth.linked on first-ever signups too. Producing it " <>
-          "honestly needs a branch-reporting return — " <>
-          "cch-w53-bl-oauth-linked-needs-a-branch-reporting-return.",
-      anchor: ~r/link_external_identity/,
-      blocker_absent: ~r/:linked\b/
-    },
     "email.verified" => %{
       reason:
         "NOT unbuilt — `post \"/v1/auth/verify-email\"` exists and is reachable, and " <>
@@ -651,6 +651,542 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
 
       assert MapSet.size(producer_files("no.such_verb")) == 0,
              "producer_files/1 found a producer for a verb that does not exist."
+    end
+  end
+
+  # ── ARM (d) — THE GENERAL DESTRUCTIVE LANE (task-55fb1f33a217249b) ────────
+  #
+  # ARM (c) above pins the lanes of ONE verb because that is the pair a wave
+  # actually found broken, and it says so as a LIMIT. This arm is the general
+  # shape that limit named: enumerate EVERY row-destroying call site in
+  # `cloud/lib` from source, and require each one to either carry an audit
+  # producer in its own transaction or sit on a named allowlist entry WITH a
+  # rationale and a predicate.
+  #
+  # WHAT A "SITE" IS. A code line matching `Repo.delete(`, `Repo.delete_all(`,
+  # `Registry.delete_barkpark(` or `Registry.delete_site(` — the two named
+  # helpers included because they ARE the delete for the two schemas this
+  # console's audit vocabulary has nouns for, and a lane that calls one has
+  # destroyed a row as surely as one that calls `Repo` itself.
+  #
+  # HOW A SITE IS KEYED, and why not by line. `"<relpath>|<enclosing unit>"`,
+  # where a unit is the nearest `def`/`defp` above it or, in the router, the
+  # nearest Plug route macro. Line numbers rot on the next insertion (and the
+  # repo's lineref gate refuses them); a unit name is stable under insertion,
+  # reds LOUDLY on a rename, and — unlike the raw source line — is unique enough
+  # to reason about, since `|> Repo.delete_all()` appears five times in
+  # accounts.ex alone and would collapse into one meaningless key. Each entry
+  # carries the COUNT of sites in that unit, so a second delete added beside an
+  # excused one reds instead of inheriting its excuse.
+  #
+  # HOW "IN ITS TRANSACTION" IS DECIDED. An `:audited` entry must have an audit
+  # producer within #{@audit_window} code lines of EVERY destructive line in its
+  # unit. Proximity, not a call graph — stated plainly because the alternative is
+  # a reader who thinks this proves the row is persisted. It does not; it proves
+  # the producer is written where the delete is, which is the property that was
+  # missing on five lanes when this was filed.
+  #
+  # WHAT THIS ARM STILL CANNOT SEE, so nobody over-reads a green run:
+  #
+  #   * A unit that contains BOTH an audited delete and an unaudited one reads
+  #     as unaudited (the `and` across a unit's sites is deliberate: the strict
+  #     direction). `do_resurrect/*` is the live example — it stamps
+  #     `barkpark.resurrected` on the success branch and deletes the row on the
+  #     enqueue-failure branch, twenty lines apart — and it is allowlisted with
+  #     that reason rather than waved through by the window.
+  #   * Four ROUTE lanes now share one audited helper
+  #     (`audited_delete_barkpark/3`), so this arm can no longer tell them
+  #     apart — the ARM (c) weakness, one level down. What it CAN tell is that a
+  #     fifth route lane calling `Registry.delete_barkpark/1` directly is a new
+  #     site in a new unit, undeclared, and reds. That is the property worth
+  #     having: the audited path is the only path, and leaving it is visible.
+  #   * `Repo.delete_all` inside an Ecto `Multi`, or a delete issued as raw SQL,
+  #     matches nothing here. Neither shape exists in `cloud/lib` today.
+  @destructive ~r/Repo\.delete\(|Repo\.delete_all\(|Registry\.delete_barkpark\(|Registry\.delete_site\(/
+  @unit_def ~r/^\s{0,4}defp?\s+([a-z_][A-Za-z0-9_?!]*)/
+  @unit_route ~r/^\s{0,4}(get|post|put|patch|delete|match)\s+"([^"]+)"/
+  @audit_producer ~r/Accounts\.audit\(|record_audit\(|audit_lifecycle_trigger\(|record_deprovision_audit\(/
+  @audit_window 12
+  @destructive_floor 25
+
+  # Every destructive unit in cloud/lib, with its disposition. `:audited` needs a
+  # `producer` regex that must match inside the window; `:allowlisted` needs an
+  # `anchor` that must resolve somewhere in cloud/lib — the same falsifiability
+  # discipline @producerless carries, for the same reason: a rationale nothing
+  # reads is a sentence with no exit code.
+  @destructive_sites %{
+    ## ── AUDITED ─────────────────────────────────────────────────────────────
+    "barkpark_cloud/registry.ex|succeed_deprovision_job" => %{
+      kind: :audited,
+      count: 1,
+      reason:
+        "the LIVE deprovision lane — the worker's succeed callback deletes the row it just " <>
+          "tore the real box out from under and stamps barkpark.deleted in the SAME " <>
+          "transaction, rolling the delete back if the audit row will not insert.",
+      producer: ~r/record_deprovision_audit\(/
+    },
+    "barkpark_cloud/web/router.ex|DELETE /v1/barkparks/:id" => %{
+      kind: :audited,
+      count: 1,
+      reason:
+        "the NON-LIVE arm of the team-facing remove — a box that never came up, deleted " <>
+          "inside Accounts.audit/3 so the row and barkpark.deleted commit together.",
+      producer: ~r/Accounts\.audit\(audit_attrs/
+    },
+    "barkpark_cloud/web/router.ex|audited_delete_barkpark" => %{
+      kind: :audited,
+      count: 1,
+      reason:
+        "the shared audited helper the four remaining route lanes now route through — both " <>
+          "arms of DELETE /v1/fleet/supports/:id and both arms of the internal deprovision " <>
+          "route. Before this task all four deleted a team's row and wrote nothing.",
+      producer: ~r/action: "barkpark\.deleted"/
+    },
+
+    ## ── ALLOWLISTED: the act is audited, one frame up ───────────────────────
+    "barkpark_cloud/registry.ex|delete_barkpark" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "THE HELPER, not a lane. Every caller of it is enumerated in this table by name, " <>
+          "which is where the audit obligation is answered — putting the producer here " <>
+          "instead would make one row for six different acts and lose which happened.",
+      anchor: ~r/audited_delete_barkpark\(/
+    },
+    "barkpark_cloud/registry.ex|delete_site" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the CP half of a site delete. Its caller runs it INSIDE Accounts.audit/3 with the " <>
+          "site.deleted row already committed — the audit is the gate upstream, by " <>
+          "construction, not a missing one here.",
+      anchor: ~r/"site\.deleted"/
+    },
+    "barkpark_cloud/web/router.ex|delete_site_after_audit" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the ACT half of DELETE /v1/sites/:id, reached ONLY once the site.deleted row is " <>
+          "committed — the function's name is the invariant and the gate is one frame up.",
+      anchor: ~r/"site\.deleted"/
+    },
+    "barkpark_cloud/registry.ex|disconnect_provider" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "drops a team's provider row; the ACT is provider.disconnected, audited at its route. " <>
+          "The credential going with the row is the plugin law, not a second event.",
+      anchor: ~r/"provider\.disconnected"/
+    },
+    "barkpark_cloud/github.ex|disconnect" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "drops a team's GitHub installation; the ACT is github.installation_disconnected, " <>
+          "audited at its route.",
+      anchor: ~r/"github\.installation_disconnected"/
+    },
+    "barkpark_cloud/accounts.ex|revoke_invitation" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "deletes a pending invitation; the ACT is invitation.revoked, audited at its route " <>
+          "inside the same request.",
+      anchor: ~r/"invitation\.revoked"/
+    },
+    "barkpark_cloud/accounts.ex|delete_user_session_tokens" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "revokes a removed member's sessions. The ACT is member.removed, audited at its " <>
+          "route; this sweep is that act's remedy, and a second row for it would report one " <>
+          "removal twice.",
+      anchor: ~r/"member\.removed"/
+    },
+    "barkpark_cloud/accounts.ex|invite_member" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "reaps an EXPIRED, never-accepted invite for the same (team,email) inside the " <>
+          "re-invite transaction, because the partial unique index would otherwise 409 a " <>
+          "re-send forever. The reaped row was already unusable; the ACT is member.invited.",
+      anchor: ~r/"member\.invited"/
+    },
+    "barkpark_cloud/registry.ex|cancel_pending_deprovision_jobs" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "deletes still-PENDING deprovision JOBS — not barkparks — on the trial-to-paid path, " <>
+          "so a now-paying team's boxes are never torn down. No resource a reader can see is " <>
+          "removed, and the act that caused it is subscription.activated.",
+      anchor: ~r/"subscription\.activated"/
+    },
+    "barkpark_cloud/accounts.ex|delete_two_factor_pending_tokens" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "spends the caller's OWN single-use 2fa-pending token after a successful challenge. " <>
+          "A credential being consumed, not a resource removed; the surrounding act is " <>
+          "stamped by audit_account_security/2 at the route.",
+      anchor: ~r/audit_account_security\(/
+    },
+
+    ## ── ALLOWLISTED: single-use credential CONSUMED (the delete IS the use) ──
+    "barkpark_cloud/device_auth.ex|consume_and_mint" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the atomic consume of an APPROVED device-auth request: a count of 1 means we won " <>
+          "the race and own the mint. The delete IS the redemption, and the session it mints " <>
+          "carries origin device_link, which is the durable evidence.",
+      anchor: ~r/origin: "device_link"/
+    },
+    "barkpark_cloud/oauth.ex|consume_state" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the single-use compare-and-consume of an oauth state nonce — exactly one row " <>
+          "deleted means first redemption, zero means replay. The delete IS the anti-replay " <>
+          "check; a row per attempt would be a log of scanner traffic.",
+      anchor: ~r/consume_state\(nonce, provider\)/
+    },
+    "barkpark_cloud/device_auth.ex|deny" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "a user DENYING their own pending device-auth request by user_code. Idempotent and " <>
+          "self-directed: the subject and the actor are the same person, and the outcome the " <>
+          "polling device sees is the record.",
+      anchor: ~r/DeviceAuth\.deny\(/
+    },
+
+    ## ── ALLOWLISTED: scheduled hygiene / retention sweeps (no actor, no act) ─
+    "barkpark_cloud/oauth.ex|reap_expired_states" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "a scheduled sweep of oauth state nonces past their TTL. Expiry is already enforced " <>
+          "in band twice over, so every reaped row was unredeemable by construction — there " <>
+          "is no actor and nothing a reader could have acted on.",
+      anchor: ~r/OAuth\.reap_expired_states\(\)/
+    },
+    "barkpark_cloud/device_auth.ex|reap_expired" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "a scheduled sweep of device-auth requests past their expiry; expiry is enforced in " <>
+          "band by every query, so this is hygiene only and has no actor.",
+      anchor: ~r/DeviceAuth\.reap_expired\(\)/
+    },
+    "barkpark_cloud/accounts.ex|reap_sse_tickets" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "a scheduled sweep of revoked or lapsed single-use SSE stream tickets. Each row was " <>
+          "already unusable; an audit row per reaped credential would be a log, not a trail.",
+      anchor: ~r/Accounts\.reap_sse_tickets\(\)/
+    },
+    "barkpark_cloud/accounts.ex|reap_oauth_exchange_codes" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the same shape one context over: revoked or lapsed single-use oauth exchange codes, " <>
+          "swept on a schedule with no actor. The where clause is deliberately narrow — " <>
+          "widening it by one context would delete other people's evidence.",
+      anchor: ~r/Accounts\.reap_oauth_exchange_codes\(\)/
+    },
+    "barkpark_cloud/workers/agent_retention_worker.ex|perform" => %{
+      kind: :allowlisted,
+      count: 4,
+      reason:
+        "the plane's own retention prune — agent events, DEAD agent tokens past their grace, " <>
+          "cached usage samples, and platform delivery records, each past a stated window. " <>
+          "Telemetry aging out on a schedule, with no team resource removed and no actor.",
+      anchor: ~r/@delivery_retention_days 180/
+    },
+
+    ## ── ALLOWLISTED: fleet-internal capacity, no team to record against ──────
+    "barkpark_cloud/registry.ex|delete_warm_server" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "a warm-POOL row — fleet capacity bookkeeping with no team and no console surface. " <>
+          "audit_events.team_id is null: false, so a teamless act cannot be recorded on this " <>
+          "trail at all; the operator-audit design owns that question.",
+      anchor: ~r/schema "warm_servers"/
+    },
+    "barkpark_cloud/registry.ex|reap_stale_warm_claims_txn" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "recovers warm-pool rows whose claim went stale — the same teamless fleet-capacity " <>
+          "class as delete_warm_server/2, on a timer rather than a call.",
+      anchor: ~r/schema "warm_servers"/
+    },
+
+    ## ── ALLOWLISTED: derived bytes, not a record ────────────────────────────
+    "barkpark_cloud/sites/deploy.ex|drop_artifact" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "drops a TERMINAL deployment's stored build bytes once the box has them. The " <>
+          "deployment row — the record of what happened — survives; only the payload goes, " <>
+          "and keeping it would be a pure leak on the plane's only durable volume.",
+      anchor: ~r/drop_artifact\(ctx\.id\)/
+    },
+    "barkpark_cloud/push.ex|enforce_device_cap" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "evicts a user's OWN oldest device push registrations past the per-user cap, at the " <>
+          "moment they register a new one. Self-directed capacity enforcement on the actor's " <>
+          "own rows, not a removal anyone else can see.",
+      anchor: ~r/enforce_device_cap\(user_id, device\.id\)/
+    },
+
+    ## ── ALLOWLISTED: rolls back what this same request just created ─────────
+    "barkpark_cloud/web/router.ex|do_resurrect" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "rolls back the barkpark row this same request created seconds earlier, when the " <>
+          "resurrect job would not enqueue. Its paired barkpark.resurrected is stamped on " <>
+          "the SUCCESS branch only, so the trail is already consistent — a barkpark.deleted " <>
+          "for a box that never existed would be noise presented as evidence.",
+      anchor: ~r/"barkpark\.resurrected"/
+    }
+  }
+
+  defp unit_of(line, current) do
+    cond do
+      Regex.match?(@unit_def, line) -> @unit_def |> Regex.run(line) |> Enum.at(1)
+      Regex.match?(@unit_route, line) -> @unit_route |> Regex.run(line) |> route_unit()
+      true -> current
+    end
+  end
+
+  defp route_unit([_, verb, path]), do: String.upcase(verb) <> " " <> path
+
+  # %{"<relpath>|<unit>" => {site_count, audited_within_window?}} over cloud/lib.
+  defp destructive_sites do
+    Enum.reduce(lib_files(), %{}, fn path, acc ->
+      lines = code_lines(path)
+      rel = Path.relative_to(path, @lib_root)
+
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce({acc, "<module body>"}, fn {line, i}, {sites, unit} ->
+        unit = unit_of(line, unit)
+
+        if Regex.match?(@destructive, line) do
+          window = Enum.slice(lines, max(i - @audit_window, 0), 2 * @audit_window + 1)
+          audited? = Enum.any?(window, &Regex.match?(@audit_producer, &1))
+
+          {Map.update(sites, "#{rel}|#{unit}", {1, audited?}, fn {n, a} ->
+             {n + 1, a and audited?}
+           end), unit}
+        else
+          {sites, unit}
+        end
+      end)
+      |> elem(0)
+    end)
+  end
+
+  describe "ARM (d) — every destructive lane is audited or excused BY NAME" do
+    test "the site reader still finds the lanes (a broken extractor must red)" do
+      sites = destructive_sites()
+      total = sites |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.sum()
+
+      assert total >= @destructive_floor,
+             """
+             The destructive-site reader found #{total} sites across #{map_size(sites)} units,
+             below the floor of #{@destructive_floor}. The extractor is broken — the regex, the
+             comment/heredoc stripping, or the lib path — and every arm below is comparing two
+             empty sets while `Repo.delete_all` sits unwatched in #{@lib_root}.
+             """
+
+      # The reader must also DISCRIMINATE, or "every site is audited" is free.
+      assert {1, true} = Map.fetch!(sites, "barkpark_cloud/registry.ex|succeed_deprovision_job")
+      assert {1, false} = Map.fetch!(sites, "barkpark_cloud/web/router.ex|do_resurrect")
+
+      refute Map.has_key?(sites, "barkpark_cloud/registry.ex|no_such_function"),
+             "the reader invents units that do not exist."
+    end
+
+    test "no destructive site is unenumerated" do
+      undeclared =
+        destructive_sites()
+        |> Map.keys()
+        |> Enum.reject(&Map.has_key?(@destructive_sites, &1))
+        |> Enum.sort()
+
+      assert undeclared == [],
+             """
+             These units destroy rows in cloud/lib and this census has never seen them:
+
+                 #{Enum.map_join(undeclared, "\n    ", & &1)}
+
+             Every row-destroying lane either writes its audit verb in its own transaction or
+             is named HERE with a reason and an anchor. A new delete that is neither is exactly
+             the shape of the five lanes this arm was built to find — four route lanes that
+             removed a team's instance and wrote nothing, plus a rollback that should not.
+
+             Add an entry: %{kind: :audited, count: n, reason: ..., producer: ~r/.../} when the
+             producer sits in the transaction, or %{kind: :allowlisted, count: n, reason: ...,
+             anchor: ~r/.../} when it genuinely does not belong on the trail — and say WHY, in
+             a sentence someone can refute.
+             """
+    end
+
+    test "no enumerated site has quietly disappeared" do
+      observed = destructive_sites()
+
+      stale =
+        @destructive_sites
+        |> Map.keys()
+        |> Enum.reject(&Map.has_key?(observed, &1))
+        |> Enum.sort()
+
+      assert stale == [],
+             """
+             These entries excuse a lane that no longer exists (renamed, moved, or deleted):
+
+                 #{Enum.map_join(stale, "\n    ", & &1)}
+
+             A stale excuse is worse than no excuse — the next real delete in a unit with this
+             name inherits an exemption nobody re-read. Re-point it or delete it.
+             """
+    end
+
+    test "each entry's site COUNT still matches the tree" do
+      drifted =
+        for {key, %{count: declared}} <- @destructive_sites,
+            {observed, _audited?} = Map.get(destructive_sites(), key, {0, false}),
+            observed != declared,
+            do: "#{key}: declared #{declared}, found #{observed}"
+
+      assert Enum.sort(drifted) == [],
+             """
+             These units gained or lost a destructive call site:
+
+                 #{Enum.map_join(Enum.sort(drifted), "\n    ", & &1)}
+
+             The count is what stops a second delete from inheriting the first one's excuse. A
+             new one in an excused unit is a new lane: re-read the rationale and either widen
+             it deliberately or audit the new site.
+             """
+    end
+
+    test "every entry is fully shaped — a reason plus the predicate its kind requires" do
+      malformed =
+        for {key, e} <- @destructive_sites,
+            not (e.kind in [:audited, :allowlisted] and is_integer(e.count) and e.count >= 1 and
+                   is_binary(e[:reason]) and String.length(e[:reason]) >= 60 and
+                   is_struct(
+                     if(e.kind == :audited, do: e[:producer], else: e[:anchor]),
+                     Regex
+                   )),
+            do: key
+
+      assert Enum.sort(malformed) == [],
+             """
+             These entries are not machine-checkable: #{inspect(Enum.sort(malformed))}
+
+             :audited needs a `producer` Regex (checked inside the window); :allowlisted needs
+             an `anchor` Regex (checked against all of cloud/lib). Both need a substantive
+             reason. A bare name with a sentence nothing reads is what wave 51 shipped.
+             """
+    end
+
+    test "every :audited lane really does carry its producer in the transaction" do
+      lost =
+        for {key, %{kind: :audited} = e} <- @destructive_sites,
+            {_n, audited?} = Map.get(destructive_sites(), key, {0, false}),
+            not audited?,
+            do: "#{key} (expected #{inspect(e.producer)} within #{@audit_window} lines)"
+
+      assert Enum.sort(lost) == [],
+             """
+             These lanes are declared AUDITED and no audit producer is written near their
+             delete any more:
+
+                 #{Enum.map_join(Enum.sort(lost), "\n    ", & &1)}
+
+             This is the arm the task asked for in one sentence: removing the producer from a
+             lane that has one REDS, instead of being covered by the producer some other lane
+             still has. Restore it, or move the entry to :allowlisted and argue the case.
+             """
+
+      # The declared producer must be the one actually there — not merely SOME
+      # audit call in the window. Otherwise a lane could be re-pointed at an
+      # unrelated producer and still read green.
+      wrong =
+        for {key, %{kind: :audited, producer: producer}} <- @destructive_sites,
+            [file, _unit] = String.split(key, "|", parts: 2),
+            path = Path.join(@lib_root, file),
+            not Enum.any?(code_lines(path), &Regex.match?(producer, &1)),
+            do: "#{key} -> #{inspect(producer)}"
+
+      assert Enum.sort(wrong) == [],
+             "these declared producers no longer appear in their own file at all: " <>
+               "#{inspect(Enum.sort(wrong))}"
+    end
+
+    test "every :allowlisted rationale's ANCHOR still resolves in cloud/lib" do
+      dangling =
+        for {key, %{kind: :allowlisted, anchor: anchor}} <- @destructive_sites,
+            lib_lines_matching(anchor) == [],
+            do: "#{key} -> #{inspect(anchor)}"
+
+      assert Enum.sort(dangling) == [],
+             """
+             These excuses cite code that does not exist in cloud/lib:
+
+                 #{Enum.map_join(Enum.sort(dangling), "\n    ", & &1)}
+
+             Almost every rationale here says "the ACT is audited one frame up" and names the
+             verb. When that verb stops being written, the excuse is FALSE and this reds — which
+             is the whole difference between an allowlist and a comment.
+             """
+    end
+
+    # THE FIVE LANES THE FILING NAMED, held individually so a future refactor
+    # cannot quietly return any of them to writing nothing.
+    test "the five formerly-unaudited barkpark delete lanes are each accounted for" do
+      router = Path.join(@lib_root, "barkpark_cloud/web/router.ex")
+      lines = code_lines(router)
+
+      direct =
+        for line <- lines,
+            Regex.match?(~r/Registry\.delete_barkpark\(/, line),
+            do: String.trim(line)
+
+      assert length(direct) == 3,
+             """
+             router.ex has #{length(direct)} direct `Registry.delete_barkpark/1` call sites,
+             expected 3 — the inline audited lane of DELETE /v1/barkparks/:id, the shared
+             audited helper, and the resurrect rollback:
+
+                 #{Enum.join(direct, "\n    ")}
+
+             Six lanes deleted a barkpark row when this was filed and five of them wrote
+             nothing. Four now route through `audited_delete_barkpark/3`; the fifth is the
+             rollback, allowlisted above. A FOURTH direct call site is a seventh lane, and it
+             is either audited through the helper or it is a new hole.
+             """
+
+      for lane <- [
+            "fleet_support_detach",
+            "fleet_support_not_live",
+            "internal_deprovision_detach",
+            "internal_deprovision_not_live"
+          ] do
+        assert Enum.any?(lines, &String.contains?(&1, "audited_delete_barkpark(conn, ")) and
+                 Enum.any?(lines, &String.contains?(&1, inspect(lane))),
+               "the #{lane} lane no longer routes its delete through the audited helper — it " <>
+                 "removes a team's instance and writes nothing, which is the state this task found."
+      end
     end
   end
 end

@@ -1,0 +1,1 @@
+Any carrier added is guarded `failure() || cancelled()` from the start, not `failure()` alone. Evidence: the guard lines.

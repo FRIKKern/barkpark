@@ -1,0 +1,1 @@
+The all-done-roster arm is reproduced hermetically and shown to reach `fetchById` and exit 2 `code=LEDGER-UNREACHABLE`. Evidence: the run output.

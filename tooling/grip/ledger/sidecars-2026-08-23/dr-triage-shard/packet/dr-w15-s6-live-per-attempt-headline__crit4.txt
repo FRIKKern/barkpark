@@ -1,0 +1,1 @@
+live_rate arrives IN the server envelope and is NOT computed client-side — TestCloudDeploymentsJSONIsVerbatim still passes. Paste the passing test name.

@@ -1,0 +1,1 @@
+The fact reaches a human (PR comment or bp task), not just a log line — the reader is named.

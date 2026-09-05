@@ -1,0 +1,1 @@
+The gate lookups are stubbed or injected on the TEST path so no test reaches a foreign host, proved by an EMPTY curl-shim log over the whole suite. Evidence: the shim log.

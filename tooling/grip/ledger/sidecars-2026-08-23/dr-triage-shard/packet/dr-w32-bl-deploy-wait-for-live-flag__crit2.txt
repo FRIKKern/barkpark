@@ -1,0 +1,1 @@
+The wait has a caller-visible deadline and exits non-zero when it expires, naming the deadline and the last status it read rather than a bare timeout.

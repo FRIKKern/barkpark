@@ -1,0 +1,1 @@
+design/check.mjs gains a duration-drift assertion so a hand-typed duration literal in a ledgered surface is visible the way a colour literal is

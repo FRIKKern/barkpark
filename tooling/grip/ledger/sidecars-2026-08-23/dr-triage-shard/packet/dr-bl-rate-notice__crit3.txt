@@ -1,0 +1,1 @@
+No line owned by cloud-console-hardening wave 31 slice 7 (registry.ex reaper/suppression region) is touched.

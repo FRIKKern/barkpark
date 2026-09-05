@@ -1,0 +1,1 @@
+value:0 with a max renders the progress bar at 0% (not dropped), matching the web reference

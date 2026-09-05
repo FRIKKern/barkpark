@@ -1,0 +1,1 @@
+Gate green: bash scripts/crown-reconcile.test.sh, count strictly up, zero failures.

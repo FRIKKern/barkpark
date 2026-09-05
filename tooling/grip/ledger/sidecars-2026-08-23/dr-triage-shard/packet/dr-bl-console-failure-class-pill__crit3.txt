@@ -1,0 +1,1 @@
+A deployment whose console is entirely empty (54% of failed rows) renders as empty-by-construction rather than as a build that was quiet.

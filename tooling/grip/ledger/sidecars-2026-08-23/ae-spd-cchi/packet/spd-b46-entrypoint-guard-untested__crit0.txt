@@ -1,0 +1,1 @@
+A test spawns scripts/studio-desk-measure.mjs through a SYMLINK (not the real path) with an argument that must fail, and asserts exit 1 with non-empty stderr. Reverting realResolve() to the old asymmetric comparison must turn it red — paste both runs.

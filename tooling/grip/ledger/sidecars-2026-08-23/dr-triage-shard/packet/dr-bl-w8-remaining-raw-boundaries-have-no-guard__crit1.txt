@@ -1,0 +1,1 @@
+An executable guard (test or CI check) REDS when a new raw-failure JSON field is added without the display-boundary scrub. Evidence: the guard plus a mutation run proving it can lose.

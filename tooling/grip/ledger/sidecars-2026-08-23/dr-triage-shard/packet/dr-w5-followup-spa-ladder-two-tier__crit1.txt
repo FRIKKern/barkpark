@@ -1,0 +1,1 @@
+ATTENTION_RANK is the eleven-rung D69 ladder and bucketOf is attention<=8 / in-flight 9-10 / healthy 11, with every pre-existing bucket assignment unchanged. Evidence: the passing console suite, plus a mutated boundary shown red.

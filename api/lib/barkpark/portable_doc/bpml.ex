@@ -79,6 +79,16 @@ defmodule Barkpark.PortableDoc.Bpml do
           [
             "paper",
             "stat",
+            # the grid/widget tier's child elements (criterion 1) — a client
+            # generating types from this contract needs the CHILD attribute
+            # rows too, not just the block tags that hold them.
+            "ref",
+            "card",
+            "node",
+            "entry",
+            "bar",
+            "lineage-node",
+            "series",
             "step",
             "item",
             "li",

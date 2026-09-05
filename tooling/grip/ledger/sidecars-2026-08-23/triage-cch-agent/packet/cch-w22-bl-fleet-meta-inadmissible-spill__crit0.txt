@@ -1,0 +1,1 @@
+The INADMISSIBLE verdict is re-derived at execution time rather than carried from this description: every write path to `region`/`server_type` is enumerated and each is shown to be a system or worker writer. Evidence: the grep and the citations, with each verdict labelled L1 or L2.
