@@ -1,6 +1,6 @@
 {
-  "population": 368,
-  "mapped": 357,
+  "population": 369,
+  "mapped": 358,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -11507,6 +11507,77 @@
           "kind": "file",
           "p": "api/lib/barkpark/content.ex",
           "evidence": "tooling/ergonomics/safety-classifier.test.mjs:46"
+        }
+      ]
+    },
+    {
+      "path": "tooling/gate-map/gate-map.test.mjs",
+      "run": "node --test tooling/gate-map/gate-map.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "tooling/gate-map/gate-map.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:21"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/breakpoint-sweep.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:23"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__css_check.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:24"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/breakpoint-sweep.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:50"
+        },
+        {
+          "kind": "dir",
+          "p": "cloud/priv/static",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:56"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__app.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:60"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/cssom-parity.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:61"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/cssom-parity.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:62"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/overflow-guard.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:63"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/smoke.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:64"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/seal-predicate.test.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:67"
+        },
+        {
+          "kind": "file",
+          "p": "docs/cards/cli.md",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:82"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/static/__preview__/does-not-exist.mjs",
+          "evidence": "tooling/gate-map/gate-map.test.mjs:90"
         }
       ]
     },
