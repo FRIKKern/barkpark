@@ -50,7 +50,10 @@
 #   scripts/paper-editor-mirror-check.sh --write          # fenced regenerate
 #   scripts/paper-editor-mirror-check.sh --write --force  # regenerate over the fence
 #   scripts/paper-editor-mirror-check.sh --adopt          # bless the region on disk
+#   scripts/paper-editor-mirror-check.sh --selftest       # prove part 1/2 can still lose
 set -euo pipefail
+
+SELF="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
 
 MODE="check"
 MIRROR_ARGS=()
@@ -58,9 +61,10 @@ for arg in "$@"; do
   case "$arg" in
     --write) MODE="write"; MIRROR_ARGS+=("$arg") ;;
     --adopt) MODE="adopt"; MIRROR_ARGS+=("$arg") ;;
+    --selftest) MODE="selftest" ;;
     --force) MIRROR_ARGS+=("$arg") ;;
     *)
-      echo "paper-editor-mirror-check: unknown argument '$arg' (expected --write, --force, --adopt or none)" >&2
+      echo "paper-editor-mirror-check: REFUSED TO MEASURE — unknown argument '$arg' (expected --write, --force, --adopt, --selftest or none)" >&2
       exit 2
       ;;
   esac
@@ -70,9 +74,111 @@ if [[ "$MODE" == "check" && ${#MIRROR_ARGS[@]} -gt 0 ]]; then
   exit 2
 fi
 
+# ── selftest: prove part 1/2 BITES, and prove it stays SILENT when it should ──
+#
+# Every arm writes two throwaway mirror files and re-invokes THIS script against
+# them via PAPER_EDITOR_MIRROR_HEEX/_BUNDLE, so the assertions drive the shipping
+# comparator — not a second copy of it that could agree while both are wrong.
+# Nothing is planted in this repo. Part 3 is skipped inside a probe (see the
+# block above the delegate for why).
+selftest() {
+  local tmp bad=0 rc
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  say() { if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi; }
+
+  # $1 = heex classes (space separated), $2 = bundle classes, $3 = heex allow
+  probe() {
+    local c
+    : > "$tmp/h.css"; : > "$tmp/b.css"
+    for c in $1; do printf '.%s { color: red }\n' "$c" >> "$tmp/h.css"; done
+    for c in $2; do printf '.%s { color: red }\n' "$c" >> "$tmp/b.css"; done
+    PAPER_EDITOR_MIRROR_HEEX="$tmp/h.css" \
+    PAPER_EDITOR_MIRROR_BUNDLE="$tmp/b.css" \
+    PAPER_EDITOR_MIRROR_HEEX_ALLOW="${3-}" \
+      bash "$SELF" > "$tmp/out" 2>&1
+    echo $?
+  }
+
+  echo "paper-editor-mirror-check --selftest (throwaway mirrors)"
+
+  # 1. SILENT ARM — a real lockstep corpus passes and PRINTS its populations.
+  rc="$(probe "bp-canvas-a bp-canvas-b" "bp-canvas-a bp-canvas-b" "")"
+  { [ "$rc" -eq 0 ] && grep -q "2 .bp-canvas-\* classes in lockstep" "$tmp/out"; } \
+    && say "lockstep corpus -> PASS, counts printed" 0 \
+    || { say "lockstep corpus -> PASS, counts printed (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 2. REFUSE ARM — BOTH mirrors emptied. The device-oracle shape: two empty sets
+  #    satisfy "no one-sided classes", so this used to be a green about nothing.
+  rc="$(probe "" "" "")"
+  { [ "$rc" -eq 2 ] && grep -q "REFUSED TO MEASURE" "$tmp/out"; } \
+    && say "BOTH mirrors emptied -> REFUSED TO MEASURE (2), never a PASS" 0 \
+    || { say "BOTH mirrors emptied -> REFUSED TO MEASURE (2) (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 3. REFUSE ARM — one side emptied is a refusal too, not a 28-class drift list.
+  rc="$(probe "bp-canvas-a" "" "")"
+  { [ "$rc" -eq 2 ] && grep -q "REFUSED TO MEASURE" "$tmp/out"; } \
+    && say "one mirror emptied -> REFUSED TO MEASURE (2)" 0 \
+    || { say "one mirror emptied -> REFUSED TO MEASURE (2) (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 4. BITE ARM — a one-sided class reds and is NAMED.
+  rc="$(probe "bp-canvas-a bp-canvas-only" "bp-canvas-a" "")"
+  { [ "$rc" -eq 1 ] && grep -q "bp-canvas-only" "$tmp/out"; } \
+    && say "heex-only class -> FAILED, class named" 0 \
+    || { say "heex-only class -> FAILED, class named (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 5. BITE ARM — the bundle side is policed too (Studio would not pick it up).
+  rc="$(probe "bp-canvas-a" "bp-canvas-a bp-canvas-ghost" "")"
+  { [ "$rc" -eq 1 ] && grep -q "bp-canvas-ghost" "$tmp/out"; } \
+    && say "bundle-only class -> FAILED, class named" 0 \
+    || { say "bundle-only class -> FAILED, class named (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 6. BITE ARM — two non-empty mirrors with NOTHING in common. The count is
+  #    non-zero on both sides, so only the intersection catches this.
+  rc="$(probe "bp-canvas-a" "bp-canvas-z" "")"
+  { [ "$rc" -eq 1 ]; } \
+    && say "disjoint mirrors (empty intersection) -> FAILED" 0 \
+    || { say "disjoint mirrors (empty intersection) -> FAILED (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 7. SILENT ARM — an allowlisted one-sided class is allowed, and VERIFIED.
+  rc="$(probe "bp-canvas-a bp-canvas-source" "bp-canvas-a" "bp-canvas-source")"
+  { [ "$rc" -eq 0 ] && grep -q "1 verified allowlisted heex-only" "$tmp/out"; } \
+    && say "allowlisted heex-only class PRESENT -> PASS, reported as verified" 0 \
+    || { say "allowlisted heex-only class PRESENT -> PASS (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 8. BITE ARM — the allowlist entry is GONE from the corpus. Measured
+  #    2026-09-05 on 9fdca8cb8: deleting .bp-canvas-source from the shell
+  #    stylesheet still printed "+1 allowlisted heex-only" at exit 0. An
+  #    allowlist that is COUNTED and never VERIFIED grows stale silently and
+  #    each dead entry widens the hole for the next real drift.
+  rc="$(probe "bp-canvas-a" "bp-canvas-a" "bp-canvas-source")"
+  { [ "$rc" -eq 1 ] && grep -q "bp-canvas-source" "$tmp/out" && grep -q "STALE" "$tmp/out"; } \
+    && say "allowlist entry ABSENT from the corpus -> FAILED, entry named STALE" 0 \
+    || { say "allowlist entry ABSENT from the corpus -> FAILED (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 9. BITE ARM — an allowlist entry present on the WRONG side is stale too.
+  rc="$(probe "bp-canvas-a" "bp-canvas-a bp-canvas-source" "bp-canvas-source")"
+  { [ "$rc" -eq 1 ]; } \
+    && say "heex allowlist entry present only in the BUNDLE -> FAILED" 0 \
+    || { say "heex allowlist entry present only in the BUNDLE -> FAILED (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  # 10. ARG DISPATCH — an unknown flag is a refusal (2), not a silent gate run.
+  rc=0; bash "$SELF" --no-such-flag > "$tmp/out" 2>&1 || rc=$?
+  { [ "$rc" -eq 2 ] && grep -q -- "--no-such-flag" "$tmp/out"; } \
+    && say "unknown argument -> exit 2, names the argument" 0 \
+    || { say "unknown argument -> exit 2, names the argument (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+
+  echo ""
+  if [ "$bad" -eq 0 ]; then echo "paper-editor-mirror-check --selftest: PASS (10/10)"; return 0; fi
+  echo "paper-editor-mirror-check --selftest: FAILED ($bad case(s))"; return 1
+}
+
+if [[ "$MODE" == "selftest" ]]; then selftest; exit $?; fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HEEX="$ROOT/api/priv/static/assets/bp-paper-editor-shell.css"
-BUNDLE="$ROOT/api/assets/paper-editor/src/styles.css"
+HEEX="${PAPER_EDITOR_MIRROR_HEEX:-$ROOT/api/priv/static/assets/bp-paper-editor-shell.css}"
+BUNDLE="${PAPER_EDITOR_MIRROR_BUNDLE:-$ROOT/api/assets/paper-editor/src/styles.css}"
 SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 
 # ── Part 3: generated paper-surface token layer (source → bundle) ────────────
@@ -80,14 +186,24 @@ SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 # so `--write` regenerates before the lockstep check verifies. `--write` passes
 # through; default is a byte-compare. The transform is the SAME code design/emit.mjs
 # drives, so this script and the emitter can never disagree.
-node "$ROOT/design/paper-editor-mirror.mjs" ${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}
+# The corpus plumb (PAPER_EDITOR_MIRROR_HEEX/_BUNDLE) is SCOPED to part 1/2,
+# exactly as PREVIEW_PARITY_SCAN_ROOT is scoped to preview-parity's part 3:
+# part 3 is a byte-compare between two files this repo owns, there is nothing
+# to plant for it, and pointing the Node owner at a throwaway tree would only
+# test that the tree lacks a design/ directory. --selftest sets the plumb, so
+# every --selftest probe runs the REAL part 1/2 against a planted corpus.
+if [ -n "${PAPER_EDITOR_MIRROR_HEEX:-}${PAPER_EDITOR_MIRROR_BUNDLE:-}" ]; then
+  echo "paper-editor-mirror: part 3 SKIPPED — the lockstep corpus is plumbed (selftest probe)."
+else
+  node "$ROOT/design/paper-editor-mirror.mjs" ${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}
+fi
 
 # ── Part 1/2: .bp-canvas-* lockstep (shell stylesheet ↔ styles.css bundle) ───
 # Intentional one-sided selectors (documented). Keep this list SMALL and justified.
 #   bp-canvas-source — the source-mode <textarea> (canvas/index.js); Studio-only,
 #                      absent from the standalone embedder bundle by design.
-HEEX_ONLY_ALLOW="bp-canvas-source"
-BUNDLE_ONLY_ALLOW=""
+HEEX_ONLY_ALLOW="${PAPER_EDITOR_MIRROR_HEEX_ALLOW-bp-canvas-source}"
+BUNDLE_ONLY_ALLOW="${PAPER_EDITOR_MIRROR_BUNDLE_ALLOW-}"
 
 python3 - "$HEEX" "$BUNDLE" "$HEEX_ONLY_ALLOW" "$BUNDLE_ONLY_ALLOW" <<'PY'
 import re, sys
@@ -145,6 +261,26 @@ bundle_allow = set(filter(None, bundle_allow.split()))
 
 code, heex_only, bundle_only = compare(heex, bundle, heex_allow, bundle_allow)
 
+# ALLOWLIST ENTRIES ARE VERIFIED PRESENT, NOT COUNTED. Measured 2026-09-05 on
+# 9fdca8cb8: deleting .bp-canvas-source from the shell stylesheet left the gate
+# at exit 0 still printing "+1 allowlisted heex-only". A counted allowlist can
+# only grow stale, and every dead entry is a class name this check has promised
+# never to look at again — the widest hole a drift guard can carry.
+stale = [("HEEX_ONLY_ALLOW", c, "bp-paper-editor-shell.css")
+         for c in sorted(heex_allow - heex)]
+stale += [("BUNDLE_ONLY_ALLOW", c, "styles.css bundle")
+          for c in sorted(bundle_allow - bundle)]
+if stale and code != 2:
+    print("paper-editor-mirror-check: FAILED — STALE allowlist entry: a documented "
+          "asymmetry names a class that is no longer in its own mirror.\n")
+    for which, c, side in stale:
+        print(f"    .{c}  ({which}) is absent from {side}")
+    print("\n  An allowlist entry is a standing promise not to police that class. When the "
+          "class\n  itself is gone the promise covers nothing and the entry only widens the "
+          "next hole.\n  Fix: delete the entry from scripts/paper-editor-mirror-check.sh, or "
+          "restore the rule.")
+    sys.exit(1)
+
 if code == 2:
     zero = []
     if not heex: zero.append("bp-paper-editor-shell.css")
@@ -157,9 +293,12 @@ if code == 2:
 
 if code == 0:
     n = len(heex & bundle)
+    sample = ", ".join("." + c for c in sorted(heex & bundle)[:3])
     print(f"paper-editor-mirror-check: PASS — {n} .bp-canvas-* classes in lockstep "
           f"(heex corpus {len(heex)}, bundle corpus {len(bundle)}, "
-          f"+{len(heex_allow)} allowlisted heex-only).")
+          f"+{len(heex_allow)} verified allowlisted heex-only"
+          + (f", +{len(bundle_allow)} verified allowlisted bundle-only" if bundle_allow else "")
+          + f"; sample: {sample}).")
     sys.exit(0)
 
 print("paper-editor-mirror-check: FAILED — the two paper-editor style mirrors have drifted.\n")
