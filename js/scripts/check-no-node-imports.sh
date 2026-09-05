@@ -7,9 +7,10 @@
 #
 # EXIT CODES — a failed READ must never be byte-identical to a clean read:
 #   0  clean: every corpus dir was read, held source files, and matched nothing.
-#   1  violation(s) found. This is the ADVISORY outcome js-tests.yml tolerates
-#      via continue-on-error (ADR-002 conflict: draft-mode/ and webhook/ have
-#      imported node:crypto since Phase 5). Do NOT change that posture here.
+#   1  violation(s) found. ADVISORY: the js-tests.yml step splits on this
+#      script's exit status — 1 emits a ::warning and the step PASSES, 3 reds it
+#      (ADR-002 conflict: draft-mode/ imports node:crypto). Do NOT re-add
+#      continue-on-error to that step; it would swallow exit 3 too.
 #   3  HARNESS FAILURE: a corpus dir is missing, or exists but holds zero
 #      scannable source files, or the Node builtin list could not be derived.
 #      A vanished corpus used to `continue` and print "clean" at exit 0 — a

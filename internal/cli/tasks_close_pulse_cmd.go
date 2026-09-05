@@ -140,8 +140,28 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 
 	stored, readback, err := taskboard.FetchSeal(taskReadbackClient(ctx), req.docID)
 	if err != nil {
-		out.userErr("close sent but NOT confirmed — the read-back of %s failed: %v", req.docID, err)
-		out.errf("  the seal may or may not have landed; re-read with `bp task get %s` before trusting it", req.docID)
+		// ONE BOUNDED SECOND LOOK, the twin of stamp's
+		// (stampReadbackRetryDelay). A read-back that lost a single race under
+		// load is not a store with no answer, and close had no retry here at
+		// all: a lone unlucky GET turned an ordinary close into a hedge.
+		time.Sleep(closeReadbackRetryDelay)
+		stored, readback, err = taskboard.FetchSeal(taskReadbackClient(ctx), req.docID)
+	}
+	if err != nil {
+		// NOT "the seal may or may not have landed". The store is what "landed"
+		// means and it did not answer, twice, so the only honest word is
+		// UNVERIFIED — and the receipt has to NAME the thing it could not read
+		// rather than imply a verdict it never earned.
+		//
+		// The remedy differs from stamp's on purpose. A stamp is idempotent, so
+		// stamp says "re-stamp, it costs nothing". A CLOSE IS NOT: a second
+		// close of a sealed row 409s `not_ready`, which is exactly what makes a
+		// correctly closed row read as uncloseable. So this says READ, then
+		// decide — never "close again".
+		out.userErr("close UNVERIFIED — the POST was accepted but the store could not be re-read, twice: %v", err)
+		out.errf("  nothing here says the seal landed and nothing here says it did not: no row was read, so this receipt makes NO claim about %s", req.docID)
+		out.errf("  read the row before acting: `bp task get %s -o json` — if it shows lifecycle_status=%s the close IS on the ledger and you are done", req.docID, req.wantSeal)
+		out.errf("  do NOT simply close again on that reading: a second close of a sealed row 409s `not_ready`, and that refusal reads as an uncloseable task")
 		if rc != exitOK {
 			return rc
 		}
@@ -168,6 +188,13 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 // reported in the same breath, long enough to outlast a read that overtook a
 // write. A var so tests can drive both arms without sleeping.
 var closeClaimRecheckDelay = 400 * time.Millisecond
+
+// closeReadbackRetryDelay is the budget of the read-back's OWN second look —
+// the one spent when the store did not answer at all, rather than answered
+// something unwelcome. Same size and same reasoning as
+// stampReadbackRetryDelay: long enough to outlast a lost race, short enough
+// that nobody waits on it. A var so tests drive both arms without sleeping.
+var closeReadbackRetryDelay = 400 * time.Millisecond
 
 // closeClaimNeedsSecondLook reports whether the ONLY complaint against the
 // stored row is a claim that still looks live. Anything else — an absent seal,
@@ -392,6 +419,7 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 			out.progressf("✓ the store holds the seal despite the POST answering a server error (exit %d) — a 5xx can commit the write before the response fails; the read-back is the truth here, not the transport error", origRC)
 		}
 		out.progressf("✓ the store holds it — %s", storedSealSummary(stored))
+		reportCloseReasonReplaced(out, req, readback)
 		return exitOK
 	}
 	out.userErr("close NOT confirmed by the store — the seal did not land as asked")
@@ -402,6 +430,44 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 	}
 	out.errf("  a close is only real once the store holds it — re-read with `bp task get %s` and close again", req.docID)
 	return exitConflict
+}
+
+// reportCloseReasonReplaced is the ONE remaining way a 2xx close can be
+// accepted-but-not-persisted on today's server, and it is named rather than
+// papered over.
+//
+// `Tasks.Close.close_with_receipt/3` has an idempotent-replay arm
+// (api/lib/barkpark/tasks/close.ex:441, `{:already_closed, doc}`), reached when
+// the row is ALREADY terminal and `idempotent_replay?/3` (close.ex:565) says
+// yes. That predicate compares exactly two things — `claim.closed_by == worker`
+// and `lifecycle_status == new_status` — and NOTHING ELSE. The reason is not in
+// it. So a second close by the same worker to the same seal with a DIFFERENT
+// reason gets a 200 and the server writes nothing: the stored row keeps the
+// FIRST close's `content.close_reason`, byte-identical, by design
+// (close.ex:428-433).
+//
+// The seal itself is genuinely on the ledger, so this is NOT a refusal: exiting
+// non-zero here would send the operator into a re-close that 409s `not_ready`
+// on an already-terminal row — the exact failure the replay arm exists to
+// prevent. What it IS is a receipt that must not let the caller read their own
+// sentence back out of a row that does not hold it. So the ✓ stands for the
+// seal, and this line names the divergence beside it.
+//
+// Silent when no reason was sent (nothing to diverge), when the row carries no
+// close_reason to compare, or when they match.
+func reportCloseReasonReplaced(out *writer, req closeRequest, readback apiclient.TaskReadback) {
+	if req.reason == "" {
+		return
+	}
+	storedReason := strings.TrimSpace(storedCloseReason(readback))
+	if storedReason == "" || storedReason == req.reason {
+		return
+	}
+	out.errf("! the SEAL landed but YOUR REASON DID NOT — the store holds another close's reason on this row")
+	out.errf("  you sent:        %q", req.reason)
+	out.errf("  the store holds: %q", storedReason)
+	out.errf("  this is the server's idempotent-replay arm: a row already closed by %s to %s answers 200 and writes NOTHING, keeping the first close's reason", req.worker, req.wantSeal)
+	out.errf("  the task IS closed — do NOT close again (a second close of a sealed row 409s `not_ready`). To change the note, patch the row rather than re-closing it.")
 }
 
 // storedSealSummary describes the row AS STORED. The criteria count rides along

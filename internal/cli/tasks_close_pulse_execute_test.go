@@ -295,16 +295,28 @@ func TestTaskCloseExecute_LandedWriteIsConfirmedByTheStore(t *testing.T) {
 
 // A read-back that cannot reach the store is UNCONFIRMED, never a success:
 // "we could not ask" is not "it landed".
+//
+// The WORD changed with the second look: this used to print "close sent but NOT
+// confirmed … the seal may or may not have landed", and that hedge is the exact
+// ambiguity the read-back exists to remove. It now says UNVERIFIED and makes no
+// claim in either direction. The property under test is unchanged — non-zero,
+// never a ✓ — so the assertion tracks the word rather than being deleted.
 func TestTaskCloseExecute_UnreadableStoreIsUnconfirmedNotSuccess(t *testing.T) {
 	cpTestServer(t, cpUnreadable)
+	oldRead := closeReadbackRetryDelay
+	closeReadbackRetryDelay = 0
+	t.Cleanup(func() { closeReadbackRetryDelay = oldRead })
 
 	out, code := captureExecuteCode(t, []string{"task", "close", "bp-task-x", "w", "1", "done", "shipped it"})
 
 	if code == exitOK {
 		t.Fatalf("exit = 0 on an unverifiable close — the verb reported success on an exit code alone; out:\n%s", out)
 	}
-	if !strings.Contains(out, "NOT confirmed") {
-		t.Errorf("output should say the close is unconfirmed; got:\n%s", out)
+	if !strings.Contains(out, "UNVERIFIED") {
+		t.Errorf("output should say the close is UNVERIFIED; got:\n%s", out)
+	}
+	if strings.Contains(out, "\u2713") {
+		t.Errorf("a \u2713 was printed for a close nothing confirmed; got:\n%s", out)
 	}
 }
 
