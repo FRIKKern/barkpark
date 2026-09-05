@@ -54,6 +54,7 @@ func run(args []string) int {
 		sitesDir   = fs.String("sites-dir", "", "sites root measured per-slug (empty resolves BARKPARK_SITES_DIR, then "+defaultSitesDir+")")
 		spaceEvery = fs.Duration("space-interval", agent.DefaultSpaceInterval, "cadence of the space report (its own, slower than --interval)")
 		consumers  = fs.String("consumer-roots", "", "comma-separated extra disk-consumer roots (empty resolves BARKPARK_CONSUMER_ROOTS, then the built-in build-plane defaults; \"none\" measures none)")
+		backupDir  = fs.String("backup-dir", "", "backup location read by the backup probe (empty resolves BARKPARK_BACKUP_DIR, then "+defaultBackupDir+"; \"none\" reports unconfigured without touching disk)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -89,6 +90,18 @@ func run(args []string) int {
 	// wrong trees says which trees it measured instead of just reporting a
 	// small number confidently.
 	resolvedConsumerRoots := resolveConsumerRoots(*consumers, os.Getenv("BARKPARK_CONSUMER_ROOTS"))
+
+	// The backup location is resolved here for the same reason, and the probe
+	// it feeds is the FIRST BackupProbe this agent has ever had wired.
+	// ReportConfig.BackupProbe has been a declared-but-never-wired seam for the
+	// whole life of the beat, so report.go took its nil branch on every box and
+	// every beat in the fleet carried `backup_ok:false` — the Go zero value,
+	// not a measurement. No console could tell that false from a real failure.
+	// Wiring it does NOT invent backups: on a box with no backup location the
+	// probe answers `unconfigured`, which is a true sentence, and the new
+	// `backup_state` field on the wire is what carries it.
+	resolvedBackupDir := resolveBackupDir(*backupDir, os.Getenv("BARKPARK_BACKUP_DIR"))
+	fmt.Fprintf(os.Stderr, "barkpark-agent: backup dir %s\n", backupDirSource(resolvedBackupDir))
 
 	// The health-gate bearer is resolved HERE, once, from a FILE the provisioner
 	// writes — not from a flag literal in a hand-added drop-in on one box. An
@@ -177,6 +190,13 @@ func run(args []string) int {
 			// ERROR, so slot_units stays null (UNMEASURED) rather than landing
 			// an empty list that would read "no failed units here".
 			SlotUnitsProbe: agent.NewSlotUnitsProbe(),
+			// Backups. Declared since the beat existed and wired until now
+			// NOWHERE, so `backup_ok` was the Go zero value on every box in the
+			// fleet — a false that meant "nobody looked" and was
+			// indistinguishable from "the backup failed". The probe reads one
+			// directory and answers a STATE, so an unconfigured box says
+			// `unconfigured` instead of lying with a false.
+			BackupProbe:    agent.NewBackupProbe(resolvedBackupDir),
 			HealthBaseURL:  *healthURL,
 			HealthToken:    healthToken,
 			HealthGateOpts: agentHealthGateOpts(*healthURL, healthToken),
@@ -244,6 +264,41 @@ func resolveSitesDir(flagValue, envValue string) string {
 		return d
 	}
 	return defaultSitesDir
+}
+
+// defaultBackupDir is where a box's database dumps land when nothing says
+// otherwise. NOTHING in this repo writes it today — that is the point: the
+// probe pointed at it answers `unconfigured`, which is the true state of every
+// box in the fleet, instead of the `false` the beat has carried forever and
+// which a console could not tell from a failed backup.
+const defaultBackupDir = "/var/backups/barkpark"
+
+// resolveBackupDir picks the directory the backup probe reads, in precedence
+// order: the explicit --backup-dir flag, then BARKPARK_BACKUP_DIR, then
+// defaultBackupDir. The literal "none" (either source) resolves to the EMPTY
+// string, which the probe reads as "no backup location configured" and answers
+// without touching disk — an operator who knows this box has no backups can say
+// so instead of paying a stat for the same answer.
+func resolveBackupDir(flagValue, envValue string) string {
+	for _, v := range []string{flagValue, envValue} {
+		if d := strings.TrimSpace(v); d != "" {
+			if d == "none" {
+				return ""
+			}
+			return d
+		}
+	}
+	return defaultBackupDir
+}
+
+// backupDirSource words the resolved backup location for the startup line, so a
+// box reporting `unconfigured` says WHICH path it looked at rather than leaving
+// an operator to guess whether the probe or the backup is missing.
+func backupDirSource(dir string) string {
+	if dir == "" {
+		return "disabled (\"none\") — the beat will report backup_state=unconfigured"
+	}
+	return dir
 }
 
 // defaultHealthTokenFile is where the provisioner writes the health-gate bearer

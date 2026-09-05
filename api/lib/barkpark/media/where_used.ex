@@ -54,6 +54,8 @@ defmodule Barkpark.Media.WhereUsed do
 
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Barkpark.Content.Document
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
@@ -170,4 +172,68 @@ defmodule Barkpark.Media.WhereUsed do
   """
   def forced?(params) when is_map(params), do: Map.get(params, "force") in ["true", "1"]
   def forced?(_), do: false
+
+  @doc """
+  The WITNESS an override leaves behind (task-ef676cfc88e71fae).
+
+  `forced?/1` disarms an IRREVERSIBLE delete, and the guard used to answer it by
+  skipping the census entirely: nothing logged, and a 200 receipt byte-identical
+  to an unforced delete of an unreferenced blob. So the store kept a hole with no
+  record that a human was told about the references and proceeded anyway, and
+  whoever investigated the broken image later concluded "it was unreferenced when
+  it was deleted" — the exact opposite of what happened.
+
+  Called on the forced branch BEFORE `Media.delete_file/2` (the point of no
+  return). It runs the same census the unforced branch runs, emits it at WARNING
+  level, and returns the receipt fields the controller merges into its 200 so the
+  CALLER's own log records the choice too.
+
+  Deliberately logs IDENTIFIERS ONLY — the blob path, the referrer count, the
+  sampled `doc_id`s and the actor label. The census is cross-dataset and
+  cross-workspace by design (see `scan/1`), so logging document TITLES or bodies
+  here would spill another tenant's content into a shared log file.
+
+  Returns `%{forced: true, referencedByCount: count}`.
+  """
+  def witness_forced_delete(conn, %MediaFile{} = file) do
+    %{count: count, sample: sample} = referrers(file)
+
+    doc_ids = Enum.map(sample, & &1.doc_id)
+
+    Logger.warning(
+      "media force-delete override: path=#{delivery_path(file)} " <>
+        "filename=#{file.filename} referrers=#{count} " <>
+        "doc_ids=#{format_doc_ids(doc_ids, count)} actor=#{actor_label(conn)}"
+    )
+
+    %{forced: true, referencedByCount: count}
+  end
+
+  defp format_doc_ids([], _count), do: "none"
+
+  defp format_doc_ids(ids, count) do
+    joined = Enum.join(ids, ",")
+    if count > length(ids), do: joined <> ",…(#{count - length(ids)} more)", else: joined
+  end
+
+  # LOG-ONLY attribution, so it may carry the account arm that
+  # `Media.Storage.Access.actor_label/1` deliberately refuses. That sibling
+  # stamps `checkedOutBy`, which is USER-VISIBLE and compared for equality by
+  # `permission_set/2`, so guessing a human principal's label there would re-key
+  # existing lock comparisons. Nothing compares this string; it only has to name
+  # somebody to the operator reading the log.
+  defp actor_label(%{assigns: assigns}) do
+    case assigns[:api_token] do
+      %{label: label} when is_binary(label) and label != "" ->
+        label
+
+      _ ->
+        case assigns[:current_user] do
+          %{email: email} when is_binary(email) and email != "" -> email
+          _ -> "api"
+        end
+    end
+  end
+
+  defp actor_label(_), do: "api"
 end

@@ -128,7 +128,12 @@ New sending IP + domain start with zero reputation. Plan:
    delivery).
 2. Verify: `opendkim-testkey` inside the container, a test send through
    [mail-tester.com](https://www.mail-tester.com), and a manual send to a
-   real Gmail/Outlook inbox — check it lands in the inbox, not spam.
+   real Gmail/Outlook inbox — check it lands in the inbox, not spam. Then
+   confirm the *relay's own* verdict for that message with the lookup in
+   [Did this message reach the destination MX?](#did-this-message-reach-the-destination-mx)
+   below — the receiving MX's own `250` reply is quoted in the `status=sent`
+   line, which is the only server-side proof; "it showed up in my inbox" is
+   not reproducible by the next operator.
 3. Watch DMARC aggregate reports (the `rua` address) for 1-2 weeks, confirm
    no unexpected fails, then tighten `p=quarantine` → `p=reject` and SPF to
    `-all`.
@@ -140,9 +145,82 @@ New sending IP + domain start with zero reputation. Plan:
 ```
 docker compose -f cloud/docker-compose.yml up --build
 # trigger a password reset against the local control_plane, then:
-docker compose -f cloud/docker-compose.yml logs postfix | grep 'queued as'
+docker compose -f cloud/docker-compose.yml logs postfix \
+  | grep -E 'status=(sent|deferred|bounced)'
 ```
 
 Real internet delivery can't be tested locally without port 25 open — this
 only proves the control_plane → postfix submission hop (auth + STARTTLS +
-DKIM-signing + queuing) works.
+DKIM-signing + queuing) works, and the outbound leg will read
+`status=deferred`/`status=bounced` with a DNS or connection error rather
+than `status=sent`.
+
+To prove the *logging* itself end-to-end without any of the rest of the
+stack, `./check-maillog.sh --live` builds this image, boots a throwaway
+container, submits an authenticated message over 587 and asserts a real
+`status=sent` line comes out of `docker logs`. It needs a working Docker
+daemon and about a minute; without `--live` it runs the static config
+assertions only, which is what CI executes.
+
+## Reading the delivery log
+
+Postfix logs to syslog by default and **this image has no syslog daemon**,
+so until the `maillog_file` line in `entrypoint.sh` existed, the relay
+emitted the entrypoint's DKIM banner and nothing else for its entire
+lifetime — no `status=sent`, no `status=deferred`, no `status=bounced`,
+ever. `maillog_file = /dev/stdout` (Postfix 3.4+; bookworm ships 3.7.x)
+routes logging through the `postlogd` service, whose stdout is inherited
+from the `postfix start-fg` master at PID 1, i.e. `docker logs`. Override
+with `MAILLOG_FILE` if you would rather write to a file on a mounted
+volume. If `master.cf` ever loses its `postlog unix-dgram` entry, Postfix
+FATALs at boot ("missing 'postlog' service in master.cf") instead of
+silently logging nothing again.
+
+Container logs are capped at 10 MB × 5 files (`logging:` on the `postfix`
+service in `cloud/docker-compose.yml`), so this history is roughly the last
+few weeks at current volume, not forever. `docker logs` also does not
+survive a container *recreate* — anything you need past a deploy has to be
+copied out first.
+
+### Did this message reach the destination MX?
+
+Answer it from the relay host with one command. Set `RCPT` to the recipient
+address; the last matching line is the verdict:
+
+```bash
+RCPT='someone@example.com'; docker logs --since 168h cloud-postfix-1 2>&1 \
+  | grep -E "to=<${RCPT}>.*status=" | tail -3
+```
+
+Read the result:
+
+| Line contains | Means |
+|---|---|
+| `status=sent` | The recipient's MX **accepted** it. Its own reply is quoted, e.g. `status=sent (250 2.0.0 OK 1725...  - gsmtp)`. This is the proof. |
+| `status=deferred` | Still trying. The parenthesised text is the remote's temporary error; `postqueue -p` shows it queued. |
+| `status=bounced` | Permanently rejected — the parenthesised text is the remote's 5xx, verbatim. |
+| *(no output)* | The message never reached the relay at all. That is an app-side or submission-hop problem, not a delivery one — check `notification_deliveries` and the `postfix/submission/smtpd` lines below. |
+
+`status=sent` here means the **next** hop accepted responsibility. It is not
+a read receipt and it does not rule out the recipient's own spam folder —
+but it does move the failure boundary past this relay, which is exactly what
+was unanswerable before.
+
+Related lookups on the same log:
+
+```bash
+# The whole life of one message, once you have its queue ID from the above.
+docker logs cloud-postfix-1 2>&1 | grep '<QUEUE_ID>'
+
+# Did the app's submission even arrive? (auth + STARTTLS on the 587 hop)
+docker logs cloud-postfix-1 2>&1 | grep 'postfix/submission/smtpd'
+
+# Everything currently stuck, with the reason.
+docker exec cloud-postfix-1 postqueue -p
+```
+
+The app's own failure copy — "The delivery failed — the server log has the
+transport detail", `label(:unknown)` in
+`cloud/lib/barkpark_cloud/notifications/delivery_reason.ex` — means *this*
+log. That sentence was written before the log existed; the lookups above are
+what it now points at.

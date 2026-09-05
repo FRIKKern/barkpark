@@ -20,10 +20,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 41 workspace_id tables including correction and release authority" do
+    test "E1 = the 42 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 41
+      assert length(e1) == 42
       assert "roles" in e1
+      # The paper view/edit trail (edit-on-the-link slice 4) carries a
+      # workspace_id with no FK, exactly like audit_events.
+      assert "paper_access_log" in e1
       # The run-secrets store gained a nullable workspace_id FK (Connectors W21,
       # charter D191/D192): a workspace's scoped secret rides the generic E1
       # WHERE workspace_id=$ws export + FK cascade; a global secret (NULL) stays.

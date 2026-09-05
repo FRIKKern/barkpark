@@ -52,7 +52,13 @@ defmodule Barkpark.Tasks.ClaimableStatusesTest do
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
       Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
         content_extra
       )
 

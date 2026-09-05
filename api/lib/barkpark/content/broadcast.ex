@@ -458,8 +458,16 @@ defmodule Barkpark.Content.Broadcast do
     |> Repo.insert!()
   end
 
-  @doc false
-  def save_revision(doc, type, dataset, action, actor_user_id \\ nil) do
+  @doc """
+  Write ONE version-history row off `doc`.
+
+  `actor_stamp` (optional, 6th arg) is the edit-on-the-link slice-4 attribution
+  triple — `%{actor_kind:, actor_id:, actor_label:}`, produced by
+  `Barkpark.Content.CallerContext.actor_stamp/1`. Empty map (the default) leaves
+  all three columns NULL, so every pre-existing caller writes exactly the row it
+  wrote before.
+  """
+  def save_revision(doc, type, dataset, action, actor_user_id \\ nil, actor_stamp \\ %{}) do
     %Revision{}
     |> Revision.changeset(%{
       # Terminal lifecycle revisions are written after their source row has
@@ -500,7 +508,13 @@ defmodule Barkpark.Content.Broadcast do
       # dataset_id-scoped list_revisions read finds it and same-named datasets
       # across projects no longer conflate.
       workspace_id: doc.workspace_id,
-      project_id: doc.project_id
+      project_id: doc.project_id,
+      # Edit-on-the-link slice 4: the principal behind the write, with its KIND.
+      # Absent for every caller that passes no stamp → three NULL columns, the
+      # row shape this function produced before the columns existed.
+      actor_kind: Map.get(actor_stamp, :actor_kind),
+      actor_id: Map.get(actor_stamp, :actor_id),
+      actor_label: Map.get(actor_stamp, :actor_label)
     })
     # `mode: :savepoint` is what KEEPS the log-and-continue below honest now that
     # `write_atomically/1` puts this insert inside a transaction on the writer

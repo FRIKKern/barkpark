@@ -472,11 +472,11 @@ defmodule PDS.Census do
   # seeing it, and PDS-D480 already ruled that @evidence_depth is a compliance dial and
   # not a claim about the code.
   @rederived %{
-    textual: 108,
-    ast: 99,
+    textual: 109,
+    ast: 100,
     phantom: 9,
     consumer: 4,
-    emitted: 95,
+    emitted: 96,
     # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -504,8 +504,22 @@ defmodule PDS.Census do
     # the census under load (>10 min at load 90). Re-run `--sites` against origin/main
     # to NAME the member when the box is quiet — this comment records the count, not
     # the member.
+    # RE-DERIVED AGAIN at task-d1654bf0d20d5009 (the unflagged-merge-gate receipt):
+    # textual 108 -> 109, ast 99 -> 100, emitted 95 -> 96, read 26 -> 27. ONE new
+    # emitted receipt site — `handle_pull_request/2`'s `unflagged_merge_gates` arm,
+    # registered above as PROVEN — and it lands in the READ class because its whole
+    # claim is that nothing was written: it reaches `Repo` only through the
+    # `reconcile_locked/4` classification read, never a write verb. `write` (57),
+    # `phantom` (9), `consumer` (4) and `unrouted` (12) did NOT move, which is the
+    # signature of an added site rather than a reclassified one — a row that did not
+    # move is evidence too.
+    #
+    # DERIVED BY THE INSTRUMENT, NOT TYPED FROM MEMORY: these four numbers are the
+    # `derived` half of this census's own D448-DRIFT-REFUSES line, run locally from
+    # the repo root on the change's own tree, engine printed live by that run:
+    #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
     write: 57,
-    read: 26,
+    read: 27,
     unrouted: 12
   }
 
@@ -993,12 +1007,12 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
-    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "98090639"},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "15541809"},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "54697721"},
     {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "41987025"},
     {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
-    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "90785343"},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
     {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
@@ -1007,7 +1021,7 @@ defmodule PDS.Census do
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
-    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "90785343"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
@@ -1832,6 +1846,21 @@ defmodule PDS.Census do
          ~S|test "a signed merged pull_request → the stamped: receipt matches the stored row", %{|},
       attestation:
         "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs` — the test `a signed merged pull_request → the stamped: receipt matches the stored row` — reds on Repo.get!",
+    },
+    # barkpark_web/controllers/github_webhook_controller.ex — the unflagged-gate receipt
+    # (task-d1654bf0d20d5009). Its whole claim is that NOTHING was written: the row
+    # carries criteria that READ as merge gates but hold no `merge_gate` flag, so the
+    # autostamp names them and stamps none of them. The flag stays the permit because a
+    # prose-wide permit fabricates dones on the 74 ledger criteria that merely DISCUSS
+    # gating. A receipt asserting a non-write is exactly the kind this register exists to
+    # bind to a store assertion, so the evidence below asserts the stored row, not the JSON.
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "22543410"},
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{|},
+      attestation:
+        "mutation: route BOTH close.ex filters through Criteria.merge_gated?/1 — the remedy the filing asked for — and the receipt becomes `stamped` while the criterion flips met; `mix test api/test/barkpark/tasks/merge_gate_unflagged_test.exs` reds 3 of 6, including `a criterion that merely TALKS about merge gating is NOT flipped on merge`",
     },
     # barkpark_web/controllers/github_webhook_controller.ex:194
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",

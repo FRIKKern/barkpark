@@ -418,6 +418,10 @@ defmodule Barkpark.Sites.DeployRunner do
   would otherwise queue that build inside its unit for up to 900s and read as a
   hang. `:rollback` and `:teardown` never touch the build gate and are never
   refused by it.
+
+  The refusal atom carries no detail — WHICH slug holds the slot, and whether
+  the holder is a peer build or a foreign one, are recorded at the refusal site
+  and read back through `last_refusal/0`.
   """
   @spec trigger(DeployRequest.t()) ::
           {:ok, :started}
@@ -802,7 +806,28 @@ defmodule Barkpark.Sites.DeployRunner do
           in_flight_slugs: [String.t()] | nil,
           refusals_total: non_neg_integer() | nil,
           refusals_since: DateTime.t() | nil,
+          door_open_admissions_total: non_neg_integer() | nil,
+          door_open_admissions: %{String.t() => non_neg_integer()} | nil,
           measured_at: DateTime.t() | nil
+        }
+
+  @typedoc """
+  WHY the last refusal happened, kept beside the count so a 409 can name the
+  holder instead of saying "another site". `holder` is `:peer` (a build THIS
+  instance launched and tracks — normal contention) or `:foreign` (an FLOCK
+  entry on the fleet build lock that this instance did not launch — a hand-run
+  engine, or a unit that outlived a previous BEAM, and operator-actionable).
+  `slug` is the slug that was REFUSED, so a reader can tell whether the record
+  is about its own request or a newer one that overwrote it.
+  """
+  @type refusal_detail :: %{
+          slug: String.t(),
+          holder: :peer | :foreign,
+          in_flight_slugs: [String.t()],
+          slots_in_use: non_neg_integer(),
+          capacity: pos_integer(),
+          holder_lock: String.t() | nil,
+          at: DateTime.t()
         }
 
   @doc """
@@ -810,7 +835,7 @@ defmodule Barkpark.Sites.DeployRunner do
   `build_slot_capacity/0`, which is a compile-time constant and therefore
   cannot report saturation, refusals, or its own ignorance.
 
-  Three facts, each a real measurement:
+  Five facts, each a real measurement:
 
     * `observed_in_flight` / `in_flight_slugs` — `building_slugs(state)`, the
       SAME census `box_at_capacity?/2` admits or refuses on. Before this it was
@@ -824,6 +849,13 @@ defmodule Barkpark.Sites.DeployRunner do
       the table is owned by the Runner, so a crash resets both together and a
       reader that saw only a small total would misread a fresh window as a quiet
       door.
+    * `door_open_admissions_total` / `door_open_admissions` — the OTHER half of
+      the door's story: builds it let through WITHOUT a second opinion because
+      its evidence was missing (no `/proc/locks`, an unreadable `/proc/locks`, a
+      lock file it could not stat). The door fails open on purpose; before this
+      it failed open SILENTLY, so the one number that bounds the leak did not
+      exist. Keyed by reason so the dev-box case (`no_proc_locks`, expected and
+      uninteresting) never hides the operator case.
 
   Reads take NO lock and make NO `GenServer.call`. That is the point: the one
   HTTP reader of this exists to describe a box whose Runner may be WEDGED
@@ -839,9 +871,26 @@ defmodule Barkpark.Sites.DeployRunner do
       in_flight_slugs: census_get(:in_flight_slugs),
       refusals_total: census_get(:refusals_total),
       refusals_since: census_get(:refusals_since),
+      door_open_admissions_total: census_get(:door_open_admissions_total),
+      door_open_admissions: census_get(:door_open_admissions),
       measured_at: census_get(:measured_at)
     }
   end
+
+  @doc """
+  The LAST refusal this door made, or `nil` when it has never refused in this
+  BEAM (or its table is gone).
+
+  This exists because `trigger/1` answers `{:error, :box_at_capacity}` — a bare
+  atom that cannot carry WHICH slug holds the slot, and cannot separate a peer
+  build from a foreign one. Both facts are known at the refusal site and were
+  previously interpolated into a log line and dropped. The record is keyed by
+  the REFUSED slug on purpose: a reader that does not recognise the slug has
+  been overtaken by a newer refusal and must fall back to the generic message
+  rather than name the wrong site.
+  """
+  @spec last_refusal() :: refusal_detail() | nil
+  def last_refusal, do: census_get(:last_refusal)
 
   @doc """
   Recompute the census SYNCHRONOUSLY inside the Runner and return it. Degrades
@@ -863,6 +912,8 @@ defmodule Barkpark.Sites.DeployRunner do
         :ets.new(@census_table, [:named_table, :public, :set, read_concurrency: true])
         :ets.insert(@census_table, {:refusals_total, 0})
         :ets.insert(@census_table, {:refusals_since, DateTime.utc_now()})
+        :ets.insert(@census_table, {:door_open_admissions_total, 0})
+        :ets.insert(@census_table, {:door_open_admissions, %{}})
         :ok
 
       _tid ->
@@ -899,12 +950,42 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Counted AT the refusal, in the same breath as the log line that announces
   # it — so the count cannot drift from the thing it counts.
-  defp note_refusal do
+  defp note_refusal(%{} = detail) do
+    census_write([{:last_refusal, detail}])
+
     try do
       :ets.update_counter(@census_table, :refusals_total, 1)
     rescue
       # No table (no Runner in this BEAM) — nothing to count on, and a refusal
       # is never worth crashing the door over.
+      ArgumentError -> :no_table
+    end
+  end
+
+  # An ADMISSION the door could not justify. The door fails OPEN by design (a
+  # box with no /proc/locks, an unreadable /proc/locks, a lock file that cannot
+  # be stat'd) — every one of those is a build that got in WITHOUT a second
+  # opinion, and until now none of them left a trace. Counted by reason, beside
+  # `refusals_total`, so the leak the refusals hide is measurable at last.
+  defp note_door_open(reason) when is_atom(reason) do
+    key = Atom.to_string(reason)
+
+    try do
+      total = :ets.update_counter(@census_table, :door_open_admissions_total, 1)
+
+      by_reason =
+        case :ets.lookup(@census_table, :door_open_admissions) do
+          [{:door_open_admissions, %{} = map}] -> map
+          _ -> %{}
+        end
+
+      :ets.insert(
+        @census_table,
+        {:door_open_admissions, Map.update(by_reason, key, 1, &(&1 + 1))}
+      )
+
+      total
+    rescue
       ArgumentError -> :no_table
     end
   end
@@ -956,6 +1037,18 @@ defmodule Barkpark.Sites.DeployRunner do
   """
   @spec lock_triple(String.t()) :: {:ok, String.t()} | :error
   def lock_triple(path) do
+    case lock_triple_status(path) do
+      {:ok, triple} -> {:ok, triple}
+      _ -> :error
+    end
+  end
+
+  # `lock_triple/1` with the two `:error` cases KEPT APART: `:absent` is
+  # conclusive (no file, so nothing holds this gate) while `{:unreadable, _}` is
+  # ignorance — the door admits on it, and that admission is counted.
+  @spec lock_triple_status(String.t()) ::
+          {:ok, String.t()} | :absent | {:unreadable, File.posix()}
+  defp lock_triple_status(path) do
     case File.stat(path) do
       {:ok, %File.Stat{major_device: dev, inode: inode}} ->
         # Userspace st_dev encoding (glibc gnu_dev_major/minor); the kernel
@@ -969,7 +1062,7 @@ defmodule Barkpark.Sites.DeployRunner do
 
       {:error, :enoent} ->
         # The lock file does not exist — nothing has ever taken this gate.
-        :error
+        :absent
 
       {:error, reason} ->
         Logger.warning(
@@ -977,7 +1070,7 @@ defmodule Barkpark.Sites.DeployRunner do
             "no second opinion on foreign builds; ADMITTING, the engine's own flock still serializes"
         )
 
-        :error
+        {:unreadable, reason}
     end
   end
 
@@ -1018,7 +1111,16 @@ defmodule Barkpark.Sites.DeployRunner do
     if takes_build_slot?(req) do
       case building_slugs(state) do
         [_ | _] = in_flight ->
-          _ = note_refusal()
+          _ =
+            note_refusal(%{
+              slug: req.slug,
+              holder: :peer,
+              in_flight_slugs: Enum.sort(in_flight),
+              slots_in_use: length(in_flight),
+              capacity: build_slot_capacity(),
+              holder_lock: nil,
+              at: DateTime.utc_now()
+            })
 
           Logger.info(
             "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build slot is " <>
@@ -1067,34 +1169,55 @@ defmodule Barkpark.Sites.DeployRunner do
 
     case File.read(path) do
       {:ok, body} ->
+        statuses =
+          Enum.map(build_gate_lock_candidates(), fn lock -> {lock, lock_triple_status(lock)} end)
+
         held =
-          Enum.find(build_gate_lock_candidates(), fn lock ->
-            case lock_triple(lock) do
-              {:ok, triple} -> flock_held?(body, triple)
-              :error -> false
-            end
+          Enum.find_value(statuses, fn
+            {lock, {:ok, triple}} -> if flock_held?(body, triple), do: lock
+            {_lock, _} -> nil
           end)
 
-        if held do
-          # Also a refusal at this door, and counted here for the same reason:
-          # a total that omitted foreign-lock refusals would understate exactly
-          # the case an operator cannot see from the BEAM.
-          _ = note_refusal()
+        cond do
+          held ->
+            # Also a refusal at this door, and counted here for the same reason:
+            # a total that omitted foreign-lock refusals would understate exactly
+            # the case an operator cannot see from the BEAM.
+            _ =
+              note_refusal(%{
+                slug: req.slug,
+                holder: :foreign,
+                in_flight_slugs: [],
+                slots_in_use: build_slot_capacity(),
+                capacity: build_slot_capacity(),
+                holder_lock: held,
+                at: DateTime.utc_now()
+              })
 
-          Logger.info(
-            "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build lock #{held} " <>
-              "is held by a build this instance did not launch (#{build_slot_capacity()} of " <>
-              "#{build_slot_capacity()} slots in use)"
-          )
+            Logger.info(
+              "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build lock #{held} " <>
+                "is held by a build this instance did not launch (#{build_slot_capacity()} of " <>
+                "#{build_slot_capacity()} slots in use)"
+            )
 
-          true
-        else
-          false
+            true
+
+          # /proc/locks read fine, but at least one candidate lock could not be
+          # stat'd for a reason OTHER than "it does not exist" — so an FLOCK
+          # entry for it would have been invisible to the scan above. We admit,
+          # and we say so.
+          Enum.any?(statuses, &match?({_lock, {:unreadable, _reason}}, &1)) ->
+            _ = note_door_open(:lock_unstattable)
+            false
+
+          true ->
+            false
         end
 
       {:error, :enoent} ->
         # No /proc/locks — this box is not Linux (dev, macOS, CI). There is no
         # second opinion to be had; ADMIT and let the engine's flock decide.
+        _ = note_door_open(:no_proc_locks)
         false
 
       {:error, reason} ->
@@ -1103,6 +1226,7 @@ defmodule Barkpark.Sites.DeployRunner do
             "ADMITTING #{inspect(req.slug)} unrefused; the engine's own flock still serializes it"
         )
 
+        _ = note_door_open(:proc_locks_unreadable)
         false
     end
   end

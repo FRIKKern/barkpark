@@ -78,6 +78,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
        page_title: "OnixEdit Codelist Staleness",
        current_issue: current_issue,
        rows: rows,
+       coverage: coverage_of(rows),
        last_diff: nil
      )}
   end
@@ -136,7 +137,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
       {:noreply,
        socket
-       |> assign(rows: rows)
+       |> assign(rows: rows, coverage: coverage_of(rows))
        |> put_flash(:info, "Marked #{doc_id} as accepted as-is.")}
     else
       {:error, :not_found} ->
@@ -157,6 +158,21 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
       <p class="bp-meta" data-test-id="current-issue">
         Current registry issue: <strong>{@current_issue}</strong>
       </p>
+
+      <%= if @coverage == :blind do %>
+        <p
+          class="bp-staleness-blind bg-red-100 text-red-800"
+          data-test-id="onixedit-staleness-blind"
+        >
+          <strong>Drift is UNMEASURED, not absent.</strong>
+          Scanned {length(@rows)} book document(s) and recognized
+          <strong>0</strong> codelist refs across all of them. This analyzer only
+          counts a ref when one map carries both <code>codelistId</code> and
+          <code>issue_version</code>; no writer produces that shape, so every row
+          below reports <code>unmeasured</code> rather than a clean bill of health.
+          Treat this page as offline until refs are annotated.
+        </p>
+      <% end %>
 
       <%= if Enum.empty?(@rows) do %>
         <p data-test-id="onixedit-staleness-empty">
@@ -300,7 +316,13 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     }
   end
 
-  defp aggregate_status([], false), do: :current
+  # A book whose walk recognized ZERO refs has not been measured — the
+  # analyzer requires BOTH "codelistId" and "issue_version" on one map and
+  # nothing writes that shape, so `[]` here means "looked and saw nothing",
+  # never "checked and found it current". Reporting `:current` made a blind
+  # detector and a healthy corpus render identically. See
+  # `StalenessChecker.corpus_coverage/1`.
+  defp aggregate_status([], false), do: :unmeasured
   defp aggregate_status([], true), do: :acknowledged
 
   defp aggregate_status(refs, acknowledged) do
@@ -311,6 +333,10 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
       true -> :current
     end
   end
+
+  # Corpus-wide non-vacuity, delegated to the pure checker so the console and
+  # `mix codelists.staleness --report` answer the question the same way.
+  defp coverage_of(rows), do: StalenessChecker.corpus_coverage(Enum.map(rows, & &1.refs))
 
   defp current_registry_issue do
     case Repo.aggregate(Codelist, :max, :issue) do
@@ -344,6 +370,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   # WI5 will extract these into a shared StatusPill helper. Keep the
   # colour mapping aligned across consoles when refactoring.
   defp pill_class(:current), do: "bg-green-100 text-green-800"
+  defp pill_class(:unmeasured), do: "bg-yellow-100 text-yellow-800"
   defp pill_class(:stale), do: "bg-yellow-100 text-yellow-800"
   defp pill_class(:deprecated), do: "bg-red-100 text-red-800"
   defp pill_class(:acknowledged), do: "bg-gray-100 text-gray-800"

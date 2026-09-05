@@ -1,6 +1,6 @@
 {
-  "population": 387,
-  "mapped": 379,
+  "population": 388,
+  "mapped": 380,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -1144,222 +1144,222 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/coherence.html",
-          "evidence": "cloud/priv/static/__app.test.mjs:8595"
+          "evidence": "cloud/priv/static/__app.test.mjs:8606"
         },
         {
           "kind": "file",
           "p": "internal/taskboard/testdata/styleguide_lifecycle.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8597"
+          "evidence": "cloud/priv/static/__app.test.mjs:8608"
         },
         {
           "kind": "file",
           "p": "internal/pdrender/testdata/styleguide_tokens.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8598"
+          "evidence": "cloud/priv/static/__app.test.mjs:8609"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__fixtures__/usage_meters.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:8806"
+          "evidence": "cloud/priv/static/__app.test.mjs:8817"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:9242"
+          "evidence": "cloud/priv/static/__app.test.mjs:9253"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__fixtures__/provider_catalog.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:9731"
+          "evidence": "cloud/priv/static/__app.test.mjs:9742"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__fixtures__/providers_capabilities.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:10073"
+          "evidence": "cloud/priv/static/__app.test.mjs:10084"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__fixtures__/domain-status.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:10834"
+          "evidence": "cloud/priv/static/__app.test.mjs:10845"
         },
         {
           "kind": "file",
           "p": "lib/containerd/io.containerd.runtime.v2.task",
-          "evidence": "cloud/priv/static/__app.test.mjs:11675"
+          "evidence": "cloud/priv/static/__app.test.mjs:11686"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_instance_top_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11711"
+          "evidence": "cloud/priv/static/__app.test.mjs:11722"
         },
         {
           "kind": "file",
           "p": "internal/cloudclient/client.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11764"
+          "evidence": "cloud/priv/static/__app.test.mjs:11775"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_status_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11899"
+          "evidence": "cloud/priv/static/__app.test.mjs:11910"
         },
         {
           "kind": "file",
           "p": "web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:13387"
+          "evidence": "cloud/priv/static/__app.test.mjs:13398"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14531"
+          "evidence": "cloud/priv/static/__app.test.mjs:14542"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14532"
+          "evidence": "cloud/priv/static/__app.test.mjs:14543"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:14545"
+          "evidence": "cloud/priv/static/__app.test.mjs:14556"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:14572"
+          "evidence": "cloud/priv/static/__app.test.mjs:14583"
         },
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__app.test.mjs:14962"
+          "evidence": "cloud/priv/static/__app.test.mjs:14973"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/sold_capability_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15252"
+          "evidence": "cloud/priv/static/__app.test.mjs:15263"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15498"
+          "evidence": "cloud/priv/static/__app.test.mjs:15509"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:17329"
+          "evidence": "cloud/priv/static/__app.test.mjs:17343"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/transport_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17714"
+          "evidence": "cloud/priv/static/__app.test.mjs:17728"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/withhold_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17828"
+          "evidence": "cloud/priv/static/__app.test.mjs:17842"
         },
         {
           "kind": "file",
           "p": "cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18216"
+          "evidence": "cloud/priv/static/__app.test.mjs:18230"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18222"
+          "evidence": "cloud/priv/static/__app.test.mjs:18236"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/render.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18258"
+          "evidence": "cloud/priv/static/__app.test.mjs:18272"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/email_settings.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18259"
+          "evidence": "cloud/priv/static/__app.test.mjs:18273"
         },
         {
           "kind": "file",
           "p": "cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18260"
+          "evidence": "cloud/priv/static/__app.test.mjs:18274"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18268"
+          "evidence": "cloud/priv/static/__app.test.mjs:18282"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/overflow-guard.mjs",
-          "evidence": "cloud/priv/static/__app.test.mjs:19739"
+          "evidence": "cloud/priv/static/__app.test.mjs:19753"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/defect-selection.mjs",
-          "evidence": "cloud/priv/static/__app.test.mjs:19766"
+          "evidence": "cloud/priv/static/__app.test.mjs:19780"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:19948"
+          "evidence": "cloud/priv/static/__app.test.mjs:19962"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:19948"
+          "evidence": "cloud/priv/static/__app.test.mjs:19962"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__unknown_census.mjs",
-          "evidence": "cloud/priv/static/__app.test.mjs:20696"
+          "evidence": "cloud/priv/static/__app.test.mjs:20710"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/auth.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:22480"
+          "evidence": "cloud/priv/static/__app.test.mjs:22494"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:22696"
-        },
-        {
-          "kind": "file",
-          "p": "internal/agent/report.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:24119"
+          "evidence": "cloud/priv/static/__app.test.mjs:22710"
         },
         {
           "kind": "dir",
           "p": "internal/agent",
-          "evidence": "cloud/priv/static/__app.test.mjs:24125"
+          "evidence": "cloud/priv/static/__app.test.mjs:24148"
         },
         {
           "kind": "file",
           "p": "scripts/console-path-escape-check.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:24126"
+          "evidence": "cloud/priv/static/__app.test.mjs:24149"
+        },
+        {
+          "kind": "file",
+          "p": "internal/agent/report.go",
+          "evidence": "cloud/priv/static/__app.test.mjs:24149"
         },
         {
           "kind": "file",
           "p": "cloud/priv/audit-actions.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:25609"
+          "evidence": "cloud/priv/static/__app.test.mjs:25675"
         },
         {
           "kind": "file",
           "p": "test/barkpark_cloud/accounts/role_agreement_census_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:26915"
+          "evidence": "cloud/priv/static/__app.test.mjs:26981"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26925"
+          "evidence": "cloud/priv/static/__app.test.mjs:26991"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26947"
+          "evidence": "cloud/priv/static/__app.test.mjs:27013"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/smoke.mjs",
-          "evidence": "cloud/priv/static/__app.test.mjs:28811"
+          "evidence": "cloud/priv/static/__app.test.mjs:28877"
         }
       ]
     },
@@ -5942,307 +5942,307 @@
         {
           "kind": "file",
           "p": "docs/cards/ghost.md",
-          "evidence": "scripts/docs-anchors-check.sh:169"
+          "evidence": "scripts/docs-anchors-check.sh:182"
         },
         {
           "kind": "file",
           "p": "api/lib/moved.ex",
-          "evidence": "scripts/docs-anchors-check.sh:176"
+          "evidence": "scripts/docs-anchors-check.sh:189"
         },
         {
           "kind": "file",
           "p": "docs/media.md",
-          "evidence": "scripts/docs-anchors-check.sh:178"
+          "evidence": "scripts/docs-anchors-check.sh:191"
         },
         {
           "kind": "file",
           "p": "docs/bare.md",
-          "evidence": "scripts/docs-anchors-check.sh:186"
+          "evidence": "scripts/docs-anchors-check.sh:199"
         },
         {
           "kind": "file",
           "p": "docs/dup.md",
-          "evidence": "scripts/docs-anchors-check.sh:190"
+          "evidence": "scripts/docs-anchors-check.sh:203"
         },
         {
           "kind": "file",
           "p": "docs/n1.md",
-          "evidence": "scripts/docs-anchors-check.sh:192"
+          "evidence": "scripts/docs-anchors-check.sh:205"
         },
         {
           "kind": "file",
           "p": "docs/n2.md",
-          "evidence": "scripts/docs-anchors-check.sh:193"
+          "evidence": "scripts/docs-anchors-check.sh:206"
         },
         {
           "kind": "file",
           "p": "docs/nope.md",
-          "evidence": "scripts/docs-anchors-check.sh:201"
+          "evidence": "scripts/docs-anchors-check.sh:214"
         },
         {
           "kind": "file",
           "p": "api/lib/x.rb",
-          "evidence": "scripts/docs-anchors-check.sh:213"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/x_test.exs",
-          "evidence": "scripts/docs-anchors-check.sh:218"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/x_test.go",
-          "evidence": "scripts/docs-anchors-check.sh:219"
-        },
-        {
-          "kind": "dir",
-          "p": "js",
-          "evidence": "scripts/docs-anchors-check.sh:221"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/dup.mjs",
           "evidence": "scripts/docs-anchors-check.sh:226"
         },
         {
           "kind": "file",
-          "p": "api/lib/private.mjs",
-          "evidence": "scripts/docs-anchors-check.sh:228"
+          "p": "api/lib/x_test.exs",
+          "evidence": "scripts/docs-anchors-check.sh:231"
         },
         {
           "kind": "file",
-          "p": "api/lib/plain.js",
+          "p": "api/lib/x_test.go",
+          "evidence": "scripts/docs-anchors-check.sh:232"
+        },
+        {
+          "kind": "dir",
+          "p": "js",
           "evidence": "scripts/docs-anchors-check.sh:234"
         },
         {
           "kind": "file",
+          "p": "api/lib/dup.mjs",
+          "evidence": "scripts/docs-anchors-check.sh:239"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/private.mjs",
+          "evidence": "scripts/docs-anchors-check.sh:241"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/plain.js",
+          "evidence": "scripts/docs-anchors-check.sh:247"
+        },
+        {
+          "kind": "file",
           "p": "api/lib/quote.ex",
-          "evidence": "scripts/docs-anchors-check.sh:249"
+          "evidence": "scripts/docs-anchors-check.sh:262"
         },
         {
           "kind": "file",
           "p": "api/lib/y.ts",
-          "evidence": "scripts/docs-anchors-check.sh:254"
+          "evidence": "scripts/docs-anchors-check.sh:267"
         },
         {
           "kind": "file",
           "p": "docs/cold-a.md",
-          "evidence": "scripts/docs-anchors-check.sh:265"
+          "evidence": "scripts/docs-anchors-check.sh:278"
         },
         {
           "kind": "file",
           "p": "docs/cold-b.md",
-          "evidence": "scripts/docs-anchors-check.sh:275"
+          "evidence": "scripts/docs-anchors-check.sh:288"
         },
         {
           "kind": "file",
           "p": "docs/cold-c.md",
-          "evidence": "scripts/docs-anchors-check.sh:289"
+          "evidence": "scripts/docs-anchors-check.sh:302"
         },
         {
           "kind": "file",
           "p": "docs/cold-d.md",
-          "evidence": "scripts/docs-anchors-check.sh:301"
+          "evidence": "scripts/docs-anchors-check.sh:314"
         },
         {
           "kind": "file",
           "p": "docs/warm-e.md",
-          "evidence": "scripts/docs-anchors-check.sh:312"
+          "evidence": "scripts/docs-anchors-check.sh:325"
         },
         {
           "kind": "file",
           "p": "scripts/canonical-marker-bindings.pin",
-          "evidence": "scripts/docs-anchors-check.sh:407"
+          "evidence": "scripts/docs-anchors-check.sh:420"
         },
         {
           "kind": "file",
           "p": "docs/media/DISCOVERY.md",
-          "evidence": "scripts/docs-anchors-check.sh:548"
+          "evidence": "scripts/docs-anchors-check.sh:596"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/media/search.ex",
-          "evidence": "scripts/docs-anchors-check.sh:549"
+          "evidence": "scripts/docs-anchors-check.sh:597"
         },
         {
           "kind": "tree",
           "p": "docs",
-          "evidence": "scripts/docs-anchors-check.sh:589"
+          "evidence": "scripts/docs-anchors-check.sh:637"
         },
         {
           "kind": "dir",
           "p": "docs/cli/fixtures",
-          "evidence": "scripts/docs-anchors-check.sh:589"
+          "evidence": "scripts/docs-anchors-check.sh:637"
         },
         {
           "kind": "dir",
           "p": "tooling/grip/ledger",
-          "evidence": "scripts/docs-anchors-check.sh:642"
+          "evidence": "scripts/docs-anchors-check.sh:690"
         },
         {
           "kind": "file",
           "p": "tooling/grip/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:693"
+          "evidence": "scripts/docs-anchors-check.sh:741"
         },
         {
           "kind": "file",
           "p": "docs/ops/studio-nav-bug-2026-04-19.md",
-          "evidence": "scripts/docs-anchors-check.sh:695"
+          "evidence": "scripts/docs-anchors-check.sh:743"
         },
         {
           "kind": "file",
           "p": "docs/ops/bokbasen-go-live.md",
-          "evidence": "scripts/docs-anchors-check.sh:744"
+          "evidence": "scripts/docs-anchors-check.sh:792"
         },
         {
           "kind": "file",
           "p": "deploy/systemd/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:744"
+          "evidence": "scripts/docs-anchors-check.sh:792"
         },
         {
           "kind": "file",
           "p": "js/CLAUDE.md",
-          "evidence": "scripts/docs-anchors-check.sh:746"
+          "evidence": "scripts/docs-anchors-check.sh:794"
         },
         {
           "kind": "file",
           "p": "deploy/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:752"
+          "evidence": "scripts/docs-anchors-check.sh:800"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/sync/HANDOFF.md",
-          "evidence": "scripts/docs-anchors-check.sh:755"
+          "evidence": "scripts/docs-anchors-check.sh:803"
         },
         {
           "kind": "file",
           "p": "scripts/bp-vercel-quick-setup.sh",
-          "evidence": "scripts/docs-anchors-check.sh:757"
+          "evidence": "scripts/docs-anchors-check.sh:805"
         },
         {
           "kind": "file",
           "p": "tooling/doc-onboarding/TRUTH-AUDIT.md",
-          "evidence": "scripts/docs-anchors-check.sh:762"
+          "evidence": "scripts/docs-anchors-check.sh:810"
         },
         {
           "kind": "file",
           "p": "docs/ops/PROD_OPS.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/ops/adding-a-domain.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/ops/vercel-dns-connect.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "deploy/uptime-kuma/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/studio/user-guide.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/contracts/webhook-realtime.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "js/packages/create-barkpark-app/templates/blog-starter/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "js/packages/create-barkpark-app/templates/website-starter/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "docs/api-v1.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "api/CLAUDE.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/SETUP.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/WINDOWS.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/TASK-SYSTEM.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/ops/branch-protection-and-overrides.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "internal/apiclient/client.go",
-          "evidence": "scripts/docs-anchors-check.sh:819"
+          "evidence": "scripts/docs-anchors-check.sh:867"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "scripts/docs-anchors-check.sh:872"
+          "evidence": "scripts/docs-anchors-check.sh:920"
         },
         {
           "kind": "file",
           "p": "api/scripts/sobelow-inline-overlap-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:942"
+          "evidence": "scripts/docs-anchors-check.sh:990"
         },
         {
           "kind": "file",
           "p": "docs/ops/merge-gates.md",
-          "evidence": "scripts/docs-anchors-check.sh:994"
+          "evidence": "scripts/docs-anchors-check.sh:1042"
         },
         {
           "kind": "file",
           "p": ".github/workflows/elixir.yml",
-          "evidence": "scripts/docs-anchors-check.sh:996"
+          "evidence": "scripts/docs-anchors-check.sh:1044"
         },
         {
           "kind": "dir",
           "p": ".github/workflows",
-          "evidence": "scripts/docs-anchors-check.sh:1007"
+          "evidence": "scripts/docs-anchors-check.sh:1055"
         },
         {
           "kind": "file",
           "p": ".github/required-checks.json",
-          "evidence": "scripts/docs-anchors-check.sh:1013"
+          "evidence": "scripts/docs-anchors-check.sh:1061"
         },
         {
           "kind": "file",
           "p": "scripts/merge-gates-elixir-anchor-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1017"
+          "evidence": "scripts/docs-anchors-check.sh:1065"
         },
         {
           "kind": "file",
           "p": "scripts/roster-drift-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1248"
+          "evidence": "scripts/docs-anchors-check.sh:1296"
         },
         {
           "kind": "file",
           "p": "scripts/no-inplace-bp-copy-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1285"
+          "evidence": "scripts/docs-anchors-check.sh:1333"
         }
       ]
     },
@@ -8686,218 +8686,228 @@
         },
         {
           "kind": "file",
-          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "p": "scripts/pds-pre-gate-papers-check.sh",
           "evidence": "scripts/pds-door-census.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-predicate.exs",
+          "evidence": "scripts/pds-door-census.sh:342"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "evidence": "scripts/pds-door-census.sh:343"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fixtures/live-corpus-2026-07-31.json",
-          "evidence": "scripts/pds-door-census.sh:341"
+          "evidence": "scripts/pds-door-census.sh:343"
         },
         {
           "kind": "file",
           "p": "tooling/pds/rerun-adjudicate.test.mjs",
-          "evidence": "scripts/pds-door-census.sh:342"
+          "evidence": "scripts/pds-door-census.sh:344"
         },
         {
           "kind": "file",
           "p": ".github/workflows/research-coverage-suite.yml",
-          "evidence": "scripts/pds-door-census.sh:342"
+          "evidence": "scripts/pds-door-census.sh:344"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:382"
+          "evidence": "scripts/pds-door-census.sh:384"
         },
         {
           "kind": "file",
           "p": "test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:382"
+          "evidence": "scripts/pds-door-census.sh:384"
         },
         {
           "kind": "dir",
           "p": "tooling/pds",
-          "evidence": "scripts/pds-door-census.sh:429"
+          "evidence": "scripts/pds-door-census.sh:431"
         },
         {
           "kind": "file",
           "p": "scripts/pds-elixir-receipt-census.exs",
-          "evidence": "scripts/pds-door-census.sh:944"
+          "evidence": "scripts/pds-door-census.sh:946"
         },
         {
           "kind": "file",
           "p": "scripts/pds-door-census.sh",
-          "evidence": "scripts/pds-door-census.sh:1493"
+          "evidence": "scripts/pds-door-census.sh:1495"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-inbeam.exs",
-          "evidence": "scripts/pds-door-census.sh:1844"
+          "evidence": "scripts/pds-door-census.sh:1846"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/three_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1847"
+          "evidence": "scripts/pds-door-census.sh:1849"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-three.sh",
-          "evidence": "scripts/pds-door-census.sh:1850"
+          "evidence": "scripts/pds-door-census.sh:1852"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark_web/studio/four_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1863"
+          "evidence": "scripts/pds-door-census.sh:1865"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-four.sh",
-          "evidence": "scripts/pds-door-census.sh:1866"
+          "evidence": "scripts/pds-door-census.sh:1868"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/inline_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1879"
+          "evidence": "scripts/pds-door-census.sh:1881"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-inline.sh",
-          "evidence": "scripts/pds-door-census.sh:1883"
+          "evidence": "scripts/pds-door-census.sh:1885"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/inbeam_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1891"
+          "evidence": "scripts/pds-door-census.sh:1893"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/fraud_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1902"
+          "evidence": "scripts/pds-door-census.sh:1904"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-fraud.sh",
-          "evidence": "scripts/pds-door-census.sh:1905"
+          "evidence": "scripts/pds-door-census.sh:1907"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/orphan_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1914"
+          "evidence": "scripts/pds-door-census.sh:1916"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-orphan.sh",
-          "evidence": "scripts/pds-door-census.sh:1917"
+          "evidence": "scripts/pds-door-census.sh:1919"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearcomment_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1933"
+          "evidence": "scripts/pds-door-census.sh:1935"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearcomment.sh",
-          "evidence": "scripts/pds-door-census.sh:1936"
+          "evidence": "scripts/pds-door-census.sh:1938"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearread_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1948"
+          "evidence": "scripts/pds-door-census.sh:1950"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearread.sh",
-          "evidence": "scripts/pds-door-census.sh:1951"
+          "evidence": "scripts/pds-door-census.sh:1953"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/trailing_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1963"
+          "evidence": "scripts/pds-door-census.sh:1965"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-trailing.sh",
-          "evidence": "scripts/pds-door-census.sh:1966"
+          "evidence": "scripts/pds-door-census.sh:1968"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/port_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1980"
+          "evidence": "scripts/pds-door-census.sh:1982"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-port.sh",
-          "evidence": "scripts/pds-door-census.sh:1983"
+          "evidence": "scripts/pds-door-census.sh:1985"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/tail_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2004"
+          "evidence": "scripts/pds-door-census.sh:2006"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-tail.sh",
-          "evidence": "scripts/pds-door-census.sh:2007"
+          "evidence": "scripts/pds-door-census.sh:2009"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/sigil_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2022"
+          "evidence": "scripts/pds-door-census.sh:2024"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-sigil.sh",
-          "evidence": "scripts/pds-door-census.sh:2025"
+          "evidence": "scripts/pds-door-census.sh:2027"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-long.sh",
-          "evidence": "scripts/pds-door-census.sh:2040"
+          "evidence": "scripts/pds-door-census.sh:2042"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/long_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2048"
+          "evidence": "scripts/pds-door-census.sh:2050"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-shonly.sh",
-          "evidence": "scripts/pds-door-census.sh:2123"
+          "evidence": "scripts/pds-door-census.sh:2125"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-through.sh",
-          "evidence": "scripts/pds-door-census.sh:2151"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-fx-shut.sh",
-          "evidence": "scripts/pds-door-census.sh:2152"
-        },
-        {
-          "kind": "file",
-          "p": "api/test/barkpark/census_door_test.exs",
           "evidence": "scripts/pds-door-census.sh:2153"
         },
         {
           "kind": "file",
+          "p": "scripts/pds-fx-shut.sh",
+          "evidence": "scripts/pds-door-census.sh:2154"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/barkpark/census_door_test.exs",
+          "evidence": "scripts/pds-door-census.sh:2155"
+        },
+        {
+          "kind": "file",
           "p": "tooling/pds/fx-lib.mjs",
-          "evidence": "scripts/pds-door-census.sh:2455"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/fx-lib.mjs",
-          "evidence": "scripts/pds-door-census.sh:2456"
-        },
-        {
-          "kind": "file",
-          "p": "tooling/pds/fx-main.mjs",
           "evidence": "scripts/pds-door-census.sh:2457"
         },
         {
           "kind": "file",
+          "p": "scripts/fx-lib.mjs",
+          "evidence": "scripts/pds-door-census.sh:2458"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/fx-main.mjs",
+          "evidence": "scripts/pds-door-census.sh:2459"
+        },
+        {
+          "kind": "file",
           "p": "tooling/pds/fx-orphan.mjs",
-          "evidence": "scripts/pds-door-census.sh:2486"
+          "evidence": "scripts/pds-door-census.sh:2488"
         }
       ]
     },
@@ -9231,6 +9241,32 @@
           "kind": "file",
           "p": "internal/cli/hetzner_respost_test.go",
           "evidence": "scripts/pds-live-hetzner-placement-group.sh:1673"
+        }
+      ]
+    },
+    {
+      "path": "scripts/pds-pre-gate-papers-check.sh",
+      "run": "bash scripts/pds-pre-gate-papers-check.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/test/barkpark/content/pds_w49_pre_gate_edit_rule_test.exs",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:13"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/pre-gate-papers.json",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:18"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-check.sh",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:41"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-predicate.exs",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:56"
         }
       ]
     },

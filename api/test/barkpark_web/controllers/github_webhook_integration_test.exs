@@ -394,7 +394,7 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
   # and then assert the STORE — because every one of these tags is a claim about
   # the store ("no write happened"), which a mapping proof cannot see.
 
-  test "a merged PR on an UNMARKED gate → reconciled: no_marker and NOT ONE byte written", %{
+  test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{
     scope: scope
   } do
     doc_id = "pds-w37-nomarker-#{System.unique_integer([:positive])}"
@@ -412,12 +412,24 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
 
     conn = deliver(body, sig, "pull_request")
 
-    # THE RECEIPT — controller line 194, verbatim shape, tag carried through the
-    # merge_events.ex:123 passthrough.
-    assert %{"ok" => true, "reconciled" => "no_marker", "task" => ^doc_id} =
-             json_response(conn, 200)
+    # THE RECEIPT. Tag changed by task-d1654bf0d20d5009; the STORE assertions
+    # below are untouched and still carry this test's whole point.
+    #
+    # `no_marker` was TRUE here but useless: it said "this row carries no gate"
+    # while the row plainly carried something that READS as one, and that
+    # criterion was then invisible to the autostamp AND refused to the builder
+    # by stamp.ex's prose arm — stampable only by a lead who noticed by hand.
+    # The receipt now NAMES the indices instead. The flag deliberately remains
+    # the permit: widening it would fabricate dones on the 74 ledger criteria
+    # that merely discuss gating (close.ex `reconcile_locked/4`).
+    assert %{
+             "ok" => true,
+             "reconciled" => "unflagged_merge_gates",
+             "task" => ^doc_id,
+             "criteria" => [1]
+           } = json_response(conn, 200)
 
-    # THE STORED ROW — `no_marker` asserts the classifier REFUSED to guess. A
+    # THE STORED ROW — the tag asserts the classifier REFUSED to guess. A
     # text fallback that stamped the look-alike wording would still print this
     # same sentence; only the row can tell the two apart.
     reloaded = Repo.get!(Document, task.id)

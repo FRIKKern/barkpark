@@ -273,7 +273,6 @@ defmodule Barkpark.Tasks.Edges do
   defp scope_twin(query, field, value),
     do: from(d in query, where: field(d, ^field) == ^value)
 
-
   @doc """
   Re-point every existing `task_edges` endpoint that binds a DRAFT twin at the
   PUBLISHED twin of the same slug, and return `%{from: {moved, deduped}, to:
@@ -299,47 +298,62 @@ defmodule Barkpark.Tasks.Edges do
   SET-BASED, never per-row (slow-migration law): two DELETEs and two UPDATEs in
   total, whatever the corpus size.
   """
-  @spec backfill_twin_canonical_edges() :: %{from: {integer(), integer()}, to: {integer(), integer()}}
+  @spec backfill_twin_canonical_edges() :: %{
+          from: {integer(), integer()},
+          to: {integer(), integer()}
+        }
   def backfill_twin_canonical_edges do
-    from_deduped = delete_colliding_twin_edges("from_id", "to_id")
-    from_moved = repoint_twin_edges("from_id")
-    to_deduped = delete_colliding_twin_edges("to_id", "from_id")
-    to_moved = repoint_twin_edges("to_id")
+    from_deduped = delete_colliding_from_edges()
+    from_moved = repoint_from_edges()
+    to_deduped = delete_colliding_to_edges()
+    to_moved = repoint_to_edges()
 
     %{from: {from_moved, from_deduped}, to: {to_moved, to_deduped}}
   end
 
-  # The twin join, scoped on every axis the `(doc_id, type, dataset_id)`
-  # uniqueness index carries. `IS NOT DISTINCT FROM` treats NULL as a VALUE
-  # rather than as "unknown", so an untenanted row matches only another
-  # untenanted row. A looser join would silently move a blocker across a
-  # tenancy boundary — worse than the unenforced blocker it is fixing.
+  # ── FOUR LITERAL STATEMENTS, NOT ONE INTERPOLATED PAIR ──────────────────
   #
-  # `substring(d.doc_id from 8)` strips the literal "drafts." (7 chars, so the
-  # remainder starts at 8); `LIKE 'drafts.%'` confines it to shadow rows. An
-  # UNPAIRED draft simply finds no published row and is left alone, which is
-  # correct rather than incidental: queue.ex axis 3 serves an unpaired draft as
-  # itself, so its edges must keep pointing at it.
-  @twin_predicate """
-    AND d.doc_id LIKE 'drafts.%'
-    AND pub.doc_id = substring(d.doc_id from 8)
-    AND pub.type = d.type
-    AND pub.dataset = d.dataset
-    AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
-    AND pub.project_id IS NOT DISTINCT FROM d.project_id
-  """
+  # An earlier shape built these from `side`/`other` variables interpolated
+  # into the SQL string. It was safe — both were internal column atoms, never
+  # caller input — but Sobelow's SQL.Query check cannot see that, and it read
+  # the interpolation as two NEW Low findings on `api/lib/barkpark/tasks/edges.ex`
+  # (`variable "side and side"`, `variable "side and side and other and other"`),
+  # which reddened the required Security gate.
+  #
+  # The fix is at the cause rather than a baseline waiver: `from_id` and `to_id`
+  # are a closed set of two, so the four statements are written out in full and
+  # NO variable reaches any SQL string. A waiver would have asked every future
+  # reader to re-derive that `side` is uninterpolatable; four literals ask
+  # nothing. The duplication is four lines of WHERE clause, which is cheaper
+  # than a fingerprint in a baseline file.
+  #
+  # THE SHARED PREDICATE, spelled once here and repeated verbatim below:
+  # `LIKE 'drafts.%'` confines the join to shadow rows; `substring(d.doc_id
+  # from 8)` strips the literal "drafts." (7 chars, so the remainder starts at
+  # 8); the join is scoped on every axis the `(doc_id, type, dataset_id)`
+  # uniqueness index carries, with `IS NOT DISTINCT FROM` so an untenanted row
+  # matches only another untenanted row — a looser join would silently move a
+  # blocker across a tenancy boundary, which is worse than the unenforced
+  # blocker being fixed. An UNPAIRED draft finds no published row and is left
+  # alone, which queue.ex axis 3 requires: it serves such a draft as itself, so
+  # its edges must keep pointing at it.
 
-  defp delete_colliding_twin_edges(side, other) do
+  defp delete_colliding_from_edges do
     %{num_rows: n} =
       Repo.query!("""
       DELETE FROM task_edges e
       USING documents d, documents pub
-      WHERE e.#{side} = d.id
-      #{@twin_predicate}
+      WHERE e.from_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
         AND EXISTS (
           SELECT 1 FROM task_edges c
-          WHERE c.#{side} = pub.id
-            AND c.#{other} = e.#{other}
+          WHERE c.from_id = pub.id
+            AND c.to_id = e.to_id
             AND c.kind = e.kind
         )
       """)
@@ -347,17 +361,62 @@ defmodule Barkpark.Tasks.Edges do
     n
   end
 
-  defp repoint_twin_edges(side) do
+  defp delete_colliding_to_edges do
     %{num_rows: n} =
       Repo.query!("""
-      UPDATE task_edges e
-      SET #{side} = pub.id
-      FROM documents d, documents pub
-      WHERE e.#{side} = d.id
-      #{@twin_predicate}
+      DELETE FROM task_edges e
+      USING documents d, documents pub
+      WHERE e.to_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+        AND EXISTS (
+          SELECT 1 FROM task_edges c
+          WHERE c.to_id = pub.id
+            AND c.from_id = e.from_id
+            AND c.kind = e.kind
+        )
       """)
 
     n
   end
 
+  defp repoint_from_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      UPDATE task_edges e
+      SET from_id = pub.id
+      FROM documents d, documents pub
+      WHERE e.from_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+      """)
+
+    n
+  end
+
+  defp repoint_to_edges do
+    %{num_rows: n} =
+      Repo.query!("""
+      UPDATE task_edges e
+      SET to_id = pub.id
+      FROM documents d, documents pub
+      WHERE e.to_id = d.id
+        AND d.doc_id LIKE 'drafts.%'
+        AND pub.doc_id = substring(d.doc_id from 8)
+        AND pub.type = d.type
+        AND pub.dataset = d.dataset
+        AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+        AND pub.project_id IS NOT DISTINCT FROM d.project_id
+      """)
+
+    n
+  end
 end

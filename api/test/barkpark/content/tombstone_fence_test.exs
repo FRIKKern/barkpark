@@ -52,7 +52,17 @@ defmodule Barkpark.Content.TombstoneFenceTest do
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -167,7 +177,18 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       assert {:ok, _} =
                write(
                  id,
-                 %{"kind" => "task", "lifecycle_status" => "open", "close_reason" => "   "},
+                 %{
+                   "kind" => "task",
+                   "acceptance_criteria" => [
+                     %{
+                       "criterion" => "the fixture states its bar",
+                       "met" => true,
+                       "evidence" => "fixture"
+                     }
+                   ],
+                   "lifecycle_status" => "open",
+                   "close_reason" => "   "
+                 },
                  scope
                )
 
@@ -177,7 +198,18 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       assert {:error, {:invalid_task_content, %{"close_reason" => [_]}}} =
                write(
                  id,
-                 %{"kind" => "task", "lifecycle_status" => "open", "close_reason" => "real"},
+                 %{
+                   "kind" => "task",
+                   "acceptance_criteria" => [
+                     %{
+                       "criterion" => "the fixture states its bar",
+                       "met" => true,
+                       "evidence" => "fixture"
+                     }
+                   ],
+                   "lifecycle_status" => "open",
+                   "close_reason" => "real"
+                 },
                  scope
                )
     end
@@ -246,7 +278,18 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       {:ok, _} =
         write(
           id,
-          %{"kind" => "task", "lifecycle_status" => "cancelled", "close_reason" => reason},
+          %{
+            "kind" => "task",
+            "acceptance_criteria" => [
+              %{
+                "criterion" => "the fixture states its bar",
+                "met" => true,
+                "evidence" => "fixture"
+              }
+            ],
+            "lifecycle_status" => "cancelled",
+            "close_reason" => reason
+          },
           scope
         )
 
@@ -255,7 +298,18 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       assert {:ok, _} =
                write(
                  id,
-                 %{"kind" => "task", "lifecycle_status" => "open", "close_reason" => reason},
+                 %{
+                   "kind" => "task",
+                   "acceptance_criteria" => [
+                     %{
+                       "criterion" => "the fixture states its bar",
+                       "met" => true,
+                       "evidence" => "fixture"
+                     }
+                   ],
+                   "lifecycle_status" => "open",
+                   "close_reason" => reason
+                 },
                  scope
                )
     end
@@ -264,7 +318,22 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       id = uniq("tomb-none")
       _ = mk_task!(id, scope)
 
-      assert {:ok, _} = write(id, %{"kind" => "task", "lifecycle_status" => "considering"}, scope)
+      assert {:ok, _} =
+               write(
+                 id,
+                 %{
+                   "kind" => "task",
+                   "acceptance_criteria" => [
+                     %{
+                       "criterion" => "the fixture states its bar",
+                       "met" => true,
+                       "evidence" => "fixture"
+                     }
+                   ],
+                   "lifecycle_status" => "considering"
+                 },
+                 scope
+               )
     end
   end
 

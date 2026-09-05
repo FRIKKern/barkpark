@@ -1,9 +1,37 @@
 defmodule Barkpark.Webhooks do
   import Ecto.Query
+  require Logger
   alias Barkpark.Audit
   alias Barkpark.Repo
   alias Barkpark.Content.Scope
   alias Barkpark.Webhooks.{Webhook, Delivery}
+
+  # ── Half-open recovery for the auto-disable latch ────────────────────────
+  #
+  # An auto-disabled endpoint is NOT dead: after a cooldown it rejoins the
+  # delivery candidate set for ONE probe. Entry and exit are both automatic, so
+  # a receiver outage that outlives an operator's attention cannot permanently
+  # end a tenant's webhook delivery. Mirrors `Barkpark.Audit.Export`, which
+  # already runs this exact shape for SIEM export sinks.
+  #
+  # The cooldown grows with how far the streak has run PAST the latch
+  # threshold — i.e. with how many probes have already failed — so a receiver
+  # that is down for a week is probed ~24x/day, not on every content change.
+  # A failed probe pushes `auto_disabled_at` forward (`restart_cooldown/3`);
+  # without that the stamp stays old, every subsequent event is "due", and the
+  # probe degenerates into the retry storm the latch exists to prevent.
+  @retry_base_seconds 60
+  @retry_max_seconds 3600
+  # Bounds the exponent so `2 ** over` cannot build a giant integer on an
+  # endpoint whose streak ran into the thousands.
+  @retry_max_doublings 8
+
+  # Stable, greppable log codes for the latch transitions — the operator-facing
+  # half. `webhook_endpoint_auto_disabled` says a tenant's integration went
+  # dark; `webhook_endpoint_recovered` closes the incident.
+  @disabled_code "webhook_endpoint_auto_disabled"
+  @recovered_code "webhook_endpoint_recovered"
+  @probe_failed_code "webhook_endpoint_probe_failed"
 
   @doc """
   List webhooks for a dataset, optionally scoped to a workspace/project.
@@ -172,8 +200,11 @@ defmodule Barkpark.Webhooks do
   defp audit_webhook(result, _action), do: result
 
   @doc """
-  Select the active webhooks that fire for an event, optionally scoped to a
-  workspace/project.
+  Select the DELIVERABLE webhooks that fire for an event, optionally scoped to a
+  workspace/project. Deliverable means every active endpoint, PLUS every
+  AUTO-disabled endpoint whose backoff cooldown has elapsed — one half-open
+  probe, so a recovered receiver resumes without a human. An endpoint a PERSON
+  disabled is never included (see `deliverable/2`).
 
   `opts` may carry `:workspace_id` / `:project_id` (threaded from the changed
   doc's scope). When present, the selection is filtered through
@@ -184,8 +215,11 @@ defmodule Barkpark.Webhooks do
   unscoped behaviour (matches every webhook in the dataset).
   """
   def active_webhooks_for(dataset, event, type, opts \\ []) do
+    now = DateTime.utc_now()
+
     Webhook
-    |> where([w], w.dataset == ^dataset and w.active == true)
+    |> where([w], w.dataset == ^dataset)
+    |> deliverable(now)
     # A webhook with audit_categories set is an AUDIT subscriber, not a content
     # one — exclude it from content fan-out so the two channels never cross.
     |> where([w], fragment("? = '{}'", w.audit_categories))
@@ -197,6 +231,7 @@ defmodule Barkpark.Webhooks do
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type))
     |> scope(opts)
     |> Repo.all()
+    |> Enum.filter(&probe_due?(&1, now))
   end
 
   @doc """
@@ -208,8 +243,10 @@ defmodule Barkpark.Webhooks do
   (nil-org) subscription sees everything — admin-only by construction.
   """
   def audit_webhooks_for(category, action, org_id) when is_binary(category) do
+    now = DateTime.utc_now()
+
     Webhook
-    |> where([w], w.active == true)
+    |> deliverable(now)
     |> where([w], fragment("? <> '{}'", w.audit_categories))
     |> where([w], fragment("? @> ARRAY[?]::varchar[]", w.audit_categories, ^category))
     |> where(
@@ -218,6 +255,55 @@ defmodule Barkpark.Webhooks do
     )
     |> audit_org_scope(org_id)
     |> Repo.all()
+    |> Enum.filter(&probe_due?(&1, now))
+  end
+
+  # ── Half-open probe admission ────────────────────────────────────────────
+
+  # SQL prefilter: every active endpoint, PLUS every AUTO-disabled endpoint
+  # whose SHORTEST possible cooldown has elapsed. The exact per-row cooldown
+  # depends on that row's streak, so it is refined in Elixir by `probe_due?/2`
+  # over the (small) disabled set rather than encoded as a SQL expression.
+  #
+  # An endpoint a PERSON disabled (`active: false` with NO `auto_disabled_at`
+  # stamp) is never admitted: only the automatic latch gets an automatic exit.
+  # This is the load-bearing half of the guard — without the `auto_disabled_at`
+  # test, a probe would resurrect an endpoint an operator deliberately turned
+  # off.
+  defp deliverable(query, now) do
+    earliest = DateTime.add(now, -@retry_base_seconds, :second)
+
+    where(
+      query,
+      [w],
+      w.active == true or
+        (not is_nil(w.auto_disabled_at) and w.auto_disabled_at <= ^earliest)
+    )
+  end
+
+  @doc """
+  When this endpoint's next half-open probe becomes due — `nil` for an endpoint
+  that is active, or one a person disabled by hand (never probed).
+  """
+  def next_probe_at(%Webhook{active: true}), do: nil
+  def next_probe_at(%Webhook{auto_disabled_at: nil}), do: nil
+
+  def next_probe_at(%Webhook{} = w),
+    do: DateTime.add(w.auto_disabled_at, cooldown_seconds(w.consecutive_failures), :second)
+
+  defp probe_due?(%Webhook{active: true}, _now), do: true
+  defp probe_due?(%Webhook{auto_disabled_at: nil}, _now), do: false
+
+  defp probe_due?(%Webhook{} = w, now),
+    do: DateTime.compare(next_probe_at(w), now) != :gt
+
+  # 60s, 120s, 240s ... capped at @retry_max_seconds, keyed off how far the
+  # streak has run PAST the latch threshold (i.e. how many probes have failed).
+  defp cooldown_seconds(failures) do
+    doublings =
+      failures |> Kernel.-(auto_disable_threshold()) |> max(0) |> min(@retry_max_doublings)
+
+    min(@retry_base_seconds * Integer.pow(2, doublings), @retry_max_seconds)
   end
 
   # A subscription scoped to an org only fires for that org's events; a global
@@ -456,6 +542,11 @@ defmodule Barkpark.Webhooks do
   Reset an endpoint's consecutive-failure counter to 0 (called on every
   successful delivery). Gated on `> 0` so a healthy endpoint's steady stream of
   successes issues no needless writes.
+
+  Also the AUTOMATIC exit from the auto-disable latch: if the successful
+  delivery was a half-open probe against an auto-disabled endpoint, the endpoint
+  is re-enabled here and the recovery is announced. A recovered receiver
+  therefore resumes with no human action.
   """
   # A media delivery (`source_kind: "media"`) carries no `endpoint_id` — its
   # endpoints are config-driven, not `webhooks` rows — so there is no
@@ -464,8 +555,69 @@ defmodule Barkpark.Webhooks do
   def reset_endpoint_failures(nil), do: {0, nil}
 
   def reset_endpoint_failures(endpoint_id) do
+    recover_endpoint(endpoint_id)
+
     from(w in Webhook, where: w.id == ^endpoint_id and w.consecutive_failures > 0)
     |> Repo.update_all(set: [consecutive_failures: 0])
+  end
+
+  # The half-open probe SUCCEEDED: close the latch automatically. Guarded on
+  # `active == false AND auto_disabled_at IS NOT NULL`, so it only ever
+  # resurrects an endpoint the AUTOMATIC latch disabled — an endpoint a person
+  # switched off carries no `auto_disabled_at` stamp and is untouched here (it
+  # is also never selected for delivery, so it cannot reach this path at all;
+  # the guard is belt-and-braces against a future caller).
+  #
+  # Emits the recovery signal exactly once per dark interval: the `active ==
+  # false` guard means the SECOND success in a row updates zero rows.
+  defp recover_endpoint(endpoint_id) do
+    was_dark_since =
+      Repo.one(from(w in Webhook, where: w.id == ^endpoint_id, select: w.auto_disabled_at))
+
+    {n, rows} =
+      from(w in Webhook,
+        where: w.id == ^endpoint_id and w.active == false and not is_nil(w.auto_disabled_at),
+        select: w
+      )
+      |> Repo.update_all(
+        set: [
+          active: true,
+          consecutive_failures: 0,
+          auto_disabled_at: nil,
+          disable_reason: nil,
+          updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        ]
+      )
+
+    # `UPDATE ... RETURNING` hands back the POST-update row, whose
+    # `auto_disabled_at` this write just cleared — so "how long was it dark" has
+    # to come from the stamp read BEFORE the flip. The read is unguarded and the
+    # write is guarded, so a concurrent recovery costs at worst a `nil` here,
+    # never a wrong flip.
+    now = DateTime.utc_now()
+
+    if n > 0 do
+      Enum.each(rows || [], &signal_recovered(&1, dark_seconds(was_dark_since, now)))
+    end
+
+    {n, rows}
+  end
+
+  # Logged at WARNING, matching the disable line rather than demoting the close
+  # to info: an operator alerting on the disable code needs the SAME channel to
+  # tell them the incident ended, or every dark interval stays open forever in
+  # their alerting.
+  defp dark_seconds(nil, _now), do: nil
+  defp dark_seconds(since, now), do: DateTime.diff(now, since, :second)
+
+  defp signal_recovered(%Webhook{} = w, dark_for_seconds) do
+    Logger.warning(
+      "[#{@recovered_code}] webhook endpoint #{w.id} (#{w.name}, dataset #{w.dataset}) " <>
+        "recovered after #{dark_for_seconds}s disabled: a half-open probe delivered " <>
+        "successfully; deliveries resume"
+    )
+
+    emit_latch_event(w, "webhook_auto_reenabled", %{"dark_for_seconds" => dark_for_seconds})
   end
 
   @doc """
@@ -474,7 +626,9 @@ defmodule Barkpark.Webhooks do
   configured threshold. The increment uses a single `UPDATE ... RETURNING` so
   concurrent deliveries can't lose a count, and the auto-disable write is gated
   on `active == true` so it stamps `auto_disabled_at` / `disable_reason` exactly
-  once (idempotent — a later give-up on an already-disabled row is a no-op).
+  once. A later give-up on an ALREADY-disabled row is a failed half-open probe:
+  it re-stamps `auto_disabled_at` so the next probe waits out a longer cooldown,
+  and it does NOT re-announce the latch (one signal per dark interval).
   """
   # Media deliveries carry no `endpoint_id` (config-driven endpoints, no
   # `webhooks` row), so there is nothing to count against and nothing to
@@ -509,10 +663,100 @@ defmodule Barkpark.Webhooks do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     disable_reason = build_disable_reason(count, reason)
 
-    from(w in Webhook, where: w.id == ^endpoint_id and w.active == true)
-    |> Repo.update_all(
-      set: [active: false, auto_disabled_at: now, disable_reason: disable_reason, updated_at: now]
+    {n, rows} =
+      from(w in Webhook, where: w.id == ^endpoint_id and w.active == true, select: w)
+      |> Repo.update_all(
+        set: [
+          active: false,
+          auto_disabled_at: now,
+          disable_reason: disable_reason,
+          updated_at: now
+        ]
+      )
+
+    # The `active == true` guard is what makes the SIGNAL fire exactly once at
+    # the threshold crossing rather than on every subsequent give-up: only the
+    # first give-up past the threshold updates a row, so only it has a row to
+    # announce.
+    if n > 0 do
+      Enum.each(rows || [], &signal_auto_disabled(&1, count, disable_reason))
+    else
+      # Zero rows means the endpoint was ALREADY auto-disabled and this failure
+      # is a half-open probe that failed again. Push the cooldown forward so the
+      # NEXT probe waits longer — without this the `auto_disabled_at` stamp
+      # stays old, every subsequent event is "due", and the probe becomes a
+      # retry storm against a receiver that is already known to be down.
+      restart_cooldown(endpoint_id, count, disable_reason, now)
+    end
+
+    {n, rows}
+  end
+
+  # The operator-facing half of the latch. Before this, an endpoint went dark
+  # and the ONLY witness was a `disable_reason` column nobody was looking at:
+  # a tenant's cache revalidation and downstream syncs stopped with no log
+  # line, no audit row, and no notification. Two signals, deliberately:
+  #
+  #   * a greppable WARNING carrying `@disabled_code`, for log-based alerting;
+  #   * an AUDIT event on the endpoint's own per-workspace hash chain, so the
+  #     stop is a durable, tamper-evident RECORD an operator can query later —
+  #     not just a line that ages out of a log buffer.
+  defp signal_auto_disabled(%Webhook{} = w, count, disable_reason) do
+    Logger.warning(
+      "[#{@disabled_code}] webhook endpoint #{w.id} (#{w.name}, dataset #{w.dataset}) " <>
+        "auto-disabled after #{count} consecutive terminal give-ups. Deliveries are " <>
+        "STOPPED. A half-open probe retries in #{cooldown_seconds(count)}s; " <>
+        "POST /v1/webhooks/#{w.dataset}/#{w.id}/reenable resumes immediately."
     )
+
+    emit_latch_event(w, "webhook_auto_disabled", %{
+      "consecutive_failures" => count,
+      "disable_reason" => disable_reason,
+      "next_probe_in_seconds" => cooldown_seconds(count)
+    })
+  end
+
+  # A half-open probe failed again: re-stamp `auto_disabled_at` so the backoff
+  # keys off NOW. Logged at info (not warning) and NOT audited — the incident
+  # was already announced by `signal_auto_disabled/3`; one line per dark
+  # interval is the signal, a line per probe is noise.
+  defp restart_cooldown(endpoint_id, count, disable_reason, now) do
+    from(w in Webhook,
+      where: w.id == ^endpoint_id and w.active == false and not is_nil(w.auto_disabled_at)
+    )
+    |> Repo.update_all(
+      set: [auto_disabled_at: now, disable_reason: disable_reason, updated_at: now]
+    )
+
+    Logger.info(
+      "[#{@probe_failed_code}] webhook endpoint #{endpoint_id} probe failed; " <>
+        "next retry in #{cooldown_seconds(count)}s"
+    )
+  end
+
+  # Same chaining + hygiene contract as `audit_webhook/2`: the endpoint's own
+  # `workspace_id` chain, no signing secret in metadata, and fully isolated —
+  # an audit hiccup must never turn a delivery give-up into a crash.
+  #
+  # `Audit.emit/1` bridges to audit-event webhook subscriptions, which can
+  # themselves fail and count toward a streak. That cannot recurse: this emit
+  # only happens on a THRESHOLD CROSSING, and the `active == true` guard above
+  # makes a crossing a once-per-dark-interval event.
+  defp emit_latch_event(%Webhook{} = w, action, extra) do
+    Audit.emit(%{
+      category: "plugin_settings",
+      action: action,
+      subject: w.id,
+      workspace_id: w.workspace_id,
+      project_id: w.project_id,
+      metadata: Map.merge(%{"name" => w.name, "dataset" => w.dataset}, extra)
+    })
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   # Human-readable disable reason, bounded so a long transport error can't

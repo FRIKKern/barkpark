@@ -83,6 +83,55 @@ defmodule Barkpark.Plugins.OnixEdit.Codelists.StalenessChecker do
           }
         }
 
+  @typedoc """
+  Whether a corpus-wide staleness read actually SAW anything.
+
+    * `:empty` — the corpus held no documents. Nothing to say.
+    * `:instrumented` — at least one document yielded at least one
+      recognized codelist ref. The classification below it is a real
+      measurement.
+    * `:blind` — documents were read, and NOT ONE of them yielded a
+      single recognized ref. Drift is UNMEASURED, not absent.
+  """
+  @type coverage :: :empty | :instrumented | :blind
+
+  @doc """
+  Non-vacuity check for a corpus-wide staleness read.
+
+  `detect_stale/2` returns `[]` in two situations a caller cannot tell
+  apart from the list alone:
+
+    1. the document genuinely carries no codelist refs, and
+    2. `codelist_ref?/1` recognized nothing, because the annotation this
+       module's moduledoc promises ("every codelist ref is annotated with
+       the registry `issue_version` it was validated against") is not
+       actually performed by any writer.
+
+  Case 2 is the dangerous one: every caller then reports `:current` for
+  every book forever, and a silent instrument is indistinguishable from a
+  healthy corpus. `codelist_ref?/1` requires BOTH `"codelistId"` AND
+  `"issue_version"` on the same map, while `Barkpark.Content.Validation`
+  rejects any `codelist` field whose value is not a plain string — so a
+  book's `content` cannot hold that shape at all, and this analyzer reads
+  zero refs on a real corpus.
+
+  Pass the per-document ref lists (in any order) and this returns
+  `:blind` when the whole corpus yielded nothing, so a caller can say
+  "I looked in the wrong place" instead of "everything is current".
+  It is a count the caller computed itself — not a second detector that
+  can go quiet in the same way.
+
+      corpus_coverage([])        #=> :empty
+      corpus_coverage([[], []])  #=> :blind
+      corpus_coverage([[], [r]]) #=> :instrumented
+  """
+  @spec corpus_coverage([[ref_status()]]) :: coverage()
+  def corpus_coverage([]), do: :empty
+
+  def corpus_coverage(per_document_refs) when is_list(per_document_refs) do
+    if Enum.any?(per_document_refs, &(&1 != [])), do: :instrumented, else: :blind
+  end
+
   @doc """
   Classify every codelist ref in `book_doc` against `current_issue`.
 

@@ -655,6 +655,24 @@ jobs:
         working-directory: api
     steps:
       - uses: actions/checkout@v4
+        with:
+          # LOAD-BEARING, NOT INCIDENTAL. The diff step below derives the PR's
+          # changed files from `HEAD^1`, and on actions/checkout's DEFAULT depth
+          # of 1 the parent commit was never fetched — `git rev-parse --verify
+          # --quiet 'HEAD^1'` fails, the changed list stays EMPTY, empty scores
+          # NEUTRAL by design, and this job passed having measured NOTHING.
+          # Every green formatting check on a pull request in this repository's
+          # history was that refusal wearing a tick.
+          #
+          # The path-escape job at :344 uses the SAME derivation and has always
+          # set `fetch-depth: 2`, under a comment explaining that depth 2 is
+          # exactly what makes `HEAD^1` the base sha. This job copied the
+          # derivation and not the depth that makes it work.
+          #
+          # Do not remove this to "save a fetch": the diff step's own comment
+          # used to claim "no extra fetch", and that sentence is what hid the
+          # bug for the life of the gate.
+          fetch-depth: 2
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -701,8 +719,32 @@ jobs:
         run: |
           set -uo pipefail
           log="${RUNNER_TEMP:-/tmp}/format-verdict.log"
-          bash scripts/format-check.sh > "$log" 2>&1
-          rc=$?
+          # `|| rc=$?` IS THE FIX, AND IT IS NOT STYLE.
+          #
+          # GitHub's default shell for `run:` is `bash -e {0}`, and `set -uo
+          # pipefail` does NOT clear `-e`. Written as a bare call followed by
+          # `rc=$?`, the step DIED on the guard's own exit 1 — the correct
+          # "unformatted" verdict, the only one this gate exists to produce.
+          # `rc=$?` never ran, the `GITHUB_OUTPUT` write never ran,
+          # `continue-on-error` swallowed the death, and the scope step below
+          # fell back to `${GUARD_RC:-2}`. 2 is a REFUSAL, so it printed NO
+          # VERDICT and scored neutral, and the job concluded success.
+          #
+          # THE GUARD THREW ITS ANSWER AWAY ONLY WHEN IT HAD ONE. A formatted
+          # tree exits 0, `-e` does not fire, and rc=0 published normally — so
+          # the failure was exclusive to the case the gate is for, which is why
+          # it survived unnoticed.
+          #
+          # `scripts/format-check.sh` has NO `exit 2` path (its codes are 0, 1,
+          # 3, 4, 5, 6; the one `exit 2` in the file is inside a selftest
+          # fixture), so "guard exit 2" could never have come from the guard.
+          # It was the `:-2` default on an unset variable.
+          #
+          # Do NOT replace this with `set +e`: that is a mode change a later
+          # edit can silently undo by re-adding strictness. `|| rc=$?` is local
+          # to this one call and cannot be undone from a distance.
+          rc=0
+          bash scripts/format-check.sh > "$log" 2>&1 || rc=$?
           cat "$log"
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"
           exit "$rc"
@@ -724,10 +766,17 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             # actions/checkout checks out refs/pull/N/merge on a pull_request,
             # so HEAD^1 IS the base tip and `HEAD^1..HEAD` IS the merge-base
-            # diff — no extra fetch, and the same derivation the path-escape
-            # job above already uses. If it cannot be computed the file stays
-            # EMPTY, which the scope reader reports as "no PR diff" and scores
-            # NEUTRAL: an unreadable diff must never manufacture a red.
+            # diff — the same derivation the path-escape job above uses, and it
+            # requires that job's `fetch-depth: 2`, now set at this job's
+            # checkout. This comment used to read "no extra fetch"; the depth
+            # was missing, `HEAD^1` never resolved, and this sentence is what
+            # hid it.
+            #
+            # If it cannot be computed the file stays EMPTY, which the scope
+            # reader reports as "no PR diff" and scores NEUTRAL: an unreadable
+            # diff must never manufacture a red. That fallback is correct and
+            # stays — but it is a LAST RESORT, and for the life of this gate it
+            # was the ONLY path taken.
             if base="$(git rev-parse --verify --quiet 'HEAD^1')" && [ -n "$base" ]; then
               git diff --name-only "$base" HEAD > "$changed" || : > "$changed"
             fi

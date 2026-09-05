@@ -118,7 +118,17 @@ defmodule BarkparkWeb.TasksControllerTest do
   # title = doc_id — too short for the truncation laws and too uniform for
   # the brief byte tripwires).
   defp mk_card_task!(doc_id, title, scope, content_extra) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
+          "lifecycle_status" => "open"
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -510,6 +520,96 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # THE FLAT NAMESPACE (task-233cb8a1d033c738). #12780 closed the filter[...]
+  # container; the top level stayed fail-OPEN, so `?parent_id=X` and `?bogus=1`
+  # each returned a 200 carrying the UNFILTERED page. Every assertion here is on
+  # the RETURNED ROWS, not on a helper call, because the defect was a plausible
+  # page of foreign rows — a helper-level assertion would not have seen it.
+  describe "GET /v1/tasks — the flat query namespace" do
+    defp list_ids(conn, qs) do
+      resp = conn |> authed() |> get("/v1/tasks?" <> qs)
+      {resp.status, Jason.decode!(resp.resp_body)}
+    end
+
+    test "?parent_id= returns ONLY that parent's children, not the whole corpus",
+         %{conn: conn, scope: scope} do
+      parent = uniq("flat-parent")
+      other = uniq("flat-other")
+      _p = mk_task!(parent, scope)
+      _o = mk_task!(other, scope)
+      for _ <- 1..3, do: mk_task!(uniq("kid"), scope, %{"parent_id" => parent})
+      for _ <- 1..2, do: mk_task!(uniq("stranger"), scope, %{"parent_id" => other})
+
+      {status, body} = list_ids(conn, "parent_id=#{parent}&limit=100")
+      assert status == 200
+
+      docs = body["docs"] || []
+      parents = docs |> Enum.map(& &1["parent_id"]) |> Enum.uniq()
+
+      # THE DEFECT: before this, the same call returned every row in the corpus
+      # across every parent, 200 OK — a false confirmation an automated
+      # re-parent driver acts on.
+      assert length(docs) == 3
+      assert parents == [parent]
+    end
+
+    test "?parent_id= and ?parent= agree — the alias is not a second answer",
+         %{conn: conn, scope: scope} do
+      parent = uniq("flat-alias")
+      _p = mk_task!(parent, scope)
+      for _ <- 1..2, do: mk_task!(uniq("kid"), scope, %{"parent_id" => parent})
+
+      {200, by_alias} = list_ids(conn, "parent_id=#{parent}&limit=100")
+      {200, by_canonical} = list_ids(conn, "parent=#{parent}&limit=100")
+
+      ids = fn body -> body["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() end
+      assert ids.(by_alias) == ids.(by_canonical)
+      assert length(by_alias["docs"]) == 2
+    end
+
+    test "an unknown flat param is a 400 that NAMES it and the accepted set",
+         %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("flat-bogus"), scope)
+
+      {status, body} = list_ids(conn, "bogus=1")
+
+      assert status == 400
+      assert body["reason"] == "invalid_filter"
+      assert body["message"] =~ ~s|"bogus"|
+      assert body["message"] =~ "parent_id"
+      assert body["details"]["key"] == "bogus"
+      assert "parent_id" in body["details"]["supported_flat"]
+    end
+
+    test "every param the shipped consumers send is still accepted",
+         %{conn: conn, scope: scope} do
+      # THE CALLER CENSUS, pinned as a test. `bp` is manifest-driven: run.go
+      # sets `view`, `limit` and `offset` explicitly and then one query key per
+      # DECLARED flag, and task.ls declares limit/offset/cursor. Nothing else
+      # ships an HTTP caller of this route — Studio and the task LiveViews use
+      # the Barkpark.Tasks context directly, and the cloud console only calls
+      # /v1/tasks/<id>. If a future manifest flag is added without widening the
+      # allowlist, this test reds instead of a lane discovering it in prod.
+      _t = mk_task!(uniq("flat-census"), scope)
+
+      for qs <- [
+            "limit=5",
+            "offset=0",
+            "view=brief",
+            "limit=5&offset=0&view=brief",
+            "type=task",
+            "kind=task",
+            "lifecycle_status=open",
+            "phase_id=none",
+            "label=none",
+            "filter[parent_id]=none"
+          ] do
+        {status, _} = list_ids(conn, qs)
+        assert status == 200, "a shipped consumer's param was refused: #{qs}"
+      end
+    end
+  end
+
   describe "POST /v1/tasks/:doc_id/close" do
     test "happy path: closes a claimed task; lifecycle flips to done",
          %{conn: conn, scope: scope} do
@@ -643,7 +743,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # This fixture is DELIBERATELY criteria-less — it exists to drive the
+          # close-time gates — so the claim-time criteria gate
+          # (task-9554c64bf51a0f81) is discharged on the record, which also
+          # exercises the override through the real HTTP path.
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       assert claim_resp.status == 200
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
@@ -681,7 +792,16 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-A"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # Criteria-less BY DESIGN — this fixture drives the close-time gates —
+          # so the claim-time gate is discharged on the record.
+          Jason.encode!(%{
+            worker_id: "worker-A",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
 
@@ -738,7 +858,18 @@ defmodule BarkparkWeb.TasksControllerTest do
       claim_resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          # This fixture is DELIBERATELY criteria-less — it exists to drive the
+          # close-time gates — so the claim-time criteria gate
+          # (task-9554c64bf51a0f81) is discharged on the record, which also
+          # exercises the override through the real HTTP path.
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            criteria_unstated_override:
+              "close-gate fixture: criteria are not what this test proves"
+          })
+        )
 
       epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
 
@@ -1086,7 +1217,13 @@ defmodule BarkparkWeb.TasksControllerTest do
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("close-foreign"), scope, %{"acceptance_criteria" => []})
 
-      claim_body = Jason.encode!(%{worker_id: "worker-A"})
+      # Criteria-less BY DESIGN — this fixture drives the close-time gates — so
+      # the claim-time gate is discharged on the record.
+      claim_body =
+        Jason.encode!(%{
+          worker_id: "worker-A",
+          criteria_unstated_override: "close-gate fixture: criteria are not what this test proves"
+        })
 
       claim_resp =
         conn |> authed() |> post("/v1/tasks/#{task.doc_id}/claim", claim_body)

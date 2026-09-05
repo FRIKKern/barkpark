@@ -780,7 +780,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
     test "dropping an open card on In Progress claims it through the fenced primitive",
          %{conn: conn, ws: ws} do
-      scoped_task("dr-open", "Claim me by drag", ws.id, lifecycle: "open", priority: 1)
+      # A claimable fixture states its bar (task-9554c64bf51a0f81): the claim-time
+      # gate refuses a criteria-less work row, and this test's whole point is
+      # that the drop REACHES the fenced claim — so the row has to be one a
+      # claim can accept.
+      scoped_task("dr-open", "Claim me by drag", ws.id,
+        lifecycle: "open",
+        priority: 1,
+        criteria: [
+          %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+        ]
+      )
 
       {:ok, view, _html} = live(conn, "/admin/projects")
       html = render_hook(view, "restage", %{"doc_id" => "dr-open", "to_col" => "in_progress"})

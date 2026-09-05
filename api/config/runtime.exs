@@ -408,6 +408,26 @@ case System.get_env("BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS") do
     :ok
 end
 
+# Paper access-log retention override (edit-on-the-link slice 4). The default
+# (config.exs) is 90 days. Same positive-int-or-warn shape as the two leases
+# above; an operator with a stricter retention policy sets it without a rebuild.
+case System.get_env("BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 ->
+        config :barkpark, :paper_access_log_ttl_days, days
+
+      _ ->
+        IO.warn(
+          "BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see
