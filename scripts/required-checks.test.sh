@@ -5098,6 +5098,224 @@ else
   bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(grep -nF "$RC25_OLD_NEEDLE" "$0" | head -3 | tr '\n' '⏎')"
 fi
 
+# ═══ 26. the INVERSE blocking-authority clause, planted as suite clauses ════
+
+section "26. a workflow may not claim BLOCKING authority the committed spec DENIES — and may not be accused when it is telling the truth"
+
+# WHAT THIS SECTION IS FOR (cgsiw-s4, clause group A). cgsiw-s1 shipped
+# `blocking_authority_check` and recorded its disarm proof BY HAND, in a comment
+# block at required-checks-verify.sh:1035-1057. A proof that lives in a comment
+# re-earns itself never. This section is that proof, mechanized, so it runs on
+# every CI invocation of this suite.
+#
+# THE TRAP, AND WHY NOTHING BELOW USES `--selftest`. `probe()` inside the
+# verifier used to re-exec "$REPO_ROOT/scripts/required-checks-verify.sh" rather
+# than the file it was launched from, so a fully disarmed COPY graded the
+# COMMITTED script and printed SELFTEST OK at rc=0. cgsiw-s1 repaired that (it
+# re-execs $SELF now), but a suite clause must not depend on the repair of the
+# thing it is testing: every mutation below invokes the mutant DIRECTLY with
+# --spec/--readback/--runs/--sha/--workflows, which is §8b(d)'s template and the
+# only non-vacuous way to mutation-prove one clause.
+#
+# AND THE MUTANT LIVES INSIDE scripts/. required-checks-verify.sh resolves
+# REPO_ROOT from its own dirname, so a copy under $TMP has $TMP for a repo: the
+# workflow scan, the tracked-prose corpus and the committed spec all resolve to
+# nothing, every probe exits 127 or refuses for a reason that is not the clause
+# under test, and a widened flag list "fixing" that would be widening the wrong
+# thing. §8b(d) writes the same trap down. So the mutant is written next to the
+# original, and removed on the way out whatever happens.
+
+RC26_MUT="$REPO_ROOT/scripts/.rc26-mutant-verify.$$.sh"
+rc26_cleanup() { rm -f "$REPO_ROOT"/scripts/.rc26-mutant-verify.*.sh; }
+# CHAIN the EXIT trap, never replace it. `trap cleanup EXIT` at :225 is what
+# turns a crash into the 70 this file's exit-code table promises and what removes
+# $TMP; a bare `trap rc26_cleanup EXIT` here would silently drop both, and the
+# only symptom would be a suite that exits 0 out of a crash. Pinned rather than
+# assumed: if the installed handler stops being `cleanup`, say so instead of
+# overwriting whatever replaced it.
+if [ "$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\\1/")" = "cleanup" ]; then
+  trap 'rc26_cleanup; cleanup' EXIT
+  ok "§26 chains the EXIT trap onto \`cleanup\` instead of replacing it (the mutant copy is removed AND the 70-on-crash contract survives)"
+else
+  bad "the EXIT trap is no longer plain \`cleanup\` ($(trap -p EXIT)) — §26 refuses to overwrite it; chain by hand"
+fi
+
+RC26_WF_DENY="$TMP/rc26-wf-deny"        # the violation
+RC26_WF_HATCH="$TMP/rc26-wf-hatch"      # annotated with a real reason
+RC26_WF_EMPTY="$TMP/rc26-wf-hatch-empty"
+RC26_WF_LEAF="$TMP/rc26-wf-leaf"        # the S3-shaped false-red guard
+mkdir -p "$RC26_WF_DENY" "$RC26_WF_HATCH" "$RC26_WF_EMPTY" "$RC26_WF_LEAF"
+
+# Each fixture gets its OWN directory: the clause scans every *.yml/*.yaml in
+# the one it is handed, so a shared directory would leak one specimen into
+# another section's verdict.
+cat > "$RC26_WF_DENY/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_HATCH/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  # spec-authority: advisory-ok — planted by required-checks.test.sh §26 to
+  # assert the hatch greens an overclaim that carries a reviewable reason.
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_EMPTY/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  # spec-authority: advisory-ok —
+  widget:
+    name: Widget gate (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+
+# THE FIXTURE SPEC AND ITS MIRROR. `Widget gate (blocking)` is in neither the
+# committed `.checks` nor the transitive needs-closure of anything in it — the
+# denied set is a COMPLEMENT, so it does not need a ledger row to be denied.
+RC26_SPEC="$TMP/enforced.json"
+RC26_WIDGET_SPEC="$TMP/rc26-widget-spec.json"
+RC26_WIDGET_RB="$TMP/rc26-widget-rb.json"
+RC26_WIDGET_RUNS="$TMP/rc26-widget-runs.json"
+jq '.protection.required_status_checks.checks += [{"context":"Widget gate (blocking)","app_id":15368}]' \
+  "$RC26_SPEC" > "$RC26_WIDGET_SPEC"
+jq '.required_status_checks.contexts = ((.required_status_checks.contexts // []) + ["Widget gate (blocking)"])
+    | .required_status_checks.checks += [{"context":"Widget gate (blocking)","app_id":15368}]' \
+  "$TMP/rb.json" > "$RC26_WIDGET_RB"
+jq '.check_runs += [{"name":"Widget gate (blocking)","conclusion":"success","started_at":"2026-07-28T01:00:00Z"}]' \
+  "$TMP/runs.json" > "$RC26_WIDGET_RUNS"
+
+rc26_run() { # <verify-script> <spec> <readback> <runs> <workflows-dir> -> sets RC26_OUT/RC26_RC
+  RC26_OUT="$(bash "$1" --spec "$2" --readback "$3" --runs "$4" --sha probe --workflows "$5" 2>&1)" \
+    && RC26_RC=0 || RC26_RC=$?
+}
+
+# (a) THE VIOLATION. A context in neither `.checks` nor its needs-closure,
+#     claiming `(blocking)` in its rendered job name -> red, and red BY NAME:
+#     a bare non-zero is satisfied by any of the dozen other refusals in the file.
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_DENY"
+if [ "$RC26_RC" -eq 1 ] && grep -q "claims BLOCKING authority the committed spec DENIES" <<<"$RC26_OUT" \
+   && grep -qF "Widget gate (blocking)" <<<"$RC26_OUT"; then
+  ok "a job claiming \`(blocking)\` for a context that is neither in the spec's \`.checks\` nor in its transitive needs-closure REDS by name (exit $RC26_RC)"
+else
+  bad "the blocking overclaim was not caught by name (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (b) THE MIRROR, and the whole point of the complement: the SAME file greens the
+#     moment that context IS required. A clause that stayed red here would be
+#     pinning a string, not tracking the committed set. Read-back and rendered
+#     names move with the spec so the other clauses stay honest.
+rc26_run "$VERIFY" "$RC26_WIDGET_SPEC" "$RC26_WIDGET_RB" "$RC26_WIDGET_RUNS" "$RC26_WF_DENY"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "…and the IDENTICAL file GREENS once that context is in \`.checks\` — the clause reads the complement of the committed set, not a frozen string"
+else
+  bad "the mirror did not green (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (c) THE ESCAPE HATCH, three ways. A reason greens; an EMPTY reason reds (a bare
+#     token is a silencer, a reason is a decision somebody can review); and the
+#     annotation on a context that IS required reds, because that is the lie
+#     advisory_prose_check catches wearing a machine-readable hat.
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HATCH"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "the escape hatch WITH a reason greens the identical violation (\`# spec-authority: advisory-ok — <why>\`)"
+else
+  bad "the annotated overclaim did not green (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_EMPTY"
+if [ "$RC26_RC" -eq 1 ] && grep -q "annotation carries no reason text" <<<"$RC26_OUT"; then
+  ok "…the hatch with an EMPTY reason REDS by name — a bare token silences the guard without recording a decision"
+else
+  bad "the reasonless hatch did not red by name (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+rc26_run "$VERIFY" "$RC26_WIDGET_SPEC" "$RC26_WIDGET_RB" "$RC26_WIDGET_RUNS" "$RC26_WF_HATCH"
+if [ "$RC26_RC" -eq 1 ] && grep -q "annotation sits on a context the committed spec REQUIRES" <<<"$RC26_OUT"; then
+  ok "…and the SAME annotation on a context the spec REQUIRES REDS — the hatch is checked in both directions, so it cannot be used to under-claim"
+else
+  bad "the hatch lying in the other direction was not caught (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+fi
+
+# (d) THE FALSE-RED GUARD, and it is the clause most likely to be lost in a
+#     later edit. A leaf job INSIDE the needs-closure of a required aggregator
+#     genuinely does block the merge, through the aggregator — so `(blocking)`
+#     on its name is TRUE and must not be accused. This is the S3 shape: the
+#     closure half is what keeps the complement honest in the other direction.
+#     Membership is by file+job id, so the leaf never renders a required name.
+RC26_AGG="$(jq -r '.protection.required_status_checks.checks[0].context' "$RC26_SPEC")"
+{ printf 'name: Aggregated\n'
+  printf '"on": [pull_request]\n'
+  printf 'jobs:\n'
+  printf '  leaf:\n'
+  printf '    name: Leaf unit tests (blocking)\n'
+  printf '    runs-on: ubuntu-latest\n'
+  printf '    steps:\n'
+  printf "      - run: 'true'\n"
+  printf '  agg:\n'
+  printf '    name: %s\n' "$RC26_AGG"
+  printf '    needs: [leaf]\n'
+  printf '    runs-on: ubuntu-latest\n'
+  printf '    steps:\n'
+  printf "      - run: 'true'\n"
+} > "$RC26_WF_LEAF/aggregated.yml"
+rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_LEAF"
+if [ "$RC26_RC" -eq 0 ]; then
+  ok "an S3-shaped leaf inside \`$RC26_AGG\`'s needs-closure may say \`(blocking)\` — it is telling the truth, and the clause does NOT red on it (the false-red guard)"
+else
+  bad "the clause accused a leaf that genuinely blocks through \`$RC26_AGG\` (exit $RC26_RC) — it has become a word filter: $(grep -m3 FAIL <<<"$RC26_OUT")"
+fi
+# …and the same fixture proves the leaf is really INSIDE the closure rather than
+# merely unexamined: drop the `needs:` edge and the identical leaf must be
+# accused. Without this, (d) passes on a clause that scans nothing at all.
+sed '/^    needs: \[leaf\]$/d' "$RC26_WF_LEAF/aggregated.yml" > "$RC26_WF_LEAF/../rc26-noneeds.yml"
+mkdir -p "$TMP/rc26-wf-noneeds" && mv "$RC26_WF_LEAF/../rc26-noneeds.yml" "$TMP/rc26-wf-noneeds/aggregated.yml"
+if [ "$(grep -c 'needs: \[leaf\]' "$TMP/rc26-wf-noneeds/aggregated.yml" || true)" -eq 0 ] \
+   && ! diff -q "$RC26_WF_LEAF/aggregated.yml" "$TMP/rc26-wf-noneeds/aggregated.yml" >/dev/null; then
+  ok "the closure mutation applies: a copy of the fixture drops the \`needs:\` edge (non-empty diff, anchor gone)"
+  rc26_run "$VERIFY" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$TMP/rc26-wf-noneeds"
+  if [ "$RC26_RC" -eq 1 ] && grep -qF "Leaf unit tests (blocking)" <<<"$RC26_OUT"; then
+    ok "…and WITHOUT the edge the identical leaf IS accused — (d) greens because the leaf is in the closure, not because the clause is asleep"
+  else
+    bad "the un-needed leaf was not accused (exit $RC26_RC) — clause (d) above is vacuous: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+else
+  bad "the closure mutation did not apply — the \`needs:\` line moved, so clause (d) is unproven"
+fi
+
+# (e) THE DISARM. Neuter the clause's STRUCTURAL EVIDENCE — the name token — in
+#     a copy inside scripts/, and (a)'s exact fixture must sail through green.
+#     Without this, (a) passes on any refusal the file happens to raise.
+rm -f "$RC26_MUT"
+sed -E "s%^BLOCKING_NAME_TOKEN=.*%BLOCKING_NAME_TOKEN='@@RC26_NEUTERED@@' # NAME TOKEN NEUTERED%" \
+  "$VERIFY" > "$RC26_MUT"
+RC26_MUTN="$(grep -c 'NAME TOKEN NEUTERED' "$RC26_MUT" || true)"
+if [ "$RC26_MUTN" -ne 1 ]; then
+  bad "the blocking-evidence mutation applied $RC26_MUTN times, not exactly 1 — BLOCKING_NAME_TOKEN moved, so the proof below is vacuous"
+elif diff -q "$VERIFY" "$RC26_MUT" >/dev/null 2>&1; then
+  bad "the mutant is byte-identical to the committed verifier — nothing was disarmed, so the proof below is vacuous"
+else
+  ok "the mutation applies: a copy INSIDE scripts/ (so its REPO_ROOT is this repo, never \$TMP) has BLOCKING_NAME_TOKEN neutered, and the diff is non-empty"
+  rc26_run "$RC26_MUT" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_DENY"
+  if [ "$RC26_RC" -eq 0 ] && ! grep -q "claims BLOCKING authority" <<<"$RC26_OUT"; then
+    ok "…and WITHOUT it the SAME violation fixture exits 0 in silence — the clause is mutation-proven able to lose (armed rc=1, disarmed rc=0)"
+  else
+    bad "the disarmed copy still refused (exit $RC26_RC) — clause (a) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+fi
+rc26_cleanup
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
