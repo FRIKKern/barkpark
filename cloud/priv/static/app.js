@@ -4020,10 +4020,19 @@
   // (`Sites.AutoDeployWorker.refuse/1` → `Notifications.dispatch_site_event`)
   // landed in the same change, and arm (b) reds until this row names it. This is
   // not a promise ahead of a mechanism — it is the console catching up to one.
+  //
+  // cch-w30-bl — EIGHT. `deployment_succeeded` is BACK, and the paragraph above
+  // is why it can be: the objection was never the toggle, it was that nothing
+  // could send it and that `settle_live/2` "legally re-reports live". Both are
+  // answered in the same change — `Registry.dispatch_deployment_terminal/2`
+  // fires it from the fenced writer AND from the `with_site_update` writer
+  // `settle_live/2` drives, EDGE-TRIGGERED on the prior status so a live → live
+  // re-report sends nothing. Arm (b) of the census reds until this row exists.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
+    ["deployment_succeeded", "Deployment live"],
     ["deployment_refused", "Deployment refused"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],

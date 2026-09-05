@@ -8154,7 +8154,8 @@ defmodule BarkparkCloud.Registry do
         {:error, :not_found}
 
       _uuid ->
-        # notifications (wave 28 S6): the dispatch is POST-transaction on purpose.
+        # notifications (wave 28 S6, extended to the success terminal by
+        # cch-w30-bl): the dispatch is POST-transaction on purpose.
         # `do_transition_deployment_fenced/4` runs the whole write inside
         # `Repo.transaction`, so a dispatch placed inside would email BEFORE
         # commit and phantom-email whenever a later clause rolls back. It is also
@@ -8162,9 +8163,14 @@ defmodule BarkparkCloud.Registry do
         # re-drives this same writer on every stage report and
         # `status_for_stage/2` carries "failed" forward unchanged, so failed →
         # failed rewrites are routine and must not re-alert.
+        #
+        # `dispatch_deployment_terminal/2` is SHARED with
+        # `transition_deployment_with_site_update/5` — the other writer that can
+        # land a terminal status — so neither terminal has a producer the other
+        # path is missing.
         case do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs) do
           {:ok, {prior_status, %Deployment{} = updated}} ->
-            maybe_dispatch_deployment_failed(prior_status, updated)
+            dispatch_deployment_terminal(prior_status, updated)
             {:ok, updated}
 
           {:error, reason} ->
@@ -8240,13 +8246,27 @@ defmodule BarkparkCloud.Registry do
         {:error, :not_found}
 
       _uuid ->
-        do_transition_deployment_with_site_update(
-          deployment_id,
-          worker_id,
-          observed_epoch,
-          deployment_attrs,
-          site_attrs
-        )
+        # cch-w30-bl: THE SUCCESS TERMINAL'S PRODUCER LIVES HERE, not only on the
+        # fenced writer beside it. `Sites.Deploy.settle_live/2` drives every
+        # static site build — the dominant path — through THIS function, and it
+        # had no post-transaction dispatch at all, so a `deployment_succeeded`
+        # producer bolted onto `transition_deployment_fenced/4` alone would have
+        # missed every one of them. Same post-commit discipline, same edge
+        # trigger, same helper.
+        case do_transition_deployment_with_site_update(
+               deployment_id,
+               worker_id,
+               observed_epoch,
+               deployment_attrs,
+               site_attrs
+             ) do
+          {:ok, {prior_status, %Deployment{} = updated}} ->
+            dispatch_deployment_terminal(prior_status, updated)
+            {:ok, updated}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -8281,7 +8301,10 @@ defmodule BarkparkCloud.Registry do
                    d |> Deployment.transition_changeset(deployment_attrs) |> Repo.update(),
                  {:ok, _site} <-
                    d.site |> Site.runtime_changeset(site_attrs) |> Repo.update() do
-              updated
+              # The PRIOR status rides out with the row, exactly as the simple
+              # fenced writer does it, so the public wrapper can edge-trigger.
+              # Unwrapped there — callers still see `{:ok, %Deployment{}}`.
+              {d.status, updated}
             else
               {:error, cs} -> Repo.rollback(cs)
             end
@@ -8730,6 +8753,66 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp failure_detail(reason), do: reason
+
+  # cch-w30-bl — THE ONE POST-COMMIT DISPATCH BOTH FENCED WRITERS CALL.
+  #
+  # A deployment reaches a TERMINAL status through two different writers:
+  # `transition_deployment_fenced/4` (the builder/agent route, and the route the
+  # API picks when `make_current` is false) and
+  # `transition_deployment_with_site_update/5` (the atomic live-pointer flip that
+  # `Sites.Deploy.settle_live/2` drives on every static site build). Wave 28's
+  # `deployment_failed` producer sat on the first one only, which was survivable
+  # because a failure never flips the live pointer and therefore never rides the
+  # second writer. The SUCCESS terminal is the mirror image: it rides the second
+  # writer almost exclusively. One helper, both call sites, so a future terminal
+  # cannot be added to one path and silently missed on the other.
+  #
+  # Both arms are EDGE-TRIGGERED on the PRIOR status, and that is not free:
+  # `Deployment.legal_transition?/2` is `to == from or to in @transitions[from]`,
+  # so a live → live rewrite is ACCEPTED. Without the guard a retried or
+  # duplicated terminal report re-alerts every time it lands.
+  defp dispatch_deployment_terminal(prior_status, %Deployment{} = updated) do
+    maybe_dispatch_deployment_failed(prior_status, updated)
+    maybe_dispatch_deployment_succeeded(prior_status, updated)
+    :ok
+  end
+
+  # cch-w30-bl: fire `:deployment_succeeded` only on the EDGE into `live`.
+  #
+  # THE TERMINAL IS "live", NOT "succeeded". `Deployment`'s status vocabulary is
+  # `queued building pushing live failed cancelled` — the event is named for what
+  # a person reads on a toggle, the guard is written against what the column
+  # holds, and conflating the two is how this producer stays unwritten.
+  defp maybe_dispatch_deployment_succeeded("live", _updated), do: :ok
+
+  defp maybe_dispatch_deployment_succeeded(_prior, %Deployment{status: "live"} = updated),
+    do: dispatch_deployment_succeeded(updated)
+
+  defp maybe_dispatch_deployment_succeeded(_prior, _updated), do: :ok
+
+  # Site-keyed for the same reason the failure is: a Deployment only
+  # `belongs_to :site`, and `Notifications.dispatch_site_event/3` resolves the
+  # team through the site, names the site in the alert, and never raises.
+  #
+  # THE PAYLOAD IS IDENTITY AND NOTHING ELSE. It deliberately does NOT carry the
+  # row's `detail` ("live at <url>"): only `Sites.Deploy.settle_live/2` writes
+  # that sentence, so on the agent route (`PUT` with `make_current: true`) the
+  # column still holds whatever the PUSHING stage left behind, and shipping it
+  # would put a stale in-flight note under a success headline. No duration
+  # either — `deployments` has no started_at/finished_at to subtract, the same
+  # ruling `deployment_identity/1` already documents for the failure alert.
+  #
+  # ONE LINE, AND THE LINE IS LOAD-BEARING. `__app.test.mjs`'s census matches its
+  # four producer idioms per SOURCE LINE, so a `dispatch_site_event(` wrapped
+  # across lines by the formatter is INVISIBLE to it — the guard would report
+  # this event as an orphaned console offer while the producer sat right here.
+  # Measured, not assumed: the multi-line form reds arm (a) with
+  # `['deployment_succeeded']`. The payload is bound first to keep the call
+  # inside the formatter's line budget.
+  defp dispatch_deployment_succeeded(%Deployment{} = deployment) do
+    payload = deployment_identity(deployment)
+    Notifications.dispatch_site_event(deployment.site_id, :deployment_succeeded, payload)
+  end
 
   # notifications (wave 28 S6): fire `:deployment_failed` only on the EDGE into
   # `failed`. `Sites.Deploy.record_stage/2` re-drives the fenced writer on every

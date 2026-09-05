@@ -17931,25 +17931,34 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers SEVEN toggles — the three producerless ones are still gone", () => {
+test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
-  // Seven toggle rows × six columns = 42 cells, and not one of them names an
+  // Eight toggle rows × six columns = 48 cells, and not one of them names an
   // event nothing can send. A regressed row would fail the census below too;
   // this leg is the person-facing half — what the page actually draws.
   //
-  // cch-w29-bl moved this 36 → 42. The count is EXACT on purpose and the number
-  // is not the assertion: the two loops below are. A row moves this number only
-  // together with its producer, because arm (a) of the census below reds on an
-  // offer with nothing behind it.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 42, "7 events × 6 channels");
-  for (const dead of ["deployment_succeeded", "member_invited", "token_expiring"]) {
+  // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48. The count is
+  // EXACT on purpose and the number is not the assertion: the two loops below
+  // are. A row moves this number only together with its producer, because arm
+  // (a) of the census below reds on an offer with nothing behind it.
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 48, "8 events × 6 channels");
+  // STILL DEAD. `member_invited` and `token_expiring` have no producer, and
+  // token_expiring must never get the obvious one: dispatch_event/3 fans to
+  // team_member_emails/1 while a token belongs to ONE user.
+  for (const dead of ["member_invited", "token_expiring"]) {
     assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
       `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
   }
   // The seventh, drawn: the auto-deploy PREBUILT refusal
   // (Sites.AutoDeployWorker.refuse/1 → Notifications.dispatch_site_event).
-  for (const live of ["deployment_failed", "deployment_refused"]) {
+  //
+  // The eighth, drawn: cch-w30-bl. `deployment_succeeded` was the THIRD dead row
+  // above until its producer landed — Registry.dispatch_deployment_terminal/2,
+  // fired from BOTH writers that can reach the `live` terminal and edge-triggered
+  // on the prior status. It moves lists here for exactly one reason: arm (b) of
+  // the census below now reds while this row is absent.
+  for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded"]) {
     assert.match(html, new RegExp(`data-event="${live}"`),
       `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }
