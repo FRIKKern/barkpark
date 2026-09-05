@@ -19,8 +19,10 @@
 # main's required set is exactly ["Elixir gate", "PR references an active task",
 # "Cloud gate", "Console gate"], and all four are PR-head gates over an ephemeral
 # CI database. None of them can see a production row or a production Actions
-# history, so this verdict is not expressible as a merge gate — it is a LEVEL
-# check over the live population. The product job is fenced with
+# history, so this verdict is not expressible as a required context — it reds
+# its own check-run and cannot stop a merge, because it is a LEVEL check over
+# the live population rather than a verdict about one PR head. The product job
+# is fenced with
 # `if: github.event_name != 'pull_request'` so its name never renders on a PR
 # head and can never be sampled into the required-check spec, and the
 # `pull_request` trigger is paths-filtered to this slice's own three files so the
