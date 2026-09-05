@@ -29,6 +29,7 @@ indx-index-identity	index_key
 instance-content-bootstrap	Run
 instrument-exit-vocabulary	createExitVocabulary
 mcp-task-tools	registerTaskTools
+media-where-used	referrers
 merge-gate-criterion-predicate	merge_gated?
 platform-delivery-record	record_all
 preview-manifest	project

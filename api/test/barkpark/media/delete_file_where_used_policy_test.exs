@@ -73,7 +73,7 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
       file = media_file!()
 
       for bogus <- [true, "guard", :guarded, nil] do
-        assert_raise ArgumentError, ~r/it must be :guard .* or :cascade/s, fn ->
+        assert_raise ArgumentError, ~r/it must be :guard or :cascade/, fn ->
           Media.delete_file(file.id, where_used: bogus)
         end
       end
