@@ -996,19 +996,53 @@ defmodule BarkparkWeb.TasksController.Params do
   @prime_filter_keys ~w(worker)
   @events_filter_keys []
 
+  # THE FLAT ALLOWLIST (task-233cb8a1d033c738). `flat:` used to be PROSE — a
+  # sentence for an error message, listing six of the eleven keys `index`
+  # actually honours. Now it is a LIST and the prose is derived from it, so the
+  # thing the message promises and the thing the route enforces cannot drift.
+  #
+  # WHY THE TOP LEVEL NEEDED CLOSING AT ALL. PR #12780 closed the `filter[...]`
+  # container: a key that route cannot honour is a 400 naming the key. The flat
+  # namespace stayed fail-OPEN, and `parent_id` is the exact spelling a caller
+  # reaches for after reading the task schema (`content.parent_id`) — the route
+  # only ever read `parent`. Measured before this change: `?filter[parent_id]=X`
+  # returned 18 rows under one parent, while `?parent_id=X` returned all 383
+  # across 76 parents, 200 OK. That is not a missing feature, it is a FALSE
+  # CONFIRMATION an automated re-parent driver will act on.
+  #
+  # `parent_id` is therefore listed as an ACCEPTED ALIAS of `parent` rather than
+  # refused: refusing the spelling the schema itself teaches would trade a wrong
+  # answer for a wrong lesson.
+  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label)
+  @ready_flat_keys ~w(view limit offset phase_id order worker)
+  @prime_flat_keys ~w(view limit offset worker order)
+  @events_flat_keys ~w(since limit)
+
   @route_filters %{
     index: %{
       label: "GET /v1/tasks",
       keys: @index_filter_keys,
-      flat: "kind, lifecycle_status, parent, phase_id, label, type"
+      flat_keys: @index_flat_keys,
+      flat: Enum.join(@index_flat_keys, ", ")
     },
     ready: %{
       label: "GET /v1/tasks/ready",
       keys: @ready_filter_keys,
-      flat: "phase_id, order, limit, offset"
+      flat_keys: @ready_flat_keys,
+      flat: Enum.join(@ready_flat_keys, ", ")
     },
-    prime: %{label: "GET /v1/tasks/prime", keys: @prime_filter_keys, flat: "worker, order, limit"},
-    events: %{label: "GET /v1/tasks/events", keys: @events_filter_keys, flat: "since, limit"}
+    prime: %{
+      label: "GET /v1/tasks/prime",
+      keys: @prime_filter_keys,
+      flat_keys: @prime_flat_keys,
+      flat: Enum.join(@prime_flat_keys, ", ")
+    },
+    events: %{
+      label: "GET /v1/tasks/events",
+      keys: @events_filter_keys,
+      flat_keys: @events_flat_keys,
+      flat: Enum.join(@events_flat_keys, ", ")
+    }
   }
 
   @doc "The `filter[...]` keys `route` can honour (`:index` / `:ready` / `:prime` / `:events`)."
@@ -1027,6 +1061,50 @@ defmodule BarkparkWeb.TasksController.Params do
   dropped filter. The `:index` seat of `parse_route_filters/2`.
   """
   def parse_index_filters(params) when is_map(params), do: parse_route_filters(params, :index)
+
+  @doc """
+  The FLAT (top-level) query params `route` honours.
+
+  One list, used both to enforce and to name — `flat:` in `@route_filters` is
+  derived from it, so an error message cannot promise a key the route drops.
+  """
+  @spec flat_keys(atom()) :: [String.t()]
+  def flat_keys(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:flat_keys)
+
+  @doc """
+  Refuse an unknown TOP-LEVEL query param on `route`.
+
+  `:ok`, or `{:error, {:unknown_flat_param, key, route}}` for the first
+  unrecognised key in sorted order — deterministic, so the same request always
+  names the same key.
+
+  WHY FAIL-CLOSED. The sibling `filter[...]` container was closed by #12780; the
+  flat namespace was still fail-OPEN, so `?parent_id=X` and `?bogus=1` both
+  returned a 200 carrying the UNFILTERED page. A caller who asked to narrow and
+  got everything back cannot tell that from a parent with many children, which
+  is why this is a wrong ANSWER rather than a missing feature.
+
+  Phoenix injects its own routing keys into `params`, so those are skipped by
+  name rather than by guesswork: they are not caller input and refusing them
+  would 400 every request.
+  """
+  @phoenix_injected ~w(format _format _method _csrf_token dataset workspace project)
+
+  @spec reject_unknown_flat_params(map(), atom()) ::
+          :ok | {:error, {:unknown_flat_param, String.t(), atom()}}
+  def reject_unknown_flat_params(params, route) when is_map(params) and is_atom(route) do
+    allowed = flat_keys(route) ++ @phoenix_injected ++ ["filter"]
+
+    params
+    |> Map.keys()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.sort()
+    |> Enum.find(&(&1 not in allowed))
+    |> case do
+      nil -> :ok
+      key -> {:error, {:unknown_flat_param, key, route}}
+    end
+  end
 
   @doc """
   Parse the optional `filter[...]` container for `route`.
@@ -1120,6 +1198,17 @@ defmodule BarkparkWeb.TasksController.Params do
   (name the offending key and list what this route accepts), because the caller
   it refuses is one who believed the request was already filtered.
   """
+  # task-233cb8a1d033c738 — the FLAT namespace's refusal. It names the key AND
+  # the accepted set, because a caller who reached for `parent_id` guessed a
+  # PLAUSIBLE spelling (it is what content.parent_id is called) and needs to be
+  # told which one this route reads, not merely that theirs was wrong.
+  def filter_message({:unknown_flat_param, key, route}) do
+    "#{filter_route_label(route)} does not read the query param #{inspect(key)}, and " <>
+      "ignoring it would return an UNFILTERED page that looks like an answer; " <>
+      "accepted flat params: #{flat_clause(route)}. " <>
+      "Structured filters go in the filter[<key>]=<value> container."
+  end
+
   def filter_message({:unknown_filter_key, key, route}) do
     "unknown filter key #{inspect(key)} on #{filter_route_label(route)}; " <>
       supported_clause(route)
@@ -1153,6 +1242,14 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp flat_clause(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:flat)
+
+  def filter_details({:unknown_flat_param, key, route}),
+    do: %{
+      key: key,
+      route: filter_route_label(route),
+      supported_flat: flat_keys(route),
+      supported_filter: filter_keys(route)
+    }
 
   def filter_details({:unknown_filter_key, key, route}),
     do: %{key: key, route: filter_route_label(route), supported: filter_keys(route)}
