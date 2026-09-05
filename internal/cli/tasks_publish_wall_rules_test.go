@@ -153,8 +153,11 @@ func TestFetchRegisteredTagsIsBlindOnEveryUnreliableAnswer(t *testing.T) {
 	}
 }
 
-// A blind registry read is REPORTED and the create proceeds — never a silent
-// clearance, never a veto.
+// A blind registry read is REPORTED and produces no refusal from the CLASSIFIER
+// — never a silent clearance. checkTagRegistry stays a pure classifier (the MCP
+// task_create path reads the same function); what to DO about a blind read is
+// the caller's decision, and `bp task create --publish` now fails closed on it
+// (TestTaskCreatePublishRefusesWhenTheRegistryIsUnreadable, below).
 func TestCheckTagRegistryFailsOpenAndSaysSo(t *testing.T) {
 	prior := registeredTagReader
 	defer func() { registeredTagReader = prior }()
