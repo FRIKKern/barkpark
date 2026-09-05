@@ -48,8 +48,19 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   If `submission_id` is already present in `bp_export_status` on entry,
   the stage step is **skipped** and the worker resumes polling. Combined
   with the `unique:` clause on the Oban worker (60s window keyed on
-  `document_id`), this means re-enqueueing or retrying the same document
-  never causes a duplicate stage POST.
+  `document_id`), this dedups the **Oban** layer: re-enqueueing or
+  retrying the same document does not re-run a stage POST that already
+  recorded its `submission_id`.
+
+  This guard is scoped to that layer and no further. It reads
+  `bp_export_status`, so it can only see a stage POST that already
+  RETURNED and was recorded. It says nothing about a duplicate minted
+  INSIDE one `Client.stage/2` call — a POST the remote accepted whose
+  response was lost, then replayed by the client's own retry loop. No
+  `submission_id` exists at that moment, so this check cannot fire.
+  That case is closed one layer down, by `Barkpark.Net.RetrySafety`,
+  which refuses to replay a non-idempotent method on an ambiguous
+  failure (`:timeout`, `502`, `504`).
 
   ## Retry policy
 
