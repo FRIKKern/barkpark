@@ -3383,9 +3383,15 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: this route sits AFTER
+      # Auth.require_user, so the caller's identity is already resolved — key
+      # the bucket on it, not on peer_ip. The limiter's own docstring makes the
+      # case for push_register: clients share carrier/corporate-NAT IPs, so a
+      # per-IP bucket lets one user starve strangers behind the same address.
+      # Limit (10), window (60 s) and the 429 shape are unchanged.
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
@@ -3477,9 +3483,11 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 404, %{error: "not_found"})
 
+      # acpc-bl-app-token-per-ip-on-authed-route: per-USER, same reasoning as
+      # the app_token bucket above (authenticated route, NAT-shared IPs).
       match?(
         {:error, :rate_limited},
-        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> conn.assigns.current_user.id)
       ) ->
         json(conn, 429, %{error: "rate_limited"})
 
