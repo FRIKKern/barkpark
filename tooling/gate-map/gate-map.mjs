@@ -242,6 +242,19 @@ export function verify(map, root = REPO) {
   return { ok: problems.length === 0, problems, fresh };
 }
 
+// ── THE PREFIX VIEW ──────────────────────────────────────────────────────────
+// `--for` answers "this exact slice"; `--prefix` answers the row's question,
+// "which instruments READ anything under cloud/priv/static/**". Same scan sites,
+// aggregated one level up — this is the prefix -> [instruments] map itself.
+export function instrumentsUnderPrefix(prefix, map) {
+  const p = prefix.replace(/\/+$/, "");
+  const under = (q) => q === p || q.startsWith(p + "/");
+  return map.instruments
+    .filter((i) => i.scans.some((s) => under(s.p)))
+    .map((i) => ({ path: i.path, run: i.run, via: i.scans.filter((s) => under(s.p)).slice(0, 3) }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export function loadMap(p = MAP_PATH) {
   return JSON.parse(fs.readFileSync(p, "utf8"));
 }
@@ -273,6 +286,15 @@ function main(argv) {
     return 0;
   }
 
+  const pf = argv.indexOf("--prefix");
+  if (pf !== -1) {
+    const prefix = argv[pf + 1];
+    const list = instrumentsUnderPrefix(prefix, loadMap());
+    console.log(`PREFIX ${prefix}  ->  ${list.length} instrument(s)`);
+    for (const i of list) console.log(`  ${i.path}\n      ${i.via.map((v) => `${v.kind} ${v.p} (${v.evidence})`).join("\n      ")}`);
+    return 0;
+  }
+
   let files = [];
   const ff = argv.indexOf("--for-file");
   if (ff !== -1) {
@@ -286,7 +308,7 @@ function main(argv) {
     }
   }
   if (!files.length) {
-    console.error("usage: gate-map.mjs --population | --verify | --derive | --for <files…> [--run]");
+    console.error("usage: gate-map.mjs --population | --verify | --derive | --prefix <p> | --for <files…> [--run]");
     return 2;
   }
 
