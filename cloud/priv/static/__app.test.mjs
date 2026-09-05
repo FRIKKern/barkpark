@@ -3221,6 +3221,9 @@ const censusRate = (numerator, sample, basis) => {
 };
 const CENSUS_ATTEMPTED = "attempted rows in the window (D19)";
 const CENSUS_FAILED = "settled failed rows in the window — the failure numerator";
+// The dr-w31 twin: the SETTLED denominator, `failed + live`. Deferrals are OUT
+// of it, which is the whole point — they are in CENSUS_ATTEMPTED.
+const CENSUS_TERMINAL = "TERMINAL rows only: failed + live. Deferred, in-flight and cancelled rows are OUT of this denominator";
 const censusClass = (name, label, count, failed) => ({
   class: name, label, agency: "box", count, share: censusRate(count, failed, CENSUS_FAILED),
 });
@@ -3229,6 +3232,7 @@ const CENSUS_REFUSED = {
   window: { from: "2026-08-25T00:00:00.000000Z", to: "2026-08-26T00:00:00.000000Z" },
   volume: 74, failed: 12, live: 58, in_flight: 3, cancelled: 1, residual: 0, deferred_total: 0,
   failure_rate: censusRate(12, 74, CENSUS_ATTEMPTED),
+  terminal_failure_rate: censusRate(12, 70, CENSUS_TERMINAL),
   live_rate: censusRate(58, 74, CENSUS_ATTEMPTED),
   classes: [censusClass("BUILD_FAILED", "the site build exited non-zero", 9, 12)],
   min_sample: 200,
@@ -3237,6 +3241,9 @@ const CENSUS_ANSWERED = {
   window: { from: "2026-08-19T00:00:00.000000Z", to: "2026-08-26T00:00:00.000000Z" },
   volume: 1840, failed: 312, live: 1402, in_flight: 21, cancelled: 6, residual: 0, deferred_total: 99,
   failure_rate: censusRate(312, 1840, CENSUS_ATTEMPTED),
+  // 312 of 1714 settled = 18.2%, against 16.96% on the attempted door. Same
+  // numerator, two bases — and the gap IS the deferral mass.
+  terminal_failure_rate: censusRate(312, 1714, CENSUS_TERMINAL),
   live_rate: censusRate(1402, 1840, CENSUS_ATTEMPTED),
   classes: [
     censusClass("BUILD_FAILED", "the site build exited non-zero", 181, 312),
@@ -3319,6 +3326,54 @@ test("dr-w1-s2 (criterion 0): the ledger's REFUSAL renders as 'not enough data (
   const row = hooks.operatorCensusClassRowHtml(censusClass("BOX_500", "the box errored on the deploy (HTTP 500)", 9, 12));
   assert.ok(row.includes("not enough data (n=12)"), "a class SHARE refuses on the same node: " + row);
   assert.ok(!/%/.test(row), "and prints no percentage either: " + row);
+});
+
+// ── dr-w31 · BOTH BASES OR NEITHER, on the console card ────────────────────
+// THE DETECTOR. Drop the `terminal_failure_rate` line from
+// operatorCensusCardHtml and this test reds by name: the settled percentage,
+// its denominator and its basis sentence all disappear while the attempted
+// percentage keeps rendering — which is exactly the surface state D525 forbids.
+//
+// WHY IT MATTERS AND IS NOT COSMETIC: the attempted door counts deferrals, and
+// a deferral is a WAIT, not an outcome. Capacity pressure raises deferrals,
+// which mechanically LOWERS the attempted-basis percentage with zero change in
+// reliability. A card printing only that number lets a fleet "improve" by
+// waiting more. The settled door (failed + live) cannot be moved that way.
+test("dr-w31 (criterion 1): the console card prints BOTH bases, each with its OWN denominator", () => {
+  const html = hooks.operatorCensusCardHtml(CENSUS_ANSWERED);
+  assert.ok(html.includes("Failure rate (attempted)"), "the attempted-basis line is LABELLED as one; got: " + html);
+  assert.ok(html.includes("Failure rate (settled)"), "and the settled-basis line renders beside it; got: " + html);
+  assert.ok(html.includes("16.96%") && html.includes("312 of 1840"),
+    "attempted: the server's pct with the server's own denominator");
+  assert.ok(html.includes("18.2%") && html.includes("312 of 1714"),
+    "settled: the SAME numerator over the settled denominator — 2 bases, 1 numerator; got: " + html);
+  assert.ok(html.includes(CENSUS_ATTEMPTED) && html.includes(CENSUS_TERMINAL),
+    "and BOTH basis sentences ride the foot, verbatim from the server (D34); got: " + html);
+  // The gap between the two is the deferral mass, and it is on the card as a
+  // COUNT so a reader can check the arithmetic rather than take it on trust.
+  assert.ok(html.includes("deferred 99"), "the mass the two denominators differ by is printed: " + html);
+});
+
+test("dr-w31 (criterion 1): a control plane that sends NO settled rate gets NEITHER — the absence is said out loud", () => {
+  // The "or neither" half of the rule. An OMITTED settled line reads as "there
+  // is only one denominator", which is the claim this row exists to remove — so
+  // the line still renders and says it was not reported.
+  const oneBasis = { ...CENSUS_ANSWERED };
+  delete oneBasis.terminal_failure_rate;
+  const html = hooks.operatorCensusCardHtml(oneBasis);
+  assert.ok(html.includes("Failure rate (settled)"),
+    "the settled line renders even when the payload carries no node for it; got: " + html);
+  assert.ok(html.includes("not reported"),
+    "…and says so in words rather than vanishing; got: " + html);
+  assert.ok(!html.includes(CENSUS_TERMINAL), "with no basis sentence invented for a rate nobody sent");
+});
+
+test("dr-w31 (criterion 1): a REFUSED reading refuses BOTH bases — and still prints no percentage at all", () => {
+  const html = hooks.operatorCensusCardHtml(CENSUS_REFUSED);
+  assert.ok(html.includes("not enough data (n=74)"), "attempted refuses on its own n");
+  assert.ok(html.includes("not enough data (n=70)"),
+    "and settled refuses on ITS own n — each refusal carries the denominator it was refused over; got: " + html);
+  assert.ok(!/%/.test(html), "no percentage escapes on either basis");
 });
 
 test("dr-w1-s2 (criterion 3): ZERO rows is 'no deployments in this window' — never a zeroed table that reads like health", () => {
