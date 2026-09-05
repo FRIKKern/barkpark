@@ -233,3 +233,11 @@ config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
 # making the stub-command tests host-dependent. The unit-path tests opt into
 # `:systemd` explicitly with a stubbed launcher + is-active probe.
 config :barkpark, Barkpark.Sites.DeployRunner, runner_mode: :port
+
+# Content.DedupWall candidate-fetch TRIPWIRE. The wall's rescue answers a
+# database outage and a bug in the wall itself with the same `{:degraded, …}`;
+# that laundered a live FunctionClauseError in `maybe_filter_dataset/2` into a
+# green 25-test suite. In test, a CODE-class error (FunctionClauseError,
+# ArgumentError, MatchError …) re-raises instead; infra errors still degrade.
+# Off everywhere else — prod keeps its fail-closed refusal rather than a 500.
+config :barkpark, dedup_raise_on_code_errors: true

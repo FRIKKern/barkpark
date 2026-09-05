@@ -312,13 +312,42 @@ defmodule Barkpark.Content.DedupWallTest do
     }
   end
 
+  # INFRA fault injector. A BARE `spawn` owns no ExUnit sandbox connection and
+  # cannot borrow one, so the first Repo call inside it raises
+  # `DBConnection.OwnershipError` from inside `Repo.transaction` — a real
+  # infrastructure failure at the real seam, deterministic, with no global state
+  # to restore.
+  #
+  # Two fault injectors that LOOK equivalent are silently vacuous here, and both
+  # were tried first: `Sandbox.checkin/1` is a no-op because `DataCase` owns the
+  # connection through `start_owner!`, and `Task.async/1` copies `$callers`, which
+  # is exactly how the sandbox hands a child process the parent's connection. Both
+  # let the fetch SUCCEED, so the assertion read `right: :ok` — a fault injector
+  # that does not fire is indistinguishable from a wall that does not work.
+  #
+  # These two tests used to inject an INTEGER dataset instead, on the theory that
+  # `d.dataset == ^dataset` would raise at query build/exec. It never got that
+  # far: an integer tripped `maybe_filter_dataset/2`'s guards first, so the
+  # injected fault was a FunctionClauseError IN THIS MODULE — a code defect, not
+  # the database failure the test names. Both tests passed anyway, because the
+  # rescue answered defect and outage identically.
+  defp without_a_database(fun) do
+    parent = self()
+    ref = make_ref()
+    spawn(fn -> send(parent, {ref, fun.()}) end)
+
+    receive do
+      {^ref, result} -> result
+    after
+      5_000 -> flunk("the un-sandboxed fetch never answered — the injector did not fire")
+    end
+  end
+
   test "fail-LOUD: a raising candidate fetch is dedup_unavailable, never a silent pass" do
-    # An integer dataset makes `d.dataset == ^dataset` (string column) raise at
-    # query build/exec — the pool-saturation failure's exception shape. The old
-    # rescue swallowed it into an empty candidate set and answered :ok, i.e. a
-    # publish reporting "not a duplicate" on a check that never ran.
     assert {:error, {:dedup_unavailable, message}} =
-             DedupWall.check(degraded_doc("drafts.fo"), "paper", 12_345)
+             without_a_database(fn ->
+               DedupWall.check(degraded_doc("drafts.fo"), "paper", @dataset)
+             end)
 
     assert message =~ "REFUSED"
     assert message =~ "dedup_bypass"
@@ -326,7 +355,48 @@ defmodule Barkpark.Content.DedupWallTest do
 
   test "fail-LOUD: guard/4 forwards dedup_unavailable to the caller" do
     assert {:error, {:dedup_unavailable, _}} =
-             DedupWall.guard(degraded_doc("drafts.fo-guard"), "paper", 12_345)
+             without_a_database(fn ->
+               DedupWall.guard(degraded_doc("drafts.fo-guard"), "paper", @dataset)
+             end)
+  end
+
+  # ── the candidate-fetch TRIPWIRE: a defect is not an outage ──────────────────
+
+  test "a non-binary dataset NAMES the value it was handed, not a redacted arity" do
+    # RED before the named clause: this raised
+    # `%FunctionClauseError{function: :maybe_filter_dataset, args: nil}` — Elixir
+    # redacts FunctionClauseError args, so neither the exception nor the log said
+    # 12345. The publish path's contract is `String.t() | nil` (`check/4`'s
+    # @spec); anything else is the caller's bug and the message must say whose.
+    assert_raise ArgumentError,
+                 ~r/dataset must be a String or nil, got: 12345/,
+                 fn -> DedupWall.check(degraded_doc("drafts.badds"), "paper", 12_345) end
+  end
+
+  test "tripwire: a planted FunctionClauseError inside the fetch RAISES in test" do
+    # Not synthetic: a non-binary `workspace_id` in opts reaches
+    # `Content.Scope.scope_to_workspace/3`, whose clauses are `:shared_only` /
+    # is_binary — so an integer is a genuine FunctionClauseError raised inside
+    # the candidate fetch, from a DIFFERENT module than the one this task fixed.
+    # Without the code-class arm the rescue eats it and this returns a tidy
+    # `{:error, {:dedup_unavailable, "the duplicate scan failed"}}` — green, and
+    # blaming the database for a bug in Barkpark.
+    assert_raise FunctionClauseError, fn ->
+      DedupWall.check(degraded_doc("drafts.fce"), "paper", @dataset, workspace_id: 12_345)
+    end
+  end
+
+  test "tripwire: an INFRA failure inside the same fetch still degrades, never raises" do
+    # The other arm, and the reason the tripwire is a classifier and not a blanket
+    # `reraise`: prod must keep answering a database outage with a fail-CLOSED
+    # refusal that names the scan, not with a 500.
+    assert {:error, {:dedup_unavailable, message}} =
+             without_a_database(fn ->
+               DedupWall.check(degraded_doc("drafts.infra"), "paper", @dataset)
+             end)
+
+    assert message =~ "the duplicate scan"
+    assert message =~ "REFUSED rather than passed unchecked"
   end
 
   test "fail-LOUD: a blown query budget refuses the publish and names the scan" do

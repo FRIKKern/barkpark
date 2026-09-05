@@ -481,7 +481,17 @@ defmodule Barkpark.Content.DedupWall do
   rescue
     # CLIFF B, now fail-LOUD: this wraps the WHOLE Repo.transaction — a
     # DBConnection error is reported, never disguised as "no duplicates found".
+    #
+    # CLIFF C — a DEFECT is not an OUTAGE. This one rescue answers two unrelated
+    # failures, and it used to answer them identically: a database outage and a
+    # bug in this very module both became `{:degraded, …}`. Right for the
+    # outage, wrong for the bug — see @code_error_modules for the FunctionClauseError
+    # that hid here, green, for months.
     e ->
+      if code_error?(e) and raise_on_code_errors?() do
+        reraise e, __STACKTRACE__
+      end
+
       Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
       {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
   catch
@@ -512,6 +522,62 @@ defmodule Barkpark.Content.DedupWall do
   defp maybe_filter_dataset(query, dataset) when is_binary(dataset) do
     from([doc: d] in query, where: d.dataset == ^dataset)
   end
+
+  # NAME the bad input. `dataset` is `String.t() | nil` on every public entry
+  # (`check/4`, `guard/4`, and `AuthoringWall.validate_all/5` above them), so
+  # anything else is a caller contract violation — but the bare
+  # FunctionClauseError this used to raise logged as
+  # `%FunctionClauseError{function: :maybe_filter_dataset, args: nil}`: Elixir
+  # redacts the arguments, so the log named the function that broke and never
+  # the value that broke it. That is the difference between "the dedup wall
+  # degraded again" and a one-line fix.
+  defp maybe_filter_dataset(_query, dataset) do
+    raise ArgumentError,
+          "Content.DedupWall: dataset must be a String or nil, got: #{inspect(dataset)}"
+  end
+
+  # ── code defect vs infra outage (the candidate-fetch tripwire) ───────────────
+  #
+  # An exception whose module names a CODE defect is re-raised where a human is
+  # watching; an infra failure (DBConnection / Postgrex / the `catch :exit`)
+  # stays `{:degraded, …}`. The split exists because it was measured, not
+  # imagined: `maybe_filter_dataset/2` raised FunctionClauseError on TWO tests in
+  # `dedup_wall_test.exs`, on every run, for months — and the suite was 25 tests,
+  # 0 failures, because the rescue laundered the module's own contract violation
+  # into "the duplicate scan failed", the same sentence a Postgres outage
+  # produces. Nothing user-visible broke (degraded is fail-CLOSED — the publish
+  # is refused, never waved through), which is exactly why nobody looked: the
+  # wall was refusing publishes on that path while the log blamed the database.
+  #
+  # PROD BEHAVIOUR IS UNCHANGED, deliberately. Raising in prod would turn a
+  # fail-closed refusal into a 500 and lose the actionable message the caller
+  # gets today, so `raise_on_code_errors?` defaults OFF and `config/test.exs`
+  # turns it ON. The tripwire's job is to stop a defect from SHIPPING, not to
+  # change what a shipped defect does.
+  @code_error_modules [
+    ArgumentError,
+    ArithmeticError,
+    BadArityError,
+    BadBooleanError,
+    BadFunctionError,
+    BadMapError,
+    BadStructError,
+    CaseClauseError,
+    CondClauseError,
+    FunctionClauseError,
+    KeyError,
+    MatchError,
+    Protocol.UndefinedError,
+    TryClauseError,
+    UndefinedFunctionError,
+    WithClauseError
+  ]
+
+  defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
+  defp code_error?(_), do: false
+
+  defp raise_on_code_errors?,
+    do: Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
 
   # ── shaping ──────────────────────────────────────────────────────────────────
 
