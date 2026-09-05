@@ -3181,12 +3181,27 @@ section "19. docs/ops/merge-gates.md never calls a TRANSITIVE UPSTREAM of a requ
 # come out of `.github/workflows/`, the required contexts out of
 # `.github/required-checks.json`. Editing either one re-aims the guard.
 #
-# THREE CLASSES, AND THE GUARD MUST NOT COLLAPSE THEM. `format` really is
+# THREE CLASSES, AND THE GUARD MUST NOT COLLAPSE THEM. Some jobs really ARE
 # advisory — `continue-on-error: true`, and deliberately NOT in any required
-# aggregator's `needs:` — so a guard that simply deleted the "do not block"
-# sentence would ship a NEW lie about `format`. The guard therefore reds only on
-# a name that is a transitive upstream, which is what forces the doc to make the
+# aggregator's `needs:` — so a guard that simply deleted every "do not block"
+# sentence would ship a NEW lie about those. The guard therefore reds only on a
+# name that is a transitive upstream, which is what forces the doc to make the
 # split rather than to soften the wording.
+#
+# THE 2026-09-04 FLIP, AND WHY THE SPECIMEN IS NOW DERIVED. Until #15971
+# (15f3d9607a, task-e31b816b4b416db6) this section and §20 named `format` as
+# THE canonical advisory specimen, typed into both the mutation below and §20's
+# clause 5. That PR dropped `format`'s `continue-on-error` and put it in
+# `elixir-gate`'s `needs:` — diff-scoped, but a real blocking upstream — and
+# rewrote merge-gates.md's format disclosure. Both typed premises flipped at
+# once, so five assertions across §19/§20 went red on a CORRECT tree and main's
+# `Required-check spec gate` stayed red for twelve hours (run 33907498184,
+# b2529b02c, "239 passed, 5 failed"; the run on 68d85542e twelve hours earlier
+# was green). NOTHING here names a specimen any more: `rc_advisory_specimen`
+# derives one from the live graph and `rc_doc_disclosure_specimen` picks the one
+# merge-gates.md actually discloses, and if the tree ever runs out of advisory
+# jobs the fixture PLANTS one. The next job that changes class re-aims this
+# section instead of reddening main.
 #
 # SENTENCE-SCOPED, NOT LINE-SCOPED, AND THIS IS MEASURED. merge-gates.md soft-
 # wraps its prose at ~78 columns, so a subject and its predicate routinely sit on
@@ -3391,6 +3406,66 @@ rc_gate_report() { # <workflow-dir> <spec-json> <doc>
   rc_nonblocking_claims "$3" "$all" "$tgt"
 }
 
+# Job ids carrying a JOB-LEVEL `continue-on-error: true`. Step-level ones are
+# out of scope on purpose: they do not change `needs.<job>.result`, which is the
+# whole mechanism this class is about (elixir.yml's format guard STEP is exactly
+# that case and must not be mistaken for the job).
+rc_coe_jobs() { # <workflow-dir>
+  local f
+  for f in "$1"/*.yml; do
+    [ -f "$f" ] || continue
+    awk '
+      BEGIN { injobs = 0; job = "" }
+      /^jobs:[[:space:]]*$/ { injobs = 1; next }
+      injobs && /^[^[:space:]#]/ { job = ""; injobs = 0; next }
+      injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
+        j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); job = j; next
+      }
+      # A TRAILING COMMENT IS THE COMMON SHAPE, not the exception:
+      # reland-check.yml writes `continue-on-error: true # advisory — report,
+      # never block`, and an end-anchored `true$` dropped it silently — measured,
+      # the derived candidate list came back one job short and §20 clause 5 had
+      # nothing to mutate.
+      injobs && job != "" && /^    continue-on-error:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$/ { print job }
+    ' "$f"
+  done | sort -u
+}
+
+# THE SPECIMEN, DERIVED. Every `continue-on-error: true` job that is neither a
+# required context nor a transitive upstream of one — i.e. every job the doc may
+# honestly call non-blocking. Emitted sorted, so the pick below is deterministic
+# and a reader can reproduce it with two greps.
+rc_advisory_specimen() { # <workflow-dir> <spec-json> [must-appear-in-doc]
+  local tgt doc j
+  tgt="$( { rc_transitive_upstreams "$1" "$2" | grep '^JOB' | cut -f2
+            jq -r '.protection.required_status_checks.checks[].context' "$2"; } | sort -u )"
+  doc="${3:-}"
+  while IFS= read -r j; do
+    [ -n "$j" ] || continue
+    if grep -qxF "$j" <<EOF
+$tgt
+EOF
+    then continue; fi
+    if [ -n "$doc" ] && ! grep -qF "\`$j\`" "$doc"; then continue; fi
+    printf '%s\n' "$j"
+  done <<EOF
+$(rc_coe_jobs "$1")
+EOF
+}
+
+# The `needs:` line of the job that publishes a required context, BY JOB KEY —
+# never by its current contents. #15971 appended one entry to `elixir-gate`'s
+# list and three mutations below, each `sed`-anchored on the five-name line,
+# silently stopped applying. An anchor that reads the job key survives the next
+# append.
+rc_needs_lineno() { # <workflow-file> <job-key>
+  awk -v key="  $2:" '
+    $0 == key { inj = 1; next }
+    inj && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { exit }
+    inj && /^    needs:[[:space:]]*\[/ { print NR; exit }
+  ' "$1"
+}
+
 RC19_TARGETS="$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$SPEC" | grep '^JOB' | cut -f2 | sort -u | tr '\n' ' ')"
 if [ -n "$RC19_TARGETS" ]; then
   ok "derived the required aggregators' transitive upstreams from source, nothing typed: $RC19_TARGETS"
@@ -3406,12 +3481,55 @@ else
   printf '%s\n' "$RC19_OUT" | sed 's/^/       /' >&2
 fi
 
+# THE ADVISORY SPECIMEN FOR MUTATION 2, DERIVED FROM THE LIVE GRAPH. If the
+# tree ever carries no advisory job at all, one is PLANTED into a fixture copy
+# rather than the split going untested — a section that quietly stops testing
+# the split is the same vacuous green this suite exists to delete. The workflow
+# dir the two clauses below run against is therefore a variable, not a constant.
+#
+# NEVER `| head -1` HERE. This file runs under `set -euo pipefail`: `head` closes
+# the pipe on line one, the producer takes SIGPIPE, and the whole SUITE dies
+# mid-section with "printf: write error: Broken pipe" — measured, once, on the
+# first draft of this very clause. The first line is taken by expansion instead.
+RC19_WFDIR="$REPO_ROOT/.github/workflows"
+RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
+if [ -n "$RC19_ADV" ]; then
+  ok "derived the advisory specimen from the live graph: \`$RC19_ADV\` carries continue-on-error and is in no required aggregator's needs (candidates: $(tr '\n' ' ' <<<"$RC19_ADV_ALL"))"
+else
+  RC19_WFDIR="$TMP/rc19-planted-workflows"
+  rm -rf "$RC19_WFDIR"; mkdir -p "$RC19_WFDIR"
+  cp "$REPO_ROOT"/.github/workflows/*.yml "$RC19_WFDIR/"
+  cat > "$RC19_WFDIR/rc19-planted.yml" <<'YAML'
+name: rc19 planted advisory
+on: pull_request
+jobs:
+  rc19-planted-advisory:
+    name: rc19 planted advisory
+    runs-on: ubuntu-latest
+    continue-on-error: true
+YAML
+  RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+  RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
+  if [ "$RC19_ADV" = "rc19-planted-advisory" ]; then
+    ok "no advisory job survives on the live tree, so one is PLANTED in the fixture copy — the split below is still tested rather than skipped"
+  else
+    bad "no advisory job on the live tree and the planted one did not derive either (got '${RC19_ADV:-<empty>}') — the split is untested"
+  fi
+fi
+
 # MUTATION 1 — DIRECTION 1, the doc lies. A copy of the doc with the retired
 # sentence put back must be reported, naming the check.
 RC19_DOC_CANARY="$TMP/merge-gates-canary.md"
 cp "$MERGE_GATES_DOC" "$RC19_DOC_CANARY"
-printf '\nEverything else on a PR is advisory: `mix-prod-compile`, `validation-perf`\nand `format` do not block.\n' >> "$RC19_DOC_CANARY"
-RC19_CANARY_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_DOC_CANARY")"
+printf '\nEverything else on a PR is advisory: `mix-prod-compile`, `validation-perf`\nand `%s` do not block.\n' "$RC19_ADV" >> "$RC19_DOC_CANARY"
+RC19_CANARY_N="$(grep -cF "and \`$RC19_ADV\` do not block." "$RC19_DOC_CANARY" || true)"
+if [ "$RC19_CANARY_N" -eq 1 ] && ! diff -q "$MERGE_GATES_DOC" "$RC19_DOC_CANARY" >/dev/null; then
+  ok "the canary sentence APPLIED exactly once, naming the derived specimen \`$RC19_ADV\` — the two clauses below are not reading a doc copy that never changed"
+else
+  bad "the canary sentence landed $RC19_CANARY_N time(s) — the two mutation proofs below would be vacuous"
+fi
+RC19_CANARY_OUT="$(rc_gate_report "$RC19_WFDIR" "$SPEC" "$RC19_DOC_CANARY")"
 if grep -q '^CLAIM	mix-prod-compile' <<<"$RC19_CANARY_OUT" \
    && grep -q '^CLAIM	validation-perf' <<<"$RC19_CANARY_OUT"; then
   ok "…and it FIRES, BY NAME, on the retired sentence put back (mutation-proven able to fail)"
@@ -3420,14 +3538,16 @@ else
   printf '%s\n' "$RC19_CANARY_OUT" | sed 's/^/       /' >&2
 fi
 
-# MUTATION 2 — the SPLIT. The same planted sentence names `format`, which is
-# genuinely advisory. If the guard ever red on it, the honest fix (say the
-# mechanism) and the dishonest one (delete the sentence) would be
-# indistinguishable, and deleting it would ship a new lie about `format`.
-if ! grep -q '^CLAIM	format' <<<"$RC19_CANARY_OUT"; then
-  ok "…and it does NOT fire on \`format\`, which is genuinely advisory — the split is measured, not asserted"
+# MUTATION 2 — the SPLIT. The same planted sentence names the DERIVED advisory
+# job. If the guard ever red on it, the honest fix (say the mechanism) and the
+# dishonest one (delete the sentence) would be indistinguishable, and deleting
+# it would ship a new lie about that job. THE NAME HERE WAS TYPED AS `format`
+# until 2026-09-04: #15971 made `format` a blocking upstream and this clause
+# reddened on a correct tree for twelve hours. It is derived now.
+if ! grep -q "^CLAIM	$RC19_ADV	" <<<"$RC19_CANARY_OUT"; then
+  ok "…and it does NOT fire on \`$RC19_ADV\`, which is genuinely advisory — the split is measured, not asserted"
 else
-  bad "the guard reddened on \`format\`, a continue-on-error job in no required aggregator's needs — it has become a word filter"
+  bad "the guard reddened on \`$RC19_ADV\`, a continue-on-error job in no required aggregator's needs — it has become a word filter"
 fi
 
 # MUTATION 3 — SENTENCE vs LINE, run rather than argued. The specimen is one
@@ -3469,8 +3589,23 @@ fi
 # MUTATION 5 — a `needs:` edge pointed at a job that does not exist. Same
 # refusal, one level down: the walk must not simply find nothing and continue.
 cp "$REPO_ROOT"/.github/workflows/elixir.yml "$RC19_WF/elixir.yml"
-sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile-renamed, validation-perf, path-escape]/' \
-  "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+# ANCHORED ON THE JOB KEY, NOT ON THE LIST'S CONTENTS. This sed used to match the
+# literal five-name `needs:` line; #15971 appended `format` to it on 2026-09-04,
+# the mutation silently stopped applying, and the clause below reddened while
+# asserting nothing about the guard at all. `rc_needs_lineno` finds the line by
+# walking to the `elixir-gate` job key, so the next append re-aims it.
+RC19_NEEDS_LN="$(rc_needs_lineno "$RC19_WF/elixir.yml" elixir-gate)"
+if [ -n "$RC19_NEEDS_LN" ]; then
+  sed -i.bak "${RC19_NEEDS_LN}s/mix-prod-compile/mix-prod-compile-renamed/" \
+    "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+fi
+RC19_DANGLE_N="$(grep -c 'mix-prod-compile-renamed' "$RC19_WF/elixir.yml" || true)"
+if [ -n "$RC19_NEEDS_LN" ] && [ "$RC19_DANGLE_N" -eq 1 ] \
+   && ! diff -q "$REPO_ROOT/.github/workflows/elixir.yml" "$RC19_WF/elixir.yml" >/dev/null; then
+  ok "the dangling-\`needs:\` mutation APPLIED: \`elixir-gate\`'s needs line (line $RC19_NEEDS_LN, found by job key) now names a job that does not exist, exactly once"
+else
+  bad "the dangling-\`needs:\` mutation did not apply (needs line '${RC19_NEEDS_LN:-<none>}', $RC19_DANGLE_N occurrence(s)) — the clause below would be reding on an UNMUTATED tree"
+fi
 if grep -q '^UNRESOLVED.*mix-prod-compile-renamed' <<<"$(rc_gate_report "$RC19_WF" "$SPEC" "$MERGE_GATES_DOC")"; then
   ok "…and a \`needs:\` entry naming no job is UNRESOLVED — a job rename refuses instead of shrinking the graph"
 else
@@ -3546,6 +3681,17 @@ fi
 # about its own `Required-check spec gate` and is not in scope (filed as
 # cch-w49-bl-required-checks-drift-calls-its-own-job-blocking).
 section "20. docs/ops/merge-gates.md never presents a check that CANNOT block as one a PR must clear"
+
+# THE 2026-09-04 FLIP (same one §19's header records). Clause 5 and clause 7 both
+# named a moving part in a string literal — clause 5 sed'd one sentence of
+# merge-gates.md about `format`, clause 7 sed'd `elixir-gate`'s five-name
+# `needs:` line. #15971 (15f3d9607a) rewrote the sentence AND appended `format`
+# to the line, so both mutations stopped applying and both clauses reddened
+# while proving nothing. Neither is typed any more: the DELETE specimen is
+# derived from the graph crossed with the page, and the ADD anchor walks to the
+# job key. A mutation that does not apply is now its own FAIL, said in those
+# words, so the next flip reports "the mutation did not apply" instead of
+# accusing the tree.
 
 # The third name source §19 does not need and this section cannot work without.
 rc20_workflow_names() { # <workflow-dir> -> `<file>\t<workflow name>`
@@ -3804,17 +3950,81 @@ else
   printf '%s\n' "$RC20_CANARY_OUT" | sed 's/^/       /' >&2
 fi
 
-# CLAUSE 5 — DELETE. `format` is genuinely advisory and genuinely disclosed, so
-# it is NOT reported today; strip the disclosure from a copy and it must be. The
-# green on item 2 is therefore earned by the sentence, not by blindness.
-RC20_DEL="$TMP/rc20-nodisclosure.md"
-sed 's/Today a red `format` check still does not block merge, and it is the/Today a red `format` check still shows on the PR, and it is the/' \
-  "$MERGE_GATES_DOC" > "$RC20_DEL"
-RC20_DEL_OUT="$(rc20_overstatements "$RC20_DEL" "$RC20_ALL" "$RC20_BLK")"
-if grep -q '^OVER	format	' <<<"$RC20_DEL_OUT" && ! grep -q '^OVER	format	' <<<"$RC20_OUT"; then
-  ok "…and DELETING item 2's \`format\` disclosure reds it by name, while the unmutated page does not report \`format\` at all — the disclosure is what earns the green"
+# CLAUSE 5 — DELETE. A genuinely advisory job that this page lists as one a PR
+# must clear is saved from the report by ONE thing: its disclosure. Strip it from
+# a copy and the name must appear. The green on that roster item is therefore
+# earned by the sentence, not by blindness.
+#
+# THE SPECIMEN IS DERIVED, TWICE OVER, AND THAT IS THE 2026-09-04 LESSON. It used
+# to be `format`, with the mutation a `sed` on one typed sentence. #15971 made
+# `format` blocking (so it can never be reported here again) AND rewrote that
+# exact sentence, so the sed matched nothing and the clause reddened on a correct
+# tree. Now: `rc_advisory_specimen` supplies the jobs that CANNOT block, and
+# `rc20_disclosure_saved` asks the section itself which of them the live page
+# would report if its disclosure vanished. Nothing about the page's wording is
+# typed here.
+#
+# THE MUTATION IS A REPLACEMENT, NOT A PHRASE EDIT, on purpose: merge-gates.md
+# soft-wraps, so a disclosure ("**Advisory\n only**") routinely straddles two
+# physical lines and no line-scoped sed can reliably remove it. The whole roster
+# item is replaced by a disclosure-FREE item naming the same job, which is
+# exactly the drift being guarded against.
+
+# The names the live page would report if the disclosure regex matched nothing —
+# i.e. the names a disclosure is currently saving.
+# SUBSHELL, not a `VAR=x func` prefix: bash keeps such an assignment after a
+# FUNCTION call (unlike a command), which would silently disarm the disclosure
+# regex for every clause below it.
+rc20_disclosure_saved() { # <doc> <all-names> <blocking-names>
+  ( RC_NONBLOCKING_RE='RC20_DISCLOSURE_REGEX_THAT_MATCHES_NOTHING'
+    rc20_overstatements "$1" "$2" "$3" ) | grep '^OVER' | cut -f2
+}
+
+# Replace <name>'s numbered roster item with a disclosure-free one. Range is
+# found by the item's own numbering, never by line number.
+rc20_strip_disclosure() { # <doc> <name> <out>
+  awk -v nm="$2" '
+    BEGIN { inside = 0; done = 0 }
+    /^[0-9]+\.[[:space:]]/ {
+      if (inside) { inside = 0 }
+      if (!done && index($0, "`" nm "`") > 0) {
+        num = $0; sub(/\..*$/, "", num)
+        print num ". **`" nm "` CI job** — see `.github/workflows/`."
+        inside = 1; done = 1; next
+      }
+      print; next
+    }
+    inside && /^[[:space:]]/ { next }
+    inside && /^[[:space:]]*$/ { inside = 0; print; next }
+    inside { inside = 0 }
+    { print }
+  ' "$1" > "$3"
+}
+
+# Same SIGPIPE rule as §19: no `| head -1` under `pipefail`.
+RC20_ADV_SAVED_ALL="$(comm -12 \
+  <(rc_advisory_specimen "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC" | sort -u) \
+  <(rc20_disclosure_saved "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK" | sort -u))"
+RC20_ADV_SAVED="${RC20_ADV_SAVED_ALL%%$'\n'*}"
+if [ -n "$RC20_ADV_SAVED" ]; then
+  ok "derived the DELETE specimen: \`$RC20_ADV_SAVED\` is on the must-clear roster, carries continue-on-error, is in no required aggregator's needs, and is reported the moment its disclosure stops matching"
 else
-  bad "removing the \`format\` disclosure changed nothing (or \`format\` was already reported) — the section is not reading the disclosure:"
+  bad "no roster item names a genuinely advisory job whose disclosure is load-bearing — clause 5 has nothing to mutate and would pass by having nothing to test"
+fi
+RC20_DEL="$TMP/rc20-nodisclosure.md"
+rc20_strip_disclosure "$MERGE_GATES_DOC" "$RC20_ADV_SAVED" "$RC20_DEL"
+RC20_DEL_ITEM_N="$(grep -cF "**\`$RC20_ADV_SAVED\` CI job** — see \`.github/workflows/\`." "$RC20_DEL" || true)"
+if [ "$RC20_DEL_ITEM_N" -eq 1 ] && ! diff -q "$MERGE_GATES_DOC" "$RC20_DEL" >/dev/null \
+   && ! grep -qE "$RC_NONBLOCKING_RE" <<<"$(grep -F "\`$RC20_ADV_SAVED\` CI job" "$RC20_DEL")"; then
+  ok "the DELETE mutation APPLIED: \`$RC20_ADV_SAVED\`'s roster item is replaced EXACTLY ONCE by a disclosure-free item that still names it"
+else
+  bad "the disclosure-strip did not apply ($RC20_DEL_ITEM_N replacement(s)) — the clause below would be reding on an unmutated page"
+fi
+RC20_DEL_OUT="$(rc20_overstatements "$RC20_DEL" "$RC20_ALL" "$RC20_BLK")"
+if grep -q "^OVER	$RC20_ADV_SAVED	" <<<"$RC20_DEL_OUT" && ! grep -q "^OVER	$RC20_ADV_SAVED	" <<<"$RC20_OUT"; then
+  ok "…and DELETING \`$RC20_ADV_SAVED\`'s disclosure reds it by name, while the unmutated page does not report it at all — the disclosure is what earns the green"
+else
+  bad "removing the \`$RC20_ADV_SAVED\` disclosure changed nothing (or \`$RC20_ADV_SAVED\` was already reported) — the section is not reading the disclosure:"
   printf '%s\n' "$RC20_DEL_OUT" | sed 's/^/       /' >&2
 fi
 
@@ -3852,8 +4062,21 @@ fi
 RC20_WF="$TMP/rc20-workflows"
 rm -rf "$RC20_WF"; mkdir -p "$RC20_WF"
 cp "$REPO_ROOT"/.github/workflows/*.yml "$RC20_WF/"
-sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, doc-gates]/' \
-  "$RC20_WF/elixir.yml" && rm -f "$RC20_WF/elixir.yml.bak"
+# ANCHORED ON THE JOB KEY. Same 2026-09-04 lesson as §19's mutation 5: this sed
+# matched the literal five-name `needs:` line, #15971 appended `format`, and the
+# clause below reddened because `doc-gates` was never actually wired.
+RC20_NEEDS_LN="$(rc_needs_lineno "$RC20_WF/elixir.yml" elixir-gate)"
+if [ -n "$RC20_NEEDS_LN" ]; then
+  sed -i.bak "${RC20_NEEDS_LN}s/\]$/, doc-gates]/" \
+    "$RC20_WF/elixir.yml" && rm -f "$RC20_WF/elixir.yml.bak"
+fi
+RC20_ADD_N="$(grep -c ', doc-gates\]$' "$RC20_WF/elixir.yml" || true)"
+if [ -n "$RC20_NEEDS_LN" ] && [ "$RC20_ADD_N" -eq 1 ] \
+   && ! diff -q "$REPO_ROOT/.github/workflows/elixir.yml" "$RC20_WF/elixir.yml" >/dev/null; then
+  ok "the ADD mutation APPLIED: \`doc-gates\` joined \`elixir-gate\`'s needs line (line $RC20_NEEDS_LN, found by job key), exactly once"
+else
+  bad "the doc-gates ADD mutation did not apply (needs line '${RC20_NEEDS_LN:-<none>}', $RC20_ADD_N occurrence(s)) — the topology flip below would be vacuous"
+fi
 cat >> "$RC20_WF/elixir.yml" <<'YAML'
   doc-gates:
     name: Doc budgets + anchors

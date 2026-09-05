@@ -245,13 +245,18 @@ is harmless:
   why `.github/required-checks.json` files each of them under **S3 SUBSUMED**,
   not as a claim that they are harmless.
 - **ADVISORY — structurally unable to block.** A job carrying
-  `continue-on-error: true` that no required aggregator lists in `needs:`. Here
-  that is `format`: a red `format` does not block merge, and PR #123 merged with
-  it red. The `continue-on-error` half alone is not enough — for such a job
+  `continue-on-error: true` that no required aggregator lists in `needs:`. Both
+  halves are load-bearing, and this is why: for a `continue-on-error` job
   `needs.<job>.result` reads `success` even when it failed, so an advisory job
   wired into an aggregator's `needs:` would launder its own red into a green
-  required context. `format` is deliberately kept out of that list for exactly
-  this reason (see the `elixir-gate` job's `needs:` comment block, which spells out why `format` is excluded). `plugin-node` is a third case again: blocking
+  required context. Today the class holds `reland-check`, `sobelow`,
+  `boundary-gate`, `lighthouse`, `gofmt` and `required-checks-drift` — a red run
+  of any of them cannot stop a merge. `format` **left this class on 2026-09-04**
+  (#15971): it dropped `continue-on-error` FIRST, precisely so the laundering
+  above could not happen, and only then joined `elixir-gate`'s `needs:`, where it
+  is now SUBSUMED like every other upstream (see
+  the `elixir-gate` job's `needs:` comment block, which now records that
+  `format` IS in `needs`, and item 2 above for the diff scope). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
