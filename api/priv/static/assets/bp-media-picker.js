@@ -412,6 +412,7 @@ class BpMediaPicker extends HTMLElement {
     browser.open({
       dataset: this._dataset(),
       token: this._token(),
+      scopePrefix: this._scopePrefix(),
       accept: "image/*",
       onSelect: (detail) => this._selectAsset(detail)
     });

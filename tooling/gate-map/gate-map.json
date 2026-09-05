@@ -1,6 +1,6 @@
 {
-  "population": 384,
-  "mapped": 376,
+  "population": 385,
+  "mapped": 377,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -658,6 +658,37 @@
           "kind": "file",
           "p": "api/assets/paper-editor/src/canvas/index.js",
           "evidence": "api/assets/paper-editor/src/canvas/__flush_pending.test.mjs:32"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-asset-browser.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs:100"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-asset-browser.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs:100"
+        },
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-media-picker.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs:101"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/static/assets/bp-media-picker.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs:101"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/paper-editor/src/canvas/index.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__media_picker_mounted.test.mjs:102"
         }
       ]
     },

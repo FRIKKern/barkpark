@@ -35,6 +35,8 @@
       this._searchTimer = null;
       this._onSelect = null;
       this._accept = "image/*";
+      this._loadGeneration = 0;
+      this._requestContext = null;
     }
 
     connectedCallback() {
@@ -78,21 +80,35 @@
 
     open(opts) {
       opts = opts || {};
+      clearTimeout(this._searchTimer);
+      this._searchTimer = null;
       this._onSelect = opts.onSelect || null;
-      this._accept = opts.accept || this.getAttribute("accept") || "image/*";
-      if (opts.dataset) this.setAttribute("dataset", opts.dataset);
-      if (opts.token) this.setAttribute("data-token", opts.token);
+      const hasOwn = (key) => Object.prototype.hasOwnProperty.call(opts, key);
+      this._requestContext = {
+        dataset: hasOwn("dataset") ? opts.dataset || "production" : this._dataset(),
+        token: hasOwn("token") ? opts.token || "" : this._token(),
+        scopePrefix: hasOwn("scopePrefix") ? opts.scopePrefix || "" : this._scopePrefix(),
+        accept: hasOwn("accept") ? opts.accept || "image/*" : this.getAttribute("accept") || "image/*"
+      };
+      this._accept = this._requestContext.accept;
 
       this.hidden = false;
       this._open = true;
       this._filter = "";
       if (this._search) this._search.value = "";
+      this._assets = [];
+      if (this._grid) this._grid.innerHTML = "";
+      if (this._empty) this._empty.hidden = true;
       this._loadAssets();
       if (this._search) this._search.focus();
     }
 
     close() {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = null;
       this._open = false;
+      this._loadGeneration++;
+      this._requestContext = null;
       this.hidden = true;
       this._onSelect = null;
     }
@@ -105,8 +121,12 @@
       return this.getAttribute("data-token") || "";
     }
 
-    _acceptKind() {
-      const a = this._accept || "";
+    _scopePrefix() {
+      return this.getAttribute("scope-prefix") || "";
+    }
+
+    _acceptKind(accept) {
+      const a = accept == null ? this._accept || "" : accept;
       if (a.indexOf("image") >= 0) return "image";
       if (a.indexOf("video") >= 0) return "video";
       if (a.indexOf("audio") >= 0) return "audio";
@@ -114,12 +134,19 @@
     }
 
   async _loadAssets() {
+      const generation = ++this._loadGeneration;
+      const context = this._requestContext || {
+        dataset: this._dataset(),
+        token: this._token(),
+        scopePrefix: this._scopePrefix(),
+        accept: this._accept
+      };
       if (this._loading) this._loading.hidden = false;
       if (this._empty) this._empty.hidden = true;
       if (this._grid) this._grid.innerHTML = "";
 
-      const dataset = this._dataset();
-      const kind = this._acceptKind();
+      const dataset = context.dataset;
+      const kind = this._acceptKind(context.accept);
       const params = new URLSearchParams({
         limit: "200",
         offset: "0",
@@ -129,27 +156,33 @@
       if (this._filter) params.set("q", this._filter);
 
       const url =
-        "/v1/media/" + encodeURIComponent(dataset) + "/search?" + params.toString();
+        context.scopePrefix +
+        "/v1/media/" +
+        encodeURIComponent(dataset) +
+        "/search?" +
+        params.toString();
 
       const headers = { Accept: "application/json" };
-      const tok = this._token();
+      const tok = context.token;
       if (tok) headers["Authorization"] = "Bearer " + tok;
 
       try {
         const r = await fetch(url, { credentials: "same-origin", headers: headers });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
+        if (generation !== this._loadGeneration || context !== this._requestContext || !this._open) return;
         const hits = (data && data.result && data.result.hits) || [];
         this._assets = hits.map((hit) => this._hitToDoc(hit)).filter((d) => assetUrl(d));
         this._renderGrid();
       } catch (_e) {
+        if (generation !== this._loadGeneration || context !== this._requestContext || !this._open) return;
         this._assets = [];
         if (this._grid) {
           this._grid.innerHTML =
             '<div class="bp-ab-grid-empty text-sm text-muted">Could not load media library.</div>';
         }
       } finally {
-        if (this._loading) this._loading.hidden = true;
+        if (generation === this._loadGeneration && this._loading) this._loading.hidden = true;
       }
     }
 
