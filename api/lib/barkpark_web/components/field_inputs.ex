@@ -134,7 +134,17 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # unconfigured richText keeps the clause below byte-identically.
   def input(%{field: %{"type" => "richText", "name" => name, "editor" => "blocks"} = f} = assigns) do
     blocks = Barkpark.Content.field_blocks(Map.get(assigns.editor_form, name))
-    vocab = Map.get(f, "blocks") || %{}
+
+    # A field that declares `"blocks"` keeps EXACTLY what it names — the
+    # declaration NARROWS. A field that says `"editor": "blocks"` and nothing
+    # else gets the papers block vocabulary, read from the ONE source the
+    # server-side write path reads (`FieldVocabulary.from_field/1` applies the
+    # same default in `apply_field_block_ops`), never a second list typed here.
+    vocab =
+      case Map.get(f, "blocks") do
+        %{} = declared -> declared
+        _ -> Barkpark.PortableDoc.FieldVocabulary.default_declaration()
+      end
 
     assigns =
       assign(assigns,
