@@ -97,7 +97,13 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
     conn = %Plug.Conn{
       request_path: "/v1/media/assets/x",
       query_params: %{},
-      assigns: %{api_token: %ApiToken{id: Ecto.UUID.generate(), label: label, permissions: ["read", "write"]}}
+      assigns: %{
+        api_token: %ApiToken{
+          id: Ecto.UUID.generate(),
+          label: label,
+          permissions: ["read", "write"]
+        }
+      }
     }
 
     Access.allowed?(conn, %MediaFile{id: Ecto.UUID.generate()}, doc, :edit_metadata)
