@@ -505,13 +505,15 @@ jobs:
       # step is what stops a one-line edit to either side from breaking it in
       # silence — the check reads all three files rather than restating them.
       #
-      # It also carries the ONE acknowledged divergence by value:
-      # api/Dockerfile's build stage is elixir:1.19-alpine, the self-host image,
-      # smoke-booted but never suite-tested. The remedy is the owner's call
-      # (pin the image down vs widen the matrix), so the check does not pick —
-      # it reds when that gap changes shape or gets resolved without the record
-      # being updated. `format`'s 1.19.5 is deliberately out of scope: that pin
-      # tracks the authoring toolchain, for the reason written above its matrix.
+      # It ALSO compares api/Dockerfile's build stage (the self-host image
+      # compose-smoke boots) against the same matrices. That stage was
+      # elixir:1.19-alpine — a divergence the check carried by value as its
+      # RULE 2 record until the owner ruled (via main, 2026-09-05,
+      # task-729be45412588f07): pin the image to the tested elixir
+      # 1.18.4-otp-27-alpine. The record is gone with the divergence; a new gap
+      # between the image and the matrices reds on its own, no record needed.
+      # `format`'s 1.19.5 is deliberately out of scope: that pin tracks the
+      # authoring toolchain, for the reason written above its matrix.
       #
       # HERE and not in `mix-prod-compile`: that job carries
       # `if: needs.changes.outputs.compile == 'true'`, so a diff touching only
