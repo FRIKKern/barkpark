@@ -71,6 +71,8 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
       refuses on, which until now was interpolated into a log line and
       discarded — and `in_flight_slugs`, that same census UNAGGREGATED (the
       field this route is admin-gated for; see Auth above) — plus
+      `door_open_admissions_total` / `door_open_admissions` beside them (the
+      builds the door ADMITTED without a second opinion, by reason),
       `refusals_total` ALWAYS beside `refusals_since`, and
       `measured_at` so the staleness is stated rather than implied. Any of them
       may be `null`: that means nothing was read, never zero.

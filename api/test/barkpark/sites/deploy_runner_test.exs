@@ -456,6 +456,160 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       assert %{state: :done, exit_code: 0} = await_done("door-409-holder")
     end
+
+    test "the 409 NAMES the peer slug holding the build slot" do
+      # THE LOSS THIS CLOSES. The door computed `building_slugs(state)` and
+      # interpolated it into a log line on the box; the refusal that crossed the
+      # wire said "another site is building" and nothing else. 42% of the
+      # fleet's sampled deployments are this refusal, and not one of them could
+      # say WHO. `holder: "peer"` is the other half: ordinary contention, a
+      # retry works, no operator needed.
+      put_cfg(enabled: true, command: stub("sleep 0.4; exit 0"))
+
+      assert DeployRunner.trigger(req("named-holder-alpha")) == {:ok, :started}
+
+      conn =
+        BarkparkWeb.SiteDeployController.trigger(
+          Phoenix.ConnTest.build_conn(),
+          %{"slug" => "named-holder-beta", "build_id" => "b1", "mode" => "deploy"}
+        )
+
+      assert conn.status == 409
+      assert %{"error" => error} = Jason.decode!(conn.resp_body)
+
+      # The code and the capacity clause are BYTE-STABLE — the control plane's
+      # deferral taxonomy matches the literal code, and the CLI keys its exit
+      # code on it. The holder rides in ADDED FIELDS and the message TAIL.
+      assert error["code"] == "box_at_capacity"
+      assert error["message"] =~
+               "the box is at its build capacity (1 of 1 build slots in use) — "
+
+      assert error["holder"] == "peer"
+      assert error["holding_slugs"] == ["named-holder-alpha"]
+      assert error["build_slots_in_use"] == 1
+      assert error["build_slot_capacity"] == 1
+      assert error["message"] =~ "named-holder-alpha"
+      refute Map.has_key?(error, "holder_lock")
+
+      assert %{state: :done, exit_code: 0} = await_done("named-holder-alpha")
+    end
+
+    test "the 409 distinguishes a FOREIGN holder from a peer build" do
+      # A foreign holder is a build this instance did not launch — a hand-run
+      # engine, or a unit that outlived a previous BEAM. It is OPERATOR-
+      # ACTIONABLE and a retry may never clear it, where a peer build clears
+      # itself in minutes. Both used to answer with the same bare code.
+      lock = tmp_lock_file()
+      {:ok, triple} = DeployRunner.lock_triple(lock)
+
+      locks =
+        fake_proc_locks("""
+        1: FLOCK  ADVISORY  WRITE 999999999 #{triple} 0 EOF
+        """)
+
+      put_cfg(
+        enabled: true,
+        command: stub("exit 0"),
+        build_gate_lock: lock,
+        proc_locks_path: locks
+      )
+
+      conn =
+        BarkparkWeb.SiteDeployController.trigger(
+          Phoenix.ConnTest.build_conn(),
+          %{"slug" => "foreign-409", "build_id" => "b1", "mode" => "deploy"}
+        )
+
+      assert conn.status == 409
+      assert %{"error" => error} = Jason.decode!(conn.resp_body)
+
+      assert error["code"] == "box_at_capacity"
+      assert error["message"] =~
+               "the box is at its build capacity (1 of 1 build slots in use) — "
+
+      assert error["holder"] == "foreign"
+      assert error["holding_slugs"] == []
+      assert error["holder_lock"] == lock
+      assert error["message"] =~ "did not launch"
+      assert error["message"] =~ "operator"
+
+      # And it is NOT the peer wording — the two refusals are now separable by
+      # a reader that has only the payload.
+      refute error["message"] =~ "retry when it finishes"
+
+      assert %{state: :idle} = DeployRunner.status("foreign-409")
+    end
+
+    test "a door-open ADMISSION is counted, by reason — the fail-open leak is measurable" do
+      # The door fails OPEN on purpose in named cases, and until now it did so
+      # SILENTLY: each one is a build the door SHOULD have refused (or at least
+      # could not vouch for) with no counter and no ledger row. This is the
+      # counter, and the fixture below actually PRODUCES two admissions — an
+      # unreadable /proc/locks and an absent one — not an assertion at zero.
+      unreadable =
+        Path.join(System.tmp_dir!(), "bp-dr-open-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(unreadable)
+      on_exit(fn -> File.rm_rf(unreadable) end)
+
+      put_cfg(
+        enabled: true,
+        command: stub("exit 0"),
+        build_gate_lock: tmp_lock_file(),
+        # A DIRECTORY where /proc/locks should be: File.read/1 fails :eisdir.
+        proc_locks_path: unreadable
+      )
+
+      before = DeployRunner.door_census()
+      assert is_integer(before.door_open_admissions_total)
+      assert is_map(before.door_open_admissions)
+
+      base_unreadable = Map.get(before.door_open_admissions, "proc_locks_unreadable", 0)
+      base_absent = Map.get(before.door_open_admissions, "no_proc_locks", 0)
+
+      capture_log(fn ->
+        assert DeployRunner.trigger(req("door-open-counted")) == {:ok, :started}
+        assert %{state: :done, exit_code: 0} = await_done("door-open-counted")
+      end)
+
+      # No procfs at all — the other named fail-open case, counted apart so the
+      # dev-box reason never hides the operator one.
+      put_cfg(proc_locks_path: Path.join(unreadable, "nope/locks"))
+      assert DeployRunner.trigger(req("door-open-counted-2")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("door-open-counted-2")
+
+      after_census = DeployRunner.door_census()
+
+      assert after_census.door_open_admissions_total == before.door_open_admissions_total + 2
+      assert after_census.door_open_admissions["proc_locks_unreadable"] == base_unreadable + 1
+      assert after_census.door_open_admissions["no_proc_locks"] == base_absent + 1
+    end
+
+    test "a REFUSAL is not a door-open admission — the two counters never move together" do
+      # The non-vacuity guard on the counter above: a door that counted every
+      # trigger would pass that test while measuring nothing. /proc/locks is
+      # READABLE here, so the refusal path takes no fail-open branch.
+      lock = tmp_lock_file()
+      locks = fake_proc_locks("1: POSIX  ADVISORY  WRITE 4020570 00:99:424242 0 EOF\n")
+
+      put_cfg(
+        enabled: true,
+        command: stub("sleep 0.4; exit 0"),
+        build_gate_lock: lock,
+        proc_locks_path: locks
+      )
+
+      assert DeployRunner.trigger(req("open-vs-refuse-alpha")) == {:ok, :started}
+
+      before = DeployRunner.door_census()
+      assert DeployRunner.trigger(req("open-vs-refuse-beta")) == {:error, :box_at_capacity}
+      after_census = DeployRunner.door_census()
+
+      assert after_census.refusals_total == before.refusals_total + 1
+      assert after_census.door_open_admissions_total == before.door_open_admissions_total
+
+      assert %{state: :done, exit_code: 0} = await_done("open-vs-refuse-alpha")
+    end
   end
 
   # A world-readable stand-in for the box's fleet build lock.

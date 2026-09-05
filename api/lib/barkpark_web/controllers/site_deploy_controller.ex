@@ -44,6 +44,19 @@ defmodule BarkparkWeb.SiteDeployController do
       its own unit for up to 900s, where an operator reads a queue as a hang.
       Only `mode: "deploy"` can draw it — a rollback or teardown never touches
       the build gate. Retry when the in-flight build finishes.
+
+      The body NAMES THE HOLDER. `code` and the message's capacity clause are
+      byte-stable (the control plane's deferral taxonomy matches the literal
+      code, and the CLI keys its exit code on it), so the holder rides in ADDED
+      FIELDS: `holder` (`"peer"` — a build this instance launched and tracks,
+      ordinary contention; `"foreign"` — an FLOCK entry on the fleet build lock
+      this instance did NOT launch, which a retry may never clear and an
+      operator should look at; `"unknown"` — a newer refusal overwrote the
+      detail before this process read it, so we decline to name a site rather
+      than name the wrong one), `holding_slugs`, `build_slots_in_use`,
+      `build_slot_capacity`, and `holder_lock` on the foreign case only. This
+      refusal is the single highest-volume event in the deploy pipeline; it
+      used to say "another site is building" and never which.
     * **202** `started` — with the fresh run status.
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
@@ -116,18 +129,15 @@ defmodule BarkparkWeb.SiteDeployController do
         # "<code> — <message>" and classifies on the head of that split, so a
         # code with an empty message collides with the request-id stamp the
         # relay appends and the deferral lands unclassified.
-        slots = DeployRunner.build_slot_capacity()
-
+        #
+        # The code and the message's leading clause are BYTE-STABLE on purpose
+        # — the control plane's deferral taxonomy matches the literal
+        # `box_at_capacity` and the CLI's exit-code map keys on it, so the
+        # holder is carried in ADDED FIELDS and in the message's TAIL, never in
+        # a second code.
         conn
         |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "box_at_capacity",
-            message:
-              "the box is at its build capacity (#{slots} of #{slots} build slots in use) — " <>
-                "another site is building; retry when it finishes"
-          }
-        })
+        |> json(%{error: box_at_capacity_error(req.slug)})
 
       {:error, :disabled} ->
         # The apply flag flipped off between the guard and the call — still
@@ -291,6 +301,77 @@ defmodule BarkparkWeb.SiteDeployController do
   # nothing and no historical row moves. What changed is what the sentence asks
   # of the reader — a decision to make, and where the per-box prerequisites for
   # making it are actually CHECKED, rather than an env var to export.
+  # The 409 body for a full box. Everything past `code` and the capacity clause
+  # is the part this endpoint used to throw away: the door KNOWS which slug is
+  # building and whether the holder is a peer build or a foreign one, said so in
+  # a log line, and then answered "another site is building".
+  #
+  # `holder`:
+  #   * `"peer"`    — a build THIS instance launched and tracks. Ordinary
+  #                   contention; `holding_slugs` names it and a retry works.
+  #   * `"foreign"` — an FLOCK entry on the fleet build lock that this instance
+  #                   did not launch (a hand-run engine, or a unit that outlived
+  #                   a previous BEAM). `holder_lock` names the lock file. A
+  #                   retry may never work; this one wants an operator.
+  #   * `"unknown"` — the door refused but its detail record was overwritten by
+  #                   a newer refusal before this process read it. We degrade to
+  #                   the old generic prose rather than name the wrong site.
+  defp box_at_capacity_error(slug) do
+    slots = DeployRunner.build_slot_capacity()
+
+    base = %{
+      code: "box_at_capacity",
+      build_slot_capacity: slots
+    }
+
+    case DeployRunner.last_refusal() do
+      %{slug: ^slug, holder: :peer, in_flight_slugs: [_ | _] = held} = detail ->
+        Map.merge(base, %{
+          holder: "peer",
+          holding_slugs: held,
+          build_slots_in_use: detail.slots_in_use,
+          message: capacity_message(detail.slots_in_use, slots, peer_tail(held))
+        })
+
+      %{slug: ^slug, holder: :foreign} = detail ->
+        Map.merge(base, %{
+          holder: "foreign",
+          holding_slugs: [],
+          holder_lock: detail.holder_lock,
+          build_slots_in_use: detail.slots_in_use,
+          message:
+            capacity_message(
+              detail.slots_in_use,
+              slots,
+              "a build this instance did not launch holds the build lock " <>
+                "#{detail.holder_lock}; it is not tracked here, so a retry may not " <>
+                "clear it — an operator should check the box"
+            )
+        })
+
+      _ ->
+        Map.merge(base, %{
+          holder: "unknown",
+          holding_slugs: [],
+          build_slots_in_use: slots,
+          message:
+            capacity_message(slots, slots, "another site is building; retry when it finishes")
+        })
+    end
+  end
+
+  # The leading clause is byte-identical to what the control plane has been
+  # parsing since D179 — only the tail after the second em dash is new.
+  defp capacity_message(in_use, slots, tail) do
+    "the box is at its build capacity (#{in_use} of #{slots} build slots in use) — " <> tail
+  end
+
+  defp peer_tail([one]), do: "site '#{one}' is building; retry when it finishes"
+
+  defp peer_tail(many) do
+    "sites #{Enum.map_join(many, ", ", &"'#{&1}'")} are building; retry when one finishes"
+  end
+
   defp feature_not_configured(conn) do
     conn
     |> put_status(:service_unavailable)
