@@ -647,7 +647,6 @@ defmodule Barkpark.Webhooks do
 
         {:ok, count}
 
-
       _ ->
         # Endpoint row is gone (deleted mid-flight) — nothing to count against.
         {:ok, 0}
@@ -725,7 +724,9 @@ defmodule Barkpark.Webhooks do
     from(w in Webhook,
       where: w.id == ^endpoint_id and w.active == false and not is_nil(w.auto_disabled_at)
     )
-    |> Repo.update_all(set: [auto_disabled_at: now, disable_reason: disable_reason, updated_at: now])
+    |> Repo.update_all(
+      set: [auto_disabled_at: now, disable_reason: disable_reason, updated_at: now]
+    )
 
     Logger.info(
       "[#{@probe_failed_code}] webhook endpoint #{endpoint_id} probe failed; " <>

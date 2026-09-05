@@ -88,8 +88,12 @@ defmodule Barkpark.WebhooksAutoDisableLatchTest do
       assert log =~ wh.id
       assert reload(wh).active == false
 
-      assert [event] = latch_events(wh, "webhook_auto_disabled"),
+      events = latch_events(wh, "webhook_auto_disabled")
+
+      assert length(events) == 1,
              "the stop must leave a durable RECORD, not just a log line that ages out"
+
+      [event] = events
 
       assert event.category == "plugin_settings"
       assert event.metadata["consecutive_failures"] == @threshold
