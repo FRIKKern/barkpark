@@ -2108,7 +2108,21 @@ defmodule BarkparkWeb.TasksController do
 
           from(d in Document,
             where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-            order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+            # THE THIRD FORK (task-ca05dd6a02a0b55f). This one cannot RAISE —
+            # it reads through `Repo.all() |> List.first()`, not `Repo.one/1` —
+            # but published-vs-draft alone is a PARTIAL order, and `dataset` is
+            # only filtered when the caller names one. With a slug in two
+            # datasets the remaining tie was broken by whatever Postgres
+            # returned first, so the same request could answer with a different
+            # row on a different connection. That is the failure mode the
+            # `limit: 1` fixes in the sibling forks would have INTRODUCED
+            # without a total order, so it is closed here by the same rule
+            # rather than left as the quiet member of the family.
+            order_by: [
+              asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id),
+              asc: d.dataset,
+              asc: d.id
+            ]
           )
       end
       |> Params.maybe_filter_workspace(workspace_id)
