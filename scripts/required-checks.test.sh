@@ -4294,6 +4294,128 @@ fi
 # The clause that DOES bite on a table left standing over a dead emission is
 # clause 5; a page that keeps a correct table beside wrong prose is out of reach
 # here, as it is for every other doc guard in this file.
+# ── §20 CLAUSE: EVERY `**N · <script>**` CROSS-REFERENCE RESOLVES ───────────
+#
+# THE HOLE (cgsiw-s4). §20 gates the doc-gates step count three ways — the
+# workflow grep, the prose claim, the table row count — and canaries it against
+# the pre-fix 17. It gates NO OTHER numeric cross-reference on this page, and
+# four of them have already rotted by exactly +2: the "Touching root.html.heex"
+# section calls studio-literal-check.sh #10, design/check.mjs Part E #9,
+# paper-editor-mirror-check.sh #6 and studio-link-lint.sh #11, while the roster
+# table numbers those same scripts 12, 11, 8 and 13. A reader following #10
+# lands on `scripts/preview-parity-check.sh`, which has nothing to do with
+# Studio colour literals. That is exactly the failure mode §19/§20 exist for,
+# on a number instead of a sentence.
+#
+# THE RESOLVER READS THE TABLE, NEVER A TYPED MAP. Rows are parsed out of the
+# `| N | Step | Runs |` grid and each `**N · \`<path>\`**` reference is resolved
+# by asking which ROW's Runs cell names that path. A typed number-to-script map
+# in this file would rot the same way the page did — and rot silently, since
+# nothing would compare it to anything.
+#
+# THE FOUR KNOWN ROTTED REFERENCES ARE A COMMITTED BASELINE, not a pass.
+# docs/ops/merge-gates.md is OUT OF THIS SLICE'S FENCE (the renumbering is filed
+# separately), so reddening on sight would land a red on main that this slice is
+# not allowed to fix. Same shape as BLOCKING_HEADER_UNRESOLVED_BASELINE: a NEW
+# mis-reference reds, a REPAIRED one prints a note asking for the baseline to
+# come down, and the baseline names each entry rather than counting them — a
+# count is satisfied by any four wrong numbers at all.
+RC20_XREF_BASELINE='10|scripts/studio-literal-check.sh|12
+9|design/check.mjs|11
+6|scripts/paper-editor-mirror-check.sh|8
+11|scripts/studio-link-lint.sh|13'
+
+rc20_xref_report() { # <merge-gates.md> -> one "KIND<TAB>cited<TAB>path<TAB>actual" line per bad reference
+  awk '
+    # THE ROSTER GRID. `| N | Step | Runs |` — the first cell is the number and
+    # everything past the second pipe is the Runs cell.
+    /^\|[ \t]*[0-9]+[ \t]*\|/ {
+      n = $0; sub(/^\|[ \t]*/, "", n); sub(/[ \t]*\|.*$/, "", n)
+      rest = $0; sub(/^\|[^|]*\|[^|]*\|/, "", rest)
+      row[n] = rest
+      if (n + 0 > maxrow) maxrow = n + 0
+      next
+    }
+    # THE REFERENCES. `**N · `path`**`, anywhere on the page.
+    {
+      s = $0
+      while (match(s, /\*\*[0-9]+ · `[^`]+`/)) {
+        m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        num = m; sub(/^\*\*/, "", num); sub(/ ·.*$/, "", num)
+        pi = index(m, "`"); path = substr(m, pi + 1); sub(/`.*$/, "", path)
+        # Deterministic: walk the rows in NUMERIC order, never `for (k in row)`,
+        # whose order awk does not define — a nondeterministic verdict on a
+        # page where two rows can legitimately name the same script.
+        found = ""
+        for (k = 1; k <= maxrow; k++)
+          if (k in row && index(row[k], "`" path "`") > 0) { found = k; break }
+        if (found == "")        printf "UNRESOLVED\t%s\t%s\t-\n", num, path
+        else if (found != num)  printf "MISNUMBERED\t%s\t%s\t%s\n", num, path, found
+        else                    printf "OK\t%s\t%s\t%s\n", num, path, found
+      }
+    }
+  ' "$1"
+}
+
+RC20_XREF_ALL="$(rc20_xref_report "$MERGE_GATES_DOC")"
+RC20_XREF_N="$(grep -c . <<<"$RC20_XREF_ALL" || true)"
+RC20_XREF_ROWS="$(grep -cE '^\|[ \t]*[0-9]+[ \t]*\|' "$MERGE_GATES_DOC" || true)"
+# NON-VACUITY FIRST. A resolver that reads zero rows or zero references reports
+# an empty problem list for the same reason a clean page does.
+if [ "$RC20_XREF_N" -ge 4 ] && [ "$RC20_XREF_ROWS" -ge 20 ]; then
+  ok "the §20 cross-reference resolver reads the page: $RC20_XREF_ROWS numbered roster row(s) and $RC20_XREF_N \`**N · <script>**\` reference(s), each resolved through the row whose Runs cell names that script (never a typed map)"
+else
+  bad "the cross-reference resolver read $RC20_XREF_ROWS row(s) and $RC20_XREF_N reference(s) — too few to be reading the page at all, so every clause below is vacuous"
+fi
+# The bad references, minus the committed baseline. `comm` over sorted keys, so
+# a baselined entry whose ACTUAL row moves is NOT waved through by its cited
+# number matching.
+RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort)"
+RC20_XREF_BASE_SORTED="$(printf '%s\n' "$RC20_XREF_BASELINE" | sort)"
+RC20_XREF_NEW="$(comm -23 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+RC20_XREF_FIXED="$(comm -13 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+if [ -z "$RC20_XREF_NEW" ]; then
+  ok "…and no \`**N · <script>**\` reference points at the wrong roster row beyond the $(grep -c . <<<"$RC20_XREF_BASE_SORTED") committed baseline entries (all four off by exactly +2; the renumbering is filed against docs/ops/merge-gates.md, which is out of this slice's fence)"
+else
+  bad "a NEW cross-reference points at the wrong roster row: $(tr '\n' '⏎' <<<"$RC20_XREF_NEW")"
+fi
+if [ -n "$RC20_XREF_FIXED" ]; then
+  echo "  note   $(grep -c . <<<"$RC20_XREF_FIXED") baselined cross-reference(s) now RESOLVE — drop them from RC20_XREF_BASELINE to ratchet: $(tr '\n' '⏎' <<<"$RC20_XREF_FIXED")"
+fi
+# MUTATION PROOF, BOTH ARMS, on a scratch copy of the page. Every reference the
+# page carries today is already in the baseline, so the arm that matters is a
+# reference the baseline does NOT know about: plant a CORRECT one (green) and
+# the same reference with its number moved by one (red). Without the correct
+# arm, the red one passes on a resolver that reds on any new text at all.
+RC20_XREF_SCRATCH="$TMP/rc20-xref-doc.md"
+RC20_XREF_PATH="$(awk -F'\t' '$1 == "MISNUMBERED" { print $3; exit }' <<<"$RC20_XREF_ALL")"
+RC20_XREF_TRUE="$(awk -F'\t' -v p="$RC20_XREF_PATH" '$1 == "MISNUMBERED" && $3 == p { print $4; exit }' <<<"$RC20_XREF_ALL")"
+cp "$MERGE_GATES_DOC" "$RC20_XREF_SCRATCH"
+printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, correct arm.\n' \
+  "$RC20_XREF_TRUE" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
+if [ -n "$RC20_XREF_PATH" ] && [ -n "$RC20_XREF_TRUE" ] \
+   && ! diff -q "$MERGE_GATES_DOC" "$RC20_XREF_SCRATCH" >/dev/null; then
+  ok "the cross-reference mutation applies: a scratch copy of the page carries a planted \`**$RC20_XREF_TRUE · $RC20_XREF_PATH**\` (non-empty diff, and the page itself is never written — it is out of fence)"
+else
+  bad "the cross-reference mutation did not apply (path='$RC20_XREF_PATH' row='$RC20_XREF_TRUE') — the two arms below are vacuous"
+fi
+RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+if [ -z "$RC20_XREF_GOOD" ]; then
+  ok "…and a reference citing the RIGHT row number resolves clean — the clause is reading the table, not reddening on any \`**N · …**\` it has not seen before"
+else
+  bad "a correctly-numbered planted reference was reported bad: $(tr '\n' '⏎' <<<"$RC20_XREF_GOOD")"
+fi
+printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, WRONG arm.\n' \
+  "$((RC20_XREF_TRUE + 1))" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
+RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
+                 | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+if [ "$RC20_XREF_RED" = "$((RC20_XREF_TRUE + 1))|$RC20_XREF_PATH|$RC20_XREF_TRUE" ]; then
+  ok "…and moving that ONE number by one makes the clause name it — cited $((RC20_XREF_TRUE + 1)), resolves to row $RC20_XREF_TRUE (mutation-proven able to fail)"
+else
+  bad "the mutated number was not caught (got '${RC20_XREF_RED:-nothing}') — the cross-reference clause cannot fail, which is the disease"
+fi
+
 section "21. every gate that announces \`green — nothing ran\` is disclosed on merge-gates.md, and every gate the page says announces it still does"
 
 # SIDE A. Derived: the annotation title IS the contract, so a gate is an emitter
