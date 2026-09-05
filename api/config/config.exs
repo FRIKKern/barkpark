@@ -370,13 +370,6 @@ config :barkpark, Oban,
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
        {"* * * * *", Barkpark.Audit.ExportWorker},
-       # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
-       # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
-       # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
-       # plugin), so this cron entry lives in the static crontab alongside the
-       # webhook/audit sweepers and runs on the static `playground_ttl` queue
-       # declared above. A no-op tick when no playground has expired.
-       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper},
        # bl-api-task-create-idempotency C4 — GC for the `idempotency_keys`
        # dedup store. `Idempotency.sweep/1` has existed since the table was
        # created and, until this entry, was called by NOTHING outside its own
@@ -387,7 +380,14 @@ config :barkpark, Oban,
        # queue alongside the webhook/audit sweepers; the worker bounds one tick
        # by construction (`Idempotency.sweep_batch/1`), so a cold first pass
        # over a long-unswept table cannot become one giant transaction.
-       {"17 * * * *", Barkpark.Idempotency.Sweeper}
+       {"17 * * * *", Barkpark.Idempotency.Sweeper},
+       # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
+       # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
+       # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
+       # plugin), so this cron entry lives in the static crontab alongside the
+       # webhook/audit sweepers and runs on the static `playground_ttl` queue
+       # declared above. A no-op tick when no playground has expired.
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`
