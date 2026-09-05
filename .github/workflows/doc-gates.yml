@@ -576,12 +576,22 @@ jobs:
           bash scripts/check-deploy-smoke.sh --selftest
           bash scripts/check-deploy-smoke.sh
 
+      # --selftest FIRST (distrust vacuous green). Part 1/2 compares two SETS of
+      # .bp-canvas-* classes and used to fail only on set DIFFERENCE, so an
+      # allowlist entry deleted from its own mirror kept printing "+1
+      # allowlisted heex-only" at exit 0. The 10-arm harness plants throwaway
+      # mirrors and re-invokes THIS script against them via
+      # PAPER_EDITOR_MIRROR_HEEX/_BUNDLE — empty corpora, disjoint corpora, a
+      # stale allowlist entry, an unknown argument — so a comparator that stops
+      # discriminating reds here instead of certifying a green about nothing.
+      # It plants nothing in this repo.
       - name: Paper-editor style mirror lockstep (fails this job)
         id: s8
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-editor-mirror-check.sh --selftest
           bash scripts/paper-editor-mirror-check.sh
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
