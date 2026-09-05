@@ -49,6 +49,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never a silent unfiltered 200) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
@@ -127,27 +128,9 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 - `POST P/v1/schemas/:dataset` — upsert; 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-## 8a. Tickets plugin — `/v1/tickets`
+## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`
 
-A **`bptk_` key IS an identity**: minted per outsider, who files/reads tickets with only that key. Plugin-gated. `status` is **server-derived**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
-
-| Persona (auth) | Routes (`/v1` prefix) |
-|---|---|
-| Submitter (`bptk_`) | `POST /tickets` · `GET /tickets[/:id]` (stamps `submitter_seen_at`) · `POST /tickets/:id/{messages,attachments}` · `GET /tickets/:id/attachments/:asset_id` |
-| Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
-| Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
-
-**Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (as no token); **rotate** = new secret, same identity row.
-
-**Attachments** (submitter-only): MIME from magic bytes (client header ignored); allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits**/key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
-
-## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [admin]
-
-Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
-
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim; undo = the inverse). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
-
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a regression.
+Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint).
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
@@ -161,7 +144,7 @@ Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnU
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
-Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
+Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 (registered; no producer in api/lib today) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
 `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `storage_unavailable` 503 (media, dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
 
