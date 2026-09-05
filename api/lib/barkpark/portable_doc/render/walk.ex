@@ -82,6 +82,28 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   @doc false
   def error_vocab, do: @error_values
 
+  # The `#rrggbb` background rule, mirrored LOCALLY for the same reason (and in
+  # the same shape) as `@error_values` right above: a cond-format background
+  # must render on a box where the sheet plugin is OFF, so CORE render carries
+  # NO compile-time edge into the Sheets PLUGIN namespace. The canonical owner
+  # stays `Barkpark.Plugins.Sheets.CondFormat.sanitize_bg/1` (@canonical
+  # capability:sheets-bg-sanitizer) and this is its RULE, copied: downcase
+  # FIRST (so acceptance is case-insensitive while the class is lowercase-only)
+  # then match `\z`-anchored — `\z`, not `$`, because PCRE `$` also matches
+  # before a trailing newline and this value lands inside an inline `style`
+  # attribute, so a stored "#rrggbb\n" can never smuggle a newline in here.
+  # A drift-guard test (sheets_parity_test) asserts THIS mirror answers
+  # term-identically to `CondFormat.valid_bg?/1` over a fixture set that
+  # includes every rejection shape, so the duplication is a CHECKED invariant,
+  # never a silent fork.
+  @sheet_bg_re ~r/^#[0-9a-f]{6}\z/
+
+  # @doc false accessor — exists ONLY so the drift-guard test can assert this
+  # local mirror agrees with `Barkpark.Plugins.Sheets.CondFormat.valid_bg?/1`.
+  @doc false
+  def sheet_bg_valid?(bg) when is_binary(bg), do: Regex.match?(@sheet_bg_re, String.downcase(bg))
+  def sheet_bg_valid?(_), do: false
+
   # A sheet cell whose ENTIRE value is an http(s) URL renders as a clickable
   # anchor in the paper embed (and thus the .html export). The regex pins
   # http(s) and bans whitespace/quote/angle chars so an attribute-breaking
@@ -1446,10 +1468,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet_cell_html(cell, _pal), do: escape_html(cell)
 
   defp sheet_bg_style(bg) when is_binary(bg) do
-    # Delegates to the ONE `#rrggbb` owner (capability:sheets-bg-sanitizer) —
-    # `\z`-anchored, so a stored "#rrggbb\n" is rejected here and can never
-    # smuggle a newline into this inline `style` attribute.
-    if Barkpark.Plugins.Sheets.CondFormat.valid_bg?(bg), do: "background:#{bg};", else: ""
+    # Uses the LOCAL mirror of the ONE `#rrggbb` owner
+    # (capability:sheets-bg-sanitizer) — see `@sheet_bg_re` up top for why the
+    # rule is copied rather than called, and for the `\z` anchoring that keeps
+    # a stored "#rrggbb\n" out of this inline `style` attribute.
+    if sheet_bg_valid?(bg), do: "background:#{bg};", else: ""
   end
 
   defp sheet_bg_style(_), do: ""
