@@ -324,7 +324,7 @@ defmodule Barkpark.Api.OpenApi do
   # command at `#/components/schemas/Document`, which is right for the data API
   # and wrong for the handful of auth verbs that answer a receipt. pds-w36 c0:
   # POST /v1/auth/reset answers `{ok, sessionsRevoked}` (auth_controller.ex
-  # `json(conn, %{ok: true, sessionsRevoked: sessions_revoked})`) and the spec
+  # renders the ok flag beside `sessionsRevoked: sessions_revoked`) and the spec
   # promised a Document — so the JS SDK and docs/auth-user-sessions.md carried a
   # field the manifest never declared. Keyed by command id; add a row when a
   # verb answers a receipt shape, never widen the default.
