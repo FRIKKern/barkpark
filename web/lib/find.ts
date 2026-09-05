@@ -99,10 +99,10 @@ export function readerHref(type: string, slug: string): string {
  * invariant {@link readerHref} owns on the construction half.
  *
  * The browser's `usePathname()` returns the ENCODED path, so a raw-interpolated
- * expected side (`/d/${type}/${slug}`) never matches once a slug carries a
- * space, `#`, `?` or `/` — and the symptom is silent: the active result row
- * simply stops highlighting. Encoding the expected side through
- * {@link readerHref} is what makes the two sides comparable.
+ * expected side (a raw '/d/' + type + '/' + slug template) never matches once
+ * a slug carries a space, '#', '?' or '/' — and the symptom is silent: the
+ * active result row simply stops highlighting. Encoding the expected side
+ * through {@link readerHref} is what makes the two sides comparable.
  *
  * `hit.href` is checked first because a normalised hit may carry a href the
  * server chose; the derived path is the fallback for hits built elsewhere. */

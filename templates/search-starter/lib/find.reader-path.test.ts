@@ -3,7 +3,7 @@
  * encoding invariant, and the one the original fix (#3779) left broken.
  *
  * `usePathname()` hands the finder the ENCODED path. The old comparison built
- * its expected side raw (`/d/${hit.type}/${hit.slug}`), so any slug carrying a
+ * its expected side raw (a '/d/' + type + '/' + slug template), so any slug carrying a
  * space, `#`, `?` or `/` never matched and the active result row silently
  * stopped highlighting — a defect with no error, just a missing highlight.
  * These tests pin the encoded-vs-encoded comparison.
