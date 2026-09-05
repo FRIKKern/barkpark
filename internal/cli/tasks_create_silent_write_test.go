@@ -57,6 +57,10 @@ type silentWriteLedger struct {
 	// response, after the write has been recorded.
 	dropCreate  bool
 	dropPublish bool
+	// publishEmptyResult answers the publish 2xx with an EMPTY results array —
+	// the server accepted it and echoed no record, so whether a published twin
+	// exists is unknown.
+	publishEmptyResult bool
 	// duplicateOf, when set, makes a SECOND create refuse with the server's
 	// real dedup-wall shape naming the incumbent id.
 	duplicateOf string
@@ -134,6 +138,13 @@ func (l *silentWriteLedger) serve(t *testing.T) *httptest.Server {
 			l.mu.Unlock()
 			if drop {
 				hijackAndClose(rw)
+				return
+			}
+			l.mu.Lock()
+			empty := l.publishEmptyResult
+			l.mu.Unlock()
+			if empty {
+				_, _ = rw.Write([]byte(`{"results":[]}`))
 				return
 			}
 			doc := map[string]any{"_id": bare, "_draft": false, "lifecycle_status": "open"}
@@ -409,5 +420,79 @@ func TestIncumbentTaskIDReadsBothDedupShapes(t *testing.T) {
 				t.Errorf("incumbentTaskID = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestPublishResultUnreadableIsNotAPlainFailure: a 2xx that echoes no record is
+// the subtlest ambiguous arm — the publish very likely landed. It used to exit
+// 1, the same code as an outright refusal, with nothing on stdout.
+func TestPublishResultUnreadableIsNotAPlainFailure(t *testing.T) {
+	led := &silentWriteLedger{docID: "drafts.task-504", publishEmptyResult: true}
+	ts := led.serve(t)
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	code := runTaskCreate(w, globals{yes: true}, ctx, []string{
+		"A publish that echoes no record",
+		"--description", "The publish answers 2xx and echoes nothing back.",
+		"--set", `tags:=[{"tag":"tasks","strength":80,"rationale":"a create whose answer is lost is a tasks-plugin defect"}]`,
+		"--publish",
+	})
+
+	t.Logf("exit=%d\nstdout=%s\nstderr=%s\nledger=%v", code, so.String(), se.String(), led.rows())
+
+	if code != exitAmbiguous {
+		t.Fatalf("exit = %d, want exitAmbiguous (%d)", code, exitAmbiguous)
+	}
+	env := decodeAmbiguousEnvelope(t, so.Bytes())
+	if env.Error.Details.Class != residuePublishResultUnreadable {
+		t.Errorf("details.class = %q, want %q", env.Error.Details.Class, residuePublishResultUnreadable)
+	}
+	if env.Error.Details.CheckCommand != "bp task get task-504" {
+		t.Errorf("check_command = %q, want \"bp task get task-504\"", env.Error.Details.CheckCommand)
+	}
+	assertAmbiguousStderr(t, se.String(), residuePublishResultUnreadable)
+}
+
+// TestCreateServerFaultIsAmbiguousWithATitleHandle: the create 5xx arm, under
+// -o json, where the whole event used to vanish. No id ever came back, so the
+// only handle is the title the caller supplied — and it must be IN the envelope,
+// not only in a stderr sentence.
+func TestCreateServerFaultIsAmbiguousWithATitleHandle(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/query/") {
+			_, _ = rw.Write([]byte(`{"result":{"documents":[{"_id":"tasks"}],"hasMore":false}}`))
+			return
+		}
+		rw.WriteHeader(http.StatusInternalServerError)
+		_, _ = rw.Write([]byte(`{"error":{"code":"internal_error","message":"the database connection pool is exhausted","request_id":"req-abc123"}}`))
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	title := "A create the server faults on"
+	code := runTaskCreate(w, globals{yes: true}, ctx, []string{title})
+
+	if code != exitAmbiguous {
+		t.Fatalf("exit = %d, want exitAmbiguous (%d), stderr: %s", code, exitAmbiguous, se.String())
+	}
+	env := decodeAmbiguousEnvelope(t, so.Bytes())
+	if env.Error.Details.Class != ambiguityCreateServerFault {
+		t.Errorf("details.class = %q, want %q", env.Error.Details.Class, ambiguityCreateServerFault)
+	}
+	if env.Error.Details.Title != title {
+		t.Errorf("details.title = %q, want %q — the title is the ONLY handle when no id came back", env.Error.Details.Title, title)
+	}
+	if env.Error.Details.DocID != "" {
+		t.Errorf("details.doc_id = %q, want empty — no id ever came back and one must never be guessed", env.Error.Details.DocID)
+	}
+	// The server's request_id must survive into the human channel: it is the one
+	// thing the API operator can act on.
+	if !strings.Contains(se.String(), "req-abc123") {
+		t.Errorf("the server's request_id was dropped:\n%s", se.String())
 	}
 }

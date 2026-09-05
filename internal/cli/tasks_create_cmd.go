@@ -270,9 +270,15 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// publish that did not produce a published twin cannot print one.
 		published, pok := firstMutationRecord(pBody)
 		if !pok {
-			out.userErr("task create: created %s but the publish response carried no result — the publish may or may not have landed; re-read with `bp task get %s`", bareID, bareID)
+			// The last of the six ambiguous arms, and the subtlest: a 2xx with no
+			// record. It already said the right sentence — it just said it on
+			// stderr only, at the same exit code as a definite refusal.
+			code := renderAmbiguousWrite(out, ambiguousWrite{
+				class: residuePublishResultUnreadable, leg: "publish", docID: bareID,
+				title: title, detail: "the publish response carried no result",
+			})
 			renderTaskCreateResidue(out, residuePublishResultUnreadable, draftID, bareID)
-			return exitGeneric
+			return code
 		}
 		record = published
 		// The publish mutation re-runs the same before_save gate, so it can raise
