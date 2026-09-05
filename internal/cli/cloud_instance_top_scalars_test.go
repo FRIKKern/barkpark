@@ -286,7 +286,7 @@ func TestPressureLinesStates(t *testing.T) {
 	}), "\n")
 	for _, want := range []string{
 		"pressure: calm — no resource pressure",
-		"  mem" + "ory: not measured — no reading",
+		"  mem" + "ory: not measured\n",
 		"judged on 1 of 4 signals — no reading for memory, load, disk",
 	} {
 		if !strings.Contains(partial, want) {
@@ -338,7 +338,7 @@ func TestCloudInstanceTopRendersTheStrugglingVerdict(t *testing.T) {
 		"pressure: struggling",
 		"swap: 93% — struggling",
 		"load: 2.64 per core — struggling",
-		"disk: not measured — no reading",
+		"disk: not measured\n",
 		"judged on 3 of 4 signals — no reading for disk",
 		"top 2 of 37 sites",
 		"documents 1.0 GB",

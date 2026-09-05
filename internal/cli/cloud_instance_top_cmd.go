@@ -979,11 +979,13 @@ func pressureSignalValue(sig cloudclient.MetricsPressureSignal) string {
 // learns to ignore, so the word and its reading always travel together.
 func pressureSignalLine(sig cloudclient.MetricsPressureSignal) string {
 	line := "  " + pressureSignalLabel(sig.Key) + ": " + pressureSignalValue(sig)
-	if state := pressureState(sig.State); state == "unknown" {
-		line += " — no reading"
-	} else {
-		line += " — " + state
+	// AN UNMEASURED SIGNAL STOPS HERE. It has no band and no share of the
+	// verdict, and printing the thresholds it WOULD have been judged against
+	// dresses an absent reading in the furniture of a measured one.
+	if pressureState(sig.State) == "unknown" {
+		return line
 	}
+	line += " — " + pressureState(sig.State)
 	if sig.WatchAt != nil && sig.StrugglingAt != nil {
 		line += " (watch at " + pressureNumber(*sig.WatchAt) +
 			", struggling at " + pressureNumber(*sig.StrugglingAt) + ")"
