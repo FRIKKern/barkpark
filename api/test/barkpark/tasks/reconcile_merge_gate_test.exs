@@ -106,7 +106,7 @@ defmodule Barkpark.Tasks.ReconcileMergeGateTest do
     assert reloaded.content["lifecycle_status"] == "open", "never terminal on a partial task"
   end
 
-  test "criterion 2: a 'MERGE GATE' text criterion WITHOUT the marker is NOT stamped (:no_marker)",
+  test "criterion 2: a 'MERGE GATE' text criterion WITHOUT the marker is NOT stamped, and is NAMED",
        %{scope: scope} do
     # Same wording, but no `merge_gate:true` — a text heuristic would misfire.
     unmarked = [
@@ -116,7 +116,20 @@ defmodule Barkpark.Tasks.ReconcileMergeGateTest do
 
     task = mk_task!(uniq("rmg-unmarked"), scope, %{"acceptance_criteria" => unmarked})
 
-    assert {:ok, :no_marker} = Tasks.reconcile_merge_gate(task.id, @landed)
+    # CONTRACT CHANGE (task-d1654bf0d20d5009), and only to the TAG: every
+    # substantive assertion below is unchanged and still holds — nothing is
+    # stamped, nothing is written, the rev does not move. What changed is that
+    # `:no_marker` was true but useless here. It says "this row carries no gate",
+    # while the row plainly carries something that READS as one; the criterion
+    # was then invisible to the autostamp AND refused to the builder by
+    # stamp.ex's prose arm, so it could only ever be stamped by a lead who
+    # noticed it by hand. The receipt now names the indices instead, which is the
+    # whole remedy: the strand becomes a sentence somebody can act on.
+    #
+    # The flag deliberately remains the permit — widening it would fabricate
+    # dones on the 74 ledger criteria that merely discuss gating. See
+    # `reconcile_locked/4`.
+    assert {:ok, :unflagged_merge_gates, [1]} = Tasks.reconcile_merge_gate(task.id, @landed)
 
     reloaded = Repo.get!(Document, task.id)
     assert Enum.at(reloaded.content["acceptance_criteria"], 1)["met"] == false

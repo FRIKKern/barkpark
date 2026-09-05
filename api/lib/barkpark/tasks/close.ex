@@ -77,6 +77,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Content.{Document, DraftId, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
 
@@ -215,6 +216,10 @@ defmodule Barkpark.Tasks.Close do
       evidence naming the PR, merge commit, and trigger source.
     * `{:ok, :already_stamped}`    — every merge-gate criterion is already met
       (a replayed/duplicate merge event, or a lead already closed). No write.
+    * `{:ok, :unflagged_merge_gates, [index]}` — nothing carries the flag, but
+      one or more criteria READ as merge gates. Nothing is stamped (a wide
+      permit fabricates dones — see `reconcile_locked/4`); the indices are
+      named so the strand is visible instead of silent.
     * `{:ok, :no_marker}`          — the task carries NO `merge_gate:true`
       criterion. The absence is NAMED (loud), never a text/position fallback, so
       an unmarked legacy gate is detectable rather than silently guessed.
@@ -227,6 +232,7 @@ defmodule Barkpark.Tasks.Close do
   @spec reconcile_merge_gate(String.t(), map(), keyword()) ::
           {:ok, :stamped, [non_neg_integer()]}
           | {:ok, :already_stamped | :no_marker | :no_guardable_marker}
+          | {:ok, :unflagged_merge_gates, [non_neg_integer()]}
           | {:error, :unknown_task | :stale_rev | term()}
   def reconcile_merge_gate(task_id, landed, opts \\ [])
       when is_binary(task_id) and is_map(landed) do
@@ -263,14 +269,55 @@ defmodule Barkpark.Tasks.Close do
   # In-lock reconciliation over the freshly-read doc. Classifies the merge-gate
   # criteria BEFORE writing so `:no_marker` (never marked) is distinguishable
   # from `:already_stamped` (marked + met) — criterion-4 named idempotency.
+  # WHY THIS FILTER IS NARROW, AND WHY SYMMETRY WITH stamp.ex IS NOT A GOAL
+  # (task-d1654bf0d20d5009).
+  #
+  # `Criteria.merge_gated?/1` is flag-OR-PROSE. `stamp.ex` uses it and this file
+  # does not, which reads like an oversight and has been filed as one. It is not.
+  #
+  # A WIDE predicate is safe gating a REFUSAL and dangerous gating a PERMIT.
+  # In `stamp.ex` the wide predicate REFUSES a builder's `--met`: a false
+  # positive there costs one extra `--merge-gated` flag. Here it would PERMIT:
+  # `reconcile_locked/4` composes evidence and writes synthetic met-flips when a
+  # PR merges. A false positive here FABRICATES A DONE, which is the one outcome
+  # this ledger exists to prevent. `landed.ex` reasons the same way and inverts
+  # one arm for exactly this reason (see its moduledoc on the deliberate width).
+  #
+  # MEASURED on the live ledger, 14,699 criteria: 501 are worded as merge gates
+  # while carrying no flag. 427 of those OPEN with the marker and are genuine
+  # gate declarations; the other 74 bury it in prose and are criteria ABOUT
+  # gating rather than gates. Widening this filter would auto-mark those 74 met
+  # on the next merge. They are not close calls — one reads "The four lead-gated
+  # rows are adjudicated `open` — NOT closed", and marking it met asserts the
+  # opposite of what it says. Another requires verification work: "Every
+  # machine-checkable merge gate is verified with `gh pr view` and mergeCommit
+  # ancestry, then stamped and closed on the CURRENT claim."
+  #
+  # So the flag stays the permit. The prose-worded-but-unflagged criteria are
+  # not stamped and not ignored either: they are NAMED in the receipt below, so
+  # the invisibility that made this worth filing becomes a sentence somebody can
+  # act on instead of silence.
   defp reconcile_locked(%Document{} = doc, worker_id, landed, ts_iso) do
-    gates =
+    indexed =
       doc.content
       |> merge_gate_criteria_list()
       |> Enum.with_index()
-      |> Enum.filter(fn {entry, _i} -> is_map(entry) and Map.get(entry, "merge_gate") == true end)
+
+    gates =
+      Enum.filter(indexed, fn {entry, _i} ->
+        is_map(entry) and Map.get(entry, "merge_gate") == true
+      end)
+
+    unflagged = unflagged_worded_gates(indexed)
 
     cond do
+      gates == [] and unflagged != [] ->
+        # Nothing to stamp — and saying `:no_marker` here would be true but
+        # useless, because the row DOES carry something that reads like a gate.
+        # Name the criteria rather than count them: a count says there is a
+        # problem, a list says where.
+        {:ok, :unflagged_merge_gates, Enum.map(unflagged, fn {_entry, i} -> i end)}
+
       gates == [] ->
         {:ok, :no_marker}
 
@@ -1280,6 +1327,17 @@ defmodule Barkpark.Tasks.Close do
   defp guardable_text(%{"criterion" => text}) when is_binary(text) and text != "", do: text
   defp guardable_text(_entry), do: nil
 
+  # Criteria that READ as merge gates but carry no `merge_gate: true`, and are
+  # not already met. `Criteria.merge_gated?/1` is the shared predicate, so an
+  # explicit `merge_gate: false` still VETOES the wording here — a criterion
+  # whose author declared it is not a gate is not reported as a stranded one.
+  defp unflagged_worded_gates(indexed) do
+    Enum.filter(indexed, fn {entry, _i} ->
+      is_map(entry) and Map.get(entry, "merge_gate") != true and
+        Map.get(entry, "met") != true and Criteria.merge_gated?(entry)
+    end)
+  end
+
   defp merge_gate_criteria_list(content) do
     case Map.get(content, "acceptance_criteria") do
       list when is_list(list) -> list
@@ -1450,6 +1508,7 @@ defmodule Barkpark.Tasks.Close do
       Map.get(c, "lifecycle_status") == "done"
     end)
   end
+
   # `done` and `cancelled` are terminal; `blocked` is an honest partial and the
   # row is still live work, so its disposition is left alone. The guard is on
   # the PRESENCE of a disposition, so an unadjudicated row stays unadjudicated.
