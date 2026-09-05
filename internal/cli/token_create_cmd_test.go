@@ -318,3 +318,27 @@ func TestTokenCreateHelpNamesTheReadTier(t *testing.T) {
 		t.Errorf("help wrote to stdout: %q", so.String())
 	}
 }
+
+// TestTokenNounHelpAdvertisesTheReadTierVerb — the DISCOVERY surface. The finding
+// is that nothing tells a customer the read tier is mintable, so the registry
+// line `bp token --help` and `bp capabilities` both render from must name the
+// gate flag. builtinVerbLines is the exact function both call.
+func TestTokenNounHelpAdvertisesTheReadTierVerb(t *testing.T) {
+	lines := strings.Join(builtinVerbLines("token"), "\n")
+	for _, want := range []string{"create", "--permissions", "read"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the token noun's built-in help block does not name %q:\n%s", want, lines)
+		}
+	}
+
+	var found bool
+	for _, b := range builtinVerbsFor("token") {
+		if b.Verb == "create" && b.label() == "token create --permissions" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("`bp capabilities` would name this verb without its gate flag, which reads as a "+
+			"duplicate of the manifest verb; labels = %v", builtinVerbsFor("token"))
+	}
+}
