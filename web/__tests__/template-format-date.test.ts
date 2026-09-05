@@ -19,7 +19,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatDate } from "../../js/packages/create-barkpark-app/templates/blog-starter/lib/format-date.ts";
+import { formatDate } from "../../js/packages/create-barkpark-app/templates/_shared/lib/format-date.ts";
 
 test("formatDate returns null for undefined / empty string", () => {
   assert.equal(formatDate(undefined), null);
