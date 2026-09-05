@@ -68,6 +68,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @read_only_pane_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # pds-w42 — THE PRINCIPAL GATE, AT THE CHOKEPOINT.
@@ -125,6 +126,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @write_denied_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # pds-w44 (PDS-D644) — THE GRANT'S OWN NARROWING, TRAVELLED INTO THE DOOR.
@@ -252,6 +254,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     socket
     |> put_flash(:error, @outside_grant_notice)
     |> assign(save_status: "Read-only")
+    |> assign(last_paper_save_ok?: false)
   end
 
   @doc false
@@ -275,7 +278,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         refuse_read_only_pane(socket)
 
       is_nil(slug) ->
-        socket
+        assign(socket, last_paper_save_ok?: false)
 
       true ->
         case Content.apply_paper_block_op(
@@ -288,6 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> resync_pane_after_op()
             |> assign(save_status: "Auto-saved")
+            |> assign(last_paper_save_ok?: true)
             # A prior halt cleared: the next accepted edit dismisses the banner.
             |> assign(paper_halt: nil)
 
@@ -297,6 +301,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, constraint_flash(message))
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
 
           # A lifecycle-hook HALT (server-owned quality gate — the hollow-doc
           # gate from sibling p-hollow-gate-server lands here) carries a
@@ -309,6 +314,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, "Edit failed")
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
         end
     end
   end
@@ -351,7 +357,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         refuse_read_only_pane(socket)
 
       is_nil(slug) ->
-        socket
+        assign(socket, last_paper_save_ok?: false)
 
       true ->
         case Content.apply_paper_block_ops(
@@ -381,6 +387,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             # across both write seams, no third state and NO in-flight
             # "Saving…" transient (charter D242 defers pending feedback).
             |> assign(save_status: "Auto-saved")
+            |> assign(last_paper_save_ok?: true)
             # A prior halt cleared: the next accepted batch dismisses the banner.
             |> assign(paper_halt: nil)
 
@@ -392,6 +399,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, constraint_flash(message))
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
 
           # A lifecycle-hook HALT on the batch path. The batch branch never set
           # save_status on error before — put_paper_halt/2 fixes that so a
@@ -404,11 +412,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, "Edit failed")
             |> assign(save_status: "Save failed")
+            |> assign(last_paper_save_ok?: false)
         end
     end
   end
 
-  def paper_ops(socket, _ops), do: socket
+  def paper_ops(socket, _ops), do: assign(socket, last_paper_save_ok?: false)
 
   # ── spd-bl-publish-affordance-triple — the hand path's missing affordances ──
   #
@@ -654,6 +663,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> assign(paper_halt: message)
     |> put_flash(:error, message)
     |> assign(save_status: "Save failed")
+    |> assign(last_paper_save_ok?: false)
   end
 
   # Normalise a lifecycle-hook halt reason into a display string. The paper
@@ -951,10 +961,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
                Shared.hook_opts(socket)
              ) do
           {:ok, _result} ->
-            sync_editor_blocks(socket)
+            socket
+            |> sync_editor_blocks()
+            |> assign(last_paper_save_ok?: true)
 
           {:error, _reason} ->
-            put_flash(socket, :error, "Edit failed")
+            socket
+            |> put_flash(:error, "Edit failed")
+            |> assign(last_paper_save_ok?: false)
         end
     end
   end

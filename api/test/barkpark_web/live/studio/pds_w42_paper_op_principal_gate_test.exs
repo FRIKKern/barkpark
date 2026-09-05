@@ -217,6 +217,35 @@ defmodule BarkparkWeb.Studio.PdsW42PaperOpPrincipalGateTest do
       assert after_component_event == %{"amount" => "299", "currency" => "NOK"}
     end
 
+    test "a correlated component flush is refused and acknowledges the matching request", %{
+      conn: conn
+    } do
+      System.delete_env("BARKPARK_PAPER_CANVAS")
+      slug = "pds-w42-correlated"
+      create_paper!(slug)
+
+      view = open!(conn, @readonly, slug)
+      assert_write_denied_socket!(view)
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => @block_id,
+          "patch" => %{"value" => %{"amount" => "1", "currency" => "USD"}}
+        },
+        "studio-denied-field-request"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "studio-denied-field-request",
+        saved: false
+      })
+
+      assert flash_error(view) == "You don't have access to do that."
+      assert stored_value(slug) == %{"amount" => "299", "currency" => "NOK"}
+    end
+
     test "the batch (canvas ops) write seam is refused for the same principal", %{conn: conn} do
       System.delete_env("BARKPARK_PAPER_CANVAS")
       slug = "pds-w42-batch"

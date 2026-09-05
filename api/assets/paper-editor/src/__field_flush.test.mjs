@@ -101,6 +101,15 @@ try {
   text.replies.shift().resolve({ saved: true });
   assert.deepEqual(await Promise.all(retryWait), [true]);
 
+  text.el.querySelector("input, textarea").value = "Needs explicit acknowledgement";
+  text.el.querySelector("input, textarea").dispatchEvent(new window.Event("input", { bubbles: true }));
+  const missingAckWait = flush(text.el);
+  text.replies.shift().resolve({});
+  assert.deepEqual(await Promise.all(missingAckWait), [false], "an empty transport reply is not persistence success");
+  const missingAckRetry = flush(text.el);
+  text.replies.shift().resolve({ saved: true });
+  assert.deepEqual(await Promise.all(missingAckRetry), [true]);
+
   const pickerNode = picker.el.querySelector("bp-media-picker");
   pickerNode.dispatchEvent(new window.CustomEvent("bp-change", {
     bubbles: true,

@@ -392,6 +392,36 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert render(reader) =~ ~s(id="paper-sentinel")
     end
 
+    test "a correlated component paper_op persists and acknowledges the exact save", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Correlated field save"}]
+          }
+        },
+        "field-request-accepted"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "field-request-accepted",
+        saved: true
+      })
+
+      assert block_text(slug, "b-body") == "Correlated field save"
+      assert assigns_of(view).save_status == "Auto-saved"
+      assert assigns_of(view).last_save_ok? == true
+      refute flash_of(view)["error"]
+    end
+
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{
       conn: conn,
       slug: slug

@@ -81,22 +81,32 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
   # asserting against a socket LiveView never builds. The mount gives the real
   # one; the seam-level precision of this suite (a direct `handle_event/3`, no
   # DOM in the way) is unchanged.
-  defp paper_socket(conn, paper) do
+  defp paper_view(conn, paper) do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{paper.doc_id}"))
 
-    :sys.get_state(view.pid).socket
+    view
+  end
+
+  defp socket_of(view), do: :sys.get_state(view.pid).socket
+
+  defp stored_intro_text do
+    case Content.get_public_paper(@slug, @dataset) do
+      %{content: %{"blocks" => [%{"content" => [%{"value" => value} | _]} | _]}} -> value
+      _ -> nil
+    end
   end
 
   describe "paper block autosave truthfulness (#8)" do
     setup %{conn: conn} do
       seed_paper_schema!()
       paper = seed_block_paper!()
-      {:ok, paper: paper, socket: paper_socket(conn, paper)}
+      view = paper_view(conn, paper)
+      {:ok, paper: paper, view: view, socket: socket_of(view)}
     end
 
     test "a clean edit reports Auto-saved", %{socket: socket} do
-      {:noreply, socket} =
+      {:reply, %{saved: true}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
           %{"block_id" => "b-intro", "text" => "Edited body."},
@@ -112,7 +122,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       # attempt hits the DB and comes back {:error, :not_found}.
       {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
 
-      {:noreply, socket} =
+      {:reply, %{saved: false}, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
           %{"block_id" => "b-intro", "text" => "Edited body."},
@@ -123,6 +133,161 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       refute socket.assigns.save_status == "Auto-saved"
       assert socket.assigns.save_status == "Save failed"
       assert socket.assigns.flash["error"] == "Edit failed"
+    end
+
+    test "paper-op replies true after persistence and false after a rejected retry", %{
+      socket: socket
+    } do
+      op = %{
+        "op" => "patch-block",
+        "id" => "b-intro",
+        "patch" => %{
+          "content" => [%{"type" => "text", "value" => "Direct paper op."}]
+        }
+      }
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               StudioLive.handle_event("paper-op", op, socket)
+
+      assert saved_socket.assigns.last_paper_save_ok? == true
+      assert stored_intro_text() == "Direct paper op."
+
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      assert {:reply, %{saved: false}, failed_socket} =
+               StudioLive.handle_event("paper-op", op, saved_socket)
+
+      assert failed_socket.assigns.last_paper_save_ok? == false
+      assert failed_socket.assigns.save_status == "Save failed"
+      assert stored_intro_text() == nil
+    end
+
+    test "paper-op and paper-block-autosave reject malformed payloads with saved false", %{
+      socket: socket
+    } do
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-op", %{}, socket)
+
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-block-autosave", %{}, socket)
+
+      assert stored_intro_text() == "Original body."
+    end
+
+    test "a correlated component save persists and acknowledges its exact request", %{
+      view: view
+    } do
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Correlated Studio edit."}]
+          }
+        },
+        "studio-field-accepted"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "studio-field-accepted",
+        saved: true
+      })
+
+      assert stored_intro_text() == "Correlated Studio edit."
+      assert socket_of(view).assigns.last_paper_save_ok? == true
+    end
+
+    test "a failed correlated component save acknowledges false and keeps the row absent", %{
+      view: view
+    } do
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      send(view.pid, {
+        :paper_op,
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "patch" => %{
+            "content" => [%{"type" => "text", "value" => "Must not land."}]
+          }
+        },
+        "studio-field-failed"
+      })
+
+      assert_push_event(view, "bp:paper-field-save-result", %{
+        request_id: "studio-field-failed",
+        saved: false
+      })
+
+      assert stored_intro_text() == nil
+      assert socket_of(view).assigns.last_paper_save_ok? == false
+    end
+
+    test "paper-ops replies saved true only after the batch persisted", %{socket: socket} do
+      assert {:reply, %{saved: true}, socket} =
+               StudioLive.handle_event(
+                 "paper-ops",
+                 %{
+                   "ops" => [
+                     %{
+                       "op" => "patch-block",
+                       "id" => "b-intro",
+                       "patch" => %{
+                         "content" => [
+                           %{"type" => "text", "value" => "Acknowledged Studio batch."}
+                         ]
+                       }
+                     }
+                   ]
+                 },
+                 socket
+               )
+
+      assert socket.assigns.last_paper_save_ok? == true
+      assert stored_intro_text() == "Acknowledged Studio batch."
+    end
+
+    test "paper-ops replies saved false for a rejected batch, never stale success", %{
+      socket: socket
+    } do
+      # Prove the attempt resets its own result rather than inheriting a prior
+      # successful status from this socket.
+      socket = Phoenix.Component.assign(socket, :last_paper_save_ok?, true)
+      {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
+
+      assert {:reply, %{saved: false}, socket} =
+               StudioLive.handle_event(
+                 "paper-ops",
+                 %{
+                   "ops" => [
+                     %{
+                       "op" => "patch-block",
+                       "id" => "b-intro",
+                       "patch" => %{
+                         "content" => [
+                           %{"type" => "text", "value" => "Rejected Studio batch."}
+                         ]
+                       }
+                     }
+                   ]
+                 },
+                 socket
+               )
+
+      assert socket.assigns.last_paper_save_ok? == false
+      assert socket.assigns.save_status == "Save failed"
+      assert stored_intro_text() == nil
+    end
+
+    test "paper-ops rejects malformed or empty payloads with saved false", %{socket: socket} do
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-ops", %{"ops" => []}, socket)
+
+      assert {:reply, %{saved: false}, _socket} =
+               StudioLive.handle_event("paper-ops", %{}, socket)
+
+      assert stored_intro_text() == "Original body."
     end
   end
 

@@ -61,7 +61,7 @@
               pending.push(
                 this.pushEventTo(target, changeEvent, params)
                   .then((results) => results.length > 0 && results.every((result) =>
-                    result.status === "fulfilled" && result.value?.reply?.saved !== false
+                    result.status === "fulfilled" && result.value?.reply?.saved === true
                   ))
                   .catch(() => false)
                   .then((saved) => {
@@ -113,7 +113,7 @@
         const pushOp = (op) => {
           this._retryOp = op;
           const pending = this.pushEvent("paper-op", op)
-            .then((reply) => reply?.saved !== false)
+            .then((reply) => reply?.saved === true)
             .catch(() => false)
             .then((saved) => {
               if (saved && this._retryOp === op) this._retryOp = null;
@@ -331,7 +331,7 @@
           const entry = this._opsQueue[0];
           this._sendingOps = true;
           const pending = this.pushEvent("paper-ops", { ops: entry.ops })
-            .then((reply) => reply?.saved !== false)
+            .then((reply) => reply?.saved === true)
             .catch(() => false)
             .then((saved) => {
               this._sendingOps = false;
@@ -525,7 +525,7 @@
         const pushOp = (op) => {
           this._retryOp = op;
           const pending = this.pushEvent("paper-op", op)
-            .then((reply) => reply?.saved !== false)
+            .then((reply) => reply?.saved === true)
             .catch(() => false)
             .then((saved) => {
               if (saved && this._retryOp === op) this._retryOp = null;

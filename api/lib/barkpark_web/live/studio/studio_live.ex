@@ -304,6 +304,23 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_info({:document_changed, msg}, socket), do: Lifecycle.document_changed(msg, socket)
   def handle_info({:autosave_form, form}, socket), do: Lifecycle.autosave_form(form, socket)
+
+  # A nested PaperFieldBlock flush carries the browser request id so the
+  # component bridge can keep an unsaved draft mounted until THIS exact op has
+  # passed the canonical, guarded persistence path. Never infer success from a
+  # prior save_status: Shared.paper_op/2 stamps a fresh per-attempt result on
+  # every accepted, refused, failed, and non-writing branch.
+  def handle_info({:paper_op, %{"op" => _} = op, request_id}, socket)
+      when is_binary(request_id) do
+    {:noreply, socket} = Lifecycle.paper_op(op, socket)
+
+    {:noreply,
+     push_event(socket, "bp:paper-field-save-result", %{
+       request_id: request_id,
+       saved: socket.assigns[:last_paper_save_ok?] == true
+     })}
+  end
+
   def handle_info({:paper_op, %{"op" => _} = op}, socket), do: Lifecycle.paper_op(op, socket)
 
   def handle_info({:tree_codelist_change, msg}, socket),

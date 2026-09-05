@@ -74,7 +74,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # THE SEAM THIS SLICE CLOSES — Content.upsert_draft
     {"{:autosave_form, form}", :write},
     # closed by pds-w42-paper-op-principal-gate (its own suite)
-    {"{:paper_op, ", :write},
+    {"{:paper_op, %{\"op\" => _} = op, request_id}", :write},
+    {"{:paper_op, %{\"op\" => _} = op}, socket)", :write},
     # send_update(PaperFieldBlock, tree_value:) → persist/2 → {:paper_op, …};
     # terminates on the paper chokepoint (covered by the paper-op suite)
     {"{:tree_codelist_change, msg}", :write},
@@ -219,7 +220,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 14,
+      assert length(heads) == 15,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 
@@ -252,16 +253,18 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The row cited nine `send(self(), {…})` sites. The measured set is EIGHT
-    # in the LiveView/component tree (the two remaining tree-wide sends are
-    # `:after_join` in the channels, which are not LiveView seams). Pinning the
-    # set means a NEW in-process sender — the exact event that turned
-    # `paper_op` from "safe by construction" into a live bypass — cannot land
-    # unnoticed.
+    # The measured set is NINE sites in the LiveView/component tree (the two
+    # remaining tree-wide sends are `:after_join` in the channels, which are
+    # not LiveView seams). The two `paper_op` sites deliberately cover the
+    # ordinary op and its save-ack-correlated variant; both terminate on the
+    # same guarded parent chokepoint. Pinning the set means a NEW in-process
+    # sender — the exact event that turned `paper_op` from "safe by
+    # construction" into a live bypass — cannot land unnoticed.
     test "the set of in-process send(self(), …) senders is pinned" do
       assert send_self_sites() == [
                {"components/fields/tree_codelist_field.ex", "{:tree_codelist_change,"},
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
+               {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},

@@ -85,6 +85,20 @@ replies.shift().resolve({saved:true});
 await tick();
 assert.deepEqual(calls, ['paper-ops','paper-toggle-edit']);
 
+// A transport reply without an explicit persistence result is not a save ack.
+calls.length = 0;
+dirty = true;
+click();
+replies.shift().resolve({});
+await tick();
+assert.deepEqual(calls, ['paper-ops'], 'a missing saved field must keep editing');
+calls.length = 0;
+click();
+assert.deepEqual(calls, ['paper-ops'], 'an unacknowledged batch remains retryable');
+replies.shift().resolve({saved:true});
+await tick();
+assert.deepEqual(calls, ['paper-ops','paper-toggle-edit']);
+
 // A save already in flight must finish even when the immediate flush is clean.
 canvas.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {bubbles:true,detail:{ops:[]}}));
 canvas.flushPendingChanges = () => {};
@@ -147,6 +161,12 @@ calls.length = 0;
 click();
 assert.deepEqual(calls, ['paper-block-autosave']);
 assert.deepEqual(JSON.parse(JSON.stringify(replies[0].payload)), {block_id:'fallback-1', text:'Final fallback text'});
+replies.shift().resolve([{status:'fulfilled', value:{reply:{}}}]);
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave'], 'fallback forms require explicit save acknowledgement');
+calls.length = 0;
+click();
+assert.deepEqual(calls, ['paper-block-autosave'], 'a form without acknowledgement remains retryable');
 replies.shift().resolve([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
 assert.deepEqual(calls, ['paper-block-autosave','paper-toggle-edit']);

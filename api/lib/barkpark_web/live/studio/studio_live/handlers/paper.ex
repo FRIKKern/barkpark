@@ -59,10 +59,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     socket =
       Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})
 
-    {:noreply, socket}
+    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
   end
 
-  def paper_block_autosave(_params, socket), do: {:noreply, socket}
+  def paper_block_autosave(_params, socket), do: {:reply, %{saved: false}, socket}
 
   # Persist a callout's native <details> fold state. The JS hook
   # (BarkparkCalloutFold) sends the post-toggle `collapsed` bool keyed by
@@ -249,19 +249,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def open_backlink(_params, socket), do: {:noreply, socket}
 
   def paper_op(%{"op" => _} = op, socket) do
-    {:noreply, Shared.paper_op(socket, op)}
+    socket = Shared.paper_op(socket, op)
+    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
   end
+
+  def paper_op(_params, socket), do: {:reply, %{saved: false}, socket}
 
   # Phase-4 S2: a <bp-paper-canvas> run emits an ORDERED op array (bp-canvas-ops);
   # the BarkparkPaperCanvas hook forwards it as `paper-ops` {ops:[…]}. Fold the
   # whole batch through the SAME Patch.apply_patches + persist path the per-block
   # paper-op uses (Shared.paper_ops → Content.apply_paper_block_ops). A non-list
-  # or empty `ops` is a quiet no-op (guarded in Shared.paper_ops/2).
+  # or empty `ops` is a quiet failed acknowledgement (guarded in
+  # Shared.paper_ops/2): no batch was persisted, so the client must retain it.
   def paper_ops(%{"ops" => ops}, socket) do
-    {:noreply, Shared.paper_ops(socket, ops)}
+    socket = Shared.paper_ops(socket, ops)
+    {:reply, %{saved: socket.assigns[:last_paper_save_ok?] == true}, socket}
   end
 
-  def paper_ops(_params, socket), do: {:noreply, socket}
+  def paper_ops(_params, socket), do: {:reply, %{saved: false}, socket}
 
   @doc """
   t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed
