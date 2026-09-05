@@ -781,8 +781,34 @@ export interface BarkparkAuth {
   verifyEmail(token: string, opts?: { signal?: AbortSignal }): Promise<void>
   /** Request a password-reset email (`POST /v1/auth/request-reset`); always succeeds. */
   requestPasswordReset(email: string, opts?: { signal?: AbortSignal }): Promise<void>
-  /** Set a new password with a reset token (`POST /v1/auth/reset`); throws on a bad token. */
-  resetPassword(token: string, password: string, opts?: { signal?: AbortSignal }): Promise<void>
+  /**
+   * Set a new password with a reset token (`POST /v1/auth/reset`); throws on a
+   * bad token. Resolves with the reset receipt, whose `sessionsRevoked` is how
+   * many other sessions the server killed (`null` when the server reported no
+   * count at all — not the same fact as `0`).
+   */
+  resetPassword(
+    token: string,
+    password: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<PasswordResetReceipt>
+}
+
+/**
+ * The receipt returned by a successful password reset.
+ *
+ * A reset revokes every OTHER session for the user; `sessionsRevoked` is the
+ * count the server actually stamped, so a caller can tell the user how many
+ * devices were signed out instead of guessing.
+ *
+ * `null` and `0` are deliberately distinct. `0` is a measurement: the server
+ * counted and there were none. `null` is an absence: the server returned no
+ * count (it predates the field), so nothing was measured. Collapsing `null` to
+ * `0` would turn "we do not know" into "we checked and it was none", which is
+ * the same unread-receipt defect the endpoint was changed to fix.
+ */
+export interface PasswordResetReceipt {
+  sessionsRevoked: number | null
 }
 
 /**
