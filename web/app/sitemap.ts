@@ -4,6 +4,7 @@ import { fetchPosts, postSlug } from "@/lib/posts";
 import { fetchPapers, paperSlug } from "@/lib/papers";
 import { paperTags } from "@/lib/paper-tags";
 import { absoluteUrl } from "@/lib/site-url";
+import { readerHref } from "@/lib/find";
 
 /**
  * Dynamic sitemap for the public reader. Enumerates the canonical
@@ -39,14 +40,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ]);
 
     const postEntries: MetadataRoute.Sitemap = posts.map((post) => ({
-      url: absoluteUrl(`/d/post/${encodeURIComponent(postSlug(post))}`),
+      url: absoluteUrl(readerHref("post", postSlug(post))),
       lastModified: lastModified(post._updatedAt),
       changeFrequency: "weekly",
       priority: 0.7,
     }));
 
     const paperEntries: MetadataRoute.Sitemap = papers.map((paper) => ({
-      url: absoluteUrl(`/d/paper/${encodeURIComponent(paperSlug(paper))}`),
+      url: absoluteUrl(readerHref("paper", paperSlug(paper))),
       lastModified: lastModified(paper._updatedAt),
       changeFrequency: "weekly",
       priority: 0.7,

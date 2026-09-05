@@ -66,14 +66,14 @@ function parseDocTypes(spec: string | undefined): DocType[] {
       { type: "author", label: "Authors" },
       { type: "category", label: "Categories" },
       { type: "project", label: "Projects" },
-    ].map((t) => ({ ...t, href: (s: string) => `/d/${t.type}/${s}` }));
+    ].map((t) => ({ ...t, href: (s: string) => readerHref(t.type, s) }));
   }
   return entries.map((entry) => {
     const [type, label] = entry.split(":").map((s) => s.trim());
     return {
       type,
       label: label && label.length > 0 ? label : titleCase(type),
-      href: (s: string) => `/d/${type}/${s}`,
+      href: (s: string) => readerHref(type, s),
     };
   });
 }
@@ -93,6 +93,26 @@ export function typeLabel(type: string): string {
  * (the detail page resolves what to render, falling back to a MetaCard). */
 export function readerHref(type: string, slug: string): string {
   return `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
+}
+
+/** Is `pathname` the reader path for this hit? THE COMPARISON HALF of the same
+ * invariant {@link readerHref} owns on the construction half.
+ *
+ * The browser's `usePathname()` returns the ENCODED path, so a raw-interpolated
+ * expected side (`/d/${type}/${slug}`) never matches once a slug carries a
+ * space, `#`, `?` or `/` — and the symptom is silent: the active result row
+ * simply stops highlighting. Encoding the expected side through
+ * {@link readerHref} is what makes the two sides comparable.
+ *
+ * `hit.href` is checked first because a normalised hit may carry a href the
+ * server chose; the derived path is the fallback for hits built elsewhere. */
+export function isReaderPathActive(
+  pathname: string | null | undefined,
+  hit: { type: string; slug: string; href?: string | null },
+): boolean {
+  if (!pathname) return false;
+  if (hit.href && pathname === hit.href) return true;
+  return pathname === readerHref(hit.type, hit.slug);
 }
 
 /** A parsed Barkpark query — how the engine understood the raw string. */
