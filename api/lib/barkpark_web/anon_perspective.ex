@@ -86,6 +86,15 @@ defmodule BarkparkWeb.AnonPerspective do
     end
   end
 
+  # The LENIENT parser: it maps every unrecognised value to `:published` so a
+  # caller reached by some path other than a declared `?perspective` route
+  # degrades CLOSED. That catch-all is NOT the strictness layer — an unsupported
+  # value on a route that declares the param is refused at the edge by
+  # `BarkparkWeb.ReadPerspective` before this ever runs. `SearchController` used
+  # to carry a byte-identical private copy of these three clauses; it now calls
+  # this one. `TasksController.Params.parse_perspective/1` stays separate and
+  # that is deliberate — see its own comment.
+  # @canonical capability:read-perspective-parse aka:perspective,parse_perspective,drafts,raw,lenient perspective
   @spec parse(term()) :: :published | :drafts | :raw
   def parse("drafts"), do: :drafts
   def parse("raw"), do: :raw

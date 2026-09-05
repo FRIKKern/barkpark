@@ -98,6 +98,13 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.Validation
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ReadPerspective
+
+  # The value set `GET /v1/graph/:id` declares in `Barkpark.Plugins.Capabilities`
+  # ("published (default) | drafts (live extract over the drafts corpus)") and
+  # therefore in `docs/openapi.json`. NARROWER than the document reads on
+  # purpose: `raw` is not offered on this surface.
+  @graph_perspectives ["published", "drafts"]
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -1474,24 +1481,37 @@ defmodule BarkparkWeb.TasksController do
   def graph_show(conn, %{"id" => id} = params) do
     case resolve_graph_root(id, conn) do
       {:ok, %Document{} = root} ->
-        opts = graph_traverse_opts(root, params, conn)
-        result = Graph.traverse(root.id, opts)
-
-        json(conn, %{
-          ok: true,
-          # Published-coalesced so a draft-only root still reports its stable
-          # published id (the graph identity), never the `drafts.` twin.
-          root: Content.published_id(root.doc_id),
-          nodes: result.nodes,
-          edges: result.edges,
-          dependents: result.dependents,
-          truncated: result.truncated,
-          truncation_reason: result.truncation_reason
-        })
+        # AFTER the existence-hiding 404 below, never before. This is the route
+        # with the draft-leak history (graph_draft_leak_test.exs): a refusal
+        # raised ahead of root resolution would answer "that id exists, your
+        # perspective is wrong" to a caller the endpoint is meant to tell
+        # nothing. `raw` is refused here on purpose — the manifest declares this
+        # route as published | drafts only, so it is not a missing branch.
+        case ReadPerspective.unsupported(params, @graph_perspectives) do
+          nil -> graph_traverse(conn, root, params)
+          bad -> ReadPerspective.refuse(conn, bad, @graph_perspectives)
+        end
 
       {:error, :not_found} ->
         not_found(conn, "document not found")
     end
+  end
+
+  defp graph_traverse(conn, %Document{} = root, params) do
+    opts = graph_traverse_opts(root, params, conn)
+    result = Graph.traverse(root.id, opts)
+
+    json(conn, %{
+      ok: true,
+      # Published-coalesced so a draft-only root still reports its stable
+      # published id (the graph identity), never the `drafts.` twin.
+      root: Content.published_id(root.doc_id),
+      nodes: result.nodes,
+      edges: result.edges,
+      dependents: result.dependents,
+      truncated: result.truncated,
+      truncation_reason: result.truncation_reason
+    })
   end
 
   # ─── GET /v1/graph/:id/tasks — the expectation REVERSE VIEW (lvw-t8) ─────

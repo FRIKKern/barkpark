@@ -12,12 +12,18 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
-  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Http.IfNoneMatch
+  alias BarkparkWeb.ReadPerspective
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   action_fallback(BarkparkWeb.FallbackController)
+
+  # The value sets THESE routes declare in `Barkpark.Plugins.Capabilities` (and
+  # therefore in `docs/openapi.json`). Kept as attributes so the refusal envelope
+  # and the acceptance check can never drift apart the way the private forks did.
+  @document_perspectives ["published", "drafts", "raw"]
+  @counts_perspectives ["published"]
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
     cond do
@@ -258,27 +264,23 @@ defmodule BarkparkWeb.QueryController do
   end
 
   # `nil` (absent) and "published" are the honoured inputs; anything else comes
-  # back so the refusal can name the value the caller actually sent.
-  defp unsupported_perspective(params) do
-    case Map.get(params, "perspective") do
-      nil -> nil
-      "published" -> nil
-      other -> other
-    end
-  end
+  # back so the refusal can name the value the caller actually sent. The
+  # published-only list is what THIS route declares in the capabilities
+  # manifest — `ReadPerspective` is deliberately per-route, not one hardcoded
+  # set, because counts, graph and the document reads honour three different
+  # value sets.
+  defp unsupported_perspective(params),
+    do: ReadPerspective.unsupported(params, @counts_perspectives)
 
   # Canonical 400 `malformed` envelope (code/hint/request_id owned by
   # Content.Errors), with a message that names the parameter and the one value
   # this endpoint honours — a refusal a caller can act on, unlike the silent
   # published body it used to get.
   defp refuse_perspective(conn, value) do
-    ErrorResponse.emit_custom(
-      conn,
-      400,
-      "malformed",
-      "unsupported perspective #{inspect(value)} on /v1/data/counts — this endpoint " <>
-        "counts the published perspective only; omit ?perspective or pass published",
-      %{parameter: "perspective", supported: ["published"], received: value}
+    ReadPerspective.refuse(conn, value, @counts_perspectives,
+      message:
+        "unsupported perspective #{inspect(value)} on /v1/data/counts — this endpoint " <>
+          "counts the published perspective only; omit ?perspective or pass published"
     )
   end
 
@@ -454,24 +456,11 @@ defmodule BarkparkWeb.QueryController do
   #
   # nil (absent) is fine. The value is returned so the refusal can name what the
   # caller actually sent.
-  defp unsupported_read_perspective(params) do
-    case Map.get(params, "perspective") do
-      nil -> nil
-      p when p in ["published", "drafts", "raw"] -> nil
-      other -> other
-    end
-  end
+  defp unsupported_read_perspective(params),
+    do: ReadPerspective.unsupported(params, @document_perspectives)
 
-  defp refuse_read_perspective(conn, value) do
-    ErrorResponse.emit_custom(
-      conn,
-      400,
-      "malformed",
-      "unsupported perspective #{inspect(value)} — supported values are " <>
-        "published, drafts and raw; omit ?perspective for published",
-      %{parameter: "perspective", supported: ["published", "drafts", "raw"], received: value}
-    )
-  end
+  defp refuse_read_perspective(conn, value),
+    do: ReadPerspective.refuse(conn, value, @document_perspectives)
 
   defp show_doc(conn, dataset, type, doc_id, params) do
     t0 = System.monotonic_time(:microsecond)
