@@ -1670,6 +1670,62 @@ expect_output_lacks "and the row it did serve is NOT reported as hidden work" \
   "drafts.pds-hidden-x   (no published twin)" \
   run --page-limit 4 --fixture-dir "$IGNORED"
 
+# CLAUSE 9 -- THE CREDENTIAL CONTRACT ON THE DRAFTS LENS.
+#
+# WHAT WAS WRONG WITH THE UNREAD LINE ABOVE, AND WHY THESE ARMS EXIST. It is
+# correct and it is not actionable: it says the lens was ignored and never says
+# WHOSE read was ignored, so an operator on a host whose BARKPARK_TOKEN is
+# published-pinned cannot tell "this server has no drafts perspective" from
+# "you asked with the wrong token". The remedy for the second is a different
+# credential, and a run that will not name the credential it used cannot ask
+# for one. Three behaviours, each pinned here:
+#
+#   (a) PINNED -> the UNREAD line NAMES the credential source, and the run
+#       still exits with its normal code. The blind-spot block is a REPORT.
+#   (b) PINNED + --require-drafts -> EXIT 2, named, and the report is printed
+#       FIRST: a refusal that destroys the evidence leaves the reader nothing
+#       to choose a different credential from.
+#   (c) DRAFT-CAPABLE -> --require-drafts is SILENT. This is the positive
+#       control: without it, an arm that always red would pass (a) and (b) and
+#       prove nothing.
+expect_output_contains "the UNREAD line NAMES the credential it read with" \
+  "credential: none (--fixture-dir cans the transport; no credential is sent) -- NOT draft-capable" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+expect_output_contains "and it prints the REMEDY, not just the diagnosis" \
+  "REMEDY: re-run with a DRAFT-CAPABLE credential" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+# THE DEFAULT IS A REPORT, NOT A GATE. If this ever reds, the blind-spot block
+# has quietly become a gate and every existing caller of the census breaks.
+expect_status "an UNREAD lens alone does NOT change the exit code" 0 \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+expect_status_matching "--require-drafts turns the UNREAD lens into a REFUSAL" 2 \
+  "--require-drafts: the drafts lens is UNREAD" \
+  run --page-limit 4 --require-drafts --fixture-dir "$IGNORED"
+expect_status_matching "and the refusal carries the credential and the remedy" 2 \
+  "credential used: none (--fixture-dir cans the transport; no credential is sent)" \
+  run --page-limit 4 --require-drafts --fixture-dir "$IGNORED"
+expect_status_matching "and it refuses the ONE remedy that is not one" 2 \
+  "Counting the published answer as zero drafts is NOT a remedy" \
+  run --page-limit 4 --require-drafts --fixture-dir "$IGNORED"
+# THE REPORT SURVIVES THE REFUSAL. Asserted on STDOUT specifically, because the
+# refusal itself goes to stderr and a 2>&1 helper cannot tell the two apart.
+expect_stdout_only_contains "the REPORT is printed before --require-drafts refuses" \
+  "(2) NEVER PUBLISHED      UNREAD" 2 \
+  run --page-limit 4 --require-drafts --fixture-dir "$IGNORED"
+# (c) THE POSITIVE CONTROL. The SAME flag over a source that ANSWERS the lens
+# must be silent and must still name the hidden work.
+expect_status "--require-drafts is SILENT when the lens is answered" 0 \
+  run --page-limit 4 --require-drafts --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the READ path names its credential too, not only the blind one" \
+  "(DRAFT-CAPABLE: the source answered perspective:drafts)" \
+  run --page-limit 4 --require-drafts --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the never-published row is still NAMED under the flag" \
+  "drafts.pds-hidden-x   (no published twin)" \
+  run --page-limit 4 --require-drafts --fixture-dir "$BLIND_OUT"
+expect_output_contains "the credential rides in --json for a machine reader" \
+  '"drafts_credential"' \
+  run --page-limit 4 --fixture-dir "$IGNORED" --json
+
 # THE SOFTENING IS SCOPED TO THE FIRST PAGE AND TO NOTHING ELSE. A drafts read
 # that starts and then stops is a TRUNCATED READ and still fails closed -- the
 # same discipline the published read has always had.

@@ -23,18 +23,39 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     limit = parse_int(params["limit"], 200) |> min(1000)
     offset = parse_int(params["offset"], 0)
 
+    list_opts = [limit: limit, offset: offset] ++ scope_opts(conn)
+
     collections =
       dataset
-      |> Collections.list([limit: limit, offset: offset] ++ scope_opts(conn))
+      |> Collections.list(list_opts)
       |> Enum.map(&Collections.render/1)
 
-    json(conn, %{
-      result: %{
+    # `count` here has always meant the PAGE ROWS, while `count` on the
+    # `/v1/media/:ds` sibling has always meant the GRAND TOTAL. Both readings
+    # produce a plausible integer, so a client that guesses wrong mis-pages in
+    # silence. Neither key is re-pointed — that would break whichever consumer
+    # is currently right — so the two envelopes are reconciled by ADDING the
+    # unambiguous pair. `total` comes from `Collections.count/2`, which shares
+    # `list_query/2` with `list/2` so the total cannot count rows the page is
+    # not allowed to show (the public-read tier clamp narrows both).
+    total = Collections.count(dataset, list_opts)
+    returned = length(collections)
+    has_more = offset + returned < total
+
+    result =
+      %{
         collections: collections,
-        count: length(collections),
+        count: returned,
+        total: total,
+        hasMore: has_more,
         limit: limit,
         offset: offset
-      },
+      }
+
+    result = if has_more, do: Map.put(result, :nextOffset, offset + returned), else: result
+
+    json(conn, %{
+      result: result,
       syncTags: ["bp:ds:#{dataset}:media:collections"]
     })
   end
@@ -65,15 +86,30 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-      json(conn, %{
-        result: %{
+      # This leg already reported an honest `total`; what it lacked was any
+      # truncation signal at all, so an exhausted page and a truncated one were
+      # byte-identical. Same exact `hasMore` as its two list siblings.
+      returned = length(hits)
+      has_more = (opts[:offset] || 0) + returned < total
+
+      result =
+        %{
           collectionId: id,
           hits: hits,
           total: total,
+          hasMore: has_more,
           limit: opts[:limit],
           offset: opts[:offset],
           facets: facets
-        },
+        }
+
+      result =
+        if has_more,
+          do: Map.put(result, :nextOffset, (opts[:offset] || 0) + returned),
+          else: result
+
+      json(conn, %{
+        result: result,
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"],
         ms: ms
       })
@@ -134,14 +170,29 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-      json(conn, %{
-        result: %{
+      # A share view is a media list like any other: without `hasMore` a
+      # truncated page and an exhausted one are byte-identical, and the share
+      # recipient is precisely the consumer with no other way to find out.
+      returned = length(hits)
+      has_more = (opts[:offset] || 0) + returned < total
+
+      result =
+        %{
           collection: Collections.render(collection),
           hits: hits,
           total: total,
+          hasMore: has_more,
           limit: opts[:limit],
           offset: opts[:offset]
-        },
+        }
+
+      result =
+        if has_more,
+          do: Map.put(result, :nextOffset, (opts[:offset] || 0) + returned),
+          else: result
+
+      json(conn, %{
+        result: result,
         syncTags: ["bp:ds:#{dataset}:media:share:#{token}"],
         ms: ms
       })

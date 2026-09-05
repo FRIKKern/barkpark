@@ -53,14 +53,28 @@ import (
 // results[].document._draft and warnings[]), the exit code never moves, and a
 // pipeline reading stdout sees nothing new.
 
-// mutatePerspectiveVerbs is the pair of manifest verbs whose receipt this
+// mutatePerspectiveVerbs is the set of manifest verbs whose receipt this
 // emitter annotates. Verb-keyed on purpose, unlike emitWarnings: the line makes
 // a claim about the DRAFT/PUBLISHED split, which is only true of the doc
-// mutation path. `doc publish` is deliberately absent — publishing is the act
-// that MAKES the published row change, and its receipt is not the trap.
+// mutation path. `doc publish`, `doc unpublish`, `doc discard-draft` and `doc
+// delete` are deliberately absent — those verbs ARE the act that moves the
+// published lens, so their receipt is not the trap.
+//
+// THE CREATE FAMILY (#17, task-7f06080cfd584194). `doc create`,
+// `doc create-or-replace` and `doc create-if-not-exists` all POST the same
+// /v1/data/mutate/:dataset body (capabilities.ex declares them with
+// mutation_op create/createOrReplace/createIfNotExists) and all land on the
+// `drafts.` twin — Sanity's createOrReplace writes the published id, ours does
+// not. Gyldendal's imported tasks were therefore invisible until a second
+// publish mutation, and nothing in the receipt said why. The same envelope
+// fields answer it (`_draft`/`_publishedId`/`_type`), so these verbs get the
+// SAME derivation, not a second copy.
 var mutatePerspectiveVerbs = map[string]bool{
-	"doc mutate": true,
-	"doc patch":  true,
+	"doc mutate":               true,
+	"doc patch":                true,
+	"doc create":               true,
+	"doc create-or-replace":    true,
+	"doc create-if-not-exists": true,
 }
 
 func isMutatePerspectiveCmd(cmd manifest.Command) bool {
@@ -142,6 +156,37 @@ func publishRemedy(r mutateResult) string {
 	return fmt.Sprintf("bp doc publish %s %s", r.Document.Type, id)
 }
 
+// draftVerb is the past-tense verb the draft line opens with, taken from the
+// server's own results[].operation rather than from the CLI verb the caller
+// typed. A `doc mutate --file` batch can carry creates and patches in ONE
+// transaction, so the receipt must be per-result; and the operation string is
+// the only place the distinction survives (Mutations.apply_one returns
+// "create" / "createOrReplace" / "update" / "noop" alongside the doc).
+//
+// "created" versus "updated" is not cosmetic here: #17's whole report is that a
+// CREATE looked like it had put a row on the ledger. "DRAFT updated" on a fresh
+// create would still be a receipt describing a document the caller has never
+// seen. An unknown or empty operation falls back to the neutral "written",
+// never to a guess.
+func draftVerb(op string) string {
+	switch op {
+	case "create", "createOrReplace":
+		return "created"
+	case "update":
+		return "updated"
+	case "replace":
+		return "replaced"
+	case "noop":
+		// createIfNotExists on an existing id: the server changed NOTHING. Say
+		// that, rather than claim a write the caller did not get.
+		return "left unchanged (createIfNotExists matched an existing draft)"
+	case "":
+		return "written"
+	default:
+		return "written"
+	}
+}
+
 // mutatePerspectiveLines builds the advisory lines for one mutate 2xx body.
 // Pure and separately testable: the emitter below is only the stderr plumbing.
 func mutatePerspectiveLines(respBody []byte) []string {
@@ -171,14 +216,15 @@ func mutatePerspectiveLines(respBody []byte) []string {
 		if *r.Document.Draft {
 			anyDraft = true
 			id := r.ID
+			verb := draftVerb(r.Operation)
 			if remedy := publishRemedy(r); remedy != "" {
 				add(fmt.Sprintf(
-					"DRAFT updated (%s): the published row is UNCHANGED until you run `%s`",
-					id, remedy))
+					"DRAFT %s (%s): the published row is UNCHANGED until you run `%s`",
+					verb, id, remedy))
 			} else {
 				add(fmt.Sprintf(
-					"DRAFT updated (%s): the published row is UNCHANGED until this draft is published",
-					id))
+					"DRAFT %s (%s): the published row is UNCHANGED until this draft is published",
+					verb, id))
 			}
 			continue
 		}

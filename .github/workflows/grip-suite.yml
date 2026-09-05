@@ -66,16 +66,17 @@ name: Grip suite
 # issue, the same path paper-readers.yml already uses for its own nightly
 # gate.
 
+# Venue (2026-09-05, task-33742276cf0a35b1): push-to-main + nightly; the PR arm is gone
+# (2.7 min per execution, 40 PR runs a fortnight; the issue-filer job below is its reader).
 on:
-  pull_request:
-    paths:
-      - "tooling/grip/**"
-      - ".github/workflows/grip-suite.yml"
   push:
     branches: [main]
     paths:
       - "tooling/grip/**"
       - ".github/workflows/grip-suite.yml"
+  schedule:
+    - cron: "25 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read

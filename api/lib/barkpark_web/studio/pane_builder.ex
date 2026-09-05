@@ -78,6 +78,42 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # editor still open — the #1851 never-unreachable guarantee.
     {tree, segments} = resolve(nav_path, gated, dataset, opts)
 
+    {panes, editor} = walk_and_stamp(segments, gated, tree, dataset, opts)
+
+    # LAST-CHANCE NORMALIZATION (#35a, S9 crit 1a). `resolve/4` hands the walk
+    # the RAW nav_path whenever the head names ANY root item — and
+    # `root_has_segment?/2` matches a `:list` group by its declared `id`, not
+    # only a type list by its `type_name`. A declared desk (`deskStructure`)
+    # whose root holds a group node whose id happens to equal a type name
+    # therefore short-circuits the normalization for that type: the walk drills
+    # the GROUP, finds no child for the document tail and opens nothing, while
+    # the identical URL on a desk without that collision opens the document.
+    # Same URL, two meanings — exactly the #35a complaint, reached by desk-node
+    # id instead of by desk depth.
+    #
+    # Retry ONCE against the normalized path, and only when the first walk
+    # opened NO editor: a URL that resolves today is never re-routed, so the
+    # shadowing group keeps its own address (`/studio/publication` still opens
+    # the group) and only the path that opened nothing is rescued. This is the
+    # #1851 never-unreachable guarantee applied to a declared desk.
+    case {editor, retry_segments(nav_path, segments, tree)} do
+      {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
+      _ -> {panes, editor}
+    end
+  end
+
+  # Walk `segments` against `tree` and stamp every pane with its own address.
+  #
+  # Every pane carries the NORMALIZED segments that address it (`:path`), so a
+  # row click in pane `i` can build `pane.path ++ [id]` instead of slicing the
+  # raw URL by the pane's rendered index. The two diverge exactly when
+  # `resolve/4` normalized a demoted type into its group: the pane stack is
+  # then one longer than the URL, and `Enum.take(nav_path, i) ++ [id]` kept
+  # the OLD doc id and appended the new one (Gyldendal field report #35b:
+  # `/studio/publication/pub-a` → click → `/studio/publication/pub-a/pub-b`).
+  # Pane `i` is addressed by the first `i` segments: the root pane by none,
+  # the pane opened by consuming segment 0 by one, and so on.
+  defp walk_and_stamp(segments, gated, tree, dataset, opts) do
     root_pane = %{
       title: gated.title,
       role: :nav,
@@ -88,15 +124,6 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
     {panes, editor} = walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
 
-    # Every pane carries the NORMALIZED segments that address it (`:path`), so a
-    # row click in pane `i` can build `pane.path ++ [id]` instead of slicing the
-    # raw URL by the pane's rendered index. The two diverge exactly when
-    # `resolve/4` normalized a demoted type into its group: the pane stack is
-    # then one longer than the URL, and `Enum.take(nav_path, i) ++ [id]` kept
-    # the OLD doc id and appended the new one (Gyldendal field report #35b:
-    # `/studio/publication/pub-a` → click → `/studio/publication/pub-a/pub-b`).
-    # Pane `i` is addressed by the first `i` segments: the root pane by none,
-    # the pane opened by consuming segment 0 by one, and so on.
     panes =
       panes
       |> Enum.with_index()
@@ -104,6 +131,23 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
     {panes, editor}
   end
+
+  # The normalized path to retry a MISSED walk with, or nil when there is none
+  # (no tail to open, no node listing the head's type, or the normalization
+  # lands on the segments already walked). Mirrors `resolve/4`'s own two
+  # normalization clauses: a singleton resolves by type name and drops the stale
+  # doc-id tail, a type list keeps it.
+  defp retry_segments([head | tail], segments, tree) when tail != [] do
+    case find_type_node(tree.items || [], head, []) do
+      {node_path, %{type: :document}} -> unless_same(node_path, segments)
+      {node_path, _node} -> unless_same(node_path ++ tail, segments)
+      nil -> nil
+    end
+  end
+
+  defp retry_segments(_nav_path, _segments, _tree), do: nil
+
+  defp unless_same(candidate, segments), do: if(candidate == segments, do: nil, else: candidate)
 
   # Pick the tree to walk and the (possibly normalized) segments to walk it
   # with. Returns `{tree, segments}` — `tree` is the gated desk unless a type

@@ -149,7 +149,7 @@ defmodule BarkparkWeb.QueryController do
           schema_hash,
           list_sync_tags(dataset, type, rendered),
           etag,
-          cache_validator(etag, schema_hash),
+          cache_validator(etag, schema_hash, page_shape(inner)),
           t0
         )
     end
@@ -606,8 +606,14 @@ defmodule BarkparkWeb.QueryController do
   # `project_fields/2` deliberately keeps every `_`-prefixed system key, so
   # `_id`/`_rev` survive the projection untouched); `?expand=` hydrates nested
   # references; `?resolve=tasks` swaps query blocks for snapshots. None of the
-  # three reaches `list_etag/3` or `doc_etag/1`.
-  @shaping_params ~w(fields expand resolve)
+  # three reaches `list_etag/3` or `doc_etag/1`. `?count=true` is the fourth of
+  # the same shape: `maybe_put_total/7` adds `result.total` to the body from a
+  # SECOND query (`Content.count_documents/3`) and touches `rendered` not at
+  # all, so an anonymous `?count=true` request and the plain one used to share
+  # one validator — and replaying the plain page's ETag against `?count=true`
+  # answered 304 with an empty body, the same transcript `?fields=` produced on
+  # prod.
+  @shaping_params ~w(fields expand resolve count)
 
   # PRESENCE, not parsed effect — deliberate. `?expand=false` and `?fields=,,`
   # both parse to "no shaping", so keying on the parsed spec would keep the ETag
@@ -677,9 +683,17 @@ defmodule BarkparkWeb.QueryController do
       end
   end
 
-  # `Vary: Authorization` rides EVERY query response, including the ones that
-  # keep their ETag: the body's field set is a function of the Authorization
-  # header, so a shared cache must key on it.
+  # `Vary: Authorization, Accept` rides EVERY query response, including the ones
+  # that keep their ETag. Both are request headers this response is a function
+  # of: the body's field set is a function of `Authorization`, and
+  # `maybe_vendor_content_type/1` switches the response Content-Type on
+  # `conn.assigns[:barkpark_vendor_accept]`, which
+  # `BarkparkWeb.Plugs.AcceptBarkparkVendor` derives from the `Accept` REQUEST
+  # header. Two callers of one url differing only in `Accept` get different
+  # Content-Type under the SAME ETag; without `Vary: Accept` a shared cache may
+  # hand one of them the other's representation metadata. Body is unchanged
+  # there — this is metadata variance, not a body leak — but the fix costs a
+  # token.
   #
   # MERGED, never overwritten. Two `vary` writers are already known: DatasetCors
   # sets `Origin` in-app, and prod responses arrive carrying `accept-encoding`
@@ -697,11 +711,13 @@ defmodule BarkparkWeb.QueryController do
       |> Enum.reject(&(&1 == ""))
 
     merged =
-      if Enum.any?(existing, &(String.downcase(&1) == "authorization")) do
-        existing
-      else
-        existing ++ ["authorization"]
-      end
+      Enum.reduce(["authorization", "accept"], existing, fn token, acc ->
+        if Enum.any?(acc, &(String.downcase(&1) == token)) do
+          acc
+        else
+          acc ++ [token]
+        end
+      end)
 
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
@@ -808,6 +824,36 @@ defmodule BarkparkWeb.QueryController do
     :crypto.hash(:sha256, "#{etag}|#{schema_hash}")
     |> Base.encode16(case: :lower)
     |> binary_part(0, 32)
+  end
+
+  # The LIST validator folds one more input: the page envelope's own scalars.
+  # `list_etag/3` folds only the `_id:_rev` tuples, so an EMPTY page collapsed
+  # to the constant `"<dataset>|<type>|"` — every past-the-end request of a type
+  # shared ONE validator, while the body still echoed `limit`/`offset`/`hasMore`
+  # back to the caller. `?offset=900&limit=10` and `?offset=500&limit=50` are
+  # both empty, return DIFFERENT bodies, and each used to 304 against the
+  # other's ETag. The same hole exists with documents present (two requests can
+  # return the same slice under different `limit`s), so this folds the shape for
+  # every page, not just the empty one.
+  #
+  # It is taken from `inner` AFTER `maybe_put_next_offset/4` and
+  # `maybe_put_total/7`, so it covers exactly the non-document keys the body
+  # actually carries — a new echoed scalar is folded the day it is added
+  # instead of the day someone remembers this function. Same direction as every
+  # other input here: an extra input can only WITHDRAW a 304, never grant one.
+  defp cache_validator(etag, schema_hash, page_shape) do
+    :crypto.hash(:sha256, "#{etag}|#{schema_hash}|#{page_shape}")
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
+  end
+
+  # Every key of the list envelope EXCEPT `documents` (whose identity `etag`
+  # already folds), rendered in a stable key order.
+  defp page_shape(inner) do
+    inner
+    |> Map.delete(:documents)
+    |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+    |> Enum.map_join(",", fn {k, v} -> "#{k}=#{inspect(v)}" end)
   end
 
   defp list_sync_tags(dataset, type, rendered) do

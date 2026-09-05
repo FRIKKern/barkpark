@@ -239,6 +239,16 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"the documents we sent), so `{\"ok\":true,\"count\":3,\"ids\":[…],\"published\":true}` printed at rc=0 " +
 			"over an empty 200, a proxy page or an error envelope on a 2xx. Nothing in it was ever a measurement.",
 	},
+	// ---- token mint ------------------------------------------------------
+	{
+		File: "internal/cli/token_create_cmd.go", Func: "runTokenCreate", Sites: 1,
+		Endpoint: "POST /w/:ws/p/:project/v1/tokens", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx runs through screenBuiltinWriteReceipt BEFORE any receipt renders, and the render then " +
+			"REQUIRES three server-only fields (parseTokenMintReceipt: a non-empty `token`, a non-empty " +
+			"`permissions` and a non-empty `workspace`) — the receipt's whole claim is which TIER landed in which " +
+			"WORKSPACE, so a body that names neither must not be able to print it.",
+	},
 	// ---- task create -----------------------------------------------------
 	{
 		File: "internal/cli/tasks_create_cmd.go", Func: "sendTaskMutations", Sites: 1,

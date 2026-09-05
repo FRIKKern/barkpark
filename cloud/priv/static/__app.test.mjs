@@ -17931,25 +17931,34 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers SEVEN toggles — the three producerless ones are still gone", () => {
+test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
-  // Seven toggle rows × six columns = 42 cells, and not one of them names an
+  // Eight toggle rows × six columns = 48 cells, and not one of them names an
   // event nothing can send. A regressed row would fail the census below too;
   // this leg is the person-facing half — what the page actually draws.
   //
-  // cch-w29-bl moved this 36 → 42. The count is EXACT on purpose and the number
-  // is not the assertion: the two loops below are. A row moves this number only
-  // together with its producer, because arm (a) of the census below reds on an
-  // offer with nothing behind it.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 42, "7 events × 6 channels");
-  for (const dead of ["deployment_succeeded", "member_invited", "token_expiring"]) {
+  // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48. The count is
+  // EXACT on purpose and the number is not the assertion: the two loops below
+  // are. A row moves this number only together with its producer, because arm
+  // (a) of the census below reds on an offer with nothing behind it.
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 48, "8 events × 6 channels");
+  // STILL DEAD. `member_invited` and `token_expiring` have no producer, and
+  // token_expiring must never get the obvious one: dispatch_event/3 fans to
+  // team_member_emails/1 while a token belongs to ONE user.
+  for (const dead of ["member_invited", "token_expiring"]) {
     assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
       `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
   }
   // The seventh, drawn: the auto-deploy PREBUILT refusal
   // (Sites.AutoDeployWorker.refuse/1 → Notifications.dispatch_site_event).
-  for (const live of ["deployment_failed", "deployment_refused"]) {
+  //
+  // The eighth, drawn: cch-w30-bl. `deployment_succeeded` was the THIRD dead row
+  // above until its producer landed — Registry.dispatch_deployment_terminal/2,
+  // fired from BOTH writers that can reach the `live` terminal and edge-triggered
+  // on the prior status. It moves lists here for exactly one reason: arm (b) of
+  // the census below now reds while this row is absent.
+  for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded"]) {
     assert.match(html, new RegExp(`data-event="${live}"`),
       `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }
@@ -19869,6 +19878,18 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
     // reached every single time.
     "Check your connection and retry.",
     "Please check the details and try again.",
+    // cch-w31-bl — the SIBLING the denominator grep found. `grep -nE
+    // '\.error \|\| \{\}' app.js` returns three helpers; webhookMutationError
+    // (fixed by w31-s4) is the positive control, siteDeleteFailureCopy already
+    // hoists the flat string into `code`, and webhookErrorHtml — lexically
+    // adjacent to the fixed one, and the helper the filing named as unexamined
+    // — did not. Its terminal sentence is not USER-blame, so it is a wider
+    // reading of this census than the five above: it blames the INSTANCE for a
+    // fault that was never measured there. A control-plane 500 arrives flat
+    // ({error:"server_error"}), misses every `code ===` branch, and told an
+    // operator to go look at a box that answered nothing — with `r.status` in
+    // scope one frame up at both call sites, thrown away.
+    "Something went wrong reaching this instance.",
   ]) {
     const idx = [...src.matchAll(new RegExp(fallback.replace(/\./g, "\\."), "g"))].map((m) => m.index);
     assert.ok(idx.length > 0, "fallback still present: " + fallback);
@@ -19941,6 +19962,93 @@ test("cch-w31-s4: every webhookMutationError call site passes the status it alre
   for (const args of calls) {
     assert.equal(args, "r.data, r.status", "a call site still discards the status: " + args);
   }
+});
+
+// ── cch-w31-bl: the DERIVED denominator for the `.error || {}` shape ────────
+//
+// The filing asked whether webhookMutationError's defect was ONE instance or a
+// FAMILY, and said nobody had sized it. This is the sizing, re-runnable:
+//
+//   $ grep -nE '\.error \|\| \{\}' cloud/priv/static/app.js
+//   12414:    var err = resp.error || {};      webhookErrorHtml
+//   12469:    var err = data.error || {};      webhookMutationError  (w31-s4 — control)
+//   15670:    var err = data.error || {};      siteDeleteFailureCopy
+//
+// Three members. Each was CLASSIFIED BY DRIVING IT with the flat envelope the
+// router's handle_errors/2 actually sends, not by reading it:
+//
+//   webhookMutationError(flat, 500)   "Something broke on our side — not your input…"   OK (fixed)
+//   siteDeleteFailureCopy(500, flat)  "This delete failed partway through…"             OK — it
+//       hoists the flat string itself (`typeof err === "string" ? err : err.code`),
+//       so `code === "server_error"` fires. Never had the defect.
+//   webhookErrorHtml(flat, "inst")    "Something went wrong reaching this instance."    DEFECT
+//
+// So: a family of three, ONE of which was still broken. The test below pins the
+// fix; the census entry above pins that no future edit reverts it.
+//
+// A NOTE ON THE CLASSIFICATION, because the filing's word was "blaming":
+// webhookErrorHtml does not blame the USER — it blames the INSTANCE. On a
+// control-plane crash the console named a box it never reached out to, sent the
+// operator to check that box's health, and offered a Retry that re-runs the same
+// crashing call. Same structural cause, one attribution over.
+test("cch-w31-bl: webhookErrorHtml stops blaming the INSTANCE for a control-plane crash", () => {
+  const body = (html) => (html.match(/<p>(.*?)<\/p>/) || [])[1];
+  // The three envelopes that reached the fall-through: the router's flat crash
+  // slug, a flat bad_gateway, and an upstream proxy's unparseable HTML body.
+  for (const [data, status] of [
+    [{ error: "server_error", request_id: "0a1b2c3d4e5f6071" }, 500],
+    [{ error: "bad_gateway" }, 502],
+    [{}, 502],
+  ]) {
+    const b = body(hooks.webhookErrorHtml(data, "abc", status));
+    assert.match(b, /broke on our side/i, "5xx still names the instance: " + b);
+    assert.ok(!/reaching this instance/i.test(b), "5xx still names the instance: " + b);
+  }
+  // The slug alone carries it even with no status plumbed — friendly() resolves
+  // `server_error` out of ERRORS — so the fix does not rest on the call sites.
+  assert.match(body(hooks.webhookErrorHtml({ error: "server_error" }, "abc")), /broke on our side/i);
+});
+
+test("cch-w31-bl: webhookErrorHtml's coded arms still win over the status switch", () => {
+  const body = (html) => (html.match(/<p>(.*?)<\/p>/) || [])[1];
+  // Every branch below sits ABOVE the fall-through, so a 502-wrapped instance
+  // fact must still read as that fact and not as the generic crash sentence.
+  assert.match(body(hooks.webhookErrorHtml({ reachable: false }, "abc", 502)), /couldn&#39;t reach the box/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "capability_unavailable" } }, "abc", 502)), /newer Barkpark/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "not_live" } }, "abc", 502)), /provisioning finishes/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "no_admin_token" } }, "abc", 500)), /no admin token/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "upstream_error", status: 404 } }, "abc", 502)), /no longer exists/i);
+  assert.equal(body(hooks.webhookErrorHtml(
+    { error: { code: "upstream_error", status: 422, detail: "url is invalid" } }, "abc", 502)), "url is invalid");
+  // api()'s fetch-catch string keeps the connection sentence, not the crash one.
+  assert.match(body(hooks.webhookErrorHtml({ error: "network_error" }, "abc", 0)), /[Nn]etwork error/);
+  // A real 4xx IS an answer about this request, so the instance-shaped sentence
+  // survives there — the change is scoped to faults nobody measured.
+  assert.equal(body(hooks.webhookErrorHtml({ error: "some_unknown_slug" }, "abc", 422)),
+    "Something went wrong reaching this instance.");
+});
+
+test("cch-w31-bl: every webhookErrorHtml call site passes the status it already had", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // NOT `[^)]*` — the arg list contains `cliInstance(bp)`, so a
+  // no-close-paren class stops at the INNER paren and every call site reads as
+  // discarding the status. Match to the end of the statement instead.
+  const calls = [...src.matchAll(/webhookErrorHtml\((.*)\);/g)]
+    .map((m) => m[1].trim())
+    .filter((a) => a !== "resp, instance, respStatus"); // the declaration itself
+  assert.equal(calls.length, 2, "the two degradation call sites (found " + calls.length + ")");
+  for (const args of calls) {
+    assert.equal(args, "r.data, cliInstance(bp), r.status", "a call site still discards the status: " + args);
+  }
+});
+
+test("cch-w31-bl: siteDeleteFailureCopy — the family's third member, verified UNBROKEN", () => {
+  // Not a fix; the classification evidence, pinned so a future edit that drops
+  // the string hoist reds here instead of quietly re-opening the shape bug.
+  const crash = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "0a1b" });
+  assert.match(crash.title, /failed partway through/i);
+  assert.equal(crash.recovery, "recheck");
+  assert.match(crash.body, /control plane crashed/i);
 });
 
 test("cch-w31-s4: faultCopy has a status-0 arm, capped at THREE honest transport classes", () => {
