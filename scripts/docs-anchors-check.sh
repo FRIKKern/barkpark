@@ -127,7 +127,7 @@ st_case() {
     ST_FAIL=1
     return
   fi
-  if ! printf '%s\n' "$out" | grep -qF "$needle"; then
+  if ! printf '%s\n' "$out" | grep -cF "$needle" >/dev/null; then
     echo "SELFTEST FAIL: $name — exit $rc as expected but output lacks: $needle"
     printf '%s\n' "$out" | sed 's/^/    | /'
     ST_FAIL=1
@@ -444,7 +444,7 @@ HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ 
 header_line() {
   local f="$1" first
   first=$(head -n 1 "$f")
-  if printf '%s\n' "$first" | grep -Eq "$HEADER_RE"; then
+  if printf '%s\n' "$first" | grep -Ec "$HEADER_RE" >/dev/null; then
     printf '%s\n' "$first"
     return 0
   fi
@@ -620,7 +620,7 @@ HEADER_FILES=$(
 )
 for f in $HEADER_FILES; do
   h=$(header_line "$f")
-  if printf '%s\n' "$h" | grep -Eq "$HEADER_RE"; then
+  if printf '%s\n' "$h" | grep -Ec "$HEADER_RE" >/dev/null; then
     echo "ok:   header $f"
   else
     fail "$f missing G1 doc-tier header (<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->)"
@@ -658,7 +658,7 @@ fi
 echo "== ARCHIVED banners (_attic/docs-2026-06/) =="
 if [ -d "_attic/docs-2026-06" ]; then
   find _attic/docs-2026-06 -name '*.md' | while IFS= read -r f; do
-    if head -n 1 "$f" | grep -q '^ARCHIVED'; then
+    if head -n 1 "$f" | grep -c '^ARCHIVED' >/dev/null; then
       echo "ok:   banner $f"
     else
       echo "FAIL: $f first line must start with 'ARCHIVED — do not load' (G3)"
@@ -879,7 +879,7 @@ canon_scan() {
       *.js) pubentry_pat='^[[:space:]]*(def |func |export |function )' ;;
       *)    pubentry_pat='^[[:space:]]*(def |func |export )' ;;
     esac
-    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE "$pubentry_pat"; then
+    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -cE "$pubentry_pat" >/dev/null; then
       echo "OK $cf:$cl $slug"
       # WHICH symbol the marker actually landed on — the 8b pin's payload.
       # "a public def within 6 lines" is an EXISTENCE test, and an inserted def
@@ -917,7 +917,7 @@ CANON_N=$(printf '%s\n' "$CANON_OUT" | grep -cE '^(OK|PRIVATE) ' || true)
 { printf '%s\n' "$CANON_OUT" | grep '^DUP ' || true; } | while IFS=' ' read -r _ d; do
   echo "FAIL: @canonical capability:$d claimed by >1 impl (a copy-paste that kept the marker?)"
 done
-if printf '%s\n' "$CANON_OUT" | grep -q '^DUP '; then FAIL=1; else echo "ok:   @canonical capability slugs unique"; fi
+if printf '%s\n' "$CANON_OUT" | grep -c '^DUP ' >/dev/null; then FAIL=1; else echo "ok:   @canonical capability slugs unique"; fi
 
 printf '%s\n' "$CANON_OUT" | grep '^OK ' | sed 's/^OK /ok:   /' | sed 's/ \([A-Za-z0-9._-]*\)$/ capability:\1/' || true
 { printf '%s\n' "$CANON_OUT" | grep '^PRIVATE ' || true; } | while IFS=' ' read -r _ loc slug; do
@@ -926,7 +926,7 @@ done
 { printf '%s\n' "$CANON_OUT" | grep '^DOCMISS ' || true; } | while IFS=' ' read -r _ slug dp; do
   echo "FAIL: @canonical capability:$slug doc: points at a missing doc: $dp"
 done
-if printf '%s\n' "$CANON_OUT" | grep -qE '^(PRIVATE|DOCMISS) '; then FAIL=1; fi
+if printf '%s\n' "$CANON_OUT" | grep -cE '^(PRIVATE|DOCMISS) ' >/dev/null; then FAIL=1; fi
 
 # Stated out loud, every run. Zero is a LEGITIMATE result — CLAUDE.md says
 # markers are demand-driven and get removed as dedup lands — so this reports the
@@ -1085,7 +1085,7 @@ COLD_BAD=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   # Tier lives on line 1 by contract ("First line of every active doc").
-  head -1 "$f" 2>/dev/null | grep -q 'doc-tier: *cold' || continue
+  head -1 "$f" 2>/dev/null | grep -c 'doc-tier: *cold' >/dev/null || continue
   awk -v verbs="$CMD_VERBS" '
     BEGIN { inf = 0; runnable = 0 }
     /^[[:space:]]*```/ {
@@ -1105,7 +1105,7 @@ while IFS= read -r f; do
   COLD_N=$((COLD_N + 1))
   # The banner must be near the top — a reader who opens the file sees it before
   # the first fence. Ten lines covers "marker, blank, H1, blank, banner" with room.
-  if ! head -10 "$f" | grep -q '^> HISTORICAL RECORD ('; then
+  if ! head -10 "$f" | grep -c '^> HISTORICAL RECORD (' >/dev/null; then
     COLD_BAD="$COLD_BAD $f"
   fi
 done <<COLDEOF
@@ -1204,7 +1204,7 @@ else
       FAIL=1
     else
       for auth_p in $AUTH_ADMIN_PIPELINES; do
-        if printf '%s\n' "$AUTH_SECTION" | grep -qF ":$auth_p"; then
+        if printf '%s\n' "$AUTH_SECTION" | grep -cF ":$auth_p" >/dev/null; then
           echo "ok:   §11 admin pipeline :$auth_p is documented"
         else
           echo "FAIL: §11 router pipeline :$auth_p plugs RequireAdmin but '$AUTH_SECTION_HEADING'" \
@@ -1215,7 +1215,7 @@ else
       done
       echo "ok:   §11 derived $AUTH_ADMIN_N RequireAdmin pipeline(s) from $AUTH_ROUTER"
       for auth_d in $(printf '%s\n' "$AUTH_SECTION" | grep -oE ':[a-z][a-z0-9_]*' | sed 's/^://' | sort -u); do
-        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -qx "$auth_d"; then
+        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -cx "$auth_d" >/dev/null; then
           echo "ok:   §11 documented :$auth_d still exists in the router"
         else
           echo "FAIL: §11 $AUTH_DOC documents pipeline :$auth_d, which $AUTH_ROUTER no longer defines." \
