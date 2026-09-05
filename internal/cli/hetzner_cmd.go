@@ -140,6 +140,14 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudRollout(out, g, args[1:])
 	case "rollback":
 		return runCloudRollback(out, g, args[1:])
+	// `update` is the self-update TRIGGER — the verb the console prints as a
+	// copy-pasteable recovery chip (cliChipHtml("bp cloud update " + instance) in
+	// app.js). It sits beside `rollback` because they are siblings: two relayed,
+	// team-admin-gated, async run triggers against one box, one forward and one
+	// back. Deliberately NOT aliased to `autoupdate` (which sets POLICY and starts
+	// nothing) — one acts, one configures.
+	case "update":
+		return runCloudUpdate(out, g, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown cloud command %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
 	}

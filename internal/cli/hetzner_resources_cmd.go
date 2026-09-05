@@ -611,6 +611,8 @@ FLEET (control plane — needs 'bp login')
                                                         (bp cloud rollout -h)
   rollback  roll ONE instance back to its previous blue/green code slot; pins it
             at that version, health-gated flip           (bp cloud rollback -h)
+  update    trigger an in-place self-update run on ONE instance; --force
+            overrides a pin for that one run               (bp cloud update -h)
   site      spawn a website that builds and serves next to a Barkpark box:
             create · deploy (--prebuilt ./dist ships a build made elsewhere) ·
             rollback · status · open · settings              (bp cloud site -h)
