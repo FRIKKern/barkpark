@@ -67,9 +67,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.PaperReadOnlyPaneTest do
   test "a pane with no editor_type (paper-only legacy assigns) is NOT treated as read-only" do
     s = socket(%{paper_doc: nil})
 
-    # nil editor_type must fall through to the pre-existing nil-slug no-op,
-    # never to the refusal — otherwise an assign-order change would silently
-    # make papers read-only.
-    assert Paper.paper_pane_op(s, @op) == s
+    # nil editor_type must reach the missing-document save failure, never the
+    # read-only refusal: an assign-order change must not make papers read-only.
+    result = Paper.paper_pane_op(s, @op)
+
+    refute result.assigns.flash["error"] == @notice
+    assert result.assigns.save_status == "Save failed"
+    assert result.assigns.last_paper_save_ok? == false
+    assert result.assigns.last_paper_save_result == %{saved: false, request_id: nil}
   end
 end

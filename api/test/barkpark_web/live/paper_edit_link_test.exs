@@ -267,6 +267,15 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       proj: proj,
       granted: granted
     } do
+      previous_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        if previous_canvas,
+          do: System.put_env("BARKPARK_PAPER_CANVAS", previous_canvas),
+          else: System.delete_env("BARKPARK_PAPER_CANVAS")
+      end)
+
       seed_picker_paper!(ws, proj, granted)
       {raw, link} = mint_link!(ws, proj, granted, "edit")
       {user, conn} = as_nonmember(conn)
@@ -324,6 +333,8 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       assert assigns_of(view).editing? == true
 
       render_hook(view, "paper-op", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => assigns_of(view).paper_rev,
         "op" => "patch-block",
         "id" => "b-body",
         "patch" => %{"content" => [%{"type" => "text", "value" => "Edited over the link"}]}
@@ -348,6 +359,7 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
 
       params = %{
         "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
         "ops" => [
           %{
             "op" => "insert-after",

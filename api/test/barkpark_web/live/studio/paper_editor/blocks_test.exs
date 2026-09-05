@@ -93,6 +93,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     # pushEvent. Simulate that wire with render_hook — the op arrives JSON-
     # decoded with string keys, exactly as the server's handler accepts it.
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "p-intro",
       "patch" => %{"content" => [%{"type" => "text", "value" => "Patched intro text."}]}
@@ -263,15 +265,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     # 1) A drop at the very front (after-id "") would land the block ABOVE the
     #    locked prefix — it CLAMPS to directly below the featured image instead
     #    of erroring: the calm nearest-allowed landing.
-    render_hook(view, "paper-move-block-to", %{"id" => "lk-body2", "after-id" => ""})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "lk-body2", "after-id" => ""})
+    )
+
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 2) A drop between the locked blocks clamps the same way (idempotent here).
-    render_hook(view, "paper-move-block-to", %{"id" => "lk-body2", "after-id" => "lk-title"})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "lk-body2", "after-id" => "lk-title"})
+    )
+
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 3) Dragging a LOCKED block anywhere is a calm no-op.
-    render_hook(view, "paper-move-block-to", %{"id" => "lk-title", "after-id" => "lk-body"})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "lk-title", "after-id" => "lk-body"})
+    )
+
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 4) A stale ▲ on the first unlocked block (its button is disabled in the
@@ -284,7 +301,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
 
     # 6) The guards are surgical: unlocked blocks still reorder below the prefix.
-    render_hook(view, "paper-move-block-to", %{"id" => "lk-body", "after-id" => "lk-featured"})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "lk-body", "after-id" => "lk-featured"})
+    )
+
     assert ids.() == ["lk-title", "lk-featured", "lk-body", "lk-body2"]
   end
 
@@ -381,7 +403,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     open_editor(view)
 
     # A drop event from the BarkparkPaperSortable hook: drop p-second AFTER h-1.
-    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => "h-1"})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "p-second", "after-id" => "h-1"})
+    )
 
     assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
              ["h-1", "p-second", "p-intro"]
@@ -393,7 +419,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     open_editor(view)
 
     # Empty after-id ⇒ move-to-front (after: nil).
-    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => ""})
+    render_hook(
+      view,
+      "paper-move-block-to",
+      wire_params(view, %{"id" => "p-second", "after-id" => ""})
+    )
 
     blocks = Content.paper_blocks(@slug, @dataset)
     assert Enum.map(blocks, & &1["id"]) == ["p-second", "h-1", "p-intro"]
@@ -447,6 +477,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     open_editor(view)
 
     render_hook(view, "paper-op", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
       "op" => "patch-block",
       "id" => "p-intro",
       "patch" => %{"content" => [%{"type" => "text", "value" => "Edited while in edit mode."}]}
@@ -498,5 +530,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     # Same process throughout — no remount.
     assert view.pid == pid_before
     assert Process.alive?(view.pid)
+  end
+
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
+  defp wire_params(view, params) do
+    Map.merge(params, %{"request_id" => Ecto.UUID.generate(), "if_rev" => paper_rev(view)})
   end
 end

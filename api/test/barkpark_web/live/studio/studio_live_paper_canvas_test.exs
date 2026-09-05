@@ -109,6 +109,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     html
   end
 
+  defp paper_rev(view), do: :sys.get_state(view.pid).socket.assigns.paper_rev
+
   # Slice just the editor surface so the snapshot is stable against unrelated
   # chrome (header buttons carry tokens / counts that drift across runs).
   defp editor_html(html) do
@@ -800,6 +802,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # Edit the intro paragraph.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -835,6 +838,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # computed a new wrapper id → remount (caret + in-flight edit lost).
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "remove-block", "id" => "h-1"}]
       })
 
@@ -889,6 +893,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -948,6 +953,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1110,6 +1116,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1151,6 +1158,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # directly after p-intro → it lands at index 2, between p-intro and c-note.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "insert-after", "afterId" => "p-intro", "block" => new_block}]
       })
 
@@ -1176,6 +1184,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "remove-block", "id" => "c-note"}]
       })
 
@@ -1198,6 +1207,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # jumps from index 3 to index 1.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [%{"op" => "move-block", "id" => "p-after", "after" => "h-1"}]
       })
 
@@ -1224,6 +1234,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # COMPOSED effect of all three.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "patch-block", "id" => "h-1", "patch" => %{"text" => "Batched Heading"}},
           %{"op" => "insert-after", "afterId" => "p-intro", "block" => inserted},
@@ -1265,6 +1276,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # First batch + its echo.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1283,6 +1295,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # SECOND, independent edit on the same still-mounted view — drives the loop again.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1319,6 +1332,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1358,6 +1372,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # would error → "Edit failed" flash → the real patch would be LOST.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "ghost-id"},
           %{
@@ -1444,6 +1459,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # the SAME op shape the per-block path persists, just inside a batch array.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1491,7 +1507,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
         }
       ]
 
-      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => ops})
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
+        "ops" => ops
+      })
 
       blocks = Content.paper_blocks(@slug, @dataset)
 
@@ -1533,10 +1553,15 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       before = Content.paper_blocks(@slug, @dataset)
       pid_before = view.pid
 
-      render_hook(view, "paper-ops", %{"request_id" => Ecto.UUID.generate(), "ops" => []})
+      render_hook(view, "paper-ops", %{
+        "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
+        "ops" => []
+      })
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => "not-a-list"
       })
 
@@ -1605,6 +1630,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1639,6 +1665,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # hollow ratchet HALTS the batch (put_paper_halt/2).
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "p-intro"},
           %{"op" => "remove-block", "id" => "c-note"},
@@ -1659,6 +1686,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
@@ -1674,6 +1702,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # leave a stale "Auto-saved" on screen.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{"op" => "remove-block", "id" => "p-intro"},
           %{"op" => "remove-block", "id" => "c-note"},
@@ -1686,6 +1715,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # …and a subsequent good write recovers the announcement.
       render_hook(view, "paper-ops", %{
         "request_id" => Ecto.UUID.generate(),
+        "if_rev" => paper_rev(view),
         "ops" => [
           %{
             "op" => "patch-block",
