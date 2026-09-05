@@ -76,6 +76,118 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
       {:error, {:xml_parse_failed, Exception.message(error)}}
   end
 
+  @typedoc """
+  A per-product failure recorded by `parse_feed/1`: the 1-based position of
+  the `<Product>` node in the feed, and a human-readable reason.
+  """
+  @type feed_error :: %{index: pos_integer(), reason: String.t()}
+
+  @doc """
+  Resilient sibling of `parse/1`.
+
+  `parse/1` maps every `<Product>` node under ONE function-level `rescue`, so
+  a single bad node discards the entire publisher feed — and its `rescue`
+  does not catch `exit`, which is what xmerl actually does on a malformed
+  character reference or an undeclared entity (`&nbsp;` is the common one in
+  real publisher ONIX). `parse_feed/1` fixes both: it isolates each
+  `<Product>` node behind its own `try`, and it catches `exit`/`throw` as
+  well as `raise` at the document level.
+
+  Returns:
+
+    * `{:ok, %{products: [map()], skipped: non_neg_integer(), errors: [feed_error()]}}`
+      when at least one product parsed. `skipped` counts the nodes that did
+      not, and `errors` names each one by position so an operator can find it
+      in the source feed.
+    * `{:error, :no_products}` — the document parsed but declared no
+      `<Product>` at all (a mis-fetched or empty feed).
+    * `{:error, {:all_products_failed, errors}}` — every `<Product>` failed.
+    * `{:error, {:xml_parse_failed, reason}}` — the document itself is not
+      usable (DOCTYPE, malformed XML, bad entity).
+
+  `parse/1` is deliberately left untouched so its existing callers carry zero
+  risk from this addition.
+
+  ## Options
+
+    * `:product_parser` — a 1-arity fun applied to each `<Product>` node
+      instead of the built-in walk. This exists for fault injection: every
+      helper in the built-in walk has a defensive catch-all clause, so no
+      real ONIX fixture makes it raise, and the per-node isolation cannot
+      otherwise be exercised by a test. It is defense-in-depth against a
+      FUTURE non-defensive helper, and this option is how that arm stays
+      covered rather than being asserted about and never run.
+  """
+  @spec parse_feed(binary(), keyword()) ::
+          {:ok, %{products: [map()], skipped: non_neg_integer(), errors: [feed_error()]}}
+          | {:error, :no_products}
+          | {:error, {:all_products_failed, [feed_error()]}}
+          | {:error, {:xml_parse_failed, term()}}
+  def parse_feed(xml, opts \\ []) when is_binary(xml) do
+    parser = Keyword.get(opts, :product_parser, &parse_product/1)
+
+    with {:ok, nodes} <- product_nodes(xml) do
+      nodes
+      |> Enum.with_index(1)
+      |> Enum.reduce(%{products: [], errors: []}, fn {node, index}, acc ->
+        case isolated_parse(parser, node, index) do
+          {:ok, product} -> %{acc | products: [product | acc.products]}
+          {:error, error} -> %{acc | errors: [error | acc.errors]}
+        end
+      end)
+      |> finish_feed()
+    end
+  end
+
+  defp product_nodes(xml) do
+    if Regex.match?(@doctype_re, xml) do
+      {:error, {:xml_parse_failed, "DOCTYPE/DTD is not permitted in ONIX input"}}
+    else
+      nodes =
+        xml
+        |> strip_default_namespace()
+        |> SweetXml.parse(namespace_conformant: false, dtd: :none)
+        |> xpath(~x"//Product"l)
+
+      case nodes do
+        [] -> {:error, :no_products}
+        nodes -> {:ok, nodes}
+      end
+    end
+  rescue
+    error -> {:error, {:xml_parse_failed, Exception.message(error)}}
+  catch
+    # xmerl signals a malformed character reference or an undeclared entity
+    # with `exit`, not a raise — `parse/1`'s `rescue` misses it entirely and
+    # the crash escapes to the caller.
+    :exit, reason -> {:error, {:xml_parse_failed, format_reason(reason)}}
+    :throw, value -> {:error, {:xml_parse_failed, format_reason(value)}}
+  end
+
+  defp isolated_parse(parser, node, index) do
+    {:ok, parser.(node)}
+  rescue
+    error -> {:error, %{index: index, reason: Exception.message(error)}}
+  catch
+    :exit, reason -> {:error, %{index: index, reason: format_reason(reason)}}
+    :throw, value -> {:error, %{index: index, reason: format_reason(value)}}
+  end
+
+  defp finish_feed(%{products: [], errors: errors}),
+    do: {:error, {:all_products_failed, Enum.reverse(errors)}}
+
+  defp finish_feed(%{products: products, errors: errors}) do
+    {:ok,
+     %{
+       products: Enum.reverse(products),
+       skipped: length(errors),
+       errors: Enum.reverse(errors)
+     }}
+  end
+
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
+
   defp strip_default_namespace(xml) do
     Regex.replace(@onix_xmlns_re, xml, "")
   end
