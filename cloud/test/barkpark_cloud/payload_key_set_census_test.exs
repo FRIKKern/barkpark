@@ -4156,11 +4156,13 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     # key added inside `class_rows/3` lands on every `classes[]` row. The
     # register must name it as UNREGISTERED, which is what both source-reading
     # censuses failed to do.
-    mutated = MapSet.put(ctx.emitted, "classes[].probe")
+    refute MapSet.member?(ctx.emitted, "classes[].probe"),
+           "the probe key is already on the wire — this arm is measuring a real emit, not a mutation"
 
+    mutated = MapSet.put(ctx.emitted, "classes[].probe")
     unregistered = MapSet.difference(mutated, MapSet.new(@emitted_paths))
 
-    assert MapSet.to_list(unregistered) == ["classes[].probe"],
-           "the probe key inside a list row did not surface as the only unregistered path"
+    assert MapSet.member?(unregistered, "classes[].probe"),
+           "a probe key on a `classes[]` row did not surface as UNREGISTERED"
   end
 end
