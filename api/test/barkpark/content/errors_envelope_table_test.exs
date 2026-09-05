@@ -132,6 +132,15 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"changeset", {:error, changeset()}, "validation_failed", 422, [:details]},
       {"invalid_task_content", {:error, {:invalid_task_content, %{"kind" => ["is required"]}}},
        "validation_failed", 422, [:details]},
+      # The mutate-path schema check's ENFORCE arm (task-41a740fd6701ec28).
+      # Only reachable for a dataset that opted in; the DEFAULT advises and
+      # never renders an envelope at all. Shares `validation_failed` + 422 +
+      # a `details` map with `invalid_task_content` and `unknown_fields` on
+      # purpose — the CLI and SDK need no new branch — which is exactly why it
+      # needs a row: an edit to either sibling must not drag this one along.
+      {"schema_validation_failed",
+       {:error, {:schema_validation_failed, %{"title" => ["Required"]}}}, "validation_failed",
+       422, [:details]},
       {"invalid_schema_fields", {:error, {:invalid_schema_fields, :missing_name}},
        "validation_failed", 422, [:details]},
       {"schema_has_documents", {:error, {:schema_has_documents, 3}}, "schema_has_documents", 409,

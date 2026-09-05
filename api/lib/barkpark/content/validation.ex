@@ -43,6 +43,66 @@ defmodule Barkpark.Content.Validation do
     * Top-level `validations: [...]` slot evaluation — the cross-field rule
       evaluator is Phase 3. The slot is reserved but inert in this phase;
       `validates_validations_slot_is_inert_in_phase_0` test guards that.
+
+  ## The mutate-path mount — ADVISE by default, ENFORCE per dataset (task-41a740fd6701ec28)
+
+  Until 2026-09-05 this module was never called on the HTTP mutate path: a
+  create whose content violated its own schema's `required` rule answered 200
+  and persisted. `Barkpark.Content.Writer.check_document_schema/3` now runs it
+  at the write chokepoint for every create-family verb and the update/upsert
+  path.
+
+  The RULING (main, 2026-09-05, on task-41a740fd6701ec28's `disposition_reason`)
+  is that the mount ships **ADVISE first**:
+
+    * **ADVISE (the default, every dataset)** — findings ride the mutate SUCCESS
+      envelope as `warnings` (`Barkpark.Content.Warnings`, charter D5) under the
+      code `schema_validation`, one entry per offending field naming the field
+      and the rule it broke. The write LANDS. Status and stored bytes are
+      byte-identical to the pre-mount behaviour.
+    * **ENFORCE (opt-in, per dataset)** — the write is refused
+      `{:error, {:schema_validation_failed, errors}}` → 422 `validation_failed`
+      with the per-field errors in `details`, matching the `unknown_fields`
+      shape already on that door. Nothing is written.
+
+  Flipping the DEFAULT to enforce is the owner's call, not a builder's.
+
+  ### The flag
+
+      config :barkpark, Barkpark.Content.Validation,
+        enforce_datasets: ["production"]   # or :all
+
+  Defaults to `[]` — no dataset enforces. `runtime.exs` maps
+  `BARKPARK_SCHEMA_ENFORCE_DATASETS` (comma-separated slugs, or `all`) over it,
+  so an operator opts a dataset in without a deploy of new code. There is NO
+  migration and no new column: the flag is deployment configuration, not
+  content, and a dataset that never appears in the list behaves exactly as it
+  did before this mount existed.
+
+  ### Migration story for rows already stored in violation
+
+  Documents written before this mount stay exactly as they are — nothing is
+  rewritten, nothing is deleted, no backfill runs. The mount is a WRITE-time
+  check only; a loose row is never re-validated at rest or on read.
+
+  The path from here, in order:
+
+    1. **Report-only period (now, every dataset).** Loose writes land with a
+       `schema_validation` warning. Operators harvest the warning codes from
+       mutate responses to size their own corpus — the advisory names the type,
+       the document id, the field and the rule, which is exactly the input a
+       clean-up needs.
+    2. **Per-dataset opt-in.** When a dataset's warning stream goes quiet, its
+       owner adds the slug to `enforce_datasets`. From that moment new and
+       edited documents in that dataset must satisfy their schema; rows never
+       touched again are still untouched.
+    3. **A grandfathered row is edited.** Under ENFORCE its next write is
+       refused 422 naming the field — the caller fixes the field or the dataset
+       owner removes the slug from the list. This is a consequence the owner
+       opts into per dataset, not one that arrives with an upgrade.
+
+  Flipping the default to `:all` is a separate, announced decision with its own
+  row.
   """
 
   require Logger
@@ -56,6 +116,25 @@ defmodule Barkpark.Content.Validation do
       validate_flat(content, title, schema)
     else
       validate_v2(content, title, schema)
+    end
+  end
+
+  @doc """
+  Whether `dataset` has OPTED IN to enforcement (422) rather than the default
+  advisory (`warnings` in the success envelope). See the moduledoc.
+
+  Reads `config :barkpark, Barkpark.Content.Validation, enforce_datasets: …`,
+  which accepts a list of dataset slugs or the atom `:all`. Absent, malformed
+  or empty configuration means ADVISE — the flag fails OPEN by construction,
+  because ADVISE is the pre-existing behaviour and a config typo must not
+  silently start 422ing a publisher's writes.
+  """
+  @spec enforce?(String.t() | nil) :: boolean()
+  def enforce?(dataset) do
+    case Application.get_env(:barkpark, __MODULE__, [])[:enforce_datasets] do
+      :all -> true
+      list when is_list(list) and is_binary(dataset) -> dataset in list
+      _ -> false
     end
   end
 

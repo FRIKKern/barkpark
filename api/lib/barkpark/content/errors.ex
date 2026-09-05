@@ -800,6 +800,22 @@ defmodule Barkpark.Content.Errors do
   # missing `kind` surfaced as a bare 500 "unknown error" — a validation
   # failure with ZERO signal about what to fix (found by the typed-verbatim
   # cheatsheet pass, 2026-06-10).
+  # Mutate-path schema validation, ENFORCE arm (task-41a740fd6701ec28). Only
+  # reachable when the write's dataset opted in via
+  # `config :barkpark, Barkpark.Content.Validation, enforce_datasets: [...]` —
+  # the DEFAULT advises (warnings in the success envelope) and never reaches
+  # here. Same canonical `validation_failed` code and same per-field `details`
+  # map shape as the `unknown_fields` refusal already on that door, so the CLI
+  # and SDK need no new code path.
+  defp build({:error, {:schema_validation_failed, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "document content failed schema validation",
+      status: 422,
+      details: errors
+    }
+  end
+
   defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
     %{
       code: "validation_failed",
