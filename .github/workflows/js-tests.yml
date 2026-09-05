@@ -26,6 +26,14 @@ on:
       # otherwise the react mirror goes stale green and reds later on an
       # unrelated js PR.
       - "web/__tests__/fixtures/engine-errors.json"
+      # The Elixir PortableDoc render path + its golden mirror. The JS parity
+      # leg (packages/react/tests/PortableDoc.parity.test.tsx) is the ONLY thing
+      # that runs the JS renderer against those goldens; an Elixir-side emitter
+      # change that regenerates BOTH mirrors touches no js/ path, so without
+      # these two entries it passed the Elixir gate and never rendered a single
+      # JS block. The mirrors agreeing is not the renderer agreeing.
+      - "api/lib/barkpark/portable_doc/**"
+      - "api/test/support/fixtures/pd-parity/**"
   pull_request:
     paths:
       - "js/**"
@@ -38,6 +46,14 @@ on:
       # otherwise the react mirror goes stale green and reds later on an
       # unrelated js PR.
       - "web/__tests__/fixtures/engine-errors.json"
+      # The Elixir PortableDoc render path + its golden mirror. The JS parity
+      # leg (packages/react/tests/PortableDoc.parity.test.tsx) is the ONLY thing
+      # that runs the JS renderer against those goldens; an Elixir-side emitter
+      # change that regenerates BOTH mirrors touches no js/ path, so without
+      # these two entries it passed the Elixir gate and never rendered a single
+      # JS block. The mirrors agreeing is not the renderer agreeing.
+      - "api/lib/barkpark/portable_doc/**"
+      - "api/test/support/fixtures/pd-parity/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
