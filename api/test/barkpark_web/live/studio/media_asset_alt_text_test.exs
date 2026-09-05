@@ -114,6 +114,7 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
     # read-only echo — an editor has to be able to type here.
     has_alt_input? =
       metadata =~ ~s(name="doc[altText].nob") and metadata =~ ~s(name="doc[altText].eng")
+
     assert has_alt_input?, "altText rendered without a writable per-language input"
   end
 
@@ -150,11 +151,14 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
     # every other type. Either row proves the round trip persisted.
     doc =
       case Content.get_document("drafts.#{slug}", "mediaAsset", @dataset) do
-        {:ok, d} -> d
-        _ -> case Content.get_document(slug, "mediaAsset", @dataset) do
-               {:ok, d} -> d
-               _ -> nil
-             end
+        {:ok, d} ->
+          d
+
+        _ ->
+          case Content.get_document(slug, "mediaAsset", @dataset) do
+            {:ok, d} -> d
+            _ -> nil
+          end
       end
 
     alt = doc && get_in(doc.content, ["altText"])

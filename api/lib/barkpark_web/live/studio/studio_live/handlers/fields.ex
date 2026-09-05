@@ -163,10 +163,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # Fold only when there is something to fold: an untouched params map must
   # come back byte-identical, or a payload with no `"doc"` key at all would
   # gain an empty one and save a blank document over a real one.
+  # EMPTY VALUES ARE LEFT OUT, deliberately and narrowly.
+  #
+  # A composite field renders EVERY subfield on every render, so a task form
+  # posts `doc[purpose].importance.score=""` and eighteen siblings whether or
+  # not the author touched them. Today all of those are dropped on the floor
+  # together with the real ones. Folding them in as `""` submits empty strings
+  # into typed composite slots and the write is REFUSED — two task-editor saves
+  # regressed to "Save failed" when this fold was unconditional.
+  #
+  # Skipping empty values makes this change strictly ADDITIVE: a key that is
+  # dropped today and carries nothing is still dropped, and a key that carries
+  # an actual keystroke starts persisting. The cost is stated plainly — CLEARING
+  # a localized value back to empty still does not persist, exactly as it does
+  # not today. That is the same defect, not a new one, and it wants its own row
+  # alongside the empty-subfield validation question this uncovered.
   defp fold_dot_paths(params) do
     {dotted, rest} =
-      Enum.split_with(params, fn {k, _v} ->
-        is_binary(k) and String.starts_with?(k, "doc[")
+      Enum.split_with(params, fn {k, v} ->
+        is_binary(k) and String.starts_with?(k, "doc[") and v != "" and not is_nil(v)
       end)
 
     if dotted == [] do
