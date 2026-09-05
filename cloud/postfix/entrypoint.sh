@@ -12,6 +12,7 @@ set -euo pipefail
 : "${MAIL_HOSTNAME:=mail.barkpark.cloud}"
 : "${MAIL_DOMAIN:=barkpark.cloud}"
 : "${DKIM_SELECTOR:=mail}"
+: "${MAILLOG_FILE:=/dev/stdout}"
 
 # ── DKIM keypair ──────────────────────────────────────────────────────────
 DKIM_DIR="/etc/opendkim/keys/${MAIL_DOMAIN}"
@@ -118,6 +119,34 @@ chmod 640 /etc/sasldb2
 adduser postfix sasl >/dev/null 2>&1 || true
 
 # ── Postfix main.cf ──────────────────────────────────────────────────────
+# ── Delivery logging ─────────────────────────────────────────────────────
+# WITHOUT THIS, THIS CONTAINER LOGS NOTHING. Postfix logs to syslog by
+# default; this image has no syslog daemon (and no /dev/log), so every
+# `status=sent` / `status=deferred` / `status=bounced` line — the ONLY
+# server-side record of whether a message actually reached the recipient's
+# MX — was silently discarded. `docker logs` held the entrypoint's DKIM
+# banner and nothing else, so "did that password-reset email arrive?" was
+# unanswerable from the box, and the app's own failure copy ("the server
+# log has the transport detail", cloud/lib/barkpark_cloud/notifications/
+# delivery_reason.ex `label(:unknown)`) pointed at a log that did not exist.
+#
+# maillog_file is Postfix 3.4+ and routes logging through the `postlogd`
+# service instead of syslog. Three facts make it work HERE specifically:
+#   1. Debian bookworm ships Postfix 3.7.x — new enough (verify with
+#      `postconf mail_version` if the base image is ever bumped).
+#   2. postlogd needs a `postlog unix-dgram` entry in master.cf, which the
+#      stock Debian master.cf already carries; `postfix start-fg` runs
+#      check-fatal, which FATALs "missing 'postlog' service in master.cf"
+#      and refuses to start if it is ever absent — so a broken config fails
+#      loudly at boot rather than silently logging nothing again.
+#   3. postlogd is spawned by the master process, inheriting its stdout —
+#      which under `exec postfix start-fg` (PID 1) is the container's
+#      stdout, i.e. `docker logs`. /dev/stdout is allowed by the default
+#      maillog_file_prefixes (`/var, /dev/stdout`).
+# Left overridable so an operator can point it at a file on a mounted
+# volume instead, but the default is the one the README documents.
+postconf -e "maillog_file = ${MAILLOG_FILE:-/dev/stdout}"
+
 postconf -e "myhostname = ${MAIL_HOSTNAME}"
 postconf -e "mydomain = ${MAIL_DOMAIN}"
 postconf -e "myorigin = \$mydomain"
