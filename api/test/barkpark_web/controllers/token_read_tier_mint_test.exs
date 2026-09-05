@@ -52,8 +52,11 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
-    private_a = seed_private_schema!(scope_a, "vault_a")
-    private_b = seed_private_schema!(scope_b, "vault_b")
+    private_a = seed_schema!(scope_a, "vault_a", "private")
+    private_b = seed_schema!(scope_b, "vault_b", "private")
+    # A PUBLIC schema in the SAME workspace — the control that makes the 404 on
+    # the private one mean "private" rather than "this caller reads nothing here".
+    public_a = seed_schema!(scope_a, "open_a", "public")
 
     # An admin OF A — `Auth.create_token/5` with a workspace_id also writes the
     # owner/admin membership row `:scoped_admin`'s RequireWorkspaceRole reads, so
@@ -71,20 +74,21 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
       proj_b: proj_b,
       private_a: private_a,
       private_b: private_b,
+      public_a: public_a,
       admin_a: admin_a
     }
   end
 
   defp mint_raw(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
-  # A PRIVATE schema — the whole point. Unique names: the test database is shared
-  # across lanes and a fixed name collides on (name, dataset_id).
-  defp seed_private_schema!(scope, prefix) do
+  # Unique names: the test database is shared across lanes and a fixed name
+  # collides on (name, dataset_id).
+  defp seed_schema!(scope, prefix, visibility) do
     name = "#{prefix}_#{System.unique_integer([:positive])}"
 
     {:ok, schema} =
       Content.upsert_schema(
-        %{"name" => name, "title" => name, "visibility" => "private", "fields" => []},
+        %{"name" => name, "title" => name, "visibility" => visibility, "fields" => []},
         @dataset,
         scope
       )
@@ -92,9 +96,23 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
     schema.name
   end
 
-  defp bearer(conn, raw) do
+  # Mint with no `permissions` — the server's own default, ["public-read"].
+  defp mint_default_token!(conn, admin_raw, ws, proj) do
     conn
-    |> Phoenix.ConnTest.build_conn()
+    |> bearer(admin_raw)
+    |> Plug.Conn.put_req_header("content-type", "application/json")
+    |> post("/w/#{ws.slug}/p/#{proj.slug}/v1/tokens", %{
+      "label" => "site #{System.unique_integer([:positive])}",
+      "dataset" => @dataset
+    })
+    |> json_response(201)
+  end
+
+  # A FRESH conn per request. The setup conn is recycled between calls, and a
+  # token test that reuses one silently carries the previous request's headers —
+  # which is how a "the sibling was refused" arm can pass on the WRONG credential.
+  defp bearer(_conn, raw) do
+    Phoenix.ConnTest.build_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
   end
 
@@ -118,15 +136,35 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
     body
   end
 
-  test "THE FIXTURE IS NOT VACUOUS: the private schema is invisible to an anonymous reader",
-       %{conn: conn, ws_a: ws_a, proj_a: proj_a, private_a: private_a} do
-    # If this were 200, every assertion below would pass for a schema that was
-    # never private and the file would prove nothing.
-    resp = get(Phoenix.ConnTest.build_conn(conn), query_path(ws_a, proj_a, private_a))
+  test "THE FIXTURE IS NOT VACUOUS: a public-read token reads the PUBLIC schema and is 404 on the private one",
+       %{
+         conn: conn,
+         ws_a: ws_a,
+         proj_a: proj_a,
+         private_a: private_a,
+         public_a: public_a,
+         admin_a: admin_a
+       } do
+    # The discriminator has to be a caller that CLEARS the workspace gate, then
+    # differs only on visibility. An anonymous read is useless here: the scoped
+    # route's workspace resolution fails closed with 403 BEFORE visibility is
+    # consulted, so an anonymous 403/404 is returned for a public schema too and
+    # would leave every arm below vacuous.
+    token = mint_default_token!(conn, admin_a, ws_a, proj_a)["token"]
 
-    assert resp.status == 404,
-           "an anonymous read of #{private_a} answered #{resp.status} — the fixture schema is " <>
-             "not actually private, so the read-tier arms below are vacuous"
+    open_resp = get(bearer(conn, token), query_path(ws_a, proj_a, public_a))
+
+    assert open_resp.status == 200,
+           "the public-read token could not read the PUBLIC schema #{public_a} " <>
+             "(#{open_resp.status}) — it is blocked for some reason other than visibility, " <>
+             "so the 404 below proves nothing"
+
+    private_resp = get(bearer(conn, token), query_path(ws_a, proj_a, private_a))
+
+    assert private_resp.status == 404,
+           "the public-read token read the PRIVATE schema #{private_a} " <>
+             "(#{private_resp.status}) — the fixture schema is not actually private and every " <>
+             "read-tier arm below is vacuous"
   end
 
   test "a token minted with [\"read\"] READS a private schema in its OWN workspace",
@@ -175,15 +213,7 @@ defmodule BarkparkWeb.TokenReadTierMintTest do
     # Both halves of the tier split in one place: the default is unchanged (a
     # caller who names nothing still gets public-read), and public-read is
     # genuinely narrower than read — otherwise the new verb buys nothing.
-    body =
-      conn
-      |> bearer(admin_a)
-      |> Plug.Conn.put_req_header("content-type", "application/json")
-      |> post("/w/#{ws_a.slug}/p/#{proj_a.slug}/v1/tokens", %{
-        "label" => "site #{System.unique_integer([:positive])}",
-        "dataset" => @dataset
-      })
-      |> json_response(201)
+    body = mint_default_token!(conn, admin_a, ws_a, proj_a)
 
     assert body["permissions"] == ["public-read"],
            "the unstated default moved to #{inspect(body["permissions"])}"
