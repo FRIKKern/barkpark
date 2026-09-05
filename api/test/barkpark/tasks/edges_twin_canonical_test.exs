@@ -175,17 +175,33 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
       slug = uniq("cross-dataset")
       draft = mk_draft!(scope, slug)
 
-      {:ok, foreign} =
+      # The foreign row must be genuinely PUBLISHED in the other dataset, so its
+      # doc_id is the BARE slug — the exact string the twin lookup searches for.
+      # An unpublished `drafts.<slug>` there would make this test pass for the
+      # wrong reason: the lookup would find nothing whether or not the dataset
+      # scope existed, and dropping the scope would not red it.
+      foreign_content =
+        Barkpark.LabelFixtures.with_registered_labels(
+          %{"kind" => "task", "lifecycle_status" => "open", "description" => @desc},
+          "aker-brygge"
+        )
+
+      {:ok, _} =
         Content.create_document(
           "task",
           %{
             "doc_id" => slug,
             "title" => "a same-slug row in another dataset",
-            "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+            "content" => foreign_content
           },
           "aker-brygge",
           scope
         )
+
+      {:ok, foreign} = Content.publish_document(slug, "task", "aker-brygge", scope)
+
+      assert foreign.doc_id == slug,
+             "the foreign row must be PUBLISHED or the dataset fence is never exercised"
 
       dependent = mk_draft!(scope, uniq("dependent"))
 
