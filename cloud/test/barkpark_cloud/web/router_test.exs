@@ -474,17 +474,46 @@ defmodule BarkparkCloud.Web.RouterTest do
     # none — computed by Registry.queued_deploy_age_map/1, ONE GROUP BY for the
     # whole list. The stalled VERDICT belongs to the clients (Go/SPA at 300s);
     # this payload only states the raw fact.
-    test "the fleet row carries queued_deploy_age_seconds — oldest queued age, nil when none" do
+    test "producer-backed Go attention fixture stays fresh against queued_deploy_age_seconds" do
+      fixture_path =
+        Path.expand("../../../../internal/cli/testdata/attention_order_cases.json", __DIR__)
+
+      fixture = fixture_path |> File.read!() |> Jason.decode!()
+      fixture_rows = fixture["barkparks"]
+      stalled_fixture = Enum.find(fixture_rows, &(&1["name"] == "stall-1"))
+      empty_fixture = Enum.find(fixture_rows, &(&1["name"] == "alpha"))
+
+      assert length(fixture_rows) == 16
+
+      assert Enum.all?(fixture_rows, &Map.has_key?(&1, "queued_deploy_age_seconds")),
+             "every Go ranking row must preserve the field the producer always emits"
+
+      assert fixture_rows
+             |> Enum.map(& &1["queued_deploy_age_seconds"])
+             |> Enum.reject(&is_nil/1)
+             |> Enum.sort() == [90, 420]
+
       {user, team} = user_with_team()
-      bp = barkpark_fixture(team, %{name: "Stalled", slug: "stalled"})
+
+      bp =
+        barkpark_fixture(team, %{
+          name: stalled_fixture["name"],
+          slug: "stall-1",
+          host: stalled_fixture["host"],
+          health_status: stalled_fixture["health_status"],
+          agent_status: stalled_fixture["agent_status"],
+          last_seen_at: stalled_fixture["last_seen_at"]
+        })
+
       {:ok, token} = Accounts.create_user_session_token(user)
 
       # No sites, no deployments: the key is PRESENT and honestly nil — "none
       # queued" must be distinguishable from a field that was never emitted.
       conn = call(:get, "/v1/barkparks", nil, token)
       [row] = json_body(conn)["barkparks"]
-      assert Map.has_key?(row, "queued_deploy_age_seconds")
-      assert is_nil(row["queued_deploy_age_seconds"])
+
+      assert Map.take(row, ["queued_deploy_age_seconds"]) ==
+               Map.take(empty_fixture, ["queued_deploy_age_seconds"])
 
       # TWO SITES on the box (the active-deployment unique index allows only
       # ONE active production row per site), 7 minutes and 2 minutes queued:
@@ -523,6 +552,15 @@ defmodule BarkparkCloud.Web.RouterTest do
       age = row2["queued_deploy_age_seconds"]
       assert is_integer(age), "expected a number, got: #{inspect(age)}"
       assert age >= 420 and age < 480, "oldest row is ~420s old, got #{age}"
+
+      projection_keys =
+        ~w(name host health_status agent_status queued_deploy_age_seconds)
+
+      normalized_producer_row =
+        Map.put(row2, "queued_deploy_age_seconds", stalled_fixture["queued_deploy_age_seconds"])
+
+      assert Map.take(normalized_producer_row, projection_keys) ==
+               Map.take(stalled_fixture, projection_keys)
 
       # Status filter has TEETH: once every queued row leaves "queued" the field
       # returns to nil — a "building" row is the reaper's business, not this

@@ -215,9 +215,35 @@ type Barkpark struct {
 	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
 	// number `barkpark_json` serves so the CLIENT can own the stalled
 	// threshold. A POINTER for the same honesty rule as Pressure: nil is both
-	// "nothing queued" and "this CP predates the field", and neither may ever
-	// read as stalled — the alarm arms only on a real number.
-	QueuedDeployAgeSeconds *float64 `json:"queued_deploy_age_seconds"`
+	// "nothing queued" and "this CP predates the field" at the Go value level,
+	// so QueuedDeployAgeSecondsMissing records the wire-level distinction. An
+	// explicit null is the producer's honest "nothing queued" response; an
+	// omitted key means the control plane is too old or its contract drifted.
+	QueuedDeployAgeSeconds        *float64 `json:"queued_deploy_age_seconds"`
+	QueuedDeployAgeSecondsMissing bool     `json:"-"`
+}
+
+// UnmarshalJSON preserves whether the control plane emitted
+// queued_deploy_age_seconds. encoding/json normally collapses an omitted key
+// and an explicit null into the same nil pointer, which would make a producer
+// rename look exactly like a healthy fleet with no queued deployment.
+func (b *Barkpark) UnmarshalJSON(data []byte) error {
+	type barkparkJSON Barkpark
+
+	var decoded barkparkJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	*b = Barkpark(decoded)
+	_, present := fields["queued_deploy_age_seconds"]
+	b.QueuedDeployAgeSecondsMissing = !present
+	return nil
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in
