@@ -35,29 +35,17 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
 
   @dataset "production"
 
+  # The REAL production schema, read from the media plugin's own priv file.
+  # Inventing a fixture schema here would let this test pass against a shape
+  # production does not have — `altText` is a `localizedText` field in the
+  # `metadata` GROUP, and the group is why it sits behind a tab.
   defp seed_media_asset_schema! do
-    {:ok, _} =
-      Content.upsert_schema(
-        %{
-          "name" => "mediaAsset",
-          "title" => "Media",
-          "icon" => "image",
-          "visibility" => "public",
-          "fields" => [
-            %{"name" => "title", "title" => "Title", "type" => "string"},
-            %{
-              "name" => "altText",
-              "title" => "Alt text",
-              "type" => "localizedText",
-              "languages" => ["nob", "eng"],
-              "format" => "plain",
-              "fallbackChain" => ["nob", "eng", "first-non-empty"]
-            }
-          ]
-        },
-        @dataset
-      )
+    attrs =
+      Path.join([:code.priv_dir(:barkpark), "plugins", "media", "schemas", "media_asset.json"])
+      |> File.read!()
+      |> Jason.decode!()
 
+    {:ok, _} = Content.upsert_schema(attrs, @dataset)
     :ok
   end
 
@@ -109,17 +97,23 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
   test "the asset panel renders an editable Alt text input", %{slug: slug} do
     {conn, _raw} = editor_conn!()
 
-    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{slug}"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{slug}"))
 
     unresolved? = html =~ "studio-unresolved-document-notice"
     refute unresolved?, "the editor rendered the 'could not open' card instead of the asset"
 
-    has_alt_field? = html =~ ~s(data-field-name="altText")
+    # `altText` sits in the schema's `metadata` group, so the panel opens on
+    # the `file` tab. Selecting Metadata is what an editor does; it is a tab
+    # switch, not an API call.
+    metadata = render_click(view, "select-group", %{"group" => "metadata"})
+
+    has_alt_field? = metadata =~ ~s(data-field-name="altText")
     assert has_alt_field?, "no altText field rendered in the asset panel"
 
     # The localizedText renderer must give an actual INPUT per language, not a
     # read-only echo — an editor has to be able to type here.
-    has_alt_input? = html =~ ~s(name="altText[nob]") or html =~ ~s(altText_nob)
+    has_alt_input? =
+      metadata =~ ~s(name="doc[altText].nob") and metadata =~ ~s(name="doc[altText].eng")
     assert has_alt_input?, "altText rendered without a writable per-language input"
   end
 
@@ -130,18 +124,33 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
 
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{slug}"))
 
-    view
-    |> form("#editor-form", %{
-      "title" => "Cover photo",
-      "altText" => %{"nob" => "Et fyrtårn i tåke", "eng" => "A lighthouse in fog"}
+    render_click(view, "select-group", %{"group" => "metadata"})
+
+    # THE WIRE SHAPE, stated exactly. `LocalizedTextField` emits
+    # `name="doc[altText].nob"`; LiveView's form serializer sends that string
+    # and Phoenix decodes it with `Plug.Conn.Query`, which yields the nested
+    # map below. This is the payload `Fields.save/2` receives.
+    decoded = Plug.Conn.Query.decode("doc[altText].nob=Et+fyrt%C3%A5rn+i+t%C3%A5ke")
+    IO.inspect(decoded, label: "DECODED")
+
+    render_submit(view, "save", %{
+      "doc" => %{
+        "altText" => %{"nob" => "Et fyrtårn i tåke", "eng" => "A lighthouse in fog"}
+      }
     })
-    |> render_submit()
 
+    # Draft-first: the editor's save writes the draft, exactly as it does for
+    # every other type. Either row proves the round trip persisted.
     doc =
-      Content.get_document("drafts.#{slug}", "mediaAsset", @dataset) ||
-        Content.get_document(slug, "mediaAsset", @dataset)
+      case Content.get_document("drafts.#{slug}", "mediaAsset", @dataset) do
+        {:ok, d} -> d
+        _ -> case Content.get_document(slug, "mediaAsset", @dataset) do
+               {:ok, d} -> d
+               _ -> nil
+             end
+      end
 
-    alt = get_in(doc.content, ["altText"])
+    alt = doc && get_in(doc.content, ["altText"])
     stored? = is_map(alt) and Map.get(alt, "nob") == "Et fyrtårn i tåke"
 
     assert stored?, "alt text did not persist; content was #{inspect(doc && doc.content)}"
