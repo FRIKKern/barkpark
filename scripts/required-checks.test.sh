@@ -5316,6 +5316,327 @@ else
 fi
 rc26_cleanup
 
+# ═══ 27. the four generator PARSER forms this suite never planted ══════════
+
+section "27. the generator index reads the forms GitHub accepts — quoted \`\"on\":\`, four continue-on-error spellings, step-level laundering, .yaml — and refuses one context on both lists"
+
+# WHY EVERY FIXTURE HERE IS SYNTHETIC (cgsiw-s4, clause group B). Measured on
+# origin/main before this section existed: the quoted-scalar `continue-on-error`
+# spellings appear ZERO times in this file, `${{ }}` as a continue-on-error value
+# ZERO times, a top-level `"on":` key ZERO times, and all four of the sections
+# that copy the real tree do it with `cp "$REPO_ROOT"/.github/workflows/*.yml` —
+# so a `.yaml` workflow is invisible to the SUITE for the same reason it was
+# invisible to the GENERATOR. A clause built on the real-tree copy idiom would
+# inherit the exact blindness it exists to catch, and would go quiet again the
+# day somebody deletes the specimen from .github/workflows. Every fixture below
+# is written into a fresh mktemp directory instead.
+#
+# Each mutation is a COPY of the generator with ONE anchor reverted, and each is
+# asserted to have applied EXACTLY ONCE before its arm is believed — a sed that
+# matched nothing produces a "mutant" identical to the original, and the disarm
+# arm then passes for the wrong reason.
+
+RC27="$TMP/rc27"
+mkdir -p "$RC27"
+rc27_feed() { # <dir> <sha>… — a green rendered row per name in RC27_NAMES
+  local d="$1"; shift
+  local s
+  for s in "$@"; do
+    jq -cn --args '{ check_runs: [ $ARGS.positional[]
+      | { name: ., conclusion: "success", started_at: "2026-07-28T01:00:00Z", app: { id: 15368 } } ] }' \
+      -- ${RC27_NAMES[@]+"${RC27_NAMES[@]}"} > "$d/checkruns-$s.json"
+  done
+}
+rc27_gen() { # <generator> <workflow-dir> <fixture-dir> <shaA> <shaB> [extra args…]
+  local g="$1" w="$2" f="$3" a="$4" b="$5"; shift 5
+  RC27_OUT="$(bash "$g" --workflows "$w" --fixture-dir "$f" --no-merge --sha "$a" --sha "$b" --explain "$@" 2>&1)" \
+    && RC27_RC=0 || RC27_RC=$?
+}
+
+# ── (a) THE QUOTED TRIGGER KEY ──────────────────────────────────────────────
+# YAML 1.1 resolves a BARE `on` to the boolean true, which is why yamllint's
+# `truthy` rule pushes authors to write `"on":` — and GitHub accepts it. Under a
+# byte anchor of `/^on:/` the quoted twin reads as a workflow with NO triggers:
+# `pf` never gets set, `/^jobs:/` still matches, and a paths-filtered job is
+# emitted REQUIRED at exit 0. The two fixtures below are the SAME workflow
+# differing in that one key, so nothing but the key can explain a divergence.
+RC27_ON="$RC27/on"; RC27_ONF="$RC27/on-fix"
+mkdir -p "$RC27_ON" "$RC27_ONF"
+cat > "$RC27_ON/plain.yml" <<'YML'
+name: Plain
+on:
+  pull_request:
+    paths:
+      - 'api/**'
+jobs:
+  a:
+    name: Plain filtered gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+sed 's/^on:/"on":/; s/Plain filtered gate/Quoted filtered gate/' "$RC27_ON/plain.yml" > "$RC27_ON/quoted.yml"
+RC27_NAMES=("Plain filtered gate" "Quoted filtered gate")
+rc27_feed "$RC27_ONF" onA onB mainA
+printf 'mainA\n' > "$RC27_ONF/main-shas.txt"
+if [ "$(grep -c '^"on":$' "$RC27_ON/quoted.yml" || true)" -eq 1 ]; then
+  ok "the quoted-trigger fixture really carries a top-level \`\"on\":\` key (0 occurrences of it existed anywhere in this suite before §27)"
+else
+  bad "the quoted-trigger fixture does not carry \`\"on\":\` — every clause below is vacuous"
+fi
+rc27_gen "$GEN" "$RC27_ON" "$RC27_ONF" onA onB
+if excluded_by "$RC27_OUT" "Plain filtered gate" "S4 PATHS-FILTERED" \
+   && excluded_by "$RC27_OUT" "Quoted filtered gate" "S4 PATHS-FILTERED"; then
+  ok "the SAME paths-filtered workflow written \`on:\` and \`\"on\":\` both yield S4 PATHS-FILTERED — the trigger key is read by all three legal spellings"
+else
+  bad "the quoted twin did not reach S4 (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+RC27_MUT_ON="$TMP/gen-bytes-on.sh"
+sed 's%^      /\^("on"|\\047on\\047|on)\[ \\t\]\*:/ { inon = 1; next }$%      /^on:/ { inon = 1; next } # TRIGGER ANCHOR REVERTED TO BYTES%' \
+  "$GEN" > "$RC27_MUT_ON"
+RC27_N="$(grep -c 'TRIGGER ANCHOR REVERTED TO BYTES' "$RC27_MUT_ON" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the trigger-anchor mutation applied $RC27_N times, not exactly 1 — the anchor moved, so the proof below is vacuous (note the index's copy is indented 6, workflow_has_head_trigger's 4)"
+elif diff -q "$GEN" "$RC27_MUT_ON" >/dev/null 2>&1; then
+  bad "the trigger-anchor mutant is byte-identical to the generator — nothing was reverted"
+else
+  ok "the trigger-anchor mutation applies exactly once, with a non-empty diff: a copy of the generator anchors on the bytes \`/^on:/\` again"
+  rc27_gen "$RC27_MUT_ON" "$RC27_ON" "$RC27_ONF" onA onB
+  if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Quoted filtered gate" \
+     && excluded_by "$RC27_OUT" "Plain filtered gate" "S4 PATHS-FILTERED"; then
+    ok "…and WITHOUT it the quoted twin is emitted REQUIRED at exit 0 while its identical unquoted sibling is still S4 — the D18/D20 deadlock, manufactured by the script written to prevent it (mutation-proven able to fail)"
+  else
+    bad "the byte-anchored copy did not require the quoted twin (exit $RC27_RC) — the clause above is vacuous: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+  fi
+fi
+
+# ── (b) THE FOUR CONTINUE-ON-ERROR VALUE FORMS ──────────────────────────────
+# `'true'`, `"true"`, `yes` and a `${{ … }}` expression are all continue-on-error
+# to GitHub and all escaped a `: *true` literal match. `false` (literal) must
+# stay BLOCKING — normalising the false spellings is the protective direction,
+# since classifying a blocking job as advisory LOSES a gate.
+RC27_COE="$RC27/coe"; RC27_COEF="$RC27/coe-fix"
+mkdir -p "$RC27_COE" "$RC27_COEF"
+{
+  printf 'name: Coe\non: [pull_request]\njobs:\n'
+  printf "  sq:\n    name: Single quoted gate\n    continue-on-error: 'true'\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+  printf '  dq:\n    name: Double quoted gate\n    continue-on-error: "true"\n    runs-on: ubuntu-latest\n    steps:\n'
+  printf "      - run: 'true'\n"
+  printf '  ex:\n    name: Expression gate\n    continue-on-error: ${{ github.event_name == %s }}\n    runs-on: ubuntu-latest\n    steps:\n' "'push'"
+  printf "      - run: 'true'\n"
+  printf "  ys:\n    name: Yes gate\n    continue-on-error: yes\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+  printf "  fl:\n    name: False gate\n    continue-on-error: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
+} > "$RC27_COE/coe.yml"
+RC27_NAMES=("Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate" "False gate")
+rc27_feed "$RC27_COEF" coeA coeB mainA
+printf 'mainA\n' > "$RC27_COEF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_COE" "$RC27_COEF" coeA coeB
+RC27_MISS=""
+for rc27_n in "Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate"; do
+  excluded_by "$RC27_OUT" "$rc27_n" "S2 ADVISORY" || RC27_MISS="$RC27_MISS [$rc27_n]"
+done
+if [ -z "$RC27_MISS" ] && kept_in "$RC27_OUT" "False gate"; then
+  ok "all four continue-on-error spellings exclude S2 ADVISORY at job level — \`'true'\`, \`\"true\"\`, \`\${{ … }}\` and \`yes\` — while a literal \`false\` stays BLOCKING (losing a gate is never the safe direction)"
+else
+  bad "a continue-on-error spelling escaped S2 (exit $RC27_RC), missed:${RC27_MISS:- none}, false-gate kept: $(kept_in "$RC27_OUT" "False gate" && echo yes || echo NO)"
+fi
+RC27_MUT_COE="$TMP/gen-byte-coe.sh"
+sed 's%^          coe = (vn == "false" || v == "(empty)") ? "" : v$%          coe = (v == "true") ? v : "" # BYTE LITERAL RESTORED%' "$GEN" > "$RC27_MUT_COE"
+RC27_N="$(grep -c 'BYTE LITERAL RESTORED' "$RC27_MUT_COE" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the continue-on-error mutation applied $RC27_N times, not exactly 1 — the normalisation moved, so the proof below is vacuous"
+else
+  ok "the continue-on-error mutation applies exactly once: a copy of the generator matches the BYTES \`true\` again"
+  rc27_gen "$RC27_MUT_COE" "$RC27_COE" "$RC27_COEF" coeA coeB
+  RC27_LAUNDERED=""
+  for rc27_n in "Single quoted gate" "Double quoted gate" "Expression gate" "Yes gate"; do
+    kept_in "$RC27_OUT" "$rc27_n" && RC27_LAUNDERED="$RC27_LAUNDERED [$rc27_n]"
+  done
+  if [ "$RC27_RC" -eq 0 ] && [ "$(grep -c . <<<"$RC27_LAUNDERED")" -ge 1 ] \
+     && [ "$RC27_LAUNDERED" = " [Single quoted gate] [Double quoted gate] [Expression gate] [Yes gate]" ]; then
+    ok "…and WITHOUT it ALL FOUR are emitted REQUIRED at exit 0 — four checks that cannot report a failure, pinned as merge gates (mutation-proven able to fail)"
+  else
+    bad "the byte-literal copy did not launder all four (exit $RC27_RC, kept:${RC27_LAUNDERED:- none}) — the clause above is vacuous"
+  fi
+fi
+
+# ── (c) STEP-LEVEL LAUNDERING, AND THE MIXED TWIN THAT MUST SURVIVE ─────────
+# A job with no job-level key whose EVERY decision-bearing step is advisory
+# publishes a check that cannot report a failure. It must produce the LOUD
+# REFUSAL rather than a silent classification, because a job that MIXES advisory
+# steps among blocking ones (the js-tests.yml `test` shape) is legitimate and
+# demoting one to catch the other would EXCLUDE a real gate. Both arms, because
+# a refusal with no mirror is one edit away from being a false red.
+RC27_LDY="$RC27/laundry"; RC27_LDYF="$RC27/laundry-fix"
+RC27_MIX="$RC27/mixed"; RC27_MIXF="$RC27/mixed-fix"
+mkdir -p "$RC27_LDY" "$RC27_LDYF" "$RC27_MIX" "$RC27_MIXF"
+cat > "$RC27_LDY/l.yml" <<'YML'
+name: Laundry
+on: [pull_request]
+jobs:
+  wash:
+    name: Laundered gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: one
+        run: 'true'
+        continue-on-error: true
+      - name: two
+        uses: actions/checkout@v4
+        continue-on-error: 'true'
+YML
+cat > "$RC27_MIX/m.yml" <<'YML'
+name: Mixed
+on: [pull_request]
+jobs:
+  test:
+    name: Mixed gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: advisory
+        run: 'true'
+        continue-on-error: true
+      - name: blocking
+        run: 'true'
+YML
+RC27_NAMES=("Laundered gate"); rc27_feed "$RC27_LDYF" ldA ldB mainA; printf 'mainA\n' > "$RC27_LDYF/main-shas.txt"
+RC27_NAMES=("Mixed gate");     rc27_feed "$RC27_MIXF" mxA mxB mainA; printf 'mainA\n' > "$RC27_MIXF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_LDY" "$RC27_LDYF" ldA ldB
+if [ "$RC27_RC" -ne 0 ] && grep -q "EVERY DECISION-BEARING STEP IS ADVISORY" <<<"$RC27_OUT" \
+   && grep -qF "job 'wash'" <<<"$RC27_OUT"; then
+  ok "a job whose every decision-bearing step carries continue-on-error draws the LOUD REFUSAL BY NAME (exit $RC27_RC), never a silent classification"
+else
+  bad "step-level laundering was not refused by name (exit $RC27_RC): $(head -2 <<<"$RC27_OUT" | tr '\n' '⏎')"
+fi
+rc27_gen "$GEN" "$RC27_MIX" "$RC27_MIXF" mxA mxB
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Mixed gate"; then
+  ok "…and the js-tests shape — advisory steps MIXED among blocking ones — is NOT demoted and NOT refused: demoting it to catch the other would EXCLUDE a real gate"
+else
+  bad "the mixed-steps job was demoted or refused (exit $RC27_RC) — the refusal above has become a false red: $(head -2 <<<"$RC27_OUT" | tr '\n' '⏎')"
+fi
+
+# ── (d) THE .yaml GLOB ──────────────────────────────────────────────────────
+# GitHub runs a `*.yaml` workflow exactly like a `*.yml` one. A `*.yml`-only
+# index leaves the `.yaml` job UNMAPPED and states the factually FALSE reason
+# "no job in <dir> publishes this name" — an operator sent to look for a
+# deletion that never happened.
+RC27_YM="$RC27/yamlmix"; RC27_YMF="$RC27/yamlmix-fix"
+mkdir -p "$RC27_YM" "$RC27_YMF"
+cat > "$RC27_YM/one.yml" <<'YML'
+name: One
+on: [pull_request]
+jobs:
+  a:
+    name: Yml gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC27_YM/two.yaml" <<'YML'
+name: Two
+on: [pull_request]
+jobs:
+  b:
+    name: Yaml gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+RC27_NAMES=("Yml gate" "Yaml gate"); rc27_feed "$RC27_YMF" ymA ymB mainA; printf 'mainA\n' > "$RC27_YMF/main-shas.txt"
+rc27_gen "$GEN" "$RC27_YM" "$RC27_YMF" ymA ymB
+if [ "$RC27_RC" -eq 0 ] && kept_in "$RC27_OUT" "Yaml gate" && kept_in "$RC27_OUT" "Yml gate"; then
+  ok "a mixed .yml + .yaml fixture tree indexes BOTH spellings — the .yaml job is traced to two.yaml, not reported UNMAPPED"
+else
+  bad "the .yaml job was not indexed (exit $RC27_RC): $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+fi
+RC27_MUT_YML="$TMP/gen-noyaml.sh"
+sed 's%^  for f in "\$WORKFLOW_DIR"/\*\.yml "\$WORKFLOW_DIR"/\*\.yaml; do$%  for f in "$WORKFLOW_DIR"/*.yml; do # YAML GLOB REMOVED%' "$GEN" > "$RC27_MUT_YML"
+RC27_N="$(grep -c 'YAML GLOB REMOVED' "$RC27_MUT_YML" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the glob mutation applied $RC27_N times, not exactly 1 — build_workflow_index's loop moved, so the proof below is vacuous"
+else
+  ok "the glob mutation applies exactly once: a copy of the generator indexes \`*.yml\` only"
+  rc27_gen "$RC27_MUT_YML" "$RC27_YM" "$RC27_YMF" ymA ymB
+  if excluded_by "$RC27_OUT" "Yaml gate" "S0 UNMAPPED" && kept_in "$RC27_OUT" "Yml gate"; then
+    ok "…and WITHOUT it the .yaml job draws the factually FALSE \`S0 UNMAPPED: no job … publishes this name\` while its .yml sibling is untouched (mutation-proven able to fail)"
+  else
+    bad "the yml-only copy did not report the .yaml job UNMAPPED (exit $RC27_RC) — the clause above is vacuous: $(grep -E '^  (keep|exclude) ' <<<"$RC27_OUT" | head -2 | tr '\n' '⏎')"
+  fi
+fi
+
+# ── (e) ONE CONTEXT ON BOTH LISTS ───────────────────────────────────────────
+# The mirror of §14b's STALE refusal: a name the COMMITTED spec REQUIRES that
+# this run derives as EXCLUDED. The check list is a base-first union, so the
+# committed row rode through while the derived exclusion was appended beside it,
+# and the emit put ONE CONTEXT ON BOTH LISTS at exit 0 — reproduced by adding
+# `continue-on-error: true` to an already-required job. Nothing downstream can
+# notice: required-checks-verify.sh contains zero reads of `.exclusions`.
+# The second job exists so selection is non-empty; without it the run refuses
+# with "selection produced ZERO contexts" and the clause proves nothing.
+RC27_BOTH="$RC27/both"; RC27_BOTHF="$RC27/both-fix"
+mkdir -p "$RC27_BOTH" "$RC27_BOTHF"
+cat > "$RC27_BOTH/b.yml" <<'YML'
+name: Both
+on: [pull_request]
+jobs:
+  g:
+    name: Both gate
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+  k:
+    name: Keeper gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+RC27_NAMES=("Both gate" "Keeper gate"); rc27_feed "$RC27_BOTHF" btA btB mainA
+printf 'mainA\n' > "$RC27_BOTHF/main-shas.txt"
+RC27_BASE="$TMP/rc27-base.json"
+jq '.protection.required_status_checks.checks = [{"context":"Both gate","app_id":15368},
+                                                 {"context":"Keeper gate","app_id":15368}]
+    | .exclusions = []' "$SPEC" > "$RC27_BASE"
+RC27_B_OUT="$(bash "$GEN" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+  --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-both.json" 2>&1)" \
+  && RC27_B_RC=0 || RC27_B_RC=$?
+if [ "$RC27_B_RC" -ne 0 ] && grep -q "REQUIRED × EXCLUDED" <<<"$RC27_B_OUT" \
+   && grep -q "CONTRADICTION  Both gate" <<<"$RC27_B_OUT"; then
+  ok "adding \`continue-on-error: true\` to an already-required job REFUSES by name (exit $RC27_B_RC, \`REQUIRED × EXCLUDED\`) instead of emitting one context on both lists"
+else
+  bad "the both-lists contradiction was not refused (exit $RC27_B_RC): $(head -2 <<<"$RC27_B_OUT" | tr '\n' '⏎')"
+fi
+emit_spec "$TMP/rc27-demoted.json" \
+  bash "$GEN" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+  --merge-base "$RC27_BASE" --sha btA --sha btB --expect-demoted "Both gate" \
+  --out "$TMP/rc27-demoted.json" || true
+if jq -e '([.protection.required_status_checks.checks[].context] | index("Both gate") | not)
+          and ([.exclusions[].context] | index("Both gate"))
+          and ([.protection.required_status_checks.checks[].context] | index("Keeper gate"))' \
+     "$TMP/rc27-demoted.json" >/dev/null 2>&1; then
+  ok "…and --expect-demoted DROPS the REQUIRED row rather than carrying both — the operator is saying the derivation is right and the check must stop gating (a protection change, so it is typed, never computed)"
+else
+  fail_emit "$(why_emit "the demotion acknowledgement left the spec self-contradictory: $(jq -c '{req:[.protection.required_status_checks.checks[].context],exc:[.exclusions[].context]}' "$TMP/rc27-demoted.json" 2>&1)")"
+fi
+RC27_MUT_CON="$TMP/gen-nocontra.sh"
+sed 's%^    if \[ -n "\$contra" \]; then$%    if false; then # DEMOTION REFUSAL REMOVED%' "$GEN" > "$RC27_MUT_CON"
+RC27_N="$(grep -c 'DEMOTION REFUSAL REMOVED' "$RC27_MUT_CON" || true)"
+if [ "$RC27_N" -ne 1 ]; then
+  bad "the contradiction-refusal mutation applied $RC27_N times, not exactly 1 — its condition moved, so the proof below is vacuous"
+else
+  ok "the contradiction-refusal mutation applies exactly once: a copy of the generator no longer refuses"
+  bash "$RC27_MUT_CON" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+    --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-nocontra.json" >/dev/null 2>&1 || true
+  RC27_BOTHLIST="$(jq -c '[.protection.required_status_checks.checks[].context] as $r
+                          | [.exclusions[].context] as $e
+                          | { both: ($r - ($r - $e)) }' "$TMP/rc27-nocontra.json" 2>&1)"
+  if [ "$RC27_BOTHLIST" = '{"both":["Both gate"]}' ]; then
+    ok "…and WITHOUT it the IDENTICAL run writes $RC27_BOTHLIST at exit 0, silently — the shape cgsiw-s2 measured, reproduced on demand (mutation-proven able to fail)"
+  else
+    bad "the unguarded run did not emit one context on both lists (got $RC27_BOTHLIST) — the refusal clause above is vacuous"
+  fi
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
