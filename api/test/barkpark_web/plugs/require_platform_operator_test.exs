@@ -131,13 +131,13 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
     do: Auth.create_token(raw, label, @dataset, ["read", "write", "admin"], ws_id)
 
   defp as(bearer) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
   end
 
   defp anon do
-    build_conn() |> put_req_header("content-type", "application/json")
+    scoped_conn() |> put_req_header("content-type", "application/json")
   end
 
   # Arm/disarm the allowlist through Application env (the same key the plug
@@ -214,7 +214,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       {:ok, token} = Auth.verify_token(ctx.admin_a)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Conn.assign(:api_token, token)
         |> RequirePlatformOperator.call([])
 

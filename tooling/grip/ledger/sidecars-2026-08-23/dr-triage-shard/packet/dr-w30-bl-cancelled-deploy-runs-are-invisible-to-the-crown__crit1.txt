@@ -1,0 +1,1 @@
+A decision states whether crown-reconcile's POPULATION line will name cancelled runs as a distinct class rather than omitting them. Evidence: the charter D number.

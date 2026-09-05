@@ -121,4 +121,63 @@ defmodule BarkparkWeb.QuizLiveTest do
 
     assert render(host) =~ "SWAPPED LIVE"
   end
+
+  describe "room capacity refusal on the host mount" do
+    # `Room.ensure/1` returns `{:error, :max_children}` BY DESIGN once
+    # `Quiz.RoomSupervisor` is at its cap (plugins/quiz.ex: max_children 10_000,
+    # "a memory-DoS backstop"). Filling 10_000 rooms in a test is not the point —
+    # the REFUSAL is. So the registered name `Barkpark.Quiz.RoomSupervisor` is
+    # re-pointed for the duration of these tests at a DynamicSupervisor with
+    # `max_children: 0`, which makes the REAL `Room.ensure/1` take its REAL
+    # refusal branch through the REAL router and the REAL mount. The plugin's own
+    # supervisor is never terminated — only the name is swapped and restored —
+    # so nothing in the supervision tree restarts. Safe because this module is
+    # `async: false` (ExUnit runs no other module concurrently with it).
+    setup do
+      real = Process.whereis(Barkpark.Quiz.RoomSupervisor)
+      assert is_pid(real), "the quiz plugin must be running for this fixture to mean anything"
+
+      Process.unregister(Barkpark.Quiz.RoomSupervisor)
+
+      {:ok, full} =
+        DynamicSupervisor.start_link(
+          strategy: :one_for_one,
+          max_children: 0,
+          name: Barkpark.Quiz.RoomSupervisor
+        )
+
+      Process.unlink(full)
+
+      on_exit(fn ->
+        if Process.alive?(full), do: Supervisor.stop(full)
+        Process.register(real, Barkpark.Quiz.RoomSupervisor)
+      end)
+
+      :ok
+    end
+
+    test "the fixture really does produce the refusal (non-vacuity)", %{pin: pin} do
+      assert Quiz.ensure_room(pin) == {:error, :max_children}
+    end
+
+    test "the host mount degrades to an honest capacity state instead of MatchError-ing",
+         %{conn: conn, pin: pin} do
+      # Pre-fix this line RAISES: `{:ok, _pid} = Quiz.ensure_room(pin)` is a
+      # MatchError inside the connected mount, so `live/2` never returns.
+      {:ok, view, html} = live(conn, "/quiz/host/#{pin}")
+
+      assert html =~ "at room capacity"
+      assert html =~ "q-status"
+      # The recovery path is REACHABLE, not just described in prose.
+      assert html =~ ~s(href="/quiz/host/#{pin}")
+      # And the room view is NOT rendered against an absent room. Refute on the
+      # QUESTION text, not on a class name: the quiz root layout inlines the
+      # whole stylesheet, so `refute html =~ "q-bar-track"` matches the CSS rule
+      # and fails even when no bar is rendered.
+      refute html =~ "powers Barkpark"
+      # The view is a live, mounted process — not a crashed one the client
+      # will reconnect-loop against.
+      assert render(view) =~ "Hyperquiz"
+    end
+  end
 end

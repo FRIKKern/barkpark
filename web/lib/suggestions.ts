@@ -55,6 +55,25 @@ import type { PopularQuery } from "./find.ts";
 export const POPULAR_CHIP_LIMIT = 6;
 
 /**
+ * Most words a popular query may have to earn a chip.
+ *
+ * Same value as the search-starter fork's `POPULAR_CHIP_MAX_WORDS`
+ * (`templates/search-starter/lib/find.ts`) — deliberately NOT a new threshold.
+ * This pair already carries unpaid divergences; the chip rule is not where a
+ * seventh gets added for free.
+ */
+export const POPULAR_CHIP_MAX_WORDS = 2;
+
+/**
+ * Longest a popular query may be (characters) to earn a chip.
+ *
+ * Same value as the fork's `POPULAR_CHIP_MAX_CHARS`. Two words can still be
+ * long ("internationalisation checklist"), so the character bound is not
+ * implied by the word bound and both are needed.
+ */
+export const POPULAR_CHIP_MAX_CHARS = 24;
+
+/**
  * The finder's reading of one suggestions answer.
  *
  * `error` carries the SAME distinction the route draws: `null` means the
@@ -87,6 +106,49 @@ function toPopular(v: unknown): PopularQuery | null {
 }
 
 /**
+ * Curate the raw popular-query pool down to the chips worth offering.
+ *
+ * THE DEFECT THIS RETIRES: this module CAPPED the pool at
+ * {@link POPULAR_CHIP_LIMIT} and stopped there. `/api/find?suggest` returns the
+ * query LOG verbatim, and a Barkpark instance's log is mostly machine exhaust —
+ * agents probing with whole sentences ("research coverage ledger"), operator
+ * syntax, one-off spelunking. A chip row is a promise ("these are the searches
+ * worth trying"), so an uncapped-but-uncurated row shipped that promise over
+ * telemetry: a single whole-sentence agent probe could occupy one of the six
+ * visible slots, and "Deploy" and "deploy" could occupy two.
+ *
+ * The rule is the search-starter fork's `curatePopularQueries`, thresholds and
+ * all: at most {@link POPULAR_CHIP_MAX_WORDS} words AND at most
+ * {@link POPULAR_CHIP_MAX_CHARS} characters, deduped case-insensitively (the
+ * log records "Deploy" and "deploy" separately), capped at
+ * {@link POPULAR_CHIP_LIMIT}. Input rank order is preserved — the pool arrives
+ * sorted by popularity and the chip row's order IS that ranking.
+ *
+ * DEGRADES TO NOTHING BY DESIGN, AND THAT IS NOT AN ERROR: a fresh dataset has
+ * an empty log, and a dev-heavy one can have a log with nothing short in it.
+ * Both yield `[]` — the caller renders no row rather than a row of leftovers,
+ * and {@link readSuggestions} still reports `error: null`, because "everything
+ * we saw was too long" is a FACT ABOUT THE CORPUS, not a failure to reach
+ * upstream. Curation must never be able to turn an answered empty into an
+ * unanswered one; that distinction is the reason this module exists.
+ */
+export function curatePopularQueries(pool: PopularQuery[]): PopularQuery[] {
+  const seen = new Set<string>();
+  const chips: PopularQuery[] = [];
+  for (const entry of pool) {
+    const query = entry.query.trim();
+    if (!query || query.length > POPULAR_CHIP_MAX_CHARS) continue;
+    if (query.split(/\s+/).length > POPULAR_CHIP_MAX_WORDS) continue;
+    const key = query.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    chips.push({ ...entry, query });
+    if (chips.length >= POPULAR_CHIP_LIMIT) break;
+  }
+  return chips;
+}
+
+/**
  * Read the route's answer.
  *
  * Tolerant of shape drift in the same spirit as `readQueryPage`: a body that is
@@ -105,11 +167,18 @@ export function readSuggestions(json: unknown): SuggestionsReading {
   }
 
   const body = json as SuggestionsBody;
-  const popular = Array.isArray(body.popular)
-    ? body.popular
-        .map(toPopular)
-        .filter((p): p is PopularQuery => p !== null)
-        .slice(0, POPULAR_CHIP_LIMIT)
+  // NOTE THE SHAPE: `answered` is computed from `Array.isArray(body.popular)`,
+  // NOT from `popular.length`. Curation can legitimately empty the list, and an
+  // emptied list must keep reading as "the upstream answered" — see the receipt
+  // reasoning below. Deriving the receipt from the list's length instead is the
+  // one edit that would silently re-fuse the two empties.
+  const answered = Array.isArray(body.popular);
+  const popular = answered
+    ? curatePopularQueries(
+        (body.popular as unknown[])
+          .map(toPopular)
+          .filter((p): p is PopularQuery => p !== null),
+      )
     : [];
 
   // The route always sends `error` (null or a string). A body without it is an
@@ -123,7 +192,7 @@ export function readSuggestions(json: unknown): SuggestionsReading {
   if (!("error" in body)) {
     return {
       popular,
-      error: Array.isArray(body.popular)
+      error: answered
         ? null // a readable list without a receipt: the list itself is the answer
         : "suggestions response carried neither a list nor a reason",
     };

@@ -1,0 +1,1 @@
+If a :deployment_failed dispatcher is ever added, a test fails or a comment is proven stale — state which mechanism you chose.

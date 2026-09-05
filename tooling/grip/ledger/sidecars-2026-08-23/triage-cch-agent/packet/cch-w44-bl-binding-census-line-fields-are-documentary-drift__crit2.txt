@@ -1,0 +1,1 @@
+EXPECT { total: 79, elevated: 40, predicated: 22, unpredicated: 18 } and the classification totals line are byte-unchanged. Evidence: the totals lines before and after.

@@ -136,8 +136,15 @@ defmodule Barkpark.PluginFreeBootTest do
   # monorepo keeps the module compiled, so there is no UndefinedFunctionError;
   # audit felix-d03 confirmed no crash under :plugins []. These are the
   # accidental-class couplings the broadened guard now TRACKS so a NEW one
-  # gets review. `render/walk.ex` is the compile-time Sheets error-vocabulary
-  # edge (finding F2, filed task-b88cd354c8ccaca3 — fixed separately).
+  # gets review. `render/walk.ex` USED to sit here twice over — the compile-time
+  # Sheets error-vocabulary edge (finding F2, task-b88cd354c8ccaca3) and then
+  # the `CondFormat.valid_bg?/1` background-validator call
+  # (task-5641006da86bfa74, the one real `portable_doc>sheets` edge the
+  # concept-map boundary gate named). Both are paid down: the walker mirrors
+  # each RULE locally and `sheets_parity_test` locks the mirrors, so core
+  # render resolves nothing in the plugin namespace and the entry is GONE from
+  # the list below. That is the shape a sanctioned coupling is supposed to
+  # have — a shorter list, not a longer one.
   @coupling_guarded_runtime [
     {"Barkpark.Plugins.Media", "lib/barkpark/media.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/delivery/asset_response.ex"},
@@ -160,7 +167,6 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/relations.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark/content/sheets.ex"},
-    {"Barkpark.Plugins.Sheets", "lib/barkpark/portable_doc/render/walk.ex"},
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark/content/papers/block_ops.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/backfill.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/projector_worker.ex"},
@@ -490,7 +496,7 @@ defmodule Barkpark.PluginFreeBootTest do
     end
 
     test "GET /api/schemas returns exactly the 6 PUBLIC seed schema names" do
-      conn = build_conn() |> get("/api/schemas")
+      conn = BarkparkWeb.ConnCase.scoped_conn() |> get("/api/schemas")
       body = json_response(conn, 200)
 
       schema_names =
@@ -562,7 +568,7 @@ defmodule Barkpark.PluginFreeBootTest do
         ])
 
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw_token)
         |> get("/v1/graph/#{doc_id}")
 
@@ -634,7 +640,7 @@ defmodule Barkpark.PluginFreeBootTest do
         Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
 
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw_token)
         |> put_req_header("content-type", "application/json")
         |> post(
@@ -712,7 +718,7 @@ defmodule Barkpark.PluginFreeBootTest do
   end
 
   defp get_following_redirects(path, hops) do
-    conn = build_conn() |> get(path)
+    conn = BarkparkWeb.ConnCase.scoped_conn() |> get(path)
 
     if conn.status in [301, 302] do
       [location] = get_resp_header(conn, "location")

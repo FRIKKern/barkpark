@@ -1,0 +1,1 @@
+The gauge is SPLIT into merge -> run-start and run-start -> serving, and the PR body explains why with the measured 5h24m47s runner-queue outlier (run 31121348964) whose actual deploy took 8m52s.

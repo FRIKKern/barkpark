@@ -92,6 +92,17 @@ defmodule BarkparkCloud.Accounts.UserToken do
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
     field :last_used_at, :utc_datetime_usec
+    # cch-w30-bl — the PAT expiry warning's ONE-SHOT BUDGET. Stamped by
+    # `Workers.TokenExpiryWarningWorker` with an atomic
+    # `UPDATE … WHERE expiry_warned_at IS NULL`, so the daily cron mails the
+    # token's OWNER exactly once no matter how many passes see the same row.
+    #
+    # DELIBERATELY ABSENT FROM BOTH CHANGESETS. Nothing a client sends may set
+    # it: it is not a user preference, it is the worker's own claim ledger, and
+    # a castable stamp would let a mint request pre-burn the warning it is
+    # supposed to receive. The worker writes it through `Repo.update_all`, which
+    # does not run a changeset, so the omission costs nothing.
+    field :expiry_warned_at, :utc_datetime_usec
     # email-verification-recovery: the address a lifecycle token (confirm /
     # change_email) was issued FOR, and the per-token wrong-code counter that
     # backs the email-change brute-force lockout.
@@ -109,6 +120,14 @@ defmodule BarkparkCloud.Accounts.UserToken do
     # that invents. Session-only; `pat_changeset/2` has its own cast list and can
     # neither receive nor expose it.
     field :origin, :string
+    # STREAM BINDING (cch-w53-bl): on a `context = "sse"` ticket row, the id of
+    # the `context = "session"` row that minted it. NULL means "not bound" —
+    # every ticket row that predates the column, plus any mint site with no
+    # honest answer — and the SSE loop then falls back to the user-wide liveness
+    # check. Never inferred, never backfilled: a guessed binding would tie a
+    # live stream to the WRONG device, which is worse than the unbound stream
+    # this closes. Ticket-only; `pat_changeset/2` neither casts nor exposes it.
+    field :session_token_id, :binary_id
 
     belongs_to :user, BarkparkCloud.Accounts.User
     belongs_to :team, BarkparkCloud.Accounts.Team
@@ -179,6 +198,12 @@ defmodule BarkparkCloud.Accounts.UserToken do
       # round-trip probe in accounts_test.exs (struct read AND raw SQL read) is
       # the only thing that reds when this line goes.
       :origin,
+      # Same allowlist hazard as `:origin` above — `cast/3` discards an unlisted
+      # key in silence, so dropping this line would write NULL on every ticket
+      # row and quietly demote per-row stream revocation back to the user-wide
+      # count. The round-trip probe in router_sse_per_row_revoke_test.exs is what
+      # reds when it goes.
+      :session_token_id,
       :last_used_at,
       :sent_to,
       :failed_attempts,

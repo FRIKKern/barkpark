@@ -1,0 +1,694 @@
+{
+  "schema": "barkpark.pds.pre-gate-papers/1",
+  "title": "Pre-gate published Papers \u2014 the grandfather register",
+  "what_this_is": "The NAMED set of already-published Barkpark Papers whose stored blocks the Paper publish gate (Barkpark.Content.Lifecycle.prepare_paper_render_shapes/2) would refuse today. The gate runs at the publish DOOR only; nothing re-gates a published row, so these predate the gate and keep serving. The 2026-09-02 ruling GRANDFATHERS them: they stay readable and are never retroactively refused; the next EDIT of each must satisfy the gate; each carries a visible \"pre-gate\" badge until then.",
+  "ruling": {
+    "date": "2026-09-02",
+    "verdict": "grandfather",
+    "recorded_by": "lead-pds worker pds-w19, task-597ea451072da061",
+    "binds": "new publishes and EDITS",
+    "does_not_bind": "reads of already-published Papers \u2014 never a retroactive refusal",
+    "backfill_policy": "Backfill only where a purely mechanical fix exists; otherwise the next EDIT must satisfy the gate and the Paper carries a pre-gate badge until then.",
+    "ratchet": "scripts/pds-pre-gate-papers-check.sh recounts the live corpus and REFUSES if any refused published Paper is not named here. The set may SHRINK without a new ruling; it may not GROW.",
+    "edit_time_mechanism": "api/test/barkpark/content/pds_w49_pre_gate_edit_rule_test.exs pins that publishing an edit of a Paper stored in either grandfathered shape is REFUSED, so \"the next edit must satisfy the gate\" is a mechanism and not prose."
+  },
+  "measurement": {
+    "measured_at": "2026-09-02T10:00Z",
+    "repo_sha": "02c3b735421eae54f66bc58c49da74228a9736ba",
+    "repo_ref": "origin/main",
+    "corpus": "bp doc ls paper --perspective published --fields blocks,body (dataset production)",
+    "denominator": 1050,
+    "denominator_source": "bp doc ls paper --perspective published --limit 1 --count -> .total",
+    "pages": 11,
+    "page_limit": 100,
+    "failed_pages": 0,
+    "refused_count": 38,
+    "refused_share": "3.6%",
+    "by_block_location": {
+      "blocks": 1019,
+      "none": 31
+    },
+    "predicate": [
+      "Barkpark.PortableDoc.Projection.read_blocks/1",
+      "Barkpark.Content.Papers.BlockOps.normalize_render_shapes/1",
+      "Barkpark.Content.Papers.BlockOps.validate_render_shapes/1"
+    ],
+    "predicate_runner": "MIX_ENV=test mix run --no-start scripts/pds-pre-gate-papers-predicate.exs",
+    "instrument_non_blindness": "1019 of 1050 papers carry a top-level \"blocks\" list and 31 carry no readable block list at all; ZERO are body-located. An all-none location census would mean the fetch projected the wrong fields, not that the corpus is clean \u2014 the check script refuses that case."
+  },
+  "classes": [
+    {
+      "class": "legacy_header_key_bare_string_cells",
+      "papers": 37,
+      "errors": 440,
+      "refusal_reason": "table_cell_no_inline_content",
+      "refusal_message": "blocks[N].head.cells[M] has no renderable inline content",
+      "offending_cell": "table block `header` (legacy spelling of `head`) whose cells are bare strings",
+      "reader_behaviour": "GRANDFATHERED. The reader renders this shape CORRECTLY \u2014 proven by composing the live block through Render.Compose.compose_block/2: the header text reaches the page as <th ...><span>Moment</span></th>. The refusal is a NORMALISER/VALIDATOR key asymmetry, not reader debt: BlockOps.validate_render_shapes/1 reads `Map.get(block, \"head\") || Map.get(block, \"header\")`, while BlockOps.normalize_table_leaves/1 rescues bare-string cells under `\"head\"` ONLY. So the legacy `\"header\"` spelling is validated but never normalised. Nothing is lost to a reader today; the cost of the ruling is that the next EDIT of any of these 37 Papers is refused on a header that renders perfectly.",
+      "reader_impact": "none",
+      "ruling": "grandfathered",
+      "mechanical_fix": {
+        "exists": true,
+        "kind": "normaliser, not per-paper backfill",
+        "where": "api/lib/barkpark/content/papers/block_ops.ex \u2014 normalize_table_leaves/1",
+        "patch": "normalise the legacy \"header\" spelling the validator already reads, exactly as \"head\" is normalised",
+        "applied": false,
+        "why_not_applied": "It changes GATE behaviour for every future publish, which is a new ruling, not the execution of this one. It is also outside this row's fence (api/lib) and this row's criteria are met without it. Filed as follow-up work; see PR body."
+      },
+      "ids": [
+        "agent-flight-recorder-charter",
+        "authoring-excellence-wave-2026-07-12",
+        "authoring-excellence-wave-2026-07-13c",
+        "authoring-excellence-wave-2026-07-13d",
+        "barkpark-chat-tui-wave-2026-07-12",
+        "barkpark-tasks-mobile-wave-2026-07-28-last-mile",
+        "compact-grep-vs-optical-archive",
+        "compact-vs-image-blur-budget",
+        "context-compression-benchmark",
+        "context-compression-benchmark-gen1",
+        "ctx-compression-capstone",
+        "ctx-compression-spend-census",
+        "desk-structure-bp-tui",
+        "epic-cycle-research-program-abcde",
+        "fleet-primer-proof",
+        "github-bridge-wave-2026-07-13",
+        "headroom-context-compression-study",
+        "intuition-atlas-verdict",
+        "legendary-paper-task-quality-takeover-2026-07-15",
+        "optical-bundles-across-models",
+        "optical-bundles-task-ab-prereg",
+        "optical-bundles-task-ab-results",
+        "optical-compression-at-scale",
+        "optical-compression-experiment-protocol",
+        "optical-compression-findings-illustrated",
+        "optical-compression-novelty-audit",
+        "optical-compression-research-report",
+        "optical-compression-text-as-image-tokens",
+        "optical-duels-prereg",
+        "optical-duels-results",
+        "paper-cross-reader-reliability-wave-1-2026-07-17",
+        "paper-cross-reader-reliability-wave-2-2026-07-17",
+        "scaffy-benchmark",
+        "scaffy-duels-prereg",
+        "superfile-lessons-bp-tui",
+        "the-picture-trick-plain-story",
+        "whole-corpus-oracle-verdict"
+      ]
+    },
+    {
+      "class": "double_wrapped_head_row_list",
+      "papers": 1,
+      "errors": 5,
+      "refusal_reason": "table_cell_no_inline_content",
+      "refusal_message": "blocks[N].head.cells[M] has no renderable inline content",
+      "offending_cell": "table block `head` holding a list of ROW objects instead of a list of cells",
+      "reader_behaviour": "GRANDFATHERED, WITH REAL READER LOSS. `head` holds a LIST containing a ROW object (`[%{\"cells\" => [cell, cell]}]`) instead of the cells themselves. Render.Compose table_row_cells/1 List.wraps the outer list, so the ROW OBJECT becomes the single cell; table_cell_content/1 falls to its catch-all and returns the map; Inline.compose_inline_children/1 has no map clause and returns []. The page answers 200 and renders ONE EMPTY <th> where two labels \u2014 \"Corner\" and \"Verdict\" \u2014 were authored. This is the only Paper of the 38 whose readers actually lose content.",
+      "reader_impact": "blank_header_cell",
+      "ruling": "grandfathered",
+      "mechanical_fix": {
+        "exists": true,
+        "kind": "per-paper backfill, derivable",
+        "where": "the stored Paper studio-space-priority-desk-advance-2026-07-19, block dg-cov-t",
+        "patch": "unwrap TWICE, to the CELLS: head: [%{\"cells\" => cs}] -> head: cs. The obvious one-level unwrap (head: %{\"cells\" => cs}) is a TRAP: the gate ACCEPTS it (validate_render_shapes/1 routes a %{\"cells\" => list} head through render_table_row_errors/2 and finds every cell renderable) but Render.Compose only promotes head to a header row when is_list(declared_head), so a MAP head renders NO <thead> at all. Gate-green, header still gone. Pinned by pds_w49_pre_gate_edit_rule_test.exs \"the OBVIOUS repair ... satisfies the gate and STILL loses the header\".",
+        "applied": false,
+        "why_not_applied": "A live write to a published Paper on the prod ledger. This worker was fenced to tooling/pds, scripts/pds-* and one test file and told not to rewrite any paper. This is the ONE row where the ruling's backfill clause bites; it is handed to the lead named, with the exact derivable patch, rather than executed unauthorised."
+      },
+      "ids": [
+        "studio-space-priority-desk-advance-2026-07-19"
+      ],
+      "gate_green_is_not_reader_green": "For this class the gate is NOT a proxy for the reader: one repair satisfies the gate and leaves the header missing. Any backfill of this row must be verified at the RENDERER, not at the gate."
+    }
+  ],
+  "papers": [
+    {
+      "id": "agent-flight-recorder-charter",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 10,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T03:41:02.766471Z",
+      "updated_at_at_measure": "2026-08-17T15:40:31.118336Z",
+      "rev_at_measure": "6fa749555649eaceafad2a5c56472963"
+    },
+    {
+      "id": "authoring-excellence-wave-2026-07-12",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 3,
+      "first_error": "blocks[16].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-12T10:25:31.533365Z",
+      "updated_at_at_measure": "2026-08-17T15:40:21.940588Z",
+      "rev_at_measure": "ca67a7d6640df525c6d3f432528d31d1"
+    },
+    {
+      "id": "authoring-excellence-wave-2026-07-13c",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 14,
+      "first_error": "blocks[6].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T10:54:21.604043Z",
+      "updated_at_at_measure": "2026-08-17T15:40:37.287407Z",
+      "rev_at_measure": "97d74b1855b6c2edf1350bbee56f8dbc"
+    },
+    {
+      "id": "authoring-excellence-wave-2026-07-13d",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 14,
+      "first_error": "blocks[13].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T12:34:42.381131Z",
+      "updated_at_at_measure": "2026-08-17T15:40:49.536676Z",
+      "rev_at_measure": "77f63e6e5567859d7917f1839b2977c1"
+    },
+    {
+      "id": "barkpark-chat-tui-wave-2026-07-12",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 22,
+      "first_error": "blocks[13].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-12T14:33:46.274456Z",
+      "updated_at_at_measure": "2026-08-17T15:40:50.229679Z",
+      "rev_at_measure": "4c12c1d51dcf7dcbbc6025e7d68ab4ff"
+    },
+    {
+      "id": "barkpark-tasks-mobile-wave-2026-07-28-last-mile",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 4,
+      "first_error": "blocks[47].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-28T21:08:19.334854Z",
+      "updated_at_at_measure": "2026-08-17T15:40:20.205128Z",
+      "rev_at_measure": "02d0a1c8bc0e987069354d56547b40e9"
+    },
+    {
+      "id": "compact-grep-vs-optical-archive",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 7,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T05:13:40.024570Z",
+      "updated_at_at_measure": "2026-08-17T15:40:31.141854Z",
+      "rev_at_measure": "f6753434067b11d6c08af6d34b9ad095"
+    },
+    {
+      "id": "compact-vs-image-blur-budget",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 9,
+      "first_error": "blocks[8].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T03:45:24.298111Z",
+      "updated_at_at_measure": "2026-08-17T15:40:44.154020Z",
+      "rev_at_measure": "77a1b498d9947772f39d087ee999eb39"
+    },
+    {
+      "id": "context-compression-benchmark",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 21,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T14:42:13.900042Z",
+      "updated_at_at_measure": "2026-08-17T15:40:33.607669Z",
+      "rev_at_measure": "08fce5a0fd0dded0ebf4c68503fb6616"
+    },
+    {
+      "id": "context-compression-benchmark-gen1",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 13,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T15:30:57.601099Z",
+      "updated_at_at_measure": "2026-08-17T15:40:19.798616Z",
+      "rev_at_measure": "fa49469437b9c0ee815d4198ebc423b1"
+    },
+    {
+      "id": "ctx-compression-capstone",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 44,
+      "first_error": "blocks[14].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-23T15:22:48.130859Z",
+      "updated_at_at_measure": "2026-08-17T15:40:29.081604Z",
+      "rev_at_measure": "c68e6f3f7c525018db953f79a659ba17"
+    },
+    {
+      "id": "ctx-compression-spend-census",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 46,
+      "first_error": "blocks[6].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-23T15:08:46.826436Z",
+      "updated_at_at_measure": "2026-08-17T15:40:39.907259Z",
+      "rev_at_measure": "51ec88840e6130f4aae9d5e419bbff4c"
+    },
+    {
+      "id": "desk-structure-bp-tui",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 8,
+      "first_error": "blocks[14].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-23T14:59:06.787050Z",
+      "updated_at_at_measure": "2026-08-17T15:40:47.858637Z",
+      "rev_at_measure": "a7bebe1b1c8a89bc74afc02bcd478c34"
+    },
+    {
+      "id": "epic-cycle-research-program-abcde",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 24,
+      "first_error": "blocks[4].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-22T07:05:38.441016Z",
+      "updated_at_at_measure": "2026-08-17T15:40:31.698292Z",
+      "rev_at_measure": "1a2af20e6989d42e85c78da0683b7cac"
+    },
+    {
+      "id": "fleet-primer-proof",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 4,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T10:20:45.191599Z",
+      "updated_at_at_measure": "2026-08-17T15:40:32.078691Z",
+      "rev_at_measure": "b05de34379a3a9ceb3cffb87997db153"
+    },
+    {
+      "id": "github-bridge-wave-2026-07-13",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 13,
+      "first_error": "blocks[8].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T09:38:16.054625Z",
+      "updated_at_at_measure": "2026-08-17T15:40:28.116131Z",
+      "rev_at_measure": "b1fbd276ee12d158cee77731b8fbd8e0"
+    },
+    {
+      "id": "headroom-context-compression-study",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 6,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-23T13:38:39.677241Z",
+      "updated_at_at_measure": "2026-08-17T15:40:18.771326Z",
+      "rev_at_measure": "1f965dc7bcd91e0d6ce732f38d529b47"
+    },
+    {
+      "id": "intuition-atlas-verdict",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 7,
+      "first_error": "blocks[6].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T10:40:06.332880Z",
+      "updated_at_at_measure": "2026-08-17T15:40:53.316603Z",
+      "rev_at_measure": "5f648a6fdd2508fcf77e1864e2c082d1"
+    },
+    {
+      "id": "legendary-paper-task-quality-takeover-2026-07-15",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 4,
+      "first_error": "blocks[19].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-15T08:01:51.916448Z",
+      "updated_at_at_measure": "2026-08-17T15:40:31.170268Z",
+      "rev_at_measure": "3103f8286f952f3dca5c84f7555e3ce0"
+    },
+    {
+      "id": "optical-bundles-across-models",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 7,
+      "first_error": "blocks[10].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T12:55:35.914011Z",
+      "updated_at_at_measure": "2026-08-17T15:40:36.297269Z",
+      "rev_at_measure": "4b746f7f42899cebc866e3e3c270f1d1"
+    },
+    {
+      "id": "optical-bundles-task-ab-prereg",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 4,
+      "first_error": "blocks[6].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-15T21:49:42.080969Z",
+      "updated_at_at_measure": "2026-08-17T15:40:33.645801Z",
+      "rev_at_measure": "ebe9ba4cb571085236a699e1bd47fc08"
+    },
+    {
+      "id": "optical-bundles-task-ab-results",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 10,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-15T22:16:58.656673Z",
+      "updated_at_at_measure": "2026-08-17T15:40:42.315745Z",
+      "rev_at_measure": "09d25de318fce6217ede1020d826367e"
+    },
+    {
+      "id": "optical-compression-at-scale",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 17,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T22:37:03.200191Z",
+      "updated_at_at_measure": "2026-08-17T15:40:29.025192Z",
+      "rev_at_measure": "6de3a24279f09821cad090c6d5fafa50"
+    },
+    {
+      "id": "optical-compression-experiment-protocol",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 9,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T14:18:12.656375Z",
+      "updated_at_at_measure": "2026-08-17T15:40:19.810748Z",
+      "rev_at_measure": "023e23e9ab3625a6646e1a10cb25a23c"
+    },
+    {
+      "id": "optical-compression-findings-illustrated",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 15,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T13:39:25.133533Z",
+      "updated_at_at_measure": "2026-08-17T15:40:13.224746Z",
+      "rev_at_measure": "3c0708b7be4db2f7599d74314822f2e1"
+    },
+    {
+      "id": "optical-compression-novelty-audit",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 3,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T11:39:45.476453Z",
+      "updated_at_at_measure": "2026-08-17T15:40:22.500583Z",
+      "rev_at_measure": "e23551da66047c129c22691fb2d8d0f7"
+    },
+    {
+      "id": "optical-compression-research-report",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 32,
+      "first_error": "blocks[11].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-15T13:30:16.563873Z",
+      "updated_at_at_measure": "2026-08-17T15:40:19.996946Z",
+      "rev_at_measure": "e8c651f8858055955d532da2e1433d97"
+    },
+    {
+      "id": "optical-compression-text-as-image-tokens",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 7,
+      "first_error": "blocks[11].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-13T13:47:49.772098Z",
+      "updated_at_at_measure": "2026-08-17T15:40:19.908779Z",
+      "rev_at_measure": "c81bf9d5b534d2a537df0ae877ce9e55"
+    },
+    {
+      "id": "optical-duels-prereg",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 3,
+      "first_error": "blocks[5].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T06:37:43.590595Z",
+      "updated_at_at_measure": "2026-08-17T15:40:28.070223Z",
+      "rev_at_measure": "8c9e1e2a2cc4399c216adfca02d2d127"
+    },
+    {
+      "id": "optical-duels-results",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 11,
+      "first_error": "blocks[6].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T07:13:28.996253Z",
+      "updated_at_at_measure": "2026-08-17T15:40:37.766687Z",
+      "rev_at_measure": "bd6b343b2c6263a56acf72eb7e735127"
+    },
+    {
+      "id": "paper-cross-reader-reliability-wave-1-2026-07-17",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 3,
+      "first_error": "blocks[11].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T04:10:55.337965Z",
+      "updated_at_at_measure": "2026-08-17T15:40:30.118341Z",
+      "rev_at_measure": "9922a837f1a4894f258cbf3b18daf857"
+    },
+    {
+      "id": "paper-cross-reader-reliability-wave-2-2026-07-17",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 2,
+      "first_error": "blocks[4].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T13:08:08.783669Z",
+      "updated_at_at_measure": "2026-08-17T15:40:21.828522Z",
+      "rev_at_measure": "47ad57d4b0f0edd4297f5e29b9cd7fbd"
+    },
+    {
+      "id": "scaffy-benchmark",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 24,
+      "first_error": "blocks[8].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T12:00:36.665821Z",
+      "updated_at_at_measure": "2026-08-17T15:40:41.236125Z",
+      "rev_at_measure": "f7a4e0ac67cd7223dd4f733e3e14ebf8"
+    },
+    {
+      "id": "scaffy-duels-prereg",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 6,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-17T08:52:50.511104Z",
+      "updated_at_at_measure": "2026-08-17T15:40:39.887713Z",
+      "rev_at_measure": "1a7e89c41e2195263e906ec5c210b5de"
+    },
+    {
+      "id": "studio-space-priority-desk-advance-2026-07-19",
+      "class": "double_wrapped_head_row_list",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "blank_header_cell",
+      "error_count": 5,
+      "first_error": "blocks[55].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-19T18:15:26.166165Z",
+      "updated_at_at_measure": "2026-08-17T15:40:28.311104Z",
+      "rev_at_measure": "9bca0feb5984e369bcc792f389847056"
+    },
+    {
+      "id": "superfile-lessons-bp-tui",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 7,
+      "first_error": "blocks[8].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-23T14:18:06.654991Z",
+      "updated_at_at_measure": "2026-08-17T15:40:30.722732Z",
+      "rev_at_measure": "ba17ab593f7d447c0348c823c95b0bc8"
+    },
+    {
+      "id": "the-picture-trick-plain-story",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 3,
+      "first_error": "blocks[33].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T12:27:43.334189Z",
+      "updated_at_at_measure": "2026-08-17T15:40:40.903960Z",
+      "rev_at_measure": "d8baaae7bc2777f8bf66bf146754cbf3"
+    },
+    {
+      "id": "whole-corpus-oracle-verdict",
+      "class": "legacy_header_key_bare_string_cells",
+      "ruling": "grandfathered",
+      "reasons": [
+        "table_cell_no_inline_content"
+      ],
+      "reader_impact": "none",
+      "error_count": 4,
+      "first_error": "blocks[7].head.cells[0] has no renderable inline content",
+      "block_location": "blocks",
+      "published_at": "2026-07-16T09:45:12.172136Z",
+      "updated_at_at_measure": "2026-08-17T15:40:29.037229Z",
+      "rev_at_measure": "085f931b1e02ce0d1f246bbae31224d3"
+    }
+  ]
+}

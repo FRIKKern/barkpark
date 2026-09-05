@@ -1,0 +1,1 @@
+AFTER cch-w42-s3-members-row-reads-the-targets-rank MERGES: the branch is cut from a main that already carries the crown, and every expectation asserts the FIXED render. Evidence: the merge base sha and a git log line showing the crown is an ancestor.

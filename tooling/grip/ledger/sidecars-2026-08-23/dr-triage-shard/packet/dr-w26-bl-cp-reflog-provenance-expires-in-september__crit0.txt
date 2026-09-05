@@ -1,0 +1,1 @@
+Either gc.reflogExpire is pinned on both boxes with the retention stated, or the recorder row is the sole provenance source and the reflog dependency is removed.

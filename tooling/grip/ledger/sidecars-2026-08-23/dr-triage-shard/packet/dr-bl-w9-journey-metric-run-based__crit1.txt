@@ -1,0 +1,1 @@
+attempts-per-release is reported for the whole population AND for the contended subset, each with its journey count on the same line. Evidence: the rendered output.

@@ -15,7 +15,7 @@ defmodule BarkparkWeb.ListenControllerTest do
   forward (a fail-OPEN back-compat seam) was REMOVED (ctx-s3) — an anonymous
   subscriber now re-renders through the fail-closed `%CallerContext{}` clause.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

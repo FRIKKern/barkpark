@@ -122,6 +122,9 @@ defmodule BarkparkWeb.SearchChannel do
 
   @max_limit 100
 
+  # Pagination offset ceiling — see `clamp_offset/1`.
+  @max_offset 100_000
+
   # Sustained rate, deliberately EQUAL to `Plugs.RateLimit`'s read budget
   # (rate_limit.ex `default_per_minute(_, :read)`), so the socket door and the
   # HTTP door price the same capability the same way.
@@ -238,7 +241,7 @@ defmodule BarkparkWeb.SearchChannel do
       # PINNED — never read from `params`. See the moduledoc.
       perspective: :published,
       limit: clamp_limit(params["limit"]),
-      offset: parse_int(params["offset"], 0),
+      offset: clamp_offset(parse_int(params["offset"], 0)),
       engine: params["engine"] || "indx"
     ]
 
@@ -466,6 +469,26 @@ defmodule BarkparkWeb.SearchChannel do
   defp clamp_limit(v) do
     v |> parse_int(50) |> max(1) |> min(@max_limit)
   end
+
+  # SAME pagination ceiling as every other document-search door —
+  # `QueryController.index/2` (:46), `SearchController` (:46, :110) and
+  # `Content.Query`'s own `@max_offset` — and the same shape the media routes
+  # adopted in #15560: `|> max(0) |> min(100_000)`. One hazard, one clamp; two
+  # different ceilings for the same hazard is its own defect.
+  #
+  # THIS is the one document-search door that handed an UNVALIDATED offset into
+  # `Content.search_documents/3`. Today it happens not to bite, and the reason is
+  # worth writing down because it is not a property of this file: the pipeline
+  # threads `offset` into `retriever_opts`, and whether it is bounded depends on
+  # WHICH RETRIEVER answers. `DocumentsRetriever.search/4` re-clamps it
+  # (`max(0) |> min(100_000)`, documents_retriever.ex — a negative offset would
+  # otherwise emit `OFFSET -1` and 500, a giant one is a DoS amplifier); the
+  # `indx` retriever — this channel's DEFAULT engine — ignores `offset`
+  # entirely. So the channel's safety was on loan from a callee, and any future
+  # retriever that honours `offset` inherits the hole. Clamping at the door
+  # makes the bound a property of the input, not of the engine that happens to
+  # be registered.
+  defp clamp_offset(v) when is_integer(v), do: v |> max(0) |> min(@max_offset)
 
   defp parse_int(n, _default) when is_integer(n), do: n
 

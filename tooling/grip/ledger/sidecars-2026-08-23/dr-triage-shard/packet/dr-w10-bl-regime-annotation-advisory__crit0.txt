@@ -1,0 +1,1 @@
+The census annotates its pinned window with the count of distinct box code revisions it spans and the timestamp of the first change

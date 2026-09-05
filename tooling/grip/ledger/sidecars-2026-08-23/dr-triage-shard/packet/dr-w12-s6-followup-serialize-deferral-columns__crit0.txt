@@ -1,0 +1,1 @@
+deferral_depth, deferral_bound and deferral_cause appear on the deployment JSON serializer, and a test asserts all three survive a round trip including the NULL case for pre-W12 rows (the migration deliberately did not backfill). Evidence: the serializer diff and the passing test name.

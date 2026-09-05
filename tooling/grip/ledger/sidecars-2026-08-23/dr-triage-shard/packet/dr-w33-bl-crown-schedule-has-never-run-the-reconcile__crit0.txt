@@ -1,0 +1,1 @@
+A SCHEDULED (event=schedule) crown-reconcile run is observed reaching step 5 and producing a verdict — not skipping it. Evidence: the run id, its event field, and the verdict line.

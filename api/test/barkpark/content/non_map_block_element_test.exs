@@ -17,10 +17,10 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
          Barkpark.PortableDoc.Render.render_block/2   # arg 1 was "notamap"
         render.ex:243  render_block/2
         render.ex:367  render_blocks/2
-        projection.ex:212  project_body/2
+        projection.ex     project_body/2
         projection.ex:162  project/4
-        writer.ex:443  scaffold_expectation/3      (create / createOrReplace)
-        writer.ex:1271 maybe_project_document_content/2  (upsert)
+        writer.ex:Writer.scaffold_expectation/3      (create / createOrReplace)
+        writer.ex:Writer.maybe_project_document_content/2  (upsert)
         mutations.ex:155 · mutate_controller.ex:22
 
   and four answering **200**: the NESTED cases never crashed —

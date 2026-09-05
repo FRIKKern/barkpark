@@ -133,11 +133,21 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
 
     test "costs ZERO DB access: it halts before authentication runs at all" do
       # The fence runs before `plug(:match)`, so no route body — and no auth
-      # wrapper — executes. `last_used_at` is the observable: EVERY authenticated
-      # request stamps it unconditionally (`verify_user_session_token` →
-      # `touch_last_used`, an unguarded `update_all`). The mint already stamps
-      # it, so the fixture BACKDATES the row to a known instant; the assertion is
-      # then "still exactly that instant", which no clock resolution can fake.
+      # wrapper — executes. `last_used_at` is the observable: the mint already
+      # stamps it, so the fixture BACKDATES the row to a known instant and the
+      # assertion is "still exactly that instant", which no clock resolution can
+      # fake.
+      #
+      # THE CONTROL LEG WAS RE-BASED (cch-w12-bl), DELIBERATELY. It used to read
+      # "the same credential on a real GET DOES move it", asserting the stamp
+      # jumped — and that assertion PINNED the over-stamp this file never meant
+      # to defend: the GET it fires is the teamless 422, a REFUSED request, and
+      # `require_user_sse` stamping there is precisely the defect. The control's
+      # job is only to prove the credential is live and reaches the auth layer,
+      # so it now measures the STATUS (422 = the header resolved a real user and
+      # the route refused) instead of the stamp, and pins the stamp as FROZEN
+      # across that refusal. Same fixture, same discriminating power over "the
+      # fence is running too late"; it no longer requires the bug to exist.
       user = user_fixture()
       {:ok, token} = Accounts.create_user_session_token(user, user_agent: "TestAgent")
       backdated = DateTime.utc_now() |> DateTime.add(-1, :hour) |> DateTime.truncate(:microsecond)
@@ -148,12 +158,16 @@ defmodule BarkparkCloud.Web.RouterSseTicketHeadBurnTest do
       assert [%UserToken{last_used_at: ^backdated}] = Repo.all(session_tokens_of(user)),
              "the HEAD reached the auth layer — the fence is running too late"
 
-      # Control: the same credential on a real GET DOES move it, so the
-      # assertion above measures the fence and not a dead fixture.
+      # Control: the same credential on a real GET DOES reach the auth layer —
+      # 422 no_team is this suite's "the header resolved a real user" signal, so
+      # the assertion above measures the fence and not a dead fixture.
       assert call(:get, "/v1/events", token).status == 422
 
-      assert [%UserToken{last_used_at: touched}] = Repo.all(session_tokens_of(user))
-      assert DateTime.compare(touched, backdated) == :gt
+      # And the refused GET leaves the stamp alone, which is the point of
+      # cch-w12-bl: `require_user_sse` defers its touch to
+      # `register_before_send/2`, so only a request the platform SERVED claims
+      # activity. A jump here means the eager touch default is back.
+      assert [%UserToken{last_used_at: ^backdated}] = Repo.all(session_tokens_of(user))
     end
 
     test "an unauthenticated HEAD is refused identically — the fence is credential-blind" do

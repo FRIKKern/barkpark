@@ -177,6 +177,44 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
       html = Render.render_html(node, @opts)
       refute html =~ "background:"
     end
+
+    test "the bg style is produced with the Sheets PLUGIN absent — the walker resolves no plugin function" do
+      # The fresh-install invariant, checked where it actually decides: what the
+      # COMPILED walker calls. A paper embedding a sheet must render its
+      # cond-format background on a box booted with the sheet plugin off, and
+      # the only way that can hold is if the walker's own beam resolves nothing
+      # in the plugin namespace. `:beam_lib`'s imports chunk IS that module's
+      # external-call table, so this reds the moment a `Barkpark.Plugins.*` call
+      # comes back into core render — where a text grep would also match the
+      # comments that (correctly) name the canonical owner, the ImpT chunk
+      # cannot be fooled by prose.
+      beam = :code.which(Barkpark.PortableDoc.Render.Walk)
+      {:ok, {_mod, [imports: imports]}} = :beam_lib.chunks(beam, [:imports])
+
+      plugin_calls =
+        imports
+        |> Enum.filter(fn {m, _f, _a} ->
+          String.starts_with?(Atom.to_string(m), "Elixir.Barkpark.Plugins.")
+        end)
+        |> Enum.uniq()
+
+      assert plugin_calls == [],
+             """
+             PortableDoc.Render.Walk resolves plugin functions — core render              would break with that plugin off (fresh-install invariant):
+               #{inspect(plugin_calls)}
+             Mirror the rule locally (see `@sheet_bg_re` / `@error_values`) and              lock the mirror in sheets_parity_test.
+             """
+
+      # ...and the style string the local mirror produces is the SAME one the
+      # plugin-calling version produced: accepted `#rrggbb` in, rejection out.
+      styled = %{
+        "kind" => "PdSheet",
+        "rows" => [["x"]],
+        "styles" => %{"0,0" => %{"bg" => "#aabbcc"}}
+      }
+
+      assert Render.render_html(styled, @opts) =~ "background:#aabbcc"
+    end
   end
 
   # ── walk PdSheet → HTML (article mode) ─────────────────────────────────────

@@ -23,7 +23,12 @@ func renderM17Fixture(t *testing.T, name string, width int) string {
 	}
 	reg := testRegistry() // pins lipgloss to Ascii (NoColor)
 	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
-	return ansi.Strip(reg.RenderDoc(blocks, ctx))
+	stripped := ansi.Strip(reg.RenderDoc(blocks, ctx))
+	// Shared blind-spot guard (unknown_block_guard_test.go): a golden diffed
+	// against Go's OWN render cannot see a fallback box that appears on BOTH
+	// sides. This is the one call that can.
+	assertNoUnknownBlock(t, name, stripped)
+	return stripped
 }
 
 // TestGoldenM17 byte-locks the slate-2 heat family: the quantile dual-encoded

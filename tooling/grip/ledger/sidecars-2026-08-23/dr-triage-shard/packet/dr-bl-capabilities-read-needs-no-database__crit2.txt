@@ -1,0 +1,1 @@
+The PR body states plainly that this does NOT address the 500 class (which is owned by jpf-bl-oban-pool-partition) and does not help authed bp callers at all.

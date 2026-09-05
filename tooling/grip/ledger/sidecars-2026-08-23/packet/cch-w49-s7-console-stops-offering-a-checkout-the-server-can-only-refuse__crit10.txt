@@ -1,0 +1,1 @@
+The PR body states the split-gate limit plainly: the consumer is pinned by the Console gate and the declaration by the Cloud gate, so neither alone proves the pair.

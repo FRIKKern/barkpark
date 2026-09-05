@@ -1,0 +1,1 @@
+The post-merge elixir.yml still carries the dispatcher, the path-escape ratchet and the Elixir gate aggregator. Evidence: grep showing all three job names present.

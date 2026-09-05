@@ -1,0 +1,1 @@
+A committed rig fixture carries a .bp-stats grid whose item count is NOT a multiple of the track count at 1920, and the rig measures the empty-remainder geometry (report key or assertion) so the exposure can red

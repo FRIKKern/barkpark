@@ -1,0 +1,1 @@
+scripts/registration-sample.sh and scripts/registration-deadlock-sweep.sh are BOTH re-run on the window as it stands at decision time, exit 0, with the output pasted — never a number somebody quoted.

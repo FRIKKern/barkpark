@@ -1,0 +1,1 @@
+The routing rule chosen (per-event matrix cell vs always-send) is stated in the source WITH its reason, and the console matrix and the server vocabulary agree in ONE diff. Evidence: the source comment and the diff of both sides.

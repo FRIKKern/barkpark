@@ -244,7 +244,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       # plugin surfaces a Plugins node holding its group"); the enablement→
       # Studio-HTML path is pinned end-to-end by the Bokbasen top-menu test
       # above.
-      {:ok, _view, html} = live(build_conn(), scoped_studio("/d/production/studio"))
+      {:ok, _view, html} = live(scoped_conn(), scoped_studio("/d/production/studio"))
 
       refute html =~ ~s(pane-item-label">Plugins</span>),
              "no :plugins-placement plugin is enabled by default — the tier node must not render empty"

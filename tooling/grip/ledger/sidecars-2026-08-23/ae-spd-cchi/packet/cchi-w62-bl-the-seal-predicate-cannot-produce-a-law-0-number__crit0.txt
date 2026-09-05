@@ -1,0 +1,1 @@
+seal-predicate.mjs PAGES the roster rather than reading one page — raising the limit is explicitly refused as a fix, because it moves the cliff instead of removing it and the server clamps at 1000 regardless.

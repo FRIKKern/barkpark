@@ -1,0 +1,1 @@
+The full role/PAT suite stays green. Evidence: the run tail with its test count and 0 failures.

@@ -141,18 +141,15 @@ provisioner-catalog-sync: ## Mirror deploy templates into the provisioner's go:e
 # NOT reachable at run time. The canonical files stay under create-barkpark-app;
 # sync re-copies each app tree byte-for-byte, and
 # BarkparkCloud.Templates.AppFilesDriftTest is the per-test-run drift guard.
+# ONE implementation, not two: this target delegates to
+# scripts/sync-starter-templates.mjs, which also COMPOSES templates/_shared/
+# under each starter exactly as create-barkpark-app's scaffold() does. A
+# hand-rolled `cp` loop here would mirror the starter dir alone and drop the 16
+# shared files, so the mirror must go through the same composer.
 # Only templates that ship a deployable app (create-barkpark-app AVAILABLE_TEMPLATES
 # = website-starter, blog-starter) are vendored — place-directory has no app tree.
 cloud-templates-sync: ## Vendor the deployable app trees into the control plane (cloud/priv/templates)
-	@for t in website-starter blog-starter; do \
-	  rm -rf cloud/priv/templates/$$t; \
-	  mkdir -p cloud/priv/templates/$$t; \
-	  ( cd js/packages/create-barkpark-app/templates/$$t && find . -type f -print0 ) \
-	    | ( cd js/packages/create-barkpark-app/templates/$$t; while IFS= read -r -d '' f; do \
-	          mkdir -p "$(CURDIR)/cloud/priv/templates/$$t/$$(dirname "$$f")"; \
-	          cp "$$f" "$(CURDIR)/cloud/priv/templates/$$t/$$f"; \
-	        done ); \
-	done
+	@node scripts/sync-starter-templates.mjs
 	@echo ">> control-plane app templates synced"
 
 # ── Cloud SPA preview harness (charter D63 — "LOOK AT IT") ────────────────────

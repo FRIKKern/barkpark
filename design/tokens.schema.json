@@ -69,7 +69,14 @@
         },
         "reading": {
           "type": "object",
-          "required": ["headingWeight", "body", "h1", "h2", "h3"]
+          "required": ["headingWeight", "body", "h1", "h2", "h3"],
+          "properties": {
+            "headingWeight": { "type": "integer", "const": 600 },
+            "body": { "$ref": "#/$defs/readingStep" },
+            "h1": { "$ref": "#/$defs/readingStep" },
+            "h2": { "$ref": "#/$defs/readingStep" },
+            "h3": { "$ref": "#/$defs/readingStep" }
+          }
         }
       }
     },
@@ -109,6 +116,17 @@
     }
   },
   "$defs": {
+    "readingStep": {
+      "description": "One step of the paper reading scale. size (px) + lineHeight are required; letterSpacing (em) and weight (CSS font-weight, integer 100-900) are OPTIONAL per step and emit as --tok-reading-<step>-tracking / -weight only when present. The shared headingWeight is pinned at 600 (validate.mjs) — a per-step weight is the only channel for one level to differ.",
+      "type": "object",
+      "required": ["size", "lineHeight"],
+      "properties": {
+        "size": { "type": "number" },
+        "lineHeight": { "type": "number" },
+        "letterSpacing": { "type": "number" },
+        "weight": { "type": "integer", "minimum": 100, "maximum": 900 }
+      }
+    },
     "hslPair": {
       "type": "object",
       "required": ["light", "dark"],

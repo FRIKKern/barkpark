@@ -1,0 +1,1 @@
+MUTATION B: making the unknown arm fail OPEN (return true) reds the fail-closed tests by name. Evidence: the mutation and its failure text.

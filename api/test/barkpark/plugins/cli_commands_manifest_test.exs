@@ -60,6 +60,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/stamp",
                  "/v1/tasks/:doc_id/landed",
                  "/v1/tasks/:doc_id/pulse",
+                 "/v1/tasks/:doc_id/renew",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
                  # #5627 listener presence — the fleet pair rides the Tasks plugin.
@@ -234,16 +235,19 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.stage" in ids
       # task-59fe7b40b719b379: the non-holder landing mark, added ADDITIVELY.
       assert "task.landed" in ids
+      # task-16e56d05b809dd39 — the NON-HOLDER lease extension a CI job calls so
+      # a claim does not lapse underneath its own open PR (Tasks.Renew).
+      assert "task.renew" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 14 task.* (13 + task.landed) + fleet.roster/fleet.beat = 16.
+      # 15 task.* (13 + task.landed + task.renew) + fleet.roster/fleet.beat = 17.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 16
+      assert length(cmds) == 17
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 

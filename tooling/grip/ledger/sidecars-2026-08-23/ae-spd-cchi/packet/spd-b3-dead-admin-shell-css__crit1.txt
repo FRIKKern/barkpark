@@ -1,0 +1,1 @@
+grep proof filed: zero class=sidebar/class=main template usage before and after; studio-literal-check green

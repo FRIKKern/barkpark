@@ -1,0 +1,156 @@
+CLOSE PACKET — spd-* + cchi-* open 0-met triage, 2026-08-23, against origin/main (git fetch origin -q run first).
+Scope: 143 rows = 75 spd- + 68 cchi-. Every row in both families that is lifecycle_status=open AND 0-criteria-met.
+
+FILES
+  ALL-VERDICTS.tsv      143 verdict lines + 31 CHAIN-CANDIDATE lines, 4 tab-separated columns:
+                        doc_id / VERDICT / detail (proof) / one-measurement (command+result)
+  <row>__crit<N>.txt    539 files, the EXACT stored criterion bytes, indices ZERO-BASED
+  CRITERIA-SHA256.txt   sha256 + byte count per criterion
+  AGENT-BRIEF.md        the verdict rules and measured shell traps the shards worked under
+  ../verdicts/*.tsv     the same verdicts, per shard
+
+=========================== PREFIX TRUTH (the lead's first question) ===========================
+`cchi-` IS A DISTINCT FAMILY FROM `cch-`, PROVEN TWO WAYS, not assumed:
+  1. STRING: `bp doc query task --filter '_id^=cch-' --limit 100` returns 100 rows and ZERO whose id
+     starts "cchi" — `^=cch-` cannot match `cchi-` because position 4 is `i`, not `-`.
+  2. STRUCTURAL, and stronger: 66 of 68 cchi- rows parent to `cch-instruments-epic`, a DIFFERENT epic
+     from `cloud-console-hardening-epic` (2 rows). The families are separate ledgers, not a spelling.
+NO OTHER SPELLINGS EXIST in either family. Queried the HYPHENLESS stems `_id^=spd` and `_id^=cchi` to
+catch an hgw2-/hgw5-style variant and grouped every returned id by its `^[a-z]+[0-9]*-` shape:
+  spd  -> {'spd-': 169}      (one shape, no spd1-/spd2-)
+  cchi -> {'cchi-': 85}      (one shape)
+CONTROL: `_id^=zzzznotreal-` returns count=0 on every pass.
+
+PAGING PROOF (no page was ever skipped; a 500 aborts the census rather than truncating it silently)
+  spd   pages(offset,rows) = [(0,100), (100,69)]  -> 169 rows read, lifecycle {open 80, done 73, cancelled 10, in_progress 6}
+  cchi  pages(offset,rows) = [(0,85)]             ->  85 rows read, lifecycle {open 70, done 5, cancelled 2, in_progress 8}
+  TARGETS (open AND 0-met): spd 75, cchi 68 = 143.
+The lead's "81 open / 70 open" reads as 80/70 here; the spd delta is the 6 in_progress rows, which are
+open work but not lifecycle_status=open.
+
+=========================== TWO INSTRUMENT DEFECTS FOUND WHILE READING ===========================
+1. `--filter` DOES NOT COMPOSE, AND THE CLI HELP SAYS IT DOES. `bp doc query --help` states
+   "Repeatable — every --filter is ANDed". MEASURED: one filter (_id^=spd-) = 169 rows; two filters
+   (_id^=spd- AND lifecycle_status=open) = 200 rows, NOT all spd- — byte-identical to the LAST filter
+   alone. The lead's warning is right and the shipped help is wrong. Use one --filter and post-filter.
+2. `bp doc query task -o json` RETURNS MALFORMED JSON for large task bodies. The server over-escapes
+   embedded quotes, emitting a bare `\\\\"` that terminates the JSON string early; `jq` and Python's
+   `json.loads(strict=False)` both reject it. Reproduce:
+     bp doc query task --filter '_id^=sup-' --limit 200 -o json | jq .count
+   Workaround used here: `--fields` projection (which drops the offending prose) plus a backslash-repair
+   pass. A ledger whose query output a standard JSON reader cannot parse is worth its own row.
+
+=========================== BUCKETS ===========================
+                    spd-   cchi-   TOTAL
+  REAL-WORK          65      50     115
+  ALREADY-DONE        3       8      11        <- close candidates, each with a landing commit
+  REFUTED             4       4       8        <- close candidates (cancelled)
+  SUPERSEDED          2       1       3        <- close candidates (cancelled)
+  BLOCKED-HUMAN       1       5       6
+  DUPLICATE           0       0       0
+  STRANDED-PREDEC.    0       0       0
+CLOSEABLE NOW: 22 of 143 (11 done + 8 refuted + 3 superseded).
+
+=========================== SIX ROWS CARRY ZERO CRITERIA — UNSTAMPABLE AS FILED ===========================
+These cannot be closed `done` (the criteria fence measures the doc as stored) and cannot be stamped at
+all. Each needs a criterion written, or a `cancelled` disposition:
+  spd-bl-publish-wall-self-rescue
+  spd-bl-desk-chips-claim-tab-semantics-they-lack
+  cchi-w37-bl-slice-gate-omits-the-surface-s-shipped-gates
+  cchi-w25-bl-live-protection-requires-two-while-the-spec-declares-four   (also REFUTED — cancel it)
+  cchi-w25-bl-w21-bp-tl-fail-cell-is-an-identity-under-anywhere
+  cchi-w25-bl-label-63-pinned-by-inequality-and-the-trailing-hyphen
+
+=========================== GATES THAT HAVE ALREADY CLEARED (rank by what ONE act unblocks) ===========================
+The lead asked for this specifically. FIVE rows are parked on gates that opened and nobody noticed:
+  * cchi-w61-bl-the-census-derives-its-admission-after-11169 — crit 0 is "PR #11169 MERGED or CLOSED
+    before this starts". #11169's `queued_seconds` @register row IS on origin/main (3 hits in
+    reader_less_instrument_census_test.exs; landings a5260f609a, 2b5969b5b9). START IT.
+  * spd-w19-desk-row-census-run — BOTH "do not start before these merge" deps are ancestors of main
+    (#8070 0e1118fe6c, #8074 679986e5b8) and legC() is live at journey.mjs:1553, contradicting the row's
+    own "instrument is stranded" note.
+  * spd-b19-anchor-report-hygiene — all four wave-18 merge shas are ancestors; crits 5 and 6 provable today.
+  * cchi-w21-s6-ci-renders-a-boundary-cell — predecessor cch-w21-s1 merged 3cf1285e30 (#9057), unstamped.
+  * cchi-w26-bl-8500-decision-packet — #8500 merged 0b425c7e84, refuting all three of its premises.
+THE ONE GATE THAT IS GENUINELY SHUT: spd-b19-lane4-quiet-host-floor needs host load under ~2.0 on 10
+cores; `uptime` during this pass read 26.04 / 31.70 / 30.78 with 25 users. Quiescing this box (or moving
+to an idle host) is the single act that unblocks it — and it is the input to a 6-row chain (see below).
+
+=========================== BEST VERDICTS, WITH LANDING COMMITS ===========================
+ALREADY-DONE (proved by CONTENT via git log -S, never by ancestry):
+  cchi-w62-bl-the-seal-predicate-cannot-produce-a-law-0-number  a1d27149e7 (#11438), hardened 005b7f38b4
+      seal-predicate.mjs now PAGES (offset + count=true, pageRoster loop) and the file itself RETRACTS the
+      row's premise at :437 — "the 'no total and no hasMore' clause of the old refusal was never a property
+      of the endpoint". Crit 2 also met: ROSTER-TRUNCATED SURVIVES, re-aimed at a repeated first id.
+  cchi-w46-bl-breakpoint-sweep-title-is-a-five-integer-claim...  583f7643a2 (#10396), D527
+      The title is now a template literal off scenarioReport — the typed copy is DELETED, which is a
+      stronger fix than the t.name parser the row prescribed. The false "EVERY NUMBER ... IS DERIVED"
+      header is replaced by a which-arm-owns-which-numeral block.
+  cchi-w69-bl-crown-harness-cannot-be-fired-by-its-own-input     0cedeffeaf (#12557)
+  cchi-w61-bl-criteria-census-over-future-published-rows         9adba57411 (#10194), wired in shell-harnesses.yml
+  cchi-w33-fanout-capture-log-async-true-asserts-the-whole-vm    66d9bd7e97 — async:false + moduledoc citing this row's own slug
+  cchi-w46-bl-binding-census-null-pin-decay-arm                  dd436fe293 (#10448) — check (2i) opens by quoting this row's defect
+  cchi-w20-bl-console-harness-advisory-prose-stale               f4b6db207a (#9658) — `grep 'ADVISORY today'` now rc 1
+  cchi-w22-bl-guard-selector-conversion-instances-grid           928fcdfe3d (#9161)
+  spd-w18-bl-repair-button-endtoend                              0a7c962bea (#8072)
+  spd-w18-empty-state-seam                                       a760b2af60 (#8073)
+  spd-w9-b29-noflash-frame-sample                                #4736 (rAF harness measure.mjs:2528) — only the stamp is owed
+REFUTED (positive contradiction stated in the TSV): cchi-w25-bl-live-protection-requires-two... and
+  cchi-w22-bl-seal-predicate-claims-merge-blocking-force (both by charter D370/D403: live protection is
+  exactly FOUR contexts with enforce_admins:true); cchi-w27-bl-scrub-test-green-by-construction;
+  spd-bl-bp-search-exits-zero-while-failing; spd-w13-1280-prior-observations-stale;
+  spd-slug-migration-forces-delete-before-publish; spd-bl-primary-checkout-diverged.
+SUPERSEDED: cchi-w27-bl-d307-create-time-door-guard (charter D331; guard shipped at writer.ex:174/:624,
+  a723ec0dd6 #9405); spd-w18-desk-click-latency; spd-bl-desk-chips-claim-tab-semantics-they-lack.
+
+=========================== CHAINS (31 filed; the five with real leverage) ===========================
+Grouped by DEFECT and FILE, never by id prefix — `-followup-`/`-fu-` rows share their parent's prefix and
+inflate a prefix-matched chain.
+ A. THE PRESS->ANSWER CHAIN (spd, 6 rows, ONE file root.html.heex): one quiet-host run plus one listener
+    widening collapses six rows. Its input is the quiet host above — so the ONE act that unblocks
+    spd-b19-lane4-quiet-host-floor pays six rows, the largest single collapse in this packet.
+ B. THE DESK-MEASURE HARNESS CHAIN (spd, 4 rows, scripts/studio-desk-measure.mjs): build b46's missing
+    test rig FIRST and w6/b23/scrim each cost one case instead of a rig each.
+ C. THE WORKFLOW-SELF-DESCRIPTION WALKER (cchi-w33 + cchi-w57): two arms of ONE .github/workflows/ walker
+    keyed on required-checks.json. One patch satisfies both.
+ D. THE required-checks PACKET PAIR (cchi-w39 + cchi-w40): one `--live` sitting pays both; budget the CI
+    cost honestly, since required-checks-drift.yml is path-unfiltered and bills EVERY PR in the repo.
+ E. GUARDS THAT PRINT A VERDICT ABOUT A FILE THEY FAILED TO PARSE (cchi-w62-tdz + cchi-w61-scaffy-anchor):
+    one boundary-refusal plus a separately-named anchor assertion in console-tdz-order-check.mjs.
+
+=========================== SPEC CONFLICTS — NOT DUPLICATES, DO NOT MERGE ===========================
+Three pairs where accepting one row REDS the other. Flagged rather than folded, per the brief:
+  * cchi-w51-bl-run-ci-still-declines-to-look-on-enforced-false vs
+    cchi-w51-bl-verify-never-checks-its-own-spec-freshness — same file
+    (scripts/required-checks-verify.sh). The freshness row explicitly warns a blanket refusal would RED
+    required-checks-apply.sh:236's own post-PUT read-back, while the run_ci row makes run_ci stricter.
+    Land together with one break-glass procedure update, or the second breaks the first.
+  * cchi-bl-protection-claim-paraphrase-escape is INTERNALLY conflicted: section 18's header at
+    required-checks.test.sh:2094-2103 ALREADY records crit 0's decision (a pinned census; auto-
+    classification refused), and crit 2 demands a fresh-paraphrase red that the recorded choice
+    structurally cannot deliver. Amend the row before building it.
+  * cchi-w21 inert-ellipsis chain: building it as worded installs the D253-REFUTED rule. Amend first.
+
+=========================== FIVE ROWS WHOSE OWN REMEDY CARRIES A STALE NUMBER ===========================
+Apply these as written and you install a FRESH error. Re-derive before building:
+  spd-b42-brief-cites-a-14-entry-census   says 15; the census is 26
+  spd-b42-provenance-cites-superseded-run points at 65541e2d4, superseded by the 2026-07-22 pair
+  spd-b31                                 says 32 test files; there are 43
+  cchi-w23-bl-guard-population-register   68/55/15 is now 178/56/38 on a 6738-line file
+  cchi-w22-bl-cruel-corpus-uncovered-caps claims `grep -c account_login` = 0; it is 2 (a *kind* fixture,
+                                          so the GAP survives but the census does not)
+
+=========================== TWO ROWS ARE LIVE AT THE WRONG ADDRESS ===========================
+  * cchi-w18-bl-seal-predicate-header-asserts-absent-wiring cites seal-predicate.mjs:3, where the sentence
+    NO LONGER EXISTS (`grep 'shells out'` rc 1). The identical false claim is at overflow-guard.mjs:2-4.
+    RE-ANCHOR before anyone builds it, or they will "fix" a line that is already gone.
+  * cchi-w40-bl-required-checks-apply-still-unaudited is MISDESCRIBED BY ITS OWN BODY: apply.sh's refusals
+    ARE enforced (:176-178, :204-205, :222-225), the mutation arm EXISTS (required-checks.test.sh:732-753),
+    and an end-to-end --confirm probe exists as live_stage() (:1312-1382). Only RUNNING it needs a
+    repo-admin token — which makes it BLOCKED-HUMAN on a credential, not the unaudited instrument it claims.
+
+=========================== TWO LANDMINES FOR BUILDERS ===========================
+  * studio_desk_focus_ring_guard_test.exs:151 pins `.bp-desk-chip:focus-visible` as ABSENT ON PURPOSE.
+    Adding the ring REDS it until the selector is moved into @desk_focus_rings.
+  * csp.ex:75 still cites the retired bare slug `spd-b35`, which now resolves to a DIFFERENT open row in
+    this same family — the D144 wrong-answer hazard surviving in code where the ledger sweep could not reach.

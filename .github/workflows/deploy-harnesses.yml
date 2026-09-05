@@ -1,7 +1,10 @@
 name: Deploy harnesses
 
+# Venue (2026-09-05, task-33742276cf0a35b1): push-to-main + nightly, NOT pull_request.
+# 3.8 min per execution on a harness that does not test the PR's own code; the issue-filer job below is its reader.
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
@@ -19,6 +22,9 @@ on:
       # api/test/barkpark/sites/deploy_runner_stage_names_test.exs, which rides
       # the required Elixir lane. This line just makes the shell half reachable.
       - "api/lib/barkpark/sites/deploy_runner.ex"
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -56,6 +62,16 @@ jobs:
             echo "::error title=Caddy too old::caddy $ver cannot parse the heredoc maintenance block (needs >= 2.7)"
             exit 1
           fi
+      - name: Every deploy/*.sh parses and passes shellcheck -S warning (task-6f18e71a351f8081 D)
+        # 17 files / 14k lines had ONE bash -n and zero shellcheck in CI. Zero-findings
+        # gate: the two warnings that existed (SC2034 x2) were fixed in the same change,
+        # so any NEW finding is a regression, not a baseline. ~1-3 s.
+        run: |
+          set -euo pipefail
+          for f in deploy/*.sh; do bash -n "$f"; done
+          shellcheck --version | grep -m1 version:
+          shellcheck -S warning deploy/*.sh
+          echo "deploy/*.sh: $(ls deploy/*.sh | wc -l | tr -d " ") files parse and carry no shellcheck warning"
       - name: Instance deploy harness
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
@@ -88,7 +104,9 @@ jobs:
       # basePath arming, standalone runtime, rollback preflight and more. Same
       # reasoning as its static sibling above: an untested deploy engine is the
       # weakest link, so gate it here. The script self-gates and exits non-zero
-      # on any failure — no hardcoded total (check counts grow over time).
+      # on any failure, and since #15813 (2026-09-03) it also refuses below a
+      # literal, committed check floor (SELFTEST_FLOOR_FULL in the script) so a
+      # run that silently lost a block cannot read as green.
       # BARKPARK_SELFTEST_REQUIRE_E2E=1 for the same reason it is set above: this
       # engine's gate block proves that the slot process HEALTH boots does not
       # inherit the box's only build slot (a permanent fleet-wide deny), and that
@@ -98,3 +116,66 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+
+  git-2-34-fetch:
+    # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with the
+    # distro git 2.34.1, which cannot speak protocol v2 to GitHub ("could not
+    # read Username" on a PUBLIC repo; evidence 2026-09-02, fix #15634 pins
+    # protocol.version=0 in deploy/cp-deploy.sh). Nothing in CI ran the box's
+    # git against origin, so the pin could be deleted as cargo cult and nobody
+    # would know until the next deploy.
+    #
+    # The probe runs INSIDE an ubuntu:22.04 container with apt's git, because
+    # GitHub's ubuntu-22.04 runner image ships a newer git from a PPA (the first
+    # version of this job asserted 2.34 on the runner itself and reddened on
+    # main, 2026-09-03 06:3xZ). It runs the EXACT pull form cp-deploy.sh uses,
+    # against the real remote; reds if the pinned form stops working on 2.34 or
+    # if cp-deploy.sh loses the pin. deploy/** only.
+    name: cp-deploy.sh's pull form works on the box's git 2.34 (ubuntu:22.04 container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: cp-deploy.sh still carries the protocol pin
+        run: grep -nE 'git .*-c protocol\.version=0 .*pull --ff-only origin main' deploy/cp-deploy.sh
+      - name: In ubuntu:22.04 with apt git — the pinned pull form succeeds; the v2 form is recorded, not gated
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          docker run --rm -e REPO_URL ubuntu:22.04 bash -euo pipefail -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq >/dev/null && apt-get install -y -qq git ca-certificates >/dev/null
+            git --version
+            git --version | grep -qE "git version 2\.34\." || { echo "::error::apt git on ubuntu:22.04 is no longer 2.34 — this probe no longer models the box; re-point it"; exit 1; }
+            git clone --quiet --depth 1 --branch main "$REPO_URL" /repo && cd /repo
+            git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main
+            echo "pinned form (protocol.version=0): OK on $(git --version)"
+            if git -c core.hooksPath=/dev/null -c protocol.version=2 pull --ff-only origin main 2>/tmp/v2.err; then
+              echo "::notice::protocol v2 works from this container on git 2.34 — the box refusal is environmental (proxy/curl); the pin still stands as measured on the box"
+            else
+              echo "::notice::protocol v2 REFUSED on git 2.34 here too: $(head -c 200 /tmp/v2.err) — the pin is load-bearing everywhere"
+            fi
+          '
+
+  report-main-failure:
+    name: Report main-push failure to a human
+    needs: [offline-deploy-harnesses, git-2-34-fetch]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: deploy-harnesses-main
+          CI_FAILURE_DETAIL: |
+            `deploy-harnesses` is RED on main. It left the pull_request path on 2026-09-05
+            (docs/ops/ci-workflow-verdicts.md, task-33742276cf0a35b1), so this
+            issue is its only reader: nobody sees a red here on a PR any more.
+            Read the failed job's log, fix or revert on main, and close this issue
+            once the next main-push or nightly run is green.
+        run: bash scripts/file-ci-failure-issue.sh

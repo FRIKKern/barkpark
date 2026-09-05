@@ -1,0 +1,1 @@
+duplicate_of carries the offending document id in the payload, so the author never has to run a search to find it. Evidence: the payload with the id in it.

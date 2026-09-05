@@ -1,0 +1,1 @@
+cloud/priv/static/app.js is UNTOUCHED (CCH fence) and no per-box scan composes stale_online_barkparks/1 (D246) — git diff --name-only plus a grep prove both

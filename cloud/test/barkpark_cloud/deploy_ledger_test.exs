@@ -830,16 +830,25 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # A coded row is no longer in the class at all…
       refute DeployLedger.classify("HEALTH", @g500_health) == "DOC_ID_EMPTY"
 
-      # …and what stays is exactly the rows that recorded no cause: the fleet
-      # that runs `deploy/site-deploy.sh`, which has ZERO bp-corpus-status
-      # readers. 3,617 "the SSR rendered no content document" rows and 3 "the
-      # build rendered no content document" rows, with no residue.
+      # …and what stays is exactly the rows that recorded no cause. Historically
+      # that was the whole static fleet: `deploy/site-deploy.sh` had ZERO
+      # bp-corpus-status readers (3,617 "the SSR rendered no content document"
+      # rows and 3 "the build rendered no content document" rows). Since
+      # dr-bl-w8-static-engine-cannot-name-a-cause BOTH engines read the marker
+      # and emit the classifier's anchor, so DOC_ID_EMPTY is only the residue:
+      # a build that carried no marker at all.
       assert DeployLedger.classify("HEALTH", @doc_id) == "DOC_ID_EMPTY"
       assert DeployLedger.classify("HEALTH", @doc_id_alt) == "DOC_ID_EMPTY"
 
       assert DeployLedger.classify("HEALTH", @doc_id_no_marker) == "DOC_ID_EMPTY"
       assert File.read!(@health_producer) =~ "no bp-corpus-status marker: this build predates"
-      refute File.read!("../deploy/site-deploy.sh") =~ "bp-corpus-status"
+      # The STATIC producer is now a reader too, and its residue sentence is the
+      # same shape — reword either engine and this reds instead of every static
+      # row silently degrading back into DOC_ID_EMPTY.
+      static = File.read!("../deploy/site-deploy.sh")
+      assert static =~ "got_corpus=\"$(meta_value \"$body\" bp-corpus-status)\""
+      assert static =~ "the build could not read a content document: $got_corpus"
+      assert static =~ "no bp-corpus-status marker: this build predates"
 
       # D112: the LABEL says what the class now means. "the marker was empty" is
       # true of every class in this family; "and the cause went unrecorded" is

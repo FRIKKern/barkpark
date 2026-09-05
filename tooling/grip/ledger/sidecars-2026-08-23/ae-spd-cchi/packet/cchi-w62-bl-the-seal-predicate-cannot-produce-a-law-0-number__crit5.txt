@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): merged, and gh api .../compare/<sha>...main --jq .status returns `ahead`.

@@ -1,0 +1,1 @@
+A scheduled workflow runs scripts/webhook-fanout-watch.sh against the LIVE rows with WEBHOOK_FANOUT_EXPECT_MIN pinned, mapping 0/1/2/3 to run conclusions the way breakglass-watch.yml does, and is proven able to LOSE by a deliberate red.

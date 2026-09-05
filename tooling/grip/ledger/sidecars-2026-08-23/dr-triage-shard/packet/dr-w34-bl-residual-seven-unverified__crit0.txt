@@ -1,0 +1,1 @@
+Each of the seven residual sentences carries its own re-run command, and the three evidence classes (code / Actions / live-DB) are labelled per item.

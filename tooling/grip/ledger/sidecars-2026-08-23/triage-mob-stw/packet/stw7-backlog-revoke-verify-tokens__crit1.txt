@@ -1,0 +1,1 @@
+Revocation targets are resolved by exact label and id, leaves unrelated tokens untouched, and records only redacted identifiers plus post-revocation status.

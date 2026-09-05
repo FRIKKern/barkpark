@@ -1679,6 +1679,23 @@ defmodule Barkpark.Content.Papers do
   """
   defdelegate apply_document_block_op(doc_id, type, op, dataset, opts \\ []), to: BlockOps
 
+  defdelegate apply_document_block_op_once(
+                doc_id,
+                type,
+                op,
+                dataset,
+                request_id,
+                principal_key,
+                opts \\ []
+              ),
+              to: BlockOps
+
+  @doc "Field-scoped block ops — `Barkpark.Content.Papers.BlockOps.apply_field_block_ops/6`."
+  defdelegate apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []), to: BlockOps
+
+  @doc "The block array behind a field value — `Barkpark.Content.Papers.BlockOps.field_blocks/1`."
+  defdelegate field_blocks(value), to: BlockOps
+
   @doc """
   The AI-proposes loop (lvw-t4): apply INSERT-ONLY block ops to the paper's
   `drafts.` twin with mandatory provenance (a `proposal-source` edge + a

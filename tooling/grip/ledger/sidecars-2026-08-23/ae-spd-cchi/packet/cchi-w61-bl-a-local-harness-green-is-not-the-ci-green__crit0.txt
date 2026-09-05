@@ -1,0 +1,1 @@
+A runtime self-check inside the console harness reds BY NAME when run on a runtime other than the declared one, and passes on the declared one — quote both runs.

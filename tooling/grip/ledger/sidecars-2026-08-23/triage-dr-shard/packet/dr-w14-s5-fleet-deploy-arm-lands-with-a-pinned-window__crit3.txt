@@ -1,0 +1,1 @@
+The deployBox helper and its three JSON fixture rows carry last_seen_at, with an in-source comment stating that without it every row classifies `unreported` and the entire deploy-rung test file asserts nothing

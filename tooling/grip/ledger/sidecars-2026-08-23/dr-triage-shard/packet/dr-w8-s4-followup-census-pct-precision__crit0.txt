@@ -1,0 +1,1 @@
+The percentage bp cloud deployments prints for a given census payload equals the pct the control plane sent for that node, or the CLI states plainly that it rounded. Evidence: a test pairing a fixture pct with the rendered cell.

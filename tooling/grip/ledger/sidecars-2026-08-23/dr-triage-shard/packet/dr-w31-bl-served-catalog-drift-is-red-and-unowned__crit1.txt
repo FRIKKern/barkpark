@@ -1,0 +1,1 @@
+scaffy-catalog-drift.yml gains a pull_request trigger on the same paths, so drift is discoverable BEFORE a merge rather than only after — proven by a PR that would have drifted showing the signal.

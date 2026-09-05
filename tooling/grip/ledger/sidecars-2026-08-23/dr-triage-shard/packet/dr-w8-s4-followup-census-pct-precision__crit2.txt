@@ -1,0 +1,1 @@
+No existing pctOf caller changes output. Evidence: go test ./internal/cli/... green with no fixture edits outside the census tests.

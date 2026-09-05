@@ -1,0 +1,1 @@
+spd-b29-inspector-overlay-eats-the-measure criterion index 1 is stamped on the real result, and spd-w7-instrument-occlusion-and-state-axis criterion index 7 is then completed since its REACHABLE half is already folded and met.

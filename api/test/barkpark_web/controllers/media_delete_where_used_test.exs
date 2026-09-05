@@ -29,7 +29,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
   must still delete (or an operator with a genuinely dead reference is stuck).
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document
@@ -54,7 +54,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       doc = paper_referencing!(file, @dataset)
 
       body =
-        admin(build_conn())
+        admin(scoped_conn())
         |> delete("/v1/media/#{@dataset}/#{file.id}")
         |> json_response(409)
 
@@ -77,7 +77,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       _doc = paper_referencing!(file, @dataset)
 
       body =
-        admin(build_conn())
+        admin(scoped_conn())
         |> delete("/v1/media/#{@dataset}/#{file.id}?force=true")
         |> json_response(200)
 
@@ -89,7 +89,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       file = media_file!()
 
       body =
-        admin(build_conn())
+        admin(scoped_conn())
         |> delete("/v1/media/#{@dataset}/#{file.id}")
         |> json_response(200)
 
@@ -101,7 +101,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       file = media_file!()
       _draft = paper_referencing!(file, @dataset, status: "draft")
 
-      admin(build_conn())
+      admin(scoped_conn())
       |> delete("/v1/media/#{@dataset}/#{file.id}")
       |> json_response(200)
 
@@ -113,7 +113,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       doc = paper_referencing!(file, "staging")
 
       body =
-        admin(build_conn())
+        admin(scoped_conn())
         |> delete("/v1/media/#{@dataset}/#{file.id}")
         |> json_response(409)
 
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       doc = paper_referencing!(file, @dataset)
 
       body =
-        admin(build_conn())
+        admin(scoped_conn())
         |> delete("/media/#{file.id}")
         |> json_response(409)
 
@@ -150,7 +150,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
     test "an UNREFERENCED blob still deletes" do
       file = media_file!()
 
-      body = admin(build_conn()) |> delete("/media/#{file.id}") |> json_response(200)
+      body = admin(scoped_conn()) |> delete("/media/#{file.id}") |> json_response(200)
 
       assert body["deleted"] == file.id
       refute Repo.get(MediaFile, file.id)
@@ -177,7 +177,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
     upload = %Plug.Upload{path: tmp, filename: "cast.png", content_type: "image/png"}
 
     created =
-      admin(build_conn())
+      admin(scoped_conn())
       |> post("/media/upload", %{"file" => upload})
       |> json_response(201)
 

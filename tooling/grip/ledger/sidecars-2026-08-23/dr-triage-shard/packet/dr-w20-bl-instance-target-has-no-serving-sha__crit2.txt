@@ -1,0 +1,1 @@
+A NULL git_commit renders UNMETERED, never `current` and never 0 - the same fail-honest rule dr-w20-s1 applies to the control plane.

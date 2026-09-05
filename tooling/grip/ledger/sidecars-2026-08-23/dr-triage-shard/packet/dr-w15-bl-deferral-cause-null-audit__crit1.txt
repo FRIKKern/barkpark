@@ -1,0 +1,1 @@
+If live rows are still being written with a NULL cause while holding a 409 code, the writer is fixed and a test pins that a 409 deferral always records its cause

@@ -1,0 +1,1 @@
+The merged attention ladder is THIRTEEN rungs with deploys_failing at 5 (D202) and unmetered at 9 (D224), attention is the contiguous run 1-10, and tone is monotone; the ladder's FOUR owners (attentionRankOrder, attention_order.json, attention_order_cases.json, expected_order) all agree

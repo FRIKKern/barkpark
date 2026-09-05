@@ -1,0 +1,1 @@
+A five-site multi-hour deploy outage produces at least one platform-addressed signal, proven by replaying the 2026-08-08 window.

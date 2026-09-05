@@ -1,0 +1,1 @@
+BOTH `assert log == ""` assertions at :37 and :46 survive unchanged — the fix is the async flag, not a weakened assertion. Evidence: the diff showing them untouched.

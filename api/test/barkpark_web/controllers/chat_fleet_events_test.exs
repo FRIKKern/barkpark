@@ -385,7 +385,7 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
   describe "GET /v1/chat/events pipeline gate" do
     test "missing bearer → 401", %{} do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("content-type", "application/json")
         |> get("/v1/chat/events")
 
@@ -393,7 +393,7 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
     end
 
     test "a valid NON-admin (non-chat) bearer → 403", %{reader: reader} do
-      conn = build_conn() |> as(reader) |> get("/v1/chat/events")
+      conn = scoped_conn() |> as(reader) |> get("/v1/chat/events")
       assert json_response(conn, 403)["error"]["code"] == "forbidden"
     end
 
@@ -401,7 +401,7 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
       reader: reader
     } do
       conn =
-        build_conn()
+        scoped_conn()
         |> as(reader)
         |> put_req_header("accept", "text/event-stream")
         |> get("/v1/chat/events")

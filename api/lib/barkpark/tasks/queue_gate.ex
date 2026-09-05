@@ -248,6 +248,13 @@ defmodule Barkpark.Tasks.QueueGate do
     end)
   end
 
+  # Every call site passes a compile-time string literal — "claim",
+  # "queue_gate", "state", "worker", "closed_at", "closed_by" — so
+  # `String.to_atom/1` can only ever mint atoms from that fixed, closed set.
+  # No request data reaches `key`, so the atom table cannot be grown by input.
+  # Inline rather than a line-pinned `.sobelow-skips` row: the row this
+  # replaces (queue_gate.ex:245) was already dead from an edit above it.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp fetch(map, key) do
     case Map.fetch(map, key) do
       {:ok, value} -> value
@@ -255,6 +262,10 @@ defmodule Barkpark.Tasks.QueueGate do
     end
   end
 
+  # Same closed set as `fetch/2` above: the only caller passes the literal
+  # "queue_gate". Bounded atom creation, no request data on `key`.
+  # Replaces the two dead line-pinned rows at queue_gate.ex:252.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp fetch_optional(map, key) do
     cond do
       Map.has_key?(map, key) -> {:present, Map.get(map, key)}

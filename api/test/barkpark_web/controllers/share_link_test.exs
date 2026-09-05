@@ -4,6 +4,7 @@ defmodule BarkparkWeb.ShareLinkTest do
   bound item (paper / doc / media), scoped to the LINK's own workspace and
   INDEPENDENT of any section share. Revocable; admin-only management.
   """
+  # sync: swaps node-global Application env (:barkpark, :shares) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Media}
@@ -183,11 +184,11 @@ defmodule BarkparkWeb.ShareLinkTest do
     # P5 (Scoped-by-URL): the short link 302s to the CANONICAL scoped
     # reader with the token riding as ?share= — and following it serves
     # the paper anonymously through RequireShareScope's item-token arm.
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
     target = redirected_to(resp, 302)
     assert target =~ ~r{^/w/[^/]+/p/[^/]+/papers/demo-paper\?share=}
 
-    followed = get(build_conn(), target)
+    followed = get(scoped_conn(), target)
     assert followed.status == 200
     assert followed.resp_body =~ "Shared via a direct link"
   end
@@ -269,7 +270,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     # Deterministically force the redirect lookup to miss while retaining the
     # link's real workspace/project ids for the static reader scope.
     resp =
-      build_conn()
+      scoped_conn()
       |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
       |> get("/s/#{token}")
 
@@ -317,7 +318,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
-    body = get(build_conn(), "/s/#{token}") |> json_response(200)
+    body = get(scoped_conn(), "/s/#{token}") |> json_response(200)
     assert body["_id"] == "post1"
     assert body["title"] == "A Post"
   end
@@ -357,7 +358,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token} =
       mint(conn, %{scope: scope_str, kind: "doc", ref_type: "post", ref_id: "postsec"})
 
-    body = get(build_conn(), "/s/#{token}") |> json_response(200)
+    body = get(scoped_conn(), "/s/#{token}") |> json_response(200)
     assert body["_id"] == "postsec"
     assert body["title"] == "Secret Post"
     refute Map.has_key?(body, "ssn")
@@ -373,7 +374,7 @@ defmodule BarkparkWeb.ShareLinkTest do
   } do
     %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: media.id})
 
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
     assert resp.status == 200
     assert resp.resp_body == "PNG-BYTES"
 
@@ -393,7 +394,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     evil = put_dangerous_media!(ws, proj)
     %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: evil.id})
 
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
 
     assert resp.status == 200
     # Served, but as a non-executable download — never inline image/svg+xml on
@@ -411,7 +412,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token, "link" => link} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
-    assert get(build_conn(), "/s/#{token}").status == 200
+    assert get(scoped_conn(), "/s/#{token}").status == 200
 
     assert conn
            |> admin()
@@ -419,11 +420,11 @@ defmodule BarkparkWeb.ShareLinkTest do
            |> json_response(200)
            |> Map.get("revoked") == true
 
-    assert get(build_conn(), "/s/#{token}").status == 404
+    assert get(scoped_conn(), "/s/#{token}").status == 404
   end
 
   test "a garbage token is 404", %{} do
-    assert get(build_conn(), "/s/not-a-real-token").status == 404
+    assert get(scoped_conn(), "/s/not-a-real-token").status == 404
   end
 
   # ── admin gating + validation ─────────────────────────────────────────────
@@ -462,14 +463,28 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert length(list["links"]) == 1
     refute Map.has_key?(hd(list["links"]), "token_hash")
     refute Map.has_key?(hd(list["links"]), "token")
+
+    # ...and no `url` either. `link_json/1` used to derive one from the stored
+    # plaintext token, so the two refutes above passed while the SECRET rode in
+    # `url`. The column is retired (arpss-w8-bl-share-link-raw-token-at-rest,
+    # RULED 2026-09-02), so the listing has no URL to give.
+    refute Map.has_key?(hd(list["links"]), "url")
+
+    # NON-VACUITY: the row IS serialized, so the three refutes are about what
+    # the serializer omits, not about an empty body.
+    assert hd(list["links"])["ref_id"] == "post1"
   end
 
   # ── arpss-w8: cross-tenant confinement ────────────────────────────────────
   #
-  # The test just above ("no token/hash") refutes two absent MAP KEYS and passes
-  # on the LEAKING controller, because the secret rides in `url`. It is left in
-  # place as this wave's own resident failure mode, and it is why everything
-  # below asserts on the SERIALIZED BODY (`resp_body =~`) instead.
+  # HISTORY, kept because it explains the shape below. The test just above
+  # ("no token/hash") refuted two absent MAP KEYS and passed on the LEAKING
+  # controller, because the secret rode in `url` — which is why everything
+  # below asserts on the SERIALIZED BODY (`resp_body =~`) instead. That is
+  # still the right instrument for the confinement question, but the raw token
+  # is no longer IN any listing body, so `refute body =~ raw` would now be
+  # vacuously green on a fully-leaking controller. Each test below therefore
+  # confines on the LINK ID — the tenant fact the listing still carries.
   describe "tenancy confinement on /v1/shares/links" do
     # The attacker is the shape the predicate choice turns on: an admin of its
     # OWN workspace A, built the way a real install builds one
@@ -497,9 +512,9 @@ defmodule BarkparkWeb.ShareLinkTest do
       %{attacker_raw: raw, attacker: actor}
     end
 
-    test "POSITIVE CONTROL: the legitimate own-workspace 200 body DOES carry the raw token",
+    test "POSITIVE CONTROL: the legitimate own-workspace 200 body carries the link ROW — and never the raw token",
          %{conn: conn, scope_str: scope} do
-      %{"token" => raw} =
+      %{"token" => raw, "link" => %{"id" => link_id}} =
         mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
       resp =
@@ -507,11 +522,17 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> admin()
         |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
 
-      # Without this control, `refute body =~ raw` is green on ANY denial body
-      # and proves nothing about serialization.
+      # Without this control, `refute body =~ link_id` is green on ANY denial
+      # body and proves nothing about serialization. The id is the tenant fact
+      # the listing legitimately carries, so it is the right non-vacuity anchor.
       assert resp.status == 200
-      assert resp.resp_body =~ raw
-      assert resp.resp_body =~ "/s/#{raw}"
+      assert resp.resp_body =~ link_id
+
+      # THE RETIREMENT, asserted on the AUTHORISED body — the one place a leak
+      # would still be legal under the old design. Not even its own admin gets
+      # the plaintext back: the mint 201 was the only place it ever appeared.
+      refute resp.resp_body =~ raw
+      refute resp.resp_body =~ "/s/"
     end
 
     test "LEAK CLOSED — list: a foreign admin never sees B's raw token in the body", %{
@@ -519,7 +540,7 @@ defmodule BarkparkWeb.ShareLinkTest do
       scope_str: scope,
       attacker_raw: raw_actor
     } do
-      %{"token" => raw} =
+      %{"token" => raw, "link" => %{"id" => link_id}} =
         mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
       resp =
@@ -528,9 +549,15 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
 
       # ORDER IS LOAD-BEARING: with the status assert first, deleting the
-      # confinement reds on the STATUS and never demonstrates the credential
-      # leak. Assert only on the raw token and the bare "/s/" — never a host
-      # prefix (`Sharing.share_link_base/0` is a LAN IP locally, nil in CI).
+      # confinement reds on the STATUS and never demonstrates the leak.
+      #
+      # `link_id` is the LOAD-BEARING refute now. `raw` and "/s/" are kept
+      # underneath it, but they are no longer sufficient on their own: the raw
+      # token is not in ANY listing body since the column was retired, so those
+      # two would stay green on a controller with the tenancy gate deleted.
+      # The id is what a foreign admin must not receive, and its positive
+      # control is the sibling test above.
+      refute resp.resp_body =~ link_id
       refute resp.resp_body =~ raw
       refute resp.resp_body =~ "/s/"
       assert resp.status == 403
@@ -624,13 +651,116 @@ defmodule BarkparkWeb.ShareLinkTest do
         |> json_response(200)
 
       assert Enum.any?(listed["links"], &(&1["id"] == link_id))
-      assert Enum.any?(listed["links"], &(&1["url"] =~ "/s/#{raw}"))
 
-      served = get(build_conn(), "/s/#{raw}")
+      # The listing carries the link, NOT a URL for it — the raw token is not
+      # stored. Regression control for `arpss-w8-bl-share-link-raw-token-at-rest`.
+      refute Enum.any?(listed["links"], &Map.has_key?(&1, "url"))
+      refute listed |> Jason.encode!() |> String.contains?(raw)
+
+      # POSITIVE CONTROL for the drop: the token minted BEFORE the column went
+      # away still resolves. Lookups were always by `token_hash`.
+      served = get(scoped_conn(), "/s/#{raw}")
       assert served.status in [200, 302]
 
       revoked = conn |> admin() |> delete("/v1/shares/links/#{link_id}") |> json_response(200)
       assert revoked["revoked"] == true
+    end
+  end
+
+  describe "GET /v1/shares/links answers within the scope it was given" do
+    # `list/2` parsed the scope triple, validated the project, then DROPPED both
+    # and queried on workspace_id alone. A link minted for the SAME ref_id in a
+    # SIBLING project of the same workspace therefore came back under a scope
+    # that does not name it — with its live `/s/<token>` url. Not cross-tenant
+    # (the caller is a proven workspace admin of this workspace), but the
+    # response contradicted its own `scope=` parameter.
+    setup %{conn: conn, ws: ws} do
+      sibling = create_project!(ws, "sibling-proj-#{System.unique_integer([:positive])}")
+      sib_scope = [workspace_id: ws.id, project_id: sibling.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "type" => "string"}]
+          },
+          @dataset,
+          sib_scope
+        )
+
+      # The SAME ref_id as the setup's project — that collision is the fixture.
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "post1", "title" => "A Post in the sibling"},
+          @dataset,
+          sib_scope
+        )
+
+      {:ok, _} = Content.publish_document("post1", "post", @dataset, sib_scope)
+
+      %{"token" => sib_raw, "link" => %{"id" => sib_id}} =
+        mint(conn, %{
+          scope: "#{ws.slug}/#{sibling.slug}/#{@dataset}",
+          kind: "doc",
+          ref_type: "post",
+          ref_id: "post1"
+        })
+
+      %{sibling: sibling, sib_raw: sib_raw, sib_id: sib_id}
+    end
+
+    test "a sibling project's link for the same ref_id is not in this project's listing", %{
+      conn: conn,
+      ws: ws,
+      scope_str: scope,
+      sibling: sibling,
+      sib_raw: sib_raw,
+      sib_id: sib_id
+    } do
+      %{"token" => own_raw, "link" => %{"id" => own_id}} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      resp =
+        conn
+        |> admin()
+        |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
+
+      # ARRIVAL first — a 429 from the suite's limiter reads like a wrong body.
+      assert resp.status == 200, "listing → #{resp.status}: #{resp.resp_body}"
+      body = json_response(resp, 200)
+      ids = Enum.map(body["links"], & &1["id"])
+
+      # POSITIVE CONTROL: the listing is non-empty and DOES carry this
+      # project's own link, so the refutes below are not vacuously green.
+      assert own_id in ids
+      assert resp.resp_body =~ own_id
+
+      refute sib_id in ids
+      refute resp.resp_body =~ sib_id
+
+      # Neither raw token is anywhere in the body — not the sibling's, and not
+      # even this scope's own. Since the column was retired the listing has no
+      # plaintext to carry, which is why the confinement above is asserted on
+      # the ID and not on the token.
+      refute resp.resp_body =~ own_raw
+      refute resp.resp_body =~ sib_raw
+
+      # and the confinement is symmetric: the sibling's own scope sees ITS link
+      # and not this one.
+      sib_body =
+        conn
+        |> admin()
+        |> get(
+          "/v1/shares/links?scope=#{ws.slug}/#{sibling.slug}/#{@dataset}&kind=doc&ref_type=post&ref_id=post1"
+        )
+        |> json_response(200)
+
+      sib_ids = Enum.map(sib_body["links"], & &1["id"])
+      assert sib_id in sib_ids
+      refute own_id in sib_ids
     end
   end
 

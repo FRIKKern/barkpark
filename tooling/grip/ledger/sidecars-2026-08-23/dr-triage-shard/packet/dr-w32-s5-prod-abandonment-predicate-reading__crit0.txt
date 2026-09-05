@@ -1,0 +1,1 @@
+After the backfill migration has run on cloud-db-1, the count of deployments with deferral_depth = deferral_bound is read read-only and quoted alongside the pre-run 0 of 32,953.

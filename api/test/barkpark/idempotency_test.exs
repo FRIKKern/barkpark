@@ -2,7 +2,7 @@ defmodule Barkpark.IdempotencyTest do
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Idempotency
-  alias Barkpark.Idempotency.Key
+  alias Barkpark.Repo.IdempotencyStore.Key
 
   describe "hash_key/4" do
     test "is deterministic for same inputs" do
@@ -37,6 +37,23 @@ defmodule Barkpark.IdempotencyTest do
       assert cached.body == ~s({"ok":true})
       assert cached.headers["content-type"] == "application/json"
       assert cached.headers["x-test"] == "1"
+    end
+  end
+
+  describe "exact transaction facade" do
+    test "delegates claim, completion, and receipt replay to the repository store" do
+      hash = Idempotency.hash_key("exact", "principal", "POST", "/paper-ops")
+      scope = "paper_ops:v1:fingerprint"
+      receipt = %{"slug" => "paper", "rev" => 2}
+
+      assert {:ok, :ok} =
+               Repo.transaction(fn ->
+                 assert :claimed = Idempotency.claim_exact(hash, scope)
+                 Idempotency.complete_exact(hash, scope, receipt)
+               end)
+
+      assert {:ok, {:replay, ^receipt}} =
+               Repo.transaction(fn -> Idempotency.claim_exact(hash, scope) end)
     end
   end
 

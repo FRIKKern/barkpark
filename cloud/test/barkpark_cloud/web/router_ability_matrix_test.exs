@@ -462,7 +462,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # cch-w37-s3: the label is "team", not "primary_team" — the gate reads
     # conn.assigns[:current_team], which resolve_team/2 fills from the
     # x-barkpark-team header, so it judges the SELECTED team, not the primary one.
-    test "require_primary_team_admin names admin on the current team (the audit-trail exhibit)" do
+    test "require_current_team_admin names admin on the current team (the audit-trail exhibit)" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "member")
@@ -478,7 +478,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_owner names owner, so an ADMIN is told what they still lack" do
+    test "require_current_team_owner names owner, so an ADMIN is told what they still lack" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "admin")
@@ -510,7 +510,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # different contract and deliberately unchanged (`bp cloud support add` reads
     # that status; app.js's envVarsFailureCopy was the console half until the team
     # env-var feature was deleted — cch-w53-bl, Option A, 2026-09-02).
-    test "require_primary_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
+    test "require_current_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
       user = user_fixture()
 
       conn = session_call(:get, "/v1/audit", nil, user)
@@ -524,7 +524,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
+    test "require_current_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
       user = user_fixture()
 
       conn = session_call(:post, "/v1/billing/checkout", %{}, user)
@@ -672,6 +672,61 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert message =~ "POST /v1/sites/:id/rollback"
     end
 
+    test "the scanner CATCHES and CORRECTLY NAMES a read-gated ONE-LINER non-GET" do
+      # THE PROPERTY, not a pair of route names: when a read gate sits under the
+      # paren route spelling, the offender named must be THAT route — never
+      # whichever multi-line macro happened to precede it. Two fixtures, because
+      # the pre-fix scanner failed in two different ways depending on what came
+      # before, and only one of them was even visible:
+      #
+      #   MISATTRIBUTION — the preceding multi-line macro is a non-GET, so the
+      #   stale `current` reds the bound while NAMING THE WRONG ROUTE and sending
+      #   the fixer to a route that is correctly gated.
+      #
+      #   SILENT MISS — the preceding multi-line macro is a GET, so `current`
+      #   reads as a GET, the offender list is empty and the gate is INVISIBLE.
+      #
+      # Measured on the pre-fix `route_re` (`\s+"` instead of `\s*\(?\s*"`):
+      # the first fixture named POST /v1/sites/:id/deploy, the second named
+      # nothing at all. Both now name the one-liner.
+      misattributing = """
+        post "/v1/sites/:id/deploy" do
+          with_team_site(conn, {:ability, "write"}, fn conn, site -> deploy(conn, site) end)
+        end
+
+        post("/v1/sites/:id/rollback") do
+          with_team_site(conn, {:ability, "read"}, fn conn, site -> rollback(conn, site) end)
+        end
+      """
+
+      silently_missed = """
+        get "/v1/sites" do
+          conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+        end
+
+        post("/v1/sites/:id/rollback") do
+          with_team_site(conn, {:ability, "read"}, fn conn, site -> rollback(conn, site) end)
+        end
+      """
+
+      for {label, source} <- [
+            {"misattributing", misattributing},
+            {"silently missed", silently_missed}
+          ] do
+        offenders = scan_read_gated(source) |> Enum.reject(&(&1.verb == "get"))
+
+        # Compared as a plain list, NOT as `assert pattern = offenders`: a
+        # pattern match raises MatchError before assert/2 ever runs, which
+        # would make the sentence below dead code on the very failure it
+        # exists to explain.
+        assert Enum.map(offenders, &{&1.verb, &1.path}) == [{"post", "/v1/sites/:id/rollback"}],
+               "the #{label} fixture must name the ONE-LINER route that carries the read gate, " <>
+                 "got #{inspect(Enum.map(offenders, &{&1.verb, &1.path}))}"
+
+        assert offense_message(offenders) =~ "POST /v1/sites/:id/rollback"
+      end
+    end
+
     test "the scanner ignores commented-out gates and the generic with_team_site clause" do
       source = """
         # AUTH: `{:ability, "read"}`, not the session default — a comment, not a gate.
@@ -742,7 +797,16 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
   # gate) and a `def`/`defp` boundary clears the current route, so a helper
   # defined after the last route cannot be misattributed to it.
   defp scan_read_gated(source) do
-    route_re = ~r/^\s*(get|post|put|patch|delete|match)\s+"([^"]+)"/
+    # `\s*\(?\s*` mirrors `declared_routes/1` above: router.ex writes routes two
+    # ways — `post "/p" do … end` and the paren spelling `post("/p") do … end` /
+    # `post("/p", do: …)` — and requiring whitespace after the verb made this
+    # scanner blind to the second one. Nine route macros in router.ex use it
+    # (`post("/v1/launch")`, `post("/v1/go-live")`, `post("/v1/resurrect")`, the
+    # dashboard and health GETs), and while `current` stayed stale from the last
+    # multi-line macro a read gate under any of them was either MISATTRIBUTED to
+    # the wrong route or missed outright. The sibling comment at the top of
+    # `declared_routes/1` learned this lesson first; it now holds here too.
+    route_re = ~r/^\s*(get|post|put|patch|delete|match)\s*\(?\s*"([^"]+)"/
     read_re = ~r/Auth\.require_ability\(\s*(?:conn,\s*)?"read"\s*\)|\{:ability,\s*"read"\}/
     def_re = ~r/^\s*defp?\s+[a-z_]/
 

@@ -382,6 +382,20 @@ function tagHtml(rawName: string): string {
   return `<a href="${href}" data-tag="${name}" class="bp-tag">#${name}</a>`
 }
 
+// Verdict chip (inline `chip` node) — the byte twin of walk.ex `chip_html/5`
+// in :article mode: a `.bp-chip` pill in one of the five paperCallout tones
+// (unknown → neutral), `strong` fills it, and `note` follows as a block
+// beneath. The surface CSS owns every colour; nothing here carries a hex.
+function chipHtml(node: Record<string, unknown>): string {
+  const t = str(node.tone)
+  const tone = /^(success|warning|danger|info|neutral)$/.test(t) ? t : 'neutral'
+  const note = escapeHtml(str(node.note))
+  return (
+    `<span class="bp-chip bp-chip--${tone}${node.strong === true ? ' bp-chip--strong' : ''}"><i class="bp-chip__dot"></i>${escapeHtml(str(node.text))}</span>` +
+    (note === '' ? '' : `<span class="bp-chip__note">${note}</span>`)
+  )
+}
+
 function valuerefHtml(v: {
   target: string
   field: string
@@ -476,6 +490,8 @@ export function renderInline(node: Inline): string {
     }
     case 'tag':
       return tagHtml(str(node.name))
+    case 'chip':
+      return chipHtml(node)
     case 'valueref':
       return valuerefHtml({
         target: str(node.target),

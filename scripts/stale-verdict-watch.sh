@@ -18,6 +18,25 @@
 # such PR would otherwise flood this verdict into noise. Only CONFLICTING rows
 # are candidates.
 #
+# A DRAFT PULL REQUEST ASSERTS NOTHING ANYONE CAN ACT ON
+#
+# GitHub refuses to merge a draft and the merge sweep skips it, so a DRAFT
+# CONFLICTING PR carries no verdict a human can act on: the hazard this watch
+# exists for — one update-branch makes a stale-green conflicted PR 4/4-eligible
+# and the sweep lands it out of order — cannot happen while the row is a draft.
+# Worse, the LEAD-BRIEF's own prescribed remedy for a stale conflicted PR is
+# "draft it instead", so a red that survives drafting is a red whose own remedy
+# does not clear it. MEASURED: main drafted #15631 at 2026-09-04T02:31Z; run
+# 33837151186 at 04:31Z still printed "NOVEL 1 — #15631 … DIRTY head cbbe4a639
+# [NOVEL]" and failed main, because this file never read isDraft.
+#
+# So drafts are EXCLUDED from the NOVEL / RED set — and never silenced. Every
+# draft that would otherwise be reported is printed on its own labelled line
+# ("DRAFT, not counted: #N …") and counted on the DRAFT line of the ratchet
+# block, so the population stays fully visible. Marking it ready makes it NOVEL
+# on the very next run. A pinned row that goes draft is NOT called healed
+# either; see $DRAFTN in RATCHET_JQ.
+#
 # IT COUNTS ALL-OF-PRESENT, NEVER OCCURRENCES-OF-SUCCESS
 #
 # The obvious jq — count rollup entries whose name is required and whose
@@ -321,7 +340,7 @@ query($owner:String!,$name:String!,$first:Int!,$after:String){
                  orderBy:{field:CREATED_AT,direction:DESC}){
       pageInfo{ hasNextPage endCursor }
       nodes{
-        number mergeable mergeStateStatus updatedAt headRefOid
+        number mergeable mergeStateStatus updatedAt headRefOid isDraft
         commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
           __typename
           ... on CheckRun { name conclusion completedAt status }
@@ -340,6 +359,7 @@ query($owner:String!,$name:String!,$first:Int!,$after:String){
 PR_NORMALISE_JQ='
 [ .data.repository.pullRequests.nodes[]
   | { number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+      isDraft: (.isDraft // false),
       statusCheckRollup:
         [ (.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
           | { __typename,
@@ -405,7 +425,11 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
       return 2
     }
     [ -n "$got" ] || { red "  page $page normalised to nothing"; printf '%s' "$out"; return 2; }
-    rows="$(jq -c -n --argjson a "$rows" --argjson b "$got" '$a + $b')" || {
+    # Both arrays go through STDIN, never argv: `--argjson a "$rows"` put the whole
+    # accumulated population on the command line and, past a few hundred PRs of
+    # check-rollup rows, execve refused it — "jq: Argument list too long" on
+    # every run from 2026-09-03 06:08Z, read as UNREACHABLE (task-0a48c7b64d5ab0f1).
+    rows="$(printf '%s\n%s\n' "$rows" "$got" | jq -c -s '.[0] + .[1]')" || {
       red "  page $page could not be appended to the population"
       return 2
     }
@@ -478,6 +502,7 @@ def commits_since($t):
   . as $pr
   | {
       number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+      isDraft: (.isDraft // false),
       ctx: [ $req[] as $n
              | { name: $n,
                  hits: [ $pr.statusCheckRollup[]?
@@ -528,7 +553,13 @@ def commits_since($t):
                            | select((.missing | length) > 0 and (.rendered | length) > 0
                                     and (.green_all | length) == (.rendered | length))
                            | { number, green: (.green_all | length), rendered: (.rendered | length) } ]
-| .reported            = [ .conflicting[] | select((.stale_greens | length) > 0) ]
+# A DRAFT PR IS NOT AN ACTIONABLE VERDICT. See the header block. The stale
+# green is still computed, still printed — on its own line — and it is kept out
+# of `.reported`, which is the set the ratchet, the trend and every exit code
+# are computed from.
+| .stale               = [ .conflicting[] | select((.stale_greens | length) > 0) ]
+| .reported            = [ .stale[] | select(.isDraft != true) ]
+| .reported_draft      = [ .stale[] | select(.isDraft == true) ]
 '
 
 # ── THE PIN ──────────────────────────────────────────────────────────────────
@@ -598,6 +629,11 @@ RATCHET_JQ='
   . as $v
   | ($v.reported | map({number, head: .headRefOid})) as $R
   | ($v.unknown  | map(.number))                     as $UNK
+  # A pinned row that went DRAFT is still reported — on the draft line — so it
+  # has not healed. Without this it would vanish from $R and red rc 8 BASELINE
+  # DRIFT, telling a human to delete a line the PR would re-earn the moment it
+  # is marked ready. Drafting is reversible; the pin outlives it.
+  | ($v.reported_draft | map(.number))               as $DRAFTN
   | ($v.all_numbers)                                 as $SEEN
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length > 0) ] as $known
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length == 0) ] as $novel
@@ -610,7 +646,9 @@ RATCHET_JQ='
           pinned_head: ([ $base[] | select(.number == $r.number) | .head ] | first) } ] as $head_moved
   | [ $base[] | . as $b | select([ $R[] | select(.number == $b.number) ] | length == 0) ] as $unreported
   | [ $unreported[] | . as $b | select(($UNK | index($b.number)) != null) ] as $pinned_unread
-  | [ $unreported[] | . as $b | select(($UNK | index($b.number)) == null)
+  | [ $unreported[] | . as $b | select(($DRAFTN | index($b.number)) != null) ] as $pinned_draft
+  | [ $unreported[] | . as $b
+      | select(($UNK | index($b.number)) == null and ($DRAFTN | index($b.number)) == null)
       | . + { gone: (($SEEN | index($b.number)) == null) } ] as $healed
   | . + { ratchet: {
       pinned:        ($base | length),
@@ -620,6 +658,7 @@ RATCHET_JQ='
       novel:         $novel,
       head_moved:    $head_moved,
       healed:        $healed,
+      pinned_draft:  $pinned_draft,
       pinned_unread: $pinned_unread } }
 '
 
@@ -657,6 +696,13 @@ render() { # reads the verdict JSON on stdin
       (if (.ratchet.known | length) > 0 then " — \(.ratchet.known | map(.number) | sort | map("#\(.)") | join(", "))  (standing debt, printed in full below, NOT failed on)" else " — no pinned row is still reporting" end),
     "  HEALED \(.ratchet.healed | length)" +
       (if (.ratchet.healed | length) > 0 then " — \(.ratchet.healed | map(.number) | sort | map("#\(.)") | join(", "))  ← this run FAILS: the baseline must shrink" else " — every pinned entry is still earning its line" end),
+    "  DRAFT  \(.reported_draft | length)" +
+      (if (.reported_draft | length) > 0 then " — \(.reported_draft | map(.number) | sort | map("#\(.)") | join(", "))  (a draft cannot be merged, so it asserts no actionable verdict — printed below, NOT counted, NOT failed on)" else " — no draft pull request is asserting a stale green" end),
+    (.reported_draft | sort_by(.number)[] |
+      "  DRAFT, not counted: #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt) — GitHub refuses to merge a draft and the merge sweep skips it, so this stale green cannot reach main. Mark it ready and it is NOVEL on the very next run."),
+    (if (.ratchet.pinned_draft | length) > 0
+     then "  ^ PINNED-DRAFT \(.ratchet.pinned_draft | length) — \(.ratchet.pinned_draft | map(.number) | sort | map("#\(.)") | join(", ")): pinned, still asserting a stale green, and now a DRAFT. NOT called healed — drafting is reversible and the pin outlives it. Delete the line only when the row stops reporting entirely."
+     else empty end),
     (if (.ratchet.pinned_unread | length) > 0
      then "  UNREAD \(.ratchet.pinned_unread | length) — \(.ratchet.pinned_unread | map(.number) | sort | map("#\(.)") | join(", ")): pinned, and this run could not classify the row. NOT called healed on a read that did not happen."
      else empty end),

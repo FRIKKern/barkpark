@@ -267,6 +267,31 @@ class BpPaperEditor extends HTMLElement {
     }
   }
 
+  // Synchronously emit the debounced patch, if one is pending. Returns true only
+  // when this call dispatched bp-op; repeated calls are therefore safe while the
+  // server acknowledgement is still in flight.
+  flushPendingChanges() {
+    if (!this._editor || !this._editable || !this._debounceTimer) return false;
+    clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    return this._emitOp();
+  }
+
+  // Synchronous host seam for navigation / beforeunload guards. The editor is
+  // dirty as soon as its debounce exists, before bp-op has been dispatched.
+  hasPendingChanges() {
+    return Boolean(this._debounceTimer);
+  }
+
+  // Explicit conflict resolution seam. The host calls this only after the user
+  // chooses "Use latest"; unlike a normal server echo it intentionally discards
+  // the pending local debounce before installing the authoritative block.
+  resolveConflictWithServerBlock(block) {
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    this.block = block;
+  }
+
   // Read the initial block from the `block` JS property (object) first, then
   // fall back to a `data-block` attribute holding a JSON string.
   _readBlock() {
@@ -303,7 +328,7 @@ class BpPaperEditor extends HTMLElement {
   }
 
   _emitOp() {
-    if (!this._editor || this._blockId == null) return;
+    if (!this._editor || this._blockId == null) return false;
     const json = this._editor.getJSON();
     const op = buildPatchBlockOp(json, this._blockId, this._blockType);
     this.dispatchEvent(
@@ -313,6 +338,7 @@ class BpPaperEditor extends HTMLElement {
         composed: true,
       }),
     );
+    return true;
   }
 
   // ── slash menu ─────────────────────────────────────────────────────────

@@ -1,0 +1,1 @@
+If the record cannot be written the override is REFUSED with a non-zero exit, not granted with a warning. Evidence: a forced-failure run showing the refusal.

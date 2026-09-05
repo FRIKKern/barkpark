@@ -1,0 +1,1 @@
+A revoke request cannot cross a workspace boundary or a token-family boundary — proven by a test where workspace A's admin attempts to revoke workspace B's token and is refused, and where an admin attempts to revoke a kind='api' token through the shares route and is refused.

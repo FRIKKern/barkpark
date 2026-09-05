@@ -85,6 +85,14 @@ defmodule BarkparkCloud.Push.DevicePushToken do
     |> validate_inclusion(:platform, @platforms)
     |> validate_length(:token, min: 8, max: 1024, count: :bytes)
     |> assoc_constraint(:user)
-    |> unique_constraint([:user_id, :platform, :token])
+    # cch-w37-bl — same shape as `TeamInvitation.changeset/2`: the error hangs
+    # on the FIRST field, and `:user_id` is a `belongs_to` key the device never
+    # sends. `:token` is what the client registers. The index name is now given
+    # explicitly BECAUSE the order changed — Ecto derives the default name from
+    # the field order, and the migration created
+    # `device_push_tokens_user_id_platform_token_index`.
+    |> unique_constraint([:token, :user_id, :platform],
+      name: :device_push_tokens_user_id_platform_token_index
+    )
   end
 end

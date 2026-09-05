@@ -215,7 +215,7 @@ import { mkdtempSync, writeFileSync as _write, mkdirSync, copyFileSync } from "n
 import { tmpdir } from "node:os";
 import { join as _join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { coldIndexReason, preflightRefusal } from "./ci-boundary.mjs";
 
@@ -395,4 +395,225 @@ test("the composition-root rule is EXACT-PATH, not a *application.ex pattern", (
     assert.equal(isCompositionRootFile(f), false, `${f} must NOT match the composition root`);
     assert.equal(isEntryPoint(f), false, `${f} must NOT be an entry-point`);
   }
+});
+
+// ── ACCEPTED-UNTIL-FIXED: the three arms, and their mutation harness ────────
+//
+// The list is what lets this gate BLOCK on a tree that still carries real debt,
+// so it is the one place a blocking gate can be talked into silence. Three arms
+// keep it honest, and each is pinned here BOTH ways: a case that fires it, and
+// — below — a MUTATION that neuters that arm in a copy of the module and proves
+// the case stops firing. An arm nobody has ever seen fail is not an arm.
+
+import { readFileSync as _read } from "node:fs";
+import {
+  loadAcceptedEntries,
+  auditAccepted,
+  ACCEPTED_PATH,
+} from "./ci-boundary.mjs";
+
+const CI_BOUNDARY_SRC = fileURLToPath(new URL("./ci-boundary.mjs", import.meta.url));
+
+const entry = (identity, row, dimension = "wrongDirection") => ({
+  identity,
+  dimension,
+  row,
+  intent: "test fixture",
+  since: "2026-09-05",
+});
+
+// ── the loader ──────────────────────────────────────────────────────────────
+
+test("the loader REFUSES an entry with no row id — an acceptance with nobody on the hook", () => {
+  assert.throws(
+    () => loadAcceptedEntries({ entries: [{ identity: "alpha>beta", intent: "because" }] }),
+    /carries no bp task row id/
+  );
+  // and the paired direction: a well-formed entry loads.
+  const ok = loadAcceptedEntries({ entries: [entry("alpha>beta", "task-9d06bca37668f76a")] });
+  assert.equal(ok.length, 1);
+});
+
+test("the loader refuses a duplicate identity and a non-array entries key", () => {
+  assert.throws(
+    () =>
+      loadAcceptedEntries({
+        entries: [entry("alpha>beta", "task-1111"), entry("alpha>beta", "task-2222")],
+      }),
+    /listed twice/
+  );
+  assert.throws(() => loadAcceptedEntries({}), /`entries` array/);
+});
+
+test("the SHIPPED accepted-until-fixed.json satisfies its own loader", () => {
+  // Not a formality: the loader is the only thing standing between this list and
+  // an allowlist, and a list that ships unparseable would take the gate to a
+  // FAULT on every run of every PR.
+  const entries = loadAcceptedEntries(_read(ACCEPTED_PATH, "utf8"));
+  assert.ok(entries.length > 0, "the shipped list must not be empty while the debt is real");
+  for (const e of entries) assert.match(e.row, /^task-[0-9a-f]+$/);
+});
+
+// ── ARM (a): never-worse, with the accepted set subtracted ──────────────────
+
+test("ARM (a): an ACCEPTED edge is waved through; an UNACCEPTED one still reds", () => {
+  const cur = metrics([], ["core>alpha", "core>beta"]);
+  // Unaccepted: both the identity row and the count row fire.
+  const bare = compare(cur, BASE);
+  assert.deepEqual(edgesNamed(bare), ["core>beta"]);
+  assert.ok(bare.regressed);
+
+  // Accepted: silent, AND the comparable count drops so the count arm does not
+  // red for the very edge the entry accepts.
+  const held = compare(cur, BASE, [entry("core>beta", "task-5641006da86bfa74")]);
+  assert.deepEqual(edgesNamed(held), []);
+  assert.equal(held.regressed, false, "an accepted identity must not red the gate");
+  assert.equal(held.comparableCounts.wrongDirection, 1);
+  assert.deepEqual(held.accepted.wrongDirection, ["core>beta"]);
+});
+
+test("ARM (a): accepting one edge does NOT wave through its neighbour", () => {
+  // The failure this pins: a tolerance keyed on anything looser than the exact
+  // identity (a concept, a prefix, a dimension) would swallow the next edge too.
+  // A baseline that also KNOWS `gamma` (it names it in a cycle pair), so
+  // core>gamma is a comparable identity rather than growth — otherwise this case
+  // would pass for the wrong reason.
+  const WIDE = {
+    kernel: ["core"],
+    counts: { sideways: 1, wrongDirection: 1, featureCycles: 0 },
+    edges: { sideways: ["alpha>beta"], wrongDirection: ["core>alpha"] },
+    featureCyclePairs: ["beta|gamma"],
+  };
+  const cur = metrics(["alpha>beta"], ["core>alpha", "core>beta", "core>gamma"]);
+  const held = compare(cur, WIDE, [entry("core>beta", "task-5641006da86bfa74")]);
+  assert.deepEqual(edgesNamed(held), ["core>gamma"]);
+  assert.ok(held.regressed, "an edge outside the list must still red");
+});
+
+// ── ARM (b): the row closed while the debt is still here ────────────────────
+
+test("ARM (b): a listed row that is done/cancelled while its edge is PRESENT reds, naming the row", () => {
+  const entries = [entry("core>beta", "task-5641006da86bfa74")];
+  const present = new Set(["core>beta"]);
+  for (const closed of ["done", "cancelled"]) {
+    const res = auditAccepted({
+      entries,
+      present,
+      lifecycle: new Map([["task-5641006da86bfa74", closed]]),
+    });
+    assert.ok(res.failed, `lifecycle '${closed}' must red while the edge is present`);
+    assert.equal(res.failures[0].arm, "row-closed");
+    assert.match(res.failures[0].reason, /task-5641006da86bfa74/);
+  }
+  // Paired direction: an OPEN row with the edge present is exactly the state the
+  // list exists to describe, and must be silent.
+  const live = auditAccepted({
+    entries,
+    present,
+    lifecycle: new Map([["task-5641006da86bfa74", "in_progress"]]),
+  });
+  assert.equal(live.failed, false);
+});
+
+test("ARM (b): an UNREADABLE ledger REFUSES loudly — it never reads as green", () => {
+  const entries = [entry("core>beta", "task-5641006da86bfa74")];
+  const present = new Set(["core>beta"]);
+  for (const unreadable of [new Map(), new Map([["task-5641006da86bfa74", null]])]) {
+    const res = auditAccepted({ entries, present, lifecycle: unreadable });
+    assert.ok(res.failed, "an unreadable ledger must not be a pass");
+    assert.equal(res.failures[0].arm, "ledger-unreadable");
+    assert.match(res.failures[0].reason, /REFUSING/);
+  }
+});
+
+// ── ARM (c): healed, so the entry must go ───────────────────────────────────
+
+test("ARM (c): an entry whose edge has DISAPPEARED reds with 'HEALED: delete entry X'", () => {
+  const res = auditAccepted({
+    entries: [entry("core>beta", "task-5641006da86bfa74")],
+    present: new Set(["core>alpha"]),
+    lifecycle: new Map([["task-5641006da86bfa74", "in_progress"]]),
+  });
+  assert.ok(res.failed);
+  assert.equal(res.failures[0].arm, "healed");
+  assert.match(res.failures[0].reason, /HEALED: delete entry core>beta/);
+});
+
+test("all three arms silent together is the ONLY green shape", () => {
+  const res = auditAccepted({
+    entries: [entry("core>beta", "task-5641006da86bfa74")],
+    present: new Set(["core>beta"]),
+    lifecycle: new Map([["task-5641006da86bfa74", "open"]]),
+  });
+  assert.equal(res.failed, false);
+  assert.deepEqual(res.failures, []);
+});
+
+// ── THE MUTATION HARNESS ────────────────────────────────────────────────────
+//
+// Copy the module, neuter ONE arm by an exact anchor, and prove the case above
+// stops firing. Each mutation asserts its anchor appears EXACTLY ONCE and that
+// the rewrite produced a NON-EMPTY diff — a mutation that did not apply is not
+// a catch, it is a green test measuring the unmutated file.
+
+let mutantSeq = 0;
+async function neuter(anchor, replacement) {
+  const src = _read(CI_BOUNDARY_SRC, "utf8");
+  const hits = src.split(anchor).length - 1;
+  assert.equal(hits, 1, `anchor must appear EXACTLY ONCE in ci-boundary.mjs, found ${hits}: ${anchor}`);
+  const mutated = src.replace(anchor, replacement);
+  assert.notEqual(mutated, src, "the mutation must produce a non-empty diff");
+  const dir = mkdtempSync(_join(tmpdir(), "ci-boundary-mutant-"));
+  const file = _join(dir, `mutant-${mutantSeq++}.mjs`);
+  _write(file, mutated);
+  return await import(pathToFileURL(file).href);
+}
+
+test("MUTATION arm (a): a tolerance that accepts EVERYTHING stops the never-worse case firing", async () => {
+  const m = await neuter(
+    "const isAccepted = (k) => acceptedSet.has(String(k));",
+    "const isAccepted = (k) => true;"
+  );
+  const cur = metrics([], ["core>alpha", "core>beta"]);
+  const bare = m.compare(cur, BASE);
+  // The un-mutated assertion above is `edgesNamed(bare) === ["core>beta"]`.
+  // Under the mutation it is empty — so the arm-(a) case reds, naming arm (a).
+  assert.deepEqual(
+    bare.regressions.filter((r) => r.kind === "new-edge").map((r) => r.edge),
+    [],
+    "ARM (a) NEUTERED: with the accept filter always true, an unaccepted edge no longer reds"
+  );
+});
+
+test("MUTATION arm (b): a lifecycle check that matches nothing stops the closed-row case firing", async () => {
+  const m = await neuter("if (CLOSED_LIFECYCLES.has(status)) {", "if (false) {");
+  const res = m.auditAccepted({
+    entries: [entry("core>beta", "task-5641006da86bfa74")],
+    present: new Set(["core>beta"]),
+    lifecycle: new Map([["task-5641006da86bfa74", "done"]]),
+  });
+  assert.equal(res.failed, false, "ARM (b) NEUTERED: a done row with the debt present no longer reds");
+});
+
+test("MUTATION arm (b, refusal): an unreadable ledger read as green stops the refusal firing", async () => {
+  const m = await neuter(
+    'if (status === null || status === undefined || status === "") {',
+    "if (false) {"
+  );
+  const res = m.auditAccepted({
+    entries: [entry("core>beta", "task-5641006da86bfa74")],
+    present: new Set(["core>beta"]),
+    lifecycle: new Map(),
+  });
+  assert.equal(res.failed, false, "ARM (b) REFUSAL NEUTERED: an unreadable ledger now passes silently");
+});
+
+test("MUTATION arm (c): a healed check that never triggers stops the HEALED case firing", async () => {
+  const m = await neuter("if (!here) {", "if (false) {");
+  const res = m.auditAccepted({
+    entries: [entry("core>beta", "task-5641006da86bfa74")],
+    present: new Set(["core>alpha"]),
+    lifecycle: new Map([["task-5641006da86bfa74", "in_progress"]]),
+  });
+  assert.equal(res.failed, false, "ARM (c) NEUTERED: a healed entry survives forever");
 });

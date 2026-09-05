@@ -10,34 +10,67 @@
 #  and two of them are invisible:
 #
 #    1. FORMATTING            the thing it claims to measure.
-#    2. ELIXIR VERSION        1.18.1 and 1.19.x formatters disagree. MEASURED
-#                             2026-07-20 on this repo: under CI's 1.18.1 exactly
-#                             ONE file was unformatted; under a local 1.19.5, 97
-#                             were. The two toolchains agreed on ZERO files. The
-#                             disagreement is TOTAL, not marginal. Every "N
+#    2. ELIXIR VERSION        the 1.18.x and 1.19.x formatters disagree, and
+#                             not marginally. MEASURED 2026-07-20 on this repo:
+#                             under CI's then-1.18.1 exactly ONE file was
+#                             unformatted; under a local 1.19.5, 97 were. The
+#                             two toolchains agreed on ZERO files. Every "N
 #                             unformatted files" figure ever quoted from a local
-#                             run described a set CI never evaluates — the count
+#                             run described a set CI never evaluated — the count
 #                             was published as 1, corrected to 91, corrected to
 #                             92, and all three were answers to the wrong
-#                             question.
+#                             question. THIS CAUSE DOES NOT GO AWAY NOW THAT THE
+#                             GATE AND THE FLEET AGREE (2026-09-02: both 1.19.5)
+#                             — it goes QUIET, and a quiet cause is exactly the
+#                             one that comes back unannounced when either side
+#                             moves. The check below still runs.
 #    3. UNFETCHED DEPS        a checkout without `mix deps.get` fails with
 #                             "Unknown dependency :ecto_sql given to
 #                             :import_deps", which is INDISTINGUISHABLE from a
 #                             format failure at the exit-code level. A mutation
 #                             test run there measures the dep error, not
 #                             formatting.
+#    4. THE FORMATTER NEVER   MEASURED 2026-09-03 (task-5e7315f1231641b8): on
+#       RAN AT ALL            the fleet's Macs `mix` is a compile-slot wrapper
+#                             (~/.local/bin/mix) that REFUSES every `mix format`
+#                             unless BP_ALLOW_FORMAT=1 — it prints "mix format
+#                             is REFUSED on this box" and exits non-zero WITHOUT
+#                             invoking a formatter. This script read that exit
+#                             as the formatting verdict, so it printed
+#                             "!! UNFORMATTED (exit 1) — a real verdict" for
+#                             EVERY file, including files CI's Format job passes.
+#                             A FAILED READ WAS BYTE-IDENTICAL TO A RED — the
+#                             exact disease this file exists to cure, in this
+#                             file. Cured below by exit 6: the verdict branch is
+#                             now reachable only when `mix format
+#                             --check-formatted` actually ran and returned 1.
 #
-#  All three exit non-zero and, until now, all three looked the same. This
+#  All four exit non-zero and, until now, all four looked the same. This
 #  script separates them by exit code and says which one it is, BEFORE it runs
 #  the formatter — so a wrong-toolchain run refuses to produce a number rather
 #  than silently producing the wrong one.
 #
 #  THE PIN IS NOT THE ENFORCEMENT. `.tool-versions` already pinned Elixir, and
-#  it did not help: asdf is not installed on every machine, so `elixir`
-#  resolves to whatever is on PATH (measured on this box: .tool-versions says
-#  1.18.4-otp-27, PATH gives Homebrew's 1.19.5/OTP 28, CI runs 1.18.1/OTP 27 —
+#  it did not help: asdf is not installed on every machine, so `elixir` resolves
+#  to whatever is on PATH (measured 2026-07-20: .tool-versions said
+#  1.18.4-otp-27, PATH gave Homebrew's 1.19.5/OTP 28, CI ran 1.18.1/OTP 27 —
 #  THREE numbers, none of them reconciled). A declaration nothing checks is a
 #  comment. This script is the check.
+#
+#  WHICH NUMBER THE GATE SHOULD BE (orchestrator ruling 2026-09-02,
+#  task-9a08c27d897f38e6). The format gate now pins 1.19.5 — THE FORMATTER
+#  DEVELOPERS AND AGENTS ACTUALLY RUN, measured on every box — because the
+#  question this instrument answers is "is the tree formatted the way the people
+#  who format it format it?", and no other answer is stable: `.tool-versions`
+#  has asked for 1.18.4-otp-27 for months and the fleet has never once honoured
+#  it, so each local `mix format` re-reddened the gate and each gate-shaped
+#  repair was undone by the next local format. A treadmill, not a backlog.
+#  `.tool-versions` deliberately did NOT move with it: it is production's
+#  declaration (release-artifact.yml builds the prebuilt from it,
+#  deploy/azure-base-install.sh pins every box's asdf to it), and the elixir.yml
+#  mix-test / mix-prod-compile matrices are production's gates. So the PIN
+#  DISAGREES warning below is now EXPECTED, and says so — two numbers, each
+#  owned, rather than three unowned ones.
 #
 #  ONE SOURCE OF TRUTH FOR THE EXPECTED VERSION: it is READ OUT of
 #  .github/workflows/elixir.yml's format job matrix, never restated here. A
@@ -48,7 +81,8 @@
 #  USAGE
 # ─────────────────────────────────────────────────────────────────────────────
 #    bash scripts/format-check.sh              # check; refuse if it cannot tell
-#    bash scripts/format-check.sh --selftest   # prove each refusal can fire
+#    bash scripts/format-check.sh --selftest   # prove each refusal can fire,
+#                                              # and that both verdicts still get through
 #
 #  EXIT CODES — the whole point of the file:
 #    0  formatted, under the right Elixir, with deps resolved
@@ -56,9 +90,14 @@
 #    3  WRONG ELIXIR — no claim made about formatting
 #    4  DEPS NOT FETCHED — no claim made about formatting
 #    5  the expected version could not be read out of the workflow
+#    6  THE FORMATTER DID NOT RUN — no `mix` on PATH, a wrapper REFUSED the
+#       invocation (the box's compile-slot shim does exactly this), or the
+#       formatter exited with a code that is neither 0 nor 1. The wrapper's own
+#       words are quoted back. No claim made about formatting.
 #
-#  Codes 3/4/5 are REFUSALS, not verdicts, and they say so in words. Nothing
-#  downstream may read them as "the tree is unformatted".
+#  Codes 3/4/5/6 are REFUSALS, not verdicts, and they say so in words. Nothing
+#  downstream may read them as "the tree is unformatted". THE INVARIANT: exit 1
+#  is emitted only when `mix format --check-formatted` RAN and returned 1.
 set -uo pipefail
 
 ROOT="${FORMAT_CHECK_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -104,23 +143,35 @@ if [ "${1:-}" != "--selftest" ]; then
 
   say ">> formatter   Elixir $RUNNING  (CI's format gate pins $EXPECTED, read from ${WORKFLOW#$ROOT/})"
 
-  # THE THIRD NUMBER, surfaced rather than silently tolerated. `.tool-versions`
+  # THE OTHER NUMBER, surfaced rather than silently tolerated. `.tool-versions`
   # is what a developer running asdf/mise will actually get, and it is a
   # SEPARATE declaration from the gate's matrix — so it can disagree with the
-  # thing that will judge them, and on this repo it does (measured: pin
-  # 1.18.4-otp-27 vs gate 1.18.1). A developer who does everything right, gets
-  # onto the pin, and formats is STILL producing the wrong answer.
+  # thing that will judge them, and on this repo it does (pin 1.18.4-otp-27 vs
+  # format gate 1.19.5).
   #
-  # A WARNING, not a refusal, and deliberately: reconciling the pin changes
-  # everyone's local toolchain and is not this script's call to make. But an
-  # unreconciled pin must at least be VISIBLE, because its whole failure mode is
-  # that nobody knows there are three numbers.
+  # SINCE 2026-09-02 THAT DISAGREEMENT IS DELIBERATE, and the note says so
+  # rather than pretending it is a fresh defect: the two declarations answer
+  # different questions. `.tool-versions` is PRODUCTION's toolchain (the release
+  # artifact and every box's asdf read it, as do the mix-test / mix-prod-compile
+  # matrices at 1.18.1); this gate's matrix is THE FORMATTER, pinned to what the
+  # fleet runs so that a local `mix format` and the gate reach the same verdict.
+  # Still a WARNING and never a refusal: someone on the pin will be refused by
+  # the version check below, with reasons, and that is the honest outcome.
   if [ -f "$ROOT/.tool-versions" ]; then
     PINNED="$(sed -n 's/^elixir[[:space:]]\{1,\}\([0-9][0-9.]*\).*/\1/p' "$ROOT/.tool-versions" | head -1)"
     if [ -n "$PINNED" ] && [ "$PINNED" != "$EXPECTED" ]; then
-      say "!! PIN DISAGREES: .tool-versions says elixir $PINNED, the gate uses $EXPECTED."
-      say "   Anyone who honours the pin lands on a formatter the gate does not use. File it;"
-      say "   this script will not reconcile a repo-wide toolchain declaration on its own."
+      say "!! PIN DISAGREES (expected — two owned numbers, not one unowned one):"
+      say "     .tool-versions          elixir $PINNED   <- PRODUCTION's toolchain"
+      say "     format gate matrix      elixir $EXPECTED   <- THE FORMATTER the fleet runs"
+      say "   Deliberate since 2026-09-02: .tool-versions is read by release-artifact.yml,"
+      say "   deploy/azure-base-install.sh and the mix-test/mix-prod-compile matrices, so it"
+      say "   does NOT move with the format gate. Format under $EXPECTED. Neither pin is stale;"
+      say "   moving either one to 'agree' would break the other's owner."
+      say "   THIRD DECLARATION, OWNER-SIDE (outside this repo, not fixable from here):"
+      say "   ~/.local/bin/mix — the fleet's compile-slot shim — hard-codes 1.18.4 at line 6"
+      say "   (comment) and line 12 (the refusal text it prints). That text predates the"
+      say "   2026-09-02 bump and now names the wrong CI pin; the shim's REFUSAL is still"
+      say "   honoured here, its version prose is not read. Owner: the orchestrator."
     fi
   fi
 
@@ -139,8 +190,12 @@ if [ "${1:-}" != "--selftest" ]; then
     say "   Do NOT run \`mix format\` to 'fix' this. Reformatting under $RUNNING rewrites"
     say "   files the gate considers CLEAN and will red the gate that is currently green."
     say ""
-    say "   Get onto $EXPECTED (asdf/mise honouring .tool-versions, or a container), then"
-    say "   re-run. NO CLAIM is being made about formatting."
+    say "   Get onto Elixir $EXPECTED and re-run. NOTE: since 2026-09-02 the format gate"
+    say "   pins the formatter THE FLEET RUNS, which is NOT what .tool-versions declares"
+    say "   (that one is production's, and mix-test/mix-prod-compile are its gates). So"
+    say "   asdf/mise honouring .tool-versions will NOT get you to $EXPECTED — install"
+    say "   $EXPECTED explicitly, or use whatever puts it on PATH."
+    say "   NO CLAIM is being made about formatting."
     exit 3
   fi
 
@@ -160,9 +215,48 @@ if [ "${1:-}" != "--selftest" ]; then
   fi
 
   say ">> deps        resolved in ${API_DIR#$ROOT/}/deps"
-  say ""
-  out="$(cd "$API_DIR" && mix format --check-formatted 2>&1)"
+
+  if ! command -v mix >/dev/null 2>&1; then
+    say ""
+    say "!! CANNOT READ FORMATTING (exit 6): no \`mix\` on PATH, so the formatter never ran."
+    say "   NO CLAIM is being made about formatting."
+    exit 6
+  fi
+
+  # THE BOX SHIM, AND WHY THIS SCRIPT MAY OVERRIDE IT. ~/.local/bin/mix refuses
+  # `mix format` unless BP_ALLOW_FORMAT=1, because a format under the WRONG
+  # Elixir re-reds the gate. That guard is right and this script has already
+  # satisfied it by hand, more precisely than the shim can: RUNNING == EXPECTED
+  # was proved above against the gate's own matrix, and --check-formatted writes
+  # nothing. So the export below is the shim's condition being MET, not bypassed
+  # — and it is done HERE rather than by the caller, so that every lane gets an
+  # honest read with the plain `bash scripts/format-check.sh` the ruling names.
+  # A caller must never need BP_ALLOW_FORMAT=1 to get a verdict out of this file.
+  out="$(cd "$API_DIR" && BP_ALLOW_FORMAT=1 mix format --check-formatted 2>&1)"
   rc=$?
+
+  # A REFUSAL IS NOT A VERDICT. Belt and braces: the exit code (only 0 and 1 are
+  # verdicts) AND the wrapper's own vocabulary, because a future wrapper may
+  # refuse with 1. Either signal routes to exit 6.
+  refused=""
+  case "$rc" in 0|1) ;; *) refused="exit code $rc is neither 0 nor 1" ;; esac
+  if printf '%s' "$out" | grep -qE 'REFUSED|UNCHECKED'; then
+    refused="the \`mix\` on PATH refused to run the formatter"
+  fi
+  if [ -n "$refused" ]; then
+    say ""
+    say "!! CANNOT READ FORMATTING (exit 6): $refused — the formatter DID NOT RUN."
+    say "   This is a REFUSAL, not a verdict. It is NOT 'unformatted'."
+    say "   What the \`mix\` on PATH ($(command -v mix)) said, verbatim:"
+    printf '%s\n' "$out" | sed 's/^/     | /'
+    say ""
+    say "   \`mix format --check-formatted\` never produced an answer, so there is nothing to"
+    say "   report about this tree. Do NOT reformat anything on the strength of this run."
+    say "   NO CLAIM is being made about formatting."
+    exit 6
+  fi
+
+  say ""
   if [ "$rc" -eq 0 ]; then
     say "$out"
     say "FORMAT OK — the tree is formatted under Elixir $RUNNING, which is the version the gate uses."
@@ -171,7 +265,8 @@ if [ "${1:-}" != "--selftest" ]; then
   say "$out"
   say ""
   say "!! UNFORMATTED (exit 1) — a real verdict, under the RIGHT Elixir ($RUNNING == the gate's $EXPECTED)"
-  say "   with deps resolved, so it is neither a version disagreement nor an import_deps error."
+  say "   with deps resolved, so it is neither a version disagreement nor an import_deps error,"
+  say "   and the formatter RAN (exit 1 from \`mix format --check-formatted\` itself)."
   say "   Fix with: (cd $API_DIR && mix format)"
   exit 1
 fi
@@ -230,7 +325,8 @@ check "and it says NO CLAIM is being made, so nothing downstream reads it as a v
 check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 "Do NOT run" "" "$rc" "$out"
 
 # 4. DEPS NOT FETCHED — expectation matches the running toolchain, deps empty.
-running="$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p' | head -1)"
+running_probe="$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p' | head -1)"
+running="$running_probe"
 if [ -n "$running" ]; then
   mkdir -p "$tmp/nodeps/api" "$tmp/nodeps/.github/workflows"
   printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running" > "$tmp/nodeps/.github/workflows/elixir.yml"
@@ -241,7 +337,66 @@ else
   say "  skip  deps-refusal case — no elixir on PATH to match an expectation against"
 fi
 
-# 5. THE READER ACTUALLY READS THE REAL WORKFLOW. If this ever returns empty on
+# 5. A WRAPPER REFUSAL IS NOT A VERDICT — the regression this file shipped with
+#    until 2026-09-03. A fake `mix` speaks the box shim's exact refusal (exit 2,
+#    "REFUSED"/"UNCHECKED", no formatter invoked) with everything else correct:
+#    right Elixir, deps present. Before the fix this printed "!! UNFORMATTED
+#    (exit 1) — a real verdict". It must now print CANNOT READ and exit 6, and
+#    must NOT contain the word UNFORMATTED anywhere.
+if [ -n "$running_probe" ]; then
+  mkdir -p "$tmp/refuse/api/deps" "$tmp/refuse/.github/workflows" "$tmp/refuse/bin"
+  : > "$tmp/refuse/api/deps/keep"
+  printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
+    > "$tmp/refuse/.github/workflows/elixir.yml"
+  cat > "$tmp/refuse/bin/mix" <<'FAKE'
+#!/usr/bin/env bash
+echo "mix format is REFUSED on this box: local Elixir 1.19.5 != the 1.18.4 that CI and prod use." >&2
+echo "If you truly must: BP_ALLOW_FORMAT=1 mix format <file>" >&2
+echo "UNCHECKED: this refusal is exit 2 — a toolchain refusal, never a formatting verdict." >&2
+exit 2
+FAKE
+  chmod +x "$tmp/refuse/bin/mix"
+  out="$(PATH="$tmp/refuse/bin:$PATH" FORMAT_CHECK_ROOT="$tmp/refuse" \
+    FORMAT_CHECK_WORKFLOW="$tmp/refuse/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+  check "a wrapper REFUSAL refuses as itself and is NEVER reported as unformatted" 6 "CANNOT READ" "UNFORMATTED" "$rc" "$out"
+  check "and it quotes the wrapper's own words so the reader can see WHO refused" 6 "REFUSED on this box" "" "$rc" "$out"
+  check "and it says NO CLAIM, so nothing downstream reads exit 6 as a verdict" 6 "NO CLAIM" "" "$rc" "$out"
+else
+  say "  skip  wrapper-refusal case — no elixir on PATH to pin an expectation to"
+fi
+
+# 6. THE VERDICTS THEMSELVES, THROUGH THE PATH THE FLEET RUNS. The refusal
+#    detector above is only safe if the two real answers still get through: a
+#    formatted tree must exit 0 and an unformatted one must exit 1, with the
+#    CALLER SETTING NOTHING (no BP_ALLOW_FORMAT — the script satisfies the
+#    shim's condition itself, having already proved RUNNING == EXPECTED).
+#    Uses the REAL toolchain when one is on PATH, so the verdicts are the
+#    formatter's own and not a mock's opinion; skips otherwise.
+if [ -n "$running_probe" ] && command -v mix >/dev/null 2>&1; then
+  for kind in ok bad; do
+    d="$tmp/verdict-$kind"
+    mkdir -p "$d/api/deps" "$d/.github/workflows"; : > "$d/api/deps/keep"
+    printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
+      > "$d/.github/workflows/elixir.yml"
+    printf '[inputs: ["*.ex"]]\n' > "$d/api/.formatter.exs"
+    if [ "$kind" = ok ]; then
+      printf 'defmodule A do\n  def a, do: :ok\nend\n' > "$d/api/a.ex"
+    else
+      printf 'defmodule B do\n      def b,   do:   :ok\nend\n' > "$d/api/b.ex"
+    fi
+  done
+  out="$(env -u BP_ALLOW_FORMAT FORMAT_CHECK_ROOT="$tmp/verdict-ok" \
+    FORMAT_CHECK_WORKFLOW="$tmp/verdict-ok/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+  check "a FORMATTED tree still passes with the caller setting no BP_ALLOW_FORMAT" 0 "FORMAT OK" "CANNOT READ" "$rc" "$out"
+  out="$(env -u BP_ALLOW_FORMAT FORMAT_CHECK_ROOT="$tmp/verdict-bad" \
+    FORMAT_CHECK_WORKFLOW="$tmp/verdict-bad/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+  check "an UNFORMATTED file still reds as exit 1, and not as a refusal" 1 "UNFORMATTED" "CANNOT READ" "$rc" "$out"
+  check "and the red names the file the formatter objected to" 1 "b.ex" "" "$rc" "$out"
+else
+  say "  skip  verdict cases — no elixir/mix on PATH to produce a real formatter verdict"
+fi
+
+# 7. THE READER ACTUALLY READS THE REAL WORKFLOW. If this ever returns empty on
 #    the committed file, every case above is testing a straw man.
 if [ -f "$WORKFLOW" ]; then
   real="$(read_expected "$WORKFLOW")"

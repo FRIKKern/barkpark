@@ -430,6 +430,9 @@ func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
 		if _, exempt := hzServerPostConditionExemptions[s.verb]; exempt {
 			class = "exempt"
 		}
+		if _, foreign := hzForeignPostConditions[s.verb]; foreign {
+			class = "foreign post-condition"
+		}
 		t.Logf("  %-14s %-22s %s:%d — %s", s.verb, s.shape, s.file, s.line, class)
 	}
 	// The floor is a self-measurement guard, not a census: it only has to be
@@ -448,10 +451,25 @@ func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
 	for _, verb := range verbs {
 		post, keyed := hzServerPostConditions[verb]
 		reason, exempt := hzServerPostConditionExemptions[verb]
+		// THE THIRD CLASSIFICATION (pds-w26-create-image-image-postcondition):
+		// a verb whose post-condition is real but lands on ANOTHER resource.
+		// Before it existed create-image had to choose between claiming a
+		// server field it never moves and declaring that nothing is re-read;
+		// it now re-reads GET /images/<id>, so both of those are false.
+		foreignRead, foreign := hzForeignPostConditions[verb]
+		if n := hzClassCount(keyed, exempt, foreign); n > 1 {
+			t.Errorf("`server %s` is classified %d ways at once (keyed=%t exempt=%t foreign=%t) — the three maps "+
+				"make INCOMPATIBLE claims about what the receipt is built from, so at least one of them is a lie",
+				verb, n, keyed, exempt, foreign)
+		}
 		switch {
 		case exempt && keyed:
-			t.Errorf("`server %s` is BOTH keyed in hzServerPostConditions and exempt — one of the two is a lie "+
-				"about what the receipt is built from", verb)
+			// Already reported above; kept so the arms below stay exclusive.
+		case foreign:
+			if strings.TrimSpace(foreignRead) == "" {
+				t.Errorf("`server %s` declares a post-condition on another resource with an empty description — "+
+					"a foreign read nobody can name is indistinguishable from no read at all", verb)
+			}
 		case exempt:
 			if strings.TrimSpace(reason) == "" {
 				t.Errorf("`server %s` takes a post-condition exemption with an empty reason — "+
@@ -505,6 +523,26 @@ func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
 				"a stale exemption excuses nothing and hides the next verb that needs one", verb, hzReceiptSourceFiles(t))
 		}
 	}
+	for verb := range hzForeignPostConditions {
+		if !declared[verb] {
+			t.Errorf("hzForeignPostConditions describes a read for %q, which reports no verb receipt in any of %v — "+
+				"a stale entry describes a confirmation nothing performs", verb, hzReceiptSourceFiles(t))
+		}
+	}
+}
+
+// hzClassCount counts how many of the three post-condition classifications one
+// verb claims. They are mutually exclusive by construction: keyed asserts a
+// SERVER field, foreign asserts another resource, exempt asserts nothing is
+// re-read at all.
+func hzClassCount(keyed, exempt, foreign bool) int {
+	n := 0
+	for _, b := range []bool{keyed, exempt, foreign} {
+		if b {
+			n++
+		}
+	}
+	return n
 }
 
 // hzShapesOf names the receipt shapes one verb emits, for refusal messages that
@@ -1366,4 +1404,159 @@ func TestRenderHzTableClampsLongCells(t *testing.T) {
 // writeTempFile is a tiny helper so the test body reads linearly.
 func writeTempFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+// hzCreateImageFake stands up the create-image wire: name resolution, the
+// snapshot POST whose response ECHOES an image, and the action poll. The
+// caller adds GET /images/9 — the read-back this row exists for.
+func hzCreateImageFake(t *testing.T) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+	})
+	// The RESPONSE ECHO: the create action hands back an image that already
+	// claims to be available with the description that was requested. Every
+	// assertion below is about the receipt NOT being built from this.
+	f.mux.HandleFunc("POST /servers/42/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{
+			"image":{"id":9,"description":"nightly","status":"available","type":"snapshot"},
+			"action":{"id":21,"status":"running","progress":0}
+		}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":21,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestHetznerCreateImageReportsTheImageItReRead is the behavioural half of
+// pds-w26-create-image-image-postcondition. The fake's GET /images/9
+// DISAGREES with the CreateImage response on every field that matters, so a
+// receipt built from the echo and a receipt built from the read-back cannot
+// print the same thing. Before this row they did.
+func TestHetznerCreateImageReportsTheImageItReRead(t *testing.T) {
+	f := hzCreateImageFake(t)
+	f.mux.HandleFunc("GET /images/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"image":{"id":9,"description":"nightly (server side)","status":"creating","type":"snapshot"}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json",
+		"hetzner", "server", "create-image", "web-1", "--description", "nightly")
+	if code != exitOK {
+		t.Fatalf("create-image exited %d, stderr: %s", code, stderr)
+	}
+	if f.count("GET", "/images/9") == 0 {
+		t.Fatalf("no GET /images/9 was issued — the receipt is still the CreateImage response echo. requests: %v",
+			f.requests())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("create-image receipt is not JSON (%v): %s", err, stdout)
+	}
+	// The OBSERVED status, not the response's "available".
+	if got := payload["image_status"]; got != "creating" {
+		t.Errorf("image_status = %v, want %q — the receipt is not reporting what GET /images/9 said", got, "creating")
+	}
+	if got := payload["image_description"]; got != "nightly (server side)" {
+		t.Errorf("image_description = %v, want the OBSERVED %q (the request asked for %q)",
+			got, "nightly (server side)", "nightly")
+	}
+	// CARRIED CRITERION: a fresh image reports `creating`, and NOTHING in the
+	// receipt may imply the snapshot is usable.
+	if got, ok := payload["image_ready"].(bool); !ok || got {
+		t.Errorf("image_ready = %v, want false — a `creating` snapshot cannot be restored from, so a receipt that "+
+			"omits this or reports true tells an operator the opposite of what the API said", payload["image_ready"])
+	}
+	if payload["confirmation"] != nil {
+		t.Errorf("confirmation = %v, want absent — the read-back SUCCEEDED; `creating` is an observed state, "+
+			"not a failure to observe", payload["confirmation"])
+	}
+	t.Logf("OBSERVED RECEIPT %v", payload)
+}
+
+// TestHetznerCreateImageAvailableImageReadsReady is the other side of the
+// image_ready discrimination: without it, a test suite that only ever saw
+// `creating` could not tell a receipt that reports readiness honestly from one
+// that hardcodes false.
+func TestHetznerCreateImageAvailableImageReadsReady(t *testing.T) {
+	f := hzCreateImageFake(t)
+	f.mux.HandleFunc("GET /images/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"image":{"id":9,"description":"nightly","status":"available","type":"snapshot"}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json",
+		"hetzner", "server", "create-image", "web-1", "--description", "nightly")
+	if code != exitOK {
+		t.Fatalf("create-image exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("create-image receipt is not JSON (%v): %s", err, stdout)
+	}
+	if got, ok := payload["image_ready"].(bool); !ok || !got {
+		t.Errorf("image_ready = %v, want true for an image GET /images/9 reports as available", payload["image_ready"])
+	}
+	if got := payload["image_status"]; got != "available" {
+		t.Errorf("image_status = %v, want available", got)
+	}
+}
+
+// TestHetznerCreateImageUnreadableImageIsConfirmationUnavailable pins the
+// escape: the action was fired AND waited to success, so a failed CONFIRMING
+// read is not a failed verb. Exit 0, the two hzFlagVerbDone keys, and no claim
+// about the image's state.
+func TestHetznerCreateImageUnreadableImageIsConfirmationUnavailable(t *testing.T) {
+	f := hzCreateImageFake(t)
+	f.mux.HandleFunc("GET /images/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 500, `{"error":{"code":"service_error","message":"images unavailable"}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json",
+		"hetzner", "server", "create-image", "web-1", "--description", "nightly")
+	if code != exitOK {
+		t.Fatalf("create-image exited %d (want 0 — only the CONFIRMING read failed), stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("create-image receipt is not JSON (%v): %s", err, stdout)
+	}
+	if payload["confirmation"] != "unavailable" {
+		t.Errorf("confirmation = %v, want %q — the same key hzFlagVerbDone sets when the read-back fails",
+			payload["confirmation"], "unavailable")
+	}
+	if s, _ := payload["confirmation_error"].(string); s == "" {
+		t.Errorf("confirmation_error is empty — an unavailable confirmation that does not say WHY is a shrug")
+	}
+	// NOTHING may be claimed about a state nobody could read.
+	for _, key := range []string{"image_status", "image_description", "image_ready"} {
+		if _, present := payload[key]; present {
+			t.Errorf("%s = %v is present on a receipt whose read-back FAILED — a value nobody observed is exactly "+
+				"the request echo this row deleted", key, payload[key])
+		}
+	}
+	if payload["image_id"] == nil {
+		t.Errorf("image_id is absent — the id is the operator's only handle on the snapshot and it came from the " +
+			"action response, which did happen")
+	}
+	t.Logf("UNCONFIRMED RECEIPT %v", payload)
+}
+
+// TestHetznerCreateImageDeclaresAForeignPostCondition asserts the DATA half:
+// create-image no longer excuses itself, and the map that now describes it says
+// which read it performs.
+func TestHetznerCreateImageDeclaresAForeignPostCondition(t *testing.T) {
+	if reason, exempt := hzServerPostConditionExemptions["create-image"]; exempt {
+		t.Errorf("create-image still takes a post-condition EXEMPTION (%q) — it re-reads GET /images/<id> now, "+
+			"so the exemption is false", reason)
+	}
+	read, foreign := hzForeignPostConditions["create-image"]
+	if !foreign {
+		t.Fatalf("create-image declares no foreign post-condition — the derivation gate would then read it as a " +
+			"verb that states nothing about what its receipt is built from")
+	}
+	if !strings.Contains(read, "/images/") {
+		t.Errorf("the create-image foreign post-condition does not name the read it performs: %q", read)
+	}
 }

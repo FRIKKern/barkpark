@@ -1,0 +1,1 @@
+The relationship between the Studio surface gutter and the public reader gutter is either UNIFIED on the same token or PINNED by a test that reads both files and asserts the horizontal values equal — with the choice justified against the risk of crossing into a layout file this epic has not owned

@@ -1,0 +1,1 @@
+GATE GREEN on the final state: `cd cloud && CC=clang mix test test/barkpark_cloud/deploy_ledger_test.exs test/barkpark_cloud/payload_key_set_census_test.exs test/barkpark_cloud/deploy_ledger_tenancy_test.exs` passes, and `CC=clang go build ./... && CC=clang go vet ./internal/... && CC=clang go test ./internal/...` passes. Evidence: pasted tail output for both.

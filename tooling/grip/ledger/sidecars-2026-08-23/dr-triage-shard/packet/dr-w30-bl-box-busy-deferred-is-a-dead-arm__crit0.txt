@@ -1,0 +1,1 @@
+The reason the busy arm stopped producing rows is identified and named as one of: capacity change, traffic change, or an unreachable producer path. Evidence: the producer code path plus a live query with its as_of.

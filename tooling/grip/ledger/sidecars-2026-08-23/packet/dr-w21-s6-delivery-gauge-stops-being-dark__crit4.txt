@@ -1,0 +1,1 @@
+The PR body pastes the BEFORE reading FROM RUN: `bp cloud deployments -o table` against the live control plane printing `NOT MEASURED — this control plane sends no delivery census`, AND the operator route answering `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}` to a real account token. Both with their as-of instants.

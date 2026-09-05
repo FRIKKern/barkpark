@@ -55,9 +55,9 @@ defmodule BarkparkWeb.SharedEditTest do
     end
 
     # ws_a is edit-shared for docs + media; ws_b is not shared at all.
-    prior = Application.get_env(:barkpark, :shares)
     share_a!("docs,media:edit", ws_a, proj_a)
-    on_exit(fn -> restore(prior) end)
+    # arpss-w8: snapshots :shares AND :shares_env (Sharing.refresh/0 reads both).
+    Barkpark.SharingFixtures.snapshot_shares!()
 
     {:ok, {edit_token, _}} =
       Auth.create_share_token(ws_a.slug, proj_a.slug, @dataset, ["docs", "media"])
@@ -76,16 +76,10 @@ defmodule BarkparkWeb.SharedEditTest do
     }
   end
 
-  defp restore(nil), do: Application.delete_env(:barkpark, :shares)
-  defp restore(v), do: Application.put_env(:barkpark, :shares, v)
-
+  # arpss-w8: planted as a STORED row (Barkpark.SharingFixtures) so Sharing.refresh/0
+  # rebuilds it instead of erasing it; snapshots :shares_env as well as :shares.
   defp share_a!(spec, ws, proj),
-    do:
-      Application.put_env(
-        :barkpark,
-        :shares,
-        Sharing.parse("#{ws.slug}/#{proj.slug}/#{@dataset}:#{spec}")
-      )
+    do: Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:#{spec}")
 
   defp auth(conn, token) do
     conn

@@ -1,0 +1,1 @@
+cloud/test/barkpark_cloud/notifications/render_test.exs passes with the new arm and the new census; run output quoted.

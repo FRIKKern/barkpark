@@ -99,7 +99,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       url = created["result"]["originalUrl"]
 
       conn =
-        build_conn()
+        scoped_conn()
         |> get(url)
 
       assert conn.status == 200
@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       etag = List.first(get_resp_header(conn, "etag"))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("if-none-match", etag)
         |> get(url)
 
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       thumb_url = created["result"]["thumbnailUrl"]
 
       conn =
-        build_conn()
+        scoped_conn()
         |> get(thumb_url)
 
       assert conn.status == 200
@@ -190,7 +190,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       svg = ~s|<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>|
       {_file, full} = put_blob!("test/xss/evil-#{suffix}.svg", svg)
 
-      conn = get(build_conn(), "/media/files/test/xss/evil-#{suffix}.svg")
+      conn = get(scoped_conn(), "/media/files/test/xss/evil-#{suffix}.svg")
 
       assert conn.status == 200
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
@@ -207,7 +207,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       suffix = System.unique_integer([:positive])
       {_file, full} = put_blob!("test/xss/evil-#{suffix}.html", "<script>alert(1)</script>")
 
-      conn = get(build_conn(), "/media/files/test/xss/evil-#{suffix}.html")
+      conn = get(scoped_conn(), "/media/files/test/xss/evil-#{suffix}.html")
 
       assert conn.status == 200
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
@@ -225,7 +225,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
         |> json_response(201)
 
       url = created["result"]["originalUrl"]
-      served = get(build_conn(), url)
+      served = get(scoped_conn(), url)
 
       assert served.status == 200
       assert get_resp_header(served, "x-content-type-options") == ["nosniff"]

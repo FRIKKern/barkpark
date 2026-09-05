@@ -1,0 +1,1 @@
+The probe instrumentation is COMMITTED to tooling/studio-journey/ rather than left in a throwaway worktree, and the self-test still passes with it in place.

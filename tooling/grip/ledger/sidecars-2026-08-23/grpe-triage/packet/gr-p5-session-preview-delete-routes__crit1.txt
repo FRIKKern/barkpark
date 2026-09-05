@@ -1,0 +1,1 @@
+The failure arm is modeled, not just the happy path: a non-2xx revoke leaves the row present with its Revoke button restored. Evidence: the scenario output.

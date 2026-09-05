@@ -1,0 +1,1 @@
+No merge-blocking job reaches guerrilla through this suite: a refusing curl sentinel first on PATH yields ZERO fires across the whole seal-predicate suite, and the suite is still green. Evidence: the fire count and the suite output.

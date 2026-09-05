@@ -16,6 +16,12 @@
 # stat with an mtime-after-claim control, or the turn's own receipt values) — never canned;
 # a failed order is `--miss`-stamped and RELEASED, never closed. The verdict logic is factored
 # (order_verdict / run_turn) so `fleet-run-verdict-test.sh` gates it on fixtures, no real turn.
+# Shape before content: bp emits ok:false, a typed error.code AND a non-zero
+# exit on a refused read; bp_json checks all three so a refusal can never be
+# read as an empty result (task-4eb2994a588453d3).
+_FLEET_RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$_FLEET_RUN_DIR/../../scripts/lib/bp-read.sh"
+
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 FLEET_AGENT="${FLEET_AGENT:-claude}"
 say(){ printf '%s [%s/%s] %s\n' "$(date +%H:%M:%S)" "${WORKER:-?}" "$FLEET_AGENT" "$*"; }
@@ -233,7 +239,24 @@ with open(lp, "a", encoding="utf-8") as fh:
 PY
 }
 
-field(){ bp task get "$1" -o json 2>/dev/null | python3 -c "
+# `bp task get` is CAPTURED, never piped. The old line was
+#     bp task get "$1" -o json 2>/dev/null | python3 -c "..."
+# which is the "bp-into-a-pipe" pattern: 2>/dev/null discards the message and,
+# with no `set -o pipefail` in this file, the pipeline's status is python3's,
+# never bp's. A `usage`/`not_found` refusal (exit 2/4) therefore arrived as an
+# error envelope with no `doc` key, `or {}` collapsed it, and field() printed
+# an empty string — indistinguishable from a row that genuinely has no holder.
+field(){
+  local _body _rc
+  _body="$(bp_json task get "$1" -o json)"; _rc=$?
+  if [ "$_rc" -ne 0 ]; then
+    # bp's own status is PROPAGATED, not flattened to 1: the caller can still
+    # tell `usage` (2) from `not_found` (4).
+    printf 'fleet-run: field(%s,%s) ABORTED — bp refused the read (see above); ' "$1" "$2" >&2
+    printf 'this is NOT an empty field.\n' >&2
+    return "$_rc"
+  fi
+  printf '%s' "$_body" | python3 -c "
 import sys,json,re
 d=json.load(sys.stdin).get('doc') or {}; c=d.get('claim') or {}; ct=d.get('content') or {}
 ac=ct.get('acceptance_criteria') or []
@@ -245,7 +268,8 @@ if not klass:
     klass=mk.group(1) if mk else 'standard'
 print({'life':d.get('lifecycle_status'),'holder':c.get('worker') or '','epoch':c.get('epoch'),
  'fence':(m.group(1) if m else 'fleet/'+'$1'),'brief':brief,'klass':klass,'ctext':(ac[0].get('criterion') if ac else ''),
- 'met0':(ac[0].get('met') if ac else '')}.get('$2',''))"; }
+ 'met0':(ac[0].get('met') if ac else '')}.get('$2',''))"
+}
 
 # ============================ THE VERDICT (PDF-D100) ============================
 # order_verdict <log> <agent_exit> <claim_epoch_s> <agent> <ctext> <brief>
@@ -461,7 +485,12 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       fleet_beat idle 1                                 # start beat: idle, one free slot, measured
       declare -A seen
       while true; do
-        for ID in $(bp task ready -o json 2>/dev/null | python3 -c "import sys,json;[print(d['doc_id']) for d in json.load(sys.stdin).get('docs',[]) if d.get('assignee')=='$WORKER']" 2>/dev/null); do
+        # CAPTURE, do not pipe. The old form was
+        #   bp task ready -o json 2>/dev/null | python3 -c "... .get('docs',[]) ..." 2>/dev/null
+        # and on a refusal the envelope has no `docs`, so the default [] made a
+        # dead ledger look exactly like "no orders for me" — forever, silently.
+        _ready="$(bp_json task ready -o json)" || { sleep 6; continue; }
+        for ID in $(printf '%s' "$_ready" | python3 -c "import sys,json;[print(d['doc_id']) for d in json.load(sys.stdin)['docs'] if d.get('assignee')=='$WORKER']"); do
           [ -n "${seen[$ID]:-}" ] && continue; seen[$ID]=1; do_order "$ID"
         done
         # idle beat every poll cycle — keeps the row ONLINE while parked, dies with the loop.

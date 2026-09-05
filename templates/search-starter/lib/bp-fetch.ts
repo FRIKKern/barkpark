@@ -48,12 +48,62 @@ const bpDispatcher = new Agent({
 export const API_URL = PUBLIC_API_URL;
 const TOKEN = READ_TOKEN;
 
-/** Per-fetch timeout. Override per host via BARKPARK_FETCH_TIMEOUT_MS. */
+/**
+ * THE BUDGET BELOW IS A COMPILED DEFAULT ON PURPOSE.
+ *
+ * On a MANAGED build (the control plane's deploy runner) nothing sets
+ * BARKPARK_FETCH_TIMEOUT_MS, and nothing can: the deploy request's env map is a
+ * closed 7-key literal (`cloud/lib/barkpark_cloud/sites/deploy.ex` `env: %{…}`),
+ * the template contract mirrors it (`cloud/lib/barkpark_cloud/templates.ex`
+ * `@env_common ++ ~w(BARKPARK_DOC_TYPE)`), and the two shell allow-lists the box
+ * enforces — `BUILD_ALLOW` (10 keys) and `site-deploy-node.sh`'s `RUNTIME_ALLOW`
+ * (6 keys) in `deploy/lib/site-deploy-common.sh` — do not carry it either. The
+ * env var is reachable only for a self-hosted deploy that sets it by hand
+ * (docs/ops/vercel-dns-connect.md). So a cure for a managed build has to live in
+ * these constants; an env var would be a cure nobody receives.
+ *
+ * THE OUTAGE FAMILY THIS SIZES FOR. The old ladder was 3 attempts with ~1s/~2s
+ * of backoff — a ~3s wait, written for a `make deploy` BEAM bounce. The observed
+ * DOC_ID_EMPTY failures are content-API unavailability lasting MINUTES (status 0
+ * = this file's own AbortController timeout, plus upstream 503s), which a 3s
+ * ladder cannot outlast. The ladder is widened to 6 attempts / ~30s of backoff,
+ * and — because a build that hangs is worse than a build that fails — capped by
+ * a hard TOTAL_BUDGET_MS wall clock so the worst case is bounded, not additive.
+ *
+ * A NOTE ON FRAMING, because this file is cited in the incident write-ups: the
+ * deploy HEALTH gate is fail-CLOSED and CORRECT. It never took a serving site
+ * down; the marker really was empty and the candidate build really did render
+ * zero content. The failure class is misNAMED, not illusory — the cure belongs
+ * here, in the fetch that gave up too early, not in the gate that caught it.
+ */
+/** Per-fetch timeout. Override per host via BARKPARK_FETCH_TIMEOUT_MS
+ * (self-hosted only — see above: a managed build never receives it). */
 const TIMEOUT_MS = Number(process.env.BARKPARK_FETCH_TIMEOUT_MS) || 15_000;
-/** Retries cover the API-restart window — total attempts = RETRIES + 1. */
-const RETRIES = 2;
-/** Backoff before retry N (1-indexed): ~1s, ~2s. */
-const BACKOFF_MS = [1_000, 2_000];
+/** Retries cover a minutes-long upstream outage — total attempts = RETRIES + 1. */
+const RETRIES = 5;
+/** Backoff before retry N (1-indexed): ~1s, ~2s, ~4s, ~8s, ~15s — 30s in total. */
+const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+/**
+ * Hard wall-clock ceiling on ONE bpFetchJson call, backoff and attempts
+ * together. Without it the widened ladder is 6 x TIMEOUT_MS + 30s ≈ 2 minutes of
+ * additive worst case per call, and a page with several upstream reads
+ * multiplies that into a build that looks hung. With it, a call that is going to
+ * fail fails inside the budget: the loop refuses to START an attempt or SLEEP a
+ * backoff it cannot finish before the wall. Self-hosted override:
+ * BARKPARK_FETCH_TOTAL_BUDGET_MS.
+ */
+const TOTAL_BUDGET_MS =
+  Number(process.env.BARKPARK_FETCH_TOTAL_BUDGET_MS) || 45_000;
+
+/** The compiled budget, exported so a spec can assert the arithmetic (that the
+ * ladder outlasts the observed outage AND stays bounded) without re-deriving
+ * the numbers in a test where they could drift out of sync with these. */
+export const RETRY_BUDGET = {
+  TIMEOUT_MS,
+  RETRIES,
+  BACKOFF_MS,
+  TOTAL_BUDGET_MS,
+} as const;
 /** Upstream statuses that mean "API is bouncing, try again", not "real error". */
 const TRANSIENT_STATUS = new Set([502, 503, 504]);
 
@@ -231,6 +281,7 @@ export async function bpFetchJson(
   init?: RequestInit,
 ): Promise<unknown> {
   const merged = withAuth(init);
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
   let lastErr: unknown;
   for (let i = 0; i <= RETRIES; i++) {
     try {
@@ -238,10 +289,15 @@ export async function bpFetchJson(
     } catch (err) {
       lastErr = err;
       if (i < RETRIES && isTransient(err)) {
-        const scheduled = BACKOFF_MS[i] ?? 2_000;
+        const scheduled = BACKOFF_MS[i] ?? BACKOFF_MS[BACKOFF_MS.length - 1];
         const advised =
           err instanceof BpUpstreamError ? err.retryAfterMs : undefined;
-        await sleep(retryDelayMs(scheduled, advised));
+        const delay = retryDelayMs(scheduled, advised);
+        // The wall, not the ladder, is what bounds this call. Sleeping a backoff
+        // we cannot follow with an attempt just burns the budget in silence, so
+        // give up NOW and surface the last real upstream error.
+        if (Date.now() + delay >= deadline) throw err;
+        await sleep(delay);
         continue;
       }
       throw err;

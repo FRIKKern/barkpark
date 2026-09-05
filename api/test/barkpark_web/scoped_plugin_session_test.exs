@@ -127,7 +127,7 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
 
       # Any NON-Default workspace: the membership gate still fails closed.
       other_conn =
-        build_conn()
+        scoped_conn()
         |> init_test_session(%{})
         |> get("/w/#{other_ws.slug}/p/#{other_proj.slug}/studio/onixedit/ping")
 

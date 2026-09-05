@@ -646,3 +646,280 @@ func TestWhoamiCloudBlockLoggedOut(t *testing.T) {
 		t.Errorf("cloud.token_present = %v, want false", cloud["token_present"])
 	}
 }
+
+// scopeFateManifestJSON is a four-command roster with exactly one command per
+// ScopeFate, so the tally whoami prints is checkable to the digit:
+//
+//	carried            workspace.project-create — :workspace_slug is in its own path
+//	mirrored           doc.ls — no scope in the path, but a scoped_prefix is advertised
+//	unscoped-by-design auth.login — the `auth` noun is declared server-global
+//	refused            task.get — the `task` noun is declared refuse-before-I/O
+//
+// doc.ls deliberately carries a NON-scoped auth_tier: commandCarriesScope
+// composes the prefix into the template for the scoped_* tiers, which would
+// make it read as carried rather than mirrored.
+const scopeFateManifestJSON = `{
+  "manifest_version": "1",
+  "etag": "test",
+  "auth_tier": "admin",
+  "server": {"name": "scope-fate-test", "base_url": "http://replaced"},
+  "nouns": [
+    {"name": "workspace", "summary": "Tenancy."},
+    {"name": "doc", "summary": "Documents."},
+    {"name": "auth", "summary": "Identity."},
+    {"name": "task", "summary": "Ledger."}
+  ],
+  "commands": [
+    {"id":"workspace.project-create","noun":"workspace","verb":"project-create","summary":"New project.",
+     "http":{"method":"POST","path_template":"/v1/workspaces/:workspace_slug/projects"},
+     "auth_tier":"admin","args":[],"flags":[],
+     "writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"doc.ls","noun":"doc","verb":"ls","summary":"List documents.",
+     "http":{"method":"GET","path_template":"/v1/data/query/:dataset/:type"},
+     "auth_tier":"admin","args":[],"flags":[],
+     "writes":false,"batch":false,"paginated":true,"dry_run":false,
+     "default_output":"table","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
+    {"id":"auth.login","noun":"auth","verb":"login","summary":"Log in.",
+     "http":{"method":"POST","path_template":"/v1/auth/login"},
+     "auth_tier":"public","args":[],"flags":[],
+     "writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"task.get","noun":"task","verb":"get","summary":"One task.",
+     "http":{"method":"GET","path_template":"/v1/tasks/:doc_id"},
+     "auth_tier":"admin",
+     "args":[{"name":"doc_id","required":true,"type":"string","summary":"Task id."}],
+     "flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}
+  ]
+}`
+
+// scopeFateServer serves scopeFateManifestJSON at GET /v1/capabilities and 404s
+// everything else, so whoami's manifest fetch succeeds and its side probes
+// (/v1/meta, the cloud plane) stay silent.
+func scopeFateServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/capabilities" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(scopeFateManifestJSON))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// whoamiScopeBlock runs whoami in human mode and returns the `scope:` line plus
+// every continuation line indented under it.
+func whoamiScopeBlock(t *testing.T, ctx manifest.Context) []string {
+	t.Helper()
+	var out, errb bytes.Buffer
+	w := newWriter(&out, &errb)
+	w.output = "table"
+	if code := runWhoami(w, globals{server: ctx.Server}, ctx, tokenProvenance{}); code != exitOK {
+		t.Fatalf("runWhoami exit = %d\n%s", code, errb.String())
+	}
+	var block []string
+	for _, l := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(l, "scope:") {
+			block = append(block, l)
+			continue
+		}
+		if len(block) > 0 && strings.HasPrefix(l, "           ") {
+			block = append(block, l)
+			continue
+		}
+		if len(block) > 0 {
+			break
+		}
+	}
+	if len(block) == 0 {
+		t.Fatalf("whoami printed no scope line:\n%s", out.String())
+	}
+	return block
+}
+
+// TestWhoamiScopePrintFloorIsByteIdentical pins the arm that is CORRECT today.
+// With no stated scope the operator's context IS the scope every request uses,
+// so the line must stay exactly what it has always been — one line, no mark, no
+// tally. This is the regression fence on the honesty work: it must not tax the
+// invocation that was never lying.
+func TestWhoamiScopePrintFloorIsByteIdentical(t *testing.T) {
+	withTempConfigHome(t)
+	srv := scopeFateServer(t)
+
+	block := whoamiScopeBlock(t, manifest.Context{
+		Server:    srv.URL,
+		Workspace: "default",
+		Project:   "default",
+		Dataset:   "production",
+	})
+	want := "scope:     w=default p=default d=production"
+	if len(block) != 1 || block[0] != want {
+		t.Fatalf("floor scope block must be the single byte-identical line\n got: %q\nwant: [%q]", block, want)
+	}
+}
+
+// TestWhoamiScopePrintFloorIgnoresProvenanceAloneAtFloorValue is the sibling
+// trap. WorkspaceExplicit is true for EVERY operator with a saved context or a
+// BARKPARK_WORKSPACE — including one set to the floor value. Marking on
+// provenance alone would put the "(stated)" tail on essentially every user, so
+// the print arms on the same divergence-AND-provenance rule StatedScope draws.
+func TestWhoamiScopePrintFloorIgnoresProvenanceAloneAtFloorValue(t *testing.T) {
+	withTempConfigHome(t)
+	srv := scopeFateServer(t)
+
+	block := whoamiScopeBlock(t, manifest.Context{
+		Server:            srv.URL,
+		Workspace:         "default",
+		Project:           "default",
+		Dataset:           "production",
+		WorkspaceExplicit: true,
+		ProjectExplicit:   true,
+	})
+	want := "scope:     w=default p=default d=production"
+	if len(block) != 1 || block[0] != want {
+		t.Fatalf("a stated-but-floor scope is not a divergence and must print the plain line\n got: %q\nwant: [%q]", block, want)
+	}
+}
+
+// TestWhoamiScopePrintMarksStatedScopeWithItsFate is THE criterion-4 check, and
+// it is the one that reds if the print ever reverts to an unconditional ctx
+// echo: with `-w beta` in play, `w=beta` alone is a claim the CLI cannot keep —
+// on this roster the flag reaches the wire on 1 command of 4 and is refused
+// outright on another. The line must mark the value as stated AND carry the
+// per-fate tally derived from the live manifest.
+func TestWhoamiScopePrintMarksStatedScopeWithItsFate(t *testing.T) {
+	withTempConfigHome(t)
+	srv := scopeFateServer(t)
+
+	block := whoamiScopeBlock(t, manifest.Context{
+		Server:            srv.URL,
+		Workspace:         "beta",
+		Project:           "default",
+		Dataset:           "production",
+		WorkspaceExplicit: true,
+	})
+	joined := strings.Join(block, "\n")
+
+	if block[0] != "scope:     w=beta (stated) p=default d=production" {
+		t.Fatalf("a stated workspace must be marked, not echoed as ambient:\n%s", joined)
+	}
+	if len(block) < 2 {
+		t.Fatalf("a stated scope must carry its per-command fate summary:\n%s", joined)
+	}
+	// The tally is the manifest's, to the digit: 1 carried, 1 mirrored,
+	// 1 unscoped-by-design, 1 refused, over 4 commands.
+	for _, needle := range []string{
+		"-w beta is NOT ambient",
+		"of 4 commands",
+		"1 carry it in their own path",
+		"1 route to the workspace mirror",
+		"1 ignore it by design",
+		"1 are REFUSED before any request is sent",
+		"bp capabilities",
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Errorf("scope block missing %q:\n%s", needle, joined)
+		}
+	}
+	// The project stayed at the floor and must NOT be marked.
+	if strings.Contains(block[0], "p=default (stated)") {
+		t.Errorf("an unstated project must not be marked:\n%s", joined)
+	}
+}
+
+// TestWhoamiScopePrintBothFlagsNamed: -w and -p stated together are named
+// together, so the operator reads the whole scope that is at risk, not half.
+func TestWhoamiScopePrintBothFlagsNamed(t *testing.T) {
+	withTempConfigHome(t)
+	srv := scopeFateServer(t)
+
+	block := whoamiScopeBlock(t, manifest.Context{
+		Server:            srv.URL,
+		Workspace:         "beta",
+		Project:           "acme",
+		Dataset:           "production",
+		WorkspaceExplicit: true,
+		ProjectExplicit:   true,
+	})
+	joined := strings.Join(block, "\n")
+	if block[0] != "scope:     w=beta (stated) p=acme (stated) d=production" {
+		t.Fatalf("both stated scopes must be marked:\n%s", joined)
+	}
+	if !strings.Contains(joined, "-w beta / -p acme is NOT ambient") {
+		t.Fatalf("both stated scopes must be named in the fate line:\n%s", joined)
+	}
+}
+
+// TestWhoamiScopePrintUnreachableManifestSaysUnknown: an unreachable server is a
+// MISSING MEASUREMENT. The print must not invent a tally in either direction —
+// and it must still refuse to present the stated scope as ambient.
+func TestWhoamiScopePrintUnreachableManifestSaysUnknown(t *testing.T) {
+	withTempConfigHome(t)
+	srv := unreachableWhoamiServer(t)
+
+	block := whoamiScopeBlock(t, manifest.Context{
+		Server:            srv.URL,
+		Workspace:         "beta",
+		Project:           "default",
+		Dataset:           "production",
+		WorkspaceExplicit: true,
+	})
+	joined := strings.Join(block, "\n")
+	if block[0] != "scope:     w=beta (stated) p=default d=production" {
+		t.Fatalf("an unreachable manifest does not make a stated scope ambient:\n%s", joined)
+	}
+	if !strings.Contains(joined, "UNKNOWN") || !strings.Contains(joined, "unreachable") {
+		t.Fatalf("an unmeasured fate must say so rather than guess:\n%s", joined)
+	}
+	if strings.Contains(joined, "of 0 commands") {
+		t.Fatalf("an empty roster must never render as a tally:\n%s", joined)
+	}
+}
+
+// TestWhoamiScopeJSONParity: `-o json` carries the same split. workspace= alone
+// is the structured form of the same lie, so scope_stated / scope_fate_tally
+// appear beside it when a scope is stated — and are ABSENT at the floor, which
+// keeps every existing receipt (the onboarding spine included) byte-shaped.
+func TestWhoamiScopeJSONParity(t *testing.T) {
+	withTempConfigHome(t)
+	srv := scopeFateServer(t)
+
+	run := func(ctx manifest.Context) map[string]any {
+		t.Helper()
+		var out, errb bytes.Buffer
+		w := newWriter(&out, &errb)
+		w.output = "json"
+		if code := runWhoami(w, globals{server: ctx.Server}, ctx, tokenProvenance{}); code != exitOK {
+			t.Fatalf("runWhoami exit = %d\n%s", code, errb.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+			t.Fatalf("parse json: %v\n%s", err, out.String())
+		}
+		return payload
+	}
+
+	floor := run(manifest.Context{Server: srv.URL, Workspace: "default", Project: "default", Dataset: "production"})
+	if _, ok := floor["scope_stated"]; ok {
+		t.Errorf("floor scope must not grow a scope_stated key: %v", floor["scope_stated"])
+	}
+	if _, ok := floor["scope_fate_tally"]; ok {
+		t.Errorf("floor scope must not grow a scope_fate_tally key: %v", floor["scope_fate_tally"])
+	}
+
+	stated := run(manifest.Context{Server: srv.URL, Workspace: "beta", Project: "default", Dataset: "production", WorkspaceExplicit: true})
+	got, _ := stated["scope_stated"].([]any)
+	if len(got) != 1 || got[0] != "-w" {
+		t.Fatalf("scope_stated = %v, want [-w]", stated["scope_stated"])
+	}
+	tally, ok := stated["scope_fate_tally"].(map[string]any)
+	if !ok {
+		t.Fatalf("stated scope missing scope_fate_tally:\n%v", stated)
+	}
+	for k, want := range map[string]float64{"commands": 4, "carried": 1, "mirrored": 1, "unscoped-by-design": 1, "refused": 1} {
+		if tally[k] != want {
+			t.Errorf("scope_fate_tally[%q] = %v, want %v", k, tally[k], want)
+		}
+	}
+}

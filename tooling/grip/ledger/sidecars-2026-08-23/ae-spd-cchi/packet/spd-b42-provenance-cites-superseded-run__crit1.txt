@@ -1,0 +1,1 @@
+A server re-read of spd-b42 shows ZERO occurrences of the superseded wave-8 green-slot SHA, so it cannot be copied forward

@@ -1,0 +1,1 @@
+NO REGRESSION: the full guard (all legs, no --defect, with an explicit OVERFLOW_GUARD_PORT) exits 0. Quote the PASS line.

@@ -8,7 +8,7 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   with the paper's content rendered through the `:email` style. Unknown slug
   is a plain 404 (same visibility contract as the reader).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Content, Repo}
 

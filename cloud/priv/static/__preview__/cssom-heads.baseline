@@ -638,4 +638,14 @@
 # baseline is 1342 (-2)" with "MISSES 0", "CSSOM style rules 1340" and "flattened
 # selectors 1286 authored / 1286 CSSOM" on the same run. Both numbers are copied
 # from that printout, never from arithmetic.
-1340
+1341
+# cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
+# screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
+# rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
+# sentence the tier cards render in place of a Subscribe button. NOT hand-incremented:
+# the CI cssom-parity run on head b61030c2e (run 33937425891) printed "!! BASELINE
+# MISMATCH in app.css: 1341 authored rule heads, sidecar baseline is 1340 (+1)" with
+# "baseline mismatch with 0 misses" — MISSES 0 is what makes this an unrecorded ADD and
+# not a parity defect. The tool's own number was written back verbatim and
+# `grep -cE '^[0-9]+$'` confirms exactly 1 payload line survives. The styleguide sheet
+# PASSED unchanged at 84. Bumped by the lead in the same PR as the CSS (D158).

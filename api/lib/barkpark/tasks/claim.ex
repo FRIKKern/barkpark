@@ -21,6 +21,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias Barkpark.Tasks.CriteriaExemption
   alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
@@ -103,6 +104,7 @@ defmodule Barkpark.Tasks.Claim do
             else
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- check_ready_for_targeted_claim(doc),
+                   :ok <- check_criteria_stated(doc, opts),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
                 do_claim(doc, worker_id, resources, opts)
@@ -144,10 +146,43 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
+  # ── THE SECOND FORK (task-ca05dd6a02a0b55f) ─────────────────────────────
+  #
+  # `documents` is unique on `(doc_id, type, dataset_id)`, NOT on
+  # `(doc_id, type)` (migration 20260527134000). One task doc_id can therefore
+  # live in TWO datasets in a single workspace/project, and this lookup carries
+  # no dataset discriminator by design — `bp task claim <id>` names no dataset.
+  # Without a `limit`, that shape made `Repo.one/1` raise
+  # `Ecto.MultipleResultsError`, i.e. a 500 on every attempt, forever.
+  #
+  # PR #15551 fixed exactly this in the READ path (`fetch_task_exact/3` in
+  # tasks_controller.ex) and did not find this fork, so three days later
+  # `bp task get akbr-feedback-2026-08-epic` resolved while
+  # `bp task claim akbr-feedback-2026-08-epic` still 500'd (measured against
+  # guerrilla 2026-09-05, request_id GNJljRgMcPdcwAYAABsC). A row that cannot be
+  # CLAIMED cannot be stamped, closed or released either — every one of those
+  # verbs is claim-fenced — so this one function kept the eleven known
+  # cross-dataset rows exactly as unreachable as before the read was fixed.
+  #
+  # The order is the rule `Content.Graph.resolve_doc/3`
+  # (`@canonical capability:slug-resolve`) and `fetch_task_exact/3` already
+  # spell, and it is TOTAL — published-first, then dataset, then id — so the
+  # same call returns the same row across every pooled connection. A partial
+  # order would trade a 500 for a silently alternating answer, which is worse.
+  #
+  # `FOR UPDATE` is preserved: this is the targeted-claim path and the row lock
+  # is what makes the claim a CAS. A fix that dropped it would trade a 500 for
+  # a lost update.
   defp fetch_task_exact_locked(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task",
+        order_by: [
+          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
+          asc: d.dataset,
+          asc: d.id
+        ],
+        limit: 1,
         lock: "FOR UPDATE"
       )
 
@@ -160,6 +195,49 @@ defmodule Barkpark.Tasks.Claim do
     case Repo.one(query) do
       nil -> {:error, :not_found}
       %Document{} = doc -> {:ok, doc}
+    end
+  end
+
+  # ── THE CLAIM-TIME CRITERIA DOOR (task-9554c64bf51a0f81) ─────────────────
+  #
+  # A row with zero acceptance criteria is one whose done state can be attested
+  # ONLY by artifact and never by criterion. The artifact says something
+  # landed; it cannot say what the row was FOR.
+  #
+  # The close door already refuses that (`check_close_artifact/5`), and by then
+  # it is too late BY CONSTRUCTION: the work is finished, so the criteria that
+  # would have defined success get written after the fact by whoever is trying
+  # to get the row shut, if they get written at all. At CLAIM time they still
+  # SHAPE the work. That is the whole argument for a second door, and it does
+  # not weaken the first.
+  #
+  # WHY A REFUSAL AND NOT A WARNING. The platform already ran that experiment:
+  # `Plugins.Tasks.warn_if_create_zero/1` is a soft `Logger.warning` on a
+  # zero-criteria task, it fired on 9 of 11 births and changed nothing, because
+  # its only reader is the server journal (close.ex records this verbatim). A
+  # second warning would be the same instrument aimed at the same blind spot.
+  # So this refuses in the same D288/D289 idiom the sibling gate uses: refuse
+  # UNLESS you say why on the record, never a wall.
+  #
+  # A RENEWAL IS NEVER REFUSED. This sits only in the non-renewal branch: a
+  # worker re-claiming a row it already holds is recovering a lease after a
+  # fence bump, and refusing that would strand live work behind a paperwork
+  # gate. The door belongs where work STARTS.
+  #
+  # The exemptions come from `Tasks.CriteriaExemption`, the same definition the
+  # close door reads, so the two cannot drift about what a container is.
+  defp check_criteria_stated(%Document{} = doc, opts) do
+    cond do
+      CriteriaExemption.exempt?(doc) -> :ok
+      override_given?(opts) -> :ok
+      true -> {:error, :criteria_unstated}
+    end
+  end
+
+  defp override_given?(opts) do
+    case Keyword.get(opts, :criteria_unstated_override) do
+      reason when is_binary(reason) -> String.trim(reason) != ""
+      _ -> false
     end
   end
 

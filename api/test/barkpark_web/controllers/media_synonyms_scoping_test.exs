@@ -14,7 +14,7 @@ defmodule BarkparkWeb.MediaSynonymsScopingTest do
   "alpha"; POST stamps Default's id). The over-block test stays GREEN in both
   states. Restore → all green.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 
@@ -60,7 +60,7 @@ defmodule BarkparkWeb.MediaSynonymsScopingTest do
   end
 
   defp conn_for(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end

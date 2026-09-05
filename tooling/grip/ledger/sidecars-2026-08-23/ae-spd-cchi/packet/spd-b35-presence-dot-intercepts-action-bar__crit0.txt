@@ -1,0 +1,1 @@
+The presence indicator no longer intercepts pointer events over interactive header controls — proven by a real-mouse click succeeding with a second viewer present

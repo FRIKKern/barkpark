@@ -1,0 +1,1 @@
+The legitimate same-workspace shares-add still works -- a positive control proves the fix did not simply disable the panel

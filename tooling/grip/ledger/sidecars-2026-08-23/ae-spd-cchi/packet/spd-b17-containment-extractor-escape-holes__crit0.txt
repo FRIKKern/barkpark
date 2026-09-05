@@ -1,0 +1,1 @@
+A bucket-prefixed `.editor-panel` rule carrying a banned property FAILS the test — proven by planting one and pasting the failure

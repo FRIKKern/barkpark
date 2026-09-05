@@ -74,9 +74,10 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
-  alias Barkpark.Content.{Document, DraftId, Scope}
+  alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
 
@@ -90,7 +91,32 @@ defmodule Barkpark.Tasks.Close do
   # land digest whose files overlap another in-progress task's claimed scope.
   @event_landed_under_you "task.landed_under_you"
 
+  @doc """
+  The three terminal lifecycle statuses a close may write.
+
+  Public because the refusal has to be able to NAME them: an
+  `{:error, {:invalid_lifecycle, s}}` that lists nothing leaves the caller
+  guessing, and a second hand-written copy of the list in the HTTP layer is a
+  copy that drifts (`BarkparkWeb.TasksController.Params.criteria_hint/2` reads
+  it from here).
+  """
+  @spec closed_lifecycle_statuses() :: [String.t()]
+  def closed_lifecycle_statuses, do: @closed_lifecycle_statuses
+
+  # `close/3` keeps the contract every existing caller pattern-matches on:
+  # `{:ok, %Document{}}`. `close_with_receipt/3` is the same call that also says
+  # WHICH of the two success shapes happened — `:closed` for a write that landed
+  # here, `:already_closed` for a replay of one that landed earlier. The
+  # controller uses the receipt so the response body can say "already closed"
+  # instead of claiming this call did the closing; nobody else has to care.
   def close(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
+    case close_with_receipt(task_id, worker_id, opts) do
+      {:ok, doc, _receipt} -> {:ok, doc}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def close_with_receipt(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
     new_status = Keyword.get(opts, :lifecycle_status, "done")
     observed_rev_opt = Keyword.get(opts, :observed_rev)
@@ -190,6 +216,10 @@ defmodule Barkpark.Tasks.Close do
       evidence naming the PR, merge commit, and trigger source.
     * `{:ok, :already_stamped}`    — every merge-gate criterion is already met
       (a replayed/duplicate merge event, or a lead already closed). No write.
+    * `{:ok, :unflagged_merge_gates, [index]}` — nothing carries the flag, but
+      one or more criteria READ as merge gates. Nothing is stamped (a wide
+      permit fabricates dones — see `reconcile_locked/4`); the indices are
+      named so the strand is visible instead of silent.
     * `{:ok, :no_marker}`          — the task carries NO `merge_gate:true`
       criterion. The absence is NAMED (loud), never a text/position fallback, so
       an unmarked legacy gate is detectable rather than silently guessed.
@@ -202,6 +232,7 @@ defmodule Barkpark.Tasks.Close do
   @spec reconcile_merge_gate(String.t(), map(), keyword()) ::
           {:ok, :stamped, [non_neg_integer()]}
           | {:ok, :already_stamped | :no_marker | :no_guardable_marker}
+          | {:ok, :unflagged_merge_gates, [non_neg_integer()]}
           | {:error, :unknown_task | :stale_rev | term()}
   def reconcile_merge_gate(task_id, landed, opts \\ [])
       when is_binary(task_id) and is_map(landed) do
@@ -238,14 +269,55 @@ defmodule Barkpark.Tasks.Close do
   # In-lock reconciliation over the freshly-read doc. Classifies the merge-gate
   # criteria BEFORE writing so `:no_marker` (never marked) is distinguishable
   # from `:already_stamped` (marked + met) — criterion-4 named idempotency.
+  # WHY THIS FILTER IS NARROW, AND WHY SYMMETRY WITH stamp.ex IS NOT A GOAL
+  # (task-d1654bf0d20d5009).
+  #
+  # `Criteria.merge_gated?/1` is flag-OR-PROSE. `stamp.ex` uses it and this file
+  # does not, which reads like an oversight and has been filed as one. It is not.
+  #
+  # A WIDE predicate is safe gating a REFUSAL and dangerous gating a PERMIT.
+  # In `stamp.ex` the wide predicate REFUSES a builder's `--met`: a false
+  # positive there costs one extra `--merge-gated` flag. Here it would PERMIT:
+  # `reconcile_locked/4` composes evidence and writes synthetic met-flips when a
+  # PR merges. A false positive here FABRICATES A DONE, which is the one outcome
+  # this ledger exists to prevent. `landed.ex` reasons the same way and inverts
+  # one arm for exactly this reason (see its moduledoc on the deliberate width).
+  #
+  # MEASURED on the live ledger, 14,699 criteria: 501 are worded as merge gates
+  # while carrying no flag. 427 of those OPEN with the marker and are genuine
+  # gate declarations; the other 74 bury it in prose and are criteria ABOUT
+  # gating rather than gates. Widening this filter would auto-mark those 74 met
+  # on the next merge. They are not close calls — one reads "The four lead-gated
+  # rows are adjudicated `open` — NOT closed", and marking it met asserts the
+  # opposite of what it says. Another requires verification work: "Every
+  # machine-checkable merge gate is verified with `gh pr view` and mergeCommit
+  # ancestry, then stamped and closed on the CURRENT claim."
+  #
+  # So the flag stays the permit. The prose-worded-but-unflagged criteria are
+  # not stamped and not ignored either: they are NAMED in the receipt below, so
+  # the invisibility that made this worth filing becomes a sentence somebody can
+  # act on instead of silence.
   defp reconcile_locked(%Document{} = doc, worker_id, landed, ts_iso) do
-    gates =
+    indexed =
       doc.content
       |> merge_gate_criteria_list()
       |> Enum.with_index()
-      |> Enum.filter(fn {entry, _i} -> is_map(entry) and Map.get(entry, "merge_gate") == true end)
+
+    gates =
+      Enum.filter(indexed, fn {entry, _i} ->
+        is_map(entry) and Map.get(entry, "merge_gate") == true
+      end)
+
+    unflagged = unflagged_worded_gates(indexed)
 
     cond do
+      gates == [] and unflagged != [] ->
+        # Nothing to stamp — and saying `:no_marker` here would be true but
+        # useless, because the row DOES carry something that reads like a gate.
+        # Name the criteria rather than count them: a count says there is a
+        # problem, a list says where.
+        {:ok, :unflagged_merge_gates, Enum.map(unflagged, fn {_entry, i} -> i end)}
+
       gates == [] ->
         {:ok, :no_marker}
 
@@ -389,7 +461,36 @@ defmodule Barkpark.Tasks.Close do
             cond do
               observed_rev_opt == nil and
                   Map.get(doc.content, "lifecycle_status") in @closed_lifecycle_statuses ->
-                {:error, :stale_claim}
+                # THE RETRY ARM (task-17224f58d3bda3bd). The guard below is
+                # right for two DIFFERENT closers racing; it was wrong for the
+                # SAME closer retrying. Measured 2026-09-02: five closes exited
+                # rc=6 `stale_claim` while their write had in fact landed, each
+                # with its own reason stored verbatim. Attempt 1 commits, its
+                # response is lost or times out under load, attempt 2 reads the
+                # now-terminal row and is told the write failed — and the
+                # natural recovery makes it worse, because a re-claim then
+                # fails `not_ready` on an already-closed row. Under this
+                # ledger's measured load (429s, pool saturation) a slow first
+                # response tripping a client retry is the ordinary case.
+                #
+                # So a replay by the SAME worker to the SAME terminal status is
+                # answered with the STORED row as a success receipt. Nothing is
+                # written: no event, no broadcast, no cascade — those already
+                # fired for the write that really happened, and re-firing them
+                # would double-count an unblock. The stored `close_reason`,
+                # `claim.closed_by` and `claim.closed_at` stay byte-identical,
+                # so the first close keeps its authorship and its reason.
+                #
+                # EVERYTHING ELSE STILL LOSES THE RACE. A row closed by ANOTHER
+                # worker, or closed to a DIFFERENT status than this call asks
+                # for, is a genuine lost race and keeps `stale_claim` — an
+                # idempotency that cannot tell a retry from a lost race would
+                # be worse than the bug it cures.
+                if idempotent_replay?(doc, worker_id, new_status) do
+                  {:already_closed, doc}
+                else
+                  {:error, :stale_claim}
+                end
 
               true ->
                 # The honesty gates sit HERE, on the `doc` read at the top of
@@ -482,13 +583,39 @@ defmodule Barkpark.Tasks.Close do
     case result do
       {:ok, {:ok, doc, broadcasts}} ->
         :ok = emit_broadcasts(broadcasts)
-        {:ok, doc}
+        {:ok, doc, :closed}
+
+      # The retry arm. No broadcasts to emit by construction — the write this
+      # call is replaying already emitted them.
+      {:ok, {:already_closed, doc}} ->
+        {:ok, doc, :already_closed}
 
       {:ok, {:error, reason}} ->
         {:error, reason}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # A REPLAY, not a race: this exact worker already closed this row to this
+  # exact status. `closed_by` is stamped by `apply_close_update/9` on every
+  # close that carries a claim, so it is the authorship record, and comparing
+  # it to the caller is what separates "your own write landed" from "somebody
+  # else got here first".
+  #
+  # A row with NO claim map is deliberately NOT a replay. Container and
+  # never-claimed rows close without a claim being invented, so they store no
+  # `closed_by` at all — there is nothing to compare, and answering `{:ok, …}`
+  # to an unidentifiable second caller would hand a success receipt to whoever
+  # asked last. Those keep `stale_claim`.
+  defp idempotent_replay?(%Document{content: content}, worker_id, new_status) do
+    case content do
+      %{"claim" => %{"closed_by" => closed_by}} ->
+        closed_by == worker_id and Map.get(content, "lifecycle_status") == new_status
+
+      _ ->
+        false
     end
   end
 
@@ -688,89 +815,10 @@ defmodule Barkpark.Tasks.Close do
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
 
-  # The container exemptions, plus the precondition: a row that HAS acceptance
-  # criteria is D289's business, never this gate's.
-  defp close_artifact_exempt?(%Document{content: content} = doc) do
-    content = content || %{}
-
-    has_criteria?(content) or not task_kind?(content) or container_label?(content) or
-      has_children?(doc)
-  end
-
-  defp has_criteria?(content) do
-    case Map.get(content, "acceptance_criteria") do
-      list when is_list(list) -> list != []
-      _ -> false
-    end
-  end
-
-  # `Validation.kinds/0` is `~w(task)` — "task" is the ONLY kind a validated row
-  # can carry, so an ABSENT `kind` is a task ("Everything is a task", schema.ex),
-  # not an exemption. Reading a missing key as exempt would make this gate
-  # vacuous over every legacy row, which is the population it exists for.
-  defp task_kind?(content) do
-    case Map.get(content, "kind") do
-      nil -> true
-      kind when is_binary(kind) -> String.downcase(String.trim(kind)) == "task"
-      _ -> false
-    end
-  end
-
-  # Label matching is SEGMENT-wise on `:`, not substring. TASK-SYSTEM.md §5's own
-  # vocabulary is `phase:<goal|design|decision|build|verify>` plus the bare
-  # `decision` gate label, so `decision`, `phase:goal` and `kind:decision` all
-  # exempt — while `proj:goalkeeper-rewrite` does NOT. A substring rule would
-  # hand that row a SILENT permit, and a silent permit is the failure mode this
-  # whole family of gates exists to end; a false refusal is loud and recoverable.
-  defp container_label?(content) do
-    content
-    |> Map.get("labels")
-    |> List.wrap()
-    |> Enum.any?(fn
-      label when is_binary(label) ->
-        label
-        |> String.split(":")
-        |> Enum.any?(&(String.downcase(String.trim(&1)) in ~w(decision goal)))
-
-      _ ->
-        false
-    end)
-  end
-
-  # Does anybody name this row as their parent? Same prefix-agnostic predicate
-  # `Params.maybe_filter_parent_id/2` and `batch_child_counts/2` match on
-  # (`regexp_replace(…, '^drafts\.', '')`), so this agrees with the `child_count`
-  # a reader sees on `bp task get <id>`. Scoped to the ROW'S OWN
-  # workspace/project/dataset — an unscoped existence check would let another
-  # tenant's child hand this row an exemption it did not earn.
-  #
-  # Deliberately the LAST predicate in `close_artifact_exempt?/1`: it is the only
-  # one that touches the DB, and `or` short-circuits, so a row with criteria, a
-  # non-task kind, or a container label never pays for it.
-  defp has_children?(%Document{doc_id: doc_id} = doc) when is_binary(doc_id) do
-    key = DraftId.published_id(doc_id)
-
-    from(d in Document,
-      where: d.type == "task",
-      where: d.dataset == ^doc.dataset,
-      where: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) == ^key
-    )
-    |> scope_children(doc)
-    |> Repo.exists?()
-  end
-
-  defp has_children?(_doc), do: false
-
-  defp scope_children(query, %Document{workspace_id: nil, project_id: nil}), do: query
-
-  defp scope_children(query, %Document{workspace_id: ws, project_id: nil}),
-    do: from(d in query, where: d.workspace_id == ^ws)
-
-  defp scope_children(query, %Document{workspace_id: nil, project_id: pr}),
-    do: from(d in query, where: d.project_id == ^pr)
-
-  defp scope_children(query, %Document{workspace_id: ws, project_id: pr}),
-    do: from(d in query, where: d.workspace_id == ^ws and d.project_id == ^pr)
+  # The container exemptions live in `Tasks.CriteriaExemption` — ONE definition,
+  # because the claim-time gate (task-9554c64bf51a0f81) consults the same
+  # question and two lists that must agree are a divergence waiting to happen.
+  defdelegate close_artifact_exempt?(doc), to: Barkpark.Tasks.CriteriaExemption, as: :exempt?
 
   # ── What counts as an artifact ───────────────────────────────────────────
   #
@@ -947,6 +995,39 @@ defmodule Barkpark.Tasks.Close do
         _ ->
           Map.put(doc.content, "lifecycle_status", new_status)
       end
+
+    # THE CLOSE-SIDE DISPOSITION ADVANCE (task-e91cbd0cceafc44e).
+    #
+    # `close` wrote no adjudication term at all — `git grep -c disposition` over
+    # this file returned 0 — so a row staged `open` or `parked` and LATER closed
+    # kept its pre-close term forever. That is not hypothetical: a census of
+    # 1,320 dispositioned rows found 42 terminal rows still carrying `open` or
+    # `parked`, their `disposition_reason` reading "AWAITING MERGE" and "STAYS
+    # OPEN" beside a `close_reason` describing finished work. Two fields on one
+    # row asserting opposite things, and every later reader had to guess which.
+    #
+    # SAME TRANSACTION, not a follow-up write: this rides the single rev-CAS
+    # `fenced_content_write` below, so lifecycle and disposition advance together
+    # or not at all. A second call could fail after the lifecycle landed and
+    # recreate exactly the contradiction being closed.
+    #
+    # ONLY THE TERM MOVES. `disposition_reason` is deliberately NOT touched — it
+    # is the durable WHY somebody wrote by hand, and a close has no better text
+    # for it than the one already there; `close_reason` carries the close's own
+    # sentence. Overwriting the reason to match the term would destroy the more
+    # informative of the two.
+    #
+    # `Stage` REMAINS THE SANCTIONED VERB for a caller-chosen disposition. This
+    # is not a second door into the vocabulary: close advances to exactly one
+    # value, "closed", on exactly the terminal statuses, and a caller cannot
+    # name a term here. The raw `/v1/data/mutate` refusal on `content.disposition`
+    # is untouched.
+    #
+    # ABSENT STAYS ABSENT. A row that never carried a disposition is not GIVEN
+    # one by being closed — birth adjudication is `ensure_disposition_via_verb`'s
+    # business, and inventing a term here would manufacture an adjudication
+    # nobody made.
+    new_content = advance_disposition_on_close(new_content, new_status)
 
     # Dossier close rationale: one scalar write riding the close call. Blank
     # reasons never overwrite an existing value.
@@ -1167,6 +1248,17 @@ defmodule Barkpark.Tasks.Close do
   defp guardable_text(%{"criterion" => text}) when is_binary(text) and text != "", do: text
   defp guardable_text(_entry), do: nil
 
+  # Criteria that READ as merge gates but carry no `merge_gate: true`, and are
+  # not already met. `Criteria.merge_gated?/1` is the shared predicate, so an
+  # explicit `merge_gate: false` still VETOES the wording here — a criterion
+  # whose author declared it is not a gate is not reported as a stranded one.
+  defp unflagged_worded_gates(indexed) do
+    Enum.filter(indexed, fn {entry, _i} ->
+      is_map(entry) and Map.get(entry, "merge_gate") != true and
+        Map.get(entry, "met") != true and Criteria.merge_gated?(entry)
+    end)
+  end
+
   defp merge_gate_criteria_list(content) do
     case Map.get(content, "acceptance_criteria") do
       list when is_list(list) -> list
@@ -1337,4 +1429,19 @@ defmodule Barkpark.Tasks.Close do
       Map.get(c, "lifecycle_status") == "done"
     end)
   end
+
+  # `done` and `cancelled` are terminal; `blocked` is an honest partial and the
+  # row is still live work, so its disposition is left alone. The guard is on
+  # the PRESENCE of a disposition, so an unadjudicated row stays unadjudicated.
+  @terminal_for_disposition ~w(done cancelled)
+
+  defp advance_disposition_on_close(content, new_status)
+       when new_status in @terminal_for_disposition do
+    case Map.get(content, "disposition") do
+      nil -> content
+      _present -> Map.put(content, "disposition", "closed")
+    end
+  end
+
+  defp advance_disposition_on_close(content, _non_terminal), do: content
 end

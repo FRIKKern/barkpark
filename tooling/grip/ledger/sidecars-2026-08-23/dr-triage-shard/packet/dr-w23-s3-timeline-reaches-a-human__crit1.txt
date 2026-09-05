@@ -1,0 +1,1 @@
+`deploy/cp-deploy.sh` is UNCHANGED in the diff (PDS-D716 fence) — `git diff --name-only origin/main...HEAD` is pasted as evidence.

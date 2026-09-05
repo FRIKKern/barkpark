@@ -21,13 +21,26 @@ defmodule Barkpark.Content.CallerContext do
 
   @type principal :: :anonymous | :api_token | :user
 
+  @typedoc """
+  The ATTRIBUTION stamp — who to name on a record this caller writes.
+
+  Deliberately separate from `:principal_type`. That field drives ACCESS
+  decisions and its value set is closed (`:anonymous | :api_token | :user`);
+  widening it would change how every existing matcher grades a caller. The
+  attribution vocabulary is open and reader-shaped: a share-link visitor is
+  `%{kind: "share"}` for the purpose of naming them on a revision while staying
+  `:anonymous` for the purpose of deciding what they may see.
+  """
+  @type actor :: %{kind: String.t(), id: binary() | nil, label: String.t() | nil}
+
   @type t :: %__MODULE__{
           principal_type: principal(),
           user_id: binary() | nil,
           token_id: binary() | nil,
           roles: [String.t()],
           is_admin: boolean(),
-          grants: [Barkpark.Access.Grant.t()]
+          grants: [Barkpark.Access.Grant.t()],
+          actor: actor() | nil
         }
 
   defstruct principal_type: :anonymous,
@@ -35,7 +48,10 @@ defmodule Barkpark.Content.CallerContext do
             token_id: nil,
             roles: [],
             is_admin: false,
-            grants: []
+            grants: [],
+            # Attribution only. Nil means "derive it from the principal" —
+            # see `actor_stamp/1`. Nothing in the access path reads it.
+            actor: nil
 
   @doc "The anonymous baseline — no principal, sees only public/unowned content."
   @spec anonymous() :: t()
@@ -124,4 +140,75 @@ defmodule Barkpark.Content.CallerContext do
   def to_opts(%__MODULE__{} = ctx) do
     [caller_context: ctx, user_id: ctx.user_id]
   end
+
+  # ── attribution (edit-on-the-link slice 4) ──────────────────────────────────
+
+  @doc """
+  Attach an explicit attribution stamp. Purely additive: nothing in the access
+  path reads `:actor`, so a context carrying one grades identically to the same
+  context without one.
+
+  Used by the paper reader, whose share-link visitor has a NAME to record
+  (the share link's id) but must keep the anonymous access posture.
+  """
+  @spec with_actor(t(), actor() | nil) :: t()
+  def with_actor(%__MODULE__{} = ctx, %{kind: kind} = actor) when is_binary(kind) do
+    %{
+      ctx
+      | actor: %{
+          kind: kind,
+          id: Map.get(actor, :id),
+          label: Map.get(actor, :label)
+        }
+    }
+  end
+
+  def with_actor(%__MODULE__{} = ctx, _actor), do: ctx
+
+  @doc """
+  The `(actor_kind, actor_id, actor_label)` triple to stamp on a record this
+  caller writes.
+
+  Prefers an explicit `:actor` (see `with_actor/2`); otherwise derives the
+  triple from the principal, so a caller that never learned about attribution
+  still records something honest. An anonymous principal yields
+  `%{actor_kind: "anonymous", actor_id: nil, actor_label: nil}` — the log says
+  "somebody unidentified", never nothing at all.
+  """
+  @spec actor_stamp(t() | nil) :: %{
+          actor_kind: String.t(),
+          actor_id: binary() | nil,
+          actor_label: String.t() | nil
+        }
+  def actor_stamp(%__MODULE__{actor: %{kind: kind} = actor}) when is_binary(kind) do
+    %{
+      actor_kind: kind,
+      actor_id: Map.get(actor, :id),
+      actor_label: Map.get(actor, :label)
+    }
+  end
+
+  def actor_stamp(%__MODULE__{principal_type: :user, user_id: id}),
+    do: %{actor_kind: "user", actor_id: id, actor_label: nil}
+
+  def actor_stamp(%__MODULE__{principal_type: :api_token, token_id: id}),
+    do: %{actor_kind: "api_token", actor_id: id, actor_label: nil}
+
+  def actor_stamp(%__MODULE__{}),
+    do: %{actor_kind: "anonymous", actor_id: nil, actor_label: nil}
+
+  def actor_stamp(_other),
+    do: %{actor_kind: "anonymous", actor_id: nil, actor_label: nil}
+
+  @doc """
+  `actor_stamp/1` read off a keyword list that may carry a `:caller_context`.
+  The shape every `Content` write path already receives.
+  """
+  @spec actor_stamp_from_opts(keyword()) :: %{
+          actor_kind: String.t(),
+          actor_id: binary() | nil,
+          actor_label: String.t() | nil
+        }
+  def actor_stamp_from_opts(opts) when is_list(opts),
+    do: opts |> Keyword.get(:caller_context) |> actor_stamp()
 end

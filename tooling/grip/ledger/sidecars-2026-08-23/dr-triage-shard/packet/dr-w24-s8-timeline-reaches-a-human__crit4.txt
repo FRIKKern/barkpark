@@ -1,0 +1,1 @@
+An unknown sha renders as 'no delivery recorded', never as a zero-second delivery; paste the rendered bytes for a 200-with-empty-list response, and the rendered bytes for the typed 503 platform_deliveries_missing.

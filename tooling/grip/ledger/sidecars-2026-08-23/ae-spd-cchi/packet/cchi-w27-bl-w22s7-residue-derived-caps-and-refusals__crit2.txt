@@ -1,0 +1,1 @@
+UNLISTED and MISCLASSED refusals exist and are mutation-proven, with rc captured on its own line (out=$(cmd 2>&1); rc=$?), never through a pipe. The GONE-KIND / BREAKABLE / format refusals ALREADY EXIST upstream in scenarios.mjs (:1702,:1706,:1709,:1790,:1793,:1846,:1849,:1857) — cite them, do not rebuild them.

@@ -16,6 +16,8 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   request-pipeline threading. Visual polish is a browser-verification follow-up.
   """
   use BarkparkWeb, :live_view
+
+  import BarkparkWeb.Studio.PageScroll
   import Ecto.Query, warn: false
   import BarkparkWeb.StudioComponents.Controls
 
@@ -169,6 +171,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <%!-- studio-shell child contract (BarkparkWeb.Studio.PageScroll): the
+          shell is height:100vh + overflow:hidden, so a bare centred column
+          here is CLIPPED and its tail is unreachable by any input. This
+          wrapper fills the shell and owns the scroll; the centred column
+          below is unchanged, so the reading measure is too. --%>
+    <.studio_page_scroll>
     <div class="org-admin" style="max-width: 920px; margin: 0 auto; padding: 24px; font-family: var(--font);">
       <h1 class="h1" style="margin-bottom: 4px;">Organization Admin</h1>
       <p class="text-sm" style="color: var(--fg-muted); margin-top: 0;">
@@ -352,6 +360,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         </ul>
       </.bp_card>
     </div>
+    </.studio_page_scroll>
     """
   end
 end

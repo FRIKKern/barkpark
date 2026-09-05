@@ -1,0 +1,74 @@
+{
+  "blocks": [
+    {
+      "depth": 2,
+      "id": "b8",
+      "items": [
+        {
+          "anchor": "the-ladder",
+          "level": 2,
+          "text": "The ladder"
+        },
+        {
+          "anchor": "the-shape",
+          "level": 2,
+          "text": "The shape: one main, N supports"
+        },
+        {
+          "anchor": "support-is-pds",
+          "level": 2,
+          "text": "A support IS a Personal Development Server"
+        },
+        {
+          "anchor": "three-layers",
+          "level": 2,
+          "text": "Three layers: engine, cockpit, commerce"
+        },
+        {
+          "anchor": "setup-experience",
+          "level": 2,
+          "text": "The setup experience is the MVP"
+        },
+        {
+          "anchor": "the-cockpit",
+          "level": 2,
+          "text": "The cockpit is not a later phase"
+        },
+        {
+          "anchor": "the-two-dials",
+          "level": 2,
+          "text": "The two dials"
+        },
+        {
+          "anchor": "mvp-0",
+          "level": 2,
+          "text": "MVP-0 — setup, offload, engine"
+        },
+        {
+          "anchor": "infrastructure",
+          "level": 2,
+          "text": "The infrastructure unit"
+        },
+        {
+          "anchor": "pricing",
+          "level": 2,
+          "text": "Pricing"
+        },
+        {
+          "anchor": "sequence",
+          "level": 2,
+          "text": "The sequence"
+        },
+        {
+          "anchor": "open-questions",
+          "level": 2,
+          "text": "Open questions"
+        }
+      ],
+      "numbered": true,
+      "type": "toc"
+    }
+  ],
+  "paper": "personal-dev-fleet-mvp",
+  "type": "toc"
+}

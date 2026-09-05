@@ -88,9 +88,7 @@ func TestPaperLinksRendersEveryReferencedPaper(t *testing.T) {
 	}
 
 	out := renderFixture(t, "paper_links_corpus.json", 80)
-	if strings.Contains(out, "unknown block") {
-		t.Fatalf("paper-links still unknown-boxes:\n%s", out)
-	}
+	assertNoUnknownBlock(t, "paper_links_corpus.json", out)
 
 	// Every ref in every layout arm must appear, title AND link. Both wrap at 80
 	// columns — titles at spaces, URLs at their hyphens — so presence is checked

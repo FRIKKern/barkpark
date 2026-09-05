@@ -1,0 +1,1 @@
+Local gate output pasted: `CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...` green, plus the fresh-build recipe used.

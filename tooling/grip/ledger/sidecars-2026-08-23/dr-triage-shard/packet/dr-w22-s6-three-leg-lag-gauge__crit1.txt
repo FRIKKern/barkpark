@@ -1,0 +1,1 @@
+`scripts/deploy-lag-legs.sh` resolves the first-job instant from `min(job.started_at)` on the jobs endpoint. The PR body states, quoting charter D384, that `run_started_at == created_at` on 509/509 runs and would have produced leg A = 0 s on every row.

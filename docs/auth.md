@@ -3,7 +3,7 @@
 
 Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
 (SHA256 hash + permission list); LiveViews read `session["api_token"]` via
-`BarkparkWeb.LiveAuth` `on_mount` hooks.
+`LiveAuth` `on_mount` hooks.
 
 > Accounts, sessions, MFA, login tickets, field encryption/visibility and row
 > ownership: the **core-auth model** — [auth-user-sessions.md](auth-user-sessions.md).
@@ -41,21 +41,18 @@ lacking `write` gets `403`; reads stay available.
 
 ### Hierarchy — permission ⟂ membership
 
-The two facts above are **orthogonal axes**; `admin` is a superset on the
-PERMISSION axis ONLY (`admin` ⊃ `ops` ⊃ `read`+`write`; `:ops` stays separate so
-Bokbasen operators get status/retry/errors, never the encrypted `client_secret`)
-and confers **no membership anywhere**.
+Orthogonal axes: `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
+`ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
+encrypted `client_secret`) and confers **no membership anywhere**.
 
 Three tiers, never interchangeable — conflate two and you write the bug.
 `RequireAdmin`: `permissions` ONLY, no membership. `Tenancy.Auth.authorize/3`:
 member? AND the token's GLOBAL `permissions`. `workspace_admin?/2`: the
 membership ROLE alone.
-So a global-`admin` token with zero memberships passes `RequireAdmin` and
-reaches the route while every `Tenancy.Auth` predicate denies it; one holding a
-plain `member` row in B passes `authorize(_, B, :admin)` and correctly FAILS
-`workspace_admin?(_, B)` — load-bearing, never unify (`StudioLiveSharesTest`
-pins it). Tier 2 READS membership, tier 1
-does not: that near-miss is the footgun.
+A global-`admin` token with zero memberships passes `RequireAdmin` yet fails
+every `Tenancy.Auth` predicate; a plain `member` in B passes
+`authorize(_, B, :admin)` and correctly FAILS `workspace_admin?(_, B)` — never
+unify (`StudioLiveSharesTest` pins it).
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
@@ -79,6 +76,9 @@ INSUFFICIENT. See [instance-operator-tier.md](contracts/instance-operator-tier.m
 `live_auth.ex`: `:admin` → `"admin"`; `:ops` → `"ops"` or `"admin"`;
 `:scoped_admin` → `workspace_admin?/2` on the URL's workspace (membership axis);
 all halt with a flash + redirect to `/studio`.
+`paper_viewer.ex` `:viewer` (paper readers): never halts; assigns
+`:current_user`/`:api_token`/`:viewer` + fail-closed `:can_edit?` (`authorize/3`
+`:write`, in `BulldocsLive.mount/3`).
 
 ## Plug pipelines (HTTP)
 

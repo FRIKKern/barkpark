@@ -1,0 +1,1 @@
+dr-w27-instance-serving-since-durable is rewritten to the stat-the-mtime criterion, or closed as superseded by dr-w28-s1 with that slice named.

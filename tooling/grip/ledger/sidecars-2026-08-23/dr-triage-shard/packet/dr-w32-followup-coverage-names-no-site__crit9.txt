@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR is merged to origin/main, and the other open PRs touching the same pins (#10811, #10129) were checked for collision first. Evidence: the merge commit sha and the collision check.

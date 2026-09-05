@@ -722,7 +722,32 @@ PROSE_RECORD_MARKERS='retracted|retired|struck|corrected|superseded|obsolete|no 
 # STALE arm permits. A future entry here must carry its owner and its
 # replacement, and must not outlive one wave: a pin that is still here a wave
 # later means this clause has become the thing it was written to catch.
-PROSE_CLAIM_PINS=''
+#
+# ENTRY 2 — pinned 2026-09-03 by lead-gates-3 (row
+# cch-w61-bl-required-checks-self-test-is-red-on-main-itself). PR #15650
+# (2026-09-03 00:00Z) committed the 2026-08-23 close-packet sidecars under
+# tooling/grip/ledger/sidecars-2026-08-23/, and crit15 of cch-w22-s7 carries the
+# August sentence "`Console gate` and `Cloud gate` are ADVISORY on the live
+# branch". It has been READ: it was true on 2026-08-23 under charter D259 and is
+# false now (four contexts, enforced). It is NOT corrected in place because the
+# packet's own README declares the files "byte-unchanged: copied, never edited"
+# — the sidecar is an evidence capture, not a charter, and rewriting captured
+# evidence is the wrong fix. RULING (main, 2026-09-03 15:43Z): the grip lane is
+# stood down and main committed the packets, so lead-gates-3 owns it: a dated
+# correction record now sits BESIDE the capture
+# (…/packet/CORRECTION-2026-09-03-crit15.md). The ruling asked for the pin to
+# drop in the same commit; it cannot — rule 3(a) fences a record by a marker
+# IN THE CLAIM'S OWN FILE, and a sibling file is a path, which this clause
+# refuses to key on by design. So the pin stays until the packet is retired
+# (its STALE arm then forces the drop). This pin dies with wave 3.
+# RULING (main, 2026-09-03 23:22Z): never edit or retire the byte-immutable
+# capture; the durable fix is a sibling CORRECTION-2026-09-03.md the prose
+# clause learns to fence on (rule 3(a) widened to a correction record). The
+# grip lane is stood down, so that work is filed for the next wave.
+#   owner:       main
+#   replacement: task-e428b30fb9b2d4c7 (P3, grip fence — correction record +
+#                the fence + dropping this entry in one PR)
+PROSE_CLAIM_PINS='tooling/grip/ledger/sidecars-2026-08-23/triage-cch-agent/packet/cch-w22-s7-cruelty-ledger-effective-caps-and-classes__crit15.txt|Cloud gate|` are advisory on the live branch'
 
 merge_truth_prose_check() {
   local files
@@ -1039,7 +1064,7 @@ BLOCKING_PROSE_CLAIM='(^|[^A-Za-z])BLOCKING([^A-Za-z]|$)|blocks the merge|must b
 # somebody can review. And the annotation is checked in BOTH directions —
 # putting it on a context that IS required reds, because that is the same lie
 # advisory_prose_check catches, wearing a machine-readable hat.
-BLOCKING_HEADER_UNRESOLVED_BASELINE=3
+BLOCKING_HEADER_UNRESOLVED_BASELINE=0
 
 # A job `name:` template as an anchored ERE — `${{ … }}` holes punched out
 # BEFORE metacharacters are escaped, so literal parens stay literal. Same

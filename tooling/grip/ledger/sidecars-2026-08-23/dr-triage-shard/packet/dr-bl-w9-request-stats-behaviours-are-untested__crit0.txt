@@ -1,0 +1,1 @@
+A test pins that a socket-path request produces no RequestStats sample. Evidence: the test and its run.

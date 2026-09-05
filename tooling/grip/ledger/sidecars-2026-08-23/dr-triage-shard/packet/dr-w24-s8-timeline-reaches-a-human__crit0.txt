@@ -1,0 +1,1 @@
+`bp cloud deliveries <sha>` exists and renders a timeline; paste the rendered bytes against a fixture, showing merged / waited / built / serving / delivering run.

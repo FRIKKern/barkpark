@@ -1,0 +1,1 @@
+The arm decision reaches the control plane — a query against the cloud `deployments` table returns a non-zero count of rows carrying a ROUTE outcome, over a stated window. Today that count is 0 of 19,327 console-carrying rows.

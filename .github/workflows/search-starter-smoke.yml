@@ -52,7 +52,7 @@ on:
         default: "https://guerrilla.barkpark.cloud/sites/search-ember/"
 
 concurrency:
-  group: search-starter-smoke-${{ github.ref }}
+  group: search-starter-smoke-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

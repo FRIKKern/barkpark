@@ -1,0 +1,1 @@
+The PR states which option it took — (a) derive the line from the live scan at print time and DELETE the pinned field, or (b) keep the field and add an arm asserting it matches the scan — and says why. Simply refreshing the stale numbers is explicitly rejected. Evidence: the PR body.

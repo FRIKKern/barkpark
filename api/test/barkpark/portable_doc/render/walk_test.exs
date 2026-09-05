@@ -114,8 +114,17 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     test "an authored paragraph remains byte-faithful" do
       node = %{"kind" => "PdParagraph", "children" => ["Some prose"]}
 
+      # `:article` stays BARE — `.bp-paper-surface p` is the single source of
+      # body typography in both View and Edit.
       assert Walk.render_body(node, @width, @article) == "<p>Some prose</p>"
-      assert Walk.render_body(node, @width, @email) == "<p>Some prose</p>"
+
+      # `:email` carries the type INLINE (mail clients strip stylesheets), from
+      # the palette rather than a re-typed literal.
+      pal = Barkpark.PortableDoc.Render.Palettes.email_palette()
+
+      assert Walk.render_body(node, @width, @email) ==
+               ~s(<p style="margin:0 0 16px;font-family:#{pal.font_body};font-size:17px;) <>
+                 ~s(line-height:1.55;color:#{pal.text}">Some prose</p>)
     end
   end
 
@@ -496,6 +505,48 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ ~s(data-embed="A &quot;quote&quot; &amp; &lt;b&gt;")
       # The injected body is still verbatim — only the attr was escaped.
       assert html =~ "<p>ok</p>"
+    end
+  end
+
+  describe "render_body/3 — PdChip" do
+    test "article: a .bp-chip pill in its tone with a dot, and the note as a block beneath" do
+      node = %{
+        "kind" => "PdChip",
+        "tone" => "success",
+        "strong" => false,
+        "text" => "Lett",
+        "note" => "finnes, trigram"
+      }
+
+      assert Walk.render_body(node, @width, @article) ==
+               ~s(<span class="bp-chip bp-chip--success"><i class="bp-chip__dot"></i>Lett</span>) <>
+                 ~s(<span class="bp-chip__note">finnes, trigram</span>)
+    end
+
+    test "article: strong fills the pill, an unknown tone degrades to neutral, no note emits no note span" do
+      node = %{"kind" => "PdChip", "tone" => "hot", "strong" => true, "text" => "X", "note" => ""}
+
+      assert Walk.render_body(node, @width, @article) ==
+               ~s(<span class="bp-chip bp-chip--neutral bp-chip--strong"><i class="bp-chip__dot"></i>X</span>)
+    end
+
+    test "article: text and note are HTML-escaped" do
+      node = %{"kind" => "PdChip", "tone" => "info", "text" => "<b>", "note" => "a & b"}
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ "&lt;b&gt;"
+      assert html =~ "a &amp; b"
+      refute html =~ "<b>"
+    end
+
+    test "email: inlines the tone pair from Util.tone_palette/1 and inverts it for strong" do
+      plain = %{"kind" => "PdChip", "tone" => "warning", "text" => "Middels"}
+      html = Walk.render_body(plain, @width, @email)
+      assert html =~ "background:#f7f0df;color:#8a6420"
+      assert html =~ ">Middels</span>"
+
+      strong = Map.put(plain, "strong", true)
+      html = Walk.render_body(strong, @width, @email)
+      assert html =~ "background:#8a6420;color:#ffffff"
     end
   end
 

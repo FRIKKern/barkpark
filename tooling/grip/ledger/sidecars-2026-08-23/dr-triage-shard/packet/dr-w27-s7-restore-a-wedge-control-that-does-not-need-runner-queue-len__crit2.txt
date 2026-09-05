@@ -1,0 +1,1 @@
+on_exit releases the DeployRunner build slot unconditionally, so a red in this test cannot cascade into deploy_runner_door_census_test.exs. Show a forced failure leaving the neighbouring file green.

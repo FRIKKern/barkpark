@@ -1,0 +1,1 @@
+For each of the three slices, a reviewer INDEPENDENT of the builder and of the wave reviewer re-derives the named judgment from scratch - not a re-read of the builder's reasoning - and is NAMED. Evidence: who did it, what they re-derived, and the commands they ran.

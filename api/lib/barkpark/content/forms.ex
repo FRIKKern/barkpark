@@ -41,10 +41,27 @@ defmodule Barkpark.Content.Forms do
       Enum.reduce(schema.fields, base, fn field, acc ->
         key = field["name"]
 
+        raw = get_in(doc.content || %{}, [key])
+
         val =
-          if key in ["title", "status"],
-            do: Map.get(acc, key),
-            else: classic_form_value(get_in(doc.content || %{}, [key]))
+          cond do
+            key in ["title", "status"] ->
+              Map.get(acc, key)
+
+            # A `richText` field that opted into the block editor is read by
+            # the field canvas as its block array, not as flattened HTML — it
+            # has no form input, so this map never reaches a form param.
+            Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field) ->
+              raw
+
+            # An `image` value decoded into a map at the save boundary rides
+            # back to the picker as its JSON wire string (Gyldendal parity E1).
+            field["type"] == "image" and is_map(raw) ->
+              Jason.encode!(raw)
+
+            true ->
+              classic_form_value(raw)
+          end
 
         Map.put(acc, key, val)
       end)
@@ -125,6 +142,25 @@ defmodule Barkpark.Content.Forms do
   defp coerce_field_value(%{"type" => "boolean"}, "true"), do: true
   defp coerce_field_value(%{"type" => "boolean"}, "false"), do: false
 
+  # Schema `"image"` fields arrive from the picker as a STRING: a bare URL, or
+  # a JSON object {url, assetId, alt?, focalX?, focalY?} (Gyldendal parity E1
+  # added the last three). Storing the JSON as a string-in-a-string made every
+  # consumer re-parse it ad hoc; decode it here so `content.cover.focalX` is a
+  # number. A bare URL stays a string (it never was an object), and a string
+  # that only LOOKS like JSON but does not parse is kept as-is.
+  defp coerce_field_value(%{"type" => "image"}, val) when is_binary(val) do
+    trimmed = String.trim(val)
+
+    if String.starts_with?(trimmed, "{") do
+      case Jason.decode(trimmed) do
+        {:ok, %{} = map} -> map
+        _ -> val
+      end
+    else
+      val
+    end
+  end
+
   defp coerce_field_value(_field, val), do: val
 
   # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────
@@ -163,7 +199,26 @@ defmodule Barkpark.Content.Forms do
         |> Map.drop(["title", "status"])
         |> Map.merge(build_content(unbound_params, schema))
         |> Map.put("blocks", new_blocks)
-        |> Projection.project(new_blocks, Labels.render_opts(dataset))
+        # task-c46967eb3dc49e77: the re-projection NAMES `:article`, the same
+        # surface `Content.Writer.doc_render_opts/3` names since #15973,
+        # instead of leaving these opts style-less and letting
+        # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default
+        # pick one.
+        #
+        # This is defence in depth, NOT a live-defect fix — and the row's
+        # filing is wrong that it was one. `Content.upsert_document/4` runs
+        # `Writer.maybe_project_document_content/2` on the SAME write, which
+        # re-projects `content["body"]` + every bound field from
+        # `content["blocks"]` through the already-`:article` `doc_render_opts/3`,
+        # so whatever this line produces is overwritten before anything is
+        # persisted. Proved both ways in PR #16047: reverting this line alone
+        # leaves `classic_form_render_surface_test.exs` GREEN, while reverting
+        # writer.ex's `:article` instead REDS it. The value of naming the
+        # surface here is a future write path that skips that re-projection.
+        |> Projection.project(
+          new_blocks,
+          Map.put(Labels.render_opts(dataset), :style, :article)
+        )
 
       _ ->
         # Merge over the existing content instead of replacing it: a key

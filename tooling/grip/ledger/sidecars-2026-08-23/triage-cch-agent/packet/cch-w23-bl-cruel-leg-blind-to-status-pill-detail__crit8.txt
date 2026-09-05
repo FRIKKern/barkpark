@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this criterion, never the builder): the PR is merged to `main`, its MERGE sha is recorded here from `gh pr view <n> --json mergeCommit` (never a branch head, Standing law 1), and `git merge-base --is-ancestor <sha> origin/main` confirms it.

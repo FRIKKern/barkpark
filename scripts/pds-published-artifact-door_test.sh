@@ -126,6 +126,35 @@ fi
 if [ "$rc" = "2" ]; then ok "READER FAILURE: an ERROR row takes the whole door to VERDICT ERROR (rc 2)"; else bad "reader failure verdict" "rc=$rc want 2 — a reader failure must never look like a clean or merely-refusing tree"; fi
 git reset -q --hard "$DIRTY"
 
+# SHALLOW HISTORY IS REFUSED, NOT PASSED (elixir-nightly run 33717527961).
+#
+# The nightly checked out at actions/checkout's default fetch-depth: 1. resolve_r
+# walks git log comparing each commit to its PARENT; on a truncated history the
+# parent does not resolve, R collapses onto the boundary commit — HEAD — and
+# exports(R) == exports(HEAD) for every package. The door printed VERDICT: PASS
+# on a tree that REFUSES with real history: a vacuous pass whose output is
+# byte-plausible.
+#
+# THE ARM IS TWO-SIDED. The SAME fixture at the SAME sha is cloned twice: once
+# shallow (must ERROR, rc 2, naming the cause) and once with full history (must
+# still REFUSE, rc 1, naming ./client). Without the control, a guard that errored
+# on every clone would pass this arm just as happily.
+SHALLOW="$TMP/shallow"; FULLCLONE="$TMP/fullclone"
+git clone -q --depth 1 "file://$FIX" "$SHALLOW" 2>/dev/null
+git clone -q "file://$FIX" "$FULLCLONE" 2>/dev/null
+if [ -d "$SHALLOW/.git" ] && [ "$(git -C "$SHALLOW" rev-parse --is-shallow-repository)" = "true" ]; then
+  ok "FIXTURE: the --depth 1 clone really is shallow (an arm over a full clone would be vacuous)"
+else
+  bad "shallow fixture" "the --depth 1 clone is not shallow — the arm below would prove nothing"
+fi
+out="$(cd "$SHALLOW" && bash "$DOOR" HEAD 2>&1)"; rc=$?
+if [ "$rc" = "2" ]; then ok "SHALLOW: the door exits 2 (measured nothing) instead of descending to a PASS it cannot support"; else bad "shallow rc" "rc=$rc want 2 — on fetch-depth: 1 R collapses onto HEAD and every package passes vacuously"; fi
+if grep -qF 'ERROR: shallow history — R cannot be derived; fetch-depth: 0 required' <<<"$out"; then ok "SHALLOW: the refusal NAMES the cause and the remedy — a failed read is never byte-identical to a PASS"; else bad "shallow line" "the run did not print the shallow ERROR line: $out"; fi
+if grep -q <<<"$out" 'VERDICT: ERROR' && ! grep -q <<<"$out" 'VERDICT: PASS'; then ok "SHALLOW: the verdict is ERROR and no PASS is printed anywhere in the run"; else bad "shallow verdict" "the shallow run did not verdict ERROR: $out"; fi
+out="$(cd "$FULLCLONE" && bash "$DOOR" HEAD 2>&1)"; rc=$?
+if [ "$rc" = "1" ]; then ok "CONTROL: the SAME fixture sha with FULL history still REFUSES (rc 1) — the guard keys on shallowness, not on being a clone"; else bad "shallow control" "rc=$rc want 1 — the full clone of the same tree must behave exactly as before"; fi
+if grep -q <<<"$out" './client'; then ok "CONTROL: the full-history clone still NAMES ./client"; else bad "shallow control names" "the full clone refusal did not name ./client: $out"; fi
+
 if grep -nE '\b(curl|wget|npm|pnpm|yarn|nc|ping)\b' "$DOOR" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -q .; then
   bad "offline" "a network command appears outside a comment in the shipped door"
 else

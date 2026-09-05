@@ -51,8 +51,23 @@ defmodule Barkpark.Content.EventLog do
   a delete's `documents` row is GONE by the time we replay, so the join matches
   nothing and the tenant-scoped listener never learns the doc was deleted (its
   cache serves the deleted doc forever). The event's own denormalised column
-  survives the delete and is the correct tenant discriminator here. nil
-  `workspace_id` → unfiltered (back-compat).
+  survives the delete and is the correct tenant discriminator here.
+
+  Three workspace values, three DIFFERENT filters — the middle one is the point:
+
+    * a binary id  → `workspace_id == <id>` (the hard tenant boundary).
+    * `:shared_only` → `workspace_id IS NULL`. This is the empty-scope sentinel
+      `BarkparkWeb.ScopeHelpers.scope_opts/1` emits when a REQUEST resolved no
+      workspace (task-3e2a70930c6df723); it means "the shared/global layer",
+      never "every tenant". Mirrors `Content.Scope.scope_to_workspace/3`'s own
+      `:shared_only` arm, so the SSE replay leg lands on the same answer as
+      every other request-driven read.
+    * `nil` → unfiltered (back-compat). Reachable ONLY from an internal caller
+      that deliberately wants the global read: `ListenController.listen/2` now
+      derives its filter from `scope_opts/1`, so an unresolved REQUEST produces
+      `:shared_only` and can no longer reach this arm. It used to — that was the
+      cross-tenant replay (a nil-workspace subscriber resumed and received every
+      co-dataset tenant's mutation events, document payload included).
   """
   def replay_since(dataset, since, workspace_id \\ nil, opts \\ [])
 
@@ -64,6 +79,21 @@ defmodule Barkpark.Content.EventLog do
     # must never resurface through the Last-Event-ID replay to an SSE consumer.
     from(e in MutationEvent,
       where: e.dataset == ^dataset and e.type != "listener",
+      order_by: e.id,
+      limit: ^batch
+    )
+    |> keyset_stream(since, batch)
+  end
+
+  # The empty-scope sentinel: the SHARED layer (`workspace_id IS NULL`) only —
+  # NOT every tenant. Ordered before the binary clause purely for readability;
+  # the two are disjoint. `type != "listener"` is carried here too, so the
+  # eventId-70357 egress exclusion holds on all THREE legs.
+  def replay_since(dataset, since, :shared_only, opts) when is_integer(since) do
+    batch = Keyword.get(opts, :batch, @replay_batch)
+
+    from(e in MutationEvent,
+      where: e.dataset == ^dataset and is_nil(e.workspace_id) and e.type != "listener",
       order_by: e.id,
       limit: ^batch
     )

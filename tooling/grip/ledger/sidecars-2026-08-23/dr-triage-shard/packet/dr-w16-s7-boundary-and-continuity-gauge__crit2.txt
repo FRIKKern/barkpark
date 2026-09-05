@@ -1,0 +1,1 @@
+DERIVATION IS RESTRICTED TO RETAINED STATUSES, with the reason stated in a comment: a transient status's min(inserted_at) is a moving target (measured: `building`'s group existed at 16:16:05 and was gone 19 s later). Paste the guard

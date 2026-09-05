@@ -1,0 +1,1 @@
+Anything the resolver cannot follow exits 2 (the binding census's vacuity floor) instead of being cleared silently: quote a run over a deliberately unresolvable site showing exit 2, not exit 0.

@@ -1,0 +1,1 @@
+The pointer-events:none element-occluder hole named at measure.mjs:872-881 is either closed or formally accepted with a written rationale in the code comment

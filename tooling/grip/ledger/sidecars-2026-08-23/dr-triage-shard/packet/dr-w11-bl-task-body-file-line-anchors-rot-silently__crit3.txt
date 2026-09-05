@@ -1,0 +1,1 @@
+If a checker ships, it REPORTS and never auto-corrects — an anchor that moved may mean the code moved or may mean the finding is gone, and a silent rewrite would erase that distinction. Prove it by mutation: move a cited symbol and show the checker naming the row rather than editing it.

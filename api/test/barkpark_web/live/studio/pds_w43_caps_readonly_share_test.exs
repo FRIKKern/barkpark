@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures
 
-  alias Barkpark.{Accounts, Content, Sharing}
+  alias Barkpark.{Accounts, Content}
   alias BarkparkWeb.Studio.Caps
 
   @dataset "production"
@@ -68,18 +68,16 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
     # not land" assertion below would pass VACUOUSLY, against a pane that was
     # not there.
     System.delete_env("BARKPARK_PAPER_CANVAS")
-    prior_shares = Application.get_env(:barkpark, :shares)
 
     on_exit(fn ->
       case prev_canvas do
         nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
         v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
       end
-
-      if is_nil(prior_shares),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior_shares)
     end)
+
+    # arpss-w8: snapshots :shares AND :shares_env (Sharing.refresh/0 reads both).
+    Barkpark.SharingFixtures.snapshot_shares!()
 
     # A NON-default workspace. The Default workspace is an open public-demo in
     # test (`public_demo_studio: true`), and that arm is offered BEFORE the
@@ -91,11 +89,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
     # The desk is `:docs`-shared READ-ONLY. This is the whole precondition:
     # a scope any signed-in user may READ, which the grant arm never gets to
     # narrow because the share arm answered first.
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
-    )
+    Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
 
     seed_paper_schema!(ws, proj)
 
@@ -184,6 +178,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   end
 
   defp socket_of(view), do: :sys.get_state(view.pid).socket
+  defp paper_rev(view), do: socket_of(view).assigns.paper_rev
   defp flash_error(view), do: socket_of(view).assigns.flash["error"]
 
   # The component event, THEN a round-trip on the parent. `persist/2` does
@@ -204,9 +199,14 @@ defmodule BarkparkWeb.Studio.PdsW43CapsReadonlyShareTest do
   defp inner_change(view, params) do
     assert_editor_rendered!(view)
 
-    view
-    |> with_target("#paper-fb-" <> @block_id)
-    |> render_hook("inner-change", params)
+    target = with_target(view, "#paper-fb-" <> @block_id)
+    render_hook(target, "inner-change", params)
+
+    render_hook(target, "inner-flush", %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => paper_rev(view),
+      "values" => params
+    })
 
     render(view)
     :ok

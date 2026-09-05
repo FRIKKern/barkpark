@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): merged to origin/main. Evidence: the merge commit sha.

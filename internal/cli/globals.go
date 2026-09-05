@@ -63,6 +63,16 @@ type globals struct {
 	// may scope a bundle, and this bit is how a verb tells the difference.
 	datasetSet bool
 
+	// noCache is --no-cache: bypass the on-disk capabilities manifest cache for
+	// BOTH the read and the write. It is the diagnostic escape hatch for the
+	// fresh window (manifest.DefaultManifestTTL) — the one thing an operator can
+	// type to be certain the command tree in front of them came from the server
+	// this second, and the answer to "the server changed and bp has not noticed
+	// yet". Bypassing the WRITE too is deliberate: a --no-cache run must leave
+	// the cache exactly as it found it, so it diagnoses the cache instead of
+	// silently repairing it.
+	noCache bool
+
 	// manifestPath is the --manifest <path> override: load the manifest from a
 	// local file instead of GET /v1/capabilities. Lets the CLI run before the
 	// capabilities endpoint is deployed. Empty means no override.
@@ -87,7 +97,8 @@ var boolFlags = map[string]bool{
 	"-v": true, "--verbose": true,
 	"--no-color": true, "--dry-run": true,
 	"--yes": true, "--all": true, "--full": true,
-	"-h": true, "--help": true,
+	"--no-cache": true,
+	"-h":         true, "--help": true,
 	"--version": true, "-V": true,
 }
 
@@ -229,6 +240,8 @@ func (g *globals) set(key, val string) error {
 		g.all = true
 	case "--full":
 		g.full = true
+	case "--no-cache":
+		g.noCache = true
 	case "--limit":
 		n, err := strconv.Atoi(val)
 		if err != nil {

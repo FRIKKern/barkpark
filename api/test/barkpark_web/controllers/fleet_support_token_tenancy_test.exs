@@ -33,7 +33,7 @@ defmodule BarkparkWeb.FleetSupportTokenTenancyTest do
   carry NO `workspace_id`, so they legitimately fall back to Default) stays
   green in both states, which is exactly why it never caught this.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
   import Barkpark.TenancyFixtures

@@ -16,7 +16,7 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
   the other half deliberately satisfied, so neither can pass vacuously) and that
   every denial is byte-identical to a missing row.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken

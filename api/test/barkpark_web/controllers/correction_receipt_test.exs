@@ -55,7 +55,7 @@ defmodule BarkparkWeb.CorrectionReceiptTest do
   Nothing in this file dispatches to that mirror and its pipeline is NOT what
   these cases prove anything about. It is unpinned here, deliberately.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

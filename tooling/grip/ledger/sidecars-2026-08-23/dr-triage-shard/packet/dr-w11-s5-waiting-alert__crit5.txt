@@ -1,0 +1,1 @@
+The copy names its clock (control-plane pickup, not the human's publish) and matches the wording landed by dr-w11-s2 — a test pins the string

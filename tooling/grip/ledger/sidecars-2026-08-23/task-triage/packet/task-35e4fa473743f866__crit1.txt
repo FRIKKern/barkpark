@@ -1,0 +1,1 @@
+BEHAVIOURAL PROOF, not a source scan: forcing a small page size (e.g. 25) against cloud-console-hardening-epic yields a roster whose length EQUALS the published-children count derived at run time from bp task get (no hardcoded 530), and the same run at the default limit returns the identical roster.

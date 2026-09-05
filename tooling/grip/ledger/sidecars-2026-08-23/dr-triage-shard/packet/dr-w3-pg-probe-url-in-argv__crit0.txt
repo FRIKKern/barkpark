@@ -1,0 +1,1 @@
+The DATABASE_URL no longer appears in the psql child argv: a test asserts the argv passed to the probe runner contains no scheme/credential substring, and the connection is carried by child env instead

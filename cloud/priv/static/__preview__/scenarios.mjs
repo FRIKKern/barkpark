@@ -74,6 +74,12 @@
 // Stable ids so smoke.mjs can deep-link #instance/<id> deterministically.
 export const IDS = {
   team: "5b2c1e00-0000-4000-8000-000000000001",
+  // cch-w12-followup-login-fixture-gap: the OTHER team. The corpus has always
+  // held exactly one, because every scenario is one account's screen — but the
+  // one seam this file could not reach (a sign-out followed by a sign-in as
+  // somebody else, with no reload in between) needs two, or "the previous
+  // team's members" has no second team to be previous TO.
+  teamBeta: "5b2c1e00-0000-4000-8000-000000000002",
   liveInstance: "5b2c1e00-0000-4000-8000-0000000000a1",
   behindInstance: "5b2c1e00-0000-4000-8000-0000000000a2",
   provisioningInstance: "5b2c1e00-0000-4000-8000-0000000000a3",
@@ -648,6 +654,118 @@ const CRUEL_SITE_DOMAIN = atLength("site domain", [
   "customerfacingmarketingexperienceclusterprimaryingressnodea19x1",
   "internalacmegroupholdingsinfrastructureexampledomainnamecorpg",
 ].join("."), 253);
+// cch-w50 (task-696a2fcf95e9c4da) — THE TWO SHAPES cch-w24-s7 DID NOT CARRY.
+//
+//   THE 511-CHAR `github_repo@github_branch` SPAN — the compact `siteRow`'s
+//     `.site-meta .mono` (app.js: `'<span class="mono">' + esc(s.github_repo) +
+//     (s.github_branch ? "@" + esc(s.github_branch) : "")`). It is the ONLY one
+//     of the row's three text hosts that the global list does not also paint,
+//     and nothing in this corpus had ever driven it past 18 characters.
+//     THE FILING SAYS "two independent 255 caps"; ONLY ONE OF THEM IS A
+//     CHANGESET RULE. Re-derived by symbol on this tree:
+//       `validate_length(:github_branch, max: 255)`  — registry/site.ex:252
+//       `validate_github_repo/1`                     — registry/site.ex:341-355,
+//         a FORMAT check (`@github_repo_format`, owner/repo) with NO length
+//         clause at all; github_repo's only cap is the column,
+//         `add :github_repo, :string` (varchar(255)) in
+//         20260627160000_add_github_to_sites.exs. So the span's ceiling is
+//         255 + 1 + 255 = 511, but a length census over site.ex sees only half
+//         of it — the same census blindness the 253-char domain has.
+//       Re-derive: grep -n 'validate_github_repo\|validate_length(:github_branch' \
+//         cloud/lib/barkpark_cloud/registry/site.ex
+//     HONESTY: 255/255 is what the CONTROL PLANE accepts and stores. GitHub
+//     itself would not mint a 255-char `owner/repo` (39-char owner, 100-char
+//     repo are its own ceilings) — this span is FORMAT-legal and storable, not
+//     registrable, exactly as the 253-char domain is. The branch half needs no
+//     such caveat: git has no practical ref-name ceiling and a generated
+//     release ref is the realistic producer.
+//     NO HYPHEN, NO DOT, NO SECOND SLASH — and that is the whole point, MEASURED
+//     rather than assumed. The first draft of this pair was the ordinary
+//     kebab-case shape (`acme-corporate-…/…-static-asset-origin` @
+//     `release/2026-09/…`) and it made the leg that guards this host VACUOUS:
+//     deleting `.site-meta .mono`'s `overflow-wrap: anywhere` from app.css and
+//     re-driving all 20 cells gave exit 0, because `-` and `/` are CSS break
+//     opportunities and the default wrap already broke the span. `anywhere`
+//     only earns its line against a run with NOTHING to break on, which is what
+//     app.css's own comment beside that rule claims is reachable ("a 511-char
+//     unbreakable token"). `@github_repo_format` is `[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`
+//     — separators are PERMITTED, never required — so CamelCase on both halves
+//     is as legal as the kebab shape and is the one that bites.
+const CRUEL_SITE_REPO = atLength("site github_repo", [
+  "AcmeCorporateMarketingPlatformEngineeringGroupHoldings",
+  "/",
+  "CorporateMarketingPlatformProductionContentDeliveryEdgeGateway",
+  "CustomerFacingExperienceClusterPrimaryIngressNorthernEuropean",
+  "RegionalStaticAssetOriginForAcmeCommerceMonorepo01",
+  "AndInternalInfrastructure01",
+].join(""), 255);
+const CRUEL_SITE_BRANCH = atLength("site github_branch", [
+  "release202609AcmeCorporateMarketingPlatformProductionContent",
+  "DeliveryEdgeGatewayCustomerFacingExperienceClusterPrimary",
+  "IngressNorthernEuropeanRegionalStaticAssetOriginRebuildAfter",
+  "TheQuarterlyRegistryMigrationStepTwoOfFourNoSeparatorsAt0139x",
+  "PhaseThreeOfSeven",
+].join(""), 255);
+// THE CRUELTY IS SHAPE AS WELL AS LENGTH, so it is asserted as shape: the only
+// break opportunity in the whole 511-character span is the single `/` the
+// owner/repo format REQUIRES. A future retune that reaches 511 with hyphens in
+// it is still 511 characters long and no longer bites — that is exactly the
+// silent regression `atLength` cannot see, so it is checked here.
+for (const [what, v] of [["github_repo", CRUEL_SITE_REPO], ["github_branch", CRUEL_SITE_BRANCH]]) {
+  const seps = v.replace(/[A-Za-z0-9]/g, "");
+  const want = what === "github_repo" ? "/" : "";
+  if (seps !== want) {
+    throw new Error(
+      "cruel fixture: " + what + " carries the break opportunit" + (seps.length === 1 ? "y" : "ies") +
+      " \"" + seps + "\", expected \"" + want + "\" — a separator makes the 511-char span breakable by the " +
+      "DEFAULT wrap, which makes the .site-meta .mono guard vacuous (measured: exit 0 with the rule deleted)",
+    );
+  }
+}
+// The span the row actually paints, asserted here so a reader does not have to
+// add two numbers and a separator by eye.
+export const CRUEL_SITE_REPO_SPAN_LEN =
+  CRUEL_SITE_REPO.length + 1 + CRUEL_SITE_BRANCH.length;
+if (CRUEL_SITE_REPO_SPAN_LEN !== 511) {
+  throw new Error("cruel fixture: the .site-meta .mono span is " + CRUEL_SITE_REPO_SPAN_LEN + " chars, must be 511");
+}
+
+//   THE 66-CHAR HOST WHOSE FIRST BREAK OPPORTUNITY IS AT CHARACTER 63 — the
+//     SHAPE axis, not the length axis. The 253-char domain above is long enough
+//     that any narrow column fails on it for the boring reason; this one is
+//     SHORT and still unbreakable across a phone column, which is the case a
+//     width-only remedy passes and a wrap-only remedy fails.
+//     THE FILING ASKED FOR A "66-CHAR SINGLE-LABEL HOST" AND THAT STRING IS NOT
+//     SERVER-LEGAL: `@domain_format` (registry/site.ex:28) is
+//     `^label(\.label)+$` — the `+` makes at least one dot MANDATORY, so a
+//     single-label domain is refused by `validate_domains/1` outright, and 66
+//     is over the 63-octet DNS label ceiling besides. The nearest thing the
+//     server does accept, and the one that carries the filing's intent, is a
+//     66-character host that is ONE 63-character label plus a two-letter TLD:
+//     `<63>.io`. Its leading run is the same 63-char unbroken token
+//     `CRUEL_SITE_SLUG` already justifies (clean_url/1 emits it verbatim
+//     through the non-admin POST /v1/launch), and the whole host is 66 chars
+//     with exactly one break opportunity in it, at char 63.
+//     Re-derive: grep -n '@domain_format' cloud/lib/barkpark_cloud/registry/site.ex
+const CRUEL_SITE_HOST_ONE_LABEL = atLength("site one-label host",
+  CRUEL_SITE_SLUG + ".io", 66);
+
+// EXPORTED so overflow-guard.mjs's W50 leg DERIVES the strings it expects to
+// find on the page instead of transcribing them. A transcribed expectation
+// rots silently the first time a constant above is retuned; a derived one
+// cannot. `CRUEL_SITE_ROW_ID` is the row the leg has to be able to point at —
+// the harness reads it off `.site-row[data-id]`.
+export const CRUEL_SITE_STRINGS = {
+  name: CRUEL_SITE_NAME,
+  slug: CRUEL_SITE_SLUG,
+  domain: CRUEL_SITE_DOMAIN,
+  oneLabelHost: CRUEL_SITE_HOST_ONE_LABEL,
+  repo: CRUEL_SITE_REPO,
+  branch: CRUEL_SITE_BRANCH,
+  repoSpanLen: CRUEL_SITE_REPO_SPAN_LEN,
+};
+export const CRUEL_SITE_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000c9";
+export const ONE_LABEL_HOST_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000ca";
 
 const sitesListRows = [
   site({
@@ -710,7 +828,16 @@ const sitesListRows = [
   // the failed and rebuilding rows above follow.
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000ca",
-    name: "acme-media", slug: "acme-media", domains: ["media.acme.com"],
+    // cch-w50: this row's host is the 66-char ONE-LABEL-PLUS-TLD shape (see
+    // CRUEL_SITE_HOST_ONE_LABEL above). It is CARRIED BY AN EXISTING ROW ON
+    // PURPOSE: `sitesListRows` is read positionally and by count by five
+    // FIXTURE_SHAPE_PINS and by two smoke scenarios, so a new row costs a
+    // five-pin edit while a swapped `domains` value costs none — and neither
+    // smoke check names "media.acme.com" (the `sites` check keys acme-media by
+    // its NAME, the `sites-on-instance` check names four other hosts).
+    // Nothing else about this row moves: still deferred, still deployed, still
+    // one domain, so `siteExtraDomains` stays 0.
+    name: "acme-media", slug: "acme-media", domains: [CRUEL_SITE_HOST_ONE_LABEL],
     framework: "astro", github_webhook_configured: true,
     current_deployment_id: depOf(8),
     last_deployment: lastDeploy("deferred", "content-auto", 240),
@@ -785,7 +912,11 @@ const sitesListRows = [
     name: CRUEL_SITE_NAME,
     slug: CRUEL_SITE_SLUG,
     domains: [CRUEL_SITE_DOMAIN],
-    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    // cch-w50: the 511-char `.site-meta .mono` span. Substituted on THIS row
+    // rather than added as a new one, for the same shape-pin reason as
+    // acme-media above; "acme/platform"@"main" was 18 characters and no
+    // instrument had ever driven that host past a comfortable width.
+    framework: "nextjs", github_repo: CRUEL_SITE_REPO, github_branch: CRUEL_SITE_BRANCH,
     github_webhook_configured: true,
     current_deployment_id: depOf(9),
     last_deployment: lastDeploy("live", "manual", 1200),
@@ -1556,6 +1687,35 @@ const teamInvites = [
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
 ];
 
+// ── cch-w12-followup-login-fixture-gap · THE SECOND IDENTITY ─────────────────
+// A roster of a DIFFERENT team, sharing not one user id with `teamMembers`.
+// That disjointness is the whole assertion: after signing in as one of these
+// people, a Who axis that still names lin or rex is naming the previous team's
+// members, and there is no innocent reading of it.
+// NOT routed through `corpusActorEmail` on purpose — that helper's contract is
+// "the ACME corpus's actors, id → email, read straight off the roster fixtures",
+// and it throws on an unknown id precisely so a typo cannot silently render as
+// ada. These two belong to another team's roster, so they are stated whole
+// here, in the same member_json shape (`{user_id, email, role, joined_at}`) the
+// server serializes.
+const teamMembersBeta = [
+  { user_id: "usr_zed", email: "zed@beta.io", role: "owner", joined_at: tMinus(90 * 86400) },
+  { user_id: "usr_qi", email: "qi@beta.io", role: "member", joined_at: tMinus(10 * 86400) },
+];
+// The /v1/me envelope the second sign-in lands. Built by MOVING the identity
+// fields of a `me()` envelope rather than by typing a fresh object literal, so
+// it is key-for-key what every other logged-in scenario answers — the
+// __me_envelope_census diffs served keys against router.ex's own response map,
+// and a hand-typed twin is exactly how a fixture drifts out from under it.
+const betaMe = (() => {
+  const env = me("Beta Works", { instance: true, published_doc: true, completed: true });
+  env.user = { id: "usr_zed", email: "zed@beta.io", confirmed: true, two_factor_enabled: false };
+  env.team = { id: IDS.teamBeta, name: "Beta Works", slug: "beta-works" };
+  env.teams = [{ id: IDS.teamBeta, name: "Beta Works", slug: "beta-works", role: "owner" }];
+  env.team_authority = { team_id: IDS.teamBeta, role: "owner", admin: true, owner: true };
+  return env;
+})();
+
 // ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
 // Each meter is {value|"unmetered", quota, warn_at, source, measured_at}; a
 // numeric quota lights the SPA's OC7 bar (ok/warn/over), a nil quota is honestly
@@ -1689,13 +1849,36 @@ const lifecycleCapabilities = {
 // hetzner + azure are prod (the two matrix columns), fake is dev-tier (FILTERED
 // out of the matrix). The false cells prove the honesty grammar: some carry the
 // server-owned gap reason (hetzner.pause, azure.adopt), some are a bare dash with
-// NO reason (hetzner.catalog, azure.audit) — the UI pads neither.
+// NO reason (azure.audit) — the UI pads neither.
+//
+// cch-w45-bl — `catalog` IS TRUE FOR BOTH NEUTRAL KINDS, AND CANNOT BE ANYTHING
+// ELSE. This fixture models the bytes GET /v1/providers/capabilities SERVES, and
+// that response is POST-OVERLAY: own_catalog_capability/2 (cloud router,
+// @neutral_kinds ~w(hetzner azure)) rewrites `catalog` to true for those two
+// kinds whenever the key is present, because THIS control plane builds their
+// catalogs itself (build_provider_catalog/2 behind GET /v1/providers/:kind/
+// catalog). So no deployment can emit hetzner.catalog:false here — the value was
+// copied from the GO SEAM fixture (priv/static/__fixtures__/
+// providers_capabilities.json, where `false` is honest: no Go provider
+// implements Cataloger) and landed on the wrong side of the overlay. azure was
+// already carrying the post-overlay `true`, so the fixture was internally
+// inconsistent about its own two neutral kinds.
+//
+// This is NOT a green bought by editing a fixture. It is the ONLY cell of this
+// payload whose value the server fixes rather than passes through, and getting
+// it wrong made the console — which now correctly consults the conduit before
+// mounting a catalog — withhold the launch wizard's `.launch-connect-provider`
+// door on `providers-connected`, an unreachable state in production. The
+// no_catalog arm keeps its coverage in __app.test.mjs, where the payload is
+// authored per-assertion rather than claimed of a real deployment. Do NOT
+// "resync" this with the Go fixture: the two sit on opposite sides of the
+// overlay, and the router's own comment forbids the reverse edit.
 const settingsProviderCapabilities = {
   providers: {
     hetzner: {
       tier: "prod",
       capabilities: {
-        core: true, catalog: false, labels: true, pause: false,
+        core: true, catalog: true, labels: true, pause: false,
         archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
       },
       gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
@@ -1921,7 +2104,7 @@ const stBlocked = deployment({
   branch: "main",
   // The humanized born-failed github-push copy exactly as FailureCopy.humanize
   // emits it at the JSON boundary (the client re-map is idempotent on it).
-  failure_reason: "GitHub pushes are recorded but can’t be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.",
+  failure_reason: "This push predates GitHub source builds and can’t be built yet — push again to build this commit, or deploy it with bp deploy.",
   inserted_at: tMinus(90000),
   updated_at: tMinus(90000),
 });
@@ -2168,19 +2351,27 @@ const siteStatesDomains = {
 // the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
 //
-// SIX, NOT NINE (wave 30 S1). `deployment_succeeded`, `member_invited` and
-// `token_expiring` were dropped from `EmailSettings` end to end — no column, no
-// producer, no toggle. A fixture that still seeded them was claiming to be
-// backend-true while describing a backend that no longer exists, which is the
-// exact shape this wave exists to remove; `__app.test.mjs`'s bidirectional
-// census guards app.js but has no reach into this file, so it stayed green.
+// EIGHT AS OF cch-w30-bl. It was SEVEN as of cch-w29-bl, and SIX, NOT NINE
+// before that (wave 30 S1).
+// `deployment_refused` is the auto-deploy PREBUILT refusal: column, producer and
+// console row all landed together, so the fixture seeds it too.
+// `deployment_succeeded` came BACK the same way — `Registry`'s
+// `dispatch_deployment_terminal/2` fires it from both writers that can land the
+// `live` terminal, so the column, the render arms and the console row returned
+// with it. `member_invited` and `token_expiring` are still dropped from
+// `EmailSettings` end to end — no column, no producer, no toggle. A fixture that
+// still seeded them was claiming to be backend-true while describing a backend
+// that no longer exists, which is the exact shape wave 30 exists to remove;
+// `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
+// this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
+  "deployment_succeeded", "deployment_refused",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
@@ -2839,6 +3030,23 @@ export const SCENARIOS = {
         { full_name: "acme/web", private: false },
         { full_name: "acme/internal-docs", private: true },
       ],
+      // cch-w48-bl — AND THE DEPLOYMENT FACT THE PICKER PRESUPPOSES. loadSite
+      // now consults GET /v1/github/installation's `configured` before offering
+      // #site-github at all, because on a deployment with NO GitHub App the
+      // control can only open a modal that says the feature does not exist —
+      // for an admin exactly as for a member.
+      //
+      // THIS IS NOT A FIXTURE ADDED TO KEEP A GREEN. Without it this scenario
+      // falls to the terminal `/v1/` 200 {} at the bottom of route(), whose body
+      // carries no `configured` key at all — the band reads "unknown", the door
+      // is honestly withheld, and every #site-github assertion in smoke.mjs goes
+      // red. That red is CORRECT for a deployment with no GitHub App; it is
+      // wrong for THIS scenario, which serves a site already linked to acme/web
+      // and a repo picker listing two repos. A site cannot be connected to a
+      // GitHub repo on a deployment that has no GitHub App, so `configured:true`
+      // is what this fixture was always implicitly claiming — it just had no
+      // route arm to say it through.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
@@ -4977,6 +5185,157 @@ export const SCENARIOS = {
       instanceVerify: { status: 404, body: { error: "no_admin_token" } },
     },
   },
+
+  // ── cch-w50-s4: THE TWO BILLING ACTORS THE CORPUS HAS NEVER HELD ────────────
+  // The plan card's bullets rendered in five of the committed scenarios before
+  // this pair, ALL of them paid-or-member. Two arms of renderPlanState had ZERO
+  // fixtures, so every render-layer guard aimed at them was green BY
+  // CONSTRUCTION — a guard over a state no fixture can produce cannot lose.
+  //
+  // 1. THE UNSUBSCRIBED OWNER — the actor renderPlanState routes to the UPSELL
+  //    card. Its four unique markers (`plan-continue`, "Optimized for shipping
+  //    to production", "See more plan options", "Recommended") had zero hits in
+  //    a rendered-DOM dump of the whole corpus.
+  // 2. THE SUPPORT++ OWNER — `grep support_plus scenarios.mjs` returned nothing.
+  //    The third catalog tier had never rendered as a CURRENT plan anywhere.
+  //
+  // THE ENVELOPE IS THE SERVER'S, NOT A SYNTHESIS (charter D573, cch-w43-s1:
+  // "the corpus mints the envelope the server mints"). `subscription: null` is
+  // what GET /v1/subscription actually answers for a team with no live
+  // subscription — web/router.ex:2088/2095 both `json(conn, 200, %{subscription:
+  // nil, billing_capability: billing_capability_json()})`, under the comment "A
+  // team with no active subscription gets {subscription: nil}". A synthesized
+  // `{plan: "free"}` subscription reaches the SAME upsell arm (planFromSub's
+  // `sub.plan !== "free"` guard rejects it, so renderPlanState falls through
+  // identically) — but /v1/subscription never mints that shape for an
+  // unsubscribed team, so the corpus would be asserting against an envelope the
+  // plane cannot produce. loadSubscription sets `subLoaded = true` on r.ok with
+  // `subCache = null`, so renderPlanState skips the trial arm, skips the
+  // active|past_due arm, and reaches the upsell.
+  "billing-free-owner": {
+    label: "Billing — the UNSUBSCRIBED owner: subscription null, so the plan card is the upsell (Recommended badge, Continue, See more plan options)",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      // The server's own arm, verbatim: no live subscription → null, never a
+      // synthesized {plan:"free"}.
+      subscription: null,
+      sites: [],
+      audit: [],
+    },
+  },
+  // The SUPPORT++ owner. `support_plus` is a first-class server plan, not a
+  // console invention: Billing.Subscription's `@plans ~w(free trial supporter
+  // support_plus forever)` validate_inclusion admits it, Billing.limits/0 carries
+  // its ceiling (10), and config keys it to a Stripe price id
+  // (STRIPE_PRICE_SUPPORT_PLUS). The one thing this fixture cannot prove from a
+  // checkout is that the LIVE plane has that price id populated — see the PR's
+  // written exception. What it renders is the tier's card as a CURRENT plan,
+  // which no scenario had ever produced.
+  "billing-support-plus": {
+    label: "Billing — the Support++ owner: the third catalog tier renders as the CURRENT plan, with the manage/cancel owner sections",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "support_plus",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 24 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(60 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // ── cch-w49-s7 · THE DEPLOY THAT CANNOT TAKE MONEY ────────────────────────
+  // THE HOLE THIS CLOSES. #10509 put `billing_capability` on GET
+  // /v1/subscription and NO fixture in this corpus had ever carried one — so
+  // every console consumer of it was green BY CONSTRUCTION, in the same way
+  // `billing-free-owner` found the upsell card's four markers had zero hits.
+  // `billing-trial` is the only actor whose #billing-tiers is VISIBLE at first
+  // paint (renderTrial unhides the grid), so it is the only actor from which a
+  // rendered-bytes assertion about the tier grid can be made at all; this is
+  // that actor with the plane declaring `unconfigured` — no plan priced, so
+  // Billing.checkout/2 can only ever answer {:error, :billing_not_configured}.
+  // Everything else is billing-trial's data verbatim: the ONE variable is the
+  // declaration.
+  "billing-unconfigured": {
+    label: "Billing — the plane declares checkout UNCONFIGURED: the tier grid offers no Subscribe at all and says why",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [liveInstance],
+      subscription: trialSub,
+      // checkout_capability/0's :unconfigured arm, verbatim: priced_plans() is
+      // empty, so `plans` is [] and not a missing key — an empty LIST is the
+      // server's own answer, and it is not the same thing as no declaration.
+      billingCapability: { checkout: "unconfigured", plans: [] },
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // ── cch-w12-followup-login-fixture-gap · THE SUCCESSFUL LOGIN ──────────────
+  // THE HOLE THIS CLOSES. Until now this file answered POST /v1/auth/login from
+  // exactly ONE fixture (`loggedout-twofactor`), and that fixture returns
+  // `two_factor_required` — so the success branch of route()'s own login arm
+  // (`if (state && d.login.status && d.login.status < 400) delete state.loggedOut`)
+  // was unreachable from every committed scenario, and no drive in this harness
+  // had ever COMPLETED a sign-in. The consequence is bigger than a missing
+  // branch: render()'s logged-out arm is the one seam where a console lie about
+  // IDENTITY can be built — it serves the sign-out click AND the 401
+  // auto-bounce, neither of which reloads — so every per-account cache clear
+  // standing in it (meCache via clearMe, subCache, capCache, overviewData.*,
+  // and activityActors) was pinned by SOURCE SHAPE alone. Nothing could DRIVE
+  // an account change, so nothing could observe one going wrong.
+  //
+  // WHAT THIS FIXTURE MODELS, AND WHAT IT HONESTLY CANNOT. route() is handed
+  // (name, method, path, state) — there is NO REQUEST BODY on that signature,
+  // in this harness or in mock.js — so the fixture cannot match credentials to
+  // an account and must not pretend to. It models the only thing it can see:
+  // this scenario boots ALREADY signed in as ada, so any successful
+  // POST /v1/auth/login reaching it is by construction a SECOND sign-in, and it
+  // lands the second identity (`secondIdentity` below). The claim under test is
+  // the console's, not the server's: what the client keeps across an account
+  // change it was told about. Credential matching is the server's, and
+  // cloud/test owns it.
+  "activity-identity-change": {
+    label: "Sign out and back in as ANOTHER TEAM, no reload — the Activity Who axis must not name the previous team's members",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: activityFeed,
+      // Identity one's roster: ada (the actor) / lin / rex — the same three the
+      // `activity` scenario's Who axis renders, and the three that must be GONE
+      // after the switch.
+      members: teamMembers,
+      // The successful sign-in itself. 200 + a session body in the shape
+      // loginResponseKind() folds to "session" (`grep -n 'function
+      // loginResponseKind' cloud/priv/static/app.js`): a token, and the team it
+      // is scoped to — which is the SECOND team, because that is who signs in.
+      login: { status: 200, body: { token: "preview-second", team_id: IDS.teamBeta } },
+      // Everything that changes with the account. Read through `state` by
+      // route(), so the switch is a STATE CHANGE the fixture can be asked about
+      // — not two static objects a check picks between, which would prove
+      // nothing about what the console did.
+      secondIdentity: { me: betaMe, members: teamMembersBeta },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -5080,12 +5439,61 @@ export function route(name, method, path, state) {
   //     401 invalid_code — the honest inline error, one click away).
   //   • d.reset answers the set-new-password submit off the emailed link.
   if (method === "POST" && p === "/v1/auth/request-reset") return { status: 200, body: {} };
-  if (method === "POST" && p === "/v1/auth/login" && d.login) return d.login;
+  if (method === "POST" && p === "/v1/auth/login" && d.login) {
+    // A successful sign-in mints a new token, so it lifts the revocation the
+    // logout arm below records — otherwise a sign-out is a one-way trap the
+    // fixture can never leave, which no real server does.
+    if (state && d.login.status && d.login.status < 400) {
+      delete state.loggedOut;
+      // cch-w12-followup-login-fixture-gap: …and, for a scenario that carries a
+      // SECOND identity, this is the moment the account changes. Recorded on
+      // the per-boot state bag (never on this module's shared scenario object,
+      // which smoke.mjs drives across many scenarios in one process), and the
+      // per-account READS below go through it — a switch nothing re-reads would
+      // prove nothing, which is this file's founding sin in a smaller costume.
+      // Until wave 12's follow-up NO fixture had a `login` under 400 at all, so
+      // this success branch had never once executed.
+      if (d.secondIdentity) state.secondIdentity = true;
+    }
+    return d.login;
+  }
   if (method === "POST" && p === "/v1/auth/two-factor-challenge" && d.twoFactorChallenge) return d.twoFactorChallenge;
   if (method === "POST" && p === "/v1/auth/reset" && d.reset) return d.reset;
 
   // Logged out: no authed reads are modelled.
   if (!scen.authed) return { status: 401, body: { error: "unauthorized" } };
+
+  // cch-w11-bl-unmodelled-delete-route-arms — DELETE /v1/auth/logout, THE LAST
+  // destroy verb that still fell through to the terminal `/v1/` 200 {} at the
+  // bottom of this function. A verb that succeeds against a route the fixture
+  // never modelled would report success against literally any server, which is
+  // this harness's founding sin in a smaller costume.
+  //
+  // RE-DERIVED, not copied from the filing: the row named four routes. Three
+  // are modelled today — /v1/github/installation (gated on the `github`
+  // fixture), /v1/sites/:id/github (the `siteGithub` matcher) and the webhook
+  // DELETE (the `whDelete` matcher, a full destroyFrom/listOf shrink oracle)
+  // all answer real shapes. Only logout was left, and this is it. Derived by
+  // sentinel: the terminal catch-all was replaced with a marker body and every
+  // DELETE the console issues was probed across all 118 scenarios — logout was
+  // the only one that reached it (112/118; the other 6 are the logged-out
+  // scenarios, whose 401 is the authed gate above, not a logout arm).
+  //
+  // THE OBSERVABLE STATE THE VERB CHANGES: the calling token is REVOKED, so
+  // every authed read after it must answer 401 — the same 401 the logged-out
+  // scenarios answer above. `state.loggedOut` is that fact, on the sessionsOf /
+  // listOf / githubOf contract: opt-in on `state` (a stateless caller keeps its
+  // old 200 byte-for-byte) and the READS GO THROUGH IT, which is the whole
+  // point — a DELETE nothing re-reads proves nothing.
+  //
+  // Signing back in clears it: the unauthenticated POSTs above sit ABOVE this
+  // gate on purpose, so a scenario that signs out and signs in again is not
+  // trapped in a 401 the fixture can never leave.
+  if (method === "DELETE" && p === "/v1/auth/logout") {
+    if (state) state.loggedOut = true;
+    return { status: 200, body: { ok: true } };
+  }
+  if (state && state.loggedOut) return { status: 401, body: { error: "unauthorized" } };
 
   if (p === "/v1/invitations/accept" && method === "POST") {
     return (d.invitation && d.invitation.accept) || { status: 404, body: { error: "invalid_or_expired" } };
@@ -5185,6 +5593,13 @@ export function route(name, method, path, state) {
     } else {
       return d.meFault;
     }
+  }
+  // cch-w12-followup-login-fixture-gap: after a successful second sign-in, the
+  // authority read answers the SECOND account. Above the ordinary arm because
+  // the ordinary arm is unconditional; the flag is only ever set by the login
+  // arm, so no scenario without a `secondIdentity` fixture can reach this.
+  if (p === "/v1/me" && state && state.secondIdentity && d.secondIdentity) {
+    return { status: 200, body: d.secondIdentity.me };
   }
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
@@ -5311,7 +5726,18 @@ export function route(name, method, path, state) {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
-  if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
+  // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
+  // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:
+  // billing_capability_json()}`). It is OPT-IN here rather than defaulted:
+  // an absent key is exactly the "unknown" the console fail-opens on, which is
+  // what every scenario written before this slice was already modelling, so no
+  // committed fixture's rendered bytes move. A scenario that wants to drive a
+  // declared capability sets `billingCapability` in its data.
+  if (p === "/v1/subscription") {
+    const sub = { subscription: d.subscription };
+    if (d.billingCapability) sub.billing_capability = d.billingCapability;
+    return { status: 200, body: sub };
+  }
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
   // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
   // to drive the failure variants (401 password_invalid, 403 forbidden, …). The
@@ -5388,7 +5814,7 @@ export function route(name, method, path, state) {
   // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
     // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
-    // does. Auth.require_primary_team_admin answers this route with
+    // does. Auth.require_current_team_admin answers this route with
     // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
     // "primary_team": cch-w37-s3 renamed the label because the gate reads
     // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team
@@ -5665,6 +6091,13 @@ export function route(name, method, path, state) {
   // since cch-w10, actually DRIVEN: members-populated clicks Remove and Revoke
   // for real, so both lists are served from the per-boot store and shrink.
   if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
+    // cch-w12-followup-login-fixture-gap: the roster is TEAM-scoped, so after
+    // the account change it is the second team's. The two rosters share no user
+    // id, which is what makes "the Who axis still names lin" an unambiguous
+    // reading rather than a coincidence of two similar fixtures.
+    if (state && state.secondIdentity && d.secondIdentity && d.secondIdentity.members) {
+      return { status: 200, body: { members: d.secondIdentity.members } };
+    }
     return { status: 200, body: { members: listOf(d, state, "members") } };
   }
   const memberOne = p.match(/^\/v1\/teams\/[^/]+\/members\/([^/]+)$/);

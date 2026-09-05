@@ -7,6 +7,7 @@ defmodule Barkpark.Plugins.Github.ClientTest do
 
   alias Barkpark.Plugins.Github.Auth
   alias Barkpark.Plugins.Github.Client
+  alias Barkpark.TestSupport.BlackHole
 
   alias Barkpark.Plugins.Github.Errors.{
     AuthError,
@@ -442,6 +443,102 @@ defmodule Barkpark.Plugins.Github.ClientTest do
 
       assert {:error, %RateLimitError{retry_after: 17}} =
                Client.add_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+    end
+  end
+
+  # Same defect, same shape as the bokbasen twin — both clients now route the
+  # decision through `Barkpark.Net.RetrySafety`. A timed-out create_issue POST
+  # minted up to 3 GitHub issues for ONE task; `MirrorJob`'s Oban-level dedup
+  # cannot see it, because it happens inside one `create_issue/3` call.
+  describe "retry safety — a timed-out-but-ACCEPTED write is not replayed" do
+    test "create_issue POST reaches the server exactly ONCE when the response times out",
+         %{bypass: bypass} do
+      stub_token(bypass)
+      # Warm the installation token against Bypass; the black hole answers
+      # nothing, so the client must not need it for the token leg.
+      assert {:ok, _} = Auth.token()
+
+      {acceptor, base, hits} = BlackHole.start()
+      on_exit(fn -> BlackHole.stop(acceptor) end)
+
+      assert {:error, %NetworkError{reason: :timeout}} =
+               Client.create_issue(@repo, %{title: "dup me"},
+                 base_url: base,
+                 max_retries: 3,
+                 retry_delay_ms: 5,
+                 timeout: 300
+               )
+
+      # RED-BEFORE (guard reverted): 4 — four GitHub issues for ONE task.
+      assert hits.() == 1
+    end
+
+    test "get_issue GET IS still replayed on the same timeout — the guard is method-scoped",
+         %{bypass: bypass} do
+      stub_token(bypass)
+      assert {:ok, _} = Auth.token()
+
+      {acceptor, base, hits} = BlackHole.start()
+      on_exit(fn -> BlackHole.stop(acceptor) end)
+
+      assert {:error, %NetworkError{reason: :timeout}} =
+               Client.get_issue(@repo, 42,
+                 base_url: base,
+                 max_retries: 2,
+                 retry_delay_ms: 5,
+                 timeout: 300
+               )
+
+      # Non-vacuity: the black hole really does drive the retry loop, so the
+      # `== 1` above is the guard refusing — not the stub failing to retry.
+      assert hits.() == 3
+    end
+
+    test "a 502 (gateway may already have forwarded the POST) is not replayed either",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Plug.Conn.resp(conn, 502, "bad gateway")
+      end)
+
+      assert {:error, %NetworkError{reason: {:http, 502}}} =
+               Client.create_issue(@repo, %{title: "x"},
+                 base_url: base,
+                 max_retries: 3,
+                 retry_delay_ms: 5
+               )
+
+      assert Agent.get(counter, & &1) == 1
+    end
+
+    test "a 503 (origin-authored, did not process) still retries the POST",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        n = Agent.get_and_update(counter, fn x -> {x, x + 1} end)
+
+        if n == 0 do
+          Plug.Conn.resp(conn, 503, "{}")
+        else
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(201, Jason.encode!(%{"number" => 7}))
+        end
+      end)
+
+      assert {:ok, %{"number" => 7}} =
+               Client.create_issue(@repo, %{title: "x"},
+                 base_url: base,
+                 max_retries: 3,
+                 retry_delay_ms: 5
+               )
+
+      assert Agent.get(counter, & &1) == 2
     end
   end
 

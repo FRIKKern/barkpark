@@ -107,16 +107,29 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			return renderPublishWallRefusal(out, ref)
 		}
 		if blind {
-			// Never imply a clearance we did not earn. The create proceeds (a
-			// client that cannot read the registry must not veto a legitimate
-			// publish), but the caller is told the check did not run.
-			out.errf("note: the tag registry could not be read, so these tags were NOT checked before creating — an unregistered tag will still refuse the publish (%s)", tagRegistryCommand)
+			// FAIL CLOSED, AND SAY SO. This branch used to print a note and
+			// create anyway ("a blind client must not veto a legitimate
+			// publish"). That reasoning weighs a refused legitimate publish
+			// against a phantom draft, and the phantom is the one that costs
+			// somebody else money: an unreadable registry under fleet load is
+			// exactly the state in which the server's own unknown_tag wall then
+			// refuses the publish, stranding the draft — and the caller, told
+			// only that a check "did not run", retries with re-guessed tag
+			// names and strands another. Six of the 23 stranded rows on the rail
+			// were minted by that loop (dr-bl-w6-phantom-draft-twins-accumulate-
+			// on-the-rail). Proceeding blind is a coin flip whose losing side
+			// writes a row nobody can claim, so this refuses BEFORE the create,
+			// with a named code and the ways out.
+			//
+			// The blast radius is bounded by checkTagRegistry itself: `blind` is
+			// only ever true when the body carries weighted tags AND the read was
+			// non-authoritative. A create with no tags never reaches here.
+			return renderTagRegistryUnreadableRefusal(out, body)
 		}
 	}
 
 	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
 	if err != nil {
-		out.userErr("task create: %v", err)
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
 		// reached the server, or may have landed and the RESPONSE was what got
@@ -125,24 +138,33 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// supposed to hand one back. The sibling ledger verbs (stamp/close/pulse)
 		// answer a 5xx by re-reading the row at its known id; create has no id to
 		// re-read, so the remedy is a search on the title the caller supplied.
-		out.errf("  ambiguous: the task may or may not have been filed — the response never arrived, so no id came back to re-check. Search before retrying: bp search query %q", title)
-		return exitGeneric
+		//
+		// task-f81c88e2c54f8e57: this used to speak on stderr ONLY, so under
+		// `-o json` the whole event was invisible — empty stdout, exit 1, row on
+		// the ledger. renderAmbiguousWrite owns both channels and the distinct
+		// exit code now.
+		return renderAmbiguousWrite(out, ambiguousWrite{
+			class: ambiguityCreateAnswerLost, leg: "create", title: title,
+			detail: err.Error(),
+		})
 	}
 	if httpStatus < 200 || httpStatus >= 300 {
-		out.userErr("task create: %s", mutateErrorMessage(httpStatus, respBody))
 		if httpStatus >= 500 {
 			// 5xx: the server answered, but a 500-class response can still hide a
 			// write that committed before the failure — "a 5xx can hide a write
 			// that landed" is the same doctrine stamp/close/pulse already apply on
 			// their read-back branch. create has no id to re-read, so the remedy
 			// is the same title search as the transport-error branch.
-			out.errf("  ambiguous: the task may or may not have been filed despite the error — search before retrying: bp search query %q", title)
+			return renderAmbiguousWrite(out, ambiguousWrite{
+				class: ambiguityCreateServerFault, leg: "create", title: title,
+				detail: mutateErrorMessage(httpStatus, respBody),
+			})
 		}
 		// 4xx (validation/auth/not_found/conflict/…): the server REFUSED before
 		// any commit, so nothing landed and there is nothing to go hunting for —
 		// printing the ambiguity caveat here would send the operator searching
 		// for a write that was never attempted.
-		return exitGeneric
+		return renderTaskCreateRefusal(out, "create", httpStatus, respBody)
 	}
 	// THE AUTHORING ADVISORIES, WHICH THIS VERB USED TO DROP ON THE FLOOR.
 	// The mutate SUCCESS envelope may carry `warnings: [{code,severity,message}]`
@@ -160,10 +182,21 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// renderTaskCreated.
 	warnings := mutateWarnings(respBody)
 
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): nothing below
+	// renders without a SERVER-GENERATED id out of results[0], and the publish
+	// arm repeats the same requirement on its own response. That is the fence's
+	// own discriminator plus a field check, not a status.
 	created, ok := firstMutationRecord(respBody)
 	if !ok {
-		out.userErr("task create: server returned no id")
-		return exitGeneric
+		// A 2xx WITH NO ID IS NOT A REFUSAL. The server accepted the mutation and
+		// said so; what is missing is the echo that would let this process name
+		// the row. Reporting it as a plain error told the caller "it failed" about
+		// a write that almost certainly succeeded — the same lie, one status code
+		// later. It is an ambiguity with a title handle, like the transport arm.
+		return renderAmbiguousWrite(out, ambiguousWrite{
+			class: ambiguityCreateResultUnreadable, leg: "create", title: title,
+			detail: "the mutate response carried no usable id",
+		})
 	}
 
 	// The server hands back a "drafts.<type>-<n>" id; the BARE published id (used
@@ -189,22 +222,63 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
 		if pErr != nil {
-			out.userErr("task create: created %s but publish failed: %v", draftID, pErr)
-			renderOrphanedDraftRemedy(out, draftID, bareID)
-			return exitGeneric
+			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
+			// may have LANDED and only the response was lost, so discarding here
+			// could throw away the draft twin of a row that is already on the
+			// board. The class is named instead (see taskCreateResidueClasses).
+			//
+			// Unlike the create leg, this one KNOWS the id — the create response
+			// named it seconds ago — so the caller gets `bp task get <id>` rather
+			// than a title search.
+			code := renderAmbiguousWrite(out, ambiguousWrite{
+				class: residuePublishAmbiguousTransport, leg: "publish", docID: bareID,
+				title: title, detail: pErr.Error(),
+			})
+			renderTaskCreateResidue(out, residuePublishAmbiguousTransport, draftID, bareID)
+			return code
 		}
 		if pStatus < 200 || pStatus >= 300 {
+			if pStatus >= 500 {
+				// Same ambiguity as the create path's 5xx arm: a server fault can
+				// hide a publish that committed before the failure. Not discarded.
+				code := renderAmbiguousWrite(out, ambiguousWrite{
+					class: residuePublishAmbiguousServerFault, leg: "publish", docID: bareID,
+					title: title, detail: mutateErrorMessage(pStatus, pBody),
+				})
+				renderTaskCreateResidue(out, residuePublishAmbiguousServerFault, draftID, bareID)
+				return code
+			}
 			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
-			renderOrphanedDraftRemedy(out, draftID, bareID)
-			return exitGeneric
+			// A duplicate_of refusal on the PUBLISH leg names the incumbent, and
+			// after an ambiguous earlier attempt that incumbent is the caller's
+			// own row. Say so before the draft is discarded below, so the exit is
+			// a resume instruction and not a dead end.
+			renderDuplicateResume(out, incumbentTaskID(pBody))
+			// A 4xx IS a refusal: the server evaluated the wall (duplicate_of,
+			// invalid_epic_paper_quality, dedup_unavailable, a rule this binary
+			// predates) and committed nothing. The draft this run created seconds
+			// ago is therefore the WHOLE row — no published twin exists — so it is
+			// discarded in the same run rather than left as a phantom the caller
+			// must be talked through disposing of. This is `bp doc discard-draft`
+			// on a never-published document, i.e. the guard's --delete-unpublished
+			// semantics (discard_draft_guard.go): here the absence of a twin is not
+			// probed but KNOWN, because this process created the draft.
+			return discardCreatedTaskDraft(out, ctx, draftID, bareID)
 		}
 		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
 		// It is now read off the record the publish mutation returned, so a
 		// publish that did not produce a published twin cannot print one.
 		published, pok := firstMutationRecord(pBody)
 		if !pok {
-			out.userErr("task create: created %s but the publish response carried no result — the publish may or may not have landed; re-read with `bp task get %s`", bareID, bareID)
-			return exitGeneric
+			// The last of the six ambiguous arms, and the subtlest: a 2xx with no
+			// record. It already said the right sentence — it just said it on
+			// stderr only, at the same exit code as a definite refusal.
+			code := renderAmbiguousWrite(out, ambiguousWrite{
+				class: residuePublishResultUnreadable, leg: "publish", docID: bareID,
+				title: title, detail: "the publish response carried no result",
+			})
+			renderTaskCreateResidue(out, residuePublishResultUnreadable, draftID, bareID)
+			return code
 		}
 		record = published
 		// The publish mutation re-runs the same before_save gate, so it can raise
@@ -212,7 +286,146 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		warnings = append(warnings, mutateWarnings(pBody)...)
 	}
 
+	if !publish {
+		// THE DRAFT-FIRST NAG. `bp task create` defaults to a draft while the MCP
+		// `task_create` tool defaults publish TRUE — 17 of the 23 rows stranded on
+		// the rail were planner-filed sub-tasks created here and never published,
+		// by callers who had no idea the two front doors disagree. One line, on
+		// stderr so the stdout receipt (human and -o json) is unchanged byte for
+		// byte, said unconditionally on the no---publish path rather than off the
+		// server-echoed on_board (which is silent whenever the server echoes no
+		// _draft — the one shape where the caller most needs telling).
+		out.errf("%s", taskDraftFirstNotice(bareID))
+	}
+
 	return renderTaskCreated(out, draftID, record, dedupeMutateWarnings(warnings))
+}
+
+// taskDraftFirstNotice is the one line a draft-first create owes its caller:
+// what the row is NOT (on the board, on `bp task ready` as a published pair)
+// and the one command that changes it. taskPublishCommand owns the spelling —
+// `task` has no publish verb, so this must never say `bp task publish`.
+func taskDraftFirstNotice(bareID string) string {
+	return "note: created as a DRAFT — not on the board and not in `bp task ready` as a pair; publish with: " + taskPublishCommand(bareID)
+}
+
+// THE RESIDUE SET. Every state in which `bp task create --publish` can end
+// without the draft it wrote being either published or discarded. It is a
+// CLOSED, NAMED list rather than a catch-all sentence, because the caller who
+// finds a `drafts.` row on the queue needs to know which of these produced it —
+// and because a future arm added without a name here reds
+// TestTaskCreateResidueSetIsEnumerated.
+const (
+	// residuePublishAmbiguousTransport: the publish request never came back. The
+	// publish may have landed; discarding could destroy the draft twin of a
+	// published row.
+	residuePublishAmbiguousTransport = "publish_ambiguous_transport"
+	// residuePublishAmbiguousServerFault: the publish answered 5xx, which can
+	// hide a write that committed before the failure.
+	residuePublishAmbiguousServerFault = "publish_ambiguous_server_fault"
+	// residuePublishResultUnreadable: the publish answered 2xx but echoed no
+	// record, so whether a published twin exists is unknown.
+	residuePublishResultUnreadable = "publish_result_unreadable"
+	// residueDiscardFailed: the publish was definitively refused and the discard
+	// that would have cleaned up was itself refused or unreachable.
+	residueDiscardFailed = "discard_failed"
+)
+
+// taskCreateResidueClasses maps each residue name to why the draft is still
+// there. Iterated by the test that asserts the set is closed.
+var taskCreateResidueClasses = map[string]string{
+	residuePublishAmbiguousTransport:   "the publish request never came back, so it may have landed — discarding could destroy the draft twin of a row that IS on the board",
+	residuePublishAmbiguousServerFault: "the publish answered a server fault, which can hide a write that committed before the failure",
+	residuePublishResultUnreadable:     "the publish answered 2xx but echoed no record, so whether a published twin exists is unknown",
+	residueDiscardFailed:               "the publish was refused and the follow-up discard could not be performed",
+}
+
+// renderTaskCreateResidue names the residue class on stderr and then prints the
+// existing orphaned-draft remedy. Naming the class first is the point: "a draft
+// was left" is a fact, and the class says WHY it was left rather than cleaned
+// up, which is the difference between a caller who retries into a second
+// phantom and one who re-reads the row.
+func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
+	why := taskCreateResidueClasses[class]
+	if why == "" {
+		why = "unclassified"
+	}
+	out.errf("  residue[%s]: the draft was NOT discarded — %s.", class, why)
+	renderOrphanedDraftRemedy(out, draftID, bareID)
+}
+
+// discardCreatedTaskDraft removes the draft this run just created, after the
+// server definitively REFUSED to publish it. It sends the same `discardDraft`
+// mutation `bp doc discard-draft` rides (Content.Mutations apply_one
+// "discardDraft" -> Content.discard_draft), which on a never-published document
+// deletes the row — the behaviour discard_draft_guard.go exists to stop a human
+// from stumbling into blind. It is correct HERE precisely because the guard's
+// three-state question is already answered: this process created the draft
+// moments ago and the publish that would have minted its twin was refused, so
+// the twin is known-absent rather than probed-absent.
+//
+// Returns the process exit code: non-zero either way (the create --publish did
+// not do what was asked), but the two paths differ in what is left on the
+// server, and both say which.
+func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID string) int {
+	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
+	status, body, err := sendTaskMutations(ctx, []map[string]any{op})
+	switch {
+	case err != nil:
+		out.errf("  the follow-up discard never reached the server (%v)", err)
+		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
+		return exitGeneric
+	case status < 200 || status >= 300:
+		out.errf("  the follow-up discard was refused: %s", mutateErrorMessage(status, body))
+		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
+		return exitGeneric
+	}
+	out.errf("  discarded %s — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	out.errf("  nothing was kept: re-file with the refusal above fixed, e.g. bp task create --publish …")
+	return exitGeneric
+}
+
+// renderTagRegistryUnreadableRefusal is the fail-closed answer to a tag registry
+// this client could not read. It refuses BEFORE the create, so it carries the
+// same "nothing was created" guarantee renderPublishWallRefusal does, and it is
+// exitUsage for the same reason: no request was sent.
+func renderTagRegistryUnreadableRefusal(out *writer, body map[string]any) int {
+	out.userErr("task create --publish: refused before writing anything — the tag registry could not be read, so the tags on this row could NOT be checked")
+	out.errf("  code:  %s", tagRegistryUnreadableCode)
+	if names := wallTagNames(body); len(names) > 0 {
+		out.errf("  tags:  %s", strings.Join(names, ", "))
+	}
+	out.errf("  why:   every weighted tag must ALREADY be a published type:tag doc. Publishing blind is how a stranded `drafts.` row gets minted: the server refuses the publish and the draft stays.")
+	out.errf("  fix:   retry once the registry read works —")
+	out.errf("           %s   # the live vocabulary", tagRegistryCommand)
+	out.errf("         or file it as a draft now and publish when the read works —")
+	out.errf("           bp task create …            # without --publish")
+	out.errf("           bp doc publish task <id> --yes")
+	out.errf("  nothing was created — no draft was left behind.")
+	return exitUsage
+}
+
+// tagRegistryUnreadableCode names the refusal. It is deliberately NOT one of the
+// server's wall codes (label_spine / unknown_tag / duplicate_of / …): no server
+// ever raises it, and borrowing one of theirs would make a client-side "we could
+// not ask" indistinguishable from a server-side "we asked and the answer was no".
+const tagRegistryUnreadableCode = "tag_registry_unreadable"
+
+// wallTagNames lists the weighted tag names on body, for the refusal above. A
+// malformed tags field yields nothing — the spine check upstream owns that
+// complaint and this line is only ever decoration.
+func wallTagNames(body map[string]any) []string {
+	tags, ref := wallTagEntries(body)
+	if ref != nil {
+		return nil
+	}
+	names := make([]string, 0, len(tags))
+	for _, entry := range tags {
+		if name, ok := entry["tag"].(string); ok && name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // taskCreateRecord is the record the SERVER persisted for one mutation:
@@ -801,8 +1014,16 @@ func printTaskCreateHelp(out *writer) {
 	out.outf(`usage: bp task create [<title>] [flags]
   File a new task. Injects the task schema's required kind="task" and
   lifecycle_status="open" defaults, so you only supply the title (and any
-  optional fields). By default the task is created as a draft; --publish
-  collapses it to published in the same call.
+  optional fields). By default the task is created as a DRAFT — not on the
+  board, and not in "bp task ready" as a published pair — and bp task create
+  says so on stderr with the one command that fixes it. --publish collapses it
+  to published in the same call.
+
+  ASYMMETRY, ON PURPOSE: the MCP task_create tool defaults publish TRUE while
+  this CLI verb defaults it FALSE (draft-first). An agent filing through MCP
+  gets a board-visible row; a script filing through bp task create gets a
+  draft unless it passes --publish. Rows filed here and never published are the
+  documented source of unclaimable drafts.task-N residue on the queue.
 
 arguments:
   title            The task title (or pass --title / --set title=…).
@@ -829,8 +1050,15 @@ flags:
                    every tag must ALREADY be a registered (published) type:tag
                    document — you cannot invent one here. List the vocabulary
                    with: bp doc ls tag --all . A row that cannot clear the wall
-                   is refused BEFORE anything is created, so a failed --publish
-                   never leaves a draft behind.
+                   is refused BEFORE anything is created, and if the registry
+                   itself cannot be read the publish is refused too
+                   (tag_registry_unreadable) rather than written blind. A
+                   refusal the server can only raise AFTER the create (e.g.
+                   duplicate_of) discards the just-created draft in the same
+                   run — so a failed --publish never leaves a draft behind
+                   except in the named residue cases it prints
+                   (residue[<class>]: … ), which are the ones where the publish
+                   may actually have landed.
 
 write globals: --dry-run (print the request, don't send) · --yes (skip the
 prod confirmation) · -o json (structured receipt)

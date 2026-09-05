@@ -23,7 +23,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   end
 
   defp scim(token) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{token}")
     |> put_req_header("content-type", "application/json")
   end

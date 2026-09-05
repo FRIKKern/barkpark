@@ -1,0 +1,1 @@
+cch-w32-bl-roster-false-open-sweep is re-scoped to criteria 2-5 with criterion 1's discharge recorded, rather than closed or left mis-sized. Evidence: the patched row.

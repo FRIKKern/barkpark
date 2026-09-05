@@ -1,0 +1,1 @@
+The limit=500 roster truncation is either armed with a refusal or explicitly recorded as an accepted unarmed tripwire with its threshold named.

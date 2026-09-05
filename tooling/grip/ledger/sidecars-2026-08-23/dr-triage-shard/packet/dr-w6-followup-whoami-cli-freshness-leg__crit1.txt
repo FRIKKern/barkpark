@@ -1,0 +1,1 @@
+If the leg is wired, it is pinned by a test that FAILS against the pre-change tree; if it is deliberately absent, a test asserts whoami does NOT claim freshness. Evidence: the fail-before output and the passing run.

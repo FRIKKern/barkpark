@@ -1,0 +1,1 @@
+After triage every remaining open PR either renders both required contexts or is knowingly CONFLICTING. Evidence: the final census.

@@ -1,0 +1,1 @@
+A decision is made and IMPLEMENTED: either bp whoami renders the CLI-freshness leg with the same tri-state vocabulary (onbCLIUpToDate/onbCLIBehind/onbCLIUnreported + markTri, no second vocabulary), or onboardingWhoamiSpine carries a doc comment naming why it is deliberately absent. Evidence: the diff plus the rendered whoami output on a dev build.

@@ -139,6 +139,15 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		renderError(out, ae)
 		return ae.exit
 	}
+	// THE RECEIPT THIS VERB PRINTS IS ENTIRELY LOCAL. `count` is len(docs) and
+	// `ids` are read off the documents we SENT, so every number below survives
+	// a 200 that said nothing — an empty body, a proxy page, `null`, `{}` or an
+	// error envelope on a 2xx all printed `{"ok":true,"count":3,"ids":[…]}` at
+	// rc=0. Nothing in the receipt was ever a measurement, which is why the
+	// screen has to run BEFORE it, not inside it.
+	if rc, handled := screenBuiltinWriteReceipt(out, "seed mutate", status, respBody); handled {
+		return rc
+	}
 
 	ids := make([]string, len(docs))
 	for i, d := range docs {
@@ -160,6 +169,13 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 			ae := classifyError(pstatus, prespBody)
 			renderError(out, ae)
 			return ae.exit
+		}
+		// The publish batch is a SECOND write with its own receipt, and
+		// `published: true` in the payload below is asserted off this response
+		// alone. Screening only the create batch would leave the receipt saying
+		// "published" over a publish nobody heard back from.
+		if rc, handled := screenBuiltinWriteReceipt(out, "seed publish", pstatus, prespBody); handled {
+			return rc
 		}
 	}
 

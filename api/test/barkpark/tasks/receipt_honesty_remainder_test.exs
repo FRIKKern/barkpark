@@ -78,6 +78,12 @@ defmodule Barkpark.Tasks.ReceiptHonestyRemainderTest do
       Map.merge(
         %{
           "kind" => "task",
+          # A claimable fixture states its bar (task-9554c64bf51a0f81): the
+          # claim-time gate refuses a criteria-less work row, so a fixture that
+          # omits them is testing a row nobody can claim.
+          "acceptance_criteria" => [
+            %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+          ],
           "lifecycle_status" => "open",
           "slug" => doc_id,
           "author" => "receipt-remainder",

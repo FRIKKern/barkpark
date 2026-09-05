@@ -42,7 +42,12 @@ func renderM1Fixture(t *testing.T, name string, width int) string {
 		RefResolver: stubRefResolver,
 	}
 	out := reg.RenderDoc(blocks, ctx)
-	return ansi.Strip(out)
+	stripped := ansi.Strip(out)
+	// Shared blind-spot guard (unknown_block_guard_test.go): a golden diffed
+	// against Go's OWN render cannot see a fallback box that appears on BOTH
+	// sides. This is the one call that can.
+	assertNoUnknownBlock(t, name, stripped)
+	return stripped
 }
 
 // TestGoldenM1 renders the M1 block fixture at every golden width and diffs it

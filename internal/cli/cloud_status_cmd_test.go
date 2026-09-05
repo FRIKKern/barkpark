@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -172,11 +173,10 @@ func TestAttentionLadderIsTwelveRungs(t *testing.T) {
 	}
 }
 
-// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. The three honest-
-// silence shapes can NEVER stall — nil is both "nothing queued" and "a CP that
-// predates the field" — and the boundary is >= 300, not > 300. The nil arm is
-// the alarm's fail-closed contract stated positively: with no queued-age input
-// the alarm says NOTHING, it does not scan an empty corpus and report calm.
+// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. A nil VALUE can never
+// stall — explicit null is the producer's honest "nothing queued" response —
+// and the boundary is >= 300, not > 300. Wire-level omission is tested
+// separately because the decoder must not collapse it into this healthy arm.
 func TestDeployStalledFence(t *testing.T) {
 	age := func(v float64) *float64 { return &v }
 	cases := []struct {
@@ -184,7 +184,7 @@ func TestDeployStalledFence(t *testing.T) {
 		bp   cloudclient.Barkpark
 		want bool
 	}{
-		{"no field (older CP / nothing queued)", cloudclient.Barkpark{}, false},
+		{"explicit null / nothing queued", cloudclient.Barkpark{}, false},
 		{"fresh queue, under the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(299)}, false},
 		{"exactly the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(300)}, true},
 		{"the incident shape: 7.5h unclaimed", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(27000)}, true},
@@ -192,6 +192,45 @@ func TestDeployStalledFence(t *testing.T) {
 	for _, c := range cases {
 		if got := deployStalled(c.bp); got != c.want {
 			t.Errorf("%s: deployStalled = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMissingQueuedDeployAgeIsVisible proves a producer rename cannot turn the
+// stall detector off silently. Only JSON decoding can create the missing-field
+// marker: direct Barkpark literals retain their existing explicit-null meaning.
+func TestMissingQueuedDeployAgeIsVisible(t *testing.T) {
+	decode := func(raw string) cloudclient.Barkpark {
+		t.Helper()
+		var b cloudclient.Barkpark
+		if err := json.Unmarshal([]byte(raw), &b); err != nil {
+			t.Fatalf("decode fleet row: %v", err)
+		}
+		return b
+	}
+	base := `"host":"10.0.0.9","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"`
+
+	missing := decode(`{` + base + `}`)
+	if status := attentionStatus(missing); status != "degraded" {
+		t.Fatalf("missing field status = %q, want degraded", status)
+	}
+	if bucket := attentionBucket(attentionStatus(missing)); bucket != "attention" {
+		t.Fatalf("missing field bucket = %q, want attention", bucket)
+	}
+	if detail := attentionDetail(missing, attentionStatus(missing)); !strings.Contains(detail, "omitted queued_deploy_age_seconds") {
+		t.Fatalf("missing field detail = %q, want a visible wire-contract warning", detail)
+	}
+
+	for name, raw := range map[string]string{
+		"explicit null": `{` + base + `,"queued_deploy_age_seconds":null}`,
+		"young queue":   `{` + base + `,"queued_deploy_age_seconds":90}`,
+	} {
+		b := decode(raw)
+		if status := attentionStatus(b); status != "ok" {
+			t.Errorf("%s status = %q, want ok", name, status)
+		}
+		if detail := attentionDetail(b, attentionStatus(b)); detail != "" {
+			t.Errorf("%s detail = %q, want empty", name, detail)
 		}
 	}
 }
@@ -550,6 +589,27 @@ func loadAttentionFixture(t *testing.T) attentionFixture {
 // case-insensitive name tiebreak (alpha < ok-1 < Zeta within the ok bucket).
 func TestRankBarkparksFixture(t *testing.T) {
 	f := loadAttentionFixture(t)
+	wantFixtureOrder := []string{
+		"rf-1", "fail-1", "susp-1", "deg-1", "deg-2", "strain-1",
+		"fill-1", "unrep-1", "stall-1", "beh-1", "rem-1", "rem-2",
+		"prov-1", "alpha", "ok-1", "Zeta",
+	}
+	if !slices.Equal(f.ExpectedOrder, wantFixtureOrder) {
+		t.Fatalf("fixture no longer exercises the full named ranking:\n got: %v\nwant: %v", f.ExpectedOrder, wantFixtureOrder)
+	}
+	byName := make(map[string]cloudclient.Barkpark, len(f.Barkparks))
+	for _, b := range f.Barkparks {
+		if b.QueuedDeployAgeSecondsMissing {
+			t.Fatalf("producer-backed fixture row %q omits queued_deploy_age_seconds", b.Name)
+		}
+		byName[b.Name] = b
+	}
+	if got := attentionStatus(byName["stall-1"]); got != "deploy_stalled" {
+		t.Fatalf("fixture's 420s row status = %q, want deploy_stalled", got)
+	}
+	if got := attentionStatus(byName["Zeta"]); got != "ok" {
+		t.Fatalf("fixture's 90s row status = %q, want ok", got)
+	}
 	ranked := rankBarkparks(f.Barkparks)
 	got := make([]string, len(ranked))
 	for i, r := range ranked {
@@ -600,13 +660,13 @@ func TestRunCloudStatusJSON(t *testing.T) {
 			return
 		}
 		_, _ = io.WriteString(w, `{"barkparks":[
-			{"id":"a","name":"ok-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current",
+			{"id":"a","name":"ok-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":4,"cpu_cores":4,"mem_used_percent":22,"load1":0.2,"load15":0.1,"disk_used_percent":31,"swap_used_percent":null,"swap_total_bytes":null,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}},
-			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out"},
-			{"id":"c","name":"slow-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"unknown","agent_status":"online"},
-			{"id":"d","name":"hot-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online",
+			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out","queued_deploy_age_seconds":null},
+			{"id":"c","name":"slow-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"unknown","agent_status":"online","queued_deploy_age_seconds":null},
+			{"id":"d","name":"hot-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":41,"cpu_cores":2,"mem_used_percent":88,"load1":5.1,"load15":4.2,"disk_used_percent":62,"swap_used_percent":92.9,"swap_total_bytes":1073741824,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}},
-			{"id":"e","name":"full-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online",
+			{"id":"e","name":"full-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","queued_deploy_age_seconds":null,
 			 "pressure":{"cpu_percent":6,"cpu_cores":4,"mem_used_percent":31,"load1":0.9,"load15":0.8,"disk_used_percent":95,"swap_used_percent":null,"swap_total_bytes":null,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}}
 		]}`)
 	}))
@@ -795,8 +855,8 @@ func TestRunCloudStatusTableDetailColumn(t *testing.T) {
 // which is the whole point — the deploy line is the sentence those columns
 // cannot say.
 const statusDeployFleet = `{"barkparks":[
-	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"},
-	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"}
+	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null},
+	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current","queued_deploy_age_seconds":null}
 ]}`
 
 // statusDeploySites maps the census's site_ids onto boxes — the fold `bp cloud

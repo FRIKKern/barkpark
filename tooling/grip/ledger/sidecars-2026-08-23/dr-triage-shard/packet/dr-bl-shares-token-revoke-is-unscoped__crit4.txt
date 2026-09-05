@@ -1,0 +1,1 @@
+GATE GREEN: `cd api && CC=clang MIX_ENV=test mix test test/barkpark/auth_test.exs` — baseline is 23 tests, 0 failures.

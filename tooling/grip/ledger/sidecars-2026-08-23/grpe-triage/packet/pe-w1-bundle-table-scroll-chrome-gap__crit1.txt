@@ -1,0 +1,1 @@
+The three {:view_edit, ".bp-table", _} entries are removed from @documented_divergences and view_edit_parity_test.exs still passes — evidence quotes the summary line

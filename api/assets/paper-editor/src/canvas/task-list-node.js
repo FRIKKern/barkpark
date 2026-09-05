@@ -331,28 +331,31 @@ export const TaskList = Node.create({
       // run-convert emits ONE patch-block{query}. The rows are NEVER touched (the
       // server repaints them on the NEW query).
       let queryTimer = null;
+      const commitQueryWrite = (label = queryInput.value) => {
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        const nextQuery = nextQueryFromLabel(cur.attrs.query, label);
+        if (
+          JSON.stringify(cur.attrs.query || null) === JSON.stringify(nextQuery)
+        )
+          return;
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, query: nextQuery });
+            return true;
+          })
+          .run();
+      };
       const scheduleQueryWrite = () => {
         if (!editor.isEditable) return;
         if (queryTimer) clearTimeout(queryTimer);
         queryTimer = setTimeout(() => {
           queryTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur) return;
-          const nextQuery = nextQueryFromLabel(cur.attrs.query, queryInput.value);
-          if (
-            JSON.stringify(cur.attrs.query || null) === JSON.stringify(nextQuery)
-          )
-            return; // nothing changed
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, { ...cur.attrs, query: nextQuery });
-              return true;
-            })
-            .run();
+          commitQueryWrite();
         }, DEBOUNCE_MS);
       };
 
@@ -360,33 +363,57 @@ export const TaskList = Node.create({
       // as ABSENT; the canonical compare treats ""/null/absent equal → a no-op edit
       // emits nothing).
       let titleTimer = null;
+      const commitTitleWrite = (raw = titleInput.value) => {
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        const nextTitle = raw === "" ? null : raw;
+        if ((cur.attrs.title || null) === nextTitle) return;
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, title: nextTitle });
+            return true;
+          })
+          .run();
+      };
       const scheduleTitleWrite = () => {
         if (!editor.isEditable) return;
         if (titleTimer) clearTimeout(titleTimer);
         titleTimer = setTimeout(() => {
           titleTimer = null;
-          if (typeof getPos !== "function") return;
-          const pos = getPos();
-          if (pos == null) return;
-          const cur = editor.state.doc.nodeAt(pos);
-          if (!cur) return;
-          const raw = titleInput.value;
-          const nextTitle = raw === "" ? null : raw;
-          if ((cur.attrs.title || null) === nextTitle) return; // nothing changed
-          editor
-            .chain()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, { ...cur.attrs, title: nextTitle });
-              return true;
-            })
-            .run();
+          commitTitleWrite();
         }, DEBOUNCE_MS);
+      };
+      const flushWrites = () => {
+        const flushQuery = !!queryTimer;
+        const flushTitle = !!titleTimer;
+        if (!flushQuery && !flushTitle) return;
+
+        // Snapshot both fields before either transaction triggers update() → paint().
+        // The repaint can restore the sibling input from attrs while it is unfocused;
+        // captured values ensure both pending edits still land in this flush.
+        const queryLabel = queryInput.value;
+        const title = titleInput.value;
+        if (flushQuery) {
+          clearTimeout(queryTimer);
+          queryTimer = null;
+        }
+        if (flushTitle) {
+          clearTimeout(titleTimer);
+          titleTimer = null;
+        }
+        if (flushQuery) commitQueryWrite(queryLabel);
+        if (flushTitle) commitTitleWrite(title);
       };
 
       queryInput.addEventListener("input", scheduleQueryWrite);
       queryInput.addEventListener("input", syncChrome);
       titleInput.addEventListener("input", scheduleTitleWrite);
       titleInput.addEventListener("input", syncChrome);
+      dom.addEventListener("bp-flush-node", flushWrites);
 
       return {
         dom,
@@ -414,6 +441,7 @@ export const TaskList = Node.create({
         destroy: () => {
           if (queryTimer) clearTimeout(queryTimer);
           if (titleTimer) clearTimeout(titleTimer);
+          dom.removeEventListener("bp-flush-node", flushWrites);
           queryInput.removeEventListener("input", scheduleQueryWrite);
           queryInput.removeEventListener("input", syncChrome);
           titleInput.removeEventListener("input", scheduleTitleWrite);

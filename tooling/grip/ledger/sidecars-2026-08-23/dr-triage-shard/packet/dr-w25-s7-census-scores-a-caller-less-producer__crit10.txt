@@ -1,0 +1,1 @@
+Full gate green: paste the census test's `N tests, 0 failures` line and the cloud-path-escape-check plain + selftest output.

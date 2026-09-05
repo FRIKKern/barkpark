@@ -1,0 +1,1 @@
+whatBreaks is either rendered or removed from nodes.json, so nothing is computed-but-undisclosed - evidence: paste the resolution

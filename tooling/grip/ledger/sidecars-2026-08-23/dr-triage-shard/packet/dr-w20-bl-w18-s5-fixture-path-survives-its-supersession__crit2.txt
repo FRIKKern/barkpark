@@ -1,0 +1,1 @@
+The PR body records that dr-w18-s5 was superseded rather than merged into dr-w19-s7, and why the two are contradictory rather than overlapping.

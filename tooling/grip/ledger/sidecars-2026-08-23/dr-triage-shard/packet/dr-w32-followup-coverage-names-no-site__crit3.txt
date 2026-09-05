@@ -1,0 +1,1 @@
+The Go reader ships in the SAME PR and renders the list; an ABSENT list renders as NOT MEASURED, never as an empty backlog. Evidence: the render function and the rendered output for both the present and the absent case.

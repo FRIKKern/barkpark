@@ -1,0 +1,1 @@
+The ADVISORY classification itself is unchanged unless a deliberate decision to register the gate is recorded — a doc edit must not silently promote or demote a gate.

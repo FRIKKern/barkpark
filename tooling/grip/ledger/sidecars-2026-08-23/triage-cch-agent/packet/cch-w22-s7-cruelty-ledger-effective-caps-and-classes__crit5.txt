@@ -1,0 +1,1 @@
+THE SCENARIO LIST MOVES INTO THE ROUTE ROW BEFORE ANY FAMILY IS ADDED, so widening is per-family pairs rather than a cross-product. Evidence: the new `CRUEL_ROUTES` shape, plus the run showing every block renders a non-empty host (zero anti-vacuity refusals from empty blocks) and the cell/nav counts.

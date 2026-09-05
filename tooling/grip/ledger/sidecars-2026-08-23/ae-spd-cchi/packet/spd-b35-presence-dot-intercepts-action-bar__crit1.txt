@@ -1,0 +1,1 @@
+How long a stale presence lingers is measured, so the blast radius for ordinary single-user sessions is known rather than assumed

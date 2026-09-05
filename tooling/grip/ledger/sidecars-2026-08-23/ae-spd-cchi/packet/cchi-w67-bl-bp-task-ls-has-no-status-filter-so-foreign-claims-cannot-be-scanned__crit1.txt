@@ -1,0 +1,1 @@
+bp search query -o json emits parseable JSON at the page cap — the limit warning goes to stderr or into the JSON envelope. Paste a piped json.load that succeeds.

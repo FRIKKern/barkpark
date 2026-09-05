@@ -1,0 +1,1 @@
+A clicked desk control renders disabled plus aria-busy in the SERVER HTML, observable in LiveViewTest after render_click

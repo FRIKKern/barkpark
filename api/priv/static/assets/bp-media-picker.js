@@ -56,26 +56,61 @@ function bpMediaPickerShowsActions(variant) {
   return variant !== "ghost";
 }
 
+// A focal coordinate is a number in 0..1 (the fraction of the image's width /
+// height); anything else reads as "unset" (null). Gyldendal parity E1: the
+// Sanity image hotspot, denormalised onto the field value as focalX / focalY.
+function bpFocalCoord(v) {
+  const n = typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return null;
+  return Math.min(1, Math.max(0, n));
+}
+
+// Where a click on the preview lands as a focal point: the click's position
+// inside `rect` ({left, top, width, height}), clamped to 0..1 each way. Pure.
+function bpMediaFocalFromClick(rect, clientX, clientY) {
+  if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+  return {
+    x: bpFocalCoord((clientX - rect.left) / rect.width),
+    y: bpFocalCoord((clientY - rect.top) / rect.height)
+  };
+}
+
 function bpParseMediaValue(raw) {
-  if (!raw || typeof raw !== "string") return { url: "", assetId: "" };
+  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null };
+  if (!raw || typeof raw !== "string") return empty;
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
     try {
       const o = JSON.parse(trimmed);
       return {
         url: o.url || "",
-        assetId: o.assetId || o.id || ""
+        assetId: o.assetId || o.id || "",
+        alt: typeof o.alt === "string" ? o.alt : "",
+        focalX: bpFocalCoord(o.focalX),
+        focalY: bpFocalCoord(o.focalY)
       };
     } catch (_e) {
-      return { url: trimmed, assetId: "" };
+      return Object.assign({}, empty, { url: trimmed });
     }
   }
-  return { url: trimmed, assetId: "" };
+  return Object.assign({}, empty, { url: trimmed });
 }
 
-function bpSerializeMediaValue(url, assetId) {
-  if (assetId) return JSON.stringify({ url: url || "", assetId: assetId });
-  return url || "";
+// The stored value. A bare URL stays a bare URL and {url, assetId} stays
+// two keys — alt / focalX / focalY are written ONLY when set, so every value
+// this picker ever wrote keeps round-tripping byte-identically.
+function bpSerializeMediaValue(url, assetId, extra) {
+  const e = extra || {};
+  const alt = typeof e.alt === "string" ? e.alt : "";
+  const fx = bpFocalCoord(e.focalX);
+  const fy = bpFocalCoord(e.focalY);
+  const rich = alt !== "" || fx != null || fy != null;
+  if (!assetId && !rich) return url || "";
+  const o = { url: url || "", assetId: assetId || "" };
+  if (alt !== "") o.alt = alt;
+  if (fx != null) o.focalX = fx;
+  if (fy != null) o.focalY = fy;
+  return JSON.stringify(o);
 }
 
 class BpMediaPicker extends HTMLElement {
@@ -84,7 +119,7 @@ class BpMediaPicker extends HTMLElement {
     this._mounted = false;
     this._value = "";
     this._busy = false;
-    this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, mime: "" };
   }
 
   connectedCallback() {
@@ -103,9 +138,23 @@ class BpMediaPicker extends HTMLElement {
       this._value = raw;
       this._meta.url = parsed.url;
       this._meta.assetId = parsed.assetId;
+      this._meta.alt = parsed.alt;
+      this._meta.focalX = parsed.focalX;
+      this._meta.focalY = parsed.focalY;
     }
 
     this._render();
+  }
+
+  // Gyldendal parity E1 — opt-in affordances on the DEFAULT variant only.
+  // `hotspot`: click the preview to set a focal point (a marker shows it);
+  // `alt`: an alt-text input under the preview. Absent → byte-identical render.
+  _wantsHotspot() {
+    return this.hasAttribute("hotspot") && !this._isGhost() && !this._isReferenceMode();
+  }
+
+  _wantsAlt() {
+    return this.hasAttribute("alt") && !this._isGhost() && !this._isReferenceMode();
   }
 
   async _resolveReferencePreview(docId) {
@@ -162,6 +211,9 @@ class BpMediaPicker extends HTMLElement {
       const parsed = bpParseMediaValue(this._value);
       this._meta.url = parsed.url;
       this._meta.assetId = parsed.assetId;
+      this._meta.alt = parsed.alt;
+      this._meta.focalX = parsed.focalX;
+      this._meta.focalY = parsed.focalY;
     }
     this._renderPreview();
   }
@@ -192,7 +244,11 @@ class BpMediaPicker extends HTMLElement {
     if (this._isReferenceMode()) {
       this._value = this._meta.assetId || "";
     } else {
-      this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId);
+      this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId, {
+        alt: this._meta.alt,
+        focalX: this._meta.focalX,
+        focalY: this._meta.focalY
+      });
     }
   }
 
@@ -223,10 +279,26 @@ class BpMediaPicker extends HTMLElement {
         '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
         "</div>";
 
+    const altHtml = this._wantsAlt()
+      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">Alt text</span>' +
+        '<input class="bp-mp-alt" type="text" placeholder="Describe the image for people who cannot see it" /></label>'
+      : "";
+
     this.innerHTML =
-      '<div class="bp-mp-preview"></div>' +
+      '<div class="bp-mp-preview"' + (this._wantsHotspot() ? ' data-hotspot="true"' : "") + "></div>" +
+      altHtml +
       actionsHtml +
       '<div class="bp-mp-error" role="alert"></div>';
+
+    this._altInput = this.querySelector(".bp-mp-alt");
+    if (this._altInput) {
+      this._altInput.value = this._meta.alt || "";
+      this._altInput.addEventListener("input", (e) => {
+        this._meta.alt = e.target.value;
+        this._commitValue();
+        this._emit();
+      });
+    }
 
     this._previewEl = this.querySelector(".bp-mp-preview");
     this._errorEl = this.querySelector(".bp-mp-error");
@@ -260,7 +332,23 @@ class BpMediaPicker extends HTMLElement {
     // Delegated once (the preview's innerHTML is replaced on every render).
     this._previewEl.addEventListener("click", (e) => {
       if (this._busy) return;
-      if (e.target.closest(".bp-mp-empty")) this._fileInput.click();
+      if (e.target.closest(".bp-mp-empty")) {
+        this._fileInput.click();
+        return;
+      }
+      // Gyldendal parity E1: with `hotspot`, a click on the image IS the
+      // focal-point gesture (Sanity's hotspot without the crop rectangle).
+      if (this._wantsHotspot()) {
+        const img = e.target.closest(".bp-mp-preview-img");
+        if (!img) return;
+        const focal = bpMediaFocalFromClick(img.getBoundingClientRect(), e.clientX, e.clientY);
+        if (!focal) return;
+        this._meta.focalX = focal.x;
+        this._meta.focalY = focal.y;
+        this._commitValue();
+        this._renderFocalMarker();
+        this._emit();
+      }
     });
     this._previewEl.addEventListener("keydown", (e) => {
       if (this._busy) return;
@@ -560,8 +648,13 @@ class BpMediaPicker extends HTMLElement {
     }
     if (url) {
       const safeUrl = url.replace(/"/g, "&quot;");
+      const hotspot = this._wantsHotspot();
+      const safeAlt = (this._meta.alt || "").replace(/"/g, "&quot;");
       this._previewEl.innerHTML =
-        '<img class="bp-mp-preview-img" src="' + safeUrl + '" alt="" />';
+        (hotspot ? '<div class="bp-mp-hotspot" title="Click the image to set its focal point">' : "") +
+        '<img class="bp-mp-preview-img" src="' + safeUrl + '" alt="' + safeAlt + '" />' +
+        (hotspot ? '<span class="bp-mp-focal" aria-hidden="true" hidden></span></div>' : "");
+      if (hotspot) this._renderFocalMarker();
       // A dead asset URL must not collapse to an invisible sliver — swap in
       // an explicit broken-state card (Remove stays visible to clear it).
       this._previewEl.querySelector("img").addEventListener("error", () => {
@@ -581,11 +674,33 @@ class BpMediaPicker extends HTMLElement {
     }
   }
 
+  // Position the focal marker at the stored focal point (percent of the box),
+  // or hide it when none is set. The marker is a layered dot over the preview.
+  _renderFocalMarker() {
+    if (!this._previewEl) return;
+    const dot = this._previewEl.querySelector(".bp-mp-focal");
+    if (!dot) return;
+    const fx = bpFocalCoord(this._meta.focalX);
+    const fy = bpFocalCoord(this._meta.focalY);
+    if (fx == null || fy == null) {
+      dot.hidden = true;
+      return;
+    }
+    dot.hidden = false;
+    dot.style.left = (fx * 100).toFixed(2) + "%";
+    dot.style.top = (fy * 100).toFixed(2) + "%";
+  }
+
   _select(file) {
+    // A NEW image resets the focal point (it belongs to the pixels); the alt
+    // text the author typed survives a swap, else the library's own alt seeds it.
+    const keptAlt = this._meta.alt && this._meta.alt !== "" ? this._meta.alt : file.alt || "";
     this._meta = {
       url: file.url || "",
       assetId: file.assetId || "",
-      alt: file.alt || "",
+      alt: keptAlt,
+      focalX: null,
+      focalY: null,
       width: file.width || null,
       height: file.height || null,
       mime: file.mime || file.mimeType || ""
@@ -593,6 +708,7 @@ class BpMediaPicker extends HTMLElement {
     this._commitValue();
     this._setError("");
     this._renderPreview();
+    if (this._altInput) this._altInput.value = this._meta.alt || "";
     this._emit();
   }
 
@@ -662,6 +778,9 @@ customElements.define("bp-media-picker", BpMediaPicker);
 if (typeof window !== "undefined") {
   window.__bpMediaPickerTestHook = {
     menuItems: bpMediaPickerMenuItems,
-    showsActions: bpMediaPickerShowsActions
+    showsActions: bpMediaPickerShowsActions,
+    parseValue: bpParseMediaValue,
+    serializeValue: bpSerializeMediaValue,
+    focalFromClick: bpMediaFocalFromClick
   };
 }

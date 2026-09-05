@@ -1,0 +1,1 @@
+Either the spawner provisions the flag with the consent decision recorded in code, or the fail-closed 503 message is re-worded to name the consent boundary rather than instruct a flag flip.

@@ -1,0 +1,1 @@
+The arm is proven able to lose BY MUTATION in both directions: change a width numeral and paste the failure; change a 'swept by N cells' clause and paste the failure. An arm that matches 0 of the 8 word-spelled clauses is vacuous and does not satisfy this.

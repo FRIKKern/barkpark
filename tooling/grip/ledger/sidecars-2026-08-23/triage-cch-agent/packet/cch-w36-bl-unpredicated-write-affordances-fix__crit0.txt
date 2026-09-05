@@ -1,0 +1,1 @@
+The finding is re-derived against origin/main at the time a slice takes this row - not quoted from this description. Evidence: the re-derivation output.

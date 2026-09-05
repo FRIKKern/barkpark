@@ -1,0 +1,1 @@
+`bash scripts/deploy-lag-legs.sh --selftest` can BOTH pass and fail: it includes a fixture where `run_started_at == created_at` but the first job started hours later, and the PR body pastes a run against a naive `run_started_at` implementation showing that fixture RED.

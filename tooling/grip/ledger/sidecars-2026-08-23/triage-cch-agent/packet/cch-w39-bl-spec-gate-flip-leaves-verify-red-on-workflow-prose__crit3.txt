@@ -1,0 +1,1 @@
+The stale 72 assertions comment in the same header is corrected to a number re-derived at edit time, and the correction names the command that produces it. Evidence: the diff plus that command output.

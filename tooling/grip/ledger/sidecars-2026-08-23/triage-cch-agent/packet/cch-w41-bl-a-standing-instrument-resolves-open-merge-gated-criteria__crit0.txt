@@ -1,0 +1,1 @@
+A script resolves every open child's unmet MERGE-GATED criteria against GitHub and reports the payable ones, using per-check-run conclusions rather than a rollup. Evidence: the script and a run over the live epic.

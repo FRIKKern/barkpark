@@ -1,0 +1,1 @@
+PRECONDITION STATED WITH A SHA: exactly ONE of {#9955, cch-w39-s1} has merged before this row starts. Charter D440 forbade S1 from minting the slug because scripts/docs-anchors-check.sh section 8 reds on repo-wide slug duplication and #9955 was CONFLICTING at the time.

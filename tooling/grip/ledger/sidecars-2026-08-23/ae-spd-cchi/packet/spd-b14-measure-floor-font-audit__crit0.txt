@@ -1,0 +1,1 @@
+The per-ch advance of every face in the reading font stack is measured in a browser and recorded, not assumed

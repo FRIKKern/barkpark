@@ -1,0 +1,171 @@
+CLOSE PACKET — onb-* + tgw-* open 0-met triage, 2026-08-23, against origin/main (fetched).
+Criterion files: <row>__crit<N>.txt hold the EXACT stored bytes (indices zero-based); sha256 + byte counts in CRITERIA-SHA256.txt.
+ALL criteria on every packet row are unmet (met=false) — every index N in 0..total-1 has a file.
+Grep self-test: known positive `git grep -c defmodule origin/main -- api/lib/barkpark.ex` = 1 hit; impossible control `ZQXW_IMPOSSIBLE_44117` = rc 1, no output.
+Instrument note: `bp doc query task --filter '_id^=zzzznotreal-'` returns count=0 (control passed).
+
+SCOPE NOTE — WHY ONLY TWO PREFIXES. `gr-`, `pe-`, `sup-` and `spd-` could not be read: `bp doc query task -o json`
+returns MALFORMED JSON for them. The server over-escapes embedded quotes in task descriptions, emitting a bare
+`\\\\"` sequence that terminates the JSON string early. Reproduce:
+  bp doc query task --filter '_id^=sup-' --limit 200 -o json | jq .count
+  -> jq: parse error: Invalid string: control characters from U+0000 through U+001F must be escaped
+  offending bytes: '...pin block studio_components_pane_test.exs:176-238 incl. :192 exact class=\\\\"pane-item selected\\\\" must pass...'
+Python json.loads(strict=False) also fails ("Invalid \escape"). `onb-` and `tgw-` parse only after a
+backslash-repair pass. THIS IS ITSELF A FILEABLE DEFECT — a ledger whose query output cannot be parsed by a
+standard JSON reader is not queryable. Any executor working gr-/pe-/sup-/spd- must fetch rows ONE AT A TIME with
+`bp task get <full-id> -o json`, which encodes correctly.
+
+=========================== VERDICTS ===========================
+
+ROW: onb-residue-onb20-duplicate-compare-action  [REFUTED]  crits 0,1,2
+  Positive contradiction: the row's premise is "two compare-flavoured actions on the authoring surface whose
+  distinction is not discoverable". A full census of today's surface finds exactly ONE.
+  - Server manifest: `bp capabilities -o json` -> ZERO commands whose verb or noun contains compare/diff.
+  - CLI authoring surface: `bp paper` dispatches new | pull | status | diff | push (internal/cli/paper_cmd.go:108-125).
+    `diff` appears once, as the working-copy diff (runPaperWCDiff).
+  - `git grep -noE '"(compare|diff)[a-z-]*"' origin/main -- internal/cli/*.go` = 4 hits total, and only
+    paper_cmd.go:116 is on the authoring surface; the others are cmux_install_merge.go:220, scaffy_cmd.go:536
+    and a test.
+  - The row names doctor's compare-target as the adjacent thing to check: `git grep -n "compare-target\|compareTarget"
+    origin/main -- internal/cli/` returns NOTHING — that verb no longer exists, so it cannot be the twin either.
+  Every other "compare" hit in internal/cli is PROSE inside cloud_deploy_*/cloud_status_* comments.
+  With no duplicate pair, crit 1 ("dissolve the duplicate ... or each verb help names when to use it vs the other")
+  and crit 2 ("callers of the old verb(s) are grepped") are vacuous. The census IS the contradicting fact.
+  NOTE FOR THE CLOSER: crit 0 asks for the census to be recorded in a durable venue. This block is that census —
+  cite it in the close_reason so the refutation is not merely asserted.
+
+ROW: onb-residue-onb17-publish-file-slug-fidelity  [REAL WORK — REPRODUCED, and worse than filed]  crits 0,1,2
+  The row asks for the defect to be reproduced or refuted first. IT REPRODUCES, and the root cause is mechanical.
+  The audit's `bp publish --file` no longer exists under that spelling (`bp publish` -> exit 2,
+  {"error":{"code":"usage","message":"unknown command \"publish\""}}). The live verb is:
+      usage: barkpark bulldocs publish <slug>   with   --file <path>|-
+  so the slug is a POSITIONAL and --file carries only the payload. The positional is then DROPPED ON THE WIRE.
+  PROOF (dry-run, non-mutating, run 2026-08-23):
+      bp bulldocs publish ae-probe-user-given-slug --file probe-payload.json --dry-run
+      POST https://guerrilla.barkpark.cloud/v1/plugins/bulldocs/papers
+      {"title":"AE slug fidelity probe","blocks":[...]}
+  The URL carries no slug segment and no query string; the body is the payload file VERBATIM. The user-given slug
+  appears NOWHERE. Re-run with a payload carrying a conflicting `"_id":"payload-supplied-id"` — the body is again
+  echoed unchanged, so the payload id wins by default and the positional is not even compared against it.
+  ROOT CAUSE, named: internal/manifest/url.go:107 — "whether a declared positional arg is path-bound (its name
+  appears here)". bulldocs.publish's route is /v1/plugins/bulldocs/papers with NO :slug segment, so the declared
+  `slug` positional is path-unbound and silently discarded. url.go:140-145 and url_scopearg_test.go:5-11 record
+  the SAME class of bug being fixed for a `dataset` positional ("silently discarded the positional, targeting the
+  wrong dataset with no error") — so the fix shape already has a precedent in-tree.
+  This is a stronger finding than the row as filed: not "silent slug substitution" but "the slug argument is inert".
+  SCOPE FOR THE BUILDER: internal/ is held by other agents — coordinate before editing.
+
+ROW: onb-backlog-c1-criterion-text-cas  [REAL WORK — ledger-only, cosmetic, prio 3]  crit 0
+  Still undone. Live read of onboarding-composition-epic (lifecycle=done, 3 crits, all met=true):
+    acceptance_criteria[0].criterion = "A first-time user reaches authenticated + MCP-connected + correct-team
+      instance with a proven read-only tool call in under 5 min, evidenced by the onboarding bp doctor receipt"
+  That is the AMBITIOUS pre-D23 wording the row asks to replace. The evidence field ALREADY carries D23's honest
+  scope ("journey mechanics proven live end-to-end against a local control plane via the shipped CLI primitives;
+  installer + Windows + paid-instance legs plan-proven with named ABORT conditions. FRESH dated proof 2026-08-18:
+  scripts/onboarding-journey-proof.sh LIVE PASS=7 ABORT=0 FAIL=0"), so criterion+evidence read together are not
+  misleading and NO reopen is warranted — exactly as the row says.
+  The work is a done->done CAS of one criterion string + MANDATORY publish, met stays true, evidence unchanged.
+  TRAP: the parent epic is lifecycle=done. Per `bp task stage`'s TERMINAL SAME-STATE ADJUDICATION EDGE, a done->done
+  stage is accepted, so the row can be adjudicated in place without resurrecting the epic to `open`.
+
+ROW: onb-backlog-release-cache-unify  [REAL WORK]  crits 0,1,2 (crit 2 is MERGE-GATED — do not stamp)
+  Premise intact: BOTH caches still coexist on origin/main.
+  - cli-release-cache.json path: readReleaseCache() at internal/cli/doctor_onboarding.go:322,
+    writeReleaseCache() at :405 (plus 4 test call sites at doctor_onboarding_test.go:756,811,831,839).
+  - updateCheckCache path: internal/cli/update_notice.go:33 `const updateCheckInterval = 24 * time.Hour`,
+    loadUpdateCache() at :80, saveUpdateCache() at :101 (already atomic, temp file + rename), used at :147.
+  Two independent 24h stores, unconsolidated. The row's own precondition (onb-backlog-release-cache-refresh-widening
+  merged and soaked) is satisfied — #12036 landed as cdc6a8f4ce.
+
+ROW: onb-residue-onb16-body-html-render-default  [REAL WORK]  crits 0,1,2
+  Premise intact and confirmed in the shipped comment. api/lib/barkpark/content/labels.ex:159 states verbatim:
+  "A nil / non-\"article\" style adds nothing -> email default, byte-unchanged from render_opts/1."
+  labels.ex:164-167 shows only the literal "article" gets :style; labels.ex:176-186 `paper_style/2` normalises
+  everything else away and returns nil, so a style-less published doc still falls through to the email look.
+  Lane note from the row holds: this is pt-*/Papers territory; crit 2 asks for re-parent or a cross-link.
+
+ROW: onb-residue-onb18-target-mismatch-receipt  [REAL WORK]  crits 0,1,2
+  Not refuted, and NOT the same axis as onb17 (that is WHICH SLUG; this is WHICH SERVER). Partial prior art exists
+  and must be read before building: internal/cli/paper_cmd.go:150-160 already resolves a `server` out of a paper
+  ref (parsePaperRef) and gates it with paperServerTrusted(target.server, resolveContext(g).Server) — i.e. a
+  cross-server guard exists on the paper READ path. Whether the PUBLISH receipt names its resolved target is
+  unproven either way and crit 0 (reproduce or refute with a quoted transcript) is the first act.
+  Datum in hand: `--dry-run` DOES print the fully-resolved target line
+  ("POST https://guerrilla.barkpark.cloud/v1/plugins/bulldocs/papers") — so the information exists in the client
+  and the gap, if any, is that the SUCCESS receipt does not carry it. Start there.
+
+ROW: onb-residue-onb21-bulldocs-retrieval-verbs  [REAL WORK — census-first]  crits 0,1,2
+  Census taken 2026-08-23 (crit 0's deliverable, needs recording in a durable venue):
+  - SERVER manifest bulldocs family = publish | patch | propose | intents | intent-processed. NO get, NO list,
+    NO export.
+  - CLIENT paper family (internal/cli/paper_cmd.go:108-125) = new | pull | status | diff | push, plus `paper view`.
+  - GENERIC retrieval that already covers papers = bp doc get | ls | query | history | revision | backlinks | related.
+  So retrieval is REACHABLE today (doc get/ls/query, paper view/pull) but there is no bulldocs-native get/list/export.
+  crit 1 explicitly allows "their absence ruled acceptable with a written why" — given bp doc * already round-trips,
+  that ruling may be the cheaper honest answer. crit 2 (export re-publishes without loss) is a real test either way.
+
+ROW: tgw-bl-coverage-write-path-unsafe  [REAL WORK]  crits 0,1,2,3
+  All FOUR defects verified intact on origin/main. tooling/research-coverage/ tracks exactly 3 files
+  (.gitignore, config.json, coverage.mjs) per `git ls-tree`.
+  - DEFECT 1 (silent field strip) — record()'s fold rebuilds a FRESH literal with exactly seven keys and no spread:
+      ledger.files[r.path] = { hash: hashOf(r.path), researchedAt: now(), score: ..., role: ..., description: ...,
+                               whatBreaks: r.what_breaks_if_wrong || "", tier: "agent" };
+    seed() does the identical thing (same seven keys, tier: a ? "agent" : "auto"). Any provenance key is dropped.
+  - DEFECT 2 (concurrent clobber) — coverage.mjs:48 is still
+      const saveLedger = (l) => writeFileSync(LEDGER, JSON.stringify(l, null, 2));
+    an unguarded whole-object write: no lock, no CAS, no tmp+rename. Last-write-wins.
+  - crit 2 (prune and seed equally vulnerable) — seed() shares the identical load->mutate->saveLedger shape, confirmed above.
+  - crit 3 (read-only lie) — coverage.mjs:8 still reads "coverage.mjs scan -> report coverage %, list stale+new
+    (read-only)" while coverage.mjs:75 does writeFileSync(join(HERE, "coverage-report.json"), ...).
+  The row names the in-repo fix precedent correctly: api/lib/barkpark/tasks/close.ex rev-fenced CAS + epoch fence.
+  SCOPE: tooling/ is held by other agents — coordinate before editing.
+
+ROW: tgw-bl-coverage-ledger-unreproducible  [REAL WORK]  crits 0,1,2
+  Premise intact. `git show origin/main:tooling/research-coverage/.gitignore` =
+      research-ledger.json
+      coverage-report.json
+      batch-count.txt
+      batches/
+      results/
+  and `git ls-tree origin/main --name-only tooling/research-coverage/` lists only .gitignore, config.json,
+  coverage.mjs — the ledger is in NO checkout but the author's. loadLedger() (coverage.mjs:47) silently returns an
+  empty default on a missing file, which is exactly how the same command prints 50.1% on one machine and 0% on a
+  clean worktree. Marked BLOCKS WAVE 2 (charter D10) by the row itself.
+  ORDERING: this row and tgw-bl-coverage-write-path-unsafe touch the SAME file (coverage.mjs) — sequence them or
+  land them together; do not dispatch side by side.
+
+ROW: tgw-bl-agent-tier-prose-published-durably  [REAL WORK]  crits 0,1,2
+  All three sub-claims verified on origin/main.
+  - The production guard exists and guards ONLY the literal string: tooling/barkpark-sync/push.mjs:23
+      if (DATASET === "production") { console.error("[push] refusing to publish code papers into 'production' ..."); process.exit(2); }
+    so `codebase` — the intended target and where the laundering happens — is unguarded, exactly as filed.
+  - SECOND GAP CONFIRMED: whatBreaks is COMPUTED (tooling/barkpark-sync/generate.mjs:132
+      `consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",`)
+    and NEVER RENDERED — push.mjs's body template emits only description (:118), role+description (:129),
+    reach heading (:130) and why (:131). `git grep -n whatBreaks origin/main -- tooling/barkpark-sync/` returns
+    the generate.mjs line and nothing in push.mjs.
+  - No agent-tier marker anywhere in tooling/barkpark-sync (same grep, zero hits for agent-tier/evidenceLevel).
+  CAVEAT THE ROW ALREADY STATES AND THE EXECUTOR MUST KEEP: the 1,666-paper corpus is on a LOCAL dev Phoenix, not
+  guerrilla, so blast radius today is one machine. crit 1's "live count after" therefore needs the LOCAL control
+  plane, not the cloud one — do not read a guerrilla zero as proof of anything.
+
+=========================== SUMMARY ===========================
+REAL WORK 9 · REFUTED 1 · ALREADY-DONE 0 · SUPERSEDED 0 · DUPLICATE 0 · BLOCKED-HUMAN 0
+CLOSEABLE NOW: 1 (onb-residue-onb20-duplicate-compare-action -> cancelled, REFUTED).
+
+WHY THIS PREFIX PAIR YIELDED ALMOST NOTHING, stated plainly so the lead can re-aim: every packet so far returned
+9-15 closeable rows; this one returns ONE. These two families are NOT stale-and-superseded backlog — they are
+freshly-triaged residue that was already de-duplicated at filing time. Six of the ten rows carry an explicit
+"reproduce or refute FIRST / census FIRST" criterion 0, i.e. they were filed BY someone who had already checked
+whether the work was still needed. The dr-*/ssw-*/mob-* families paid out because they are OLD waves whose fixes
+landed under other rows' PRs; onb-*/tgw-* have not had time to rot. Aim the next triage at an OLD prefix.
+
+CHAIN — ONE FILE, TWO ROWS: tgw-bl-coverage-write-path-unsafe and tgw-bl-coverage-ledger-unreproducible both edit
+tooling/research-coverage/coverage.mjs (saveLedger at :48 / loadLedger at :47 — adjacent lines). Land them in one
+PR or strictly sequence them; two builders in one file is how a wave loses work.
+
+CHAIN — THE SAME UNDISCLOSED-JUDGMENT DEFECT, TWO PIPELINES: tgw-bl-coverage-write-path-unsafe DEFECT 1 (record()
+strips any provenance key) and tgw-bl-agent-tier-prose-published-durably SECOND GAP (whatBreaks computed, never
+rendered) are the same disease at both ends of one pipeline: coverage.mjs cannot CARRY provenance and push.mjs
+does not PUBLISH what it does carry. Fixing either alone still ships unevidenced numbers. charter D10 gates the
+provenance field on the write path being fixed first, so the order is forced: write-path, then publish-path.

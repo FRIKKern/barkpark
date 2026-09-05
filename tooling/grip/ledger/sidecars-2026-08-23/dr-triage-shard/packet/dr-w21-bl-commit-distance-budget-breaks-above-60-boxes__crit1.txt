@@ -1,0 +1,1 @@
+Boxes sharing one git_commit cost ONE compare call per sweep (per-sha memoization within a tick), measured by a test counting client invocations for N boxes on one sha.

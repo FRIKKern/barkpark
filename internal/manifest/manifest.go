@@ -98,6 +98,53 @@ type Noun struct {
 	Plugin  *string `json:"plugin,omitempty"`
 }
 
+// writesKey is the manifest key whose ABSENCE the Writes tri-state exists to
+// notice. Named once so the decoder and its doc comment cannot drift.
+const writesKey = "writes"
+
+// UnmarshalJSON decodes a Command and additionally records whether the document
+// carried a `writes` key at all (Command.WritesDeclared).
+//
+// WHY THIS EXISTS. `Writes` is a plain bool, so Go's zero value makes an
+// OMITTED `writes` key indistinguishable from an explicit `"writes": false` —
+// and a MISSING key is not an UNKNOWN field, so Parse's DisallowUnknownFields
+// never catches it either. Every consumer that defaults to "safe" on false then
+// reads UNKNOWN as SAFE. For the verbless-inference gate (internal/cli
+// soleReadVerb, which auto-re-dispatches a bare `bp <noun> <free text>` to a
+// single-verb noun) that is a safety gate failing OPEN: one single-verb noun
+// shipped without the flag — by a new plugin, or by a server on an older
+// manifest schema — becomes eligible for AUTOMATIC EXECUTION from free text.
+//
+// The strict inner decode is not incidental: Parse's DisallowUnknownFields
+// recurses into Command today, and a custom UnmarshalJSON would otherwise
+// silently opt Command out of that trust boundary.
+func (c *Command) UnmarshalJSON(data []byte) error {
+	// commandFields sheds this method, so the nested decode does not recurse.
+	type commandFields Command
+	var fields commandFields
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&fields); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+	*c = Command(fields)
+	_, declared := keys[writesKey]
+	c.WritesDeclared = declared
+	return nil
+}
+
+// NonWriting reports that the manifest AFFIRMATIVELY declared this command
+// non-writing. It is deliberately NOT `!c.Writes`: an UNDECLARED `writes` key
+// answers false here, so a caller whose safe default is "refuse" fails CLOSED on
+// a manifest this bp cannot fully vouch for. Use it for permission-shaped
+// decisions; `c.Writes` remains the right read for "the manifest said this
+// writes" (HTTP method inference, MCP hints, receipts).
+func (c Command) NonWriting() bool { return c.WritesDeclared && !c.Writes }
+
 // HTTP is the single API call a command makes. PathTemplate is FLAT — the CLI
 // prepends its own /w/:ws/p/:project prefix locally when ScopedPrefix is set.
 type HTTP struct {
@@ -108,22 +155,31 @@ type HTTP struct {
 // Command is one <noun> <verb> leaf of the CLI tree = one API call. ScopedPrefix,
 // Source, and Since are optional/additive.
 type Command struct {
-	ID            string  `json:"id"`
-	Noun          string  `json:"noun"`
-	Verb          string  `json:"verb"`
-	Summary       string  `json:"summary"`
-	HTTP          HTTP    `json:"http"`
-	AuthTier      string  `json:"auth_tier"`
-	Args          []Arg   `json:"args"`
-	Flags         []Flag  `json:"flags"`
-	Writes        bool    `json:"writes"`
-	Batch         bool    `json:"batch"`
-	Paginated     bool    `json:"paginated"`
-	DryRun        bool    `json:"dry_run"`
-	DefaultOutput string  `json:"default_output"`
-	ScopedPrefix  *string `json:"scoped_prefix,omitempty"`
-	Source        *string `json:"source,omitempty"`
-	Since         *string `json:"since,omitempty"`
+	ID       string `json:"id"`
+	Noun     string `json:"noun"`
+	Verb     string `json:"verb"`
+	Summary  string `json:"summary"`
+	HTTP     HTTP   `json:"http"`
+	AuthTier string `json:"auth_tier"`
+	Args     []Arg  `json:"args"`
+	Flags    []Flag `json:"flags"`
+	Writes   bool   `json:"writes"`
+	// WritesDeclared reports whether the decoded manifest document AFFIRMATIVELY
+	// carried a `writes` key for this command. It is the second half of a
+	// TRI-STATE — {declared-writing, declared-non-writing, UNDECLARED} — that a
+	// plain bool cannot express, and it is set only by Command.UnmarshalJSON,
+	// never by the wire (json:"-": the JSON shape is unchanged).
+	//
+	// Read it through Command.NonWriting, not directly, for any decision whose
+	// safe default on UNKNOWN is "refuse".
+	WritesDeclared bool    `json:"-"`
+	Batch          bool    `json:"batch"`
+	Paginated      bool    `json:"paginated"`
+	DryRun         bool    `json:"dry_run"`
+	DefaultOutput  string  `json:"default_output"`
+	ScopedPrefix   *string `json:"scoped_prefix,omitempty"`
+	Source         *string `json:"source,omitempty"`
+	Since          *string `json:"since,omitempty"`
 	// MutationOp, when set, wraps the body-arg object into a single mutation:
 	// `{mutations: [{<MutationOp>: <body>}]}` — turns `doc delete post p1` into a
 	// `{delete:{type,id}}` mutate POST. Empty for non-mutation commands.

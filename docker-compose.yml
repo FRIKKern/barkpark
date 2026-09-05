@@ -61,6 +61,14 @@ services:
       # NEVER ${BARKPARK_PLUGINS:-} — the empty string is the plugin KILL
       # SWITCH server-side, so an unset var must stay unset.
       - BARKPARK_PLUGINS
+      # Platform operators, DB statement wall, indx state (census 2026-09-03:
+      # all four read in api/config/runtime.exs, none had a passthrough line)
+      - BARKPARK_DB_STATEMENT_TIMEOUT
+      - BARKPARK_INDX_STATE_DIR
+      - BARKPARK_OPERATOR_EMAILS
+      - BARKPARK_OPERATOR_TOKEN_IDS
+      # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
+      - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST

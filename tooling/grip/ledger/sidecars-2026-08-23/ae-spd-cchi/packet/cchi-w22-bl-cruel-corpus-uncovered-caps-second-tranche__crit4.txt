@@ -1,0 +1,1 @@
+`smoke.mjs` runs in this slice's OWN gate, because its two-way census exits 1 before any scenario runs and that was wave 21's only merge blocker. Evidence: the run with `rc=$?`.

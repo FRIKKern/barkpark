@@ -1,0 +1,1 @@
+A Go decoder reads the `publish_clock` node and `-o table` renders it to a named human caller

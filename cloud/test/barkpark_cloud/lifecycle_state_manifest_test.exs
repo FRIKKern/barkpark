@@ -273,7 +273,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
     # calls the private `maybe_enforce/1` itself.
     elapsed = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
 
-    {team, bp, fn -> {:ok, _} = Billing.mark_past_due(sub, %{current_period_end: elapsed}) end}
+    {team, bp, fn -> {:ok, _} = Billing.mark_past_due(sub, %{grace_ends_at: elapsed}) end}
   end
 
   defp seed(:quota_reconcile) do

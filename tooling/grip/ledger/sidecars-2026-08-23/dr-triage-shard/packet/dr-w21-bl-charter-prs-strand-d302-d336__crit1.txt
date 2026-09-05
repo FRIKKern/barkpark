@@ -1,0 +1,1 @@
+After the sweep, a token scan of origin/main's charter shows a contiguous decision run with no missing definitions between D256 and the current ceiling, or the remaining gaps are named as deliberate.

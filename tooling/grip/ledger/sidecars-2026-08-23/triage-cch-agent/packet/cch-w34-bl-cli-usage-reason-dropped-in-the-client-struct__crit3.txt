@@ -1,0 +1,1 @@
+A crashed read ranks ABOVE unmetered in usageStateSeverity so fleetRowState cannot roll a crashed headline meter into a calm row. Evidence: a test asserting the row state for a crashed headline meter.

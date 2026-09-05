@@ -1,0 +1,1 @@
+scripts/go-literal-check.sh refuses to pass when it scans implausibly few files, with the floor named in the script and the current count (152) quoted in the PASS line.

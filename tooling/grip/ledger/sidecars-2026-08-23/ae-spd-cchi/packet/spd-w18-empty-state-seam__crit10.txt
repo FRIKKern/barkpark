@@ -1,0 +1,1 @@
+The gate `cd api && CC=clang mix test test/barkpark_web/studio/ test/barkpark_web/live/studio/` passes and its full output is quoted.

@@ -30,6 +30,27 @@ if ! command -v git >/dev/null; then
   apt-get update -qq && apt-get install -y -qq git
 fi
 git --version
+# A git that decides it needs a username has NO tty here. Left alone it either
+# blocks forever on the prompt or dies with "fatal: could not read Username for
+# 'https://github.com'" — an error that sends every reader after credentials or
+# repo visibility when the cause is just as often the wire protocol or a
+# transient remote. That is exactly how the control plane sat 49 commits behind
+# for ~7h (see deploy/cp-deploy.sh, PR #15634). GIT_TERMINAL_PROMPT=0 turns the
+# hang into an immediate failure; git_net_die makes that failure name the git
+# version, so the next reader starts from the truth instead of the word
+# "Username".
+export GIT_TERMINAL_PROMPT=0
+git_net_die() {
+  echo "FATAL: git network operation failed: $*" >&2
+  echo "  git version      : $(git --version 2>&1)" >&2
+  echo "  protocol.version : $(git config --get protocol.version 2>/dev/null || echo '(unset — git default, v2 on git >= 2.26)')" >&2
+  echo "  This is a WIRE or AUTH condition. A 'could not read Username' here does" >&2
+  echo "  NOT prove a credential problem: git 2.34.x (the apt git on Ubuntu 22.04)" >&2
+  echo "  has been observed refusing protocol v2 against GitHub on some boxes while" >&2
+  echo "  v0/v1 succeed from the SAME box with the SAME remote and credentials." >&2
+  echo "  Retry the same command with: git -c protocol.version=0 ..." >&2
+  exit 11
+}
 # git ensure (end)
 # nixpacks builds need BuildKit's buildx component (docker.io ships without it).
 if ! docker buildx version >/dev/null 2>&1; then
@@ -66,10 +87,12 @@ $GO version
 # Fresh shallow tools checkout — NEVER the live /opt/barkpark (its post-merge
 # hook rebuilds and restarts the serving CMS; see repo Golden Rule 7).
 if [ -d /opt/barkpark-tools/.git ]; then
-  git -C /opt/barkpark-tools fetch --depth 1 origin main
+  git -C /opt/barkpark-tools fetch --depth 1 origin main \
+    || git_net_die "fetch --depth 1 origin main in /opt/barkpark-tools"
   git -C /opt/barkpark-tools reset --hard origin/main
 else
-  git clone --depth 1 https://github.com/FRIKKern/barkpark /opt/barkpark-tools
+  git clone --depth 1 https://github.com/FRIKKern/barkpark /opt/barkpark-tools \
+    || git_net_die "clone --depth 1 https://github.com/FRIKKern/barkpark"
 fi
 
 # Build platform follows the box architecture — never hardcode it.

@@ -1,0 +1,1 @@
+`bp doc query --filter '_id…'` either filters correctly or refuses the filter with a named error. Evidence: the before/after output for a filter matching a known-extant document.

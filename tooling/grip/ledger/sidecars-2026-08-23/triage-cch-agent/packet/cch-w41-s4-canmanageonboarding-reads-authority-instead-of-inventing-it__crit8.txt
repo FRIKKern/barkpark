@@ -1,0 +1,1 @@
+All three gates green, with the baseline re-derived on this branch's own base rather than quoted. Evidence: node --check, the app-test tests/pass/fail lines, and the smoke scenario count.

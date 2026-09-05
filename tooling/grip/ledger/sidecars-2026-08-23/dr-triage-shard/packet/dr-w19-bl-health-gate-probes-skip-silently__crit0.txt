@@ -1,0 +1,1 @@
+The deep-link and search-seed probes distinguish COULD-NOT-CHECK from OK, and a COULD-NOT-CHECK is reported in the HEALTH output rather than silently skipped.

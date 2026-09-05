@@ -151,6 +151,43 @@ raw_doc lapseskew   open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fab
 EXP_EXACT="$(iso_ago 1800)"
 raw_doc lapseexact open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$EXP_EXACT\"}"
 
+# ── THE THIRD WRITER: bp task stage (task-19674fbd76242b63) ───────────────────
+# `bp task stage` moves lifecycle_status (done/cancelled/blocked/in_progress →
+# open) under an advisory lock while DELIBERATELY never touching content.claim
+# (api/lib/barkpark/tasks/stage.ex). It therefore produces open + claim.worker
+# legitimately — the shape the gate used to call corrupt outright. What it also
+# writes is the fingerprint: content.disposition and content.disposition_rerun,
+# whose raw /v1/data/mutate door is closed by
+# Barkpark.Content.Mutations.ensure_disposition_via_verb/4 (@disposition_key,
+# @disposition_rerun_key), which names this verb as the only writer.
+#
+# The docs served by /v1/data/doc FLATTEN content, so these keys sit beside
+# lifecycle_status — that is where the gate reads them, exactly as it reads
+# lifecycle_status and claim.
+stage_doc() { # stage_doc <id> <extra-content-json-or-empty>
+  local id="$1" extra="$2"
+  cat > "$fixtures/v1/data/doc/production/task/$id" <<EOF
+{"result":{"_id":"$id","_type":"task","lifecycle_status":"open","claim":{"worker":"fable-tob","epoch":2}${extra:+,$extra}}}
+EOF
+}
+# A row staged back to open carrying the adjudication TERM. Legitimate: PASS.
+stage_doc stagedopen '"disposition":"open","reopen_trigger":"when the gate is fixed"'
+# The RERUN key alone is equally attributable — same verb, same closed raw door.
+stage_doc stagedrerun '"disposition_rerun":"bash scripts/pr-task-gate.test.sh"'
+# THE FAIL-CLOSED FIXTURE. open + claim.worker with NO stage fingerprint at all:
+# the gate cannot attribute it to stage, so it must still refuse by name.
+stage_doc handflipopen ''
+# THE NARROWING THE FILING GOT WRONG, pinned. content.disposition_reason is
+# written by stage too, but it is NOT fenced by the raw mutate door AND
+# TtlSweeper.apply_lapse independently promotes a legacy engagement.note into it
+# — two writers, so it attributes nothing. A row carrying only that key is an
+# unattributable mixed state and must red. Widen the fingerprint to include it
+# and this fixture goes green: that is the test.
+stage_doc reasononly '"disposition_reason":"parked while the epic reorganised"'
+# Present-but-empty is not a fingerprint: a null or blank key is no evidence a
+# verb ran. Without this, `key in doc` would pass the suite.
+stage_doc stagedblank '"disposition":"","disposition_rerun":null'
+
 # Boot a static server. It returns 200 for existing files, 404 else.
 #
 # The server ANNOUNCES ITS OWN PORT rather than being interrogated with lsof/ss.
@@ -279,6 +316,36 @@ check "done needs no PR_OPENED_AT"        0 'TASK_ID=doneclosed'
 # compared against it rather than against the null worker.
 check "lapsed actor matches worker"  0 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=fable-tob"
 check "lapsed actor wrong worker"    1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=nobody"
+
+# -- The third writer: bp task stage (task-19674fbd76242b63) ------------------
+# Both arms, on the SAME shape. The only thing that moves between them is
+# whether the document carries a key only `bp task stage` can have written.
+check "staged open+worker passes"     0 "TASK_ID=stagedopen PR_OPENED_AT=$PR_OPEN"
+check "staged (rerun key) passes"     0 "TASK_ID=stagedrerun PR_OPENED_AT=$PR_OPEN"
+check "hand-flipped open+worker fails" 1 "TASK_ID=handflipopen PR_OPENED_AT=$PR_OPEN"
+# FAIL-CLOSED on a mixed state that cannot be POSITIVELY attributed to stage.
+# disposition_reason has a second writer (TtlSweeper.apply_lapse promotes a
+# legacy engagement.note into it) and no raw-door fence, so it attributes
+# nothing and this row must red.
+check "disposition_reason alone fails" 1 "TASK_ID=reasononly PR_OPENED_AT=$PR_OPEN"
+check "blank fingerprint fails"        1 "TASK_ID=stagedblank PR_OPENED_AT=$PR_OPEN"
+# The staged actor is the LIVE claim.worker (the claim was never freed), so an
+# author map is compared against it — not against previous_worker, which a
+# staged row does not have.
+check "staged actor matches worker"   0 "TASK_ID=stagedopen PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=fable-tob"
+check "staged actor wrong worker"     1 "TASK_ID=stagedopen PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=nobody"
+# A staged row is decided from the document alone — like in_progress and done —
+# so withholding PR_OPENED_AT must not red it.
+check "staged needs no PR_OPENED_AT"  0 "TASK_ID=stagedopen"
+# THE WORDS, not just the exit code: the refusal must name bp task stage as a
+# legitimate producer of the mixed state instead of asserting the state cannot
+# occur. Every unattributable mixed row lands here, so this is the sentence that
+# has to teach the reader which of the three writers to reach for.
+check_says "unattributable red names stage" 1 "bp task stage" "TASK_ID=handflipopen PR_OPENED_AT=$PR_OPEN"
+check_says "unattributable red names the keys" 1 "content.disposition / content.disposition_rerun" "TASK_ID=handflipopen PR_OPENED_AT=$PR_OPEN"
+# ...and the PASS must say WHY it passed, so a reader auditing a green verdict
+# can see the attribution rather than take it on faith.
+check_says "staged pass names the verb"  0 "staged back into the ready backlog by bp task stage" "TASK_ID=stagedopen PR_OPENED_AT=$PR_OPEN"
 
 # -- THE RED MUST CARRY THE WHOLE CURE, not a third of it ---------------------
 # Wave 24: six PRs green on every code gate sat red for hours on this one

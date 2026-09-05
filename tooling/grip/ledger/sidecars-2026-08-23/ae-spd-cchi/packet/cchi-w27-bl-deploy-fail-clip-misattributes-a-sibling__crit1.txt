@@ -1,0 +1,1 @@
+MUTATION PROOF: a cruel sibling (not a .deploy-fail panel) inside .deploys produces a message that does NOT claim the failure reason is clipped, and a genuinely clipped .deploy-fail still reds with the original wording.

@@ -1,0 +1,1 @@
+A test drives a site whose ONLY non-live row is cancelled and asserts the chosen behaviour — the assertion must name whether that site appears in sites[] with still_waiting true

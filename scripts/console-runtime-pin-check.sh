@@ -11,11 +11,17 @@
 #   · console-harness.yml's `console-unit` job must carry that SAME literal in
 #     `node-version:`.
 #   · The EXEMPTION SET is pinned by SET-EQUALITY, not by a floor: exactly
-#     `cssom-parity`, `tier-floor-render` and `overflow-guard` may differ, and
-#     they must all be on 22 (they speak CDP over a bare global WebSocket,
-#     stable by default only from Node 22 — epic decision D17). A FOURTH
-#     setup-node job reds this guard and is NAMED, because a new job silently
-#     inheriting a different runtime is exactly the drift nobody would see.
+#     `cssom-parity`, `tier-floor-render`, `overflow-guard` and `modal-oracle`
+#     may differ, and they must all be on 22 (they speak CDP over a bare global
+#     WebSocket, stable by default only from Node 22 — epic decision D17). A
+#     FIFTH setup-node job reds this guard and is NAMED, because a new job
+#     silently inheriting a different runtime is exactly the drift nobody would
+#     see. `modal-oracle` joined on 2026-09-05
+#     (cch-w22-s1-residue-modal-oracle-uninvoked): it is the fourth CDP
+#     instrument to get its own job, and it needs 22 for the same reason the
+#     other three do — this guard REDS a new browser job rather than letting it
+#     inherit a runtime on which its bring-up exits 2, which is the guard
+#     working, not the guard in the way.
 #
 # WHY A REPO-ROOT .nvmrc WOULD BE WRONG
 # -------------------------------------
@@ -54,7 +60,7 @@ ROOT="${CONSOLE_RUNTIME_PIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd
 DECL_REL="cloud/priv/static/__node-version"
 WF_REL=".github/workflows/console-harness.yml"
 PINNED_JOB="console-unit"
-EXEMPT_JOBS="cssom-parity overflow-guard tier-floor-render"   # sorted
+EXEMPT_JOBS="cssom-parity modal-oracle overflow-guard tier-floor-render"   # sorted
 EXEMPT_VERSION="22"
 
 fail() { echo "::error::console-runtime-pin-check: $*" >&2; }
@@ -169,7 +175,7 @@ measure() {
     done
   done
 
-  [ "$rc" -eq 0 ] && echo "OK: the console runtime declaration, console-unit's literal and the three-job exemption set all agree."
+  [ "$rc" -eq 0 ] && echo "OK: the console runtime declaration, console-unit's literal and the exemption set (printed in full above, never counted in this sentence) all agree."
   return "$rc"
 }
 

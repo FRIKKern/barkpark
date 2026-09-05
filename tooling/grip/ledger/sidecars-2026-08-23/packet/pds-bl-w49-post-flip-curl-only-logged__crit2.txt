@@ -1,0 +1,1 @@
+The PR body states the blast radius: merging a deploy/** byte deploys BOTH production hosts, and names deploy.yml's two changes-job regexes as the evidence.

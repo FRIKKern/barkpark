@@ -1,0 +1,1 @@
+The `run.updated_at`-as-group-release inference is stated as an inference in the script header (or replaced by a timestamp the `changes` job emits), naming the 3.0 s median gap across 107 runs as circumstantial support rather than an API contract.

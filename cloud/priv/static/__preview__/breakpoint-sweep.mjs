@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  118 scenarios, 24 rendered, 94 in a COMMITTED residue literal.
+//   SCENARIO  122 scenarios, 24 rendered, 98 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -418,38 +418,38 @@ export function familyOf(scen) {
 }
 
 // The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 85
-// name-keyed entries below, which is what makes a 112th scenario refusable.
+// render it. These are REASONS, not an allowlist: the allowlist is the 96
+// name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 13 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 15 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
   "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 5 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers` inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 8 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, and cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 15 widths, one .plan-rec badge and one full-width button wider than nothing.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 85 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 96 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
 // grows with the artifact and can never refuse anything: it looks itemised, it
-// is even "artifact-derived", and it is 100% vacuous. Typed out, a 112th
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 121st
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 120 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 96 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -553,13 +553,50 @@ export const RESIDUE_FAMILY_REASONS = {
 // RE-READ from `scenarioReport`, and the family stays at 13 because
 // `no-deeplink` already had five members.
 //
+// cch-w50-s4 moved it by TWO, in ONE commit (the strict:false hazard the
+// 104->105 precedent names): `billing-free-owner` and `billing-support-plus` —
+// the two billing ACTORS the corpus had never held — are the 119th and 120th
+// scenarios and the 95th and 96th residue entries. `billing-free-owner` is the
+// UNSUBSCRIBED owner, the actor renderPlanState routes to the upsell card, whose
+// four unique markers (`plan-continue`, "Optimized for shipping to production",
+// "See more plan options", "Recommended") had ZERO hits in a rendered-DOM dump
+// of the whole corpus — so any render-layer guard aimed at that card was green
+// BY CONSTRUCTION. `billing-support-plus` is the first `support_plus` fixture
+// this file has ever carried at all. RESIDUE, not cells: the upsell card and the
+// current-plan card are both the .card.plan-card the `billing-trial` cell walks
+// at all 18 widths, differing by one .plan-rec badge and one .btn-block — no
+// geometry those cells do not already sample. The sweep exited 2 with `UNLISTED
+// scenario "billing-free-owner" (family hash:#billing)` and the twin, and smoke
+// on `CENSUS: 2 committed scenario(s) have NO expectation`, until the entries
+// below and their EXPECTATIONS were written; the numbers here were RE-READ from
+// `scenarioReport`, never carried from the brief — which said 110->112/85->87
+// against a merge base that already measured 118/94. The family stays at 13
+// because `hash:#billing` already had five members.
+//
+// cch-w49-s7 moved it by ONE: `billing-unconfigured` — the corpus's FIRST
+// fixture of any kind to carry D554's `billing_capability` on the
+// /v1/subscription 200, so the first from which a rendered-bytes claim about the
+// console's consumption of it can be made at all (before it, every consumer of
+// that key was green BY CONSTRUCTION, the same hole `billing-free-owner` found
+// one arm over) — is the 122nd scenario and the 98th residue entry. RESIDUE, not
+// a cell: it is `billing-trial`'s actor with ONE field changed, so it paints the
+// same .tier-grid the `billing-trial` cell already walks at all 18 widths, minus
+// three buttons and plus one full-width `.tier-omit-note` row — strictly less
+// horizontal demand than the geometry that cell measures, and the 230px track
+// floor is untouched. The sweep exited 2 with `UNLISTED scenario
+// "billing-unconfigured" (family hash:#billing)` until the entry below was
+// written, and smoke refused first on `CENSUS: 1 committed scenario(s) have NO
+// expectation`. Both numerals were RE-READ from a RUN of `node
+// breakpoint-sweep.mjs` on this branch, never by adding one — and the family
+// stays at 13 because `hash:#billing` already had seven members.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
 // "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
 // spanning SEVEN lines, and three of the numbers under it were owned by
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 118 / 25 / 24 / 94 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 120 / 25 / 24 / 96 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -624,7 +661,7 @@ export const SCENARIO_RESIDUE = {
   "instance-behind": "hash:#instance",
   "instance-remove-failed": "hash:#instance",
   "verify-no-credentials": "hash:#instance",
-  // hash:#overview — 11
+  // hash:#overview — 12
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
   "fleet-usage": "hash:#overview",
@@ -636,6 +673,15 @@ export const SCENARIO_RESIDUE = {
   "overview-attention": "hash:#overview",
   "overview-never-reported": "hash:#overview",
   "overview-member-empty-fleet": "hash:#overview",
+  // cch-w12-followup-login-fixture-gap — a DRIVE fixture, not a screen. It boots
+  // the same #overview grid the two cells already walk at all 15 widths and then
+  // moves through three states smoke.mjs steps it through by hand (Activity →
+  // signed out → signed in as another team → Activity), none of which is a
+  // width. What it exists to produce is the only thing this corpus could not:
+  // a COMPLETED sign-in, so render()'s logged-out arm can be entered and left
+  // with an account change across it. Its terminal geometry is the `activity`
+  // cell's, which this sweep already renders.
+  "activity-identity-change": "hash:#overview",
   // hash:#site — 13
   "deploy-detail-cruel": "hash:#site",
   "promote-failure": "hash:#site",
@@ -690,12 +736,15 @@ export const SCENARIO_RESIDUE = {
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
   "theater-ready": "path:/new",
-  // hash:#billing — 5
+  // hash:#billing — 8
   "billing-portal-return": "hash:#billing",
   "billing-member": "hash:#billing",
   "billing-me-unreadable": "hash:#billing",
   "billing-me-recovers": "hash:#billing",
   "billing-cancelling": "hash:#billing",
+  "billing-free-owner": "hash:#billing",
+  "billing-support-plus": "hash:#billing",
+  "billing-unconfigured": "hash:#billing",
   // hash:#operator — 5
   "operator-zero-staging": "hash:#operator",
   "operator-denied": "hash:#operator",
@@ -1853,6 +1902,81 @@ async function legCssom(rep) {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE TIER-CTA TENSE PROBE — billing-trial only, inside the committed job.
+// ─────────────────────────────────────────────────────────────────────────────
+//  cch-bl-tier-card-free-button-still-future-tense-for-a-lapsed-trial.
+//
+//  WHY IT LIVES IN legRender AND NOT IN THE tiers5 LEG: `tier-floor-render` in
+//  console-harness.yml invokes `--render --widths 901 --cell billing-trial`, and
+//  the tiers5 leg is invoked by NO workflow (its own header says so). The row
+//  requires the geometry gate to MEASURE the new lapsed-trial label rather than
+//  be waved past it, so the measurement has to be reachable from the command CI
+//  actually runs.
+//
+//  WHAT IT MEASURES: the billing-trial scenario carries a LIVE trial, so the
+//  screen the generic probe measured shows only "Yours when the trial ends".
+//  This probe re-renders the SHIPPED three-plan catalog into the REAL
+//  #billing-tiers under the REAL app.css twice — once with the live clock and
+//  once with a lapsed one (trialDays 0) — and asks the same question of both:
+//  does any CTA clip? Same splice technique the tiers5 leg uses, same stated
+//  LIMIT: it proves LAYOUT, never behaviour (splicing bypasses renderTiers, so
+//  no click handler is wired).
+//
+//  NON-VACUITY IS CHECKED, NOT ASSUMED: it refuses unless the two passes really
+//  produced two DIFFERENT Free labels. A probe that renders the same label twice
+//  and reports "no clipping" would certify the lapsed label without ever having
+//  drawn it — the exact way a geometry gate goes blind.
+function tierLabelProbeJs() {
+  return `(function(){
+  var hooks = globalThis.__bpHooks;
+  if (!hooks || typeof hooks.tierCardHtml !== 'function' || !Array.isArray(hooks.planCatalog))
+    return { refused: '__bpTestHook delivered no tierCardHtml/planCatalog — app.js\\'s export tail changed shape, so the tier CTA tense is measuring nothing' };
+  var grid = document.querySelector('#billing-tiers');
+  if (!grid || grid.hidden) return { refused: '#billing-tiers is absent or hidden — the billing screen never populated' };
+  var catalog = hooks.planCatalog;
+  var freeCount = catalog.filter(function (t) { return t.free; }).length;
+  if (freeCount !== 1) return { refused: 'the shipped catalog carries ' + freeCount + ' free tier(s); this probe asks about exactly one' };
+  var passes = [];
+  [['live', undefined], ['lapsed', 0]].forEach(function (pair) {
+    grid.innerHTML = catalog.map(function (t) {
+      return hooks.tierCardHtml(t, 'trial', false, undefined, pair[1]);
+    }).join('');
+    var cards = grid.querySelectorAll('.tier');
+    var btns = grid.querySelectorAll('.tier .btn');
+    var freeBtn = grid.querySelector('.tier-free .btn');
+    var clipped = [];
+    Array.prototype.forEach.call(btns, function (b) {
+      if (b.scrollWidth > b.clientWidth) {
+        var tier = b.closest('.tier');
+        clipped.push({
+          plan: tier ? (tier.querySelector('.tier-name') || {}).textContent : '?',
+          sw: b.scrollWidth, cw: b.clientWidth, text: (b.textContent || '').trim(),
+        });
+      }
+    });
+    passes.push({
+      tense: pair[0],
+      cards: cards.length,
+      btns: btns.length,
+      freeLabel: freeBtn ? (freeBtn.textContent || '').trim() : null,
+      freeW: freeBtn ? Math.round(freeBtn.scrollWidth) : null,
+      boxW: freeBtn ? Math.round(freeBtn.clientWidth) : null,
+      clipped: clipped,
+    });
+  });
+  for (var i = 0; i < passes.length; i++) {
+    if (passes[i].cards !== catalog.length || passes[i].btns !== catalog.length)
+      return { refused: 'the ' + passes[i].tense + ' pass rendered ' + passes[i].cards + ' cards / ' + passes[i].btns + ' buttons for a ' + catalog.length + '-plan catalog — a card with no control makes this measurement vacuous' };
+    if (!passes[i].freeLabel)
+      return { refused: 'the ' + passes[i].tense + ' pass rendered no .tier-free CTA at all' };
+  }
+  if (passes[0].freeLabel === passes[1].freeLabel)
+    return { refused: 'both passes rendered the SAME Free CTA (' + JSON.stringify(passes[0].freeLabel) + ') — the lapsed-trial label was never drawn, so a clean verdict here would certify a label nothing measured' };
+  return { passes: passes };
+})()`;
+}
+
 async function legRender(rep) {
   const widthFilter = valOf("--widths");
   const cellFilter = valOf("--cell");
@@ -1901,6 +2025,7 @@ async function legRender(rep) {
       out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x18 = 900 renders (11.0 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2700 (32.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
+    const tierCtaF = [], tierCtaSeen = [];
     const bgSeen = new Map();
     const t0 = Date.now();
     let done = 0;
@@ -1914,6 +2039,14 @@ async function legRender(rep) {
       for (const width of widths) {
         const { targetId, sessionId } = await openCell();
         try {
+          // cch-bl-tier-card — the hook receiver for the tier-CTA tense probe
+          // below, installed BEFORE app.js parses and ONLY for the cell that
+          // uses it (an accessor, not an assignment: see TIERS5_HOOK_TAP for the
+          // measured reason mock.js would otherwise overwrite it). Every other
+          // cell renders exactly as it did before.
+          if (cell.name === "billing-trial") {
+            await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
+          }
           await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
           // A FRESH `?theme=` LOAD PER CELL, NEVER A RUNTIME ATTRIBUTE FLIP.
           // A flip leaves the console lying about itself — a verifier measured
@@ -2000,6 +2133,17 @@ async function legRender(rep) {
               q3f.push({ cell: cell.name, theme, width, height, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
             }
           }
+          // ── the tier-CTA tense probe (billing-trial only) ────────────────
+          if (cell.name === "billing-trial") {
+            const tl = await evalJs(sessionId, tierLabelProbeJs());
+            if (tl.refused) {
+              return die(`billing-trial/${theme}@${width}: tier CTA tense probe — ${tl.refused}`);
+            }
+            for (const pass of tl.passes) {
+              tierCtaSeen.push({ theme, width, tense: pass.tense, label: pass.freeLabel, w: pass.freeW, box: pass.boxW });
+              for (const c of pass.clipped) tierCtaF.push({ theme, width, tense: pass.tense, ...c });
+            }
+          }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
         } finally {
           await closeCell(targetId);
@@ -2081,9 +2225,25 @@ async function legRender(rep) {
     }
     for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}/${n.theme}@${n.width}: ${n.sel} shows a ${n.cue}px ${n.axis === "x" ? "horizontal" : n.axis === "y" ? "vertical" : "edge"} cue while it FITS on ${n.axis === "both" ? "BOTH axes" : `${n.axis}`} (w ${n.sw}/${n.cw}, h ${n.sh}/${n.ch})\n`);
 
-    const failed = q1f.length + q2f.length + q3f.length;
+    // THE TIER CTA IN BOTH TENSES — printed whether it passes or not, for the
+    // reason the Q3 line gives: a number that appears only on failure reads the
+    // same as a probe that stopped looking.
+    if (tierCtaSeen.length) {
+      const byTense = new Map();
+      for (const t of tierCtaSeen) {
+        const w = byTense.get(t.tense);
+        if (!w || t.w > w.w) byTense.set(t.tense, t);
+      }
+      out(`   ✓ tier CTA — ${tierCtaSeen.length} Free-tier CTA measurement(s) across both trial tenses: ` +
+        [...byTense].map(([tense, t]) => `${tense} "${t.label}" widest ${t.w}px in a ${t.box}px box [@${t.width}/${t.theme}]`).join(" · ") + `\n`);
+    }
+    for (const f of tierCtaF) {
+      out(`   ✗ TIER CTA CLIPPED  billing-trial/${f.theme}@${f.width} (${f.tense} trial): ${String(f.plan).trim()} "${f.text}" ${f.sw}>${f.cw}\n`);
+    }
+
+    const failed = q1f.length + q2f.length + q3f.length + tierCtaF.length;
     if (failed) {
-      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length}) — exit 1\n`);
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
       return 1;
     }
     out(`\n>> verdict    clean across ${total} cells — exit 0\n`);

@@ -1,0 +1,1 @@
+The ceiling job's first real CI run is green, or its red is explained and the roster regenerated - never resolved by adding continue-on-error. Evidence: the run id.

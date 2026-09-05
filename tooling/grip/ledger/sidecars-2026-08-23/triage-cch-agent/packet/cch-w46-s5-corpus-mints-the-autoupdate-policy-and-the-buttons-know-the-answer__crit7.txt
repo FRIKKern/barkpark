@@ -1,0 +1,1 @@
+cch-backlog-bpbase-envelope-incomplete is corrected on the server: twelve fields, not six, and its unsatisfiable byte-identical overflow criterion re-worded. Evidence: the patched task read back.

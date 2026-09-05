@@ -299,9 +299,16 @@ defmodule BarkparkWeb.Router.Plugins do
     if Keyword.get(opts, :auth) == :public_root do
       session_name = public_root_session_name(path, mod)
       root_layout = Keyword.fetch!(opts, :root_layout)
+      # Optional per-route `on_mount:` for a public_root LiveView — a hook the
+      # plugin wants on ITS reader (e.g. `BarkparkWeb.PaperViewer` on the
+      # paper reader). It is passed through to the per-route live_session, so
+      # it can never leak onto a sibling route or into the shared buckets.
+      on_mount = Keyword.get(opts, :on_mount, [])
 
       quote do
-        live_session unquote(session_name), root_layout: unquote(Macro.escape(root_layout)) do
+        live_session unquote(session_name),
+          root_layout: unquote(Macro.escape(root_layout)),
+          on_mount: unquote(Macro.escape(on_mount)) do
           live(
             unquote(path),
             unquote(mod),
@@ -375,5 +382,5 @@ defmodule BarkparkWeb.Router.Plugins do
   # warning on unknown route options. `:auth` is the scope selector;
   # `:root_layout` is consumed by the `:public_root` live_session wrapper
   # above and is not a valid `live/4` option.
-  defp strip_plugin_opts(opts), do: Keyword.drop(opts, [:auth, :root_layout])
+  defp strip_plugin_opts(opts), do: Keyword.drop(opts, [:auth, :root_layout, :on_mount])
 end

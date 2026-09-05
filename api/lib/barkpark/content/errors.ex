@@ -75,6 +75,11 @@ defmodule Barkpark.Content.Errors do
     # Per-workspace quota gate at the mutate seam (perfect-plan-build W1, D11).
     "workspace_suspended" =>
       "This workspace is suspended — no writes are accepted until an operator reinstates it. Contact your workspace admin; details.reason names why.",
+    # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a, main 2026-09-05).
+    "workspace_scope_required" =>
+      "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to.",
+    # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
+    # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
       "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
   }
@@ -178,6 +183,14 @@ defmodule Barkpark.Content.Errors do
                          "session_restarting",
                          "session_start_failed",
                          "invalid_request_id",
+                         # 503 + retry-after: the exactly-once replay ring has no
+                         # table to read, so the session refuses the batch
+                         # (fail-CLOSED) rather than re-apply a non-idempotent op
+                         # it can no longer recognise. Nothing was applied; the
+                         # same request_id succeeds once the ring is back. Its own
+                         # token rather than `session_restarting` because the
+                         # SESSION is fine — only the ring is gone.
+                         "replay_unavailable",
                          # Media collection share link expired — v1/media_collections_controller.ex
                          "share_expired",
                          # Access-grant claim + token / ticket-key create (422) —
@@ -375,6 +388,45 @@ defmodule Barkpark.Content.Errors do
       details: %{reason: reason}
     }
 
+  # ── The unscoped-WRITE refusal (task-6fa023cdabdc5f6a) ──────────────────────
+  #
+  # A write arrived with NO workspace scope and its principal could have meant
+  # zero workspaces (a platform / global-admin token) or several. The ruling is
+  # infer-when-unambiguous, REFUSE-when-ambiguous: nothing is written and the
+  # caller is told which door to send it through.
+  #
+  # 422, not 400/409/403 — read off this module's own vocabulary:
+  #
+  #   * `malformed` (400) is a BODY-SHAPE failure ("send a well-formed JSON body
+  #     matching the endpoint's expected shape"). This body is perfectly well
+  #     formed; the request is unprocessable for a reason the parser cannot see.
+  #   * `conflict` (409) is a resource-STATE collision ("the document already
+  #     exists"). Nothing collided; no state is involved.
+  #   * `forbidden` (403) would be a lie: the caller is very likely ENTITLED to
+  #     write — to one of several workspaces. It must choose, not be denied.
+  #
+  # 422 is the slot this codebase already uses for "well-formed, but I cannot
+  # act on it as sent" — `slug_mismatch`, `create_wall`, `invalid_grant`,
+  # `batch_too_large`. This is that.
+  #
+  # `details.workspaces` carries the slugs the caller CAN write to (empty for a
+  # platform token), so the refusal is actionable in one hop instead of a
+  # round-trip to GET /v1/workspaces.
+  defp build({:error, :workspace_scope_required}),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422
+    }
+
+  defp build({:error, {:workspace_scope_required, workspaces}}) when is_list(workspaces),
+    do: %{
+      code: "workspace_scope_required",
+      message: "this write named no workspace and the caller's scope is ambiguous",
+      status: 422,
+      details: %{workspaces: workspaces}
+    }
+
   defp build({:error, :quota_exceeded}),
     do: %{code: "quota_exceeded", message: "workspace write quota exceeded", status: 402}
 
@@ -384,6 +436,22 @@ defmodule Barkpark.Content.Errors do
       message: "workspace write quota exceeded",
       status: 402,
       details: %{quota: quota}
+    }
+
+  # Oversize mutate batch — BarkparkWeb.Plugs.RequireWithinQuota. Deliberately
+  # REUSES the sheets ops door's already-registered `batch_too_large` (422): the
+  # meaning ("your batch exceeds this endpoint's cap — split and resend") and the
+  # status are identical, and a second token for it would have grown the public
+  # Error.code enum and docs/api-v1.md §9 for no client-visible gain. The hint is
+  # set here rather than in @hints because the code lives in
+  # @public_inline_codes, whose entries are owned by their inline emitters.
+  defp build({:error, {:batch_too_large, n, max}}) when is_integer(n) and is_integer(max),
+    do: %{
+      code: "batch_too_large",
+      message: "the mutations list carries #{n} mutations; the cap is #{max} per request",
+      status: 422,
+      details: %{count: n, max: max},
+      hint: "Split the batch into requests of at most #{max} mutations and resend."
     }
 
   defp build({:error, :forbidden_origin}),
@@ -618,6 +686,52 @@ defmodule Barkpark.Content.Errors do
           "outage to report, not a document to fix."
     }
 
+  # The database connection was lost MID-WRITE on the create path
+  # (`Content.Writer.do_create_document/5`'s rescue): a pool checkout dropped
+  # from the queue, a `tcp recv: closed`, a statement killed with the
+  # connection. Before this arm existed the raise escaped the Writer entirely
+  # and Phoenix RenderErrors rendered it through `BarkparkWeb.ErrorJSON` as 500
+  # `internal_error / "unknown error (DBConnection.ConnectionError)"` — the
+  # WRONG CLASS of answer. `BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # grants retry grace by matching the error CODE and `internal_error` is not on
+  # its transient list, and the CLI's `internal_error` hint says to "report the
+  # request_id to the API operator": a condition that clears on its own was
+  # described to every caller as a permanent server defect to escalate.
+  #
+  # WHY THE `code` IS "storage_unavailable" (the `dedup_unavailable` reasoning
+  # above, applied a second time). One public code maps to ONE status —
+  # `internal/cli/errors.go` keys the CLI exit code on `code` and
+  # `internal/cli/errors_api_parity_test.go` refuses a code this file emits at
+  # two statuses — and minting a brand-new code is a four-place change
+  # (`@hints` → `known_codes/0` → the served OpenAPI `Error.code` enum behind a
+  # drift gate → `docs/api-v1.md` §9 under a byte cap). This arm is the same
+  # transient-storage SHAPE the sibling already wears: public, 503, CLI exit 8,
+  # retry-is-the-right-reflex. `reason: "connection_unavailable"` discriminates
+  # it from a media-volume fault and from the dedup-scan outage, exactly as
+  # `:replay` does under "unauthorized".
+  #
+  # THE MESSAGE CARRIES THE AMBIGUITY. Unlike the dedup outage — where the scan
+  # never ran, so provably nothing was written — a connection lost mid-write
+  # leaves the caller unable to know whether the draft row landed. The Writer
+  # builds that sentence (it names `bp doc ls task --perspective drafts`) and it
+  # rides through verbatim, because telling a caller to "resend the identical
+  # request" without telling them to CHECK FIRST walks them into the dedup wall
+  # and a duplicate-of-your-own-first-attempt refusal.
+  defp build({:error, {:connection_unavailable, reason}}),
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "connection_unavailable",
+      hint:
+        "Transient: the database connection dropped mid-write, so this write " <>
+          "was neither confirmed nor refused on its merits. CHECK WHETHER IT " <>
+          "LANDED before retrying — `bp doc ls task --perspective drafts` for " <>
+          "a task, otherwise re-read the id you sent — then resend the " <>
+          "identical request only if it did not. If it keeps failing the " <>
+          "database is degraded: an outage to report, not a document to fix."
+    }
+
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
   # legacy exemption ledger. 422 with the validator's documentation-grade
@@ -730,6 +844,22 @@ defmodule Barkpark.Content.Errors do
   # missing `kind` surfaced as a bare 500 "unknown error" — a validation
   # failure with ZERO signal about what to fix (found by the typed-verbatim
   # cheatsheet pass, 2026-06-10).
+  # Mutate-path schema validation, ENFORCE arm (task-41a740fd6701ec28). Only
+  # reachable when the write's dataset opted in via
+  # `config :barkpark, Barkpark.Content.Validation, enforce_datasets: [...]` —
+  # the DEFAULT advises (warnings in the success envelope) and never reaches
+  # here. Same canonical `validation_failed` code and same per-field `details`
+  # map shape as the `unknown_fields` refusal already on that door, so the CLI
+  # and SDK need no new code path.
+  defp build({:error, {:schema_validation_failed, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "document content failed schema validation",
+      status: 422,
+      details: errors
+    }
+  end
+
   defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
     %{
       code: "validation_failed",

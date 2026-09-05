@@ -1,0 +1,1 @@
+`bash scripts/stale-verdict-watch.test.sh` is green with new assertions proven able to lose. Evidence: the fail-before output.

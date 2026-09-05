@@ -1,0 +1,1 @@
+If ever built: the three fail-open branches report through emit() (a BPSTAGE line the control plane parses), not log(), so an OPEN admission gate reaches the plane instead of dying on stdout.

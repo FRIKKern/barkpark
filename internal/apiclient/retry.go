@@ -138,6 +138,19 @@ type retryTransport struct {
 	onExhausted func(ExhaustedNotice)
 	// count is the cumulative number of retries this transport has performed.
 	count atomic.Int64
+
+	// onBackpressure / onBackpressureExhausted are the 429 path's announcements.
+	// They are SEPARATE callbacks from onRetry/onExhausted because a throttle is
+	// not a fault, and a reader handed one channel for both cannot tell a
+	// healthy server saying "slower" from a sick one saying "sorry".
+	// See retry_backpressure.go.
+	onBackpressure          func(BackpressureNotice)
+	onBackpressureExhausted func(BackpressureExhaustedNotice)
+	// throttled counts 429 backoffs, separately from count. Same reason.
+	throttled atomic.Int64
+	// backpressureAttempts overrides retry429Attempts in tests. Zero means the
+	// constant.
+	backpressureAttempts int
 }
 
 func (t *retryTransport) roundTripper() http.RoundTripper {
@@ -153,15 +166,23 @@ func (t *retryTransport) roundTripper() http.RoundTripper {
 // is returned with its body untouched and unbuffered. Only a 500 pays for the
 // bounded peek that reads its error code.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Idempotence gate. GET and HEAD qualify by definition — a HEAD is a GET
-	// that discards the body, and there is no shape of either whose repeat can
-	// change server state. Every other method is passed through untouched: a
-	// write's repeat is not this layer's decision to make (see the package
-	// comment).
-	if !idempotentMethod(req) {
-		return t.roundTripper().RoundTrip(req)
-	}
-
+	// THE IDEMPOTENCE GATE IS PER-FAULT, NOT PER-METHOD.
+	//
+	// It used to sit here as a blanket `if !idempotentMethod(req) { pass }`,
+	// which was right while a transient 500 was the only thing retried: a 500
+	// says nothing about whether the write landed, so no write may be repeated.
+	//
+	// A 429 is a different animal and needs the decision made LATER, against
+	// the response: every 429 this API emits comes from a Plug that halted
+	// before the controller, so the write provably did not happen and the
+	// replay provably cannot duplicate it. Deciding here, on the method alone,
+	// would throw that evidence away — and with it every `bp task pulse`, which
+	// is a POST and is most of the load that produced the throttle.
+	//
+	// So a non-idempotent request now enters the loop. It is still refused a
+	// repeat on a 500 (isRetryableServerFault's arm below checks the method),
+	// and it is granted one on a 429 only when the envelope and a rewindable
+	// body both say it is safe (mayReplayUnderBackpressure).
 	attempts := t.attempts
 	if attempts <= 0 {
 		attempts = retryAttempts
@@ -175,6 +196,17 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// declined on attempt 1) must not claim it "persisted through" anything.
 	retried := 0
 
+	// The two faults keep SEPARATE attempt counters and separate caps. A
+	// sequence that is throttled twice and then hits one transient 500 has not
+	// spent its 500 budget on the throttles, and vice versa: they are unrelated
+	// conditions and a shared counter would let a healthy backpressure burst
+	// silently consume the allowance for a genuine fault.
+	throttleAttempt := 0
+	// waited is the SUM of the backpressure waits spent in this RoundTrip, the
+	// bound that stops a server asking for one second forty times from turning
+	// an interactive command into a hang.
+	var waited time.Duration
+
 	for attempt := 1; ; attempt++ {
 		resp, err = t.roundTripper().RoundTrip(req)
 
@@ -187,7 +219,26 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 
+		// BACKPRESSURE FIRST — it is the cheaper check (a status compare) and
+		// it is the one whose answer differs by method.
+		if bp, is429 := classifyBackpressure(resp); is429 && !callerOwnsBackpressure(req) {
+			done, next := t.handleBackpressure(req, resp, bp, &throttleAttempt, &waited)
+			if done {
+				return resp, next
+			}
+			if next != nil {
+				return nil, next
+			}
+			continue
+		}
+
 		retryable, requestID := isRetryableServerFault(resp)
+		// A 500 is retried for GET/HEAD only, and that refusal is load-bearing:
+		// a 500 gives no evidence about whether a write landed. Unlike the 429
+		// arm above, there is nothing here to weigh — the answer is the method.
+		if retryable && !idempotentMethod(req) {
+			retryable = false
+		}
 		if !retryable {
 			return resp, nil
 		}
@@ -248,6 +299,103 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 }
 
+// handleBackpressure decides what a 429 means for this request and, when it
+// means "wait and try again", performs the wait.
+//
+// It returns (done, err):
+//
+//	done=true            — stop; hand resp back to the caller (err is nil).
+//	done=false, err=nil  — the wait was taken; the loop should try again.
+//	done=false, err!=nil — abandon the RoundTrip with err (a cancelled context
+//	                       or an unrewindable body).
+//
+// EVERY early return announces itself before giving up. A 429 handed back in
+// silence is precisely the defect this closes: the operator sees a non-2xx, has
+// no idea a throttle caused it, and files an outage.
+func (t *retryTransport) handleBackpressure(
+	req *http.Request,
+	resp *http.Response,
+	bp backpressure,
+	throttleAttempt *int,
+	waited *time.Duration,
+) (bool, error) {
+	attempts := t.backpressureAttempts
+	if attempts <= 0 {
+		attempts = retry429Attempts
+	}
+	*throttleAttempt++
+
+	give := func(reason string) (bool, error) {
+		t.announceBackpressureExhausted(req, *throttleAttempt, bp.requestID, reason)
+		return true, nil
+	}
+
+	// A wait the server itself called long is a refusal to serve, not a request
+	// to pause. Hand it back unslept and SAY the number, so the operator sees a
+	// quota rather than a hang.
+	if bp.tooLong {
+		return give(fmt.Sprintf("the server asked for %s, which is longer than this client will ever wait on your behalf (%s); the 429 is returned unslept", bp.delay, maxRetryAfter))
+	}
+
+	if ok, why := mayReplayUnderBackpressure(req, bp); !ok {
+		return give("it was not replayed because " + why)
+	}
+
+	if *throttleAttempt >= attempts {
+		return give(fmt.Sprintf("the attempt cap of %d is spent", attempts))
+	}
+
+	if *waited+bp.delay > maxTotalBackpressureWait {
+		return give(fmt.Sprintf("waiting a further %s would exceed the %s total-wait budget for one request (already waited %s)", bp.delay, maxTotalBackpressureWait, *waited))
+	}
+
+	// Same deadline arithmetic the 500 path uses: never turn a would-be answer
+	// into a context-deadline error by sleeping through the caller's budget.
+	if !t.hasBudgetFor(req, bp.delay) {
+		return give(fmt.Sprintf("this request's own deadline leaves no room to wait %s and still make a real attempt", bp.delay))
+	}
+
+	// Committed to the retry. Drain so the connection is reused rather than
+	// leaked, then rewind the body — a write replay that sent a consumed body
+	// would be a truncated request the server might well accept.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	if err := rewindBody(req); err != nil {
+		return false, fmt.Errorf("barkpark: could not rewind the request body to retry after a 429: %w", err)
+	}
+
+	*waited += bp.delay
+	t.throttled.Add(1)
+	if t.onBackpressure != nil {
+		t.onBackpressure(BackpressureNotice{
+			Attempt:     *throttleAttempt,
+			Of:          attempts,
+			Method:      req.Method,
+			URL:         req.URL.String(),
+			Delay:       bp.delay,
+			ServerAsked: bp.serverAsked,
+		})
+	}
+	if err := t.sleepFor(req.Context(), bp.delay); err != nil {
+		return false, fmt.Errorf("barkpark: 429 backoff interrupted: %w", err)
+	}
+	return false, nil
+}
+
+func (t *retryTransport) announceBackpressureExhausted(req *http.Request, attempts int, requestID, reason string) {
+	if t.onBackpressureExhausted == nil {
+		return
+	}
+	t.onBackpressureExhausted(BackpressureExhaustedNotice{
+		Attempts:  attempts,
+		Method:    req.Method,
+		URL:       req.URL.String(),
+		RequestID: requestID,
+		Reason:    reason,
+	})
+}
+
 // idempotentMethod reports whether req's method is one this transport may
 // repeat on its own authority.
 func idempotentMethod(req *http.Request) bool {
@@ -266,9 +414,11 @@ func idempotentMethod(req *http.Request) bool {
 // retry policy in this binary and this is how a second call site gets it.
 func NewRetryTransport(base http.RoundTripper) http.RoundTripper {
 	return &retryTransport{
-		base:        base,
-		onRetry:     stderrRetryNotifier,
-		onExhausted: stderrExhaustedNotifier,
+		base:                    base,
+		onRetry:                 stderrRetryNotifier,
+		onExhausted:             stderrExhaustedNotifier,
+		onBackpressure:          stderrBackpressureNotifier,
+		onBackpressureExhausted: stderrBackpressureExhaustedNotifier,
 	}
 }
 

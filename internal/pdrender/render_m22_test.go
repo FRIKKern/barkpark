@@ -29,7 +29,10 @@ func renderM22(t *testing.T, width int, p Profile) string {
 	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
 	reg := DefaultRegistry(DarkTheme())
 	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: p}
-	return reg.RenderDoc(blocks, ctx)
+	out := reg.RenderDoc(blocks, ctx)
+	// Shared blind-spot guard (unknown_block_guard_test.go).
+	assertNoUnknownBlock(t, "sample_m22.json", ansi.Strip(out))
+	return out
 }
 
 // TestGoldenM22 is the roadmap-v2 glyph layer: date-derived lanes off a block

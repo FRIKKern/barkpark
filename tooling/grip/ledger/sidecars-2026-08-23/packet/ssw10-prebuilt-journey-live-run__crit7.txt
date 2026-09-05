@@ -1,0 +1,1 @@
+THE FAIL-BEFORE IS RECORDED, NOT ASSUMED: the run (or the PR body) quotes the pre-crown refusal for the same fixture - 'the instance refused the deploy (HTTP 400): E_UNKNOWN_TYPE - unsupported tar entry type "x"' with all six stages skipped - so the walk is a pivot rather than a first attempt.

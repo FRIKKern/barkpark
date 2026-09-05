@@ -1,0 +1,1 @@
+MUTATION: the corrected leg can distinguish the two states. Evidence: a run against a context that IS live-required and one that is not, with both verdicts.

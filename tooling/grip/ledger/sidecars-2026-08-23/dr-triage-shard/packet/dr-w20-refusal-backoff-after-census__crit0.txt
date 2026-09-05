@@ -1,0 +1,1 @@
+Attempts-per-live and deferral-chain depth are re-measured over a pinned post-merge window on cloud-db-1, with VOLUME quoted beside every rate and the window bounds stated.

@@ -1,0 +1,1 @@
+The advisory template workflows (search-starter-smoke, astro-finder-drift, astro-search-finder-test) are named and pasted green on the PR, even though none of them is a required context.

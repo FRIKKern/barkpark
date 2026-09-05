@@ -1,0 +1,1 @@
+LIVE PROOF ON THE BOX THAT HAS THE PROBLEM: jarl's space payload names `containerd` ~14G and `barkpark-builder` ~11G as its top consumers -- i.e. the surface finally answers "of what" for a box at 95% with 1.9 GB free. Paste the rendered payload beside `df -hP /` and `du -x -sh /var/lib/*`.

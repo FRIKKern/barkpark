@@ -1,0 +1,1 @@
+node __binding_census.mjs exits 0 and prints 15 unpredicated, not 16; every place that quotes the old figure is updated in the same commit.

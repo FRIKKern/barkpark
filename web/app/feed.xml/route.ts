@@ -8,6 +8,7 @@ import {
   type PaperDocument,
 } from "@/lib/papers";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
+import { readerHref } from "@/lib/find";
 
 /**
  * RSS 2.0 feed for the public reader. Route Handler (not a page) so it serves
@@ -76,14 +77,14 @@ async function collectItems(): Promise<FeedItem[]> {
 
   const postItems: FeedItem[] = posts.map((post: PostDocument) => ({
     title: post.title ?? "(untitled)",
-    link: absoluteUrl(`/d/post/${encodeURIComponent(postSlug(post))}`),
+    link: absoluteUrl(readerHref("post", postSlug(post))),
     description: post.excerpt ?? "",
     date: post._updatedAt ?? post._createdAt,
   }));
 
   const paperItems: FeedItem[] = papers.map((paper: PaperDocument) => ({
     title: paperTitle(paper),
-    link: absoluteUrl(`/d/paper/${encodeURIComponent(paperSlug(paper))}`),
+    link: absoluteUrl(readerHref("paper", paperSlug(paper))),
     description: paperExcerpt(paper) ?? "",
     date: paper._updatedAt ?? paper._createdAt,
   }));

@@ -1,0 +1,1 @@
+Production is queried for the longest `detail` ever written, so the disposition rests on reach rather than symmetry. Evidence: the query and the max.

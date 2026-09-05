@@ -1,0 +1,1 @@
+The default render is presentable (or style=article becomes the default) without breaking existing styled papers — proven by render test or golden

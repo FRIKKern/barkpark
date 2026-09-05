@@ -1,0 +1,1 @@
+GATE: cd cloud && CC=/usr/bin/clang mix test test/barkpark_cloud/deploy_ledger_test.exs test/barkpark_cloud/payload_key_set_census_test.exs passes, AND CC=/usr/bin/clang go build ./... && CC=/usr/bin/clang go test ./internal/cli/ -run TestCloudDeployments passes. Paste both.
