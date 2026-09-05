@@ -177,7 +177,10 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
       ws_a: ws_a
     } do
       raw = "w41-bound-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Barkpark.Auth.create_token(raw, "bound", @dataset, ["read", "write"], ws_a.id)
+
+      {:ok, _token} =
+        Barkpark.Auth.create_token(raw, "bound", @dataset, ["read", "write"], ws_a.id)
+
       doc_id = "w41-bound-#{System.unique_integer([:positive])}"
 
       resp = send_create(scoped_conn_from(conn), raw, doc_id)
