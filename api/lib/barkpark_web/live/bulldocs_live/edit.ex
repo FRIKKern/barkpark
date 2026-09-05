@@ -164,10 +164,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def apply_op(socket, %{"op" => _} = op) do
     cond do
       not writable?(socket) ->
-        refuse(socket)
+        refuse_save(socket)
 
       not is_binary(socket.assigns[:slug]) ->
-        socket
+        failed_save(socket)
 
       true ->
         socket.assigns.slug
@@ -180,7 +180,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     end
   end
 
-  def apply_op(socket, _op), do: socket
+  def apply_op(socket, _op), do: failed_save(socket)
 
   @doc """
   Apply an ORDERED batch of ops atomically through

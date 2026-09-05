@@ -412,6 +412,9 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
         "field-request-accepted"
       })
 
+      # Synchronize with the handler before asserting its asynchronously pushed reply.
+      render(view)
+
       assert_push_event(view, "bp:paper-field-save-result", %{
         request_id: "field-request-accepted",
         saved: true
@@ -512,6 +515,33 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
         assert stored_blocks(slug) == before
         rejected_socket
       end)
+    end
+
+    test "single-op rejection cannot reuse an earlier successful acknowledgement", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      op = %{"op" => "patch-block", "id" => "b-body", "patch" => %{"text" => "Saved"}}
+
+      assert {:reply, %{saved: true}, saved_socket} =
+               BulldocsLive.handle_event("paper-op", op, socket_of(view))
+
+      before = stored_blocks(slug)
+
+      for {params, socket} <- [
+            {%{}, saved_socket},
+            {op, Phoenix.Component.assign(saved_socket, :can_edit?, false)},
+            {op, Phoenix.Component.assign(saved_socket, :slug, nil)}
+          ] do
+        assert {:reply, %{saved: false}, rejected_socket} =
+                 BulldocsLive.handle_event("paper-op", params, socket)
+
+        assert rejected_socket.assigns.last_save_ok? == false
+        assert rejected_socket.assigns.save_status == "Save failed"
+        assert stored_blocks(slug) == before
+      end
     end
 
     test "fallback autosave acknowledges only the current successful write", %{
