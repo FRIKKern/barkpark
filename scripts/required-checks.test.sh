@@ -4313,17 +4313,17 @@ fi
 # in this file would rot the same way the page did — and rot silently, since
 # nothing would compare it to anything.
 #
-# THE FOUR KNOWN ROTTED REFERENCES ARE A COMMITTED BASELINE, not a pass.
-# docs/ops/merge-gates.md is OUT OF THIS SLICE'S FENCE (the renumbering is filed
-# separately), so reddening on sight would land a red on main that this slice is
-# not allowed to fix. Same shape as BLOCKING_HEADER_UNRESOLVED_BASELINE: a NEW
-# mis-reference reds, a REPAIRED one prints a note asking for the baseline to
-# come down, and the baseline names each entry rather than counting them — a
-# count is satisfied by any four wrong numbers at all.
-RC20_XREF_BASELINE='10|scripts/studio-literal-check.sh|12
-9|design/check.mjs|11
-6|scripts/paper-editor-mirror-check.sh|8
-11|scripts/studio-link-lint.sh|13'
+# THE BASELINE IS EMPTY, AND STAYS EMPTY. It held the four root.html.heex
+# references #16063 could not renumber in its own PR (docs/ops/merge-gates.md
+# was out of that slice's fence). The renumbering landed with this diff, all
+# four now resolve, and the pins came down in the same commit — so the clause
+# guards EVERY citation on the page rather than reddening only on a fifth
+# drift. Same shape as BLOCKING_HEADER_UNRESOLVED_BASELINE: a NEW mis-reference
+# reds, a REPAIRED one prints a note asking for the baseline to come down, and
+# the baseline names each entry rather than counting them — a count is
+# satisfied by any four wrong numbers at all. Re-pinning here is a ratchet
+# release: fix the page instead.
+RC20_XREF_BASELINE=''
 
 rc20_xref_report() { # <merge-gates.md> -> one "KIND<TAB>cited<TAB>path<TAB>actual" line per bad reference
   awk '
@@ -4370,12 +4370,15 @@ fi
 # The bad references, minus the committed baseline. `comm` over sorted keys, so
 # a baselined entry whose ACTUAL row moves is NOT waved through by its cited
 # number matching.
-RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort)"
+# `|| true`: the page is CLEAN now, so `grep -v '^OK'` matches nothing and exits
+# 1. Under `set -euo pipefail` that status is the assignment's status and the
+# whole suite dies here — an empty problem list is the SUCCESS case, not an error.
+RC20_XREF_BAD="$(grep -vE '^OK\t' <<<"$RC20_XREF_ALL" | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort || true)"
 RC20_XREF_BASE_SORTED="$(printf '%s\n' "$RC20_XREF_BASELINE" | sort)"
 RC20_XREF_NEW="$(comm -23 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
 RC20_XREF_FIXED="$(comm -13 <(printf '%s\n' "$RC20_XREF_BAD") <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
 if [ -z "$RC20_XREF_NEW" ]; then
-  ok "…and no \`**N · <script>**\` reference points at the wrong roster row beyond the $(grep -c . <<<"$RC20_XREF_BASE_SORTED") committed baseline entries (all four off by exactly +2; the renumbering is filed against docs/ops/merge-gates.md, which is out of this slice's fence)"
+  ok "…and no \`**N · <script>**\` reference points at the wrong roster row, beyond the $(grep -c . <<<"$RC20_XREF_BASE_SORTED" || true) committed baseline entries (the baseline is empty: every citation on the page resolves through the roster row that names its script)"
 else
   bad "a NEW cross-reference points at the wrong roster row: $(tr '\n' '⏎' <<<"$RC20_XREF_NEW")"
 fi
@@ -4388,8 +4391,12 @@ fi
 # the same reference with its number moved by one (red). Without the correct
 # arm, the red one passes on a resolver that reds on any new text at all.
 RC20_XREF_SCRATCH="$TMP/rc20-xref-doc.md"
-RC20_XREF_PATH="$(awk -F'\t' '$1 == "MISNUMBERED" { print $3; exit }' <<<"$RC20_XREF_ALL")"
-RC20_XREF_TRUE="$(awk -F'\t' -v p="$RC20_XREF_PATH" '$1 == "MISNUMBERED" && $3 == p { print $4; exit }' <<<"$RC20_XREF_ALL")"
+# SEED FROM ANY RESOLVED REFERENCE, not from a BROKEN one. The page is clean
+# now, so keying the seed on a MISNUMBERED line would make both arms below
+# vacuous the moment the page is correct — a mutation proof that only works
+# while the bug is still there proves nothing about the fix.
+RC20_XREF_PATH="$(awk -F'\t' '$4 != "-" { print $3; exit }' <<<"$RC20_XREF_ALL")"
+RC20_XREF_TRUE="$(awk -F'\t' -v p="$RC20_XREF_PATH" '$4 != "-" && $3 == p { print $4; exit }' <<<"$RC20_XREF_ALL")"
 cp "$MERGE_GATES_DOC" "$RC20_XREF_SCRATCH"
 printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, correct arm.\n' \
   "$RC20_XREF_TRUE" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
@@ -4400,7 +4407,7 @@ else
   bad "the cross-reference mutation did not apply (path='$RC20_XREF_PATH' row='$RC20_XREF_TRUE') — the two arms below are vacuous"
 fi
 RC20_XREF_GOOD="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
-                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+                  | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ -z "$RC20_XREF_GOOD" ]; then
   ok "…and a reference citing the RIGHT row number resolves clean — the clause is reading the table, not reddening on any \`**N · …**\` it has not seen before"
 else
@@ -4409,7 +4416,7 @@ fi
 printf '\n**%s · `%s`** — planted by required-checks.test.sh §20, WRONG arm.\n' \
   "$((RC20_XREF_TRUE + 1))" "$RC20_XREF_PATH" >> "$RC20_XREF_SCRATCH"
 RC20_XREF_RED="$(rc20_xref_report "$RC20_XREF_SCRATCH" | grep -vE '^OK\t' | awk -F'\t' '{ printf "%s|%s|%s\n", $2, $3, $4 }' | sort \
-                 | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED"))"
+                 | comm -23 - <(printf '%s\n' "$RC20_XREF_BASE_SORTED") || true)"
 if [ "$RC20_XREF_RED" = "$((RC20_XREF_TRUE + 1))|$RC20_XREF_PATH|$RC20_XREF_TRUE" ]; then
   ok "…and moving that ONE number by one makes the clause name it — cited $((RC20_XREF_TRUE + 1)), resolves to row $RC20_XREF_TRUE (mutation-proven able to fail)"
 else
