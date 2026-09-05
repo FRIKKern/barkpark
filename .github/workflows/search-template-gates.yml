@@ -32,11 +32,57 @@ name: search-template-gates
 # a broken workflow — the fix is to correct (or cut) the offending doc copy, not
 # to loosen the gate. It stays fail-closed on unproven commands on purpose.
 #
-# NOTE: a new workflow only *blocks* a PR once a human registers it as a required
-# check in branch protection. Until then it still runs and reds the PR page on
-# failure. Triggers on pull_request only, so main's own status stays untouched.
+# NOTE: this workflow is ADVISORY. It reds its own check-run on failure; it
+# cannot stop a merge, because branch protection's required set on main is
+# exactly ["Elixir gate", "PR references an active task", "Cloud gate",
+# "Console gate"] and nothing here is among them.
+#
+# WHY THERE IS A push:main ARM (added 2026-09-05, task-bc9fe6dc29d0b979).
+# Until now this file declared `on: pull_request` ONLY, so `gh run list
+# --workflow=search-template-gates.yml --branch main` returned an EMPTY list:
+# main was never measured. That is not a small gap for `Vendored SDK
+# freshness` in particular — #16174 was merged at 12:20Z while that job was
+# red, and main then shipped a stale vendored barkpark-core.tgz to every user
+# who scaffolded from these templates. A gate that has never once run on the
+# branch it protects reports nothing, and reads exactly like a gate that ran
+# and found nothing.
+#
+# WHERE A STALE TARBALL ON MAIN NOW SURFACES. Two places, both on the push
+# arm: (1) the `Vendored SDK freshness` check-run on the main commit reds —
+# visible on the commit, in the Actions tab, and in `gh run list --workflow=
+# search-template-gates.yml --branch main`; and (2) the `report-main-failure`
+# job below files (or comments on) ONE idempotent GitHub issue under the key
+# `search-template-gates-main` via scripts/file-ci-failure-issue.sh, assigned
+# and @mentioned, because nobody opens the Actions tab unprompted. Close that
+# issue when a main run is green again; the next failure opens a fresh one.
+#
+# THE push ARM IS PATH-UNFILTERED, ON PURPOSE. The pull_request arm below is
+# keyed to the paths that can make the tarballs stale, which is right for a PR
+# — but a paths: filter on the main arm would only move the vacuous green one
+# hop over, from "main is never measured" to "main is not measured when
+# untouched". The tarballs are a FROZEN artifact: they rot relative to a
+# source tree that keeps moving, and the run that proves they are still fresh
+# is exactly the run on the commit that did not touch them.
+#
+# IF THIS IS EVER PROMOTED TO REQUIRED, register an AGGREGATOR context that
+# always emits — never one of the paths-filtered leaf job names below. A
+# required context that emits no check run on a filtered-out PR routes to
+# `Expected — Waiting for status to be reported` forever and deadlocks the
+# merge; registering the leaf reproduces the same defect it is meant to end.
+#
+# FENCE COLLISION — THE GATE AND ITS REMEDY LIVE IN DIFFERENT TREES. The
+# freshness job fires on `js/packages/{core,react}/**` changes, but its ONLY
+# remedy writes to `templates/**`: you fix a red here by running
+# `scripts/recut-vendor-tarballs.sh` and committing the re-cut
+# `templates/*/vendor/*.tgz` plus `templates/VENDOR-STAMP.json`. So the SDK
+# lane must run that script IN THE SAME PR as the js/packages change — a lane
+# fenced out of `templates/**` cannot green this gate and will conclude,
+# wrongly, that the gate is broken. See docs/ops/ci-workflow-verdicts.md.
 
 on:
+  # PATH-UNFILTERED BY DESIGN — see "THE push ARM IS PATH-UNFILTERED" above.
+  push:
+    branches: [main]
   pull_request:
     paths:
       - "templates/**"
@@ -79,8 +125,15 @@ on:
       - "tooling/doc-truth/verify-docs.mjs"
       - ".github/workflows/search-template-gates.yml"
 
+permissions:
+  contents: read
+
 concurrency:
-  group: search-template-gates-${{ github.ref }}
+  # One group PER MAIN SHA, so a later push never evicts an earlier main run
+  # and leaves that commit unmeasured; PRs keep grouping by ref as before.
+  group: search-template-gates-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels this suite dark
+  # (never-cancel-main-check.sh / honest-gates D12). A no-op on PRs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -144,3 +197,45 @@ jobs:
           templates/astro-search-starter/README.md
           templates/search-starter/DEPLOYING.md
           templates/search-starter/README.md
+
+  # THE READER FOR THE push:main ARM. Without this, a red on main lands in the
+  # Actions tab that nobody opens — and this workflow was PR-only precisely
+  # because a red with no reader is indistinguishable from no red at all.
+  # Copied from deploy-harnesses.yml / grip-suite.yml (#16127): one idempotent
+  # issue per key, assigned and @mentioned, commented on for repeat firings.
+  report-main-failure:
+    name: Report main-push failure to a human
+    needs:
+      [
+        vendor-block-coverage,
+        vendor-sdk-freshness,
+        contrast-focus-literals,
+        bp-command-truth,
+      ]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: search-template-gates-main
+          CI_FAILURE_DETAIL: |
+            `search-template-gates` is RED on main. This workflow is ADVISORY —
+            it reds its own check-run and cannot stop a merge — so this issue is
+            how a red on main reaches a human at all.
+
+            If `Vendored SDK freshness` is the failing job, the vendored
+            barkpark-core / barkpark-react tarballs under `templates/*/vendor/`
+            no longer match `js/packages/{core,react}` source, and every user who
+            scaffolds from these templates is getting the stale SDK. THE REMEDY
+            LIVES IN A DIFFERENT TREE FROM THE TRIGGER: run
+            `bash scripts/recut-vendor-tarballs.sh` and commit the re-cut
+            `templates/*/vendor/*.tgz` plus `templates/VENDOR-STAMP.json`.
+
+            Close this issue once a main-push run is green; the next failure
+            opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
