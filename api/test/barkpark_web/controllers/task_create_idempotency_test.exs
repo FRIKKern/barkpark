@@ -16,7 +16,7 @@ defmodule BarkparkWeb.TaskCreateIdempotencyTest do
   The API-side remedy is the convention already in the tree: the
   `Idempotency-Key` request header, claim-first-deduped by
   `BarkparkWeb.Plugs.Idempotency` (mounted on BOTH mutate routes — flat
-  `:idempotent`, router.ex:1148, and scoped `:scoped_mutate`, router.ex:456).
+  `:idempotent`, and scoped `:scoped_mutate` — both in router.ex).
   These tests prove that convention actually holds for a task CREATE — the one
   mutation with no server-assigned id to re-read — over real HTTP.
   """
