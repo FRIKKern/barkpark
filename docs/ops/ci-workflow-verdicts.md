@@ -85,6 +85,32 @@ STAY (they test the code the PR touches). Watcher = the `Report main-push failur
 | `grip-suite.yml` | push:main + nightly 03:25Z + dispatch (PR arm removed) | lead-gates | `grip-suite` |
 | `twoslash.yml` | push:main + nightly 03:30Z + dispatch | lead-gates | `twoslash-main` |
 
+## ADDED 2026-09-05 (task-bc9fe6dc29d0b979) — `search-template-gates.yml` gains a main arm
+
+Not a move: the PR arm and its `paths:` list are unchanged. `search-template-gates.yml` was
+`pull_request`-only, so `gh run list --workflow=search-template-gates.yml --branch main` returned an
+EMPTY list — main was never measured, and #16174 merged at 12:20Z while `Vendored SDK freshness` was
+red, shipping a stale vendored `barkpark-core.tgz` to every scaffolded user. Trigger change
+authorised by main under task-33742276cf0a35b1.
+
+| workflow | venue now | owner | issue key |
+|---|---|---|---|
+| `search-template-gates.yml` | push:main (path-UNFILTERED) + the unchanged PR arm | lead-gates | `search-template-gates-main` |
+
+The main arm is deliberately path-unfiltered: the vendored tarballs are a FROZEN artifact that rots
+against a moving source tree, so a `paths:` filter would only move the vacuous green one hop, from
+"main is never measured" to "main is not measured when untouched". It stays ADVISORY — it reds its
+own check-run and cannot stop a merge. **If it is ever promoted to required, register an AGGREGATOR
+context, never one of the paths-filtered leaf job names**: a required context that emits no check run
+on a filtered-out PR waits for status forever.
+
+**Fence collision — the trigger and the remedy live in different trees.** `Vendored SDK freshness`
+fires on `js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
+`bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut `templates/*/vendor/*.tgz` and
+`templates/VENDOR-STAMP.json`. The SDK lane must run that script **in the same PR** as the
+js/packages change; a lane fenced out of `templates/**` cannot green this gate and will wrongly
+conclude the gate is broken.
+
 ## The three that need words
 
 **`required-checks-drift` — MOVE, in flight as #15663.** ~3,500 job-minutes across 1,227 PR runs for
