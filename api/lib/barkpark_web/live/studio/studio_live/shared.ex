@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   alias Barkpark.{Content, Tenancy}
   alias Barkpark.Content.Warnings
+  alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
@@ -314,17 +315,58 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # predicate treats as unresolvable and refuses FOR A GRANT-GRADED SOCKET ONLY.
   # A membership-derived socket is untouched: `grant_target_denied?/3` returns
   # false without loading anything.
+  # task-3cae133ab3aca51d — THE MEDIA PERMISSION SET, ASKED AT THIS SEAM TOO.
+  #
+  # The two arms above are the Studio's own authority: "may this PRINCIPAL
+  # write" and "does this principal's GRANT name this target". A `mediaAsset`
+  # has a THIRD authority that predates both and that neither can see — the
+  # media permission set, `Media.Storage.Access`, which guards the same
+  # `altText`/`caption` fields on the HTTP door
+  # (`V1.MediaController.patch_metadata` -> `Access.allowed?/4`,
+  # `media_controller.ex:561`) and withholds `edit_metadata` from a non-admin
+  # who does not hold the asset's CHECKOUT lock.
+  #
+  # PR #16066 made `mediaAsset` documents openable in this editor, so those
+  # fields acquired a second write path — and this one had no idea the lock
+  # existed. Reproduced by run before this arm
+  # (`media_asset_edit_metadata_authority_test.exs`): a `["read","write"]` token
+  # labelled `s9-not-the-holder`, which `Access.allowed?/4` answers `false` for,
+  # submitted `form#editor-form` and the draft read back
+  # `%{"altText" => %{"nob" => "SKREVET AV EN NEKTET SKRIBENT"},
+  #    "checkedOutBy" => "another-editor"}`. A permission WIDENING through the
+  # UI: refused over HTTP, accepted in the Studio.
+  #
+  # ONE AUTHORITY, NOT A THIRD COPY. This calls the SAME function the media
+  # controller's guard now delegates to — `Access.edit_metadata_allowed?/2`,
+  # behind `Access.metadata_write_denied?/3`, which also owns the "is this the
+  # asset type" test so the media type name does not get a copy in a module that
+  # knows nothing about media. No new permission kind, and the HTTP behaviour is
+  # byte-identical (the media controller tests are unchanged and green).
+  #
+  # LAST, DELIBERATELY. The principal question and the grant question are
+  # cheaper and broader; this one is media-only and answers `false` for every
+  # other type, so it must not shadow the two refusals that carry their own
+  # user-facing wording.
   @doc false
   def do_autosave(socket, params) do
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
+    type = socket.assigns[:editor_type]
 
     cond do
       Paper.write_denied?(socket) ->
         Paper.refuse_write_denied(socket)
 
-      Paper.grant_target_denied?(socket, socket.assigns[:editor_type], doc_id) ->
+      Paper.grant_target_denied?(socket, type, doc_id) ->
         Paper.refuse_outside_grant(socket)
+
+      MediaAccess.metadata_write_denied?(socket, type, doc) ->
+        socket
+        |> put_flash(
+          :error,
+          "This asset is checked out by another editor, so its metadata is read-only for you."
+        )
+        |> assign(save_status: "Read-only")
 
       true ->
         autosave_write(socket, params)
