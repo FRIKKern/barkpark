@@ -131,7 +131,8 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     for {label, qs} <- [
           {"?fields= projection", "?fields=title"},
           {"?expand= hydration", "?expand=author"},
-          {"?resolve=tasks snapshotting", "?resolve=tasks"}
+          {"?resolve=tasks snapshotting", "?resolve=tasks"},
+          {"?count=true totalling", "?count=true"}
         ] do
       test "single doc — #{label} suppresses the etag" do
         conn = get(scoped_conn(), doc_path(unquote(qs)))
@@ -163,6 +164,106 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
 
       body = json_response(shaped, 200)
       refute body == json_response(get(scoped_conn(), doc_path()), 200)
+    end
+  end
+
+  describe "?count=true is shaping: it changes the body without moving _id:_rev" do
+    # FIXTURE HONESTY first — without this the pin below could pass because
+    # ?count=true does nothing at all.
+    test "the two bodies really differ: only the counted one carries result.total" do
+      plain = json_response(get(scoped_conn(), list_path()), 200)
+      counted = json_response(get(scoped_conn(), list_path("?count=true")), 200)
+
+      refute Map.has_key?(plain["result"], "total")
+      assert Map.has_key?(counted["result"], "total")
+
+      assert plain["result"]["documents"] == counted["result"]["documents"],
+             "fixture is off-target: ?count=true moved the DOCUMENTS, so this is no longer a test about a body the _id:_rev fold cannot see"
+    end
+
+    # MUTATION PROOF: remove "count" from `@shaping_params` in
+    # query_controller.ex and "a ?count=true list carries no validator" reds —
+    # the header comes back. The 304 pin below is guarded TWICE (the count
+    # fence, and the page-shape fold that puts `total` in the validator), so it
+    # reds only when BOTH are reverted — verified, not assumed.
+    test "a ?count=true list carries no validator" do
+      conn = get(scoped_conn(), list_path("?count=true"))
+      assert conn.status == 200
+
+      assert etag_of(conn) == [],
+             "a counted representation advertised a validator folded from _id:_rev alone"
+    end
+
+    test "and a ?count=true request is NOT answered 304 from a countless validator" do
+      [etag] = etag_of(get(scoped_conn(), list_path()))
+
+      counted =
+        scoped_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get(list_path("?count=true"))
+
+      assert counted.status == 200,
+             "the server answered a COUNTED request 304 from a COUNTLESS representation's validator"
+
+      assert Map.has_key?(json_response(counted, 200)["result"], "total")
+    end
+  end
+
+  describe "an empty page does not share one validator with every other empty page" do
+    # Both are past the end of a one-document type, so `rendered == []` and
+    # `list_etag/3` degenerates to the constant "<dataset>|<type>|". The BODIES
+    # still differ — they echo limit/offset/hasMore back — so one validator
+    # across both means each 304s against the other's ETag.
+    #
+    # MUTATION PROOF: call `cache_validator(etag, schema_hash)` (the arity-2
+    # clause, no page shape) at the list call site and both pins below red.
+    test "two empty pages with different limit/offset get different validators" do
+      a = get(scoped_conn(), list_path("?offset=900&limit=10"))
+      b = get(scoped_conn(), list_path("?offset=500&limit=50"))
+
+      assert a.status == 200
+      assert b.status == 200
+
+      body_a = json_response(a, 200)
+      body_b = json_response(b, 200)
+
+      assert body_a["result"]["documents"] == [],
+             "fixture is vacuous: the page was not empty, so list_etag/3 never degenerated"
+
+      assert body_b["result"]["documents"] == []
+
+      refute body_a["result"] == body_b["result"],
+             "fixture is vacuous: the two empty pages returned the SAME body, so one validator would be correct"
+
+      assert [etag_a] = etag_of(a)
+      assert [etag_b] = etag_of(b)
+
+      refute etag_a == etag_b,
+             "every empty page of a type collapsed to one validator, while their bodies differ"
+    end
+
+    test "an empty page is not answered 304 from another empty page's validator" do
+      [etag_a] = etag_of(get(scoped_conn(), list_path("?offset=900&limit=10")))
+
+      replay =
+        scoped_conn()
+        |> put_req_header("if-none-match", etag_a)
+        |> get(list_path("?offset=500&limit=50"))
+
+      assert replay.status == 200,
+             "an empty page was served 304 from a validator minted for a DIFFERENT empty page"
+    end
+
+    # The direction guard: the fold must not cost the identical request its 304.
+    test "the SAME empty page still round-trips to a 304" do
+      [etag] = etag_of(get(scoped_conn(), list_path("?offset=900&limit=10")))
+
+      replay =
+        scoped_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get(list_path("?offset=900&limit=10"))
+
+      assert replay.status == 304
     end
   end
 
@@ -208,6 +309,21 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
 
     test "rides the list route", %{conn: conn} do
       assert "authorization" in vary_of(get(conn, list_path()))
+    end
+
+    # AXIS 3. `maybe_vendor_content_type/1` switches the response Content-Type
+    # on an assign derived from the ACCEPT request header, under an ETag that
+    # folds no Accept — so a shared cache must key on it too.
+    # MUTATION PROOF: drop "accept" from the merge list in
+    # `put_vary_authorization/1` and these two red.
+    test "accept rides the response too, because Accept picks the content-type" do
+      conn = get(scoped_conn(), doc_path())
+      assert "accept" in vary_of(conn)
+      assert "authorization" in vary_of(conn)
+    end
+
+    test "accept rides the list route" do
+      assert "accept" in vary_of(get(scoped_conn(), list_path()))
     end
 
     test "rides GET /v1/capabilities, whose body is tier-keyed", %{conn: conn} do
