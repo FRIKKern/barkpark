@@ -16,6 +16,12 @@ for (const name of [
   globalThis[name] = window[name];
 }
 globalThis.window = window;
+// Node 20 has no navigator global; use this DOM's browser identity on every
+// runtime instead of accidentally relying on newer Node's built-in navigator.
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: window.navigator,
+});
 globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 
 const { Diagram, BP_DIAGRAM_NODE_NAME } = await import("./diagram-node.js");
