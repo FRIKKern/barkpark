@@ -563,6 +563,11 @@ func vercelPublishPayload(ids []string, publishType string) map[string]any {
 // admin-gated POST /w/<site>/p/default/v1/tokens endpoint (Part A). This is the
 // step that removes the only prod-ssh dependency from the old flow.
 func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site string) (string, error) {
+	// public-read is CORRECT here and stays: this token is baked into a PUBLICLY
+	// deployed Next.js site, so it is a published-only credential by design —
+	// `read` would let anyone who views source pull the workspace's PRIVATE
+	// schemas. A desk operator who needs the read tier mints it deliberately with
+	// `bp token create <label> --permissions read` (token_create_cmd.go).
 	body, _ := json.Marshal(map[string]any{
 		"label":       "public-read-" + site,
 		"permissions": []string{"public-read"},
