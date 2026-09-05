@@ -195,8 +195,14 @@ main() {
   #      carries no scannable product source at all
 
   # --- 3a. census: refuse to certify a tree that holds nothing to scan ---------
+  # NO PIPE FROM printf HERE. `printf ... | head -3` under `set -o pipefail`
+  # returns 141 (SIGPIPE) the moment head closes the pipe early: the gate then
+  # exits 141 having printed parts 1 and 2 and nothing else — a silent non-zero
+  # that reads as neither a pass nor a finding. Herestrings feed a temp file, so
+  # head has no writer to signal. Measured here on the first run of this rewrite.
   CORPUS="$(scan_sources '.' "$SCAN_ROOT")"
-  CORPUS_N="$(printf '%s' "$CORPUS" | grep -c . || true)"
+  CORPUS_N="$(grep -c . <<<"$CORPUS" || true)"
+  [ -n "$CORPUS" ] || CORPUS_N=0
   if [ "$CORPUS_N" -eq 0 ]; then
     refuse "zero scannable files under $SCAN_ROOT.
     Looked for *.{$(echo "$SCANNED_EXTS" | tr ' ' ',')} under: $SCANNED_DIRS
@@ -205,7 +211,7 @@ main() {
   fi
   # Positive control in the OUTPUT, not just in the assertions: a zero must never
   # be indistinguishable from an empty scan when a human reads the log.
-  CORPUS_SAMPLE="$(printf '%s\n' "$CORPUS" | head -3 | tr '\n' ' ')"
+  CORPUS_SAMPLE="$(head -3 <<<"$CORPUS" | tr '\n' ' ')"
 
   # --- 3b. the check ----------------------------------------------------------
   OEMBED_HITS="$(scan_sources oembed "$SCAN_ROOT")"
@@ -228,11 +234,11 @@ main() {
 # the shipping code path — not a second implementation that could agree while
 # both are wrong. Nothing is planted in this repo.
 selftest() {
-  local tmp bad=0 rc
+  local tmp bad=0 ran=0 rc
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  say() { if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi; }
+  say() { ran=$((ran + 1)); if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi; }
 
   fresh() { # a scannable tree with one file per scanned extension, no oEmbed,
             # plus a VALID two-file fetch corpus for parts 1 and 2.
@@ -253,15 +259,22 @@ selftest() {
       bash "$SELF" > "$tmp/out" 2>&1
     echo $?
   }
-  local n_exts; n_exts="$(printf '%s\n' $SCANNED_EXTS | grep -c .)"
+  local n_exts n_dirs
+  n_exts="$(tr ' ' '\n' <<<"$SCANNED_EXTS" | grep -c . || true)"
+  n_dirs="$(tr ' ' '\n' <<<"$SCANNED_DIRS" | grep -c . || true)"
 
   echo "preview-parity-check --selftest (throwaway trees)"
 
   # 1. SILENT ARM — a clean corpus must not fire.
+  # The expected census is one probe file per scanned extension PLUS the two
+  # fetch-corpus files, which are themselves .tsx/.ts and therefore scanned.
+  # Pinning the NUMBER is the point: "PASS" alone would also be printed by a
+  # scan that read one file.
+  local n_clean=$((n_exts + 2))
   fresh; rc="$(probe)"
-  { [ "$rc" -eq 0 ] && grep -q "zero oEmbed references across $n_exts scanned source files" "$tmp/out"; } \
-    && say "clean corpus -> PASS (parts 1-3 stay silent, $n_exts files scanned)" 0 \
-    || { say "clean corpus -> PASS (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+  { [ "$rc" -eq 0 ] && grep -q "zero oEmbed references across $n_clean scanned source files" "$tmp/out"; } \
+    && say "clean corpus -> PASS (parts 1-3 stay silent, $n_clean files scanned)" 0 \
+    || { say "clean corpus -> PASS, $n_clean files scanned (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
 
   # ── part 2's corpus-vanish arms — the defect this rewrite closed ─────────────
 
@@ -418,9 +431,9 @@ selftest() {
     || { say "unknown argument -> exit 2, names the argument (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
 
   echo ""
-  echo "  scanned-extension arms: $n_exts   product-dir arms: $(printf '%s\n' $SCANNED_DIRS | grep -c .)"
-  if [ "$bad" -eq 0 ]; then echo "preview-parity-check --selftest: PASS"; return 0; fi
-  echo "preview-parity-check --selftest: FAILED ($bad case(s))"; return 1
+  echo "  scanned-extension arms: $n_exts   product-dir arms: $n_dirs"
+  if [ "$bad" -eq 0 ]; then echo "preview-parity-check --selftest: PASS ($ran/$ran)"; return 0; fi
+  echo "preview-parity-check --selftest: FAILED ($bad of $ran case(s))"; return 1
 }
 
 case "${1:-}" in
