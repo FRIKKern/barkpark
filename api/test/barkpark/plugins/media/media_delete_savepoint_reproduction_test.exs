@@ -132,7 +132,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteSavepointReproductionTest do
       id = unboxed(fn -> insert_unboxed_blob!() end)
 
       try do
-        result = unboxed(fn -> Media.delete_file(id) end)
+        result = unboxed(fn -> Media.delete_file(id, where_used: :cascade) end)
 
         assert match?({:ok, %MediaFile{}}, result),
                "delete_file/2 on an :idle connection answered #{inspect(result)}; " <>

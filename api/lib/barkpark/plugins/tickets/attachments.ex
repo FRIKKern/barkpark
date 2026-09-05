@@ -276,7 +276,11 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
             # invisible to the count cap. A 201 pointing at a permanent 404
             # would be a lie, so best-effort delete the orphan and report the
             # store as failed (client retries cleanly).
-            _ = Media.delete_file(file.id, scope)
+            # `where_used: :cascade` — this is the rollback of a blob THIS
+            # request created seconds ago and never handed out a URL for, so no
+            # published document can reference it and a where-used lookup could
+            # only cost a scan. See `Media.delete_file/2`'s `:where_used` docs.
+            _ = Media.delete_file(file.id, Keyword.put(scope, :where_used, :cascade))
             {:error, :storage_unavailable}
         end
       else

@@ -126,7 +126,7 @@ defmodule Barkpark.Plugins.Media.AssetsTest do
 
       assert Assets.find_by_media_file_id(file.id, @dataset)
 
-      assert {:ok, _} = Media.delete_file(file.id)
+      assert {:ok, _} = Media.delete_file(file.id, where_used: :cascade)
       refute Assets.find_by_media_file_id(file.id, @dataset)
     end
   end

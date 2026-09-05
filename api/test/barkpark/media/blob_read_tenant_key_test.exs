@@ -214,7 +214,8 @@ defmodule Barkpark.Media.BlobReadTenantKeyTest do
 
       # And the delete verb is row-addressed too: B removing its row must not
       # erase A's bytes (the cross-tenant DESTROY through the same hole).
-      assert {:ok, _} = Media.delete_file(ctx.row_b.id, workspace_id: ctx.b.ws.id)
+      assert {:ok, _} =
+               Media.delete_file(ctx.row_b.id, workspace_id: ctx.b.ws.id, where_used: :cascade)
 
       resp_a = scoped_get(ctx.a, ctx.shared)
       assert resp_a.status == 200
