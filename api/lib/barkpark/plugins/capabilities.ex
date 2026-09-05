@@ -63,6 +63,8 @@ defmodule Barkpark.Plugins.Capabilities do
 
   alias Barkpark.Plugins.Registry
 
+  require Logger
+
   @typedoc "The six closed auth tiers from the frozen schema enum."
   @type tier :: String.t()
 
@@ -251,7 +253,10 @@ defmodule Barkpark.Plugins.Capabilities do
         cmd = normalize_command(cmd)
         name = Map.get(plugin_noun_to_name, cmd["noun"])
         source = if name, do: "plugin:#{name}", else: "plugin"
-        Map.put(cmd, "source", source)
+
+        cmd
+        |> declare_writes_fail_closed(name)
+        |> Map.put("source", source)
       end)
 
     core_nouns = core_nouns()
@@ -463,6 +468,48 @@ defmodule Barkpark.Plugins.Capabilities do
     |> Map.update("http", %{}, &stringify_shallow/1)
     |> Map.update("args", [], fn args -> Enum.map(args || [], &stringify_shallow/1) end)
     |> Map.update("flags", [], fn flags -> Enum.map(flags || [], &stringify_shallow/1) end)
+  end
+
+  # @canonical capability:plugin-command-writes-fail-closed aka:writes,readonlyhint,plugin mutator,fail closed
+  #
+  # `writes` is a SAFETY bit and this is its ONLY runtime owner for
+  # plugin-contributed commands. CORE commands get theirs from the core builder's
+  # `Keyword.fetch!(opts, :writes)` — a hard crash at compile time if omitted.
+  # Plugin commands have no such door: `cli_commands/0` returns plain maps, and
+  # `Barkpark.Plugin`'s `required(:writes) => boolean()` lives in a @type, which
+  # is a DIALYZER claim with zero runtime force. So an out-of-tree plugin that
+  # forgets the key emitted a command with `writes` ABSENT.
+  #
+  # Absent is not neutral downstream. Go decodes a missing key into the zero
+  # value `false`, and `bridgeAnnotations` (internal/cli/mcp_bridge.go) maps
+  # false to `ReadOnlyHint: true` — so a plugin MUTATOR was advertised to every
+  # MCP client as a safe read, and `bp`'s prod write confirmation
+  # (`cmd.Writes && isProd(...)`, internal/cli/run.go) was skipped for it. Two
+  # safety gates failing OPEN on the same missing key.
+  #
+  # So: assume it mutates. An undeclared command is emitted `writes: true` and
+  # warned about by name. Over-declaring costs a spurious confirmation prompt;
+  # under-declaring costs an unconfirmed production write.
+  #
+  # It DEFAULTS, it does not OVERRIDE: an explicit `writes: false` is left
+  # exactly as the plugin wrote it, or the bit would stop carrying information.
+  # And it never raises — repo doctrine is that one malformed out-of-tree
+  # command must not brick the manifest for every other plugin and the core.
+  defp declare_writes_fail_closed(cmd, plugin_name) do
+    case Map.fetch(cmd, "writes") do
+      {:ok, w} when is_boolean(w) ->
+        cmd
+
+      _ ->
+        Logger.warning(
+          "plugin command declares no `writes` bit; assuming it MUTATES (writes: true). " <>
+            "plugin=#{plugin_name || "<unknown>"} noun=#{cmd["noun"]} verb=#{cmd["verb"]} " <>
+            "id=#{cmd["id"]} — declare `writes:` explicitly in cli_commands/0: an " <>
+            "undeclared mutator would be advertised to MCP clients as read-only."
+        )
+
+        Map.put(cmd, "writes", true)
+    end
   end
 
   defp stringify_shallow(map) when is_map(map) do
