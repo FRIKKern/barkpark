@@ -22,9 +22,7 @@ func TestPdEmbedRendersTargetNotUnknownBlock(t *testing.T) {
 	if !strings.Contains(out, "↪") {
 		t.Fatalf("embed should use the ↪ placeholder glyph; got %q", out)
 	}
-	if strings.Contains(strings.ToLower(out), "unknown block") {
-		t.Fatalf("embed must NOT hit the unknown-block fallback; got %q", out)
-	}
+	assertNoUnknownBlock(t, "embed with target", out)
 }
 
 func TestPdEmbedEmptyTargetDegrades(t *testing.T) {
@@ -32,9 +30,10 @@ func TestPdEmbedEmptyTargetDegrades(t *testing.T) {
 	ctx := RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}
 
 	out := strings.Join(reg.Render(Block{Type: "embed"}, ctx), "\n")
-	if !strings.Contains(out, "↪") || strings.Contains(strings.ToLower(out), "unknown block") {
-		t.Fatalf("empty-target embed should show a ↪ placeholder, not unknown-block; got %q", out)
+	if !strings.Contains(out, "↪") {
+		t.Fatalf("empty-target embed should show a ↪ placeholder; got %q", out)
 	}
+	assertNoUnknownBlock(t, "embed with empty target", out)
 }
 
 // A non-URL target (a human reference, not a slug) renders as a plain muted line

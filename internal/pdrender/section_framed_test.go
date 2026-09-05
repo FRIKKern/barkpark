@@ -40,7 +40,10 @@ func renderSectionAt(t *testing.T, block map[string]any, width int) string {
 	}
 	reg := testRegistry()
 	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
-	return ansi.Strip(reg.RenderDoc(blocks, ctx))
+	stripped := ansi.Strip(reg.RenderDoc(blocks, ctx))
+	// Shared blind-spot guard (unknown_block_guard_test.go).
+	assertNoUnknownBlock(t, "section-framed.golden.json", stripped)
+	return stripped
 }
 
 func framedFixtureInput(t *testing.T) (map[string]any, framedProjection) {

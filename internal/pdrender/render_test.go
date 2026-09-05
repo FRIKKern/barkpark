@@ -48,7 +48,12 @@ func renderFixture(t *testing.T, name string, width int) string {
 	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
 	out := reg.RenderDoc(blocks, ctx)
 	// Strip any residual ANSI for a readable, diffable golden.
-	return ansi.Strip(out)
+	stripped := ansi.Strip(out)
+	// Shared blind-spot guard (unknown_block_guard_test.go): a golden diffed
+	// against Go's OWN render cannot see a fallback box that appears on BOTH
+	// sides. This is the one call that can.
+	assertNoUnknownBlock(t, name, stripped)
+	return stripped
 }
 
 func TestGolden(t *testing.T) {
