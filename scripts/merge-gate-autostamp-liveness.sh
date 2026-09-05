@@ -44,6 +44,9 @@
 
 set -uo pipefail
 
+# Shape before content on every bp read (task-4eb2994a588453d3).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-read.sh"
+
 DAYS=30
 REPO="FRIKKern/barkpark"
 FIXTURE=""
@@ -120,9 +123,21 @@ while IFS="$(printf '\t')" read -r num doc_id merged sha; do
     fi
   else
     command -v bp >/dev/null || { echo "UNAVAILABLE: bp not on PATH" >&2; exit 3; }
-    bp task get "$doc_id" -o json 2>/dev/null \
-      | python3 -c 'import sys,json;s=sys.stdin.read();i=s.find("{");sys.exit(1) if i<0 else print(json.dumps(json.loads(s[i:])))' \
-      > "$TMP/tasks/$doc_id.json" 2>/dev/null || rm -f "$TMP/tasks/$doc_id.json"
+    # CAPTURE, do not pipe. The old form was
+    #   bp task get "$doc_id" -o json 2>/dev/null | python3 -c '... s.find("{") ...'
+    # and a refusal defeated it TWICE: 2>/dev/null discarded the message, and
+    # the error envelope IS a well-formed `{...}`, so the first-brace parser
+    # accepted it and wrote it out as if it were a task. The verdict pass below
+    # then read `(c.get("merge_gate_autostamp") or {})` off that envelope and
+    # scored the row as "never autostamped" — a refusal rendered as a finding.
+    if body="$(bp_json task get "$doc_id" -o json)"; then
+      printf '%s' "$body" \
+        | python3 -c 'import sys,json;s=sys.stdin.read();i=s.find("{");sys.exit(1) if i<0 else print(json.dumps(json.loads(s[i:])))' \
+        > "$TMP/tasks/$doc_id.json" || rm -f "$TMP/tasks/$doc_id.json"
+    else
+      echo "  (skipped $doc_id: bp refused the read — NOT counted as un-autostamped)" >&2
+      rm -f "$TMP/tasks/$doc_id.json"
+    fi
   fi
 done < "$TMP/candidates.txt"
 

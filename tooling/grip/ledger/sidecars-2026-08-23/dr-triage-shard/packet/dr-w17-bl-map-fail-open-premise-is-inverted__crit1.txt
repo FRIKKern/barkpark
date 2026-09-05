@@ -1,0 +1,1 @@
+The three-part fix is specified with (iii) — distinguish unconfigured / empty / upstream-failed — named as the enabling part, and lib/graph.ts:273-283 cited as the in-repo precedent

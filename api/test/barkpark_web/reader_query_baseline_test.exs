@@ -29,16 +29,56 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   task_edges 1; driven-task N+1 slope 4.0 statements per additional citing
   task per leg.
 
-  ## The counter — pid-filter-FREE, and why that is load-bearing
+  ## The counter — no filter INSIDE the handler, an OWNER SET outside it
 
   The telemetry handler for `[:barkpark, :repo, :query]` runs in WHICHEVER
-  process issues the query and sends to the test pid unconditionally. NEVER
-  add `if self() == test_pid` inside the handler: the connected mount runs in
-  the LiveView process, so a pid-filtered counter under-reports `live/2` by
-  EXACTLY the connected leg (mutation-measured at the baseline: 44 -> 22).
-  That trap is kept alive here as a permanent test — the deliberately filtered
-  twin counter must keep under-reporting `live/2` vs the honest one, proving
-  the honest counter still sees cross-process queries.
+  process issues the query. NEVER add `if self() == test_pid` inside the
+  handler: the connected mount runs in the LiveView process, so a pid-filtered
+  counter under-reports `live/2` by EXACTLY the connected leg
+  (mutation-measured at the baseline: 44 -> 22). That trap is kept alive here
+  as a permanent test — the deliberately filtered twin counter must keep
+  under-reporting `live/2` vs the honest one, proving the honest counter still
+  sees cross-process queries.
+
+  But "report unconditionally" is not the same as "count unconditionally". The
+  handler is GLOBAL: it also fires for statements issued by processes that were
+  never part of this request. That is not hypothetical — it reddened main at
+  sha 2c5b658d41 (run 33830854180, attempt 1):
+
+      [reader-query-baseline] dead leg (get/2): 19 statements
+        (documents 6, datasets 4, schema_definitions 3, workspaces 2,
+         chat_messages 1, content_edges 1, projects 1, task_edges 1)
+      dead leg blew the budget: 19 > 18
+
+  `chat_messages 1` is the whole defect. The anonymous paper reader never
+  touches `chat_messages`; `Barkpark.StudioChat.BlockedSweeper` does — a
+  GenServer child of `StudioChat.Supervisor` that boots with the app in EVERY
+  env and re-arms `Process.send_after(self(), :sweep, 60_000)`, each sweep
+  issuing one `Repo.all` over `chat_messages` joined to `chat_sessions`. The
+  dead leg is a ~160ms window; once per 60s the sweeper's statement lands
+  inside it and the census gains a source the reader cannot produce. `gh run
+  rerun --failed` on the SAME sha passed because the next sweep missed the
+  window. Load widens the window; it does not create the bug.
+
+  Note what it is NOT: foreign ROWS. `seed_fixture!/2` already keys every shape
+  on a `System.unique_integer` slug/epic, and the sibling N+1 slope test pins
+  the shape at 0.0 statements per additional row. Another agent writing to the
+  shared test database cannot move this count. A foreign PROCESS can.
+
+  So the handler still reports from any process — it now tags each event with
+  the issuing pid — and ownership is decided AFTER the leg has run, when
+  `live/2` has finally told us which LiveView process served the connected
+  mount. A statement counts when its issuing process is the test process, the
+  LiveView process the leg returned, or a process spawned by either
+  (`$callers`/`$ancestors`). `BlockedSweeper` is a child of the application
+  supervisor and satisfies none of those, so it is excluded by construction,
+  not by an allowlist of source names that would have to grow with every new
+  background sweeper.
+
+  The foreign-process leak is kept honest by its own permanent test below: a
+  deliberately foreign process issues a `chat_messages` statement INSIDE the
+  measured window and the census must not move. That test reds on this file's
+  pre-fix counter.
 
   ## Known limit
 
@@ -50,7 +90,7 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.{Content, Tasks, TenancyFixtures}
+  alias Barkpark.{Content, QueryCounter, Tasks, TenancyFixtures}
 
   @dataset "production"
 
@@ -104,43 +144,14 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
   # ── the counter ─────────────────────────────────────────────────────────────
   #
-  # Copied from graph_controller_test.exs `count_repo_queries` — the
-  # pid-filter-FREE shape (attach, send from ANY process, detach, drain),
-  # extended with the per-source split (`meta[:source]` from Ecto telemetry).
-
-  defp count_repo_queries(fun) do
-    ref = make_ref()
-    test_pid = self()
-    handler_id = {:reader_query_counter, ref}
-
-    :telemetry.attach(
-      handler_id,
-      [:barkpark, :repo, :query],
-      # NO pid filter here — see @moduledoc. The handler executes in the
-      # query-issuing process (test pid on the dead leg, the LiveView process
-      # on the connected leg) and reports unconditionally.
-      fn _event, _measurements, meta, _cfg -> send(test_pid, {ref, :query, meta[:source]}) end,
-      nil
-    )
-
-    try do
-      fun.()
-    after
-      :telemetry.detach(handler_id)
-    end
-
-    drain_counts(ref, {0, %{}})
-  end
-
-  defp drain_counts(ref, {count, per_source}) do
-    receive do
-      {^ref, :query, source} ->
-        key = source || "(no source)"
-        drain_counts(ref, {count + 1, Map.update(per_source, key, 1, &(&1 + 1))})
-    after
-      0 -> {count, per_source}
-    end
-  end
+  # `Barkpark.QueryCounter` (test/support/query_counter.ex) — the shared
+  # lineage-scoped counter this file's own copy was lifted into. Same
+  # semantics, unchanged: the handler reports from ANY process, tags each event
+  # with the issuing pid and its `$callers`/`$ancestors`, and ownership is
+  # resolved after the leg has named its LiveView process with `own/1`. See
+  # that module's @moduledoc for why neither "count everything" nor a `self()`
+  # filter is correct here; its permanent leak trap lives in
+  # `Barkpark.QueryCounterTest`.
 
   # The VACUOUS-GREEN TWIN — deliberately wrong, kept only for the trap test
   # below. Counts a query ONLY when the issuing process is the test process,
@@ -165,8 +176,15 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
       :telemetry.detach(handler_id)
     end
 
-    {count, _} = drain_counts(ref, {0, %{}})
-    count
+    drain_filtered(ref, 0)
+  end
+
+  defp drain_filtered(ref, acc) do
+    receive do
+      {^ref, :query, nil} -> drain_filtered(ref, acc + 1)
+    after
+      0 -> acc
+    end
   end
 
   # ── the pinned fixture ──────────────────────────────────────────────────────
@@ -178,12 +196,32 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # quality gate refuses heading-only papers).
   defp seed_fixture!(scope, opts \\ []) do
     citing_tasks = Keyword.get(opts, :citing_tasks, 1)
+    title_offset = Keyword.get(opts, :title_offset, 0)
     uniq = System.unique_integer([:positive])
     slug = "rqb-target-#{uniq}"
     epic = "rqb-epic-#{uniq}"
 
-    # 1 live task-list block matching 2 tasks (distinct titles).
-    for title <- ["Collect crawler samples #{uniq}", "Publish robots verdict #{uniq}"] do
+    # 1 live task-list block matching 2 tasks. These titles must be drawn from
+    # the SAME disjoint slice as the driven-task titles below, for the same
+    # reason: the slope test seeds two fixtures inside one test, and the
+    # publish-time dedup wall compares titles ACROSS them. A shared word stem
+    # plus a differing `System.unique_integer` is NOT distinct enough — two
+    # `"Collect crawler samples <n>"` scored 0.71 and the second fixture died
+    # with `{:error, {:duplicate_task, ...}}` at seed 150461 (1 red in 20 runs,
+    # a second flake in this file independent of the statement counter). Only
+    # the DRIVEN titles were sliced by `:title_offset` before; the task-list
+    # titles were left sharing a stem.
+    list_titles = [
+      "Collect crawler samples",
+      "Publish robots verdict",
+      "Chart unfurler latency",
+      "Retire the legacy sitemap",
+      "Weigh syndication headroom",
+      "Draft the embargo memo"
+    ]
+
+    for title <-
+          Enum.map(0..1, fn n -> "#{Enum.at(list_titles, title_offset + n)} #{uniq}" end) do
       {:ok, _} =
         Content.create_document(
           "task",
@@ -264,8 +302,6 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
       "Seal the query shape dedupe"
     ]
 
-    title_offset = Keyword.get(opts, :title_offset, 0)
-
     for n <- 1..citing_tasks do
       task_id = "rqb-dt-#{uniq}-#{n}"
 
@@ -301,16 +337,27 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
     slug
   end
 
+  # `Phoenix.ConnTest.get/2` runs the endpoint in the test process, so the dead
+  # leg owns no extra pid.
   defp dead_leg(conn, slug) do
-    count_repo_queries(fn ->
-      conn |> get("/papers/#{slug}") |> html_response(200)
-    end)
+    {_, census} =
+      QueryCounter.census(fn ->
+        conn |> get("/papers/#{slug}") |> html_response(200)
+      end)
+
+    census
   end
 
+  # `live/2`'s disconnected mount runs in the test process; the connected mount
+  # runs in `view.pid`, which is why the counter cannot filter on `self()`.
   defp both_legs(conn, slug) do
-    count_repo_queries(fn ->
-      {:ok, _view, _html} = live(conn, "/papers/#{slug}")
-    end)
+    {_, census} =
+      QueryCounter.census(fn ->
+        {:ok, view, _html} = live(conn, "/papers/#{slug}")
+        QueryCounter.own(view.pid)
+      end)
+
+    census
   end
 
   defp print_census(label, count, per_source) do
@@ -351,7 +398,11 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
              "both legs blew the budget: #{both} > #{@both_legs_budget} " <>
                "(per-source: #{inspect(both_sources)})"
 
-      assert connected >= 0
+      # Not `>= 0`: a zero connected leg would mean the counter stopped seeing
+      # the LiveView process, and `both <= 35` would then be a vacuous green.
+      assert connected > 0,
+             "the connected leg vanished (#{both} - #{dead} = #{connected}) — the honest " <>
+               "counter is no longer seeing the LiveView process"
     end
 
     test "driven-task N+1 slope <= #{@max_n_plus_one_slope} statements per citing task per leg",
@@ -402,6 +453,60 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
              "the pid-filtered twin (#{filtered}) no longer under-reports the honest " <>
                "counter (#{honest}) on live/2 — the vacuous-green trap has been defused; " <>
                "check whether the honest counter still sees the connected leg"
+    end
+  end
+
+  describe "the foreign-process leak trap (permanent)" do
+    # The regression this file was reddened by: a GLOBAL telemetry handler
+    # counts statements from processes that were never part of the request.
+    # `BlockedSweeper` (a 60s `Repo.all` over `chat_messages`, booted with the
+    # app in every env) put `chat_messages 1` into the dead-leg census on main
+    # at 2c5b658d41 and pushed 18 -> 19. This test reproduces that
+    # DETERMINISTICALLY instead of once per 60s.
+    test "a statement from a process outside the request never enters the census",
+         %{conn: conn, scope: scope} do
+      slug = seed_fixture!(scope)
+
+      {clean, clean_sources} = dead_leg(conn, slug)
+
+      {_, {noisy, noisy_sources}} =
+        QueryCounter.census(fn ->
+          conn |> get("/papers/#{slug}") |> html_response(200)
+          foreign_chat_messages_statement!()
+        end)
+
+      refute Map.has_key?(clean_sources, "chat_messages"),
+             "the reader itself queried chat_messages — this trap's premise moved " <>
+               "(#{inspect(clean_sources)})"
+
+      refute Map.has_key?(noisy_sources, "chat_messages"),
+             "a foreign process's chat_messages statement entered the census " <>
+               "(#{inspect(noisy_sources)}) — the counter is global again"
+
+      assert noisy == clean,
+             "a foreign statement moved the census: #{noisy} with the foreign process " <>
+               "vs #{clean} without it (#{inspect(noisy_sources)})"
+    end
+  end
+
+  # A process with NO spawn lineage back to the test: plain `spawn/1` writes
+  # neither `$callers` nor `$ancestors`, which is exactly the shape of a
+  # sweeper started by the application supervisor at boot. It issues the same
+  # `chat_messages` statement `BlockedSweeper.sweep/1` issues, INSIDE the
+  # measured window, and we block until it has actually run.
+  defp foreign_chat_messages_statement! do
+    parent = self()
+    marker = make_ref()
+
+    spawn(fn ->
+      _ = Barkpark.Repo.aggregate(Barkpark.StudioChat.Message, :count, :id)
+      send(parent, {marker, :done})
+    end)
+
+    receive do
+      {^marker, :done} -> :ok
+    after
+      5_000 -> flunk("the foreign chat_messages statement never ran")
     end
   end
 end

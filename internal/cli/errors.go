@@ -291,6 +291,7 @@ var codeExit = map[string]int{
 	"invalid_deploy_mode":     exitValidation, // 400, sites/deploy_request.ex (site deploy mode)
 	"session_restarting":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (crash loop — RETRY)
 	"session_start_failed":    exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
+	"replay_unavailable":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
 }
 
 // codeExitNotWireBucketable names the members of known_codes/0 that are
@@ -478,7 +479,17 @@ func classifyError(status int, body []byte) apiError {
 		// away by the client after the server had already computed it.
 		// docs/cli/error-exit-table.md:110 has promised "`resource_conflict`
 		// carries `conflicts[]` naming the holders" the whole time.
-		return apiError{exit: exit, code: strErr.Reason, message: msg, details: topLevelConflicts(body)}
+		// The SAME lift for the edited-under-you 409, whose two recovery values
+		// (`current_rev`, `changed_fields`) are top-level siblings of `reason`
+		// for exactly the same reason the conflicts array is — so this branch
+		// dropped them too, and the hint below promised data the CLI had thrown
+		// away. A body carries one shape or the other, never both, so the
+		// conflicts payload keeps its bytes byte-for-byte.
+		details := topLevelConflicts(body)
+		if details == nil {
+			details = topLevelDrift(body)
+		}
+		return apiError{exit: exit, code: strErr.Reason, message: msg, details: details}
 	}
 
 	// Message-only no-code envelope: default usage, downgrade to not-found when
@@ -896,6 +907,64 @@ func topLevelConflicts(body []byte) json.RawMessage {
 	return json.RawMessage(wrapped)
 }
 
+// topLevelDrift lifts the edited-under-you 409's two recovery values out of an
+// {"ok":false,"reason":"doc_changed_since_claim",…} body and returns them as the
+// `details` payload {"current_rev":…,"changed_fields":[…]} — the sibling of
+// topLevelConflicts, for the sibling shape.
+//
+// pds-bl-close-409-hint-promises-absent-fields: the server has ALWAYS put both
+// on the wire (tasks_controller.ex, the :doc_changed_since_claim arm), and the
+// CLI hint has always told the operator "the 409 body names current_rev +
+// changed_fields" — but this branch declared only Error/Reason/OK, so both
+// values died in the client and `bp task close … -o json` printed
+//
+//	{"error":{"code":"doc_changed_since_claim","message":"…"},"ok":false}
+//
+// The promise was true of the wire and unreachable from the output, which is
+// worse than not promising: the operator went looking for a field that the tool
+// itself had deleted.
+//
+// Shape-keyed, never reason-keyed: current_rev must be a non-empty string, and
+// changed_fields (when present) an array. A body carrying neither returns nil,
+// so every other ok:false reason's envelope stays byte-identical.
+func topLevelDrift(body []byte) json.RawMessage {
+	var env struct {
+		CurrentRev    string            `json:"current_rev"`
+		ChangedFields []json.RawMessage `json:"changed_fields"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil || env.CurrentRev == "" {
+		return nil
+	}
+	payload := map[string]any{"current_rev": env.CurrentRev}
+	if len(env.ChangedFields) > 0 {
+		payload["changed_fields"] = env.ChangedFields
+	}
+	wrapped, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(wrapped)
+}
+
+// driftRev reads `current_rev` back out of an apiError's details payload, or ""
+// when the body did not carry one. It is what lets the doc_changed_since_claim
+// hint SUBSTITUTE the rev into the recovery command instead of printing a
+// `<current_rev>` placeholder the operator has to go fetch — and, when it is
+// absent, what makes the hint say so honestly rather than promise it.
+func (e apiError) driftRev() string {
+	d := normalizeDetails(e.details)
+	if d == nil {
+		return ""
+	}
+	var obj struct {
+		CurrentRev string `json:"current_rev"`
+	}
+	if err := json.Unmarshal(d, &obj); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(obj.CurrentRev)
+}
+
 // bodyMessage extracts a top-level "message" string from an error body, used to
 // give the {"ok":false,"reason":…} shape a human one-liner (e.g. "task not
 // found") instead of the bare reason token. Returns "" when absent.
@@ -969,7 +1038,17 @@ func (e apiError) hint() string {
 		// (if the holder is YOU) re-claim under your own id to renew the lease.
 		return "the task isn't claimable — someone else holds it or it isn't ready; if YOU hold it, re-claim with your own worker id to renew the lease"
 	case "doc_changed_since_claim":
-		return "the task's brief changed since you claimed it — the 409 body names current_rev + changed_fields; re-read with `bp task get <id>`, reconcile, then close with `--set observed_rev=<current_rev>` (strict full-rev CAS, bypasses the digest fence). A plain re-read then close repeats the 409 — a same-worker re-read preserves the claim-time work digest"
+		// TWO wordings, chosen by what the body ACTUALLY carried. The old single
+		// wording promised "the 409 body names current_rev + changed_fields" and
+		// then printed a literal `<current_rev>` placeholder — a promise the
+		// operator could not spend, because this branch of classifyError had
+		// dropped the value. With the rev in hand the command is COMPLETE (copy
+		// it, run it); without it the hint says plainly that the rev must be
+		// read, and never claims the refusal already named it.
+		if rev := e.driftRev(); rev != "" {
+			return "the task's brief changed since you claimed it — reconcile the changed fields above, then close with `--set observed_rev=" + rev + "` (strict full-rev CAS, bypasses the digest fence; the rev is from this refusal, no re-read needed to run it). A plain re-read then close repeats the 409 — a same-worker re-read preserves the claim-time work digest"
+		}
+		return "the task's brief changed since you claimed it — re-read with `bp task get <id> -o json` to learn the current rev, reconcile, then close with `--set observed_rev=<that rev>` (strict full-rev CAS, bypasses the digest fence). A plain re-read then close repeats the 409 — a same-worker re-read preserves the claim-time work digest"
 	case "resource_conflict":
 		// NOT a stale-lease case, and that distinction is the whole hint: a
 		// re-claim under your own worker id mints a fresh epoch and changes

@@ -6743,8 +6743,14 @@ stump and must never be read as the charter. **D320 is not in this charter at al
   probe — and `/` is `send_dashboard` → `send_file(200, priv/static/index.html)` with **zero Repo in the
   path**, so it is structurally incapable of failing on a DB-dead box. Demonstrated live without harming prod:
   `https://barkpark.cloud/definitely-not-a-route-xyz` → 404, which the regex ACCEPTS. The fix is a copy of a
-  backstop that already exists 80 lines away in the same repo; `deploy.yml:156-158`'s hard `test "$code" =
-  "200"` on the instance job is the counterexample proving the asymmetry is a defect. Honest bound: a FULLY
+  backstop that already exists 80 lines away in the same repo. **RE-CUT (D369, and the fix that closed it):
+  the instance job is NOT "already correct" — it COVERS THE DEAD-POOL CLASS AND NOTHING ELSE.** Its
+  `test "$code" = "200"` on `/api/schemas` is a real DB-touching oracle and has fired (run 30686555528), but
+  it was mutation-proved GREEN against a server answering 200 with body `[]`, and `/api/schemas` is
+  deliberately not token-gated, so the whole authenticated stack could be dead under it. Cite it as the
+  asymmetry's *narrow* half, never as the standard: it has since been raised to the same two-oracle bar
+  (non-empty catalog + bad-creds 401), and `scripts/check-deploy-smoke.sh` now guards BOTH jobs' smokes —
+  before that it was `job == "control-plane"` throughout, so the weakest oracle was also the only unguarded one. Honest bound: a FULLY
   dead CP already fails (Caddy 502 is rejected); this closes the PARTIAL-death class — the one that happened.
 
 - **D345 — THE ARM-ROUTE SILENCE IS NOT ZERO: ONE LIVE SITE HAS BEEN A PUBLIC 404 FOR 208 DEPLOYS WHILE

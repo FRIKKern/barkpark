@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
   # (`{:refused, status}`) and an unsigned URL are both correct; a signature is
   # not.
   defp anon_show(id, query \\ "") do
-    conn = get(build_conn(), "/v1/media/#{@ds}/#{id}#{query}")
+    conn = get(scoped_conn(), "/v1/media/#{@ds}/#{id}#{query}")
 
     case conn.status do
       200 -> {:ok, json_response(conn, 200)["result"]}
@@ -146,12 +146,12 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       %{"id" => id} = asset_with_visibility(conn, "token")
 
       meta_path = "/v1/media/#{@ds}/#{id}?appendRequestSecret=true"
-      meta = get(build_conn(), meta_path)
+      meta = get(scoped_conn(), meta_path)
 
       case meta.status do
         200 ->
           url = json_response(meta, 200)["result"]["originalUrl"]
-          bytes = get(build_conn(), url)
+          bytes = get(scoped_conn(), url)
 
           assert bytes.status == 403,
                  "ESCALATION anonymous->bytes:\n" <>
@@ -183,7 +183,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       # `Access.authenticated?/1` is authentication, not authorization, so a
       # read token must clear it exactly as an admin token does — if this ever
       # reddens, the gate has quietly become a permission check.
-      bytes = get(build_conn(), result["originalUrl"])
+      bytes = get(scoped_conn(), result["originalUrl"])
       assert bytes.status == 200
       receipt("read-only api token", result["originalUrl"], bytes)
     end
@@ -261,11 +261,11 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       # have been asserting that a signature defeats tenancy, which is the
       # opposite of what this PR wants to be true. Both halves are pinned below
       # so a future reader cannot mistake one refusal for the other.
-      bytes = session.(build_conn()) |> get(result["originalUrl"])
+      bytes = session.(scoped_conn()) |> get(result["originalUrl"])
       assert bytes.status == 200
       receipt("workspace-member account session (no bearer)", result["originalUrl"], bytes)
 
-      anon = get(build_conn(), result["originalUrl"])
+      anon = get(scoped_conn(), result["originalUrl"])
 
       assert anon.status == 403,
              "a valid signature let an anonymous caller through the SCOPED delivery " <>
@@ -278,7 +278,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       %{"id" => id} = asset_with_visibility(conn, "token")
 
       path = "/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{id}?appendRequestSecret=true"
-      resp = get(build_conn(), path)
+      resp = get(scoped_conn(), path)
 
       if resp.status == 200 do
         refute signed?(json_response(resp, 200)["result"]["originalUrl"]),
@@ -331,7 +331,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
     test "ANONYMOUS relations must not disclose a token asset", %{conn: conn} do
       %{"id" => id} = asset_with_visibility(conn, "token")
 
-      assert get(build_conn(), "/v1/media/#{@ds}/#{id}/relations").status in [401, 403, 404]
+      assert get(scoped_conn(), "/v1/media/#{@ds}/#{id}/relations").status in [401, 403, 404]
     end
   end
 
@@ -346,7 +346,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
     test "ANONYMOUS index omits token and private assets — and says so in `count`",
          %{public: public, token: token, private: private} do
       result =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/#{@ds}?limit=500")
         |> json_response(200)
         |> Map.fetch!("result")
@@ -380,7 +380,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
     test "ANONYMOUS search omits token and private assets",
          %{public: public, token: token, private: private} do
       result =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/#{@ds}/search?limit=500")
         |> json_response(200)
         |> Map.fetch!("result")
@@ -394,7 +394,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
     test "ANONYMOUS search FACETS must not census the tiers they cannot read" do
       result =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/#{@ds}/search?facets=visibility&limit=1")
         |> json_response(200)
         |> Map.fetch!("result")
@@ -409,7 +409,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
     test "ANONYMOUS search cannot filter its way to a private asset", %{private: private} do
       result =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/#{@ds}/search?visibility=private&limit=500")
         |> json_response(200)
         |> Map.fetch!("result")
@@ -470,7 +470,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       path = "/v1/media/#{@ds}/collections/#{collection.doc_id}/assets"
 
       anon =
-        build_conn()
+        scoped_conn()
         |> get("#{path}?limit=500&appendRequestSecret=true")
         |> json_response(200)
         |> Map.fetch!("result")
@@ -503,7 +503,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
     test "ANONYMOUS legacy /media index omits token and private assets",
          %{public: public, token: token, private: private} do
       body =
-        build_conn()
+        scoped_conn()
         |> get("/media/?dataset=#{@ds}")
         |> json_response(200)
 

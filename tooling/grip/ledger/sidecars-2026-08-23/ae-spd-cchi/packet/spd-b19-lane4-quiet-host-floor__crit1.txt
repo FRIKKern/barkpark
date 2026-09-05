@@ -1,0 +1,1 @@
+A single press on a Structure row is measured across 10 consecutive COLD loads with every latency quoted, pressing early deliberately on each iteration rather than relying on iteration 1 being fast.

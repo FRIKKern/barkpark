@@ -6,7 +6,10 @@
 #
 #   Part 1/2 — .bp-canvas-* lockstep. The Studio paper editor's node-view chrome
 #   (.bp-canvas-*) is styled in TWO places that must stay in lockstep:
-#     1. api/lib/barkpark_web/layouts/root.html.heex   (Studio inline <style>)
+#     1. api/priv/static/assets/bp-paper-editor-shell.css  (the Studio shell
+#        stylesheet — inline in root.html.heex until edit-on-the-link lifted it
+#        into a static asset BOTH root.html.heex and the public paper reader
+#        layout link, so one copy paints the editor on both surfaces)
 #     2. api/assets/paper-editor/src/styles.css        (the de-scoped bundle)
 #   When a rule lands in one mirror but not the other, edit-mode-at-rest silently
 #   diverges from view mode (hyphens/callout/list-marker drift, cycles 57-58).
@@ -14,7 +17,7 @@
 #   other, unless the asymmetry is in the documented allowlist.
 #   NOTE: paper-surface.css is deliberately NOT unioned into the heex side —
 #   per its own header, .bp-canvas-* node-view chrome is Studio-shell and stays
-#   in root.html.heex (a canvas rule landing in the portable source is itself
+#   in the Studio shell stylesheet (a canvas rule landing in the portable source is itself
 #   drift this check should surface).
 #   (The old "part 2" single-owner --bp-* sentinel moved to
 #   test/barkpark/portable_doc/render/stylesheet_test.exs, which pins the same
@@ -36,21 +39,39 @@
 #   lockstep, and there is exactly ONE implementation — this script and the
 #   emitter can never disagree. This part just delegates (CLI surface unchanged).
 #
+#   --write here is FENCED, exactly as `node design/emit.mjs --write` is: it refuses
+#   to replace the marked region when its SHA-256 does not match
+#   design/emit-manifest.json, names every line it would delete, and records the
+#   write in that same manifest. The fence lives in the ONE Node owner; this script
+#   only forwards the flags, so the two writers can never disagree.
+#
 # Usage:
-#   scripts/paper-editor-mirror-check.sh            # check (CI + the merge gate)
-#   scripts/paper-editor-mirror-check.sh --write    # regenerate the token layer
+#   scripts/paper-editor-mirror-check.sh                  # check (CI + the merge gate)
+#   scripts/paper-editor-mirror-check.sh --write          # fenced regenerate
+#   scripts/paper-editor-mirror-check.sh --write --force  # regenerate over the fence
+#   scripts/paper-editor-mirror-check.sh --adopt          # bless the region on disk
 set -euo pipefail
 
 MODE="check"
-if [[ "${1:-}" == "--write" ]]; then
-  MODE="write"
-elif [[ -n "${1:-}" ]]; then
-  echo "paper-editor-mirror-check: unknown argument '$1' (expected --write or none)" >&2
+MIRROR_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --write) MODE="write"; MIRROR_ARGS+=("$arg") ;;
+    --adopt) MODE="adopt"; MIRROR_ARGS+=("$arg") ;;
+    --force) MIRROR_ARGS+=("$arg") ;;
+    *)
+      echo "paper-editor-mirror-check: unknown argument '$arg' (expected --write, --force, --adopt or none)" >&2
+      exit 2
+      ;;
+  esac
+done
+if [[ "$MODE" == "check" && ${#MIRROR_ARGS[@]} -gt 0 ]]; then
+  echo "paper-editor-mirror-check: --force needs --write" >&2
   exit 2
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HEEX="$ROOT/api/lib/barkpark_web/layouts/root.html.heex"
+HEEX="$ROOT/api/priv/static/assets/bp-paper-editor-shell.css"
 BUNDLE="$ROOT/api/assets/paper-editor/src/styles.css"
 SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 
@@ -59,13 +80,9 @@ SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 # so `--write` regenerates before the lockstep check verifies. `--write` passes
 # through; default is a byte-compare. The transform is the SAME code design/emit.mjs
 # drives, so this script and the emitter can never disagree.
-if [[ "$MODE" == "write" ]]; then
-  node "$ROOT/design/paper-editor-mirror.mjs" --write
-else
-  node "$ROOT/design/paper-editor-mirror.mjs"
-fi
+node "$ROOT/design/paper-editor-mirror.mjs" ${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}
 
-# ── Part 1/2: .bp-canvas-* lockstep (root.html.heex ↔ styles.css bundle) ─────
+# ── Part 1/2: .bp-canvas-* lockstep (shell stylesheet ↔ styles.css bundle) ───
 # Intentional one-sided selectors (documented). Keep this list SMALL and justified.
 #   bp-canvas-source — the source-mode <textarea> (canvas/index.js); Studio-only,
 #                      absent from the standalone embedder bundle by design.
@@ -105,7 +122,7 @@ def compare(heex, bundle, h_allow, b_allow):
 
 # ALWAYS-ON SELF-TEST (runs before every measurement): two empty sets satisfy
 # `not heex_only and not bundle_only`, so a refactor that empties BOTH corpora
-# (moving the Studio <style> out of root.html.heex, or renaming the
+# (moving the Studio editor CSS out of its file, or renaming the
 # .bp-canvas-* convention) used to print 'PASS — 0 classes in lockstep'
 # forever. Prove the comparator can refuse AND can red before trusting it.
 for want, h, b in (
@@ -121,7 +138,7 @@ for want, h, b in (
               f"refusing to measure with a broken instrument")
         sys.exit(2)
 
-heex = canvas_classes(heex_path, "root.html.heex")
+heex = canvas_classes(heex_path, "bp-paper-editor-shell.css")
 bundle = canvas_classes(bundle_path, "styles.css bundle")
 heex_allow = set(filter(None, heex_allow.split()))
 bundle_allow = set(filter(None, bundle_allow.split()))
@@ -130,7 +147,7 @@ code, heex_only, bundle_only = compare(heex, bundle, heex_allow, bundle_allow)
 
 if code == 2:
     zero = []
-    if not heex: zero.append("root.html.heex")
+    if not heex: zero.append("bp-paper-editor-shell.css")
     if not bundle: zero.append("styles.css bundle")
     print(f"paper-editor-mirror-check: REFUSED TO MEASURE — {' and '.join(zero)} yielded ZERO "
           f".bp-canvas-* classes (heex={len(heex)}, bundle={len(bundle)}). A lockstep of two "
@@ -147,11 +164,11 @@ if code == 0:
 
 print("paper-editor-mirror-check: FAILED — the two paper-editor style mirrors have drifted.\n")
 if heex_only:
-    print("  In root.html.heex but NOT in styles.css bundle:")
+    print("  In bp-paper-editor-shell.css but NOT in styles.css bundle:")
     for c in sorted(heex_only):
         print(f"    .{c}")
 if bundle_only:
-    print("  In styles.css bundle but NOT in root.html.heex (Studio would not pick this up!):")
+    print("  In styles.css bundle but NOT in bp-paper-editor-shell.css (Studio would not pick this up!):")
     for c in sorted(bundle_only):
         print(f"    .{c}")
 print("\n  Fix: add the missing rule to the other mirror (keep values identical), or — if the")

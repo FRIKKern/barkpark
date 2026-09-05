@@ -21,7 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.Labels
-  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -1140,11 +1140,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     if write_denied?(socket) do
       reader_source_html(socket, paper)
     else
-      Map.get(paper.content || %{}, "body_html") || ""
+      editor_body_html(Map.get(paper.content || %{}, "body_html"))
     end
   end
 
   def reader_paper_html(_socket, _paper), do: ""
+
+  # ── THE WRITE-CAPABLE ARM IS STILL A VIEW (arpss-studio-legacy-body-html) ───
+  #
+  # The clamp above answers "what may a NON-EDITING viewer see"; it does NOT
+  # answer "are these bytes safe to `raw/1` at all". Those are different
+  # questions, and the write-capable arm only ever had an answer to the first.
+  # `Content.Papers.reader_source/3` runs `HtmlSanitizer.sanitize/1` on EVERY
+  # `body_html` it serves — no principal test — so one stored field had two
+  # readers and only one of them scrubbed. That ASYMMETRY, not either path
+  # alone, is the defect: whichever reader a poisoned row reaches first decides
+  # whether script executes.
+  #
+  # SANITIZING HERE COSTS THE AUTHOR NOTHING, because `:paper_html` is never an
+  # editor buffer. It feeds exactly one READ-ONLY `raw(@paper_html)` arm in
+  # `components.ex` (taken when `@show_editor` and `@paper_block_mode` are both
+  # false); editing a legacy HTML-only paper lives on the paper-ingest ops
+  # endpoint, which re-scrubs on store. No round-trip can be truncated by this
+  # — there is no round-trip.
+  #
+  # WHY THE STORE-TIME CHOKEPOINT IS NOT ALREADY ENOUGH. `Content.Writer`
+  # scrubs `content["body_html"]` on create AND upsert, so writes made TODAY
+  # are clean — but that chokepoint landed in #2340 (2026-07-10) and does not
+  # reach backwards. `Plugs.PaperReaderCsp` exists precisely to catch "a
+  # pre-sanitizer poisoned row" (its words) and is path-gated to the
+  # `…/papers/:slug` readers — Studio is not one of them. So on THIS arm the
+  # store-time pass was the only layer: no read-time scrub, no CSP. This
+  # restores layer 1 on the read side and makes one field's two readers agree.
+  #
+  # The SAME function as the reader, deliberately — not a second sanitizer and
+  # not a hand-rolled escape. The two paths differ on REDACTION (an author sees
+  # their own unredacted document; a non-editing viewer gets the Envelope's
+  # verdict), which is a separate axis and stays exactly as it was.
+  @doc """
+  Scrub a legacy `body_html` bound for the read-only `raw(@paper_html)` arm.
+
+  `HtmlSanitizer.sanitize/1` — the same scrubber `Content.Papers.reader_source/3`
+  runs — so the Studio reader and the bulldocs reader cannot drift on which
+  markup is executable. Non-binary input (an absent cache) becomes `""`.
+  """
+  def editor_body_html(html) when is_binary(html), do: HtmlSanitizer.sanitize(html)
+  def editor_body_html(_), do: ""
 
   @doc """
   The BLOCK body this socket may be shown for `paper` (task-e175d91d93291b10).

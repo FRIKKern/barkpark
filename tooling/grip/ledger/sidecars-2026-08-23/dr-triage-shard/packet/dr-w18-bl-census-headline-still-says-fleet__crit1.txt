@@ -1,0 +1,1 @@
+A test asserts a 403 refusal does NOT claim the FLEET was unreadable. It must fail before the fix.

@@ -1,0 +1,1 @@
+The control-plane box is read directly (L1, not CI logs): its docker version, whether a stale cloud_default endpoint exists today, and what the manual intervention of 2026-07-23 actually did - pasted.

@@ -67,7 +67,9 @@ on:
     branches: [main]
 
 concurrency:
-  group: console-harness-${{ github.ref }}
+  # per-sha on main: a per-ref group evicts the PENDING main run when the next merge lands,
+  # so the older sha never gets a verdict (same fix as security.yml; measured 2026-09-02).
+  group: console-harness-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -98,10 +100,39 @@ jobs:
           # they must test the merged result, not the head in isolation.
           # `github.sha` is the fallback for `push` events, which have no PR.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history: the PR base sha must be resolvable locally for the
-          # three-dot diff below. A shallow checkout makes `git cat-file -e`
-          # miss it, which this step treats as a hard failure.
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
           fetch-depth: 0
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set
@@ -309,8 +340,8 @@ jobs:
     # `FAIL console-unit: failure` with no verdict at all, because it had
     # `outputs:` None and its `decide` line took no verdict argument.
     #
-    # SEVEN of this job's steps can exit 2 (ten exit(2) sites: breakpoint-sweep
-    # 4, member-authority-sweep 1, and one each in the five censuses). Each of
+    # EIGHT of this job's steps can exit 2 (eleven exit(2) sites: breakpoint-sweep
+    # 4, member-authority-sweep 1, and one each in the six censuses). Each of
     # those steps classifies its own exit code and publishes the verdict BEFORE
     # exiting — the shape proven to survive `exit 1` on run 31136979488. A step
     # that PASSES publishes nothing, so the chain below reduces to the one
@@ -324,6 +355,7 @@ jobs:
         ${{ steps.sweep.outputs.verdict
         || steps.member-authority.outputs.verdict
         || steps.binding-census.outputs.verdict
+        || steps.refusal-copy-census.outputs.verdict
         || steps.unknown-census.outputs.verdict
         || steps.reason-arm-census.outputs.verdict
         || steps.me-envelope-census.outputs.verdict
@@ -633,6 +665,54 @@ jobs:
           echo "::error title=console-unit ${v} — __binding_census.mjs::__binding_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
+      # ── THE REFUSAL-COPY CENSUS (charter D383/D441, wave 40) ────────────────
+      #
+      # Sibling to the binding census above, and the same law one axis over. That
+      # one asks whether an affordance the console DRAWS is one the server will
+      # honour. This one asks whether a CAUSE the console NAMES is one the server
+      # can send.
+      #
+      #   A CAUSE THE CONSOLE NAMES IS A CAUSE THE SERVER SENT — or it is a
+      #   sentence somebody invented, and nobody judged.
+      #
+      # An ADD/REMOVE set diff over 339 pinned refusal-copy sites in app.js, in
+      # three kinds: MAP (a member of a copy map that a fence body consults), FN
+      # (a cause literal in copy position inside a refusal renderer) and ARG (a
+      # fallback handed to friendly/faultCopy/ctl.fail — delegated by
+      # construction). ADD is the disease: a new invented cause. REMOVE is the
+      # decay: a pin that has quietly become fiction. Two further arms REFUSE TO
+      # MEASURE with exit 2 — a missing fence, and a derived key two distinct
+      # function bodies can both produce.
+      #
+      # A SEPARATE STEP, NOT A CASE IN __app.test.mjs, for the reason this
+      # workflow already gives for the binding census: other slices are editing
+      # that file, and a census that has to merge with them is a census that gets
+      # weakened to land.
+      #
+      # THIS GATE IS EXPENSIVE ON PURPOSE, AND THE FILE SAYS SO IN ITS OWN HEADER.
+      # The FN and ARG keys hash the sentence, so ANY copy edit inside a refusal
+      # renderer's return reds this step and has to be re-pinned deliberately.
+      # That is the point — a changed cause sentence is a judgment somebody should
+      # make on purpose — and it is a real recurring cost. If that cost stops
+      # being worth paying, narrow the population or retire the file. Do not keep
+      # the file and stop letting it red.
+      - name: Refusal-copy census (ADD + REMOVE over app.js cause vocabulary)
+        id: refusal-copy-census
+        run: |
+          # Verdict wrapper — same contract as the censuses above.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__refusal_copy_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __refusal_copy_census.mjs::__refusal_copy_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
       # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
       #
       # Sibling to the binding census above, and the same shape of instrument:
@@ -918,6 +998,37 @@ jobs:
           test "$rc" -eq 0
           node cloud/priv/static/__binding_census.mjs --add-check \
             cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "remove fixture under --add-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+
+      # ── the refusal-copy census's own 2x2 ──────────────────────────────────
+      # Same shape and same reasoning as the four cells above: the matching cells
+      # prove each arm CAN fire, and the cross cells prove it can tell the two
+      # arms apart. Both fixtures declare their own @must-flag / @must-clear rows
+      # in their own bytes, two and two, so a cell that fires for an UNDECLARED
+      # reason exits 2 exactly like one that stays silent.
+      - name: Refusal-copy census fixture control — ADD arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --add-check \
+            cloud/priv/static/__refusal_copy.add.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Refusal-copy census fixture control — REMOVE arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --remove-check \
+            cloud/priv/static/__refusal_copy.remove.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Refusal-copy census fixture control — the cross cells stay silent (exit 0)
+        run: |
+          node cloud/priv/static/__refusal_copy_census.mjs --remove-check \
+            cloud/priv/static/__refusal_copy.add.fixture.js && rc=0 || rc=$?
+          echo "add fixture under --remove-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+          node cloud/priv/static/__refusal_copy_census.mjs --add-check \
+            cloud/priv/static/__refusal_copy.remove.fixture.js && rc=0 || rc=$?
           echo "remove fixture under --add-check: rc=$rc (expect 0)"
           test "$rc" -eq 0
 

@@ -1,0 +1,1 @@
+The corpus is declared as `"../../../.github/workflows/deploy.yml"` STRING LITERALS. Paste proof that the Path.expand form is invisible to the ratchet (it printed OK while the test read deploy.yml) and that the literal form makes it refuse with `UNCOVERED repo-root read`.

@@ -1,0 +1,1 @@
+THE GUARD CAN LOSE: reverting the sync makes a test fail showing the row still reads Ending after an un-cancel. Evidence: the failure message, then the revert.

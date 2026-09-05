@@ -1,0 +1,1 @@
+RECOVERY is sent: a test asserts that when the wait clears a message goes out naming how long it lasted, so the instrument can report good news as well as bad

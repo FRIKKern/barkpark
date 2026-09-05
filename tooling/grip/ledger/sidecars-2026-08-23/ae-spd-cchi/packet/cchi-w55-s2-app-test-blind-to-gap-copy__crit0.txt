@@ -1,0 +1,1 @@
+cloud/priv/static/__app.test.mjs's capability-gap fixtures carry the REAL server sentence — FailureCopy.capability_gap_reason/2's output — instead of the short stub 'Hetzner has no pause primitive.' pinned at :8667, :8799, :8848, :8886, :9162, :9184 and :13056 (grep -c = 7, remedy clause pinned ZERO times).

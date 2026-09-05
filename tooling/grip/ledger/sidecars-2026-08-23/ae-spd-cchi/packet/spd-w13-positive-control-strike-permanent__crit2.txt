@@ -1,0 +1,1 @@
+IT CAN FAIL: mutating the extracted rule to a container-scoped, non-important form makes the assertion go red — proving it tests the mechanism and not the string.

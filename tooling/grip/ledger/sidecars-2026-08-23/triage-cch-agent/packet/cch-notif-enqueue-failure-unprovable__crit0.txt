@@ -1,0 +1,1 @@
+A test forces one Oban insert to fail and asserts BOTH the enqueue-failure log line (team, channel, event) and that the returned count excludes the failed leg. Evidence: the test name plus its run output, and a mutation reverting enqueue_channel/4 to a bare Oban.insert showing the test reds.

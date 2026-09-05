@@ -1,0 +1,1 @@
+MUTATION PROOF, both directions: a fresh paraphrase of the unprotected-main claim inserted into a tracked file makes `bash scripts/required-checks.test.sh` red BY NAME, and the sentence section 18 deliberately passes untouched ('Nothing in CI mechanically blocks a merge here; the gates are discipline.') still passes. Quote both runs.

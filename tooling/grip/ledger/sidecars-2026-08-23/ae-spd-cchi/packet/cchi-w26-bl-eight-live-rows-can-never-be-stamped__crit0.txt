@@ -1,0 +1,1 @@
+Each of the eight rows is dispositioned: given concrete evidence-bearing criteria, or cancelled/re-parented with a stated reason. The disposition of each is listed by doc_id.

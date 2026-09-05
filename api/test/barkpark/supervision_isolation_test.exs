@@ -205,4 +205,55 @@ defmodule Barkpark.SupervisionIsolationTest do
 
     Supervisor.stop(sup)
   end
+
+  # Read a supervisor module's own flags by calling its `init/1` — pure here
+  # (it only builds child specs), and it reads the SHIPPED module, not a copy.
+  defp supervisor_flags(module, arg) do
+    {:ok, {flags, _children}} = module.init(arg)
+    flags
+  end
+
+  describe "the REAL intermediate supervisors carry a WIDER budget than the top tier" do
+    # The tests above prove the DOCTRINE on a synthetic tier built with
+    # @tier_max_restarts — they never read a real module, so an intermediate
+    # supervisor that silently kept the OTP default 3/5s passed them all.
+    # These read the shipped modules' own supervisor flags.
+    #
+    # Why the default is the bug and not merely a smell: `Barkpark.Supervisor`
+    # ALSO runs 3/5s. A tier whose budget equals its parent's cannot absorb a
+    # burst its parent would not have absorbed — the wall and the thing behind
+    # the wall fall over in the same window.
+
+    test "the reader can see the OTP default it must reject (non-vacuity)" do
+      # If `Supervisor.init/2`'s flag map ever renamed :intensity/:period this
+      # assertion breaks FIRST, so a green below can never be a green on a key
+      # that silently read nil.
+      {:ok, {default_flags, _}} = Supervisor.init([], strategy: :one_for_one)
+
+      assert %{intensity: 3, period: 5} = Map.take(default_flags, [:intensity, :period])
+    end
+
+    test "Barkpark.StudioChat.Supervisor widens to 5 restarts / 10 seconds" do
+      studio_chat = supervisor_flags(Barkpark.StudioChat.Supervisor, :ok)
+
+      assert studio_chat.intensity == 5
+      assert studio_chat.period == 10
+    end
+
+    test "the studio_chat budget is strictly wider than the top supervisor's" do
+      studio_chat = supervisor_flags(Barkpark.StudioChat.Supervisor, :ok)
+      {:ok, {top, _}} = Supervisor.init([], strategy: :one_for_one)
+
+      refute {studio_chat.intensity, studio_chat.period} == {top.intensity, top.period}
+      assert studio_chat.intensity > top.intensity
+    end
+
+    test "it matches the corrected sibling Barkpark.Plugins.Supervisor" do
+      studio_chat = supervisor_flags(Barkpark.StudioChat.Supervisor, :ok)
+      plugins = supervisor_flags(Barkpark.Plugins.Supervisor, [])
+
+      assert {studio_chat.intensity, studio_chat.period} ==
+               {plugins.intensity, plugins.period}
+    end
+  end
 end

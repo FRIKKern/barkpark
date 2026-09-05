@@ -1179,3 +1179,98 @@ func TestTaskFrameToleratesMalformedAndUnkeyable(t *testing.T) {
 		t.Fatalf("malformed/unkeyable task frames must be inert, got %+v", st.TaskTransitions)
 	}
 }
+
+// TestRuntimeTurnStartedAdvancesGenerationOnly is criterion 1 on the Go
+// surface: the codex turn-start arm advances the generation and emits NOTHING
+// else. Before it, Gen moved at exactly one site — the claude system/init arm —
+// so the D77 settle fence was INERT on this lane.
+//
+// The "nothing else" half is the trap TestRuntimeKindMatchIsExact guards from
+// the other side: a runtime kind that is not a settle must trigger zero IO.
+func TestRuntimeTurnStartedAdvancesGenerationOnly(t *testing.T) {
+	before := State{
+		SessionID:      "s1",
+		Gen:            3,
+		TailGen:        3,
+		Tail:           "prior turn, still painted",
+		TailBytes:      len("prior turn, still painted"),
+		Phase:          TurnIdle,
+		Notice:         "a standing notice",
+		StableTurn:     7,
+		CommittedBytes: 41,
+	}
+	after, effs := drive(before, t0, runtimeFrame(t, "turn_started", nil))
+
+	if after.Gen != before.Gen+1 {
+		t.Fatalf("turn_started must advance the generation: %d → %d", before.Gen, after.Gen)
+	}
+	if len(effs) != 0 {
+		t.Fatalf("turn_started must emit no effects, got %d", len(effs))
+	}
+	// Everything else is untouched. Tail/TailGen especially: blanking them here
+	// would flash away the prior turn's still-painted text.
+	if after.Tail != before.Tail || after.TailGen != before.TailGen || after.TailBytes != before.TailBytes {
+		t.Fatalf("turn_started must not touch the tail: tail=%q tailGen=%d bytes=%d", after.Tail, after.TailGen, after.TailBytes)
+	}
+	if after.Phase != before.Phase || after.Notice != before.Notice {
+		t.Fatalf("turn_started must not touch phase/notice: phase=%v notice=%q", after.Phase, after.Notice)
+	}
+	// The stable cursor is keyed on the SERVER turn, never on this client clock
+	// (State.StableTurn's own comment) — the twin of the mobile pin in
+	// apps/mobile/__tests__/chatCursorTurnKeyed.test.ts.
+	if after.StableTurn != before.StableTurn || after.CommittedBytes != before.CommittedBytes {
+		t.Fatalf("turn_started must not move the stable cursor: turn=%d committed=%d", after.StableTurn, after.CommittedBytes)
+	}
+	// The one deliberate exception, pre-existing and charter D81: the live-doc
+	// base is stamped at the turn boundary, because that is the only moment this
+	// turn's byte 0 is knowable.
+	if after.StableBase != len(before.Tail) {
+		t.Fatalf("turn_started still stamps the live-document base, got %d want %d", after.StableBase, len(before.Tail))
+	}
+}
+
+// TestCodexTwoTurnInterleaveSettleRace is criterion 2 on the Go surface: the
+// codex twin of TestSettleRaceLiveTailSurvivesStaleFetch, driven ENTIRELY off
+// runtime frames — no claude system/init anywhere, which is precisely the lane
+// on which the D77 fence used to be inert.
+//
+// Turn 1 completes and its settle GET goes out carrying turn 1's generation.
+// Turn 2 starts and streams BEFORE that GET lands. When the stale GET finally
+// lands it must NOT clear turn 2's live tail. Without the generation advance in
+// the turn_started arm the GET's Gen still equals TailGen and the clear fires.
+func TestCodexTwoTurnInterleaveSettleRace(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0,
+		runtimeFrame(t, "turn_started", nil),
+		runtimeTextFrame(t, "text_delta", "TURN ONE ANSWER"),
+	)
+	st, effs := drive(st, t0, runtimeFrame(t, "turn_completed", map[string]any{"terminal_state": "completed"}))
+	fetch, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("turn_completed must emit the tail-settle FetchTailEffect")
+	}
+	staleGen := fetch.Gen
+
+	// Turn 2 begins and streams while turn 1's GET is still in flight.
+	st, _ = drive(st, t0,
+		runtimeFrame(t, "turn_started", nil),
+		runtimeTextFrame(t, "text_delta", "TURN TWO IS LIVE"),
+	)
+	if st.TailGen == staleGen {
+		t.Fatalf("turn two's tail must carry a NEWER generation than turn one's settle (both %d) — the fence is inert", staleGen)
+	}
+
+	// Turn 1's stale GET lands last.
+	st, _ = drive(st, t0, TailFetchedEvent{
+		Session: Session{ID: "s1", Messages: []Message{
+			{Seq: 1, Role: "assistant", Blocks: json.RawMessage(`[{"type":"paragraph","content":[{"type":"text","value":"TURN ONE ANSWER"}]}]`)},
+		}},
+		Gen: staleGen,
+	})
+	if len(st.Messages) != 1 {
+		t.Fatalf("turn one must still settle into its row, got %d", len(st.Messages))
+	}
+	if !strings.Contains(st.Tail, "TURN TWO IS LIVE") {
+		t.Fatalf("a stale turn-1 settle must not clear turn two's live tail, got %q", st.Tail)
+	}
+}

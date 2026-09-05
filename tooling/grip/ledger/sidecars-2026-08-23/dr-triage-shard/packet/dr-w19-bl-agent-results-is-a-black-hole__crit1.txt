@@ -1,0 +1,1 @@
+The command-queue producer gap is stated in code or docs: either a producer exists, or the absence is recorded where a reader of command_queue/0 will see it.

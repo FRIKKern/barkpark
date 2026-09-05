@@ -1,0 +1,1 @@
+A named decision states which credential class may enable the prebuilt lane, and whether normalize_abilities keeps collapsing write+deploy.

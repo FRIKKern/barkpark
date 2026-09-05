@@ -1,0 +1,1 @@
+The fixture no longer asserts values for columns no producer can write, or labels them explicitly as synthetic-and-unreachable.

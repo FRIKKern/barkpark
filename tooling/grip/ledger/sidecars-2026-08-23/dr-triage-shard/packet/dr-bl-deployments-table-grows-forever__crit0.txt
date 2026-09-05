@@ -1,0 +1,1 @@
+A written decision covers deployments retention: a bound, or an explicit ruling that unbounded is correct because the census depends on the full history, with the growth rate measured.

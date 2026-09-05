@@ -490,7 +490,7 @@ defmodule Barkpark.PluginFreeBootTest do
     end
 
     test "GET /api/schemas returns exactly the 6 PUBLIC seed schema names" do
-      conn = build_conn() |> get("/api/schemas")
+      conn = BarkparkWeb.ConnCase.scoped_conn() |> get("/api/schemas")
       body = json_response(conn, 200)
 
       schema_names =
@@ -562,7 +562,7 @@ defmodule Barkpark.PluginFreeBootTest do
         ])
 
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw_token)
         |> get("/v1/graph/#{doc_id}")
 
@@ -634,7 +634,7 @@ defmodule Barkpark.PluginFreeBootTest do
         Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
 
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw_token)
         |> put_req_header("content-type", "application/json")
         |> post(
@@ -712,7 +712,7 @@ defmodule Barkpark.PluginFreeBootTest do
   end
 
   defp get_following_redirects(path, hops) do
-    conn = build_conn() |> get(path)
+    conn = BarkparkWeb.ConnCase.scoped_conn() |> get(path)
 
     if conn.status in [301, 302] do
       [location] = get_resp_header(conn, "location")

@@ -74,7 +74,8 @@ type State struct {
 	Local    []LocalSend // optimistic sends not yet settled into Messages
 	WedgeAt  time.Time   // interrupt wedge deadline (zero unless interrupting)
 
-	// Gen is the turn generation, bumped once per system/init frame. It is the
+	// Gen is the turn generation, bumped once per turn-start frame on EITHER
+	// lane (claude system/init, codex runtime turn_started). It is the
 	// settle-race token (charter D77): a turn's tail-settle GET carries the Gen
 	// that issued it, so a STALE turn-1 fetch landing after a queued turn-2's init
 	// already flipped Phase (reduce.go's init handler) can be told apart from a
@@ -687,9 +688,22 @@ func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
 	switch frame.Kind {
 	case "turn_started":
 		// The codex lane's turn-start signal — the sibling of the claude lane's
-		// system/init, and the ONLY moment this turn's byte 0 is knowable (charter
-		// D81). It stamps the live-document base and NOTHING else: phase, tail and
-		// notice stay exactly as inert as they were before this case existed.
+		// system/init. It does exactly two things and emits NOTHING (no effect, no
+		// IO): it advances the generation, and it stamps the live-document base.
+		//
+		// The generation advance is what makes the D77 settle fence LIVE on this
+		// lane. Before it, Gen moved only inside the claude system/init arm, so a
+		// codex turn kept the generation it started in: a stale turn-1 settle GET
+		// carried a Gen that still equalled TailGen when it landed, and
+		// reduceTailFetched cleared turn 2's live tail. Bumped FIRST and here for
+		// the same reason init bumps it there — Tail/TailGen are deliberately
+		// untouched, so the prior turn's text stays painted (no blank flash) and
+		// carries its own generation with it until its own settle lands.
+		st.Gen++
+		// The base is the ONLY moment this turn's byte 0 is knowable (charter
+		// D81). Phase, tail and notice stay exactly as inert as they were before
+		// this case existed; the stable cursor (StableTurn/CommittedBytes) is
+		// keyed on the SERVER turn and is deliberately NOT reset here.
 		st.StableBase = len(st.Tail)
 		return st, nil
 
@@ -707,10 +721,8 @@ func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
 		}
 		// Stamped and CAPPED through the same accumulator the claude lane uses
 		// (charter D77), so the settle guard and the display cap see the same
-		// shape on both lanes. Residual, recorded: Gen advances only on a claude
-		// system/init frame, so a codex turn keeps the generation it started in —
-		// the fence is inert there rather than wrong, and advancing it on runtime
-		// turn boundaries is a separate parity slice.
+		// shape on both lanes — and the generation the stamp carries is now this
+		// lane's own, advanced by the turn_started arm above.
 		st = appendTail(st, native.Params.Delta)
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming

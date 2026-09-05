@@ -21,7 +21,7 @@ defmodule BarkparkWeb.SessionControllerTest do
   live TOTP or a burned recovery code.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it.

@@ -1,0 +1,1 @@
+The per-tick systemctl cost is MEASURED on guerrilla (forks/hour and wall time), not assumed — the number is pasted, and the interval is set from it rather than from taste

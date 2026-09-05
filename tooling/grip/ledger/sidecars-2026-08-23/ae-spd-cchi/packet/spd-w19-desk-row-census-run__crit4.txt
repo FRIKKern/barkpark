@@ -1,0 +1,1 @@
+Rows that do nothing are NAMED and each gets its own published child task - including item-rest if it is still dead, and pane_section_header which is dead by construction at its only desk call site.

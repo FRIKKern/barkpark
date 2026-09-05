@@ -1,0 +1,1 @@
+A census of remaining bare-div phx-click affordances on the desk is recorded so the pattern is visible rather than fixed one instance at a time

@@ -1,0 +1,1 @@
+MUTATION PROOF: restore the exit-0 behaviour and confirm that test REDS naming the exit code, not the stderr text -- the defect is precisely that the stderr text was already right while the exit code was wrong.

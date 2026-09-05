@@ -1,0 +1,1 @@
+The branch at 0bf3b4551 is ADOPTED (rebased/cherry-picked), not rebuilt, and its THREE conflicts are resolved - .github/workflows/elixir.yml (one comment-only hunk; the skip-shim, dispatcher, path-escape and elixir-gate jobs SURVIVE) plus two api/test chat tests resolved to HEAD. Evidence: the refs and the resolutions.

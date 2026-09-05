@@ -24,7 +24,7 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       "who may" twice: `Accounts.team_admin?/2` delegates to
       `TeamMembership.admin?/1` (`rank(role) >= rank("admin")`), while
       `Authz.team_admin?/2` tests membership of a role LITERAL list. Both are
-      live — `require_team_admin` routes through Authz, `require_primary_team_admin`
+      live — `require_team_admin` routes through Authz, `require_current_team_admin`
       through Accounts — and nothing asserted they agree. ARM C walks the FULL
       role domain, not just the three canonical roles: the schema roles, `nil`
       (non-member), and off-ladder strings. The off-ladder half is not

@@ -1,0 +1,1 @@
+The five other consumers of failure_copy.ex (azure, domain_status, router, sites.deploy, delivery_reason) are unbroken, proved by running their suites

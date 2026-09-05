@@ -1,0 +1,1 @@
+REFUSALS ARE SCORED PER-ASSERTION, NOT PER-LEG. Evidence: the scoring code, plus the demonstration that the `.instances-grid` card-half assertion is now individually accountable — under the historical defect it must be shown able to red on its own, independent of the leg's page-global half.

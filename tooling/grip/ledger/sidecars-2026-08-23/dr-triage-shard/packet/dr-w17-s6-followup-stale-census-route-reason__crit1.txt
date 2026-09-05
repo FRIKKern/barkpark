@@ -1,0 +1,1 @@
+cd cloud && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_cloud/deploy_ledger_reachability_test.exs is green. Paste the total

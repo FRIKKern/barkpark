@@ -103,8 +103,30 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: var(--tok-reading-body-tracking);
-  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
+  /* THE DISPLAY SIZE IS VIEWPORT-CLAMPED, and the token is still the ceiling.
+     `--tok-reading-h1-size` (40px) is sized for the 580px reading column. On a
+     390px phone the column is 358px and a nine-word title wrapped to FIVE lines
+     of 40px display type — measured on /papers/heggemsnes-act, headless
+     Chromium at 390x844: 40px -> 5 lines, 34px -> 4, 28px -> 3. A title that
+     costs a third of the first screen is not a title, it is a wall.
+
+     `clamp(28px, 8vw, <token>)`: the token is the MAX, so every width at or
+     above 500px (40 / 0.08) renders the authored 40px and desktop is untouched
+     byte-for-byte. Below it the display size tracks the viewport the column
+     tracks — 31.2px at 390 (4 lines), floor 28px at 350 and under. The floor is
+     not a taste number: 28px is the largest size that still reads as display
+     type against the 18px body while fitting the title inside four lines.
+
+     ON THE TOKEN, NOT ON A SHELL. `.bp-paper-surface h1` is byte-mirrored into
+     root.html.heex and paper-editor/src/styles.css and view_edit_parity_test
+     compares it property-by-property, so a media override per shell would have
+     to be written three times and kept in sync by hand — and root.html.heex is
+     forbidden from DEFINING a `--bp-*` token at all (stylesheet_test.exs:85).
+     Clamping the token instead moves the reader and both editor surfaces
+     together, which is what parity means. */
+  --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
+  --bp-h2-weight: var(--tok-reading-h2-weight);
   --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
@@ -113,8 +135,8 @@ html[data-theme="dark"] .bp-paper-body {
      `--bp-*` name and the emitted layer stays the one source.
 
      WHAT IT IS: how much room an EVIDENCE block takes before it starts. The
-     numbers are ratios of `--tok-air-beat` (the benchmark artifact's paragraph
-     beat, 22px), so the LAW ships rather than six literals: code 1.1x, table
+     numbers are ratios of `--tok-air-beat` (the benchmark artifact's AIR UNIT,
+     22px), so the LAW ships rather than six literals: code 1.1x, table
      1.36x, asciicast 1.45x, callout 1.55x, stats 1.64x, figure 1.82x — which
      resolve within 0.2px of the measured scale in
      tooling/paper-excellence/evidence/erasure.html (24/30/32/34/36/40px).
@@ -130,11 +152,33 @@ html[data-theme="dark"] .bp-paper-body {
      reader has none, so only a one-sided margin lands both surfaces on the same
      spacing (additive == collapsed when the other side is zero).
 
-     NOT `--bp-para-margin-top`: the reader's paragraph beat is 12pt/16px, the
-     artifact's is ~22px. The air scale is anchored on the ARTIFACT's beat because
-     that is what reproduces its measured evidence spacing. Retuning the reader's
-     prose rhythm to match is a real question, but it is type.reading's to answer,
-     not this scale's. */
+     NOT `--bp-para-margin-top`, AND THAT IS NOW A RULING RATHER THAN A DEFERRAL
+     (2026-09-02, task-741e0de1ddb3a482). This note used to say retuning the
+     reader's prose rhythm to 22px was "a real question ... type.reading's to
+     answer". It is answered: the prose beat STAYS at 12pt/16px, and 22px is
+     re-read as the artifact's AIR UNIT rather than as anyone's paragraph beat.
+
+     The two numbers are not competing measurements of one thing. 22px is the
+     unit the EVIDENCE ladder is expressed in; 16px is the rhythm PROSE is set
+     on. Anchoring the ladder on the artifact is what reproduces its measured
+     evidence spacing, and it does not oblige the reader's paragraphs to match.
+
+     WHY THE PROSE BEAT DOES NOT RISE TO 22. The ladder's bottom rung is code, at
+     1.1 x 22 = 24.2px. Against a 16px prose beat, the step from a paragraph to
+     the evidence it introduces is 8.2px — a step a reader can see, which is the
+     entire job of the scale. Against 22 it would be 2.2px: the evidence would
+     open at the same distance as the next sentence, and the air would stop
+     saying anything. Worse, paragraph-to-paragraph (22) would then exceed
+     heading-to-paragraph (16), so a heading would sit CLOSER to the paragraph
+     below it than two paragraphs sit to each other — a heading that has lost its
+     grip on the text it introduces. And 16px is 0.556 of the 28.8px line box,
+     inside the classical half-line-to-full-line paragraph window; 22px is 0.76,
+     which reads as a loose block, not as continuous argument.
+
+     The relation is ASSERTED, not remembered: tooling/paper-excellence/rig
+     measures the rendered prose beat against the rendered code air on every
+     (scheme x width) cell and reds unless the prose beat stays a clear step
+     below the ladder's bottom rung. Raising the beat to 22 reds it. */
   --bp-air-code: var(--tok-air-code);
   --bp-air-table: var(--tok-air-table);
   --bp-air-asciicast: var(--tok-air-asciicast);
@@ -254,8 +298,14 @@ html[data-theme="dark"] .bp-paper-body {
      under any left rail or pane offset the column itself sits behind.
 
      Captions do NOT ride the band: `--bp-evidence-caption` returns a figcaption
-     to a 72-character reading measure inside a figure that may be 1240px wide,
-     because a caption is prose and inherits prose's law, not its figure's. */
+     to a reading measure inside a figure that may be 1240px wide, because a
+     caption is prose and inherits prose's law, not its figure's. (The value is
+     `50ch`, calibrated to the CPL that actually lands — `ch` is the advance of
+     the digit zero, not the mean — and papers/captions-floor moved the caption
+     from system-ui italic to the reading serif, so the ch it resolves against
+     changed with it; the rig's `captionCpl` / `captionWidth` baselines pin the
+     rendered number. The consumer is now the ONE `.bp-figcaption` rule below,
+     not three inline copies.) */
   --bp-evidence-band: var(--tok-evidence-band);
   --bp-evidence-band-max: var(--tok-evidence-band-max);
   --bp-evidence-fill: var(--tok-evidence-fill);
@@ -275,15 +325,17 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-pre-radius: 4px;
   /* Code-BLOCK frame tokens (S9 code-interior). DISTINCT from --bp-pre-* (the
      generic 14px <pre>) and --bp-code-* (the inline-code chip): the article code
-     block is its own hardcoded terracotta-left-accent frame. These single-source
+     block is its own square-cornered --paper-bg-deep slab. These single-source
      the literals Figures.code_block_html/1 + the .bp-canvas-code editor frame both
-     paint, so View↔Edit move together. */
+     paint, so View↔Edit move together. The 3px --bp-codeblock-accent-w left bar
+     retired with task-ddb1e0ab09a62466: it existed because the reader body was
+     painted --paper-bg-deep and the slab was invisible; the body now stands on
+     --paper-bg and the slab is its own mark. */
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
   --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
-  --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
 }
@@ -360,7 +412,29 @@ html[data-theme="dark"] .bp-paper-body {
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
 .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
+/* ── THE DISPLAY VOICE (device 3, charter D29/D36) ────────────────────────────
+   A section head is the one place the paper speaks in its display voice, and
+   that voice is BIG AND LIGHT: ~2.0x the body (36px over 18px), weight 400, a
+   tight 1.15 leading and -0.015em tracking. Size does the work; weight steps
+   back so the head reads as an opening, not a shout — the h1 keeps the shared
+   600 and stays the loudest thing on the page by weight, the h3 keeps 600 and
+   stays the smallest by size, so hierarchy survives at every level.
+
+   `font-weight` reads `--bp-h2-weight` — the PER-STEP channel (tokens.json
+   type.reading.h2.weight → --tok-reading-h2-weight → the bridge above) — and
+   NOT the shared `--bp-heading-weight` the h1–h6 group rule binds. The shared
+   scalar is pinned at 600 by design/validate.mjs and never moves; a level that
+   wants its own voice declares its own weight. Declared on this element rule
+   (same specificity as the group rule, later in source) so it wins on h2 alone.
+
+   `text-wrap: balance` — a two-line head at 36px is a ragged block, and the
+   browser's greedy breaker leaves a lone word on line two more often than not;
+   balance splits the head into lines of roughly equal length so the head is
+   one shape, not a line and a stub. Headings are short (≤6 lines, the balance
+   ceiling in Chromium), so it always applies. Both editor twins carry the
+   identical declarations — view_edit_parity_test.exs §2/§5 pin font-weight
+   and text-wrap across all three files. */
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
 /* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
    A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
@@ -399,7 +473,23 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface > #paper-body > h2,
 .bp-paper-surface > #paper-body > div:not([class]) > h2 {
   margin-top: var(--bp-section-beat);
-  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+  padding-top: var(--bp-section-gap);
+}
+/* The SAME device for a level-2 heading that OPENS a `section` container. The
+   container is one box deeper than a bare block (stream item, then the box div
+   compose_section_stack/2 emits), so the two legs above stop one level short of
+   it on the live reader; compose drops the container's rule pair when its first
+   child is a heading precisely so this heading can carry the boundary alone.
+   `:first-child` is load-bearing: an h2 later in the box is a sub-argument, not
+   a boundary. The `.bp-section--wide` legs cover the classed box. Same three
+   declarations, read from the same tokens (view_edit_parity_test.exs §9 pins the
+   bare legs; this one has no Edit twin because the canvas has no section box). */
+.bp-paper-surface > #paper-body > div:not([class]) > div:not([class]) > h2:first-child,
+.bp-paper-surface > #paper-body > .bp-section--wide > h2:first-child,
+.bp-paper-surface > #paper-body > div:not([class]) > .bp-section--wide > h2:first-child {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
 }
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
@@ -467,6 +557,51 @@ html[data-theme="dark"] .bp-paper-body {
   display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
   border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
 }
+
+/* THE ONE FIGCAPTION. Every article <figure> the renderer emits — diagram and
+   asciicast (render/figures.ex), image / child frame (render/compose.ex) — used
+   to carry the SAME ~200 bytes of inline caption styling at three emit sites,
+   and the third copy had drifted: a literal `color:#55635e` where its two
+   siblings read `var(--paper-ink-soft, …)`. On the dark ground that literal is
+   2.97:1 — a contrast FAIL the token-reading copies did not have (7.05:1). One
+   class cannot drift from itself, which is the whole reason this rule exists.
+
+   THE TYPE: serif and ROMAN, not system-ui and italic. A caption sits inside a
+   serif paper and was the one run on the page that changed voice; and italic
+   Iowan at 14px is the weakest glyph set this surface ships. 0.9rem/1.45 keeps
+   the 14.4px the inline styles measured — above the 12px floor below — and
+   --paper-ink-soft is 6.65:1 light / 7.05:1 dark.
+
+   THE MEASURE, NOT THE BAND: a caption is prose and never rides the figure's
+   width, so `--bp-evidence-caption` returns it to a reading measure inside a
+   card that may be 1240px wide.
+
+   LEFT-ALIGNED, NOT CENTRED, and that is a measured choice. `margin-inline:
+   auto` was tried first and is worse everywhere: whenever the figure is NOT
+   broken out — a narrow viewport, the Studio pane, any host without the band —
+   the figure IS the column, so centring pushes the caption into the middle of
+   the column instead of onto the prose's left edge (measured 389.8px off, on
+   the showcase at 1280 in the rig harness). Left-aligned, the caption starts at
+   the figure's own content edge: exactly the prose edge for the unpadded
+   figures, and the card's text inset for the padded diagram card, which is
+   where a caption inside a card belongs.
+
+   The one case this does NOT nail is a figure that HAS broken out to the band:
+   there the caption sits at the band's inset, (band − column)/2 left of the
+   prose. That offset is only computable ON the figure — percentages there
+   resolve against the column — and from inside the caption `var(--bp-evidence-
+   pull)` resolves against the FIGURE, so it yields the figure's own padding,
+   not the column offset. Closing it means moving the breakout off `<figure>`
+   onto an inner wrapper (so the caption is a column-width child), which is a
+   bigger change than this rule and would double-pull any .bp-table/.bp-stats/
+   .bp-chart nested inside a figure. Left-aligned is strictly better than
+   centred in the meantime, and wrong in one case instead of two.
+
+   The :email / default clauses keep their inline <div>: an email client has no
+   stylesheet to carry a class. Both editor surfaces mirror this rule
+   (root.html.heex and assets/paper-editor/src/styles.css) and
+   view_edit_parity_test.exs §2/§5 byte-compare all three. */
+.bp-paper-surface .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
 
 /* The public reader progressively enhances only PortableDoc article images.
    The renderer emits this data hook in :article mode; email and default output
@@ -603,7 +738,7 @@ html[data-theme="dark"] .bp-paper-body {
    At 360 the band expression collapses to `100%`, so the cap becomes the column
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
-.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
@@ -629,14 +764,9 @@ html[data-theme="dark"] .bp-paper-body {
    was drawing the same line the head of a section draws, in the middle of an
    argument (see the rule ladder above; the artifact's own `th` is
    `1px solid var(--rule)`). */
-.bp-paper-surface .bp-table__th {
-  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left;
-  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
-  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
-}
-.bp-paper-surface .bp-table__td {
-  border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top;
-}
+.bp-paper-surface .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+.bp-paper-surface .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+.bp-paper-surface .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
@@ -672,6 +802,28 @@ html[data-theme="dark"] .bp-paper-body {
   color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
   border-radius: 3px; font-size: 0.9em; text-decoration: none; border-bottom: none;
 }
+/* Verdict chips (inline `chip` node, walk.ex chip_html/5): a coloured pill in
+   one of the five paperCallout tones with a dot that survives grayscale, and an
+   optional note as a block beneath. The chip is what a scorecard CELL carries
+   and what a legend is made of — colour is the verdict, so every colour here is
+   a `--bp-tone-*` pair, never a literal. `--strong` fills the pill: the step a
+   four-band scale needs above danger without a sixth tone entering the token
+   system. `white-space: nowrap` keeps "Ikke relevant" on one line inside a
+   narrow cell; the note wraps freely under it. */
+.bp-paper-surface .bp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px; font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; line-height: 1.45; letter-spacing: 0.01em; white-space: nowrap; vertical-align: middle; }
+.bp-paper-surface .bp-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.bp-paper-surface .bp-chip--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chip--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chip--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chip--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chip--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-chip--strong { color: var(--paper-bg); }
+.bp-paper-surface .bp-chip--success.bp-chip--strong { background: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chip--warning.bp-chip--strong { background: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chip--danger.bp-chip--strong  { background: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chip--info.bp-chip--strong    { background: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chip--neutral.bp-chip--strong { background: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-chip__note { display: block; font-size: 0.78rem; color: var(--paper-ink-soft); line-height: 1.35; margin-top: 4px; max-width: 22em; }
 .bp-paper-surface .bp-embed {
   margin: 1em 0; padding: 0.25em 0 0.25em 1em; border-left: 3px solid var(--paper-accent);
 }
@@ -809,9 +961,10 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-reading-h1-size: 40px;
   --tok-reading-h1-lh: 1.05;
   --tok-reading-h1-tracking: -0.02em;
-  --tok-reading-h2-size: 27px;
-  --tok-reading-h2-lh: 1.2;
-  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h2-size: 36px;
+  --tok-reading-h2-lh: 1.15;
+  --tok-reading-h2-tracking: -0.015em;
+  --tok-reading-h2-weight: 400;
   --tok-reading-h3-size: 21px;
   --tok-reading-h3-lh: 1.3;
   --tok-air-beat: 22px;
@@ -1142,14 +1295,14 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   width: var(--bp-evidence-width, 100%); box-sizing: border-box; overflow-x: auto;
 }
 .bp-paper-surface .bp-filetree-note { white-space: pre; }
-.bp-paper-surface .bp-filetree-legend { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
+.bp-paper-surface .bp-filetree-legend { color: var(--paper-ink-soft); font-size: 12px; margin-top: 4px; }
 
 .bp-paper-surface .bp-tasks {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   margin: 1.6rem 0;
 }
 .bp-paper-surface .bp-tasks--empty {
-  font-family: var(--paper-font-mono); color: var(--paper-ink-faint); font-size: 0.85rem;
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
   border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
 }
 .bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; }
@@ -1161,7 +1314,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-g--ready   { color: var(--paper-ink); }                 /* full white — unchecked */
 .bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
 .bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
-.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-g--considering { color: var(--paper-ink); opacity: 0.35; } /* ◌ — dim: a candidate, below backlog on the ladder */
 .bp-paper-surface .bp-g--researching { color: var(--st-violet); }                /* ◎ — violet: active investigation, the wave's one new hue */
 .bp-paper-surface .bp-g--progress { color: var(--st-info); }
@@ -1176,24 +1329,24 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 /* rows */
 .bp-paper-surface .bp-trow { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.86rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-trow:first-child { border-top: none; }
-.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
+.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-soft); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
 .bp-paper-surface .bp-trow__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-paper-surface .bp-trow--open .bp-trow__t { opacity: 0.6; }               /* backlog title recedes */
 .bp-paper-surface .bp-trow--done .bp-trow__t { color: var(--paper-ink-soft); } /* done recedes */
 .bp-paper-surface .bp-trow__m { display: flex; align-items: center; gap: 0.6rem; flex: none; }
-.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-trow__p[data-p="1"] { color: var(--st-danger); }
 .bp-paper-surface .bp-trow__p[data-p="2"] { color: var(--st-warn); }
-.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); font-variant-numeric: tabular-nums; }
-.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-info); }
-.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-warn); }
+.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-info); }
+.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-warn); }
 
 /* phase headers with rollup */
 .bp-paper-surface .bp-phase { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.9rem; background: var(--paper-bg-deep); border-top: 1px solid var(--paper-rule); }
 .bp-paper-surface .bp-phase:first-child { border-top: none; }
 .bp-paper-surface .bp-phase__nm { font-weight: 600; font-size: 0.8rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-phase__rule { flex: 1; height: 1px; background: var(--paper-chrome-border); }
-.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
 
 /* momentum header — always feel progress */
 .bp-paper-surface .bp-momentum { border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.7rem; }
@@ -1234,26 +1387,26 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    one that cannot move a layout. */
 .bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); overflow-wrap: break-word; }
 .bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.4rem; }
+.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 0.4rem; }
 .bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-tl__seg { display: inline-flex; align-items: center; gap: 0.3rem; }
-.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-tdetail__desc { font-size: 0.9rem; color: var(--paper-ink); line-height: 1.55; margin-top: 0.9rem; }
-.bp-paper-surface .bp-tdetail__lbl { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); font-weight: 700; margin: 1rem 0 0.45rem; }
+.bp-paper-surface .bp-tdetail__lbl { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); font-weight: 700; margin: 1rem 0 0.45rem; }
 .bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-faint); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
+.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-soft); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
 .bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); overflow-wrap: anywhere; }
 .bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
 .bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); overflow-wrap: anywhere; }
-.bp-paper-surface .bp-rail__more { font-size: 0.72rem; color: var(--paper-ink-faint); padding-left: 0.3rem; }
-.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-rail__more { font-size: 0.75rem; color: var(--paper-ink-soft); padding-left: 0.3rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 0.9rem; overflow-wrap: anywhere; }
 
 /* ── task board (kanban) ── */
 .bp-paper-surface .bp-board {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 1.6rem 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 /* Same move as `.bp-card` below, for the same reason and with the same colours:
@@ -1269,8 +1422,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
 .bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
 .bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
+.bp-paper-surface .bp-board__label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
 .bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
 .bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
 .bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; overflow-wrap: anywhere; }
@@ -1282,7 +1435,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
 }
 .bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
-.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
 .bp-paper-surface .bp-rm__lane { display: flex; align-items: center; gap: 10px; }
 .bp-paper-surface .bp-rm__lane--phase .bp-rm__lbl { font-weight: 700; color: var(--paper-ink); }
@@ -1305,13 +1458,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 }
 .bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
 .bp-paper-surface .bp-legend__r:first-child { border-top: none; }
-.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
 
 /* ── notes: annotated label-chip list (the "what upgraded" column) ── */
 .bp-paper-surface .bp-notes { display: flex; flex-direction: column; gap: 0.9rem; margin: 1.4rem 0; }
 .bp-paper-surface .bp-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; }
-.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
 .bp-paper-surface .bp-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; }
 .bp-paper-surface .bp-note__d b { color: var(--paper-ink); font-weight: 600; }
 @media (max-width: 520px) { .bp-paper-surface .bp-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-paper-surface .bp-note__k { justify-self: start; } }
@@ -1328,11 +1481,11 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-term__dots i:nth-child(2) { background: #f59e0b; opacity: 0.85; }
 .bp-paper-surface .bp-term__dots i:nth-child(3) { background: #22c55e; opacity: 0.85; }
 .bp-paper-surface .bp-term__title { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
+.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
 .bp-paper-surface .bp-term__live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 22%, transparent); }
 .bp-paper-surface .bp-term__body { padding: 0.5rem 0.4rem; }
 .bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
-.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 
 /* ── columns — responsive multi-column layout ──
    A columns block is an explicit composition surface, so it may use the
@@ -1405,96 +1558,141 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
 .bp-paper-surface .bp-canvas-stage--src { border-color: var(--paper-accent); }
 .bp-paper-surface .bp-canvas-stage__k, .bp-paper-surface .bp-canvas-stage__t, .bp-paper-surface .bp-canvas-stage__d, .bp-paper-surface .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
-.bp-paper-surface .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
 .bp-paper-surface .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-surface .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
-.bp-paper-surface .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
-.bp-paper-surface .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
+.bp-paper-surface .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); cursor: pointer; }
 
 /* ── pipeline: source → emit → gate flow ── */
 .bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }
 .bp-paper-surface .bp-pipe { display: flex; align-items: stretch; gap: 8px; min-width: min-content; }
 .bp-paper-surface .bp-pnode { flex: 1 1 0; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
 .bp-paper-surface .bp-pnode--src { border-color: var(--paper-accent); }
-.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
 .bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
-.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
-.bp-paper-surface .bp-pnode__src { font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-accent); margin-top: 8px; word-break: break-word; }
-.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-faint); font-size: 1.1rem; flex: none; }
+.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pnode__src { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-accent); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-soft); font-size: 1.1rem; flex: none; }
 
 /* ── data-viz slate: stat / stats / heatmap / chart (gui-premium w1) ──
    Browser twins of the pdrender creative slate. All color resolves through the
    paper tokens; intensity/series index only ever drive a custom property or an
    indexed class — author data never carries color. */
-.bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
+.bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
 
-.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
-/* THE VALUE MUST BE ABLE TO BREAK, AND `anywhere` IS THE ONLY THING THAT WORKS.
-   `.bp-stat__v` is the largest type in the sheet — 1.7rem mono — and it sits in
-   a cell that is far narrower than a phone screen. The `.bp-stats` grid below
-   is `repeat(auto-fit, minmax(140px, 1fr))`, so at a 390px viewport the reading
-   column (358px of content) makes exactly two ~179px tracks. Measured in
-   headless Chromium: a value of twelve characters with no break opportunity
-   fills that track and pushes the DOCUMENT past the viewport, and from there
-   every extra character costs another ~16px of sideways page scroll.
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
+/* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
+   fits, and a contained overflow.
 
-   Twelve characters is not an exotic input, it is a formatted number. Neither
-   `$1,234,567.89` nor `1 234 567,89` offers a single break opportunity —
-   comma, period and the U+202F narrow no-break space used for digit grouping
-   all refuse one — and a stats row formats every cell the same way, so the
-   second cell is already at the screen edge when it starts. A stat block whose
-   job is to show a large figure could not show a large figure on a phone.
+   `.bp-stat__v` is the largest type in the sheet and it sits in a cell far
+   narrower than a phone screen: `.bp-stats` is `repeat(auto-fit, minmax(140px,
+   1fr))`, so at a 390px viewport the 358px reading column makes exactly two
+   ~178px tracks, ~149px of them inside the cell's padding.
 
-   `anywhere`, not `break-word`: `.bp-stat` is `inline-flex`, i.e. shrink-to-fit,
-   and outside the grid it sizes itself from its content's intrinsic width.
-   `break-word` never reports a smaller intrinsic width, so it fixes the grid
-   case and leaves the standalone stat exactly as broken — measured, both arms.
-   Only `anywhere` participates in min-content sizing, which is precisely the
-   property needed here and precisely the property that makes it the wrong
-   choice for the headings elsewhere in this sheet.
+   WHAT WAS WRONG. The rule used to read `overflow-wrap: anywhere` at a flat
+   1.7rem, which stops the page scrolling sideways by breaking the value. Both
+   halves of that break are wrong, and they are different wrongs:
 
-   Wrapping a number is not lovely. Truncating one is a lie, and `overflow:
-   hidden; text-overflow: ellipsis` — the clamp the nowrap labels in this sheet
-   use — would present a shortened figure as if it were the whole figure. A
-   number that wraps is still readable; a number silently missing its last
-   digits is not. */
-.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+     * `anywhere` breaks INSIDE a number. `$1,234,567.89` has no break
+       opportunity of its own, so `anywhere` splits it mid-digit — the reader
+       gets `$1,234,56` over `7.89` and has to reassemble a figure by eye.
+     * ordinary wrapping breaks a compound value at its spaces. Measured on
+       /papers/heggemsnes-act at 390x844, `8 min 10 s` rendered as `8 min 10`
+       over `s`, which reads as two numbers.
+
+   WHAT REPLACES IT, in three parts that only work together:
+
+     * `white-space: nowrap` — a value never breaks, at a space or inside a
+       digit run. This is the actual contract.
+     * `font-size: clamp(1.15rem, 5.6vw, 1.7rem)` — the size is what makes
+       nowrap affordable. The 1.7rem MAX is reached at a 486px viewport, so
+       every desktop width renders exactly the size this rule always rendered
+       (measured: the 1280 and 1920 rig baselines are unmoved). Below it the
+       value tracks the cell that shrank: 21.8px at 390, where `8 min 10 s`
+       measures 135px inside a 149px cell — measured in headless Chromium, the
+       same way the old `anywhere` threshold was.
+     * `max-width: 100%; overflow-x: auto` — the safety net for the value no
+       clamp can size for. A figure longer than its cell scrolls INSIDE the
+       cell instead of growing the document, so the page still never rocks
+       sideways; that guarantee was `anywhere`'s job and it does not lapse.
+
+   NOT AN ELLIPSIS, still. Several nowrap labels in this sheet pair with
+   `overflow: hidden; text-overflow: ellipsis`. That clamp is wrong for a
+   figure: it presents a shortened number as though it were the whole number.
+   `overflow-x: auto` hides no digit — every one stays reachable — which is why
+   it is the containment that may be used here and the ellipsis is not.
+
+   The arithmetic above is asserted, not remembered:
+   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs. */
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: clamp(1.15rem, 5.6vw, 1.7rem); font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; white-space: nowrap; max-width: 100%; overflow-x: auto; }
 /* The label is prose in a 179px track. `break-word` is enough here — the label
    never sizes its own box (the grid track does), so the min-content behaviour
    `.bp-stat__v` needs is not required, and the weaker declaration is the one
    that cannot move a layout. */
-.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
-.bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
+.bp-paper-surface .bp-stat__l { order: 2; font-size: 0.75rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
+.bp-paper-surface .bp-stat__bar { order: 1; height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin: 2px 0 0; }
 .bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
-.bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
+.bp-paper-surface .bp-stat__spark { order: 4; width: 100%; height: 26px; margin-top: 4px; }
 .bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
 /* The stat strip BREAKS OUT to the evidence band. This is the clearest case for
    the whole device: `auto-fit` + `minmax` means the grid does not merely get
    wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
    8. The component gains resolution with the screen instead of stacking tiles
-   the reader then has to scroll past. */
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
-.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
+   the reader then has to scroll past.
+
+   THE SEAMS ARE DRAWN BY THE CELLS, NOT THE GROUND (task-0098ba55d2642545,
+   charter D36). The hairline grid used to be a rule-tinted CONTAINER ground
+   showing through 1px gaps. That paints every empty grid area too: a strip whose
+   item count is not a multiple of the track count leaves the remainder of its
+   last row as a solid rule-tinted slab (auto-fit only collapses TRAILING tracks,
+   and 9 stats at 7 tracks is a full row plus two cells and five slabs). So the
+   container is transparent, `overflow: hidden` clips what the cells paint past
+   its edge, and each cell paints its own seams:
+
+     * `box-shadow: 1px 0` — the 1px gap column to its RIGHT, its own height;
+     * `box-shadow: 0 1px` — the 1px gap row BELOW it, its own width;
+     * `::after`, a 1x1 dot at its bottom-right corner — the crossing pixel
+       neither one-sided shadow reaches.
+
+   ONE-SIDED, never a ring. `--paper-rule` is translucent in the default light
+   skin (rgba(21, 33, 29, 0.09)), and a ring on every cell paints each seam
+   twice (both neighbours' rings land in the same gap), so the seam goes ~1.9x
+   darker there — chrome getting louder, which is exactly what the rule ladder
+   above forbids. Each gap pixel is painted by exactly one cell: the
+   right seam by the cell on its left, the bottom seam by the cell above, the
+   crossing by the cell up-left of it. The exterior edges (last column's right,
+   last row's bottom) fall outside the container and `overflow: hidden` drops
+   them — so a full row renders byte-for-byte as before, and a partial row's
+   remainder is page ground bounded by hairlines on its top and left, i.e. a
+   grid whose cells stop where the data stops. Measured by the rig as
+   `statRemainder` (the probe at the empty track must hit a transparent
+   container) with the committed `stat-partial-row` fixture — eleven cells,
+   prime, so the last row is partial at every band width (8+3 @1280, 9+2
+   @1920). Container and cell rules are mirrored on both editor twins
+   (`.bp-paper-editor-body .bp-stats` / `… .bp-stat`). */
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
 
 .bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
 .bp-paper-surface .bp-gauge__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
-.bp-paper-surface .bp-gauge__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-gauge__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-paper-surface .bp-gauge__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
 .bp-paper-surface .bp-gauge__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
-.bp-paper-surface .bp-gauge__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
-.bp-paper-surface .bp-gauge__n { font-size: 0.68rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
-.bp-paper-surface .bp-gauge__note { font-size: 0.72rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-gauge__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-gauge__n { font-size: 0.75rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
+.bp-paper-surface .bp-gauge__note { font-size: 0.75rem; color: var(--paper-ink-soft); }
 
-.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: inline-block; }
+.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: block; width: fit-content; max-width: var(--bp-evidence-width, 100%); margin-inline: var(--bp-evidence-pull, 0px); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; overflow-x: auto; }
 .bp-paper-surface .bp-heat__grid { display: grid; gap: 4px; align-items: center; }
 .bp-paper-surface .bp-heat__c { aspect-ratio: 1; min-height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--paper-accent) calc(var(--i, 0) * 88%), var(--paper-rule)); }
-.bp-paper-surface .bp-heat__rl, .bp-paper-surface .bp-heat__cl { font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-heat__rl, .bp-paper-surface .bp-heat__cl { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-heat__rl { padding-right: 8px; text-align: right; }
-.bp-paper-surface .bp-heat__cl { text-align: center; }
-.bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__cl { text-align: center; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; align-self: end; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
 
 /* The chart BREAKS OUT to the evidence band. Its svg is `width: 100%` over a
@@ -1515,7 +1713,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
 .bp-paper-surface .bp-chart__grid { stroke: var(--paper-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .bp-paper-surface .bp-chart__axis { stroke: var(--paper-ink-faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 11px; }
+.bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 12px; }
 .bp-paper-surface .bp-chart__s { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .bp-paper-surface .bp-chart__b { stroke: none; opacity: 0.85; }
 .bp-paper-surface .bp-chart__s0 { stroke: var(--paper-accent); }
@@ -1527,7 +1725,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg); }
 .bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg); }
 .bp-paper-surface .bp-chart__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
-.bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-chart__swatch { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
 .bp-paper-surface .bp-chart__key .bp-chart__s0 { background: var(--paper-accent); }
 .bp-paper-surface .bp-chart__key .bp-chart__s1 { background: var(--bp-tone-info-fg, #3b82f6); }
@@ -1551,7 +1749,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
 .bp-paper-surface .bp-chart__refline--warn { stroke: var(--bp-tone-warning-fg); }
 .bp-paper-surface .bp-chart__refline--danger { stroke: var(--bp-tone-danger-fg); }
-.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 10px; }
+.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 12px; }
 .bp-paper-surface .bp-chart__pt { fill: var(--paper-accent); stroke: var(--paper-bg); stroke-width: 1.5; }
 
 /* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
@@ -1570,19 +1768,22 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    THE KILDE LAW: every figure datum carries a source ref, surfaced as the
    small mono «kilde» stamp under the figure. Units are always their own span
    beside the display-string number, never fused into it. */
-.bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
-.bp-paper-surface .bp-stat__body { font-size: 0.72rem; color: var(--paper-ink-soft); line-height: 1.45; }
+.bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-stat__body { order: 3; font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
 
-.bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.64rem; letter-spacing: 0.04em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
 .bp-paper-surface .bp-kilde__ref { word-break: break-word; }
 .bp-paper-surface .bp-kilde__ref a { color: inherit; }
-/* Inside the hairline grid the kilde is a grid item over the rule-colored
-   ground — without its own fill the whole footer line paints as a tinted band
-   (synth-proven pe-w3-hairline-grid-ground). Page ground restores flushness:
-   the 1px row gap above reads as the seam between slab and stamp, the
-   padding-top gives the stamp its air below that seam. */
-.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; background: var(--paper-bg); padding-top: 8px; }
+/* Inside the hairline grid the kilde is a full-width grid item under the last
+   row. The seam above it is the last row's cells painting their bottom gap
+   (see `.bp-stats .bp-stat` above) — it needs no fill of its own now that the
+   container has no ground, and it draws no seam of its own either: one that
+   spanned the full width would double-paint the seam the cells already drew.
+   Under a partial last row the seam therefore stops where the cells stop and
+   the stamp sits on open ground — the grid ends where the data ends. The
+   padding-top gives the stamp its air below the seam. */
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; padding-top: 0; }
 
 .bp-paper-surface .bp-duel { margin: 1.4rem 0; }
 /* jf-w1-engine-narrow-dark-fixes: self-contain horizontally, the same three
@@ -1590,13 +1791,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    at >=720px, display:block + overflow-x:auto is the escape hatch for a duel
    with long legend/value text at narrow measures. */
 .bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
-.bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
+.bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
 .bp-paper-surface .bp-duel__th--a { color: var(--paper-accent); }
 .bp-paper-surface .bp-duel__label { font-size: 0.82rem; font-weight: 600; color: var(--paper-ink); text-align: left; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
-.bp-paper-surface .bp-duel__delta { display: block; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 400; color: var(--paper-ink-soft); margin-top: 3px; }
+.bp-paper-surface .bp-duel__delta { display: block; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 400; color: var(--paper-ink-soft); margin-top: 3px; }
 .bp-paper-surface .bp-duel__val { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--paper-ink); text-align: right; white-space: nowrap; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
 .bp-paper-surface .bp-duel__val--a { color: var(--paper-accent); }
-.bp-paper-surface .bp-duel__unit { font-size: 0.66rem; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-duel__unit { font-size: 0.75rem; color: var(--paper-ink-soft); margin-left: 0.35em; }
 
 /* route (sport track): the SVG carries its own presentation attributes (it must
    survive a CSS-less email client), so the stanza owns only the figure rhythm +
@@ -1610,10 +1811,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-lineage { margin: 1.4rem 0; }
 .bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 .bp-paper-surface .bp-lineage__node { border-top: 1px solid var(--paper-rule); padding-top: 8px; }
-.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
-.bp-paper-surface .bp-lineage__unit { font-size: 0.66rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-lineage__unit { font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
 /* jf-w1-engine-narrow-dark-fixes: __nodes is an auto-fit minmax(150px,1fr)
    grid, so a node can be squeezed to its 150px floor at narrow measures — a
    long unbroken body string (a URL, a compound word) then blows the column
@@ -1625,7 +1826,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
 .bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
 .bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }
-.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.64rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
+.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.75rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
 
 .bp-paper-surface .bp-heat__c--z,
 .bp-paper-surface .bp-heat__c--b0,
@@ -1650,9 +1851,9 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 /* value cells: the exact number IS the second channel — the bin color moves to
    an underline strip so ink text keeps full contrast on every theme. These come
    AFTER the marker rules so the strip geometry wins at equal specificity. */
-.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.7rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
+.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.75rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
 .bp-paper-surface .bp-heat__c--v::after { content: ""; position: absolute; inset: auto 15% 0; top: auto; width: auto; height: 3px; margin: 0; border-radius: 2px; }
-.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-heat__c--v.bp-heat__c--z::after { background: var(--paper-rule); }
 .bp-paper-surface .bp-heat__c--v.bp-heat__c--b0::after { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
 .bp-paper-surface .bp-heat__c--v.bp-heat__c--b1::after { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
@@ -1660,7 +1861,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-heat__c--v.bp-heat__c--b3::after { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
 
 /* Σ marginals: dim mono sums, the grand total emphasized. */
-.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.7rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
+.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
 .bp-paper-surface .bp-heat__sum--grand { font-weight: 650; color: var(--paper-ink); }
 .bp-paper-surface .bp-heat__cl--sum { text-align: right; padding-right: 7px; }
 
@@ -1672,12 +1873,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    tokens, so both schemes hold. */
 .bp-paper-surface .bp-form { display: flex; flex-direction: column; gap: 12px; margin: 2rem 0; counter-reset: bpq; }
 .bp-paper-surface .bp-form-grill::before,
-.bp-paper-surface .bp-form-questionnaire::before { content: "Grill"; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-questionnaire::before { content: "Grill"; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-accent); }
 .bp-paper-surface .bp-form-questionnaire::before { content: "Questionnaire"; }
 
 .bp-paper-surface .bp-form-question { counter-increment: bpq; margin: 0; padding: 15px 17px 17px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; }
 .bp-paper-surface .bp-form-question > legend { float: left; width: 100%; padding: 0; margin: 0; font-size: 1.02rem; font-weight: 650; line-height: 1.35; color: var(--paper-ink); }
-.bp-paper-surface .bp-form-question > legend::before { content: counter(bpq, decimal-leading-zero); display: block; margin-bottom: 5px; font-family: var(--paper-font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.09em; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-question > legend::before { content: counter(bpq, decimal-leading-zero); display: block; margin-bottom: 5px; font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.09em; color: var(--paper-accent); }
 .bp-paper-surface .bp-form-note { clear: both; font-style: italic; font-size: 0.88rem; color: var(--paper-ink-soft); margin: 0.35rem 0 0; line-height: 1.5; }
 .bp-paper-surface .bp-form-opts { clear: both; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
 
@@ -1717,16 +1918,16 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    in the value column. */
 .bp-paper-surface .bp-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; margin: 0; padding: 0.36rem 0; }
 .bp-paper-surface .bp-field + .bp-field { border-top: 1px solid var(--paper-rule); }
-.bp-paper-surface .bp-field__l { font-family: var(--paper-font-mono); font-size: 0.7rem; letter-spacing: 0.02em; color: var(--paper-ink-faint); transform: translateY(-1px); }
+.bp-paper-surface .bp-field__l { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); transform: translateY(-1px); }
 .bp-paper-surface .bp-field__v { color: var(--paper-ink); font-size: 0.98rem; line-height: 1.5; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-field__mono { font-family: var(--paper-font-mono); font-size: 0.84em; }
-.bp-paper-surface .bp-field__none { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-field__none { color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-field__swatch { display: inline-block; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--paper-chrome-border); margin-right: 7px; vertical-align: -1px; }
 .bp-paper-surface .bp-field__img { display: block; max-width: 220px; border-radius: 8px; border: 1px solid var(--paper-chrome-border); }
 .bp-paper-surface .bp-field__sub { display: flex; gap: 0.7rem; align-items: baseline; }
-.bp-paper-surface .bp-field__sub > b { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 500; color: var(--paper-ink-soft); min-width: 4.2rem; flex: none; }
+.bp-paper-surface .bp-field__sub > b { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); min-width: 4.2rem; flex: none; }
 .bp-paper-surface .bp-field__list { margin: 0; padding-left: 1.2rem; }
-.bp-paper-surface .bp-field__list li::marker { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.8em; }
+.bp-paper-surface .bp-field__list li::marker { color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.8em; }
 @media (max-width: 560px) { .bp-paper-surface .bp-field { grid-template-columns: 1fr; row-gap: 2px; } }
 
 /* ── mermaid diagram polish (gui-premium w1) ──
@@ -1763,7 +1964,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    reads as a deliberate "nothing renders here" state, never a broken layout.
    Appended at the end of the hand-authored section, clear of the data-viz slate
    region above (concurrently owned by gp-w5-dataviz-fidelity). */
-.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
+.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
 
 /* ── undelivered-block delivery wave (study /papers/portabledoc-potential-study;
    tasks task-392e09d6e29c42d1 + task-49fcdc3e45c93c02). ──────────────────────
@@ -1776,18 +1977,18 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 /* bar-chart: label + fill track + optional digit (data_viz.ex bar_chart_html). */
 .bp-paper-surface .bp-bar-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-bar-chart__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
-.bp-paper-surface .bp-bar-chart__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-bar-chart__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-paper-surface .bp-bar-chart__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
 .bp-paper-surface .bp-bar-chart__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
-.bp-paper-surface .bp-bar-chart__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-bar-chart__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
 
 /* criteria-progress: the task family's meter — same row anatomy. */
 .bp-paper-surface .bp-criteria-progress { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-criteria-progress__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
-.bp-paper-surface .bp-criteria-progress__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-criteria-progress__l { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-paper-surface .bp-criteria-progress__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
 .bp-paper-surface .bp-criteria-progress__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
-.bp-paper-surface .bp-criteria-progress__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-criteria-progress__d { font-family: var(--paper-font-mono); font-size: 0.75rem; min-width: 3em; text-align: right; }
 
 /* steps: numbered procedure — counter chip + title + indented body. The
    ::marker suppression matters: bp-steps is a semantic <ol> and the generic
@@ -1806,12 +2007,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    read as controls and the active tab must be visibly marked. */
 .bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
 .bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
-.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.74rem; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); cursor: pointer; }
 .bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }
 .bp-paper-surface .bp-tabs__panel, .bp-paper-surface .bp-code-tabs__panel { padding: 12px 15px; }
 .bp-paper-surface .bp-tabs__panel[hidden], .bp-paper-surface .bp-code-tabs__panel[hidden] { display: none; }
 .bp-paper-surface .bp-tabs__section { padding: 10px 15px; }
-.bp-paper-surface .bp-tabs__label, .bp-paper-surface .bp-code-tabs__label { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 700; color: var(--paper-ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+.bp-paper-surface .bp-tabs__label, .bp-paper-surface .bp-code-tabs__label { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; color: var(--paper-ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
 
 /* expandable: native <details> chrome (zero-JS disclosure). */
 .bp-paper-surface .bp-expandable { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 0; }
@@ -1828,24 +2029,24 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    size. The dividing line is whether a reader reads it as part of the sentence. */
 .bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-footnote__note { margin: 0.25rem 0; }
-.bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-soft); }
 
 /* equation: centered display math (native MathML) + honest empty degrade. */
 .bp-paper-surface .bp-equation { margin: 1.5rem 0; text-align: center; font-size: 1.08em; overflow-x: auto; }
-.bp-paper-surface .bp-equation--empty { border: 1px dashed var(--paper-chrome-border); border-radius: 10px; padding: 10px 13px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; text-align: left; }
+.bp-paper-surface .bp-equation--empty { border: 1px dashed var(--paper-chrome-border); border-radius: 10px; padding: 10px 13px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; text-align: left; }
 
 /* api-endpoint: method chip + path + params table. Method tones ride the
    status palette so GET/POST/DELETE read at a glance without new colors. */
 .bp-paper-surface .bp-api-endpoint { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
 .bp-paper-surface .bp-api-endpoint__head { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: var(--paper-bg-deep); }
-.bp-paper-surface .bp-api-endpoint__method { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 6px; background: var(--paper-rule); color: var(--paper-ink); flex: none; }
+.bp-paper-surface .bp-api-endpoint__method { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 6px; background: var(--paper-rule); color: var(--paper-ink); flex: none; }
 .bp-paper-surface .bp-api-endpoint__method--get { color: var(--st-ok); border: 1px solid currentColor; background: none; }
 .bp-paper-surface .bp-api-endpoint__method--post { color: var(--st-info); border: 1px solid currentColor; background: none; }
 .bp-paper-surface .bp-api-endpoint__method--put, .bp-paper-surface .bp-api-endpoint__method--patch { color: var(--st-warn); border: 1px solid currentColor; background: none; }
 .bp-paper-surface .bp-api-endpoint__method--delete { color: var(--st-danger); border: 1px solid currentColor; background: none; }
 .bp-paper-surface .bp-api-endpoint__path { font-family: var(--paper-font-mono); font-size: 0.8rem; background: none; padding: 0; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-api-endpoint__params { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-.bp-paper-surface .bp-api-endpoint__params th { text-align: left; padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-api-endpoint__params th { text-align: left; padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-api-endpoint__params td { padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); }
 .bp-paper-surface .bp-api-endpoint__params tr:last-child td { border-bottom: none; }
 
@@ -1853,7 +2054,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-toc { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 12px 15px; }
 .bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; }
 .bp-paper-surface .bp-toc__item { margin: 3px 0; }
-.bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-toc__item[data-level="2"] { margin-left: 1.1rem; font-size: 0.92em; }
 .bp-paper-surface .bp-toc__item[data-level="3"] { margin-left: 2.2rem; font-size: 0.88em; }
 .bp-paper-surface .bp-toc--sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
@@ -1879,5 +2080,5 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chat-approval, .bp-paper-surface .bp-chat-plan, .bp-paper-surface .bp-chat-question, .bp-paper-surface .bp-chat-thinking, .bp-paper-surface .bp-chat-todo, .bp-paper-surface .bp-chat-tool-diff { margin: 1.1rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 10px 13px; font-size: 0.85rem; }
 
 /* valueref-accept: the inline baseline-accept affordance (walk.ex). */
-.bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.68rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
+.bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.75rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
 .bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }

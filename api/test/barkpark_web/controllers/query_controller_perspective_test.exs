@@ -31,7 +31,7 @@ defmodule BarkparkWeb.QueryControllerPerspectiveTest do
   prove the fix did not widen anything, not to detect the defect.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, TenancyFixtures}
 

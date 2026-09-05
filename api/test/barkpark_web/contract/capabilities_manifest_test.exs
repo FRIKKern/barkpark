@@ -1215,7 +1215,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # request gets — the chat gate must not perturb the ungated pipeline.
       # etag is content-addressed off the final map (generated_at excluded), so
       # etag equality IS body identity minus the per-request timestamp.
-      twin = caps_conn(build_conn())
+      twin = caps_conn(scoped_conn())
       twin_body = json_response(twin, 200)
 
       assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
@@ -1258,7 +1258,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
          %{conn: conn} do
       plain = caps_conn(conn)
-      with_chat = caps_conn(build_conn(), "?chat=1")
+      with_chat = caps_conn(scoped_conn(), "?chat=1")
 
       plain_etag = plain |> get_resp_header("etag") |> List.first()
       chat_etag = with_chat |> get_resp_header("etag") |> List.first()
@@ -1274,7 +1274,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # Presenting the plain etag against the chat request must re-render (200).
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", plain_etag)
         |> get("/v1/capabilities?chat=1")
@@ -1771,6 +1771,72 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         json_response(resolved, 200)
 
       assert resolved_at != nil
+    end
+  end
+
+  describe "If-None-Match is the shared RFC 9110 §13.1.2 matcher (D11)" do
+    # This route emits a WEAK validator (`W/"caps-…"`, Capabilities.etag_for/1)
+    # and used to compare it BYTE-EXACTLY. RFC 9110 §13.1.2 says If-None-Match
+    # uses the WEAK comparison function, so the strong form of our own tag must
+    # select it. PIN: reds on the pre-delegation matcher (exact compare → 200).
+    test "the STRONG form of our weak validator 304s", %{conn: conn} do
+      weak = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+      assert String.starts_with?(weak, ~s(W/")), "fixture is vacuous: etag #{inspect(weak)}"
+      "W/" <> strong = weak
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", strong)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
+      assert resp.resp_body == ""
+    end
+
+    test "the exact validator we emitted still 304s (positive control)", %{conn: conn} do
+      etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", etag)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
+    end
+
+    # NEGATIVE CONTROL — a 304 may only be granted on a validator we emitted.
+    test "a validator we never emitted gets the body (200)", %{conn: conn} do
+      _ = conn
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", ~s(W/"caps-deadbeefdeadbeef"))
+        |> get("/v1/capabilities")
+
+      assert resp.status == 200
+    end
+
+    # Multi-line folding: green before AND after (this site already flat_mapped
+    # every header line) — kept as a delegation regression guard.
+    test "a match on the SECOND If-None-Match line 304s", %{conn: conn} do
+      etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> then(fn c ->
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
+        end)
+        |> get("/v1/capabilities")
+
+      assert resp.status == 304
     end
   end
 end

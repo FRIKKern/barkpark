@@ -1,0 +1,1 @@
+Merge-gated criteria are distinguished from criteria that merely discuss merges - a builder can stamp the latter without any lead-only override.

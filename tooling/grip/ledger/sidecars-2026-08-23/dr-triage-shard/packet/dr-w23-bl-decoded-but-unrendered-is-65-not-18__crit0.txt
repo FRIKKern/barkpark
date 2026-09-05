@@ -1,0 +1,1 @@
+A type-resolved census (go/packages + go/types, not grep) over internal/cloudclient vs internal/cli exists and is runnable, and its output is pasted.

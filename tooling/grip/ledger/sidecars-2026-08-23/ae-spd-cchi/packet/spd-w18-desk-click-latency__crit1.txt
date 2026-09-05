@@ -1,0 +1,1 @@
+A single press on #item-paper reliably patches the URL across 10 consecutive cold loads with no retry, and the observed latencies are quoted.

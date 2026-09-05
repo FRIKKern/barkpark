@@ -1,0 +1,1 @@
+jarl specifically reports a non-null `cpu_cores` and a space payload. Evidence: the live `/v1/barkparks` excerpt for jarl and the rendered `bp cloud instance top jarl` naming `/var/lib/containerd`.

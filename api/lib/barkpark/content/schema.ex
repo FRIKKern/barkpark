@@ -129,6 +129,117 @@ defmodule Barkpark.Content.Schema do
   end
 
   @doc """
+  Resolve a type's `%SchemaDefinition{}` FOR FIELD-VISIBILITY REDACTION — the
+  tenant-scoped lookup with the GLOBAL-schema fallback.
+
+  THE ONE chokepoint every Envelope render/redact site resolves its schema
+  through. `get_schema/3` with a binary `:workspace_id` filters
+  `where workspace_id == ^ws` (`Barkpark.Content.Scope.scope_to_workspace/3`), so
+  a schema declared GLOBALLY (`workspace_id: nil`) never matches a document that
+  lives in a workspace. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
+  (an undeclared field is public, for legacy parity), so a single scoped lookup
+  that misses renders every `private` / `owner_only` / `readable_by` field of
+  that type to whoever is reading. The retry — the same lookup with the tenant
+  keys DROPPED — recovers the global row so the declared visibility still binds.
+
+  TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant rows,
+  so the fallback is accepted ONLY when its `workspace_id` is nil — the genuinely
+  global schema. Any non-nil `workspace_id` would substitute a FOREIGN tenant's
+  same-named schema, turning a redaction fix into a cross-tenant schema leak (and,
+  on the write-through paths, gating this tenant's edits on another's visibility).
+
+  Returns `{:ok, schema}` or `:error` — `:error` (not `{:error, :not_found}`)
+  precisely so a caller cannot mistake it for a bare `get_schema/3` result.
+
+  A caller that wants the raw tenant-scoped read (schema CRUD, the schema
+  endpoint, reference detection — anything that is not feeding a redaction
+  boundary) still calls `get_schema/3` directly.
+  """
+  @spec get_schema_for_redaction(String.t(), String.t() | nil, keyword()) ::
+          {:ok, SchemaDefinition.t()} | :error
+  # @canonical capability:schema-resolution-for-redaction aka:get_schema fallback,global schema fallback doc:docs/cards/search-media.md
+  def get_schema_for_redaction(name, dataset, opts \\ []) do
+    case get_schema(name, dataset, opts) do
+      {:ok, schema} ->
+        {:ok, schema}
+
+      _ ->
+        case get_schema(name, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> {:ok, schema}
+          _ -> :error
+        end
+    end
+  end
+
+  @doc """
+  Resolve a type's `%SchemaDefinition{}` the way every tenant-facing SURFACE
+  must — a three-rung ladder, first hit wins:
+
+    1. the caller's exact scope (workspace + project, when a project is given);
+    2. the caller's WORKSPACE, any project — the desk catalogue's own rule
+       (`Scope.scope_to_workspace_including_global/3` deliberately does not
+       narrow by project: a workspace's content types span its projects);
+    3. the shared global layer (`workspace_id IS NULL`).
+
+  Returns `{:ok, schema}` or `:error`. Rows owned by OTHER workspaces are never
+  reached — that is the leak the old unscoped read carried.
+
+  `get_schema_for_redaction/3` deliberately keeps its own two-step (exact scope,
+  then global) and does NOT ride this ladder: redaction is a security
+  chokepoint, and widening it to a workspace-wide rung changed which schema
+  redacted an expanded reference in the content suite. Studio NAVIGATION may
+  widen to the workspace; a REDACTION boundary may not.
+
+  Gyldendal field report #34, the TOKEN arm (2026-09-04): the Studio pane walk
+  read the DOCUMENT with the socket's scope but looked the SCHEMA up with
+  `get_schema/2` — no scope at all. Without a workspace, the dataset string
+  `"production"` resolves to the seeded Default workspace's dataset id, so a
+  schema registered in any OTHER workspace's `production` answered
+  `{:error, :not_found}`, the editor branch (`doc && schema`) produced nil, and
+  the shell reported a document that demonstrably exists as "does not exist".
+  Every unscoped `get_schema/2` on a request-driven path is that bug waiting
+  to happen; this is the resolver those paths call instead.
+  """
+  @spec resolve_schema(String.t(), String.t(), keyword()) :: {:ok, SchemaDefinition.t()} | :error
+  def resolve_schema(name, dataset, opts \\ []) do
+    if Keyword.has_key?(opts, :workspace_id) do
+      resolve_schema_scoped(name, dataset, opts)
+    else
+      # NO tenant scope at all — an internal / unscoped caller (a pane build
+      # outside a workspace mount, a mix task, a test). This is the explicit
+      # global read `get_schema/2` always was: the "global rung admits only a
+      # shared row" rule below exists to stop a SCOPED caller reaching another
+      # tenant's schema, and has no caller to protect here. Without this arm an
+      # unscoped read of a tenant-owned schema answered :error — the pane then
+      # lost its desk groups and orderings (found by E3.1's own test).
+      case get_schema(name, dataset, opts) do
+        {:ok, schema} -> {:ok, schema}
+        _ -> :error
+      end
+    end
+  end
+
+  defp resolve_schema_scoped(name, dataset, opts) do
+    workspace_only = Keyword.delete(opts, :project_id)
+    global = Keyword.drop(opts, [:workspace_id, :project_id])
+
+    rungs =
+      [opts, workspace_only, global]
+      |> Enum.uniq()
+
+    Enum.reduce_while(rungs, :error, fn rung, acc ->
+      case get_schema(name, dataset, rung) do
+        # A shared row is admissible from any rung.
+        {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> {:halt, {:ok, schema}}
+        # A tenant-owned row is admissible only from a tenant-scoped rung — the
+        # global rung must never hand back another workspace's schema.
+        {:ok, schema} when rung != global -> {:halt, {:ok, schema}}
+        _ -> {:cont, acc}
+      end
+    end)
+  end
+
+  @doc """
   Resolve the full Expectation for a schema definition.
 
   An Expectation is the schema PLUS its SOFT `layout` (ordered field-refs +
@@ -589,6 +700,8 @@ defmodule Barkpark.Content.Schema do
       actions: schema.actions || [],
       groups: schema.groups || [],
       deskGroups: schema.desk_groups || [],
+      # Gyldendal parity E3 — the schema-level desk block (orderings today).
+      desk: schema.desk || %{},
       crossValidations: schema.cross_validations || [],
       # Generic list-row preview declaration (badge + meta content fields);
       # empty map == no declaration, SDK/TUI rows render unchanged.

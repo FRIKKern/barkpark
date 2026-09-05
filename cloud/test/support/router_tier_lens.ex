@@ -86,8 +86,8 @@ defmodule BarkparkCloud.RouterTierLens do
     "require_user_or_pat_or_worker" => "user(s)+worker",
     "require_team_role" => "user",
     "require_team_admin" => "admin",
-    "require_primary_team_admin" => "admin",
-    "require_primary_team_owner" => "owner",
+    "require_current_team_admin" => "admin",
+    "require_current_team_owner" => "owner",
     "require_platform_operator" => "operator",
     "require_worker" => "worker",
     "require_agent" => "agent",
@@ -414,10 +414,12 @@ defmodule BarkparkCloud.RouterTierLens do
   # ── The refusal lens ───────────────────────────────────────────────────────
   #
   # `guard_in/3` returns the FIRST `Auth.require_*` hit and stops, which is right
-  # for the ~155 routes whose gate IS that call — and wrong for seven whose gate
-  # continues in a `cond` BELOW it. POST /v1/env-vars calls `Auth.require_user`
-  # and then 403s any non-team-admin two branches later; read by the outer guard
-  # alone it censuses as `user`.
+  # for the ~155 routes whose gate IS that call — and wrong for the handful whose
+  # gate continues in a `cond` BELOW it. POST /v1/resurrect calls
+  # `Auth.require_user` and then 403s any non-team-admin two branches later; read
+  # by the outer guard alone it censuses as `user`. (The example here used to be
+  # POST /v1/env-vars, deleted with the team env-var feature — cch-w53-bl,
+  # Option A, 2026-09-02.)
   #
   # THE SIGNAL IS A REFUSAL, NOT A MENTION: `GET /v1/notifications/deliveries`
   # calls `Accounts.team_admin?/2` too, but the boolean SCOPES a query — it

@@ -1,0 +1,1 @@
+When the control plane does not carry the route, the workflow step prints an explicit greppable warning naming how many shas went unrecorded and exits 0; there is no bare `|| true` anywhere in the added shell.

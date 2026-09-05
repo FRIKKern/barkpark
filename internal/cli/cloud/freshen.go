@@ -58,14 +58,22 @@ const freshenRepoDir = "/opt/barkpark"
 // local HEAD, the origin/main tip, and both `git describe` versions as
 // parseable KEY=VALUE lines on stdout (fetch chatter is routed to stderr so it
 // never pollutes the parse). `set -e` makes an unreachable fetch a non-zero exit
-// so the caller sees a check failure rather than a stale comparison. Seconds, not
+// so the caller sees a check failure rather than a stale comparison, and the
+// fetch runs under GIT_TERMINAL_PROMPT=0 with a named failure line
+// (task-466aef17f2085404): there is no tty on the box, so a git that wants a
+// username would otherwise burn the whole 90 s budget on a prompt nobody can
+// answer and surface as a bare exit. Seconds, not
 // minutes — it is run on EVERY go-live, so the fetch is ALSO bounded on the box
 // (`timeout 90`, generous for weeks of drift): a wedged-but-alive fetch degrades
 // to a loud check-failure instead of silently burning the whole provision budget
 // (ssh keepalives only catch a DEAD connection).
 const freshenCheckScript = `set -e
+export GIT_TERMINAL_PROMPT=0
 cd ` + freshenRepoDir + `
-timeout 90 git fetch origin --tags --prune 1>&2
+if ! timeout 90 git fetch origin --tags --prune 1>&2; then
+  echo "FRESHEN_CHECK_FAILED: git fetch origin failed (GIT_TERMINAL_PROMPT=0, so no credentials were asked for): likely credentials or the remote is unreachable" >&2
+  exit 1
+fi
 printf 'FRESHEN_HEAD=%s\n' "$(git rev-parse HEAD)"
 printf 'FRESHEN_REMOTE=%s\n' "$(git rev-parse origin/main)"
 printf 'FRESHEN_FROM=%s\n' "$(git describe --tags --always 2>/dev/null || echo unknown)"

@@ -1,0 +1,1 @@
+__app.test.mjs asserts ATTENTION_RANK against attention_order.json, and a fixture-only edit REDS the node suite (Mutation A re-run, output quoted)

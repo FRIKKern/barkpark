@@ -56,7 +56,7 @@ on:
       - "api/test/support/fixtures/pd-parity/**"
 
 concurrency:
-  group: js-tests-${{ github.ref }}
+  group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -70,22 +70,70 @@ jobs:
         working-directory: js
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # PRs need the base ref's history so turbo can scope to `...[origin/<base>]`
+          # (task-4e377262789d8fd3). main keeps the shallow clone.
+          # Quoted on purpose: a bare 0 is FALSY in expressions, so `&& 0 || 1` always gave 1.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Cache turbo task outputs (js/.turbo)
+        # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
+        # change; without this cache every PR run started cold. Key on the lockfile +
+        # sha, restore the newest prefix match (task-4e377262789d8fd3).
+        uses: actions/cache@v4
+        with:
+          path: js/.turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-
+
+      # Scope (task-4e377262789d8fd3): on a PR, turbo runs build/test/lint/typecheck/size
+      # only for packages whose inputs changed since the base, plus their dependents
+      # (`...[origin/<base>]`). Two packages are ALWAYS in scope because later steps
+      # read their dist directly: @barkpark/codegen (drift gate) and @barkpark/core
+      # (workerd + browser proofs). A PR that touches anything outside js/packages/*
+      # (this workflow, turbo.json, the lockfile, tsconfig.base, web fixtures) runs
+      # the FULL graph, so a CI or infra change can never scope itself into a
+      # vacuous green. main always runs the full graph.
+      - name: Decide turbo scope
+        id: scope
+        run: |
+          set -f  # never let the shell glob `...[origin/<base>]`
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (push)"; exit 0
+          fi
+          base="origin/${{ github.base_ref }}"
+          changed=$(git -C .. diff --name-only "$base"...HEAD)
+          printf '%s\n' "$changed" | sed 's/^/  changed: /'
+          if printf '%s\n' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
+            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (a file outside js/packages/* changed)"; exit 0
+          fi
+          f="--filter=...[$base] --filter=@barkpark/codegen --filter=@barkpark/core"
+          echo "filter=$f" >> "$GITHUB_OUTPUT"
+          echo "scope: SCOPED $f"
+          pnpm exec turbo run test $f --dry-run=json | node -e '
+            let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);
+            const pk=[...new Set(j.tasks.map(t=>t.package))];console.log(`scope: ${pk.length} packages: ${pk.join(" ")}`)})'
+
       - name: Build
-        run: pnpm build
+        run: pnpm exec turbo run build ${{ steps.scope.outputs.filter }}
 
       # Drift gate: the committed generated types MUST equal a fresh regen from
       # the committed schema fixture. Network-free (`--from` reads the fixture —
@@ -126,7 +174,12 @@ jobs:
       # @barkpark/nextjs therefore runs its two projects as separate commands
       # (see its package.json `test`), and no config may set passWithNoTests.
       - name: Test
-        run: pnpm test
+        # `pnpm test -- --coverage` never worked: pnpm hands `--coverage` to turbo
+        # itself ("unexpected argument '--coverage'"). The old advisory duplicate
+        # had been failing that way silently under continue-on-error, so no
+        # coverage artifact ever existed. One blocking run, no coverage flag;
+        # real coverage is its own row.
+        run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm
@@ -173,17 +226,17 @@ jobs:
           exit "$status"
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm exec turbo run lint ${{ steps.scope.outputs.filter }}
 
       - name: "Prettier format (ADVISORY — parity with gofmt + mix-format gates)"
         continue-on-error: true
         run: pnpm exec prettier --check "packages/*/src/**/*.{ts,tsx}"
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm exec turbo run typecheck ${{ steps.scope.outputs.filter }}
 
       - name: Bundle budget
-        run: pnpm size
+        run: pnpm exec turbo run size ${{ steps.scope.outputs.filter }}
 
       # ADVISORY (not blocking) until the ADR-002 conflict is decided:
       # webhook/ and draft-mode/ have imported node:crypto since their Phase 5
@@ -193,19 +246,33 @@ jobs:
       # signDraftModeToken async (breaking); relaxing means an amendment ADR.
       # Tracked in docs/decisions/deferred.md. Same advisory-job precedent as
       # elixir.yml's format job.
-      - name: "No node: imports in edge packages (ADVISORY — ADR-002 conflict)"
-        continue-on-error: true
-        run: bash scripts/check-no-node-imports.sh
+      #
+      # The ADVISORY posture covers exit 1 — a real ADR-002 violation — ONLY. The
+      # guard's exit 3 is a HARNESS failure (a corpus dir vanished, or scanned
+      # zero source files) and MUST red: a corpus floor that `continue-on-error`
+      # swallows cannot fire, and the vanished-corpus mode is the one that used
+      # to print "clean" at exit 0. Hence the explicit status split below instead
+      # of `continue-on-error: true` on the step.
+      - name: "No node: imports in edge packages (ADVISORY on violations, BLOCKING on an unreadable corpus)"
+        run: |
+          set +e
+          bash scripts/check-no-node-imports.sh
+          status=$?
+          set -e
+          if [ "$status" -eq 3 ]; then
+            echo "edge gate FAILED: check-no-node-imports could not read its corpus (exit 3) — it scanned nothing and proved nothing" >&2
+            exit 1
+          fi
+          if [ "$status" -eq 1 ]; then
+            echo "::warning::check-no-node-imports found violation(s) — ADVISORY pending the ADR-002 decision (docs/decisions/deferred.md)"
+          fi
+          exit 0
 
       # ADVISORY (cqv3-p3): emit REAL line coverage so the codebase-quality
       # tooling (tooling/risk) ingests coverage-final.json instead of the
       # presence proxy. The `json` reporter is configured in each package's
       # vitest.config.ts; turbo's test task already declares coverage/** outputs.
       # Never blocks — coverage is an observability signal, not a merge gate.
-      - name: "JS coverage (ADVISORY — feeds codebase-quality tooling)"
-        continue-on-error: true
-        run: pnpm test -- --coverage
-
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -226,15 +293,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile

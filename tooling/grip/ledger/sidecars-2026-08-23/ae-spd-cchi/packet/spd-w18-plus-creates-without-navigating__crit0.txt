@@ -1,0 +1,1 @@
+Both desk steps (Structure row select, and the "+") land on a SINGLE press across 10 consecutive cold runs, and the per-step latencies are quoted.

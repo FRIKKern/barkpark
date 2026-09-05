@@ -26,7 +26,7 @@ on:
       - ".github/workflows/ci.yml"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
   # otherwise starves the suite (2026-06-10: 19 consecutive main runs
   # cancelled, zero completions all day). Queued main runs collapse to one.
@@ -55,20 +55,22 @@ jobs:
         if: steps.detect.outputs.present != 'true'
         run: echo "web/ not found — Lighthouse job skipped."
 
-      - name: Setup Node
-        if: steps.detect.outputs.present == 'true'
-        uses: actions/setup-node@v4
-        with:
-          # 22, not 20: the Next build collects the webhook route's page data,
-          # which calls util.markAsUncloneable (Node 22+). On 20 the build throws
-          # "markAsUncloneable is not a function".
-          node-version: "22"
-
       - name: Install pnpm
         if: steps.detect.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # cache: pnpm needs pnpm on PATH first, hence pnpm/action-setup runs above
+          cache: pnpm
+          cache-dependency-path: |
+            js/pnpm-lock.yaml
+            web/pnpm-lock.yaml
 
       # web's `@barkpark/core` is a file: link whose dist must exist before the
       # Next build can resolve it. Without this the build errors ("Can't resolve
@@ -166,17 +168,22 @@ jobs:
         if: steps.detect.outputs.present != 'true'
         run: echo "web/ not found — web-checks skipped."
 
-      - name: Setup Node
-        if: steps.detect.outputs.present == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
       - name: Install pnpm
         if: steps.detect.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # cache: pnpm needs pnpm on PATH first, hence pnpm/action-setup runs above
+          cache: pnpm
+          cache-dependency-path: |
+            js/pnpm-lock.yaml
+            web/pnpm-lock.yaml
 
       # web depends on `@barkpark/core` via a `file:../js/packages/core` link,
       # whose dist must exist for the app to typecheck / for core-importing test

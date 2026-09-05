@@ -1,0 +1,1 @@
+A test asserts the leg reaches the response body, and mutating the leg changes the body.

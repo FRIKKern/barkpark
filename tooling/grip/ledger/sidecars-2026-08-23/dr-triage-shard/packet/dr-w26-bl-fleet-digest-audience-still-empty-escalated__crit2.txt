@@ -1,0 +1,1 @@
+DailyDigestWorker's four-runs-in-its-life cadence is explained or fixed — a scheduled worker that ran 4 times is itself unreported.

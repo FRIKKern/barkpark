@@ -15,6 +15,10 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
       flips the job (idempotently), fail marks it failed; no/bad token → 401
     * auth posture: plain member → 403; an admin of ANOTHER team gets the SAME
       404 as a nonexistent id (no existence leak); unauthenticated → 401
+    * cch-w54-bl re-attach: a SECOND, different host on an instance that already
+      answers on one → 409 already_attached, the row keeps the FIRST host, no
+      second job, and the first host stays ask-gate-approved; the same host
+      again is still a 202 (the failed-attach recovery path)
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
@@ -245,6 +249,109 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
 
       conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain})
       assert conn.status == 401
+    end
+  end
+
+  # ── cch-w54-bl: a re-attach is REFUSED, never an overwrite ──────────────────
+  #
+  # PRE-FIX, driven 2026-09-03 on origin/main (probe output in the PR body):
+  # POST host-a → 202, then POST host-b → 202; the row flipped to host-b,
+  # `Registry.domain_registered?("host-a")` went true → false and
+  # `GET /v1/tls/ask?domain=host-a` went 200 → 404. The A record the attach
+  # worker had already published for host-a survived all of that on a LIVE,
+  # still-billed box, with nothing in the control plane pointing at it any more.
+  # There is no detach verb on this surface to sequence instead, so the fix is
+  # the refusal.
+  #
+  # MUTATION: delete the `reattach_of_different_host?` arm from
+  # `Registry.set_custom_host/2` and the first test below reds by name on the
+  # 202 (and on the flipped custom_host), which is exactly the orphan.
+  # Drain a barkpark's attach jobs so the one-active-job-per-kind index is NOT
+  # what answers a SECOND attach POST — the re-attach refusal under test must be
+  # the already_attached gate, not already_attaching.
+  defp drain_attach_jobs(bp) do
+    from(j in ProvisionJob, where: j.barkpark_id == ^bp.id and j.kind == "attach_domain")
+    |> Repo.update_all(set: [status: "succeeded"])
+  end
+
+  describe "POST /v1/barkparks/:id/domain — re-attach (cch-w54-bl)" do
+    test "a SECOND, different host → 409 already_attached; the first host survives on the row, in DNS and at the ask-gate" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      assert call(
+               :post,
+               "/v1/barkparks/#{bp.id}/domain",
+               %{domain: "host-a.barkpark.cloud"},
+               token
+             ).status ==
+               202
+
+      drain_attach_jobs(bp)
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: "host-b.barkpark.cloud"}, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["error"] == "already_attached"
+      # The refusal NAMES the host in the way — without it the caller cannot act.
+      assert body["custom_host"] == "host-a.barkpark.cloud"
+      assert body["detail"] =~ "host-a.barkpark.cloud"
+
+      # The orphan the pre-fix path created, asserted absent in all three places
+      # the probe measured it.
+      assert Registry.get_barkpark(bp.id).custom_host == "host-a.barkpark.cloud"
+      assert Registry.domain_registered?("host-a.barkpark.cloud")
+      refute Registry.domain_registered?("host-b.barkpark.cloud")
+      assert call(:get, "/v1/tls/ask?domain=host-a.barkpark.cloud").status == 200
+      assert call(:get, "/v1/tls/ask?domain=host-b.barkpark.cloud").status == 404
+
+      # Refused before the persist → no second job, and no audit row claiming
+      # a domain was attached.
+      assert active_attaches(bp) == 0
+
+      assert Accounts.list_audit_events(team)
+             |> Enum.count(&(&1.action == "barkpark.domain_attached")) == 1
+    end
+
+    test "the SAME host again (any spelling) is still 202 — the failed-attach recovery path is untouched" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      assert call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token).status == 202
+      drain_attach_jobs(bp)
+
+      # Case, whitespace and the trailing dot all normalize to the stored host,
+      # so this is a re-attach of ITSELF, not a replacement.
+      conn =
+        call(
+          :post,
+          "/v1/barkparks/#{bp.id}/domain",
+          %{domain: "  Gyldendal.Barkpark.Cloud. "},
+          token
+        )
+
+      assert conn.status == 202
+      assert json_body(conn)["custom_host"] == @domain
+      assert Registry.get_barkpark(bp.id).custom_host == @domain
+      assert active_attaches(bp) == 1
+    end
+
+    test "a malformed second domain is still the SYNTAX verdict, not the re-attach one" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      assert call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token).status == 202
+      drain_attach_jobs(bp)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: "a.b.barkpark.cloud"}, token)
+      assert conn.status == 422
+      assert json_body(conn) == %{"error" => "invalid_domain"}
+      assert Registry.get_barkpark(bp.id).custom_host == @domain
     end
   end
 

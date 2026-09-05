@@ -12,7 +12,14 @@ name: search-template-gates
 #   2. templates-literal-check.sh — no light-mode palette text literal and no
 #                                  hardcoded focus ring in the starter .tsx;
 #                                  --selftest (17 cases) + the real scan.
-#   3. verify-bp-commands.mjs    — every `bp …` command PRINTED in the flagship
+#   3. check-vendor-freshness.mjs — the vendored @barkpark/core and
+#                                  @barkpark/react tarballs must correspond to
+#                                  the CURRENT js/packages source. The block
+#                                  gate above covers only the RENDERER, and only
+#                                  the block-type axis; it is blind to
+#                                  @barkpark/core entirely. --selftest (20/20)
+#                                  plus the real content comparison.
+#   4. verify-bp-commands.mjs    — every `bp …` command PRINTED in the flagship
 #                                  template docs must PARSE against the CLI's own
 #                                  sources. Run over the template docs with
 #                                  repo-RELATIVE paths (the resolver concatenates
@@ -48,7 +55,24 @@ on:
       # gate that never fires on the change it guards reports green forever and
       # is indistinguishable from one that ran and found nothing.
       - "js/packages/react/src/blocks/**"
+      # THE SOURCE SIDE check-vendor-freshness.mjs EXISTS TO CATCH. Its digest
+      # covers the PACK INPUTS of both vendored packages — src/**, package.json
+      # and the build config — so those are exactly the paths that must wake
+      # this workflow. `js/packages/core/**` matched NO pattern here before
+      # (measured: `git grep barkpark-core -- scripts .github/workflows`
+      # returned nothing repo-wide), so 24 core commits landed after the last
+      # re-cut with no workflow anywhere noticing.
+      - "js/packages/core/src/**"
+      - "js/packages/core/package.json"
+      - "js/packages/core/tsup.config.ts"
+      - "js/packages/core/tsconfig.json"
+      - "js/packages/react/src/**"
+      - "js/packages/react/package.json"
+      - "js/packages/react/tsup.config.ts"
+      - "js/packages/react/tsconfig.json"
       - "scripts/check-vendor-blocks.mjs"
+      - "scripts/check-vendor-freshness.mjs"
+      - "scripts/recut-vendor-tarballs.sh"
       - "scripts/templates-literal-check.sh"
       - "tooling/doc-truth/verify-bp-commands.mjs"
       - "tooling/doc-truth/bp-cli-sources.mjs"
@@ -70,6 +94,24 @@ jobs:
           node-version: "20"
       - name: Self-test the tripwire (its negative half must red)
         run: node scripts/check-vendor-blocks.mjs --selftest
+
+  vendor-sdk-freshness:
+    name: Vendored SDK freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Self-test the tripwire (its negative half must red)
+        run: node scripts/check-vendor-freshness.mjs --selftest
+      # Unlike vendor-block-coverage above, the REAL gate runs here too: it
+      # needs no npm install, only the checkout and the system tar, so there is
+      # no reason to ship only the selftest. Never piped — a gate piped through
+      # tail or grep -q reports the PIPE's exit code, and under load pipefail
+      # plus SIGPIPE turns a red into a 141 that reads as a flake.
+      - name: Compare the vendored tarballs against js/packages source
+        run: node scripts/check-vendor-freshness.mjs
 
   contrast-focus-literals:
     name: Starter-template contrast/focus literals

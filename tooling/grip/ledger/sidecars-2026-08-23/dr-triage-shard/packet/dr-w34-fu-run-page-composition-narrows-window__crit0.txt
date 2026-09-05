@@ -1,0 +1,1 @@
+The real deploy.yml success:non-success mix over a week is measured and quoted, with the command that produced it.

@@ -1,0 +1,1 @@
+If the census prints a 'deepest chain' it NAMES which chain notion it used, and the PR body records that the stamped deferral_depth (consecutive same-CAUSE deferrals at the head of the site's stream) is NOT the (site_id, content_rev) notion — a content-rev chain of length 4 carries a stamped depth of 5

@@ -129,6 +129,12 @@ defmodule BarkparkCloud.Accounts do
 
   ## OAuth / SSO (oauth-sso)
 
+  @typedoc """
+  Which of `get_or_create_user_from_oauth/1`'s three precedence arms ran.
+  See that function's "The BRANCH is part of the return" section.
+  """
+  @type oauth_branch :: :existing | :linked | :created
+
   @doc """
   Resolve a Cloud User from a VERIFIED OAuth identity, birthing one (with its own
   team + owner membership + a self-serve trial + notification settings, in ONE
@@ -148,21 +154,47 @@ defmodule BarkparkCloud.Accounts do
        notification settings, all in one transaction, so a half-made account
        never strands.
 
-  Returns `{:ok, %User{}}` or `{:error, term}`. A concurrent double-callback that
-  races to link the same identity is reconciled to the now-linked user rather
-  than surfacing a 500.
+  Returns `{:ok, %User{}, branch}` or `{:error, term}`. A concurrent
+  double-callback that races to link the same identity is reconciled to the
+  now-linked user rather than surfacing a 500.
+
+  ## The BRANCH is part of the return, not an inference
+
+  The three precedence arms above are three DIFFERENT events, and until
+  cch-w53-bl-oauth-linked-needs-a-branch-reporting-return this function
+  collapsed them into one bare `{:ok, user}`. A caller that wanted to record
+  "this account gained a provider" had no way to tell arm 2 (a LINK onto an
+  account that already existed) from arm 3 (a first-ever signup), so any audit
+  producer wired to it would have stamped `oauth.linked` on every OAuth signup —
+  a trail entry describing a linking event that did not happen.
+
+  So the branch is reported:
+
+    * `:existing` — arm 1, plus the concurrent-callback reconcile. Nothing was
+      created and nothing was linked on THIS call; the identity was already
+      ours.
+    * `:linked` — arm 2. An account that already existed gained a new provider
+      identity. This is the ONE branch `oauth.linked` may be produced on.
+    * `:created` — arm 3. A first-ever signup. An identity row was inserted, but
+      there was no prior account for it to be "linked" to.
+
+  It is a three-value atom rather than a boolean on purpose: `:existing` and
+  `:created` are both "not a link" for the audit question and would collapse
+  under a boolean, while they are opposites for every other question a caller
+  could ask (one wrote no rows at all, the other birthed a user, a team, a
+  membership, a trial and a settings row).
   """
   @spec get_or_create_user_from_oauth(%{
           provider: String.t(),
           provider_uid: String.t(),
           email: String.t() | nil
-        }) :: {:ok, User.t()} | {:error, term()}
+        }) :: {:ok, User.t(), oauth_branch()} | {:error, term()}
   def get_or_create_user_from_oauth(%{provider: provider, provider_uid: uid} = identity)
       when is_binary(provider) and is_binary(uid) do
     email = Map.get(identity, :email)
 
     case get_user_by_external_identity(provider, uid) do
-      %User{} = user -> {:ok, user}
+      %User{} = user -> {:ok, user, :existing}
       nil -> birth_or_link_oauth(provider, uid, email)
     end
   end
@@ -657,10 +689,18 @@ defmodule BarkparkCloud.Accounts do
   `Plug.Conn.register_before_send/2` once the status is known.
 
   `touch: true` remains the default for the callers that hold no `Plug.Conn` and
-  make no authorization decision of their own — notably the SSE stream open,
-  whose conn status is set ONCE at `send_chunked` and then parks for hours, so
-  deferring its stamp would buy nothing and risks under-reporting a device that
-  really is streaming.
+  make no authorization decision of their own.
+
+  THE SSE STREAM OPEN IS NO LONGER ONE OF THEM, and the paragraph that used to
+  say so was refuted by the route's own 422. `GET /v1/events` resolves its header
+  credential here and only THEN answers `no_team`, so the eager stamp made a
+  teamless header client that was REFUSED print as freshly active. The claim that
+  deferring "would buy nothing" rested on the conn status being set once at
+  `send_chunked` — true for the stream, false for the refusal, which never
+  reaches `send_chunked` at all. The router now passes `touch: false` there and
+  re-stamps from `register_before_send/2`, which fires for `send_chunked` as well
+  — so a served stream still stamps at its 200, at the same instant the eager
+  call did, and nothing is deferred past the park.
   """
   @spec verify_user_session_token(binary(), keyword()) :: User.t() | nil
   def verify_user_session_token(plaintext, opts) when is_binary(plaintext) and is_list(opts) do
@@ -711,14 +751,27 @@ defmodule BarkparkCloud.Accounts do
   # update_all never raises on a zero-row match, so a token revoked between the
   # verify SELECT and this UPDATE is a harmless no-op — the return contract
   # (User | nil) is unaffected.
+  #
+  # FAIL-SOFT, in the same shape as `touch_pat_last_used/1`'s rescue. A zero-row
+  # match is a no-op, but the statement itself can still RAISE — a pool timeout,
+  # a dropped connection, a deadlock. Since the wave-8 fix this write runs inside
+  # a `Plug.Conn.register_before_send/2` callback, and an exception raised there
+  # ESCAPES `send_resp`: the request was already SERVED, and a transient DB
+  # hiccup while stamping "last seen" would convert that served 200 into a 500.
+  # The column answers "is this token dead?", never a billed count — so a failed
+  # stamp is logged and swallowed, never charged to the person's response.
   defp touch_last_used(hash, now) do
     cutoff = DateTime.add(now, -@session_last_used_throttle_seconds, :second)
 
-    from(t in UserToken,
-      where: t.token_hash == ^hash,
-      where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
-    )
-    |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    try do
+      from(t in UserToken,
+        where: t.token_hash == ^hash,
+        where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
+      )
+      |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    rescue
+      e -> Logger.warning("touch_session_last_used failed: #{inspect(e)}")
+    end
 
     :ok
   end
@@ -735,7 +788,7 @@ defmodule BarkparkCloud.Accounts do
     hash = UserToken.hash_token(plaintext)
 
     case Repo.get_by(UserToken, token_hash: hash) do
-      %UserToken{} = t -> stamp_revoked(t)
+      %UserToken{} = t -> revoke_session_row(t)
       nil -> {:error, :not_found}
     end
   end
@@ -759,7 +812,7 @@ defmodule BarkparkCloud.Accounts do
          # context: "session" keeps the per-row Revoke button from killing a PAT by id.
          %UserToken{} = t <-
            Repo.get_by(UserToken, id: token_id, user_id: uid, context: "session") do
-      stamp_revoked(t)
+      revoke_session_row(t)
     else
       _ -> {:error, :not_found}
     end
@@ -836,6 +889,74 @@ defmodule BarkparkCloud.Accounts do
 
     {:ok, count}
   end
+
+  ## STREAM BINDING HELPERS (cch-w53-bl)
+  ##
+  ## `user_has_live_session?/1` is a question about the USER, and on the per-row
+  ## revoke path the answer is YES by construction: the device that pressed
+  ## Revoke is itself a live session, so the count never reaches zero and the
+  ## revoked device's parked stream survived its own revocation. These two
+  ## narrow the question to ONE session row.
+
+  @doc """
+  Resolve a presented SESSION token `plaintext` to its row `id`, or `nil` when it
+  is absent, unknown, revoked, expired, or not a `"session"` row.
+
+  READ-ONLY on purpose, and that is the difference from
+  `verify_user_session_token/2`: it stamps NOTHING. It runs at the SSE-ticket
+  mint and at a header-authenticated stream connect, both of which already
+  verified the same token a line earlier, and a second `last_used_at` stamp from
+  here would be a duplicate liveness claim.
+  """
+  @spec live_session_token_id(binary() | nil) :: binary() | nil
+  def live_session_token_id(plaintext) when is_binary(plaintext) and plaintext != "" do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    Repo.one(
+      from t in UserToken,
+        where: t.token_hash == ^hash,
+        where: t.context == "session",
+        where: is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now,
+        select: t.id
+    )
+  end
+
+  def live_session_token_id(_), do: nil
+
+  @doc """
+  Is THIS ONE session row still live (unrevoked, unexpired, `context = "session"`)?
+
+  The per-device half of `user_has_live_session?/1`, for the SSE loop: a stream
+  bound to its minting session rechecks this row, so revoking that one row from
+  the sessions panel ends that one stream, bounded by a heartbeat, while every
+  other device keeps streaming.
+
+  A `token_id` that is not a UUID answers `false` rather than raising — the id
+  arrives from a ticket column and a stream must end, not 500, if it is ever
+  garbage.
+  """
+  @spec session_token_live?(binary() | nil) :: boolean()
+  def session_token_live?(token_id) when is_binary(token_id) do
+    case Repo.uuid_or_nil(token_id) do
+      nil ->
+        false
+
+      id ->
+        now = DateTime.utc_now()
+
+        Repo.exists?(
+          from t in UserToken,
+            where: t.id == ^id,
+            where: t.context == "session",
+            where: is_nil(t.revoked_at),
+            where: is_nil(t.expires_at) or t.expires_at > ^now
+        )
+    end
+  end
+
+  def session_token_live?(_), do: false
 
   @doc """
   Does `user` still hold at least ONE live session? The cheap existence half of
@@ -1288,6 +1409,35 @@ defmodule BarkparkCloud.Accounts do
 
   # Stamp revoked_at = now on a UserToken (idempotent). The verbatim twin of
   # Registry.revoke_agent_token/1's struct clause.
+  # Revoke ONE session row and, in the same breath, the unredeemed `"sse"` stream
+  # tickets that row minted (cch-w53-bl). Both single-row kill switches —
+  # `revoke_user_session_token/1` (this device logs out) and
+  # `revoke_user_session/2` (one row from the sessions panel) — go through here,
+  # so neither can leave a 60-second bearer behind that opens a FRESH
+  # authenticated stream for a device that was just signed out. That is the
+  # per-row twin of the ticket sweep `revoke_all_user_sessions/2` already does
+  # for sign-out-everywhere.
+  #
+  # SCOPED BY `session_token_id`, never by `user_id + context`: a user-wide "sse"
+  # sweep here would be charter D28's two-tab mutual-eviction storm (revoking a
+  # phone would evict the laptop's unredeemed ticket). A PAT row reaching this
+  # function sweeps nothing — no ticket points at it.
+  defp revoke_session_row(%UserToken{} = t) do
+    with {:ok, revoked} <- stamp_revoked(t) do
+      {_swept, _} =
+        Repo.update_all(
+          from(s in UserToken,
+            where: s.session_token_id == ^t.id,
+            where: s.context == "sse",
+            where: is_nil(s.revoked_at)
+          ),
+          set: [revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond)]
+        )
+
+      {:ok, revoked}
+    end
+  end
+
   defp stamp_revoked(%UserToken{} = t) do
     t
     |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
@@ -2041,6 +2191,77 @@ defmodule BarkparkCloud.Accounts do
   def revoke_personal_access_token(_user, _token_id), do: {:error, :not_found}
 
   @doc """
+  Every PAT minted against `team`, newest first, with `:user` preloaded — the
+  TEAM-ADMIN read that `list_personal_access_tokens/1` (per-user, caller-scoped)
+  cannot serve.
+
+  Why a second list function and not an option on the first: the caller-scoped
+  read answers "what have *I* minted"; this one answers "what programmatic
+  credentials can act on *this team*", and the two have different authorities
+  (a session user vs. a team admin) and different blast radii. Keeping them
+  apart means the per-user query can never be widened by a stray option.
+
+  TEAM-SCOPED ON PURPOSE (`team_id == team`, never `user_id`): a member may hold
+  PATs on several teams, and a row from another team appearing in this list
+  would be a tenancy leak, not a feature. Includes revoked rows — the tombstone
+  is the point of an admin view.
+  """
+  @spec list_team_personal_access_tokens(Team.t() | binary()) :: [UserToken.t()]
+  def list_team_personal_access_tokens(team) do
+    tid = team_id(team)
+
+    from(t in UserToken,
+      where: t.team_id == ^tid and t.context == "pat",
+      order_by: [desc: t.inserted_at, desc: t.id],
+      preload: [:user]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Revoke (stamp `revoked_at` on) ONE PAT minted against `team`, whoever holds
+  it — the admin-side kill switch for a member's leaked credential. Idempotent.
+
+  The fence is `team_id == team` (plus `context == "pat"`), NOT `user_id`: this
+  is the whole point of the function, and it is also its whole blast radius. A
+  token id belonging to another team, a non-PAT row, a non-UUID string, or
+  nothing at all is the SAME `{:error, :not_found}` the caller-scoped
+  `revoke_personal_access_token/2` returns — a 404 shape, so an admin cannot
+  probe another team's token ids for existence.
+
+  Returns `{:ok, token}` with `:user` preloaded so the caller can name the
+  holder in an audit row without a second read.
+  """
+  @spec revoke_team_personal_access_token(Team.t() | binary(), binary()) ::
+          {:ok, UserToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def revoke_team_personal_access_token(team, token_id) when is_binary(token_id) do
+    tid = team_id(team)
+
+    # A non-UUID token_id would make the get_by cast raise → 500; guard it to the
+    # not_found (404) branch, exactly as revoke_personal_access_token/2 does.
+    case Repo.uuid_or_nil(token_id) &&
+           Repo.get_by(UserToken, id: token_id, team_id: tid, context: "pat") do
+      nil ->
+        {:error, :not_found}
+
+      %UserToken{revoked_at: nil} = token ->
+        token
+        |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
+        |> Repo.update()
+        |> case do
+          {:ok, updated} -> {:ok, Repo.preload(updated, :user)}
+          other -> other
+        end
+
+      %UserToken{} = token ->
+        # Already revoked — idempotent.
+        {:ok, Repo.preload(token, :user)}
+    end
+  end
+
+  def revoke_team_personal_access_token(_team, _token_id), do: {:error, :not_found}
+
+  @doc """
   Verify a presented PAT `plaintext`. Returns `{user, token}` when the row
   exists, is `context = "pat"`, unrevoked, and unexpired; otherwise `nil`.
 
@@ -2451,8 +2672,18 @@ defmodule BarkparkCloud.Accounts do
   the other's unredeemed ticket: that tab would 401, which would make it remint,
   which would evict the first — a mutual-eviction storm, one junk 401 per turn.
   """
-  @spec create_sse_ticket(User.t()) :: {:ok, binary()} | {:error, Ecto.Changeset.t()}
-  def create_sse_ticket(%User{} = user) do
+  ## `session_token` (cch-w53-bl) is the plaintext SESSION token the mint request
+  ## carried in its `Authorization` header — the device asking for a stream. It is
+  ## resolved to that session ROW's id and stamped on the ticket as
+  ## `session_token_id`, which is what lets the parked stream be ended by a
+  ## PER-ROW revoke of that one device (`DELETE /v1/account/sessions/:id`) instead
+  ## of only by a user-wide sign-out. `nil` (the default, and any plaintext that
+  ## does not resolve to a live session) leaves the binding NULL, and the loop
+  ## falls back to the user-wide check — see `session_token_live?/1` and
+  ## `user_has_live_session?/1`.
+  @spec create_sse_ticket(User.t(), binary() | nil) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_sse_ticket(%User{} = user, session_token \\ nil) do
     plaintext = generate_token()
 
     expires_at =
@@ -2465,7 +2696,8 @@ defmodule BarkparkCloud.Accounts do
       user_id: user.id,
       context: "sse",
       token_hash: UserToken.hash_token(plaintext),
-      expires_at: expires_at
+      expires_at: expires_at,
+      session_token_id: live_session_token_id(session_token)
     })
     |> Repo.insert()
     |> case do
@@ -2495,7 +2727,32 @@ defmodule BarkparkCloud.Accounts do
   unenforceable.
   """
   @spec consume_sse_ticket(binary()) :: User.t() | nil
-  def consume_sse_ticket(plaintext) when is_binary(plaintext) do
+  def consume_sse_ticket(plaintext) do
+    case consume_sse_ticket_binding(plaintext) do
+      {%User{} = user, _session_token_id} -> user
+      nil -> nil
+    end
+  end
+
+  @doc """
+  `consume_sse_ticket/1` plus the ticket's STREAM BINDING: returns
+  `{user, session_token_id}` — where `session_token_id` is the `"session"` row
+  that minted the ticket, or `nil` for an unbound one — and `nil` for a ticket
+  that does not redeem.
+
+  THE BINDING HAS TO COME OUT OF THE REDEMPTION, not a later lookup, and that is
+  the whole reason this function exists (cch-w53-bl). Redeeming BURNS the row in
+  the same transaction and `SseTicketReaper` DELETES burnt rows on the minute, so
+  a caller that wanted the binding afterwards would be racing a reaper with the
+  plaintext it just spent. The stream loop needs it forever (it parks for hours),
+  so it is handed over once, at connect.
+
+  `consume_sse_ticket/1` stays the shape every non-stream caller wants — the
+  single-use semantics, filters, and the matched-row-only burn are all here and
+  described there.
+  """
+  @spec consume_sse_ticket_binding(binary()) :: {User.t(), binary() | nil} | nil
+  def consume_sse_ticket_binding(plaintext) when is_binary(plaintext) do
     hash = UserToken.hash_token(plaintext)
     now = lifecycle_now()
 
@@ -2512,9 +2769,13 @@ defmodule BarkparkCloud.Accounts do
           )
 
         case token do
-          %UserToken{user_id: user_id} = t ->
+          %UserToken{user_id: user_id, session_token_id: session_token_id} = t ->
             {:ok, _burned} = Repo.update(UserToken.changeset(t, %{revoked_at: now}))
-            Repo.get(User, user_id)
+
+            case Repo.get(User, user_id) do
+              %User{} = user -> {user, session_token_id}
+              nil -> nil
+            end
 
           nil ->
             nil
@@ -2522,12 +2783,12 @@ defmodule BarkparkCloud.Accounts do
       end)
 
     case result do
-      {:ok, user} -> user
+      {:ok, binding} -> binding
       {:error, _reason} -> nil
     end
   end
 
-  def consume_sse_ticket(_), do: nil
+  def consume_sse_ticket_binding(_), do: nil
 
   @doc """
   Delete every `"sse"` ticket row that is BURNED (`revoked_at` stamped) or past
@@ -2853,11 +3114,11 @@ defmodule BarkparkCloud.Accounts do
   defp birth_or_link_oauth(provider, uid, email) do
     result =
       Repo.transaction(fn ->
-        user = find_or_birth_oauth_user!(provider, uid, email)
+        {user, branch} = find_or_birth_oauth_user!(provider, uid, email)
 
         case link_external_identity(user, %{provider: provider, provider_uid: uid, email: email}) do
           {:ok, _identity} ->
-            user
+            {user, branch}
 
           {:error, %Ecto.Changeset{} = cs} ->
             if unique_violation?(cs),
@@ -2867,14 +3128,19 @@ defmodule BarkparkCloud.Accounts do
       end)
 
     case result do
-      {:ok, user} ->
-        {:ok, user}
+      {:ok, {user, branch}} ->
+        {:ok, user, branch}
 
       # A concurrent callback linked this identity first; its tx aborted ours on
       # the unique violation. Re-fetch OUTSIDE the aborted tx.
+      #
+      # The branch here is `:existing`, NOT the branch our aborted transaction
+      # was taking: whatever this call was about to do, it did not do it — the
+      # winner did. Reporting `:linked` from here would stamp a second
+      # `oauth.linked` row for the one link the other callback already recorded.
       {:error, :identity_conflict} ->
         case get_user_by_external_identity(provider, uid) do
-          %User{} = user -> {:ok, user}
+          %User{} = user -> {:ok, user, :existing}
           nil -> {:error, :identity_conflict}
         end
 
@@ -2890,17 +3156,24 @@ defmodule BarkparkCloud.Accounts do
   # Repo.rollbacks the whole thing. The convergence path returns the existing
   # user UNTOUCHED (no password/team/role mutation); only a new identity row is
   # later added by the caller.
+  #
+  # Returns `{user, branch}` — `:linked` for the convergence arm, `:created` for
+  # the birth arm. THE BRANCH IS DECIDED HERE AND NOWHERE ELSE: this `case` IS
+  # the difference between "an account gained a provider" and "an account was
+  # born", and a caller reconstructing it afterwards (e.g. by comparing
+  # inserted_at, or by counting identity rows) would be guessing at exactly the
+  # moment the guess stops being cheap.
   defp find_or_birth_oauth_user!(provider, uid, email) do
     case email && get_user_by_email(email) do
       %User{} = existing ->
-        existing
+        {existing, :linked}
 
       _ ->
         # No email match (or no email at all) → birth a fresh OAuth-only account
         # with the SAME entitlement chain as a password signup. A withheld email
         # gets a stable synthetic one so the email-required schema is satisfied;
         # the durable link is the (provider, uid) row, not this address.
-        birth_oauth_user!(email || synthetic_oauth_email(provider, uid))
+        {birth_oauth_user!(email || synthetic_oauth_email(provider, uid)), :created}
     end
   end
 

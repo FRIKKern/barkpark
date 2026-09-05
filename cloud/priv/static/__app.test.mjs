@@ -84,7 +84,7 @@ vm.runInContext(
 // ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
 // The server refuses two DIFFERENT things on this one screen: launching needs
 // team-ADMIN (go_live's inline gate), paying needs OWNER
-// (Auth.require_primary_team_owner). So the 402 paywall used to hand a team
+// (Auth.require_current_team_owner). So the 402 paywall used to hand a team
 // admin a "Choose Supporter" button the server had already decided to refuse,
 // and a plain member's ROLE refusal rendered as "Plan limit reached".
 //
@@ -611,6 +611,221 @@ test("cch-w10: init() hands the boot to bootOAuth — render() is no longer the 
   // pending promise instead of having painted.
   assert.match(src, /\n\s*function render\(\) \{/, "render() stays a plain synchronous function");
   assert.ok(!/async function render\(/.test(src), "render() must not become async");
+});
+
+// ── cch-w53-bl-the-emailed-confirmation-link-has-no-client ──────────────────
+//
+// THE DEFECT WAS AN ABSENCE, so only a DRIVE can see it. The control plane has
+// mailed <dashboard>/?confirm=<token> since email-verification-recovery, and
+// POST /v1/auth/verify-email -> Accounts.confirm_user/1 has stood ready to
+// honour it the whole time. Between them: nothing. `grep -rnF 'confirm='
+// cloud/priv/static` and `grep -rnF 'verify-email' cloud/priv/` both exited 1
+// on origin/main — measured, with a control grep that DID hit
+// (`/v1/auth/login`, four files) so the empty result is a fact about the tree
+// and not about the grep. Clicking the emailed link landed you on the dashboard
+// and nothing happened.
+//
+// A pure-helper test cannot fail on that: the helpers did not exist, so there
+// was nothing to assert about them being uncalled. These tests drive
+// bootEmailConfirm against a stubbed fetch and assert THE HOP HAPPENS — which
+// is exactly the assertion the missing client would have failed.
+//
+// The second obligation is the copy: a spent token must never read as a sign-in
+// failure. That is not fussiness. `confirmed_at` gates no authority anywhere in
+// cloud/lib, so a person whose confirmation link expired has lost nothing —
+// telling them their sign-in failed would invent a problem and point them at a
+// screen that cannot fix it.
+
+// Swap the sandbox globals bootEmailConfirm reads, run it to completion,
+// restore. Mirrors driveBootOAuth above, with one addition: the history call
+// count is snapshotted AT THE MOMENT OF THE HOP, because "scrub before the
+// network" is an ORDERING claim and a post-hoc read cannot tell the two orders
+// apart.
+async function driveBootEmailConfirm({ search, hash = "", pathname = "/", status, payload = {} }) {
+  const saved = {
+    location: sandbox.location, history: sandbox.history, fetch: sandbox.fetch,
+    document: sandbox.document, localStorage: sandbox.localStorage,
+    sessionStorage: sandbox.sessionStorage,
+  };
+  const { loc, assigned } = recordingLocation(hash);
+  loc.search = search;
+  loc.pathname = pathname;
+  const history = recordingHistory();
+  const fetch = fetchStub(status, payload);
+  const dom = oauthDom();
+  const local = memStore();
+  const session = memStore();
+
+  sandbox.location = loc;
+  sandbox.history = history;
+  sandbox.document = dom.document;
+  sandbox.localStorage = local;
+  sandbox.sessionStorage = session;
+
+  let scrubsBeforeHop = null;
+  const wrapped = (...args) => {
+    scrubsBeforeHop = history.calls.length;
+    return fetch(...args);
+  };
+  wrapped.calls = fetch.calls;
+  sandbox.fetch = wrapped;
+
+  let doneCalls = 0;
+  try {
+    await new Promise((resolve) => {
+      hooks.bootEmailConfirm(() => { doneCalls++; resolve(); });
+    });
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return { assigned, history, fetch: wrapped, dom, local, session, doneCalls, scrubsBeforeHop };
+}
+
+test("cch-w53-bl: the confirm client is exported (RED on origin/main, where it does not exist)", () => {
+  assert.equal(typeof hooks.confirmTokenFromSearch, "function", "confirmTokenFromSearch must be hookable");
+  assert.equal(typeof hooks.emailConfirmOutcome, "function", "emailConfirmOutcome must be hookable");
+  assert.equal(typeof hooks.bootEmailConfirm, "function", "bootEmailConfirm must be hookable");
+});
+
+test("cch-w53-bl: confirmTokenFromSearch reads ?confirm= and nothing else", () => {
+  const f = (q) => hooks.confirmTokenFromSearch(q);
+
+  assert.equal(f("?confirm=tok-abc"), "tok-abc");
+  assert.equal(f("confirm=tok-abc"), "tok-abc", "a leading ? is optional");
+  // The mailed link can land beside the OTHER two boot readers' parameters.
+  assert.equal(f("?checkout=success&confirm=tok-abc&billing=portal"), "tok-abc");
+  // Percent-encoding survives: the token is url-safe base64 today, but a client
+  // that corrupts the credential it was handed is worse than one that ignores it.
+  assert.equal(f("?confirm=a%2Bb%2Fc"), "a+b/c");
+
+  // NOT a confirm landing.
+  assert.equal(f(""), null);
+  assert.equal(f(null), null);
+  assert.equal(f("?checkout=success"), null);
+  assert.equal(f("?confirm="), null, "an empty token is not a token — never POST an empty string");
+  assert.equal(f("?confirm=%20%20"), null, "nor is whitespace");
+  // A NEAR MISS that must not be honoured: another key ENDING in "confirm".
+  assert.equal(f("?reconfirm=tok"), null);
+});
+
+test("cch-w53-bl: a confirm landing POSTs the token to /v1/auth/verify-email — the hop origin/main never made", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=one-time-token",
+    status: 200,
+    payload: { ok: true },
+  });
+
+  assert.equal(r.fetch.calls.length, 1, "exactly one verify call");
+  assert.equal(r.fetch.calls[0].path, "/v1/auth/verify-email");
+  assert.equal(r.fetch.calls[0].opts.method, "POST");
+  assert.deepEqual(JSON.parse(r.fetch.calls[0].opts.body), { token: "one-time-token" });
+
+  // Unauthenticated by construction — the token IS the credential, and a
+  // logged-out click must reach the same answer as a logged-in one.
+  assert.ok(!r.fetch.calls[0].opts.headers.Authorization,
+    "the verify hop must not ride a session — the route takes none");
+
+  // THE SCRUB IS BEFORE THE HOP, and it is a REPLACE. A single-use token in a
+  // history entry is one Back press from being replayed.
+  assert.equal(r.scrubsBeforeHop, 1, "the URL must be scrubbed BEFORE the request goes out");
+  assert.deepEqual(r.history.calls[0], ["replace", "/"]);
+  assert.deepEqual(r.assigned, [], "never location.hash = … — that is a history PUSH");
+
+  assert.equal(r.doneCalls, 1);
+  assert.equal(r.dom.toasts.length, 1);
+  assert.match(r.dom.toasts[0].innerHTML, /Email confirmed/);
+});
+
+test("cch-w53-bl: the scrub drops ONLY confirm, keeping the other boot readers' parameters and the fragment", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?checkout=success&confirm=tok&billing=portal",
+    hash: "#billing",
+    status: 200,
+    payload: { ok: true },
+  });
+
+  assert.deepEqual(r.history.calls[0], ["replace", "/?checkout=success&billing=portal#billing"],
+    "handleCheckoutReturn and handleBillingPortalReturn read the SAME query on this boot — " +
+    "scrubbing the whole search string would silently eat their landings");
+});
+
+test("cch-w53-bl: no ?confirm= is a free boot — no request, no history write, done() on the spot", async () => {
+  const r = await driveBootEmailConfirm({ search: "?checkout=success", status: 200 });
+
+  assert.equal(r.fetch.calls.length, 0, "a normal boot must not touch the network");
+  assert.equal(r.history.calls.length, 0, "nor rewrite the URL");
+  assert.equal(r.doneCalls, 1);
+  assert.equal(r.dom.toasts.length, 0);
+});
+
+test("cch-w53-bl: a SPENT token is not a login failure — the copy, the session and the route are all untouched", async () => {
+  // The route folds already-used / expired / revoked into ONE opaque 422
+  // invalid_token (Accounts.confirm_user/1 fails closed on all three).
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=spent-token",
+    status: 422,
+    payload: { error: "invalid_token" },
+  });
+
+  assert.equal(r.fetch.calls.length, 1);
+  assert.equal(r.doneCalls, 1, "the boot completes — a failed verify never strands the screen");
+
+  assert.equal(r.dom.toasts.length, 1);
+  const copy = r.dom.toasts[0].innerHTML;
+  assert.match(copy, /spent/i, "the outcome says what actually happened");
+  assert.doesNotMatch(copy, /sign[- ]?in|signing in|log[- ]?in|password/i,
+    "a spent confirmation link must NEVER read as a sign-in failure: confirmed_at gates no " +
+    "authority in cloud/lib, so the person has lost nothing and there is nothing to re-enter");
+
+  // Nothing about the session moved: no store write, no route change.
+  assert.equal(r.local.getItem("bp.session"), null);
+  assert.equal(r.session.getItem("bp.session"), null);
+  assert.deepEqual(r.assigned, [], "no navigation — not to the sign-in screen, not anywhere");
+  // The one history write is the scrub, and it happened before the hop.
+  assert.equal(r.history.calls.length, 1);
+});
+
+test("cch-w53-bl: a 500 says only what is true, and still never mentions signing in", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=tok",
+    status: 500,
+    payload: { error: "boom" },
+  });
+
+  assert.equal(r.doneCalls, 1);
+  const copy = r.dom.toasts[0].innerHTML;
+  // NB: the apostrophe is HTML-escaped by esc() before it reaches innerHTML
+  // ("couldn&#39;t"), so the anchor is the half of the sentence without one.
+  assert.match(copy, /confirm this address just now/i);
+  assert.doesNotMatch(copy, /sign[- ]?in|signing in|log[- ]?in/i);
+  // It must NOT claim the link is spent — a transport fault is retryable and a
+  // "spent" claim would send the person off to mint a token they do not need.
+  assert.doesNotMatch(copy, /spent|expired/i);
+});
+
+test("cch-w53-bl: emailConfirmOutcome is a THREE-way classifier, not a two-way one", () => {
+  assert.equal(hooks.emailConfirmOutcome({ ok: true, status: 200 }).kind, "success");
+  assert.equal(hooks.emailConfirmOutcome({ ok: false, status: 422 }).kind, "info");
+  assert.equal(hooks.emailConfirmOutcome({ ok: false, status: 500 }).kind, "info");
+  assert.equal(hooks.emailConfirmOutcome(null).kind, "info");
+
+  // Never `error`: the toast kind carries an aria role, and role="alert" for an
+  // email confirmation nobody asked about is an interruption with no action
+  // behind it. And the two failure sentences must DIFFER — folding them would
+  // tell a person with a transport blip to go mint a fresh token.
+  const spent = hooks.emailConfirmOutcome({ ok: false, status: 422 });
+  const fault = hooks.emailConfirmOutcome({ ok: false, status: 500 });
+  assert.notEqual(spent.title, fault.title);
+  assert.notEqual(spent.body, fault.body);
+});
+
+test("cch-w53-bl: init() actually calls bootEmailConfirm — the wiring tripwire", () => {
+  // Every test above drives the reader directly, so all of them stay green if
+  // the client is built and never called: PRECISELY the defect this row is
+  // about. init() is unreachable from this harness (readyState "loading"), so
+  // the call site is asserted in the SOURCE.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(src, /\n\s*bootEmailConfirm\(\);\n/, "init() must call bootEmailConfirm()");
 });
 
 // ── cch-bl-mockjs-revoke-stateless · THE BROWSER PREVIEW'S REVOKE ───────────
@@ -4153,6 +4368,91 @@ test("D32: the SPA attention vocabulary matches attention_order.json", () => {
     "deploy_stalled must sit after unreported and before behind");
 });
 
+// ── the PREDICATE gets a cross-surface asserter too (dr-w25) ────────────────
+//
+// The D32 test above holds the SPA's RANK TABLE to attention_order.json. It says
+// nothing about classifyBp — a rung could keep its fixture rank forever and
+// still be unreachable, or reachable only through half its inputs. That is
+// exactly the defect this slice repairs: `behind` was reachable through
+// update_state and NOT through commit_ancestry, so a box the control plane had
+// measured 2,493 commits behind main classified `ok` and rendered live-green.
+//
+// The expected side is DERIVED from the fixture (states minus the named gap),
+// never a second hand-typed ladder: a state added to attention_order.json with
+// no witness here reds this test rather than scanning green.
+test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is reachable by commit ancestry", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+  );
+  const SPA_GAP = ["strained", "filling"]; // same named gap the D32 test pins
+  const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
+  assert.ok(expected.length >= 10,
+    "derived from a fixture carrying only " + expected.length + " classifiable states — an empty corpus would green every loop below");
+
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // One witness payload per fixture state, keyed BY THE FIXTURE'S NAMES.
+  const WITNESS = {
+    removal_failed: { deprovision_status: "failed" },
+    failed: { provision_status: "failed" },
+    suspended: { host: "h", suspended: true },
+    degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    unreported: { host: "h", last_seen_at: null },
+    deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
+    behind: { ...LIVE, update_state: "behind" },
+    removing: { deprovision_status: "pending" },
+    provisioning: {},
+    ok: { ...LIVE },
+  };
+  assert.deepEqual(Object.keys(WITNESS).slice().sort(), expected.slice().sort(),
+    "a fixture state gained or lost a witness — the predicate and attention_order.json have drifted");
+
+  for (const state of expected) {
+    assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
+    const rank = fixture.states.find((st) => st.state === state).rank;
+    assert.equal(hooks.attentionRank(WITNESS[state]), rank,
+      state + ": classifyBp's witness ranks " + hooks.attentionRank(WITNESS[state]) + ", fixture says " + rank);
+  }
+
+  // THE ROW THIS SLICE REPAIRS — the production payload, verbatim: the control
+  // plane measured 2,493 commits behind main while the release-tag grade read
+  // `current` (no tag has been cut since 2026-07-08). Before this slice the
+  // SECOND source was invisible to the predicate and this box classified "ok".
+  const tagCurrentCommitBehind = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: 2493 };
+  assert.equal(hooks.classifyBp(tagCurrentCommitBehind), "behind",
+    "a box the plane measured behind main must not classify live-green because its release tag grades itself current");
+  assert.equal(hooks.attentionRank(tagCurrentCommitBehind),
+    fixture.states.find((st) => st.state === "behind").rank);
+  assert.equal(hooks.bucketOf(tagCurrentCommitBehind), "attention");
+
+  // …and the RENDERED heading an operator reads (criterion 1's paste).
+  const s = hooks.statusOf(tagCurrentCommitBehind);
+  assert.equal(s.label, "Update available");
+  assert.equal(s.role, "info");
+  // Not the false all-clear "A newer release is available": the detail names the
+  // disagreement, in the Go twin's phrasing (behindDetail).
+  assert.equal(s.detail, "2493 commits behind main · release-tag grade still reads current");
+
+  // The unmetered arm: ancestry behind, distance null — still `behind`, and the
+  // detail never fabricates a number.
+  const unmetered = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: null };
+  assert.equal(hooks.classifyBp(unmetered), "behind");
+  assert.equal(hooks.statusOf(unmetered).detail,
+    "behind main by an unmeasured number of commits · release-tag grade still reads current");
+
+  // NON-REGRESSION, both directions: ancestry `current` is not behind, an absent
+  // ancestry (older control plane) is not behind, and a release-tag behind keeps
+  // its pre-existing release sentence rather than inheriting the commit one.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "current", commit_distance: 0 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_distance: 2493 }), "ok");
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A box that is BOTH is still one rung, and the tag sentence wins (the UPDATE
+  // column already shows running → latest) — Go's precedence, verbatim.
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", commit_ancestry: "behind", commit_distance: 7, update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
+  assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
+  assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+});
+
 // ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
 
 test("jpf-w1: a 5-minute unclaimed queued deploy is deploy_stalled — warn, attention, age named", () => {
@@ -4664,13 +4964,16 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
 });
 
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
-// The CP marks a GitHub push deployment born-failed (the builder can't run it
-// until the gh-1 App integration lands). FailureCopy.humanize maps the raw
+// The CP marked a GitHub push deployment born-failed when no source build was
+// available. Source builds have since arrived (the router's
+// `github_build_available?/1` is repo-present), so this family is now the
+// LEGACY tail plus the no-linked-repo defensive fallback — the copy explains
+// those rows and promises nothing. FailureCopy.humanize maps the raw
 // machine reason to human copy at the JSON boundary, so the client usually
 // already receives the human string — the mapping must be IDEMPOTENT.
 
 const GH_HUMAN =
-  "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+  "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
 
 test("failureCopy: raw github-push reason → the exact server-humanized copy", () => {
   assert.equal(
@@ -4691,7 +4994,7 @@ test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) s
   // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
   // curly apostrophe, casing, or can't→cannot, the client must still recognize
   // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
-  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  const curly = "This push predates GitHub source builds and can’t be built yet — push again to build.";
   assert.equal(hooks.failureCopy(curly), GH_HUMAN);
   assert.equal(hooks.failureTone(curly), "blocked");
   assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");
@@ -9267,12 +9570,10 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
-// ── G-06 Members restyle + greenfield env-vars page (Settings wave, phase 4) ──
+// ── G-06 Members restyle (Settings wave, phase 4) ────────────────────────────
 
-test("G-06: the members + env-vars helpers are exported", () => {
-  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy",
-    "envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
-    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml"]) {
+test("G-06: the members helpers are exported", () => {
+  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
 });
@@ -9309,132 +9610,33 @@ test("G-06: inviteFailureCopy — already_member vs already_invited each get tru
   assert.equal(typeof hooks.inviteFailureCopy({ error: "other" }), "string");
 });
 
-test("G-06: envScopeLabel — barkpark scope OR a barkpark_id reads Instance, else Team", () => {
-  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: null }), "Team");
-  assert.equal(hooks.envScopeLabel({ scope: "barkpark", barkpark_id: "bp1" }), "Instance");
-  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: "bp1" }), "Instance"); // id wins
-  assert.equal(hooks.envScopeLabel({}), "Team");
-});
-
-test("G-06: envVarsFailureCopy + envVarWriteFailureCopy — honest per-status copy", () => {
-  assert.match(hooks.envVarsFailureCopy(0), /Network error/i);
-  assert.match(hooks.envVarsFailureCopy(422), /isn't part of a team/i);
-  assert.match(hooks.envVarsFailureCopy(403), /permission/i);
-  // The write-once 409 is the honest per-row truth — delete + recreate.
-  assert.match(hooks.envVarWriteFailureCopy(409, { error: "write_once" }), /write-once.*[Dd]elete/i);
-  // cch-w40-s1 — THE 403 ARM NOW CONSULTS THE SERVER, NOT THE AUTHOR. It used to
-  // return "Only team owners and admins can change environment variables." BEFORE
-  // faultCopy/friendly, shadowing forbiddenEvidenceCopy — and that sentence is
-  // FLATLY FALSE on router.ex:4394, the cross-tenant arm, where the caller IS an
-  // admin. Evidence first; a bare 403 gets the curated generic and names no role.
-  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden", required: "admin", scope: "team" }),
-    "You need the admin role on this team — an admin on this team can grant it.",
-    "router.ex:4355/4417 send `required: \"admin\"` — the evidence is no longer discarded");
-  for (const bare of [{}, { error: "forbidden" }, null]) {
-    assert.doesNotMatch(hooks.envVarWriteFailureCopy(403, bare), /owners and admins/i,
-      "a bare 403 must not fabricate a role sentence: " + JSON.stringify(bare));
-  }
-  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden" }),
-    "You don't have permission to do that, and the refusal didn't say which role would allow it.",
-    "the cross-tenant arm (router.ex:4394) states only what a bare 403 proves");
-  assert.match(hooks.envVarWriteFailureCopy(422, { error: "key_required" }), /Enter a key/i);
-});
-
-test("G-06: envVarRowHtml — value sealed forever (no reveal), write-once note, canWrite gates Delete", () => {
-  const secret = { id: "e1", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "pg" };
-  const admin = hooks.envVarRowHtml(secret, true);
-  assert.match(admin, /set-row-key">DATABASE_URL/); // mono key visible
-  assert.match(admin, /set-chip">Secret</);
-  assert.match(admin, /set-chip">Team</);
-  assert.match(admin, /data-env-delete="e1"/);       // admin gets Delete
-  // The value is NEVER rendered or revealable — no reveal/show affordance at all.
-  assert.ok(!/Reveal|Show value|reveal/i.test(admin), "no reveal affordance may exist");
-  // A member gets the SAME metadata, zero Delete.
-  const member = hooks.envVarRowHtml(secret, false);
-  assert.ok(!member.includes("data-env-delete"), "a member row carries no Delete");
-  // A write-once row states it can't be changed in place (a POST would 409).
-  const once = hooks.envVarRowHtml({ id: "e2", key: "STRIPE", scope: "team", is_secret: true, is_shown_once: true }, true);
-  assert.match(once, /set-chip">Write-once</);
-  assert.match(once, /Delete and recreate to change/i);
-});
-
-test("G-06: envVarsPanelHtml — admin gets the add FORM + save-row; a member is read-only", () => {
-  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
-  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
-  assert.match(admin, /Add a variable/);
-  assert.match(admin, /set-save-row/);
-  assert.match(admin, /data-env-delete="e1"/);
-  // Member-read / admin-write: E-03's any-member-write does NOT transfer here.
-  const member = hooks.envVarsPanelHtml(vars, { role: "member" });
-  assert.ok(!member.includes("Add a variable"), "a member sees no add form");
-  assert.ok(!member.includes("set-save-row"), "a member sees no save-row");
-  assert.ok(!member.includes("data-env-delete"), "a member sees no Delete");
-  // The empty-state copy invites an admin, stays quiet for a member.
-  assert.match(hooks.envVarsPanelHtml([], { role: "admin" }), /Add one below/);
-  assert.ok(!hooks.envVarsPanelHtml([], { role: "member" }).includes("Add one below"));
-});
-
-// ── cch-w53-s1 · THE ENV CUSTODY RETRACTION, PINNED SO IT CANNOT COME BACK ──
-// MEASURED GROUND: the control plane ships `env: Registry.resolved_env_for_barkpark/1`
-// in every provision claim, but provisioner.JobSpec declares no `env` json tag and
-// decodes with a bare json.Unmarshal — the map is dropped with no error, and a live
-// managed box's /opt/barkpark/.env carries platform keys only. So every sentence
-// that told a user these values reach an instance was false, and each was pinned by
-// NOTHING: the whole retraction was free-green. These three tests are the pins.
-// They are deliberately NEGATIVE (ban the claim) as well as positive (require the
-// honest shape), because a future well-meaning rewrite is exactly the failure mode.
-
-// The vocabulary of the retracted claim. Any of these back in the env surface means
-// the console is again promising a delivery no code performs.
-const ENV_CUSTODY_LIES = /injected into your instance|values injected|at boot\b|at the next boot|removes it from every instance/i;
-
-test("cch-w53-s1: envVarsPanelHtml never re-claims boot-time injection", () => {
-  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
-  for (const role of ["admin", "member"]) {
-    const html = hooks.envVarsPanelHtml(vars, { role });
-    assert.ok(!ENV_CUSTODY_LIES.test(html),
-      "the env panel must not claim these values reach an instance (" + role + ")");
-  }
-  // And it still says the true thing, so the retraction is not just a deletion.
-  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
-  assert.match(admin, /Stored encrypted for your team/);
-  assert.match(admin, /not delivered to any instance/i);
-  // The already-filed, out-of-scope sentences are untouched (cch-w52 backlog owns
-  // them) — this pin must not be read as licence to re-cut them here.
-  assert.match(admin, /Values are encrypted at rest and never shown again after you save/);
-});
-
-test("cch-w53-s1: index.html's env header carries no injection claim either", () => {
-  // A SECOND, INDEPENDENT sentence in a DIFFERENT file: it renders before app.js
-  // paints and survives every panel error state, so an app.js-only fix leaves the
-  // lie standing on screen. Scoped to the #view-env section so unrelated copy
-  // elsewhere in the document cannot green or red this by accident.
-  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
-  const start = html.indexOf('id="view-env"');
-  assert.ok(start > 0, "the env view must be locatable in index.html");
-  const end = html.indexOf("</section>", start);
-  assert.ok(end > start, "the env view must be a closed section");
-  const section = html.slice(start, end);
-  assert.ok(!ENV_CUSTODY_LIES.test(section),
-    "index.html's env header must not claim these values reach an instance");
-  assert.match(section, /stored encrypted/i);
-  assert.match(section, /not delivered to any instance/i);
-});
-
-test("cch-w53-s1: the delete sheet claims no containment it cannot perform", () => {
-  // Source-sliced rather than rendered: confirmDeleteEnvVar writes through
-  // openModal (DOM), and the sentence — not the wiring — is what regressed.
+// ── cch-w53-bl · THE ENV-VAR SURFACE IS GONE, PINNED SO IT CANNOT COME BACK ──
+// Option A, ruled by main 2026-09-02: the team env-var feature was DELETED (prod
+// `env_vars` held zero rows ever — n_live_tup/n_tup_ins/n_tup_del all 0 since the
+// 2026-07-23 postmaster start, against 27 teams / 27 users / 8 barkparks). The
+// nine G-06 env tests that stood here went with the helpers they drove, and the
+// three cch-w53-s1 retraction pins went with the sentences they policed. What
+// replaces them is the ABSENCE pin: a console that regrows this page without a
+// delivery path reds here, which is the failure mode the retraction was written
+// for in the first place.
+test("cch-w53-bl: the team env-var console surface is gone, in all three artifacts", () => {
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
-  const start = src.indexOf("function confirmDeleteEnvVar(");
-  const end = src.indexOf("function ", start + 10);
-  assert.ok(start > 0 && end > start, "confirmDeleteEnvVar must be locatable");
-  const region = src.slice(start, end);
-  assert.ok(!ENV_CUSTODY_LIES.test(region),
-    "the delete sheet must not claim a removal from any instance");
-  // The loss it CAN speak to survives verbatim — smoke.mjs env-populated and
-  // env-write-once-409 both read this substring.
-  assert.ok(region.includes("can't be recovered"), "the honest loss clause must survive");
-  assert.match(region, /No instance changes/);
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  for (const name of ["envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
+    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml", "loadEnvVars", "fetchEnvVars",
+    "submitEnvVar", "confirmDeleteEnvVar"]) {
+    assert.equal(hooks[name], undefined, name + " must not be exported — the feature is deleted");
+    assert.ok(!src.includes("function " + name + "("), name + " must not be declared in app.js");
+  }
+  // The wire is gone in BOTH directions: no call site, and no route left to call.
+  assert.ok(!src.includes("/v1/env-vars"), "app.js must hold no /v1/env-vars call site");
+  // And the static shell no longer registers the screen or its nav entry.
+  assert.ok(!html.includes('id="view-env"'), "index.html must not register the env screen");
+  assert.ok(!html.includes("#settings/env"), "index.html must not link the env screen");
+  // NON-VACUITY: the sibling settings screen this one was cut alongside is still
+  // here, so a green above is an absence of env-vars, not an absence of parsing.
+  assert.ok(html.includes('id="view-members"') && typeof hooks.loadMembers === "function",
+    "the members screen must still be present — otherwise this test proves nothing");
 });
 
 test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured bound and no stronger timing", () => {
@@ -9463,15 +9665,6 @@ test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured boun
   // The two accurate clauses stay.
   assert.match(body, /This device stays signed in/);
   assert.match(body, /can sign back in with their password/);
-});
-
-test("G-06: envAddFormHtml — write-only (never a value read-back affordance)", () => {
-  const html = hooks.envAddFormHtml();
-  assert.match(html, /id="env-key"/);
-  assert.match(html, /id="env-value"/);
-  assert.match(html, /id="env-once"/);   // the write-once toggle
-  assert.match(html, /set-save-row/);
-  assert.ok(!/Reveal|Show value/i.test(html), "the add form never offers a value read-back");
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -9953,7 +10146,7 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   // capability true but console-unwired → CLI affordance with the exact command.
   assert.equal(byVerb.archive.mode, "cli");
-  assert.equal(byVerb.archive.cli, "bp cloud instance archive web");
+  assert.equal(byVerb.archive.cli, "bp cloud instance archive web --provider hetzner");
   assert.equal(byVerb.audit.mode, "cli");
   // capability false → disabled, carrying Hetzner's OWN gap reason verbatim.
   assert.equal(byVerb.pause.mode, "disabled");
@@ -9976,7 +10169,7 @@ test("S11b: azure model — the one false verb is disabled with its SERVER reaso
   // synthetic payload: see "JS never invents a reason" below and the GR71
   // default_gap test above. Here the honest truth is a CLI affordance.
   assert.equal(byVerb.audit.mode, "cli");
-  assert.equal(byVerb.audit.cli, "bp cloud instance audit az1");
+  assert.equal(byVerb.audit.cli, "bp cloud instance audit az1 --provider azure");
   // pause is a capability here → a CLI affordance, not disabled.
   assert.equal(byVerb.pause.mode, "cli");
 });
@@ -10009,6 +10202,216 @@ test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled re
   assert.match(html, /Hetzner has no pause primitive\./); // server-owned reason
   assert.match(html, /data-life-verb="decommission"/); // the live, wired verb
   assert.match(html, /btn-danger/);
+});
+
+// ══ console-3/lifecycle-batch ════════════════════════════════════════════════
+// FOUR ROWS, ONE REGION. Each block below states the premise it re-derived on
+// origin/main and the mutation that reds it.
+
+// ── cch-w47-bl: the CLI chip names the provider it resolves against ────────
+// PREMISE (re-derived by symbol on origin/main): lifecycleActionsModel built
+// `cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp)` and
+// lifecycleCliName returns name/slug/id only — no flag anywhere. The provider
+// was already in scope as `kind`. Both Go resolvers floor an absent provider to
+// hetzner, so on azure EVERY cli chip resolved against the wrong credentials.
+test("cch-w47-bl: EVERY mode:cli chip names the provider — derived from the model's own kind, on both providers", () => {
+  // SIBLING SET, DERIVED not listed: every verb LIFECYCLE_VERBS offers (the
+  // exported lifecycleVerbs mirror) that this payload turns into a chip. If a
+  // verb is added to the constant it lands here automatically.
+  for (const [bp, kind] of [
+    [{ provider: "hetzner", host: "h", name: "web" }, "hetzner"],
+    [{ provider: "azure", host: "h", name: "az1" }, "azure"],
+    [{ host: "h", name: "legacy" }, "hetzner"], // no provider → the hetzner lane, named explicitly
+  ]) {
+    const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
+    const chips = plain(m.actions).filter((a) => a.mode === "cli");
+    assert.ok(chips.length > 0, kind + " produced no cli chip at all — this assertion would be vacuous");
+    assert.equal(m.kind, kind);
+    for (const a of chips) {
+      assert.equal(a.cli, "bp cloud instance " + a.verb + " " + bp.name + " --provider " + kind,
+        a.verb + " on " + kind + " must name its provider");
+    }
+    // …and NO chip is left flagless — the shape, not just the sampled verbs.
+    assert.equal(chips.filter((a) => !a.cli.includes(" --provider ")).length, 0);
+  }
+});
+
+test("cch-w47-bl: the flag is the model's kind, not a re-derivation — an unknown provider names ITSELF or nothing", () => {
+  // A provider the payload does not carry degrades before any chip is built, so
+  // there is no arm where a chip could name a kind the model did not compute.
+  const gone = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "gcp", host: "h", name: "web" });
+  assert.equal(gone.kind, "gcp");
+  assert.equal(plain(gone.actions).filter((a) => a.mode === "cli").length, 0);
+});
+
+// ── cch-w46-bl: one verb, ONE identity, offered or refused ─────────────────
+// PREMISE (re-derived by symbol): lifecycleActionHtml's live arm emitted
+// data-life-verb; its disabled arm emitted a bare
+// `<button class="btn btn-sm" type="button" disabled>` with no hook at all, so
+// the same verb had two identities and a rendered-state hook table needed two
+// keys for one control.
+test("cch-w46-bl: the REFUSED lifecycle arm carries the same data-life-verb as the live one", () => {
+  // SIBLING SET, DERIVED: every disabled arm lifecycleActionHtml can emit — one
+  // per verb the constant declares, driven through the render itself rather
+  // than through a hand-listed set.
+  for (const verb of hooks.lifecycleVerbs) {
+    const html = hooks.lifecycleActionHtml({ verb, label: verb, mode: "disabled", reason: "" });
+    assert.match(html, /class="inst-life-disabled"/, verb + " must still use the shipped wrapper");
+    assert.match(html, new RegExp('data-life-verb="' + verb + '"'),
+      verb + "'s refused arm has no hook identity — it is `button.btn` to any hook table");
+    assert.match(html, /disabled/, verb + " must stay disabled");
+  }
+});
+
+test("cch-w46-bl: the identity is STABLE across the offer/refuse mutation — same key, both arms", () => {
+  // THE MEASURED CONSEQUENCE, reproduced: identify each arm the way a hook
+  // table does (first data-attribute wins) and check the key does not move when
+  // the same verb flips from offered to refused.
+  const key = (html) => (html.match(/data-([\w-]+)="([^"]*)"/) || []).slice(1).join("=");
+  const live = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "live", resourceName: "web" });
+  const refused = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "disabled", reason: "nope" });
+  assert.equal(key(live), "life-verb=decommission");
+  assert.equal(key(refused), "life-verb=decommission");
+  assert.equal(key(live), key(refused), "one verb must have ONE identity whether it is offered or refused");
+  // And the refused arm is still refused — the identity is not an offer.
+  assert.match(refused, /disabled/);
+  assert.doesNotMatch(refused, /btn-danger/);
+});
+
+// ── cch-w51-bl: the chips consult the store answer the console already has ──
+// PREMISE (re-derived by symbol): LIFECYCLE_VERBS is a flat constant and
+// lifecycleActionsModel referenced no archive-store state at all, while
+// loadArchives had already painted archives-note--unconfigured on the same
+// fleet screen. The console held the answer in its DOM and nowhere else.
+const ARCH_UNCONFIGURED = { ok: false, error: "Archive storage isn't configured for this deployment." };
+
+test("cch-w51-bl: archiveStoreFromModel projects each archivesModel state — and a NON-answer stays unknown", () => {
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel(undefined)).state, "unknown");
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED)).state, "not_configured");
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel({})).state, "failed"); // transport / catch-all
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] })).state, "loaded");
+  const loaded = hooks.archiveStoreFromModel(hooks.archivesModel({
+    ok: true, archives: [{ fqdn: "web.example", slug: "web", source_provider: "hetzner", created_at: "2026-01-01T00:00:00Z" }],
+  }));
+  assert.equal(loaded.state, "loaded");
+  assert.equal(loaded.rows.length, 1);
+  assert.equal(loaded.rows[0].slug, "web");
+});
+
+test("cch-w51-bl GUARD: no Archive/Resurrect chip is offered UNCAVEATED while the console holds a not_configured store", () => {
+  const store = hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED));
+  assert.equal(store.state, "not_configured", "the guard is vacuous unless this arm really is the unconfigured one");
+  const bp = { provider: "hetzner", host: "h", name: "web" };
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", store);
+  // SIBLING SET, DERIVED: the store-coupled verbs are the ones whose chip HTML
+  // must carry the caveat — read off the model, not hand-listed.
+  const offered = plain(m.actions).filter((a) => a.mode === "cli" && (a.verb === "archive" || a.verb === "resurrect"));
+  assert.ok(offered.length > 0, "no archive/resurrect chip was offered at all — the guard would be vacuous");
+  for (const a of offered) {
+    assert.ok(a.storeNote, a.verb + " is offered with no store caveat while the store answered not_configured");
+    const chip = hooks.lifecycleActionHtml(a);
+    assert.match(chip, /inst-life-reason inst-life-note--warn/, a.verb + "'s caveat must RENDER, not just sit on the model");
+    assert.match(chip, /show up in Archives here/, a.verb + " must name the VISIBILITY consequence");
+  }
+  // THE COPY IS ABOUT VISIBILITY, NEVER FAILURE — the credentials differ, so a
+  // claim that the command fails would be a NEW false statement.
+  const note = hooks.archiveVisibilityNote("archive", store);
+  assert.match(note, /still runs with your own/);
+  assert.doesNotMatch(note, /will fail|won't work|cannot archive|unavailable/i);
+  // And the chip still TEACHES the command — the caveat qualifies it, it does
+  // not remove the affordance.
+  assert.match(hooks.lifecycleActionHtml(offered[0]), /bp cloud instance archive web --provider hetzner/);
+});
+
+test("cch-w51-bl GUARD, THE OTHER DIRECTION: a loaded / failed / unknown store annotates NOTHING", () => {
+  const bp = { provider: "hetzner", host: "h", name: "web" };
+  for (const [label, store] of [
+    ["unknown (never read)", { state: "unknown", rows: [] }],
+    ["unknown (no arg at all)", undefined],
+    ["failed", hooks.archiveStoreFromModel(hooks.archivesModel({}))],
+    ["loaded", hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] }))],
+  ]) {
+    const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", store);
+    const chips = plain(m.actions).filter((a) => a.mode === "cli");
+    assert.equal(chips.filter((a) => a.storeNote).length, 0,
+      label + " must annotate no chip — an unread or working store is not an unconfigured one");
+    assert.equal(hooks.lifecycleActionRowHtml(m).includes("won't show up in Archives"), false, label);
+  }
+  // A non-store verb is never annotated even on the unconfigured answer.
+  const unconf = hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED));
+  for (const verb of ["adopt", "audit", "pause", "decommission"]) {
+    assert.equal(hooks.archiveVisibilityNote(verb, unconf), "", verb + " does not touch a bundle and must stay silent");
+  }
+});
+
+test("cch-w51-bl: the 5th argument is an ADD — the shipped 2/3/4-arg call sites are byte-identical", () => {
+  const bp = { provider: "azure", host: "h", name: "az1" };
+  const four = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded"));
+  const five = hooks.lifecycleActionRowHtml(
+    hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", { state: "unknown", rows: [] }));
+  assert.equal(four, five, "an absent store argument must render exactly like an unknown one");
+});
+
+// ── cch-archive-residue: the decommission sheet's residue line ─────────────
+// PREMISE (re-derived by symbol): confirmDecommission pushed the archive-residue
+// sentence with an unconditional lines.push and read no archives at confirm
+// time — loadArchives cached nothing and the instance route never ran it.
+test("cch-archive-residue: a team with NO bundles is not told about a residue it does not have", () => {
+  const store = hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] }));
+  assert.equal(store.state, "loaded", "vacuity check: this arm must really be the determinate empty read");
+  // (length, not deepEqual: the array comes back from the vm realm, whose
+  // Array is a different constructor than this file's.)
+  assert.equal(hooks.archiveResidueLines(store, { name: "web" }).length, 0);
+});
+
+test("cch-archive-residue: an UNKNOWN or FAILED read keeps the blanket sentence — a non-answer is never an absence", () => {
+  for (const [label, store] of [
+    ["never read", { state: "unknown", rows: [] }],
+    ["no store at all", undefined],
+    ["read FAILED", hooks.archiveStoreFromModel(hooks.archivesModel({}))],
+    ["store not configured", hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED))],
+  ]) {
+    const lines = hooks.archiveResidueLines(store, { name: "web" });
+    assert.equal(lines.length, 1, label + " must keep exactly the blanket sentence");
+    assert.match(lines[0], /Any archive bundle this team has already made/, label);
+    // The SERVER-OWNED retention fact survives (ArchiveRetentionWorker really
+    // does sweep daily at 30 days) — this slice conditions the sentence, it
+    // does not rewrite it.
+    assert.match(lines[0], /30 days/, label);
+    assert.match(lines[0], /its most recent bundle is kept/, label);
+  }
+});
+
+test("cch-archive-residue / cch-w51-bl: a loaded store names whether THIS instance has a bundle", () => {
+  const withMine = hooks.archiveStoreFromModel(hooks.archivesModel({
+    ok: true,
+    archives: [
+      { fqdn: "web.example", slug: "web", source_provider: "hetzner", created_at: "2026-01-01T00:00:00Z" },
+      { fqdn: "api.example", slug: "api", source_provider: "azure", created_at: "2026-01-02T00:00:00Z" },
+    ],
+  }));
+  const mine = hooks.archiveResidueLines(withMine, { name: "web", host: "web.example" });
+  assert.equal(mine.length, 2);
+  assert.match(mine[1], /This instance has an archive bundle/);
+  assert.match(mine[1], /resurrect from it/);
+  // …and the NEGATIVE side, so the sentence is a discriminator and not decoration.
+  const notMine = hooks.archiveResidueLines(withMine, { name: "shop", host: "shop.example" });
+  assert.equal(notMine.length, 2);
+  assert.match(notMine[1], /None of this team's archive bundles was made from shop/);
+  assert.doesNotMatch(notMine[1], /This instance has an archive bundle/);
+  // NO INVENTED NUMBER anywhere: the only window named is the 30 days the
+  // ArchiveRetentionWorker actually applies.
+  for (const line of mine.concat(notMine)) {
+    const windows = line.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+    assert.ok(windows.every((w) => /^30\s*days$/i.test(w)), "invented window: " + JSON.stringify(windows));
+  }
+});
+
+test("console-3/lifecycle-batch: every new pure helper is exported", () => {
+  for (const name of ["archiveStoreFromModel", "archiveStoreSnapshot", "archiveVisibilityNote",
+    "archiveResidueLines", "lifecycleActionHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
 });
 
 test("S11b: the loading + unavailable renders show their honest states", () => {
@@ -12709,7 +13112,7 @@ test("isu-w5: updatePanelHtml escapes a hostile channel value (no markup injecti
 
 // ── cch-w45-s5: the two member-reachable instance writes are decided at OFFER
 // time ────────────────────────────────────────────────────────────────────────
-// BOTH routes are require_primary_team_admin server-side while every read this
+// BOTH routes are require_current_team_admin server-side while every read this
 // screen makes is `user`, so a plain member painted the whole instance and got a
 // 403 on click. Re-derived on the PRE-FIX tree by booting the committed
 // panel-overview-member scenario: #instance-body carried a LIVE
@@ -12730,8 +13133,13 @@ const CCH_W45_S5_LIVE = {
   provision_status: "succeeded", update_state: "current", provider: "hetzner",
 };
 // The reason span's TEXT, or null when no reason was rendered at all.
+// cch-w47-rv-bl: the span the STRIPS emit now carries an `id` (the target every
+// disabled control in the strip points aria-describedby at), so the id is
+// OPTIONAL here — the singleton sites (timeline Retry, verify-note Re-provision)
+// still emit the bare span. Widening this reader keeps every assertion below
+// asserting the SENTENCE rather than accidentally asserting the markup shape.
 function cchW45S5Reason(html) {
-  const m = html.match(/<span class="inst-life-reason">([^<]*)<\/span>/);
+  const m = html.match(/<span class="inst-life-reason"(?: id="[^"]*")?>([^<]*)<\/span>/);
   return m ? m[1] : null;
 }
 
@@ -12799,8 +13207,37 @@ test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (ins
   // bytes the server's own 403 renders through friendly(). That is the property
   // this row exists to hold, and the split() count is what makes a hand-written
   // lookalike sentence unable to pass here.
-  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 7,
-    "every refused affordance on the screen carries the server's sentence");
+  //
+  // cch-w47-rv-bl: 7 → 3. Not because a control left the screen — the same
+  // affordances render, all still disabled-and-explained — but because the
+  // sentence now has ONE owner per BUTTON GROUP instead of two per BUTTON.
+  // The three that remain, named so a future drift is legible:
+  //   1. #inst-header-actions' one .inst-life-reason (Update, Connect agent,
+  //      Attach domain all point aria-describedby at it)
+  //   2. #inst-update-actions' one .inst-life-reason (the autoupdate toggles +
+  //      Roll back, same pointer)
+  //   3. the fleet-support card's empty state, which has NO disabled control to
+  //      describe (D514 omits the add affordance outright) and so states the
+  //      sentence in prose, exactly as it did before.
+  // On the POLICY-BEARING fixture the row was filed against the pre-fix number
+  // is THIRTEEN, not the nine the filing claimed — see the count test below,
+  // which drives that fixture on purpose.
+  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 3,
+    "the sentence has one owner per button group, plus the support card's control-less prose");
+  // …and it is still on the screen for EVERY refused affordance: each disabled
+  // control names the span that carries it. A dedupe that dropped the pointer
+  // would satisfy the count above while costing a screen-reader user the
+  // explanation entirely.
+  const describedBy = [...refused.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)].map((m) => m[1]);
+  // Three on THIS fixture (no policy block, update_state "current"): Connect
+  // agent + Attach domain in the header strip, Roll back in the updates strip.
+  // The policy-bearing fixture is driven by the dedicated count test below.
+  assert.ok(describedBy.length >= 3,
+    "every grouped disabled control must point at its group's reason; got " + describedBy.length);
+  for (const id of new Set(describedBy)) {
+    assert.ok(refused.includes('<span class="inst-life-reason" id="' + id + '">' + CCH_W45_S5_ADMIN_SENTENCE + "</span>"),
+      "aria-describedby=\"" + id + "\" points at a span that does not exist with the server's sentence in it");
+  }
   // The new verb specifically: the click hook is GONE on refuse and PRESENT on
   // grant. Without this pair the count above could be satisfied by a control
   // that renders its excuse and stays clickable anyway.
@@ -12893,7 +13330,7 @@ test("connect agent: the URL half is escaped and rides the shipped .detail-url g
 // ── cch-w47-s2: the FOUR autoupdate policy buttons are decided at OFFER time
 // too ────────────────────────────────────────────────────────────────────────
 // `patch "/v1/barkparks/:id/autoupdate"` (web/router.ex) opens with
-// Auth.require_primary_team_admin — the same tier as the Rollback button four
+// Auth.require_current_team_admin — the same tier as the Rollback button four
 // lines below it in the SAME button strip — yet the four `data-au` toggles were
 // appended with no authority argument at all. Same remedy, same grammar: the
 // live mount hook (`data-au=`) exists on the grant arm ONLY.
@@ -12939,6 +13376,139 @@ test("cch-w47-s2: the autoupdate policy toggles are authority-gated — grant ke
   const legacy = hooks.updatePanelHtml({ id: "b-2", host: "h", update_state: "current" }, "grant");
   assert.doesNotMatch(legacy, /data-au=/);
   assert.doesNotMatch(legacy, /Pause autoupdate/);
+});
+
+// ── cch-w47-rv-bl: ONE REFUSAL SENTENCE PER BUTTON GROUP ─────────────────────
+//
+// THE PREMISE, RE-DERIVED ON origin/main@b2529b02c RATHER THAN READ OFF THE ROW.
+// The row says NINE and names "four controls x 2". Both numbers are wrong, and
+// wrong in opposite directions:
+//   * autoupdateActions returns two MUTUALLY EXCLUSIVE PAIRS (pause XOR resume,
+//     pin XOR unpin), so at most TWO policy toggles ever render at once — never
+//     four. The row's per-control arithmetic overcounts that strip.
+//   * …and it undercounts the screen, because it omits the HEADER strip
+//     entirely. On a live, BEHIND, policy-bearing box the pre-fix
+//     instanceDetailHtml render carried the sentence THIRTEEN times:
+//       header  — Update + Connect agent + Attach domain, each title + span = 6
+//       updates — Pause + Pin + Roll back,               each title + span = 6
+//       support — the fleet-support card's control-less empty state        = 1
+// The AFTER contract, pinned below: THREE — one per button group, plus that
+// same control-less prose. Per GROUP the budget is what the row asks for: at
+// most twice (here, exactly once — the accessible name is a POINTER, not a
+// second copy of the sentence).
+//
+// This fixture carries an autoupdate policy block ON PURPOSE (the row's carried
+// criterion): a box without one draws no toggles and the count would prove
+// nothing about the strip this slice re-grammars.
+const CCH_W47_RV_BL_BOX = {
+  id: "b-1", name: "Gyldendal", host: "5.75.169.183", url: "https://g.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.2.25",
+  provision_status: "succeeded", provider: "hetzner",
+  update_state: "behind", update_latest_release: "v0.5.0", update_running_release: "v0.4.0",
+  // the CP's real policy block, at the migrations' column defaults
+  autoupdate_enabled: true, autoupdate_paused: false, channel: "prod", pinned_release: null,
+};
+const CCH_W47_RV_BL_STRIPS = [
+  ["#inst-header-actions", (a) => hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, a), "inst-header-actions-reason", 3],
+  ["#inst-update-actions", (a) => hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, a), "inst-update-actions-reason", 3],
+];
+
+test("cch-w47-rv-bl: a refused member's instance screen states the admin refusal ONCE per button group, not once per button", () => {
+  const S = CCH_W45_S5_ADMIN_SENTENCE;
+  const refused = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "refuse");
+
+  // THE COUNT. Pre-fix this was 13 on exactly this fixture.
+  assert.equal(refused.split(S).length - 1, 3,
+    "the whole instance-detail render must state the refusal three times — one per button group, " +
+    "plus the fleet-support card's control-less empty state; got " + (refused.split(S).length - 1) +
+    ":\n" + refused);
+
+  // PER GROUP, which is the row's actual bound: at most twice. Asserted on the
+  // strip's own bytes so a future third group cannot quietly relax it.
+  for (const [name, render, groupId, controls] of CCH_W47_RV_BL_STRIPS) {
+    const strip = render("refuse");
+    assert.equal(strip.split('<div class="inst-life-disabled">').length - 1, controls,
+      name + ": expected " + controls + " disabled controls on this fixture; got:\n" + strip);
+    assert.ok(strip.split(S).length - 1 <= 2,
+      name + ": the refusal is stated " + (strip.split(S).length - 1) +
+      " times in one button strip — the budget is a per-group reason plus, at most, an accessible name.");
+    // …and the ONE it states is the server's own sentence in the shipped span,
+    // carrying the id its controls point at.
+    assert.ok(strip.includes('<span class="inst-life-reason" id="' + groupId + '">' + S + "</span>"),
+      name + ": the group's one reason span is missing or does not carry FORBIDDEN_ROLE_COPY.admin verbatim");
+
+    // THE DEDUPE MUST NOT COST THE EXPLANATION. Every disabled control in the
+    // strip still names the refusal in its accessible description — and the id
+    // it names must resolve, or a screen reader hears nothing at all.
+    const controlsHtml = [...strip.matchAll(/<button([^>]*)disabled([^>]*)>/g)];
+    assert.equal(controlsHtml.length, controls, name + ": disabled-button scan disagrees with the wrapper count");
+    for (const m of controlsHtml) {
+      const attrs = m[1] + m[2];
+      assert.ok(attrs.includes('aria-describedby="' + groupId + '"'),
+        name + ": a disabled control carries no pointer to the group reason — attrs: " + attrs);
+      assert.ok(!attrs.includes("title="),
+        name + ": a grouped control kept its own title — that is the per-control repetition this row deletes");
+    }
+  }
+
+  // NO COPY WAS REWORDED OR SHORTENED (the carried criterion): the sentence on
+  // screen is FORBIDDEN_ROLE_COPY.admin, authored once in app.js, and no
+  // lookalike appeared beside it.
+  const appSrc = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(appSrc.includes("admin: " + JSON.stringify(S) + ","),
+    "the sentence must still be FORBIDDEN_ROLE_COPY.admin verbatim, authored once in app.js");
+  for (const r of refused.match(/<span class="inst-life-reason"(?: id="[^"]*")?>[^<]*<\/span>/g) || []) {
+    assert.equal(r.replace(/ id="[^"]*"/, ""), '<span class="inst-life-reason">' + S + "</span>",
+      "a reason span carries copy that is NOT the server's sentence — " + r);
+  }
+
+  // AND THE ADMIN ARM IS UNTOUCHED. A dedupe that broke the offer would satisfy
+  // every assertion above — this is the half a member-only test cannot see.
+  const granted = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "grant");
+  assert.equal(granted.split(S).length - 1, 0, "an admin is accused of nothing");
+  assert.match(granted, /id="inst-domain"/);
+  assert.match(granted, /id="inst-update"/);
+  assert.match(granted, /data-au="pause"/);
+  assert.match(granted, /data-rollback="1"/);
+  assert.equal(hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}), granted,
+    "an omitted authority is still the shipped screen, byte for byte");
+});
+
+// The UNKNOWN arm, counted in the same pass (the row's carried criterion asks
+// for this number reported whether or not it moved — it moved: 7 → 3).
+test("cch-w47-rv-bl: the unknown arm dedupes the same way — one 'Checking capabilities' note per group, one shared Retry", () => {
+  const S = CCH_W45_S5_ADMIN_SENTENCE;
+  const NOTE = "Checking capabilities&hellip;";
+  const unknown = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "unknown");
+
+  // Pre-fix on this fixture: 7 (header 3 + updates 3 + the support card's 1).
+  assert.equal(unknown.split(NOTE).length - 1, 3,
+    "the still-checking note must be stated three times — one per button group plus the support card's " +
+    "control-less empty state; got " + (unknown.split(NOTE).length - 1));
+
+  for (const [name, render, groupId, controls] of CCH_W47_RV_BL_STRIPS) {
+    const strip = render("unknown");
+    assert.equal(strip.split(NOTE).length - 1, 1, name + ": the note is stated once per strip");
+    assert.ok(strip.includes('<span class="inst-life-note" id="' + groupId + '">' + NOTE + "</span>"),
+      name + ": the group's one note is missing or does not carry the rail's shipped words");
+    assert.equal(strip.split('<div class="inst-life-disabled">').length - 1, controls);
+    for (const m of strip.matchAll(/<button([^>]*)disabled([^>]*)>/g)) {
+      assert.ok((m[1] + m[2]).includes('aria-describedby="' + groupId + '"'),
+        name + ": an unknown-arm control does not point at the group note");
+    }
+    // AND IT ACCUSES NOBODY. An unanswered /v1/me is not evidence of membership.
+    assert.ok(strip.indexOf(S) === -1, name + ": the unknown arm borrowed the refusal's sentence");
+  }
+
+  // ONE shared exit, unchanged: wireMeRetry binds the FIRST [data-me-retry], so
+  // the copies this slice removed were already dead bytes. It rides the header
+  // strip — the page's shipped home for it.
+  assert.equal(unknown.split("data-me-retry").length - 1, 1,
+    "exactly one /v1/me retry on the screen; got " + (unknown.split("data-me-retry").length - 1));
+  assert.match(hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
+    "…and it is the header strip's, where it shipped");
+  assert.doesNotMatch(hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
+    "a second exit in the updates strip would be a control nothing binds");
 });
 
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
@@ -16072,7 +16642,10 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   // cch-w48-s2: the sixth argument is the authority band, and it FAILS CLOSED —
   // #site-github is admin-gated, so this pin (which asserts the control) names
   // "grant" explicitly. The closed arms have their own pins below.
-  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant");
+  // cch-w48-bl: the 10th argument is githubReadinessState()'s band and it too
+  // FAILS CLOSED — a pin that ASSERTS the button must now name a deployment
+  // where GitHub exists ("ready"), or the control is honestly withheld.
+  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant", null, null, null, "ready");
   assert.match(html, /id="site-domains"/);            // the domains rungs mount
   assert.match(html, /id="deploy-rail-slot"/);        // the live rail slot survives
   // Scale: a read-only rail value — no input/select/toggle control for it (GR28).
@@ -16115,10 +16688,10 @@ test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admi
   // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
   // byte-identically. Without this, a siteDetailHtml that rendered NOTHING at
   // all would satisfy every negative assertion below.
-  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant");
+  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.equal((admin.match(/id="site-github"/g) || []).length, 1);
   assert.match(admin, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
-  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant");
+  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.match(adminBare, /id="site-github" type="button">Connect GitHub repo<\/button>/);
 
   // MEMBER + UNCONNECTED → OMITTED ENTIRELY. D428's ONLY-clause: disable-and-
@@ -16159,6 +16732,91 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
   // A garbage authority is not a grant either (only the literal "grant" is).
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
+});
+
+// ── cch-w48-bl: THE SECOND AXIS — IS GITHUB CONFIGURED ON THIS DEPLOYMENT ────
+//
+// cch-w48-s2 fenced #site-github on AUTHORITY and said in its own comment that
+// it deliberately did not gate on GitHub.configured?. On a deployment with no
+// GitHub App credential — which the live control plane is — that leaves an
+// ADMIN offered a button whose modal can only reach the 503 arm. The role fence
+// cannot see this: the refusal is the same for every actor, which is exactly
+// what makes it a DIFFERENT axis and not a stronger version of the same one.
+test("cch-w48-bl: githubReadinessFrom — only a 200 body carrying the BOOLEAN may claim a configuration state", () => {
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: true } }), "ready");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: false } }), "unconfigured");
+  // A body without the key says NOTHING — an older control plane, or the
+  // preview corpus's benign empty 200. Not "unconfigured": that would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: {} }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: "yes" } }), "unknown");
+  // Every failure class reads unknown — a 500, a 403 and a dead socket are not
+  // evidence about configuration (the rule cch-w67-s4 wrote into loadGithub).
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 500, data: { error: "boom" } }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 0, transport: "offline" }), "unknown");
+  assert.equal(hooks.githubReadinessFrom(null), "unknown");
+});
+
+test("cch-w48-bl: siteDetailHtml withholds #site-github on an UNCONFIGURED deployment — for an ADMIN too", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+
+  // THE ARM THAT DISTINGUISHES THIS FROM THE AUTHORITY FENCE: the actor is a
+  // team ADMIN — "grant" on the band cch-w48-s2 fenced — and the control is
+  // still withheld, because the deployment has no GitHub App at all.
+  const adminUnconfigured = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminUnconfigured, /id="site-github"/);
+  assert.doesNotMatch(adminUnconfigured, /Connect GitHub repo/);
+  // No ghost and no invented sentence: the badges cluster carries no disabled
+  // button and no title, exactly as the member arms do.
+  assert.doesNotMatch(s2Badges(adminUnconfigured), /<button|disabled|title=/);
+  assert.doesNotMatch(adminUnconfigured, /not configured|isn't configured|admin on this team/i);
+  // …and the read-legal fact SURVIVES. site.github_repo came from a require_user
+  // GET; whether the App is wired up today says nothing about whether this site
+  // is linked, so deleting the repo name would destroy information the payload
+  // handed the person.
+  assert.match(adminUnconfigured, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+
+  // An UNCONNECTED site on an unconfigured deployment loses the whole control —
+  // there is no fact left to keep.
+  const adminBareUnconfigured = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminBareUnconfigured, /site-github/);
+  assert.doesNotMatch(s2Badges(adminBareUnconfigured), /<button|disabled|title=/);
+
+  // A MEMBER on a CONFIGURED deployment is still refused by the role fence —
+  // the two axes are independent, and neither subsumes the other.
+  const memberReady = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse",
+    null, null, null, "ready");
+  assert.doesNotMatch(memberReady, /id="site-github"/);
+
+  // PAIRED POSITIVE CONTROL, so the negatives above are not satisfied by an
+  // empty render: admin + ready is the one combination that opens the door.
+  const open = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "ready");
+  assert.equal((open.match(/id="site-github"/g) || []).length, 1);
+});
+
+test("cch-w48-bl: the readiness argument FAILS CLOSED — unknown, garbage and an OMITTED argument all withhold", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // "unknown" is the band while the one-shot read is in flight, and terminally
+  // after it failed. A readiness we cannot prove is not an offer.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "unknown"),
+    /id="site-github"/);
+  // Only the literal "ready" opens it.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "configured"),
+    /id="site-github"/);
+  // AN OMITTED ARGUMENT — a call site that never heard about this parameter —
+  // takes the closed arm. This is the OPPOSITE default from `authority`, and
+  // deliberately so: here the closed arm is the whole point of the term.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /id="site-github"/);
+  // …and the chip survives every closed arm.
+  assert.match(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
 });
 
 test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
@@ -16753,12 +17411,19 @@ test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refu
   assert.match(hooks.deployDetailHtml({ detail: "Pushing image…", console: ["x"] }, "building"), /Pushing image/);
 });
 
-// ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
-test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
-  // Owner-only writes: only the literal "owner" role manages billing (stricter
-  // than admin — require_primary_team_owner).
+// ── gr-p4-billing (G-01): the launch-step role helper + the paid-plan test ──
+// cch-w49-s6 RE-TITLED THIS. billingCanManage(role) is no longer the billing
+// gate's owner test — billingOwnerAuthority() is, and it reads the SERVER's
+// team_authority.owner rather than a role string. This helper survives as
+// launchCheckoutAuthority's (app.js: `grep -n 'function launchCheckoutAuthority'`),
+// which is the /new PLAN step and fails OPEN on unknown by shipped design. Left
+// unchanged on purpose; what it answers is pinned here, what BILLING answers is
+// pinned by the driven tests at the tail of this file.
+test("billingCanManage (launchCheckoutAuthority's helper) / billingHasPaidPlan: the role read + the paid-plan test (GR36)", () => {
+  // Owner-only: only the literal "owner" role passes this set membership
+  // (stricter than admin — require_current_team_owner).
   assert.equal(hooks.billingCanManage("owner"), true);
-  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
+  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — the launch PLAN step is stricter too");
   assert.equal(hooks.billingCanManage("member"), false);
   assert.equal(hooks.billingCanManage(undefined), false);
   // A real paid plan (a non-free catalog plan in an active/past_due state) has a
@@ -16932,8 +17597,19 @@ test("cch-w50: NON-VACUITY CONTROL — a RUNNING trial keeps every retracted str
     "the running trial still gets the backed teardown warning");
   assert.ok(owner.includes("Pick a plan below to keep it."),
     "and the RATIFIED CTA, verbatim (task-2ed0ea068f37345d)");
-  assert.ok(owner.includes("We'll remind you 3 days and 1 day before the trial ends."),
-    "and the reminder promise the worker actually keeps");
+  // cch-w50-s5 — the reminder promise is now THREE-valued on the team's mute
+  // state, so the running trial's card is asserted per state rather than as one
+  // unconditional sentence. The default (one-argument) call is the UNKNOWN arm:
+  // renderBilling never fetches /v1/notifications/settings, so on a direct
+  // /billing landing notifCache is null and the console has not earned the flat
+  // promise. Both numerals still have to be there in every arm — that is the
+  // half the worker really keeps.
+  assert.ok(owner.includes("3 days and 1 day before the trial ends"),
+    "the reminder promise the worker actually keeps, with both scheduled numerals");
+  assert.ok(owner.includes("If your team's alerts are on"),
+    "and the default arm is CONDITIONAL — an unread notifCache is not evidence alerts are on");
+  assert.ok(hooks.trialCardHtml(running, "on").includes("We'll remind you 3 days and 1 day before the trial ends."),
+    "with alerts KNOWN on, the flat promise is made verbatim");
   assert.ok(member.includes("When the trial ends, the instance is torn down."),
     "the member twin keeps the warning half too (cch-w55-s3)");
 
@@ -16965,7 +17641,8 @@ test("cch-w50: the two cards read ONE tagline model, so the clamp cannot land on
 test("G-04: the notification builders + routing helpers are exported", () => {
   for (const name of ["notifMatrixColumns", "notifChannelState", "notifCellState",
     "notifEventChannels", "notifTransportLabel", "notifDeliveryTone", "notifDeliveryStatusLabel",
-    "notifDeliveryRowHtml", "notifDeliveriesHtml", "notifDeliveriesErrorHtml",
+    "notifDeliveryRowHtml", "notifDeliveryCarrierLabel", "notifDeliveriesHtml",
+    "notifDeliveriesErrorHtml",
     "notifEmailSectionHtml", "notifChannelsSectionHtml", "notifChannelRowHtml",
     "notifMatrixSectionHtml", "notifMatrixCellHtml", "notifDeliveriesShellHtml",
     "notifMemberAdminNoticeHtml", "notifPageHtml"]) {
@@ -17126,6 +17803,89 @@ test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error"
   assert.doesNotMatch(chat, /wh-del-err/);
 });
 
+// ── cch-w52-s3: THE CARRIER SEGMENT ──────────────────────────────────────────
+//
+// THIS SLICE AUTHORS ITS OWN PIN, DELIBERATELY. The Console gate was measured
+// BLIND to this change: a plain-text meta segment breaks ZERO of the nine node
+// instruments the gate runs (`__css_check` only fires on a NEW class emitted with
+// no rule in app.css, and this segment introduces none). A green Console gate
+// after this change proves that app.js still parses — nothing about what the row
+// says. Every assertion below therefore states the CLAIM, not the compile.
+//
+// Note also what does NOT cover this: the only `doesNotMatch(/wh-del-meta/)` in
+// this suite guards `deliveryRowHtml`, the WEBHOOK row built by a different
+// function. It is untouched here and must not be read as coverage.
+
+test("cch-w52-s3 a delivery row NAMES ITS CARRIER — channel is the egress family, not the mechanism", () => {
+  // A team's OWN relay carried it. Before this field, this row and the one below
+  // it were byte-identical, which is the defect: the fallback was invisible.
+  const carried = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "team_smtp", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(carried, /own SMTP relay/,
+    "a send the team's own relay carried must SAY so — otherwise the log cannot answer 'sent by what'");
+  assert.doesNotMatch(carried, /Barkpark platform mailer/);
+
+  // The SILENT FALLBACK: same team, same transport selection, but the override
+  // could not be built, so the platform carried it. Same channel ("email"), same
+  // status ("sent") — the carrier is the ONLY thing that distinguishes them.
+  const fellBack = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "platform", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(fellBack, /Barkpark platform mailer/);
+  assert.doesNotMatch(fellBack, /own SMTP relay/);
+
+  // NON-VACUITY: the two rows differ ONLY in `carrier`, so if the segment were
+  // dropped from the meta join these would be identical strings and every
+  // assertion above would still need this one to notice.
+  assert.notEqual(carried, fellBack,
+    "two rows differing only in carrier rendered IDENTICALLY — the carrier segment is not on the row at all");
+
+  // The segment rides the EXISTING meta span; no new class was minted.
+  assert.match(carried, /wh-del-meta/);
+  assert.doesNotMatch(carried, /wh-del-carrier/);
+});
+
+test("cch-w52-s3 UNKNOWN is a SENTENCE, never a blank and never an omitted segment", () => {
+  // A row written before the column existed cannot prove its carrier. The house
+  // style of this epic is that unknown is a STATE — so it gets words, not a gap.
+  const unknown = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: "unknown", status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(unknown, /carrier not recorded/);
+
+  // A MISSING carrier is the same epistemic state as an explicit "unknown" and
+  // must read the same way — a null on the wire is not licence to render a blank.
+  const absent = hooks.notifDeliveryRowHtml({
+    recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
+    carrier: null, status: "sent", attempts: 1, inserted_at: "2026-09-04T10:00:00Z",
+  });
+  assert.match(absent, /carrier not recorded/);
+  assert.equal(hooks.notifDeliveryCarrierLabel({}), "carrier not recorded",
+    "an object with no carrier key at all still gets the sentence");
+
+  // A DANGLING SEPARATOR is the failure mode a blank produces — the meta join
+  // would read "email &middot;  &middot; 1 attempt". Pin that it cannot happen.
+  assert.doesNotMatch(absent, /&middot;\s*&middot;/);
+
+  // A legacy chat row backfilled to its own channel is KNOWN, not unknown, and is
+  // rendered verbatim rather than flattened into the unknown sentence.
+  assert.equal(hooks.notifDeliveryCarrierLabel({ carrier: "discord" }), "via discord");
+
+  // NO `api` MEMBER anywhere in this vocabulary. cch-w52-s1 deleted that
+  // transport because nothing carried it; the fix that makes carriers legible
+  // must not re-mint the word.
+  const labels = ["platform", "team_smtp", "unknown", null].map(function (c) {
+    return hooks.notifDeliveryCarrierLabel({ carrier: c });
+  });
+  labels.forEach(function (l) {
+    assert.doesNotMatch(l, /\bAPI\b/i, "the console re-introduced an 'api' carrier: " + l);
+  });
+});
+
 test("G-04 notifDeliveriesHtml: populated card vs honest empty; error degrade is distinct", () => {
   assert.match(hooks.notifDeliveriesHtml([{ recipient: "x", status: "sent" }]), /wh-del-card/);
   assert.match(hooks.notifDeliveriesHtml([]), /No notifications have been delivered yet/);
@@ -17171,16 +17931,36 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers SIX toggles — the three producerless ones are gone", () => {
+test("cch-w30-s1: the matrix offers EIGHT toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
-  // Six toggle rows × six columns = 36 cells, and not one of them names an
+  // Eight toggle rows × six columns = 48 cells, and not one of them names an
   // event nothing can send. A regressed row would fail the census below too;
   // this leg is the person-facing half — what the page actually draws.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 36, "6 events × 6 channels");
-  for (const dead of ["deployment_succeeded", "member_invited", "token_expiring"]) {
+  //
+  // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48. The count is
+  // EXACT on purpose and the number is not the assertion: the two loops below
+  // are. A row moves this number only together with its producer, because arm
+  // (a) of the census below reds on an offer with nothing behind it.
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 48, "8 events × 6 channels");
+  // STILL DEAD. `member_invited` and `token_expiring` have no producer, and
+  // token_expiring must never get the obvious one: dispatch_event/3 fans to
+  // team_member_emails/1 while a token belongs to ONE user.
+  for (const dead of ["member_invited", "token_expiring"]) {
     assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
       `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
+  }
+  // The seventh, drawn: the auto-deploy PREBUILT refusal
+  // (Sites.AutoDeployWorker.refuse/1 → Notifications.dispatch_site_event).
+  //
+  // The eighth, drawn: cch-w30-bl. `deployment_succeeded` was the THIRD dead row
+  // above until its producer landed — Registry.dispatch_deployment_terminal/2,
+  // fired from BOTH writers that can reach the `live` terminal and edge-triggered
+  // on the prior status. It moves lists here for exactly one reason: arm (b) of
+  // the census below now reds while this row is absent.
+  for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded"]) {
+    assert.match(html, new RegExp(`data-event="${live}"`),
+      `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }
 });
 
@@ -17642,6 +18422,33 @@ test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => 
   const legacy = hooks.notifChatTestToast({ ok: true, status: 202, data: { ok: true } }, "slack", true);
   assert.equal(legacy.kind, "success");
   assert.match(legacy.body, /Sent to slack\./);
+});
+
+// ── cch-w32-bl: the chat leg's refusal is as readable as the email leg's ─────
+//
+// The chat leg jumped the 10s/team guard entirely, so `rate_limited` was
+// UNREACHABLE on this button and the toast never learned to read it — a 429
+// rendered "Try again shortly." while `retry_after` sat unused in the body.
+// Both legs now spend one budget, so both toasts must say the same number.
+test("cch-w32-bl notifChatTestToast: a rate-limited chat test reads the countdown, like the email one", () => {
+  const t = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited", retry_after: 7 } }, "slack", true);
+  assert.equal(t.kind, "error");
+  assert.match(t.body, /wait 7s/i, "the wire carried the number — the toast must show it");
+  assert.match(t.body, /share one per-team limit/i,
+    "a caller who just pressed the EMAIL button must be told why the CHAT button refused");
+
+  // The shared-limit sentence is what makes a cross-leg refusal legible; a
+  // generic 'try again' would leave the caller hunting a chat bug that is not
+  // there. And an older server that omits retry_after still gets a number.
+  const noNumber = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited" } }, "slack", true);
+  assert.match(noNumber.body, /wait 10s/i, "an absent retry_after falls back to the window itself");
+
+  // A NON-rate-limit failure must not gain the countdown sentence.
+  const other = hooks.notifChatTestToast(
+    { ok: false, status: 502, data: { error: "send_failed" } }, "slack", true);
+  assert.doesNotMatch(other.body, /per-team limit/i);
 });
 
 // ── cch-w40-bl: the EMAIL test button stops answering yes when it cannot know ─
@@ -19044,17 +19851,15 @@ test("cch-w30-s5: faultCopy swaps the validation fallback out on a 5xx only", ()
   assert.match(hooks.faultCopy(413, { error: "request_too_large" }, fb), /too large/i);
 });
 
-test("cch-w30-s5: the two named copy helpers stop blaming the person on a 5xx", () => {
+test("cch-w30-s5: the named copy helper stops blaming the person on a 5xx", () => {
+  // The env-var write twin was deleted with the feature (cch-w53-bl, Option A);
+  // inviteFailureCopy is the surviving helper of the pair this slice fixed.
   // invite: "Check the address and try again." was a lie on a 500.
   assert.match(hooks.inviteFailureCopy({ error: "server_error" }, 500), /broke on our side/i);
   assert.ok(!/check the address/i.test(hooks.inviteFailureCopy({}, 500)));
   // …and the 4xx answers it was written for are untouched.
   assert.match(hooks.inviteFailureCopy({ error: "already_member" }, 409), /already on your team/i);
   assert.match(hooks.inviteFailureCopy({}, 422), /Check the address/i);
-  // env-var write: "Check the values and try again." was a lie on a 500.
-  assert.match(hooks.envVarWriteFailureCopy(500, { error: "server_error" }), /broke on our side/i);
-  assert.ok(!/check the values/i.test(hooks.envVarWriteFailureCopy(500, {})));
-  assert.match(hooks.envVarWriteFailureCopy(422, {}), /Check the values/i);
 });
 
 test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's back", () => {
@@ -19065,7 +19870,6 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
     "Check the details and try again.",
     "Check the form and try again.",
     "Check the address and try again.",
-    "Check the values and try again.",
     // cch-w31-s4 — the two sentences the survey found STILL bare. Each one is
     // added in the same change as its fix, and each REDS this test on its own:
     // the connection sentence sat at the fleet + billing degradation cards with
@@ -19074,6 +19878,18 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
     // reached every single time.
     "Check your connection and retry.",
     "Please check the details and try again.",
+    // cch-w31-bl — the SIBLING the denominator grep found. `grep -nE
+    // '\.error \|\| \{\}' app.js` returns three helpers; webhookMutationError
+    // (fixed by w31-s4) is the positive control, siteDeleteFailureCopy already
+    // hoists the flat string into `code`, and webhookErrorHtml — lexically
+    // adjacent to the fixed one, and the helper the filing named as unexamined
+    // — did not. Its terminal sentence is not USER-blame, so it is a wider
+    // reading of this census than the five above: it blames the INSTANCE for a
+    // fault that was never measured there. A control-plane 500 arrives flat
+    // ({error:"server_error"}), misses every `code ===` branch, and told an
+    // operator to go look at a box that answered nothing — with `r.status` in
+    // scope one frame up at both call sites, thrown away.
+    "Something went wrong reaching this instance.",
   ]) {
     const idx = [...src.matchAll(new RegExp(fallback.replace(/\./g, "\\."), "g"))].map((m) => m.index);
     assert.ok(idx.length > 0, "fallback still present: " + fallback);
@@ -19148,6 +19964,93 @@ test("cch-w31-s4: every webhookMutationError call site passes the status it alre
   }
 });
 
+// ── cch-w31-bl: the DERIVED denominator for the `.error || {}` shape ────────
+//
+// The filing asked whether webhookMutationError's defect was ONE instance or a
+// FAMILY, and said nobody had sized it. This is the sizing, re-runnable:
+//
+//   $ grep -nE '\.error \|\| \{\}' cloud/priv/static/app.js
+//   12414:    var err = resp.error || {};      webhookErrorHtml
+//   12469:    var err = data.error || {};      webhookMutationError  (w31-s4 — control)
+//   15670:    var err = data.error || {};      siteDeleteFailureCopy
+//
+// Three members. Each was CLASSIFIED BY DRIVING IT with the flat envelope the
+// router's handle_errors/2 actually sends, not by reading it:
+//
+//   webhookMutationError(flat, 500)   "Something broke on our side — not your input…"   OK (fixed)
+//   siteDeleteFailureCopy(500, flat)  "This delete failed partway through…"             OK — it
+//       hoists the flat string itself (`typeof err === "string" ? err : err.code`),
+//       so `code === "server_error"` fires. Never had the defect.
+//   webhookErrorHtml(flat, "inst")    "Something went wrong reaching this instance."    DEFECT
+//
+// So: a family of three, ONE of which was still broken. The test below pins the
+// fix; the census entry above pins that no future edit reverts it.
+//
+// A NOTE ON THE CLASSIFICATION, because the filing's word was "blaming":
+// webhookErrorHtml does not blame the USER — it blames the INSTANCE. On a
+// control-plane crash the console named a box it never reached out to, sent the
+// operator to check that box's health, and offered a Retry that re-runs the same
+// crashing call. Same structural cause, one attribution over.
+test("cch-w31-bl: webhookErrorHtml stops blaming the INSTANCE for a control-plane crash", () => {
+  const body = (html) => (html.match(/<p>(.*?)<\/p>/) || [])[1];
+  // The three envelopes that reached the fall-through: the router's flat crash
+  // slug, a flat bad_gateway, and an upstream proxy's unparseable HTML body.
+  for (const [data, status] of [
+    [{ error: "server_error", request_id: "0a1b2c3d4e5f6071" }, 500],
+    [{ error: "bad_gateway" }, 502],
+    [{}, 502],
+  ]) {
+    const b = body(hooks.webhookErrorHtml(data, "abc", status));
+    assert.match(b, /broke on our side/i, "5xx still names the instance: " + b);
+    assert.ok(!/reaching this instance/i.test(b), "5xx still names the instance: " + b);
+  }
+  // The slug alone carries it even with no status plumbed — friendly() resolves
+  // `server_error` out of ERRORS — so the fix does not rest on the call sites.
+  assert.match(body(hooks.webhookErrorHtml({ error: "server_error" }, "abc")), /broke on our side/i);
+});
+
+test("cch-w31-bl: webhookErrorHtml's coded arms still win over the status switch", () => {
+  const body = (html) => (html.match(/<p>(.*?)<\/p>/) || [])[1];
+  // Every branch below sits ABOVE the fall-through, so a 502-wrapped instance
+  // fact must still read as that fact and not as the generic crash sentence.
+  assert.match(body(hooks.webhookErrorHtml({ reachable: false }, "abc", 502)), /couldn&#39;t reach the box/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "capability_unavailable" } }, "abc", 502)), /newer Barkpark/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "not_live" } }, "abc", 502)), /provisioning finishes/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "no_admin_token" } }, "abc", 500)), /no admin token/i);
+  assert.match(body(hooks.webhookErrorHtml({ error: { code: "upstream_error", status: 404 } }, "abc", 502)), /no longer exists/i);
+  assert.equal(body(hooks.webhookErrorHtml(
+    { error: { code: "upstream_error", status: 422, detail: "url is invalid" } }, "abc", 502)), "url is invalid");
+  // api()'s fetch-catch string keeps the connection sentence, not the crash one.
+  assert.match(body(hooks.webhookErrorHtml({ error: "network_error" }, "abc", 0)), /[Nn]etwork error/);
+  // A real 4xx IS an answer about this request, so the instance-shaped sentence
+  // survives there — the change is scoped to faults nobody measured.
+  assert.equal(body(hooks.webhookErrorHtml({ error: "some_unknown_slug" }, "abc", 422)),
+    "Something went wrong reaching this instance.");
+});
+
+test("cch-w31-bl: every webhookErrorHtml call site passes the status it already had", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // NOT `[^)]*` — the arg list contains `cliInstance(bp)`, so a
+  // no-close-paren class stops at the INNER paren and every call site reads as
+  // discarding the status. Match to the end of the statement instead.
+  const calls = [...src.matchAll(/webhookErrorHtml\((.*)\);/g)]
+    .map((m) => m[1].trim())
+    .filter((a) => a !== "resp, instance, respStatus"); // the declaration itself
+  assert.equal(calls.length, 2, "the two degradation call sites (found " + calls.length + ")");
+  for (const args of calls) {
+    assert.equal(args, "r.data, cliInstance(bp), r.status", "a call site still discards the status: " + args);
+  }
+});
+
+test("cch-w31-bl: siteDeleteFailureCopy — the family's third member, verified UNBROKEN", () => {
+  // Not a fix; the classification evidence, pinned so a future edit that drops
+  // the string hoist reds here instead of quietly re-opening the shape bug.
+  const crash = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "0a1b" });
+  assert.match(crash.title, /failed partway through/i);
+  assert.equal(crash.recovery, "recheck");
+  assert.match(crash.body, /control plane crashed/i);
+});
+
 test("cch-w31-s4: faultCopy has a status-0 arm, capped at THREE honest transport classes", () => {
   const fb = "Check your connection and retry.";
   // status 0 = the request never got an answer, so a fallback written about the
@@ -19217,9 +20120,18 @@ test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error su
   // operator read as `unreachable` so a card that never got an answer stops
   // reading like one that got a refusal. The pin is a set-size ratchet on
   // ADDITIONS, not a ban on them — a branch that DISAPPEARS still reds it.
+  // cch-w53-bl (env-var Option A, 2026-09-02) takes the pin 6 -> 5: one of the
+  // four originals was envVarsFailureCopy's, deleted with the team env-var
+  // feature. A branch that DISAPPEARS reds this — which is what it just did.
+  // cch-w36-bl (console-3-w26) takes it 5 -> 7: metricsFailureCopy and
+  // usageFailureCopy each GREW one. Both routes are total over a sick box, so
+  // their old status-blind default told a person whose network died that the
+  // instance "may be starting up"; a status-0 arm is the branch that stops it.
+  // The pin stays a ratchet on ADDITIONS — a branch that disappears still reds.
   const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
-  assert.equal(zeroBranches.length, 6,
-    "the four original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
+  assert.equal(zeroBranches.length, 7,
+    "the three surviving original status-0 branches, faultCopy's arm, operatorReadFault's, " +
+    "and the metrics/usage arms (found " + zeroBranches.length + ")");
   assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
   // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
   // reads unchanged) — the bytes now ride alongside as `text` instead of
@@ -20193,16 +21105,6 @@ test("cch-w36-s3: loadMembers reports a FAILED /v1/me as a failure, never as 'No
   }
 });
 
-test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed too", async () => {
-  const teamless = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 200, { user: { id: "u9", email: "solo@acme.com" } });
-  assert.match(teamless, /No team yet/, "a GENUINE teamless 200 keeps its determinate answer");
-
-  const failed = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 500, { error: "server_error" });
-  assert.ok(failed.indexOf("No team yet") === -1);
-  assert.match(failed, /Couldn&#39;t load environment variables|Couldn't load environment variables/);
-  assert.match(failed, /data-env-retry/);
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // cch-w38-s1 — THE INSTANCE RAIL STOPS SELLING WHAT THE SERVER WILL REFUSE,
 // AND STOPS DEMOTING AN OWNER IT COULD NOT CHECK.
@@ -20255,20 +21157,43 @@ test("cch-w38-s1: the authority answer is THREE-VALUED and reads /v1/me's state,
   hooks.clearMe();
 });
 
+// cch-w46-bl RE-POINTED THESE ORACLES, AND THE RE-POINT IS THE POINT. Every
+// assertion below used the PRESENCE of `data-life-verb="decommission"` as its
+// proxy for "a live, click-wired destroy verb" — true only while the refused
+// arm had no hook identity at all. cch-w46-bl gives the refused arm the SAME
+// data-life-verb (one verb, ONE identity, offered or refused), so the proxy
+// would silently start reporting a refusal as an offer. The oracle moves to
+// bytes only the LIVE arm can emit — its `data-life-name` companion, which
+// lifecycleActionHtml writes in the mode==="live" branch and nowhere else — and
+// the mount agrees: paintLifecycleActions now binds only when the control is
+// not `disabled`. Weaker proxy replaced by a stronger one, in the same diff
+// that made the weaker one wrong.
+const LIVE_DECOMM = 'data-life-verb="decommission" data-life-name=';
+
+test("cch-w46-bl: LIVE_DECOMM discriminates the two arms — the oracle these tests rest on is not vacuous", () => {
+  const live = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "live", resourceName: "web" });
+  const refused = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "disabled", reason: "no" });
+  assert.ok(live.includes(LIVE_DECOMM), "the live arm must match the oracle");
+  assert.ok(!refused.includes(LIVE_DECOMM), "the refused arm must NOT — otherwise every absence assertion below is vacuous");
+  assert.ok(refused.includes('data-life-verb="decommission"'), "…while still carrying the shared identity");
+});
+
 test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's sentence, unknown carries none", () => {
   const refused = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse"));
   // The remedy: a DISABLED control that is still THERE, plus the one sentence
   // that repairs it — FORBIDDEN_ROLE_COPY.admin, byte-identical to what the
   // server's own 403 renders through friendly(). No new copy is minted here.
   assert.match(refused, /inst-life-disabled/);
-  assert.ok(refused.includes('<button class="btn btn-sm" type="button" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
+  assert.ok(refused.includes('<button class="btn btn-sm" type="button" data-life-verb="decommission" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
     "the refused verb is a disabled control, titled with the server's sentence");
   assert.ok(refused.includes('<span class="inst-life-reason">' + W38_ADMIN_SENTENCE + "</span>"),
     "…and the sentence is VISIBLE in the shipped reason span, not hover-only");
   // THE PART THE [^>]* ASSERTION AT :11858 CANNOT SEE: no click hook, no
   // destroy-tier styling, no typed-confirm ellipsis promising a modal.
-  assert.ok(refused.indexOf('data-life-verb="decommission"') === -1,
-    "a verb the server will refuse gets NO click hook — paintLifecycleActions binds on this attribute");
+  assert.ok(refused.indexOf(LIVE_DECOMM) === -1,
+    "a verb the server will refuse gets NO live control — paintLifecycleActions binds only a non-disabled one");
+  assert.match(refused, /data-life-verb="decommission" disabled/,
+    "…and cch-w46-bl: it carries the SAME identity as the live arm, disabled");
   assert.ok(refused.indexOf("btn-danger") === -1, "and no destroy-tier styling");
   assert.ok(refused.indexOf("Decommission&hellip;") === -1, "and no ellipsis promising a confirm modal");
   assert.ok(refused.includes("Manage this instance via the bp CLI"), "the rail is never HIDDEN from a member (D428)");
@@ -20282,7 +21207,7 @@ test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's se
     "unknown states the truth: we are still checking");
   assert.ok(unknown.indexOf(W38_ADMIN_SENTENCE) === -1,
     "a role we do not know is NOT a role of member — no refusal sentence on an unanswered read");
-  assert.ok(unknown.indexOf('data-life-verb="decommission"') === -1,
+  assert.ok(unknown.indexOf(LIVE_DECOMM) === -1,
     "…and the destroy verb is not live while the answer is outstanding");
   assert.match(unknown, /inst-life-disabled/);
 
@@ -20303,11 +21228,11 @@ test("cch-w38-s1: the loading and unavailable frames carry the authority too —
   // shipped decommission LIVE unconditionally. They are the frames a member
   // actually sees first, so they are the frames most able to lie.
   const frame1 = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(undefined, W38_BP, "refuse"));
-  assert.ok(frame1.indexOf('data-life-verb="decommission"') === -1, "frame 1 does not offer a refused verb");
+  assert.ok(frame1.indexOf(LIVE_DECOMM) === -1, "frame 1 does not offer a refused verb");
   assert.ok(frame1.includes(W38_ADMIN_SENTENCE), "…and it explains why, from frame 1");
 
   const unavailable = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(null, W38_BP, "refuse"));
-  assert.ok(unavailable.indexOf('data-life-verb="decommission"') === -1, "nor does the conduit-failed frame");
+  assert.ok(unavailable.indexOf(LIVE_DECOMM) === -1, "nor does the conduit-failed frame");
   assert.match(unavailable, /data-life-retry/, "…and that frame keeps its own Retry — the authority note never eats a recovery");
 
   // The model carries the decision so the DOM mount cannot fork it.
@@ -20378,6 +21303,16 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
     provision_error: "SECRET_KEY_BASE too short (32 bytes)", provision_steps: [], provision_console: [],
   };
   const ghostDead = (label) => '<button class="btn btn-ghost btn-sm" type="button" disabled title="' + S + '">' + label + "</button>";
+  // cch-w47-rv-bl: a control inside a BUTTON GROUP no longer titles itself with
+  // the sentence — the strip owns one .inst-life-reason and each disabled
+  // control points aria-describedby at it. `groupDead` is the exact bytes for
+  // that shape; `ghostDead` above is still the exact bytes for the two SINGLETON
+  // sites (the timeline's Retry setup, the verify note's Re-provision), which
+  // are a group of one and keep the shipped title+span pair.
+  const groupDead = (label, groupId) =>
+    '<button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="' + groupId + '">' + label + "</button>";
+  const HDR = "inst-header-actions-reason";
+  const UPD = "inst-update-actions-reason";
 
   // ELEVEN OFFER SITES over SEVEN verbs — the count differs because two verbs
   // are offered from more than one surface, and gating one site of a verb while
@@ -20387,46 +21322,46 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
   const OFFERS = [
     { verb: "runDecommission", route: "POST /v1/instances/:id/lifecycle", where: "the CLI rail",
       render: (a) => hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, a)),
-      live: 'data-life-verb="decommission"',
-      dead: '<button class="btn btn-sm" type="button" disabled title="' + S + '">Decommission</button>' },
+      live: LIVE_DECOMM,
+      dead: '<button class="btn btn-sm" type="button" data-life-verb="decommission" disabled title="' + S + '">Decommission</button>' },
 
     { verb: "rollbackInstance", route: "POST /v1/barkparks/:id/rollback", where: "the Updates panel",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>',
-      dead: ghostDead("Roll back&hellip;") },
+      dead: groupDead("Roll back&hellip;", UPD) },
 
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pause)",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>',
-      dead: ghostDead("Pause autoupdate") },
+      dead: groupDead("Pause autoupdate", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pin)",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>',
-      dead: ghostDead("Pin version") },
+      dead: groupDead("Pin version", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (resume)",
       render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="resume">Resume autoupdate</button>',
-      dead: ghostDead("Resume autoupdate") },
+      dead: groupDead("Resume autoupdate", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (unpin)",
       render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>',
-      dead: ghostDead("Unpin") },
+      dead: groupDead("Unpin", UPD) },
 
     { verb: "attachDomain", route: "POST /v1/barkparks/:id/domain", where: "the instance header",
       render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" id="inst-domain">Attach domain</button>',
-      dead: ghostDead("Attach domain") },
+      dead: groupDead("Attach domain", HDR) },
 
     // ── the three this commit closes ────────────────────────────────────────
     { verb: "updateInstance", route: "POST /v1/barkparks/:id/self-update", where: "the instance header CTA",
       render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
       live: '<button class="btn btn-primary btn-sm" type="button" id="inst-update">Update to v0.5.0</button>',
-      dead: ghostDead("Update to v0.5.0") },
+      dead: groupDead("Update to v0.5.0", HDR) },
 
     { verb: "removeInstance", route: "DELETE /v1/barkparks/:id", where: "the removal-failed header",
       render: (a) => hooks.instanceHeaderHtml(REMOVE_FAILED_BP, a),
       live: '<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>',
-      dead: ghostDead("Retry removal") },
+      dead: groupDead("Retry removal", HDR) },
 
     { verb: "retryInstance", route: "POST /v1/barkparks/:id/retry", where: "the provisioning timeline",
       render: (a) => hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, a),
@@ -20463,16 +21398,37 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
 
     // VISIBLE, not hover-only: a `title` is unreachable on touch and to a
     // screen reader browsing the page, so the sentence rides the shipped span.
-    assert.ok(refused.includes('<span class="inst-life-reason">' + S + "</span>"),
+    // cch-w47-rv-bl: the span may now carry the group's `id` (the target the
+    // grouped controls point aria-describedby at), so BOTH shapes are accepted
+    // — what is asserted is that the sentence is on screen in a reason span,
+    // not which of the two markups it arrived in.
+    assert.ok(refused.includes('<span class="inst-life-reason">' + S + "</span>") ||
+      /<span class="inst-life-reason" id="[^"]*">/.test(refused),
       at + ": the refusal is title-only. The sentence must also ride the VISIBLE .inst-life-reason span — a tooltip is not an explanation on a phone.");
 
     // NO NEW COPY: every reason this markup carries is the server's own.
-    const reasons = refused.match(/<span class="inst-life-reason">[^<]*<\/span>/g) || [];
+    const reasons = refused.match(/<span class="inst-life-reason"(?: id="[^"]*")?>[^<]*<\/span>/g) || [];
     assert.ok(reasons.length > 0, at + ": no reason span at all in the member's markup");
     for (const r of reasons) {
-      assert.equal(r, '<span class="inst-life-reason">' + S + "</span>",
+      assert.equal(r.replace(/ id="[^"]*"/, ""), '<span class="inst-life-reason">' + S + "</span>",
         at + ": a reason span carries copy that is NOT FORBIDDEN_ROLE_COPY.admin — " + r);
     }
+
+    // cch-w47-rv-bl, THE DEDUPE'S PRICE, PAID IN THE SAME LOOP: a control that
+    // dropped its title must point at a reason that EXISTS. An aria-describedby
+    // naming an absent id is silence to a screen reader — the exact regression a
+    // "the screen says it once now" count assertion would happily certify.
+    for (const m of refused.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)) {
+      assert.ok(refused.includes('<span class="inst-life-reason" id="' + m[1] + '">' + S + "</span>"),
+        at + ': a disabled control points aria-describedby at "' + m[1] +
+        '" and no reason span with that id carries the sentence — the refusal is unannounced.');
+    }
+
+    // …and the sentence is not repeated per control. This is the row's bound,
+    // asserted at the strip: ONE owner per group, never one per button.
+    assert.ok(refused.split(S).length - 1 <= 2,
+      at + ": the refusal sentence appears " + (refused.split(S).length - 1) +
+      " times in this strip's bytes — the budget is a per-group reason plus, at most, what an accessible name needs.");
 
     // …and no live mount hook survives, so the wiring has nothing to re-arm.
     assert.ok(!refused.includes(o.live),
@@ -20505,16 +21461,32 @@ test("cch-w38-s1: while /v1/me is outstanding the three newly-gated verbs say CH
     provision_error: "boom", provision_steps: [], provision_console: [],
   };
 
+  // cch-w47-rv-bl: the two HEADER frames are inside a button group now, so their
+  // disabled control points aria-describedby at the strip's one note instead of
+  // carrying its own copy; the two SINGLETON frames below keep the bare shape.
+  // Both are still UNTITLED, which is the property this test exists to hold.
+  const HDR_NOTE = "inst-header-actions-reason";
   const frames = [
-    ["updateInstance", hooks.instanceHeaderHtml(LIVE_BP, "unknown"), "Update to v0.5.0"],
-    ["removeInstance", hooks.instanceHeaderHtml(REMOVE_FAILED_BP, "unknown"), "Retry removal"],
-    ["retryInstance", hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "unknown"), "Retry setup"],
-    ["retryInstance", hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, "unknown"), "Re-provision"],
+    ["updateInstance", hooks.instanceHeaderHtml(LIVE_BP, "unknown"), "Update to v0.5.0", HDR_NOTE],
+    ["removeInstance", hooks.instanceHeaderHtml(REMOVE_FAILED_BP, "unknown"), "Retry removal", HDR_NOTE],
+    ["retryInstance", hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "unknown"), "Retry setup", null],
+    ["retryInstance", hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, "unknown"), "Re-provision", null],
   ];
-  for (const [verb, html, label] of frames) {
-    assert.ok(html.includes('<button class="btn btn-ghost btn-sm" type="button" disabled>' + label + "</button>"),
-      verb + ": the still-checking arm must draw the control disabled and UNTITLED — got:\n" + html);
-    assert.match(html, /inst-life-note">Checking capabilities&hellip;</,
+  for (const [verb, html, label, groupId] of frames) {
+    const expected = groupId
+      ? '<button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="' + groupId + '">' + label + "</button>"
+      : '<button class="btn btn-ghost btn-sm" type="button" disabled>' + label + "</button>";
+    assert.ok(html.includes(expected),
+      verb + ": the still-checking arm must draw the control disabled and UNTITLED — expected:\n  " + expected + "\ngot:\n" + html);
+    assert.ok(!/disabled[^>]*title=/.test(html),
+      verb + ": an unanswered /v1/me must title NOTHING — a title is a claim we have not earned");
+    if (groupId) {
+      assert.ok(html.includes('<span class="inst-life-note" id="' + groupId + '">Checking capabilities&hellip;</span>'),
+        verb + ": the group's one checking note must exist with the id its controls point at");
+      assert.equal(html.split("Checking capabilities&hellip;").length - 1, 1,
+        verb + ": the still-checking note is stated ONCE per button strip, not once per button");
+    }
+    assert.match(html, /inst-life-note"(?: id="[^"]*")?>Checking capabilities&hellip;</,
       verb + ": an unanswered /v1/me must say we are still checking, in the rail's shipped words");
     assert.ok(html.indexOf(W38_ADMIN_SENTENCE) === -1,
       verb + ": a role we have not read is NOT the role of member — an unanswered read must accuse nobody");
@@ -20611,8 +21583,14 @@ function railDom() {
       this.controls = {};
       if (this._html.indexOf("data-me-retry") !== -1) this.controls["[data-me-retry]"] = mk("me");
       if (this._html.indexOf("data-life-retry") !== -1) this.controls["[data-life-retry]"] = mk("life");
+      // cch-w46-bl: the refused arm now carries data-life-verb too, so this
+      // stub stops treating the ATTRIBUTE as the control and mirrors the DOM —
+      // querySelector answers the element either way, and `disabled` is what
+      // paintLifecycleActions actually reads before it binds.
       if (this._html.indexOf('data-life-verb="decommission"') !== -1) {
-        this.controls['[data-life-verb="decommission"]'] = mk("decommission");
+        const ctl = mk("decommission");
+        ctl.disabled = this._html.indexOf('data-life-verb="decommission" data-life-name=') === -1;
+        this.controls['[data-life-verb="decommission"]'] = ctl;
       }
     },
     isConnected: true,
@@ -20722,7 +21700,7 @@ test("cch-w46-s3: a /v1/me that succeeds LATE repaints the rail — on the USAGE
     }));
     // The strand's starting point: the rail painted while the answer was out.
     assert.ok(before.length > 0, "the rail painted");
-    assert.ok(before.indexOf('data-life-verb="decommission"') === -1,
+    assert.ok(before.indexOf(LIVE_DECOMM) === -1,
       "an unknown authority offers no destroy verb");
     assert.match(before, /data-me-retry/, "…but it does offer the way out");
 
@@ -20731,7 +21709,7 @@ test("cch-w46-s3: a /v1/me that succeeds LATE repaints the rail — on the USAGE
     const after = dom.el.innerHTML;
     assert.notEqual(after, before,
       "B2 must not be byte-identical to B1 — on main it is (" + before.length + " bytes), which is the whole defect");
-    assert.match(after, /data-life-verb="decommission"/,
+    assert.ok(after.includes(LIVE_DECOMM),
       "the owner's rail comes alive without a reload");
     assert.ok(after.indexOf("data-me-retry") === -1, "…and the exit retires with the question it answered");
     assert.ok(after.indexOf("Checking capabilities") === -1);
@@ -20770,7 +21748,7 @@ test("cch-w46-s3: a /v1/me that FAILS late repaints too, and its Retry re-drives
     btn.click();
     await settle();
     assert.equal(owner.count("/v1/me"), 1, "one click, one fresh authority read");
-    assert.match(dom.el.innerHTML, /data-life-verb="decommission"/,
+    assert.ok(dom.el.innerHTML.includes(LIVE_DECOMM),
       "…and the answer it fetched paints, without a page reload");
   } finally {
     Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
@@ -20841,7 +21819,7 @@ test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusa
 test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (its first assertion in this harness)", async () => {
   // attachDomain had ZERO assertions across 15k lines. Its 422 arm sat ABOVE
   // the friendly() fallthrough, so `422 {error:"no_team"}` — what
-  // require_primary_team_admin answers a caller with no team — was reported as
+  // require_current_team_admin answers a caller with no team — was reported as
   // "Only <name>.barkpark.cloud domains are supported for now."
   const drive = async (status, payload) => {
     const saved = { fetch: sandbox.fetch, document: sandbox.document };
@@ -20965,6 +21943,55 @@ test("cch-w40-bl: the per-slug truth table — every arm relays what the plane m
   // before the POST, so the server never emits domain_required to this arm. It is
   // classified in the source comment above attachDomainFailureCopy and given NO
   // copy of its own — asserting a sentence for it would pin an unreachable path.
+});
+
+// ── cch-w54-bl: the re-attach refusal (409 already_attached) ────────────────
+//
+// POST /v1/barkparks/:id/domain now REFUSES a second, different host instead of
+// overwriting custom_host and stranding the previous host's A record on a live
+// box. The console's side of that ruling is TWO facts, both pinned below:
+//
+//   1. renderInstance offers "Attach domain" only when `!bp.custom_host`
+//      (`lc.live && !bp.custom_host`), so the console already agrees with a
+//      refusal — it never offers the click the plane now rejects. That gate is
+//      the C2 reconciliation: an OVERWRITE would have been the thing the UI
+//      disagreed with.
+//   2. the arm exists anyway. The gate is one stale render away from being
+//      wrong (a peer attaches a domain while this tab holds the old fleet
+//      read), and an unarmed slug does not degrade to silence — friendly()
+//      answers "Something went wrong", burning a refusal whose entire value is
+//      naming the host in the way.
+test("cch-w54-bl: already_attached relays the plane's sentence — the host in the way is never dropped", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  const detail =
+    "This instance already answers on host-a.barkpark.cloud. Attaching a different " +
+    "domain would leave host-a.barkpark.cloud's DNS record pointing at a live box " +
+    "with nothing tracking it, so the attach is refused. Re-attaching " +
+    "host-a.barkpark.cloud itself is still allowed.";
+
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud", detail }),
+    detail,
+    "the server's detail sentence is relayed verbatim — one screen, one dialect");
+
+  // detail absent (an older plane / a trimmed body): the host still reaches the
+  // person. Falling to friendly() here would drop the only actionable fact.
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.");
+
+  // Neither field present — still a NAMED refusal, never the generic.
+  const bare = f(409, { error: "already_attached" });
+  assert.equal(bare, "This instance already has a domain attached.");
+  assert.equal(bare.indexOf("Something went wrong"), -1);
+
+  // MUTATION: delete the already_attached branch from attachDomainFailureCopy
+  // and all three assertions above red — the first two on the relayed sentence,
+  // the third on friendly()'s generic.
+  assert.notEqual(f(409, { error: "already_attached", custom_host: "h.barkpark.cloud" }),
+    "That domain is already in use.",
+    "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
 });
 
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
@@ -21303,7 +22330,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   // DEVIATION FROM THE BRIEF, PINNED HERE SO IT IS VISIBLE RATHER THAN SILENT.
   // The slice brief predicted the five owner-gated billing writes would keep
   // ERRORS.forbidden verbatim, "because the owner gate's evidence is
-  // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
+  // billing-scoped or absent". It is neither: Auth.require_current_team_owner
   // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
   // "owner", scope: "team")` arm) ships evidence, so the fence DOES fire
   // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
@@ -21318,7 +22345,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   assert.ok(hooks.friendly(portal403, "Please try again in a moment.").indexOf("try again") === -1);
   // cch-w40-s1 — THE SHARPEST ATTACK ON D447'S INVERSION DIES HERE, and this is
   // the assertion that proves it. All three billing ROUTES (router.ex:5202/5243/
-  // 5278) gate first-statement on require_primary_team_owner, which sends
+  // 5278) gate first-statement on require_current_team_owner, which sends
   // `required: "owner"` — so forbiddenEvidenceCopy wins and the inverted default
   // is STRUCTURALLY UNREACHABLE from a billing screen. The arm above is the owner
   // arm and is untouched; the arm below is the BARE one, which is where the
@@ -21453,6 +22480,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     // that would break its relay.
     deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
     no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures, pinned with the same byte-exactness as every other registered slug.
+    // repo_not_in_installation shipped in #12128 and was never pinned here; it
+    // joins now, with the two this diff registers.
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.",
+    github_error: "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.",
+    invalid_name: "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -21491,6 +22525,10 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     // exists for it (the fence's shadow law), so listing it here would red the
     // registered-slug assertion by design.
     "deploy_not_started", "no_content_binding",
+    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
+    // cures join the ban sweep; repo_not_in_installation is a backfill (#12128
+    // registered it without adding it here).
+    "repo_not_in_installation", "github_error", "invalid_name",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -21671,36 +22709,11 @@ test("cch-w40-s1 (D419(d)): the delivery log stops selling a permanent 403 as 'm
     "no arity-0 call site survives in the shipped file");
 });
 
-test("cch-w40-s1: envVarWriteFailureCopy's 403 stops shadowing the evidence seam", () => {
-  // The arm returned BEFORE faultCopy/friendly, so the console's authored guess
-  // structurally outranked the server's own evidence. Two 403s reach it.
-  const f = hooks.envVarWriteFailureCopy;
-  // (a) router.ex:4355 / :4417 — the admin gate. The evidence is now rendered.
-  assert.equal(f(403, { error: "forbidden", required: "admin", scope: "team" }), ADMIN_SENTENCE);
-  // (b) router.ex:4394 — the CROSS-TENANT arm, left bare on purpose (D396(5)):
-  //     an admin of team A writing team B's barkpark_id. The old sentence
-  //     ("Only team owners and admins can change environment variables.") was
-  //     FLATLY FALSE there — the caller IS an admin — and unfixable by the reader,
-  //     because no role grant repairs a wrong-team id.
-  assert.equal(f(403, { error: "forbidden" }), FORBIDDEN_GENERIC);
-  assert.equal(f(403, { error: "forbidden" }).indexOf("owners and admins"), -1);
-  // A malformed/absent body must not fall out of the 403 class into input copy.
-  for (const junk of [{}, null, undefined]) {
-    assert.equal(f(403, junk), FORBIDDEN_GENERIC, "a 403 is never a validation answer: " + JSON.stringify(junk));
-    assert.equal(f(403, junk).indexOf("Check the values"), -1);
-  }
-  // THE OTHER ARMS ARE UNTOUCHED — this widened one branch, not the function.
-  assert.match(f(409, { error: "write_once" }), /write-once/);
-  assert.equal(f(422, { error: "key_required" }), "Enter a key.");
-  assert.match(f(500, { error: "server_error" }), /broke on our side/);
-  assert.match(f(422, {}), /Check the values/);
-});
-
 test("cch-w40-s1 THE INVERSION CANNOT REACH A BILLING SCREEN — proved, not asserted (D444/D447(c))", () => {
   // The sharpest attack on D447 is "you just deleted the billing refusal copy".
   // It dies on TWO independent structures, and this test pins both.
   //
-  // (1) All three billing ROUTES gate first-statement on require_primary_team_owner,
+  // (1) All three billing ROUTES gate first-statement on require_current_team_owner,
   //     which sends `required: "owner"` — so forbiddenEvidenceCopy WINS there and
   //     the inverted default is unreachable from a billing refusal.
   assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }, "Please try again in a moment."),
@@ -22200,8 +23213,14 @@ test("cch-w39-s1: D444 — the retry lives INSIDE the unknown arm's subtree, nev
   // Manage region holds the unknown block and NOTHING else — so the retry can
   // never be a sibling of the loaded content smoke pins at #billing-manage.
   const billing = appRegion(src, "  function renderBilling(", "\n  function showBillingSection(");
-  const unknownAt = billing.indexOf('meState() !== "loaded"');
-  const refusalAt = billing.indexOf("if (!billingIsOwner())");
+  // cch-w49-s6 — RE-ANCHORED ON THE BAND. This pin used to read
+  // `meState() !== "loaded"` and `if (!billingIsOwner())`; both literals are
+  // gone, because a moved team pin leaves meState() at "loaded" and the boolean
+  // then routed a real owner to the refusal. The ORDERING claim is unchanged
+  // and is all this pin ever asserted — the fence itself is now guarded by the
+  // DRIVEN tests at the tail of this file, not by these substrings.
+  const unknownAt = billing.indexOf('band !== "grant" && band !== "refuse"');
+  const refusalAt = billing.indexOf('band === "refuse"');
   assert.ok(unknownAt > 0 && refusalAt > unknownAt,
     "the unknown arm must be decided BEFORE the refusal — that ordering IS the fix");
   const unknownFn = appRegion(src, "  function renderBillingMeUnknown(", "\n  }\n");
@@ -24728,8 +25747,9 @@ test("cch-w72-bl: roleChangeFailureCopy — an unread typed slug reads the hones
     "You're the last owner — promote another member to owner first.");
 });
 
-// The four toast handlers (session-revoke paint, confirmRevokeToken,
-// confirmRevokeInvite, confirmDeleteEnvVar) are click-driven modal callbacks that
+// The toast handlers (session-revoke paint, confirmRevokeToken,
+// confirmRevokeInvite — confirmDeleteEnvVar was the fourth until the team env-var
+// feature was deleted, cch-w53-bl) are click-driven modal callbacks that
 // emit friendly(r.data, "<honest>") inline. Each is proven the same way: locate
 // the exact call site by its toast title, PARSE its two argument texts (callArgs
 // throws if the site is gone or reformatted), then DRIVE the real exported
@@ -24762,10 +25782,6 @@ test("cch-w72-bl: confirmRevokeToken — friendly() carries a truthy honest fall
 
 test("cch-w72-bl: confirmRevokeInvite — friendly() carries a truthy honest fallback", () => {
   cchw72ActionSite('title: "Couldn\'t revoke invitation", body: friendly');
-});
-
-test("cch-w72-bl: confirmDeleteEnvVar — friendly() carries a truthy honest fallback", () => {
-  cchw72ActionSite('title: "Couldn\'t delete variable", body: friendly');
 });
 
 // ── the negative control: the humanizer tail is UNTOUCHED ──
@@ -24916,8 +25932,19 @@ test("cch-w74: the password 401 accusation keys on the invalid_current_password 
     "the accusation must be gated on r.data.error === \"invalid_current_password\"");
   // A slug-less 401 renders non-accusatory session copy — it states only what is
   // proven (the session is gone), never the password accusation.
-  assert.match(body, /: r\.status === 401\s*\n\s*\? "Your session has expired — sign in again\."/,
-    "a slug-less 401 must render honest session copy, never the password accusation");
+  //
+  // cch-w77-bl (console-3-w26) — THE SENTENCE MOVED TO ITS ONE OWNER, so this
+  // arm is now pinned BEHAVIOURALLY as well as textually. It used to match the
+  // literal inline here; that literal was the only copy in the file, which is
+  // why three sibling 2FA writers had nothing to read and rendered neutral
+  // operation-failed copy for the same 401. The protection is unchanged in
+  // strength: the call site is pinned by name AND the seam is asserted to answer
+  // exactly that sentence for a slug-less 401, so reverting either half reds.
+  assert.match(body, /: accountWriteFailureCopy\(r\.status, r\.data, "Couldn't update password\."\)/,
+    "a slug-less 401 must reach the one owner of the session sentence");
+  assert.equal(hooks.accountWriteFailureCopy(401, { error: "unauthorized" }, "Couldn't update password."),
+    "Your session has expired — sign in again.",
+    "…and that owner must still answer the honest session sentence, never the password accusation");
   // The accusation string appears EXACTLY once — no un-gated second copy leaks
   // back the conflation this slice deletes.
   assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
@@ -25429,4 +26456,2218 @@ test("bpBase declares every key barkpark_json serializes", async () => {
     ". A key no fixture declares is a key no fixture can override, so no instrument here can ever drive it. " +
     "Add each to bpBase with the SERVER's default (the Ecto schema's for a column-backed key, null for the " +
     "serializer's UNMEASURED contract) — never a value the control plane would not send.");
+});
+
+// ── cch-w50-s5 · THE TRIAL REMINDER'S NUMERALS, AND WHO ACTUALLY GETS ONE ────
+//
+// Two defects, one sentence. The billing screen rendered "We'll remind you 3
+// days and 1 day before the trial ends." and:
+//
+//   1. NOTHING PINNED THE NUMERALS. `grep "3 days and 1 day" __app.test.mjs`
+//      returned rc=1, zero hits — the sentence could be edited to any pair of
+//      numbers with this whole suite green, and the server's real schedule
+//      (TrialExpiryWorker's @three_days / @one_day) could move without it. The
+//      schedule is now DATA (`trialNoticeDays`), composed into the sentence,
+//      and mirrored against the server accessor in billing_client_mirror_test.exs.
+//
+//   2. IT PROMISED MAIL A MUTED TEAM WILL NEVER GET. `alerts_enabled` reaches
+//      this file through exactly one door — GET /v1/notifications/settings,
+//      whose sole success path is renderNotifications, which is what populates
+//      notifCache. renderBilling fetches the SUBSCRIPTION and nothing else. So
+//      a person landing directly on /billing has notifCache === null and this
+//      console has never asked. The naive guard —
+//      `notifCache && notifCache.alerts_enabled === false` — is FALSE in that
+//      state, i.e. it KEEPS the promise for a muted team, whose worker
+//      (TrialExpiryWorker.receivable?/1) will send nothing. UNKNOWN is its own
+//      state and it softens.
+//
+// MUTATION-PROVED (run before commit, red output in the PR body):
+//   * `TRIAL_NOTICE_DAYS = [5, 1]` reds the mirror's here-declared list on BOTH
+//     sides and reds "the schedule is DATA" below.
+//   * deleting the numerals from the rendered sentence reds the mirror's
+//     "THE NUMERALS REACH THE SENTENCE" arm against @pinned_notice_days.
+//   * `trialAlertsState` weakened to the naive `notifCache && ... === false`
+//     shape (i.e. unknown → "on") reds the fail-closed test below.
+
+test("cch-w50-s5: the reminder schedule is DATA, and the sentence is composed from it", () => {
+  // Compared as JSON: the array crosses a node:vm realm boundary, so its
+  // prototype is not this realm's Array and deepEqual reads that as a mismatch.
+  assert.equal(JSON.stringify(Array.from(hooks.trialNoticeDays)), "[3,1]",
+    "the console's schedule — mirrored against TrialExpiryWorker.notice_thresholds_days/0");
+
+  // The phrase is BUILT, so a schedule change moves the sentence with it and
+  // the singular can never render as "1 days".
+  assert.equal(hooks.trialNoticePhrase([3, 1]), "3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([1]), "1 day");
+  assert.equal(hooks.trialNoticePhrase([7]), "7 days");
+  assert.equal(hooks.trialNoticePhrase([7, 3, 1]), "7 days, 3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([]), "");
+
+  // NON-VACUITY: the composition really is what reaches the card. A hypothetical
+  // schedule renders its own numerals, not the shipped ones.
+  const odd = hooks.trialReminderCopy("on", [9, 2]);
+  assert.ok(odd.includes("9 days and 2 days"), "the copy renders the schedule it is handed: " + odd);
+  assert.ok(!odd.includes("3 days"), "and not a numeral typed into the sentence");
+});
+
+test("cch-w50-s5: the mute read FAILS CLOSED — unknown softens, it does not promise", () => {
+  // The three-valued read. Only a settings payload that positively says
+  // alerts_enabled: true earns the flat promise.
+  assert.equal(hooks.trialAlertsState(null), "unknown",
+    "notifCache is null on a direct /billing landing — renderBilling never fetches settings");
+  assert.equal(hooks.trialAlertsState(undefined), "unknown");
+  assert.equal(hooks.trialAlertsState({}), "unknown", "a settings envelope without the key is not consent");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: null }), "unknown");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: "true" }), "unknown", "a string is not the boolean");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: true }), "on");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: false }), "muted");
+
+  // THE DEFECT, stated as an assertion: the unknown arm must not make the
+  // promise, because it is false for exactly the team that cannot see it.
+  const unknown = hooks.trialReminderCopy("unknown", hooks.trialNoticeDays);
+  assert.ok(!unknown.includes("We'll remind you 3 days"),
+    "UNKNOWN made the flat promise — this is the naive check: " + unknown);
+  assert.ok(unknown.includes("If your team's alerts are on"),
+    "UNKNOWN states its own condition rather than asserting or denying delivery");
+  assert.ok(unknown.includes("3 days and 1 day"),
+    "and still names the schedule, so the person knows what they are checking for");
+
+  const muted = hooks.trialReminderCopy("muted", hooks.trialNoticeDays);
+  assert.ok(!muted.includes("We'll remind you"), "a muted team is promised nothing");
+  assert.ok(muted.includes("alerts muted"), "the mute is named, so it can be acted on");
+  assert.ok(muted.includes("Notifications"), "and the screen that undoes it is named");
+
+  const on = hooks.trialReminderCopy("on", hooks.trialNoticeDays);
+  assert.equal(on, "We'll remind you 3 days and 1 day before the trial ends.",
+    "the flat promise survives for the ONE state that earns it — without this the guard above passes for the wrong reason");
+});
+
+test("cch-w50-s5: the trial CARD carries the mute state through to the rendered sentence", () => {
+  const running = { plan: "trial", status: "active", trial_days_remaining: 9 };
+
+  const dflt = hooks.trialCardHtml(running);
+  const on = hooks.trialCardHtml(running, "on");
+  const muted = hooks.trialCardHtml(running, "muted");
+
+  // The default (no second argument) is the UNKNOWN arm in this sandbox, where
+  // notifCache is null — the same state a direct /billing landing produces.
+  assert.ok(dflt.includes("If your team's alerts are on"),
+    "the default card softens: " + dflt);
+  assert.ok(on.includes("We'll remind you 3 days and 1 day before the trial ends."));
+  assert.ok(muted.includes("alerts muted"));
+  assert.equal(new Set([dflt, on, muted]).size, 3,
+    "three mute states must render three cards — otherwise the state is not reaching the copy");
+
+  // The cch-w50 clamp is untouched: an ENDED trial gets no reminder line in any
+  // mute state, because there is no future notice left to qualify.
+  for (const state of ["unknown", "on", "muted"]) {
+    const ended = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 0 }, state);
+    assert.ok(!/remind you|alerts muted|alerts are on/.test(ended),
+      state + ": the ended card promises and qualifies nothing — the reminder line is gone outright");
+  }
+});
+
+// ── cch-w45 · THE ROLE DIALOG'S WRITE SITE IS RANK-RELATIVE ─────────────────
+//
+// Wave 44 made the members ROW rank-relative (canChangeMemberRole, mirroring
+// Accounts.update_member_role_as/4 — can_grant? AND (self? OR outranks?), a
+// strict `>` with NO owner escape hatch) and left the WRITE SITE actor-only:
+// openRoleModal opened on `assignableRoles(ctx.role).length`, the ACTOR-TIER
+// question, arity 1, in front of a RELATION. The only thing keeping an owner
+// off a PEER OWNER's row was that memberRowHtml declined to draw the button —
+// a rendering accident, not a gate, and one that the paint outlives:
+// wireMembersPanel binds per-button over a CAPTURED ctx and loadMembers repaints
+// only on view entry and after member writes, never on an authority refresh.
+//
+// AND IT WAS UNDRIVABLE. openRoleModal was reachable from nothing but a DOM
+// click; it is on the __bpTestHook seam now, so this gate has an exit code.
+
+function roleModalDom() {
+  const mk = (id) => ({
+    id, innerHTML: "", hidden: true, textContent: "", value: "", disabled: false,
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = {
+    "#modal-root": mk("modal-root"),
+    "#modal-body": mk("modal-body"),
+    ".modal-x": mk("modal-x"),
+    "#role-submit": mk("role-submit"),
+    "#role-select": mk("role-select"),
+  };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  return {
+    nodes,
+    // Did the dialog MOUNT? openModal writes #modal-body.innerHTML, so an empty
+    // body after the call is a refusal — the same signal the operator sees.
+    opened: () => nodes["#modal-body"].innerHTML !== "",
+    restore() {
+      sandbox.document.querySelector = prevQS;
+      sandbox.document.getElementById = prevGE;
+    },
+  };
+}
+
+// The server matrix, verbatim from update_member_role_as/4: an owner may
+// re-role an admin and a member and THEMSELF, and may NOT re-role a PEER OWNER
+// (strict `>`, no hatch — remove_member_as/3 has one, this verb does not).
+const OWNER_CTX = { teamId: "t1", role: "owner", userId: "u-me" };
+
+test("cch-w45: openRoleModal REFUSES the owner-acting-on-peer-owner cell", () => {
+  hooks.clearMe(); // no live /v1/me → membersContext() is null → the captured ctx stands
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-peer", "peer@x.io", "owner");
+    assert.equal(dom.opened(), false,
+      "an owner may not change a PEER OWNER's role — update_member_role_as/4 " +
+      "answers {:error, :forbidden} (`Accounts.update_member_role_as/4`, strict `>`), so the dialog " +
+      "must not open. It opened, which means the gate is still the actor-only " +
+      "assignableRoles(ctx.role).length check.");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal OPENS on the owner-acting-on-admin cell", () => {
+  hooks.clearMe();
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "owner outranks admin — the server accepts this write");
+    assert.match(dom.nodes["#modal-body"].innerHTML, /Change role/);
+    assert.match(dom.nodes["#modal-body"].innerHTML, /admin@x\.io/);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal agrees with canChangeMemberRole on every cell", () => {
+  hooks.clearMe();
+  const roles = ["owner", "admin", "member"];
+  for (const actorRole of roles) {
+    for (const targetRole of roles) {
+      for (const isSelf of [false, true]) {
+        const ctx = { teamId: "t1", role: actorRole, userId: "u-me" };
+        const targetId = isSelf ? "u-me" : "u-other";
+        // On the SELF row the server compares against the actor's resolved
+        // role, which is what memberRowHtml stamps into data-role.
+        const domRole = isSelf ? actorRole : targetRole;
+        const dom = roleModalDom();
+        try {
+          hooks.openRoleModal(ctx, targetId, "x@x.io", domRole);
+          const want = hooks.canChangeMemberRole(actorRole, domRole, isSelf);
+          assert.equal(dom.opened(), want,
+            `${actorRole} → ${domRole}${isSelf ? " (self)" : ""}: dialog ` +
+            `${dom.opened() ? "opened" : "refused"}, predicate says ${want}`);
+        } finally {
+          dom.restore();
+        }
+      }
+    }
+  }
+  // Non-vacuity: the matrix above must contain BOTH verdicts, or it proves nothing.
+  const verdicts = new Set();
+  for (const a of roles) for (const t of roles) verdicts.add(hooks.canChangeMemberRole(a, t, false));
+  assert.equal(verdicts.size, 2, "the matrix must contain a grant AND a refusal");
+});
+
+test("cch-w45: the STALE-CTX path — a demotion mid-panel refuses at OPEN time", async () => {
+  // wireMembersPanel captured `ctx` when the panel painted; loadMembers is
+  // called on view entry and after member WRITES, never on a /v1/me refresh. So
+  // the captured ctx below still says "owner" while the server now says member.
+  // roleModalAuthority re-derives from membersContext() at open time, and a
+  // DETERMINATE live band wins over the paint.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const dom = roleModalDom();
+  sandbox.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve({
+      user: { id: "u-me", email: "me@x.io" },
+      team: { id: "t1", name: "T" },
+      // The demotion: the server's resolved authority is `member` now.
+      team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+    }),
+  });
+  try {
+    hooks.clearMe();
+    await hooks.loadMe();
+    assert.equal(hooks.teamAuthorityState(), "refuse", "the live band must be determinate");
+    assert.equal(hooks.membersContext().role, "member", "the live read must carry the demotion");
+    // The captured ctx is the stale one — it still claims owner.
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), false,
+      "the demoted actor's stale buttons must not open the dialog — the live " +
+      "team_authority says member, and a member can assign nothing");
+  } finally {
+    dom.restore();
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w45: an INDETERMINATE live band never becomes a false refusal", () => {
+  // loading / failed / stale / teamless → membersContext() is null, i.e. no
+  // NEWER fact. There is nothing to prefer over the paint, so the captured ctx
+  // stands and the server is the backstop. Failing closed here would withhold a
+  // control the server honours — this epic's own class running backwards.
+  hooks.clearMe(); // "loading"
+  assert.equal(hooks.membersContext(), null);
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "an unknown band is not a refusal");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: roleModalAuthority prefers the live read only for the SAME team", () => {
+  const live = { teamId: "t2", role: "member", userId: "u-me" };
+  const a = hooks.roleModalAuthority(OWNER_CTX, live, "u-admin", "admin");
+  assert.equal(a.actorRole, "owner", "a live read for another team says nothing about this one");
+  const same = hooks.roleModalAuthority(OWNER_CTX, { ...live, teamId: "t1" }, "u-admin", "admin");
+  assert.equal(same.actorRole, "member", "same team → the live read wins");
+  // Self re-derives the TARGET off the actor, never the DOM's data-role.
+  const self = hooks.roleModalAuthority(OWNER_CTX, null, "u-me", "member");
+  // (field-wise: the object is minted inside the vm realm, so deepEqual's
+  // prototype check would red on a correct value.)
+  assert.equal(self.actorRole, "owner");
+  assert.equal(self.targetRole, "owner", "self takes the ACTOR's role, not the DOM's data-role");
+  assert.equal(self.isSelf, true);
+});
+
+test("cch-w45 (D439): assignableRoles' return type is unchanged — still an array", () => {
+  // D439 is binding: the rank-relativity lives in the SIBLING
+  // (canChangeMemberRole), never inside assignableRoles, which stays the honest
+  // actor-tier gate for its other three call sites.
+  for (const role of ["owner", "admin", "member", "nonsense", undefined]) {
+    const out = hooks.assignableRoles(role);
+    assert.ok(Array.isArray(out), `assignableRoles(${role}) must return an array`);
+    assert.ok(out.every((r) => typeof r === "string"));
+  }
+  // (spread across the realm boundary — the vm's Array.prototype is not ours.)
+  assert.deepEqual([...hooks.assignableRoles("owner")], ["owner", "admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("admin")], ["admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("member")], []);
+  assert.equal(hooks.assignableRoles.length, 1, "arity 1 — the ACTOR axis, unchanged");
+});
+
+// ── cch-w31-bl: THE ROLE-VOCABULARY CENSUS ──────────────────────────────────
+//
+// THE LAW: A CONSOLE THAT DECIDES WHAT A PERSON MAY DO FROM A HAND-COPIED ROLE
+// SET IS ONE SERVER-SIDE POLICY CHANGE AWAY FROM OFFERING AN ACTION THE API
+// WILL REFUSE — OR HIDING ONE IT WOULD ALLOW — AND NEITHER FAILURE HAS A GUARD.
+//
+// Wave 31 slice 3 built the role-agreement census on the ELIXIR side
+// (test/barkpark_cloud/accounts/role_agreement_census_test.exs). The JS half is
+// outside anything ExUnit can see, and it was left unpaid: app.js restated the
+// owner|admin set at four independent sites, none of which was linked to the
+// server table it was copied from.
+//
+// TWO INDEPENDENT SOURCES, WHICH IS THE WHOLE POINT. The LEFT side is the
+// SHIPPED console — the vocabulary app.js actually exports at runtime, read out
+// of the evaluated IIFE, not re-typed here (a re-typed literal pins itself and
+// catches nothing). The RIGHT side is the SERVER's own text: Authz's
+// `@admin_roles` attribute and `team_owner?/2`'s literal, parsed out of
+// cloud/lib/barkpark_cloud/accounts/authz.ex. Neither side can be edited into
+// agreement by touching the other, so adding a role to one ladder alone reds.
+//
+// IT REFUSES RATHER THAN PASSING. If the attribute or the clause cannot be
+// found, ARM A fails with a REFUSED message instead of deriving an empty set
+// and greening — the worst failure a census can have is going quiet at exactly
+// the moment the file it reads was restructured.
+//
+// ARM B IS WHY A FIFTH COPY CANNOT COME BACK. The vocabulary is tested by SET
+// MEMBERSHIP (actorRoleIn), never by `===` against a literal, so the ban can be
+// absolute: ANY `=== "owner"` / `=== "admin"` / `=== "member"` comparison
+// against an ACTOR role anywhere in app.js is a violation, reported by the name
+// of the function that holds it. That is a rule, not an allowlist — an
+// allowlist's eighth entry gets waved through by the seven above it.
+//
+// WHAT ARM B DELIBERATELY DOES NOT COVER, and why it is not a hole: the MEMBERS
+// band compares a TARGET row's role (`r.role`, `ctx.role`, `actorRole`,
+// `targetRole`) against the server's ranked ladder in assignableRoles /
+// memberRoleRank / canChangeMemberRole. That is a different axis with its own
+// server table (TeamMembership `@ranks`) and its own cross-layer census on the
+// Elixir side; folding it in here would make one rule answer two questions.
+
+const AUTHZ_EX_URL = new URL("../../lib/barkpark_cloud/accounts/authz.ex", import.meta.url);
+
+// Blank JS line- and block-comments so a comparison merely QUOTED in a comment
+// is not censused as code. String BODIES are kept on purpose: the role literals
+// this census hunts live inside them, and blanking strings would blind the arm
+// to the exact thing it exists to find. Length is preserved, so every index
+// into the blanked text is an index into the original.
+function w31BlankComments(src) {
+  const out = src.split("");
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === "/" && n === "/") {
+      while (i < src.length && src[i] !== "\n") { out[i] = " "; i++; }
+    } else if (c === "/" && n === "*") {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) if (src[i] !== "\n") out[i] = " ";
+    } else if (c === '"' || c === "'") {
+      i++;
+      while (i < src.length && src[i] !== c) { if (src[i] === "\\") i++; i++; }
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+// The last `function NAME(` opened at or above `at`. app.js is one IIFE of
+// indented top-level functions, so this attributes a hit to the function a
+// reader would have to open to fix it — a name, never a line citation.
+function w31EnclosingFn(src, at) {
+  const re = /\n\s*function\s+([A-Za-z0-9_$]+)\s*\(/g;
+  let name = "(module top level)";
+  let m;
+  while ((m = re.exec(src))) {
+    if (m.index >= at) break;
+    name = m[1];
+  }
+  return name;
+}
+
+// An ACTOR-role receiver is one of exactly three spellings, and app.js has no
+// fourth way to reach the signed-in person's role: `meCache.role` (the cache),
+// `me.role` (an envelope passed in), or the bare parameter `role` (the shape
+// billingCanManage used). The lookbehinds are what keep a ROSTER row's
+// `r.role` / `ctx.role` — a different axis — out of the census.
+const W31_ACTOR_ROLE_CMP =
+  /(meCache\.role|(?<![.\w$])me\.role|(?<![.\w$])role)\s*(===|!==)\s*"(owner|admin|member)"/g;
+
+function w31ActorRoleHits(src) {
+  const code = w31BlankComments(src);
+  const hits = [];
+  W31_ACTOR_ROLE_CMP.lastIndex = 0;
+  let m;
+  while ((m = W31_ACTOR_ROLE_CMP.exec(code))) {
+    hits.push({ fn: w31EnclosingFn(code, m.index), text: m[0] });
+  }
+  return hits;
+}
+
+function w31AuthzLadders() {
+  const src = fs.readFileSync(AUTHZ_EX_URL, "utf8");
+  const admin = /^\s*@admin_roles\s+~w\(([^)]*)\)/m.exec(src);
+  assert.ok(admin,
+    "REFUSED: `@admin_roles ~w(...)` was not found in accounts/authz.ex. A census that cannot read " +
+    "its server side must refuse, never derive an empty set and green.");
+  const owner = /def\s+team_owner\?\([^)]*\),\s*do:\s*role\([^)]*\)\s*==\s*"([a-z_]+)"/.exec(src);
+  assert.ok(owner,
+    "REFUSED: `team_owner?/2`'s role literal was not found in accounts/authz.ex.");
+  return { admin: admin[1].trim().split(/\s+/), owner: [owner[1]] };
+}
+
+test("cch-w31-bl ARM A: the console's role vocabulary IS the server's — and neither side was typed here", () => {
+  const server = w31AuthzLadders();
+  assert.ok(Array.isArray(hooks.consoleAdminRoles) && hooks.consoleAdminRoles.length > 0,
+    "the shipped console must expose its admin role set as DATA, or there is no left side to census");
+  assert.deepEqual([...hooks.consoleAdminRoles].sort(), [...server.admin].sort(),
+    "the console's admin role set must equal Authz's @admin_roles — adding a role to one ladder " +
+    "alone is exactly the drift this census exists to red on");
+  assert.deepEqual([...hooks.consoleOwnerRoles].sort(), [...server.owner].sort(),
+    "the console's owner-only set must equal team_owner?/2's own literal");
+
+  // The predicate that consumes them is set membership, and it fails closed on
+  // a role we do not have (nil on the wire for a teamless account).
+  assert.equal(hooks.actorRoleIn("owner", hooks.consoleAdminRoles), true);
+  assert.equal(hooks.actorRoleIn("member", hooks.consoleAdminRoles), false);
+  assert.equal(hooks.actorRoleIn(null, hooks.consoleAdminRoles), false, "an unknown role is not a role of admin");
+  assert.equal(hooks.actorRoleIn(undefined, hooks.consoleOwnerRoles), false);
+
+  // …and the four shipped predicates still answer what the ladders say, so the
+  // agreement above is not agreement between two dead constants.
+  assert.equal(hooks.billingCanManage("owner"), true);
+  assert.equal(hooks.billingCanManage("admin"), false, "billing WRITES are owner-only — the admin limb must stay out");
+  assert.equal(hooks.billingCanManage("member"), false);
+});
+
+test("cch-w31-bl ARM B: no hand-rolled actor-role literal survives anywhere in app.js", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const hits = w31ActorRoleHits(src);
+  assert.deepEqual(hits, [],
+    "every one of these re-declares the server's role table inside a function that could have asked " +
+    "the ONE vocabulary instead: " + JSON.stringify(hits));
+});
+
+test("cch-w31-bl ARM B CAN LOSE: a fifth hand-rolled copy is named by the function that holds it", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // THE MUTATION, applied to a COPY of the real shipped source — never to the
+  // tree. This is the exact fifth copy the row describes: a fresh predicate
+  // that re-types the owner|admin set instead of asking the vocabulary.
+  const anchor = "  function actorRoleIn(role, roles) {";
+  assert.ok(src.includes(anchor), "the mutation anchor must exist EXACTLY ONCE, or this proof proves nothing");
+  assert.equal(src.split(anchor).length - 1, 1, "…exactly once");
+  const mutant = src.replace(anchor,
+    "  function w31MutantCanManage() {\n" +
+    "    return !!(meCache && (meCache.role === \"owner\" || meCache.role === \"admin\"));\n" +
+    "  }\n" + anchor);
+  assert.notEqual(mutant, src, "the mutation must have APPLIED — an unapplied mutation is not a catch");
+
+  const hits = w31ActorRoleHits(mutant);
+  assert.equal(hits.length, 2, "both limbs of the copy are censused, not just the first");
+  for (const h of hits) {
+    assert.equal(h.fn, "w31MutantCanManage",
+      "the census must name the FUNCTION a reader has to open, not a location that drifts");
+  }
+
+  // …and the same scanner is not merely allergic to that one spelling: the
+  // billingCanManage shape (a bare `role` parameter) and a passed envelope
+  // (`me.role`) are censused too, while a ROSTER row's `r.role` is not.
+  const control = [
+    'function fifthCopy(role) { return role === "owner"; }',
+    'function sixthCopy(me) { return me.role !== "member"; }',
+    'function rosterRow(r) { return r.role === "owner"; }',
+    'function targetRow(ctx) { return ctx.role === "owner"; }',
+  ].join("\n");
+  const controlHits = w31ActorRoleHits("\n" + control);
+  assert.deepEqual(controlHits.map((h) => h.fn), ["fifthCopy", "sixthCopy"],
+    "the three actor spellings are censused; the roster axis (r.role / ctx.role) is deliberately not");
+
+  // A comparison merely QUOTED in a comment is prose, not code.
+  assert.deepEqual(w31ActorRoleHits('\nfunction commentOnly() {\n  // meCache.role === "owner"\n  return 1;\n}\n'), []);
+});
+
+// ── cch-w47-s1-fu: THE LAUNCH BAND'S STALE ARM ──────────────────────────────
+
+test("cch-w47-s1-fu: launchAuthority carries a STALE band — a moved pin is not a role answer", async () => {
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "control: fetched under t1, answered for t1");
+
+    // THE CROSS-TAB RACE, verbatim (the same one teamAuthorityState models):
+    // another tab writes the pin and reloads ITSELF. Nothing here listens for
+    // `storage` and loadMe() is not called on a route change, so this tab
+    // otherwise keeps selling t1's launch authority for its whole page life
+    // while api() sends t2 on every request.
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.launchAuthority(), "stale",
+      "MUTATION TARGET: collapse the pin test back into the role read and this line is the red");
+    assert.notEqual(hooks.launchAuthority(), "grant",
+      "above all it is not a GRANT for a team this cached answer never described");
+
+    store.setItem("bp.active-team", "t1");
+    assert.equal(hooks.launchAuthority(), "grant", "back under its own pin, the cached answer is current again");
+
+    // BOTH DIRECTIONS. The row names the mirror case explicitly: a member on A
+    // pinned to B was still REFUSED. A stale refusal is not a refusal either.
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, W47_MEMBER);
+    assert.equal(hooks.launchAuthority(), "refuse", "control: a real member on their own pin is refused");
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.launchAuthority(), "stale", "…and the same answer under a moved pin is not that refusal");
+
+    // The SIBLING is untouched (D439): instanceAdminAuthority still answers its
+    // own three values, and never grew a fifth.
+    assert.ok(["unknown", "grant", "refuse"].includes(hooks.instanceAdminAuthority()),
+      "the shipped predicate must NOT have been widened along with the band");
+  });
+});
+
+test("cch-w47-s1-fu: absorbMe RE-TAKES the pin, so a switch that reloads is never instantly stale", async () => {
+  await withTeamPin(async (store) => {
+    // Never switched: null at absorb, null now. The cold case must NOT read
+    // stale — a band that cries wolf on every fresh boot is unactionable.
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "a console that never switched teams is never stale");
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t9");
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "a re-absorb under the new pin is current, not instantly stale");
+  });
+});
+
+test("cch-w47-s1-fu: the FORM seam fails CLOSED on stale with the shipped exit — and the offer sites do not move", async () => {
+  const savedDoc = sandbox.document;
+  const dom = launchDom();
+  try {
+    sandbox.document = dom.document;
+    await withTeamPin(async (store) => {
+      store.setItem("bp.active-team", "t1");
+      await driveMe(200, W47_OWNER);
+      const granted = launchContainer();
+      hooks.launchFlow(granted.el, { runway: true });
+      assert.match(granted.el.innerHTML, /class="launch-form"/, "control: under its own pin the owner gets the form");
+
+      store.setItem("bp.active-team", "t2");
+      const stale = launchContainer();
+      hooks.launchFlow(stale.el, { runway: true });
+      const html = stale.el.innerHTML;
+      assert.ok(html.indexOf("launch-form") === -1, "fail CLOSED: the whole form is withheld under a moved pin");
+      assert.ok(html.indexOf('type="submit"') === -1, "…no submit");
+      assert.ok(html.indexOf("seg-btn") === -1, "…and no provider tabs still selling it");
+      assert.ok(html.includes(hooks.meRetryHtml()), "the SHIPPED exit, verbatim — not a second retry idiom");
+      assert.equal(html.split("data-me-retry").length - 1, 1, "exactly ONE of it");
+      // NOT the determinate refusal card: "ask a team admin to give you that
+      // role" is a claim about an answer we do not hold for this team.
+      assert.ok(html.indexOf("admin role on this team") === -1,
+        "a moved pin must not be dressed up as the server's own refusal");
+
+      // THE FOUR OFFER SITES DO NOT MOVE. They branch on `=== "refuse"`, so a
+      // stale answer withholds the FORM and leaves every control standing.
+      dom.nodes["#overview-launch"].hidden = false;
+      dom.nodes["#fleet-launch"].hidden = false;
+      hooks.refreshLaunchOffers();
+      assert.equal(dom.nodes["#overview-launch"].hidden, false, "a stale answer must not delete a control");
+      assert.equal(dom.nodes["#fleet-launch"].hidden, false);
+
+      // POSITIVE CONTROL — without it the two lines above are a dead call. A
+      // DETERMINATE refusal really does hide both buttons here.
+      hooks.clearMe();
+      store.setItem("bp.active-team", "t1");
+      await driveMe(200, W47_MEMBER);
+      hooks.refreshLaunchOffers();
+      assert.equal(dom.nodes["#overview-launch"].hidden, true,
+        "positive control: a real refusal hides them, so the survival above is a fact");
+      assert.equal(dom.nodes["#fleet-launch"].hidden, true);
+    });
+  } finally {
+    sandbox.document = savedDoc;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1-fu: every launchAuthority() call site is either the FORM seam or a refuse-only offer test", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const code = w31BlankComments(src);
+  // The three seams that may read the whole band: the mount that withholds the
+  // form, its repaint, and the /new step's own offer builder.
+  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch"]);
+  const re = /launchAuthority\(\)/g;
+  const sites = [];
+  let m;
+  while ((m = re.exec(code))) {
+    // The DECLARATION is not a call site: `function launchAuthority()` matches
+    // the same text and would name itself as an offer that moves.
+    if (/function\s+$/.test(code.slice(Math.max(0, m.index - 12), m.index))) continue;
+    sites.push({
+      fn: w31EnclosingFn(code, m.index),
+      refuseOnly: /^launchAuthority\(\)\s*(===|!==)\s*"refuse"/.test(code.slice(m.index, m.index + 44)),
+    });
+  }
+  assert.ok(sites.length >= 6, "sanity: the band has call sites at all (found " + sites.length + ")");
+  const moved = sites.filter((s) => !s.refuseOnly && !SEAMS.has(s.fn));
+  assert.deepEqual(moved, [],
+    "an offer site that reads the band as anything but `=== \"refuse\"` would CHANGE on 'stale' — " +
+    "and a stale answer must never delete a control: " + JSON.stringify(moved));
+});
+
+// ── cch-w43-bl: THE INVITE LANDING READS EVERY MEMBERSHIP ───────────────────
+
+const W43_PREVIEW_B = { team: { id: "tb", name: "Northwind", slug: "northwind" }, email: "ada@acme.com", role: "admin" };
+// Pinned to team A, but the envelope carries the membership in team B too —
+// exactly the account POST /v1/invitations/accept mints, and exactly the shape
+// /v1/me added `teams` for.
+const W43_ME_PINNED_A = {
+  role: "owner",
+  team: { id: "ta", name: "Acme Inc", slug: "acme" },
+  teams: [
+    { id: "ta", name: "Acme Inc", slug: "acme", role: "owner" },
+    { id: "tb", name: "Northwind", slug: "northwind", role: "member" },
+  ],
+  user: { id: "u1", email: "ada@acme.com" },
+};
+const W43_ME_ONE_TEAM = {
+  role: "owner",
+  team: { id: "ta", name: "Acme Inc", slug: "acme" },
+  teams: [{ id: "ta", name: "Acme Inc", slug: "acme", role: "owner" }],
+  user: { id: "u1", email: "ada@acme.com" },
+};
+
+test("cch-w43-bl: already_member is decided against EVERY membership, not the one pinned team", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+
+  // THE ASSERTION THAT IS RED ON MAIN. Pinned to acme, invited to northwind,
+  // already a member of northwind — main compares `preview.team.slug ===
+  // me.team.slug`, sees acme !== northwind, and paints the JOIN screen for a
+  // team this person is already in.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, W43_ME_PINNED_A, now, "loaded"), "already_member",
+    "MUTATION TARGET: revert to the single pinned-team comparison and THIS line is the red");
+
+  // The pinned team is still a membership: the shipped case must not regress.
+  assert.equal(
+    hooks.inviteLandingState(200, { team: { slug: "acme", name: "Acme Inc" } }, W43_ME_PINNED_A, now, "loaded"),
+    "already_member", "the PINNED team is a membership too");
+
+  // …and a genuine stranger still gets the Join screen, or the fix is
+  // always-already-a-member, which would ship green on the line above.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, W43_ME_ONE_TEAM, now, "loaded"), "confirm",
+    "positive control: an account that is NOT in the invited team is still offered the join");
+
+  // The membership set itself, pinned directly rather than only through the
+  // state machine that consumes it.
+  assert.deepEqual([...hooks.inviteMembershipSlugs(W43_ME_PINNED_A)].sort(), ["acme", "northwind"]);
+  assert.deepEqual([...hooks.inviteMembershipSlugs(null)], [], "no envelope is no memberships, never a crash");
+  assert.deepEqual([...hooks.inviteMembershipSlugs({ team: { slug: "solo" } })], ["solo"],
+    "an envelope WITHOUT teams[] still contributes its pinned team — reading teams[] alone would fail open");
+});
+
+test("cch-w43-bl: a /v1/me that did NOT land decides nothing — it never reads as 'not already a member'", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+  // On main this is "confirm": a 500 on the account read ASSERTED you are not a
+  // member and sold you the Join button.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "failed"), "check_failed",
+    "a failed account read is not an answer about your memberships");
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "loading"), "check_failed",
+    "…and neither is one still in flight");
+  // check_failed is the RECOVERABLE state: it keeps the parked token and its
+  // action re-checks. It must not have decayed into the dead-link copy.
+  const html = hooks.inviteStateHtml("check_failed", { team: "Northwind" });
+  assert.match(html, /data-invite-act="recheck"/, "the state the band lands on must still offer the re-check");
+  assert.ok(html.indexOf("isn't valid any more") === -1, "a failed account read must not kill the link");
+
+  // A LOADED envelope with no team is a determinate 'you belong to nothing' and
+  // still confirms — the band is the discriminator, not the envelope's nullity.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "loaded"), "confirm");
+
+  // The preview's own determinate answers still win over the account band: a
+  // dead link is dead whether or not we could read the account.
+  assert.equal(hooks.inviteLandingState(404, null, null, now, "failed"), "invalid");
+  assert.equal(hooks.inviteLandingState(200, { ...W43_PREVIEW_B, expires_at: "2020-01-01T00:00:00Z" }, W43_ME_ONE_TEAM, now, "loaded"),
+    "expired");
+});
+
+test("cch-w43-bl: loadInvite is no longer a THIRD /v1/me idiom, and the accept PINS the team it joined", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  const load = appRegion(src, "  function loadInvite(", "  function renderInviteState(");
+  assert.ok(load.includes("absorbMe(res[1])"),
+    "the account read must go through the ONE absorb — a local variable has no band, no pin and no retained fault");
+  assert.ok(!/var me = res\[1\]\.ok \? res\[1\]\.data : null/.test(load),
+    "…and the old two-valued local must be GONE, not merely shadowed");
+  assert.ok(/inviteLandingState\(pr\.status, preview, me, Date\.now\(\), meState\(\)\)/.test(load),
+    "the landing must decide on the BAND the absorb produced, not on the envelope's nullity");
+
+  const accept = appRegion(src, "  function submitInviteAccept(", "  function showAuthInviteBanner(");
+  assert.ok(/localStorage\.setItem\("bp\.active-team", String\(joinedTeamId\)\)/.test(accept),
+    "MUTATION TARGET: delete the pin write and this line is the red — without it 'You're in' is " +
+    "followed by a dashboard still scoped to the OLD team");
+  const pin = accept.indexOf('localStorage.setItem("bp.active-team"');
+  const reload = accept.indexOf("loadMe();");
+  assert.ok(pin > 0 && reload > pin,
+    "the pin must be written BEFORE the re-read — api() reads it on every request, so the order is the fix");
+  assert.ok(/r\.data && r\.data\.team_id/.test(accept),
+    "the SERVER's own answer is the first source for the team we joined");
+  assert.ok(/preview && preview\.team && preview\.team\.id/.test(accept),
+    "…with the preview as the stated fallback, because the 200 body's shape is the server's to change");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// console-3-w26 — THE COPY SEAM: no sentence may claim a state its status did
+// not establish, and the 401 sentence has exactly one owner.
+//
+// Three rows land here. Each block states the RE-DERIVED premise (measured on
+// origin/main at build time, not quoted from a filing) and then pins the fix by
+// a mutation the assertion must be able to lose to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── cch-w36-bl · the wrong-cause arm ────────────────────────────────────────
+//
+// THE PREMISE, RE-DERIVED: `metricsFailureCopy` and `usageFailureCopy` are the
+// two named copy helpers on this file that took a status and had ONE typed arm
+// (404) plus a default that ASSERTS A CAUSE — "it may be starting up". Their
+// routes (GET /v1/barkparks/:id/metrics and .../usage) are `Auth.require_user`
+// + team-scoped and are TOTAL over a sick or silent box by their own headers:
+// a never-phoned-home instance is a normal 200. So no status either route can
+// produce means "starting up", and the sentence was false at every one of them
+// while sitting next to a Retry button a 5xx or a dead network cannot fix.
+//
+// The other eight named helpers were read and are NOT in this set: they either
+// classify by slug into sentences their payload proves (attachDomainFailureCopy,
+// siteCreateFailureCopy, siteDeleteFailureCopy, addSupportErrorCopy,
+// accountTwoFactorErrorCopy), delegate to faultCopy/friendly, which own the
+// 5xx/status-0 honesty law (siteThemeFailureCopy, meFailureCopy,
+// inviteFailureCopy), or already carry the typed arms (membersFailureCopy).
+test("cch-w36-bl: metricsFailureCopy/usageFailureCopy never claim a cause the status did not establish", () => {
+  for (const [name, noun] of [["metricsFailureCopy", "metrics"], ["usageFailureCopy", "usage"]]) {
+    const copy = hooks[name];
+    assert.equal(typeof copy, "function", name + " must be exported — an unexported arm is unpinnable");
+
+    // MUTATION TARGET (1): delete the status-0 arm and this reds. Nothing
+    // answered, so nothing about the instance was established.
+    assert.match(copy(0), /Network error/i, name + "(0) must name the transport, not the instance");
+    assert.ok(!/starting up/.test(copy(0)));
+
+    // MUTATION TARGET (2): delete the >=500 arm and this reds. A control-plane
+    // crash is not the instance booting.
+    assert.match(copy(500), /on our side/i, name + "(500) must own the fault");
+    assert.match(copy(503), /on our side/i);
+    assert.ok(!/starting up/.test(copy(500)));
+
+    // The 404 arm is UNCHANGED — the one no-existence-leak answer both routes
+    // give for wrong-team / absent / malformed id.
+    assert.equal(copy(404), "This instance isn't in your team, or has been removed.");
+
+    // MUTATION TARGET (3): restore the old default and this reds. The residual
+    // states the outcome and nothing else.
+    assert.ok(!/starting up/.test(copy(418)), name + " must not guess a cause on an unclassified status");
+    assert.match(copy(418), new RegExp("couldn't load " + noun, "i"));
+
+    // THE WHOLE-FUNCTION INVARIANT: no reachable status may say it.
+    for (const st of [0, 401, 403, 404, 409, 418, 422, 500, 502, 503]) {
+      assert.ok(!/starting up/.test(copy(st)),
+        name + "(" + st + ") still claims the instance may be starting up");
+      assert.equal(typeof copy(st), "string");
+    }
+  }
+});
+
+test("cch-w36-bl: the sentence is gone from app.js source, not merely shadowed", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // CODE ONLY — the `//` lines are stripped first, because the fix's own comment
+  // QUOTES the sentence it deleted (that quote is the record of what was wrong,
+  // and a guard that forbids naming a defect forbids explaining it).
+  const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  // MUTATION TARGET: re-add either helper's old default line and this reds.
+  assert.ok(!/it may be starting up/.test(code),
+    "no copy site may hedge a failure into an unproven boot");
+  // …and the guard is NOT vacuous: the string is still findable in the file.
+  assert.ok(/it may be starting up/.test(src),
+    "the stripper must not have eaten the file — the comment record still names it");
+});
+
+// ── cch-w77-bl · one owner of the 401 sentence ──────────────────────────────
+//
+// THE PREMISE, RE-DERIVED: an expired session answers 401 `unauthorized`, and
+// the ERRORS map has NO `unauthorized` key (grep the object above friendly()),
+// so friendly() falls through to each caller's fallback. The honest sentence
+// existed at exactly ONE site on origin/main — submitPasswordChange's
+// status-401 ternary (cch-w74) — and the sibling account writers rendered
+// neutral operation-failed copy for the same 401.
+//
+// THE SIBLING SET, DERIVED FROM CODE, NOT FROM THE FILING: every api() call in
+// the account region that passes `noBounce: true` AND renders copy on failure —
+// a bouncing 401 never renders anything, it re-renders login. That is FIVE
+// writers, not the three the row names: two-factor enroll, two-factor confirm,
+// recovery-codes regen, two-factor DISABLE (the row misses it), and the already
+// -fixed password change. `DELETE /v1/account/sessions` (revoke-all) is the
+// sixth noBounce call; it is included below by the same rule only if it renders
+// copy — it does not on this tree, so it is deliberately left.
+test("cch-w77-bl: the 401 sentence has ONE owner and it is what accountWriteFailureCopy returns", () => {
+  assert.equal(typeof hooks.accountWriteFailureCopy, "function");
+  assert.equal(hooks.sessionExpiredCopy, "Your session has expired — sign in again.");
+  // MUTATION TARGET: change the constant and every arm below moves with it —
+  // which is the point: there is nothing else to change.
+  assert.equal(hooks.accountWriteFailureCopy(401, { error: "unauthorized" }, "Couldn't do it."),
+    hooks.sessionExpiredCopy);
+  assert.equal(hooks.accountWriteFailureCopy(401, null, "Couldn't do it."), hooks.sessionExpiredCopy);
+  // ERRORS still has no `unauthorized` key, which is WHY this seam exists —
+  // friendly() alone renders the caller's neutral fallback for that 401.
+  assert.equal(hooks.friendly({ error: "unauthorized" }, "Couldn't do it."), "Couldn't do it.");
+  // Every NON-401 render is byte-for-byte friendly()'s, so no other copy moved.
+  for (const [status, data, fb] of [
+    [422, { error: "invalid_otp" }, "Couldn't confirm that code."],
+    [409, { error: "no_team" }, "Couldn't do it."],
+    [500, { error: "server_error" }, "Couldn't do it."],
+    [0, { error: "network_error" }, "Couldn't do it."],
+    [403, null, "Couldn't do it."],
+  ]) {
+    assert.equal(hooks.accountWriteFailureCopy(status, data, fb), hooks.friendly(data, fb),
+      "a " + status + " must render exactly what friendly() rendered before");
+  }
+});
+
+test("cch-w77-bl: all five account writers read the one owner — no second copy of the sentence", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // MUTATION TARGET: revert any ONE of these call sites to friendly(r.data, …)
+  // and its assertion reds. The fallbacks are quoted verbatim so a silent copy
+  // change is a red too.
+  for (const fallback of [
+    "Couldn't start two-factor setup.",
+    "Couldn't confirm that code.",
+    "Couldn't issue new recovery codes.",
+    "Couldn't turn two-factor off.",
+    "Couldn't update password.",
+  ]) {
+    assert.ok(src.includes('accountWriteFailureCopy(r.status, r.data, "' + fallback + '")'),
+      "the account writer with fallback " + JSON.stringify(fallback) + " must route through the 401 seam");
+    assert.ok(!src.includes('friendly(r.data, "' + fallback + '")'),
+      "…and must no longer call friendly() directly, which cannot see the status");
+  }
+  // The literal appears EXACTLY ONCE in the whole file: in the constant.
+  const hits = src.split("Your session has expired — sign in again.").length - 1;
+  assert.equal(hits, 1, "the 401 sentence must be written once; found " + hits + " occurrences");
+  assert.ok(/var SESSION_EXPIRED_COPY = "Your session has expired — sign in again\.";/.test(src),
+    "…and the one occurrence must be the owning declaration");
+
+  // The #12158 fix is intact: the slug arm still wins ahead of the seam, so a
+  // wrong current password is still accused and an expired session still is not.
+  const pw = appRegion(src, "  function submitPasswordChange(", "  // ----------------------------------------------------------- eye toggle");
+  const slug = pw.indexOf('r.data.error === "invalid_current_password"');
+  const seam = pw.indexOf("accountWriteFailureCopy(");
+  assert.ok(slug > 0 && seam > slug,
+    "invalid_current_password must be decided BEFORE the 401 seam, or a real wrong password reads as a dead session");
+  assert.ok(pw.includes('"Current password is wrong."'));
+});
+
+// ── cch-bl-tier-card · the lapsed trial's future tense ──────────────────────
+//
+// THE PREMISE, RE-DERIVED: tierCardHtml's free arm emitted
+// `<button class="btn" disabled>Yours when the trial ends</button>`
+// UNCONDITIONALLY, and the card is only reached with Free as a non-current tier
+// when the active plan is "trial" — including a trial whose window has already
+// closed (trial_days_remaining <= 0), for which "when the trial ends" dates a
+// past event in the future. `trialEnded` is the SAME predicate trialCardHtml and
+// trialTagline already read, so this is a fourth reader of a shipped clamp, not
+// a new trial-state source.
+test("cch-bl-tier-card: a LAPSED trial's Free button is not future tense; a live one is unchanged", () => {
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  assert.ok(free, "the catalog must carry the free tier");
+
+  const live = hooks.tierCardHtml(free, "trial", false, undefined, 9);
+  const lapsed = hooks.tierCardHtml(free, "trial", false, undefined, 0);
+
+  // days = 9 — the label is untouched, byte for byte, including for a NEGATIVE
+  // -to-positive boundary (1 is still a live trial).
+  assert.ok(live.includes(">Yours when the trial ends<"), "a live trial keeps its label");
+  assert.ok(hooks.tierCardHtml(free, "trial", false, undefined, 1).includes(">Yours when the trial ends<"));
+
+  // MUTATION TARGET: drop the trialEnded() branch and this reds — the future
+  // tense returns for a trial that has already ended.
+  assert.ok(!lapsed.includes("Yours when the trial ends"),
+    "days=0 must NOT promise a future end for a trial that has already ended");
+  assert.ok(!/when the trial ends|will end|once the trial ends/.test(lapsed),
+    "no future-tense clause about the trial ending may survive at days<=0");
+  assert.ok(lapsed.includes(">Your plan from here<"), "the lapsed label, verbatim");
+  assert.ok(lapsed.includes('class="btn" disabled'), "…still inert: there is no free checkout to offer");
+  assert.ok(!lapsed.includes('data-plan="free"'), "…and still unwired");
+  // It must NOT claim Free is already current: planFromSub answers "trial" for
+  // up to an hour after expiry, so this console has not measured that.
+  assert.ok(!lapsed.includes(">Current plan<"), "a lapsed trial is not yet on Free — do not say it is");
+
+  // -3 days (the worker has not run for a while) is the same lapsed state.
+  assert.equal(hooks.tierCardHtml(free, "trial", false, undefined, -3), lapsed);
+
+  // The lapsed label is no WIDER than the one the .tier-grid floor was measured
+  // against, so the geometry gate cannot be quietly re-cut by this copy. (The
+  // browser half is the tiers5 leg, which now renders BOTH labels.)
+  assert.ok("Your plan from here".length <= "Yours when the trial ends".length,
+    "a longer CTA would need the tier floor re-measured before it could ship");
+});
+
+test("cch-bl-tier-card: an unknown trial clock renders exactly what a 3-arg call rendered before", () => {
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  const baseline = hooks.tierCardHtml(free, "trial", false);
+  // The tiers5 fixture in breakpoint-sweep.mjs calls tierCardHtml with THREE
+  // arguments; absence of a clock is not evidence a trial lapsed.
+  for (const clock of [undefined, null, "0", NaN, {}, "ended"]) {
+    assert.equal(hooks.tierCardHtml(free, "trial", false, undefined, clock), baseline,
+      "a non-numeric trial clock must not change the render (" + String(clock) + ")");
+  }
+  assert.ok(baseline.includes(">Yours when the trial ends<"));
+  // And every OTHER tier is blind to the clock entirely.
+  for (const t of hooks.planCatalog.filter((x) => !x.free)) {
+    assert.equal(hooks.tierCardHtml(t, "trial", false, undefined, 0),
+      hooks.tierCardHtml(t, "trial", false), t.plan + " must not read the trial clock");
+  }
+});
+
+test("cch-bl-tier-card: renderTiers threads the SAME trial field trialCardHtml reads", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "  function renderTiers(", "  function subscribe(");
+  // MUTATION TARGET: delete the thread and every real render falls back to the
+  // future tense — the fix would be reachable only from the test hook.
+  assert.ok(/subCache && typeof subCache\.trial_days_remaining === "number"/.test(region),
+    "the clock must come from the sub envelope's own field");
+  // cch-w49-s7 added a SIXTH argument (the per-plan offer), so the pin is on the
+  // clock's position in the call rather than on the call's total arity — a
+  // regex that spelled the whole argument list would have to be rewritten by
+  // every future slice and would stop being about the clock.
+  assert.ok(/tierCardHtml\(t, active, subscribed, capability, trialDays[,)]/.test(region),
+    "renderTiers must pass the clock through to the card");
+  assert.ok(appRegion(src, "  function trialCardHtml(", "  function renderTrial(")
+    .includes("sub.trial_days_remaining"),
+    "…and it must be the SAME field the trial card reads, not a second source");
+});
+// ── cch-w45-bl · THE CONDUIT'S CATALOG ANSWER IS NO LONGER DECORATIVE ────────
+//
+// w45-s4 taught GET /v1/providers/capabilities to state the CATALOG capability
+// honestly. The READING side never asked: mountLaunchCatalog and
+// loadTheaterCatalog fetched /v1/providers/<kind>/catalog unconditionally, so
+// for a kind whose catalog bool is honestly FALSE the console mounted the panel
+// and discovered the truth as a 404 unknown_kind or a 502 — a request known in
+// advance to fail, and a capability answer doing no work on the surface that
+// most depends on it.
+//
+// THE THREE ARMS ARE DRIVEN, not read: the tests below run the REAL mounts
+// against a stubbed fetch and assert THE WIRE — whether GET …/catalog was
+// issued at all — because the rendered panel alone cannot tell "we skipped the
+// request" from "we made it and handled the 404".
+
+test("cch-w45-bl: catalogCapability — only an explicit false is a refusal; absence is 'unknown'", () => {
+  const payload = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+      bare: { tier: "prod", capabilities: { catalog: false }, gaps: {} },
+    },
+  };
+  // Field-by-field, not deepEqual: the object is minted inside the node:vm
+  // realm, so its Object prototype is not this realm's and deepStrictEqual
+  // refuses a structurally identical answer.
+  assert.equal(hooks.catalogCapability(payload, "hetzner").state, "supported");
+  assert.equal(hooks.catalogCapability(payload, "hetzner").reason, "");
+  assert.equal(hooks.catalogCapability(payload, "azure").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "azure").reason,
+    "Azure doesn't publish a size-and-region catalog here yet.");
+  // A stated gap with no sentence is still a refusal — the console must not
+  // invent the reason, and the render arm has its own honest fallback.
+  assert.equal(hooks.catalogCapability(payload, "bare").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "bare").reason, "");
+  // UNKNOWN IS NOT A REFUSAL. A kind the conduit does not list (an older control
+  // plane, or a newly connectable kind), a payload that never arrived, and a
+  // shape we cannot read all proceed — withholding on any of them would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.catalogCapability(payload, "cloudflare").state, "unknown");
+  assert.equal(hooks.catalogCapability(null, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({}, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: {} } }, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: { capabilities: {} } } }, "hetzner").state, "unknown");
+});
+
+// The catalog slot + the container the wizard hands the mount. `isConnected` is
+// real state here: mountLaunchCatalog aborts on a detached slot, so a fakeNode
+// (isConnected === undefined) would make every assertion below vacuous.
+function catalogHost() {
+  const slot = fakeNode();
+  slot.isConnected = true;
+  const host = fakeNode();
+  host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+  host.querySelectorAll = () => [];
+  return { host, slot };
+}
+
+test("cch-w45-bl: mountLaunchCatalog consults caps.catalog BEFORE fetching — and an unsupported kind is never asked", async () => {
+  const CAPS = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+    },
+  };
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    const body = p.indexOf("/capabilities") !== -1
+      ? CAPS
+      : { server_types: [{ slug: "cx22", cores: 2, ram_gb: 8, disk_gb: 40, monthly_price: 6 }],
+          regions: [{ slug: "fsn1", name: "Falkenstein" }], currency: "EUR" };
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    // ── the REFUSED kind: the conduit says catalog:false ────────────────────
+    const az = catalogHost();
+    hooks.mountLaunchCatalog(az.host, {}, "azure", "g1");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the mount issued GET /v1/providers/azure/catalog against a conduit that already said catalog:false — " +
+      "a request known in advance to fail; wire: " + JSON.stringify(wire));
+    // …and the SERVER's own gaps.catalog sentence is what renders, verbatim.
+    assert.match(az.slot.innerHTML, /Azure doesn&#39;t publish a size-and-region catalog here yet\./);
+    assert.doesNotMatch(az.slot.innerHTML, /Couldn't load/);
+    // No phantom selection is left behind for submit to send.
+    assert.equal(az.host._launchHosting.region, null);
+    assert.equal(az.host._launchHosting.server_type, null);
+
+    // ── the SUPPORTED kind: byte-for-byte the shipped path ──────────────────
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g2");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "a catalog-capable kind must still be fetched exactly once; wire: " + JSON.stringify(wire));
+    assert.match(hz.slot.innerHTML, /cx22/);
+
+    // ── the UNKNOWN kind: not listed by the conduit, so NOT refused ─────────
+    const cf = catalogHost();
+    hooks.mountLaunchCatalog(cf.host, {}, "cloudflare", "g3");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/cloudflare/catalog") !== -1).length, 1,
+      "a kind the conduit does not list must still be fetched — an unknown answer is not a refusal; wire: " +
+      JSON.stringify(wire));
+
+    // ── ONE conduit read for all three mounts ───────────────────────────────
+    assert.equal(wire.filter((p) => p.indexOf("/v1/providers/capabilities") !== -1).length, 1,
+      "the capability answer must be read once per page life, not once per mount; wire: " + JSON.stringify(wire));
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: the gate does not swallow the degraded states — a catalog-capable kind that 502s still says so", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    // The conduit answer is already cached from the test above (one read per
+    // page life), so only the catalog call reaches here — and it fails.
+    return Promise.resolve({
+      ok: false, status: 502,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "catalog_unavailable" }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g4");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1);
+    assert.match(hz.slot.innerHTML, /catalog is unavailable right now/);
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: loadTheaterCatalog asks the conduit too — a catalog-less kind gets no price request", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    wire.push(String(url).split("?")[0]);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ server_types: [], regions: [] }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    let ready = 0;
+    hooks.loadTheaterCatalog({ provider: "azure", server_type: "Standard_B2s" }, () => { ready += 1; });
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the price line asked a kind the conduit says has no catalog; wire: " + JSON.stringify(wire));
+    // The waiter still resolves — an unpriceable answer omits the line, exactly
+    // as a 404/502 already did. The gate must not strand the caller.
+    assert.equal(ready, 1, "the onReady waiter was never called — the mount is stranded, not degraded");
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+// ── cch-w45-bl · THE CONDUIT READ THAT NEVER ANSWERS, AND THE DOOR BEHIND IT ──
+//
+// FOUND BY THE BROWSER, NOT BY READING. The gate above is a READINESS narrowing
+// on top of a network read, and a narrowing placed in front of a door has two
+// ways to fail, not one: it can fail to withhold (the shipped tests cover that)
+// and it can fail OPEN-ENDED — withhold on an answer it never actually got. The
+// catalog panel is the ONLY thing that renders `.launch-connect-provider`, the
+// launch wizard's connect door, so a mount that stalls or refuses on an
+// unanswered conduit read costs the person the one control that lets them
+// connect a provider at all. The overflow guard measured exactly that class on
+// the PR head (10 findings across W24-cred-dialog-button-alive and
+// W25-launch-catalog-after-connect: "the launch wizard never rendered a
+// .launch-connect-provider door").
+//
+// `providerCapsCache` is ONE read per page life, so these arms cannot run in the
+// module sandbox — the tests above already resolved it. Each gets its own realm,
+// which is also what makes the assertion honest: it drives the mount's FIRST
+// conduit read, the only one whose failure the person can be standing in front
+// of. A fresh realm per arm; nothing here touches the shared sandbox.
+function w45FreshHooks() {
+  const h = {};
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading",
+      addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => ({ ...inertEl }),
+      documentElement: { ...inertEl, getAttribute: () => null },
+      body: { ...inertEl, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: storage, sessionStorage: storage, navigator: {},
+    URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"), box);
+  return { h, box };
+}
+
+test("cch-w45-bl: a conduit read that FAILS still reaches the catalog — and the connect door with it", async () => {
+  // Every way the capability read can come back without a usable answer. Each
+  // one is "unknown", and unknown is not a refusal: the shipped path must run.
+  const ARMS = {
+    "a rejected fetch (offline / DNS / refused)": () => Promise.reject(new TypeError("Failed to fetch")),
+    "a 500 from the conduit itself": () => Promise.resolve({
+      ok: false, status: 500, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "internal" }),
+    }),
+    "a 200 carrying an HTML error page (a proxy in the way)": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "text/html" },
+      text: () => Promise.resolve("<html>502 Bad Gateway</html>"),
+    }),
+    "a 200 whose JSON body is null": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve(null),
+    }),
+    "a 200 whose body is not the payload shape at all": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ providers: "not-an-object" }),
+    }),
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  for (const [label, capAnswer] of Object.entries(ARMS)) {
+    const { h, box } = w45FreshHooks();
+    const wire = [];
+    box.fetch = (url) => {
+      const p = String(url).split("?")[0];
+      wire.push(p);
+      if (p.indexOf("/v1/providers/capabilities") !== -1) return capAnswer();
+      // The catalog read answers exactly as a control plane with no connected
+      // provider does — 404 no_provider — because THAT is the response the
+      // connect door is rendered from.
+      return Promise.resolve({
+        ok: false, status: 404, headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ error: "no_provider" }),
+      });
+    };
+    const slot = fakeNode();
+    slot.isConnected = true;
+    const host = fakeNode();
+    host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+    host.querySelectorAll = () => [];
+
+    h.mountLaunchCatalog(host, {}, "hetzner", "gx");
+    await flushP();
+
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "with " + label + " the conduit told us NOTHING about hetzner, yet the catalog was not fetched — " +
+      "the gate withheld on an absence; wire: " + JSON.stringify(wire));
+    assert.match(slot.innerHTML, /launch-connect-provider/,
+      "with " + label + " the panel resolved no_provider but rendered no .launch-connect-provider door — " +
+      "the person has no way to connect a provider at all; panel: " + JSON.stringify(slot.innerHTML));
+    // Not the no_catalog arm: a conduit we could not read has not told us that
+    // this kind publishes no catalog, so its sentence must never appear.
+    assert.doesNotMatch(slot.innerHTML, /size-and-region catalog/,
+      "with " + label + " the console printed a no-catalog claim it cannot have; panel: " +
+      JSON.stringify(slot.innerHTML));
+    // And the mount is not stranded on its loading frame.
+    assert.doesNotMatch(slot.innerHTML, /Loading /,
+      "with " + label + " the mount never left its loading frame — the conduit read stranded it");
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w65-bl — THE FRIENDLY() ARITY RATCHET + THE CURATED-RUNG GUARD.
+//
+// THE ROW AS FILED, AND WHAT RE-DERIVING IT FOUND. The task says "66 of 115
+// friendly() call sites discard an unregistered server error slug in favour of
+// a caller-written generic", and a later verifier re-counted 76 of 127. Both
+// figures are wrong in the SAME way, and the arity scanner below is why: they
+// counted the literal `friendly(` wherever it appears in app.js, and that file
+// carries more of them in its own COMMENT PROSE than in its code. Masking
+// comments and strings and balancing parens, origin/main has
+//
+//     64 friendly() call sites, and ALL 64 PASS A FALLBACK. Zero are one-arg.
+//
+// So the split is not 49/66 or 51/76. It is 0/64 — which makes the defect
+// UNIVERSAL rather than partial, and makes the tail's humanizer, the thing
+// those figures imagined 49 sites reaching, structurally unreachable from every
+// live call site.
+//
+// WHY THE OBVIOUS FIX IS REFUSED. "Let the slug win where it is unregistered"
+// inverts a law that wave 72 MEASURED, built and pinned: a one-arg
+// friendly(data) on an unread slug renders key.replace(/_/g," ") — "unread
+// typed slug", "write once" — at a person, and cch-w72-bl removed the last nine
+// sites that could do it. Surfacing a humanized wire slug at 64 sites would
+// re-open that hole 7x wider, and the 22 assertions that hold the w72-bl law
+// red on it (measured: the composition variant of this slice reds 22 of 1280).
+// A blanket removal of the 64 fallbacks is refused for the same reason. What
+// the person reads must stay the caller's written sentence.
+//
+// SO THE DISCARD IS SANCTIONED FOR THE READER AND MUST BE LOUD TO THE
+// CODEBASE. The two guards below are that loudness, and both can lose:
+//
+//   G1 ARITY RATCHET — every friendly() call site passes a fallback. w72-bl
+//      enforced this by editing nine call sites; nothing stopped the tenth.
+//      Now a one-arg site reds the harness by name.
+//
+//   G2 CURATED-RUNG GUARD — every key in ERRORS actually answers, and every
+//      slug in the detail fence is NOT in ERRORS. Mutation-proved: deleting one
+//      ERRORS key from a copy of the shipped file makes friendly() return the
+//      caller's fallback verbatim for that slug, and the guard names it. That
+//      is the row's criterion in one sentence: it reds when a fallback shadows
+//      a slug the ERRORS map does not register.
+//
+// HONEST LIMIT, STATED. Neither guard can see the class that hurts most: a slug
+// the ROUTER emits that app.js never names at all. The oracle for that is the
+// emitter, in another language in another tree — the same structural blindness
+// __reason_arm_census.mjs states about its own subject. These guards hold the
+// console's side: the rungs stay wired, and nothing regresses to a humanized
+// wire slug.
+
+// ── the scanner (paren-balanced, comment/string/regex masked) ───────────────
+//
+// KNOWN IMPRECISION, stated because an unstated limit is the same lie:
+//   * it is not a JS parser. It masks line/block comments, string and template
+//     bodies, and regex literals (the regex arm is load-bearing — without it a
+//     quote inside /["']/ opens a phantom string and the scan loses half the
+//     file; the first draft of this scanner reported 0 sites of BOTH kinds).
+//   * template-literal ${…} interpolations are masked with the template body,
+//     so a friendly() call inside one would be missed. There are none.
+//   * a two-argument call whose second argument is itself a comma expression
+//     counts as two-arg, which is the correct answer here: a fallback IS given.
+//   * the `function friendly(` declaration is excluded explicitly.
+function cchw65MaskCode(src) {
+  const mask = new Uint8Array(src.length); // 1 = code
+  let i = 0, state = "code", q = "";
+  while (i < src.length) {
+    const c = src[i], n = src[i + 1];
+    if (state === "code") {
+      if (c === "/" && n === "/") { state = "line"; i += 2; continue; }
+      if (c === "/" && n === "*") { state = "block"; i += 2; continue; }
+      if (c === "/") {
+        let j = i - 1;
+        while (j >= 0 && /\s/.test(src[j])) j--;
+        const prev = j >= 0 ? src[j] : "(";
+        if (j < 0 || "(,=:[!&|?{};+-*%~^".indexOf(prev) >= 0) {
+          mask[i] = 1; i++;
+          while (i < src.length) {
+            if (src[i] === "\\") { i += 2; continue; }
+            if (src[i] === "[") { while (i < src.length && src[i] !== "]") { if (src[i] === "\\") i++; i++; } }
+            if (src[i] === "/") { i++; break; }
+            i++;
+          }
+          continue;
+        }
+        mask[i] = 1; i++; continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { state = "str"; q = c; mask[i] = 1; i++; continue; }
+      mask[i] = 1; i++; continue;
+    }
+    if (state === "line") { if (c === "\n") state = "code"; i++; continue; }
+    if (state === "block") { if (c === "*" && n === "/") { state = "code"; i += 2; continue; } i++; continue; }
+    if (state === "str") { if (c === "\\") { i += 2; continue; } if (c === q) state = "code"; i++; continue; }
+  }
+  return mask;
+}
+
+function cchw65FriendlySites(src) {
+  const mask = cchw65MaskCode(src);
+  const isCode = (k) => mask[k] === 1;
+  const re = /friendly\s*\(/g;
+  const oneArg = [], twoArg = [];
+  let m;
+  while ((m = re.exec(src))) {
+    const at = m.index;
+    if (!isCode(at)) continue;                                   // comment or string prose
+    if (/function\s+$/.test(src.slice(Math.max(0, at - 12), at))) continue; // the declaration
+    if (at > 0 && /[A-Za-z0-9_$.]/.test(src[at - 1])) continue;  // e.g. `unfriendly(`
+    let i = src.indexOf("(", at), depth = 0, commas = 0;
+    for (; i < src.length; i++) {
+      if (!isCode(i)) continue;
+      const c = src[i];
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === ")" || c === "]" || c === "}") { depth--; if (depth === 0) break; }
+      else if (c === "," && depth === 1) commas++;
+    }
+    (commas === 0 ? oneArg : twoArg).push(src.slice(at, i + 1).replace(/\s+/g, " "));
+  }
+  return { oneArg, twoArg };
+}
+
+test("cch-w65-bl G1: every friendly() call site passes a fallback — no site can humanize a wire slug", () => {
+  const sites = cchw65FriendlySites(APP_SRC);
+  // NON-VACUITY FIRST. A scanner that found nothing would assert the property
+  // for free. The floor is a floor, not an identity: new call sites are growth,
+  // not a regression, and a gate keyed on an exact count reds on growth.
+  assert.ok(sites.twoArg.length >= 60,
+    "the scanner must actually find the friendly() corpus; it found " + sites.twoArg.length);
+  assert.deepEqual(sites.oneArg, [],
+    "a one-argument friendly() renders key.replace(/_/g,' ') — a raw wire slug — at a person " +
+    "(cch-w72-bl removed the last nine). Give it an honest fallback. Offenders: " +
+    JSON.stringify(sites.oneArg));
+});
+
+test("cch-w65-bl G1 CONTROL: the arity ratchet fires on a one-arg site (it can lose)", () => {
+  // MUTATION, BOTH DIRECTIONS. Direction A: a fabricated one-arg site is seen.
+  const mutant = APP_SRC + "\nvar cchw65Mutant = friendly(r.data);\n";
+  const seen = cchw65FriendlySites(mutant);
+  assert.equal(seen.oneArg.length, 1, "the ratchet must SEE a one-arg call site");
+  assert.match(seen.oneArg[0], /^friendly\(r\.data\)$/);
+  // Direction B: it is not fooled by prose. The same text inside a comment and
+  // inside a string is invisible — which is precisely the miscount the filing
+  // and the re-count both made.
+  const prose = APP_SRC + "\n// friendly(r.data) in a comment\nvar s = \"friendly(r.data)\";\n";
+  assert.deepEqual(cchw65FriendlySites(prose).oneArg, [],
+    "a friendly( inside comment prose or a string literal is NOT a call site");
+  // …and a multiline two-arg call is counted as two-arg, not one — the exact
+  // imprecision a line-oriented `friendly\\(.*,` grep has.
+  const wrapped = APP_SRC + "\nvar w = friendly(\n  r.data,\n  \"Couldn't do the thing.\"\n);\n";
+  const wsites = cchw65FriendlySites(wrapped);
+  assert.deepEqual(wsites.oneArg, [], "a multiline call with a fallback is not a one-arg site");
+  assert.equal(wsites.twoArg.length, cchw65FriendlySites(APP_SRC).twoArg.length + 1);
+});
+
+// ── G2: the curated rung, and the shadow law over the detail fence ──────────
+// A fresh sandbox per source string, so a MUTATED copy of the shipped file can
+// be evaluated and its friendly() probed like the real one.
+function cchw65Eval(source) {
+  const h = {};
+  const el = {
+    addEventListener: noop, removeEventListener: noop, setAttribute: noop, removeAttribute: noop,
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    style: {}, hidden: false, value: "", innerHTML: "", textContent: "",
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  const store = { getItem: () => null, setItem: noop, removeItem: noop };
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading", addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+      createElement: () => ({ ...el }), documentElement: { ...el, getAttribute: () => null },
+      body: { ...el, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: store, sessionStorage: store, navigator: {}, URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop, console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(source, box, { filename: "app.js (cch-w65-bl mutant)" });
+  return h;
+}
+
+// A sentinel no copy in the file could ever equal, so "the fallback came back
+// verbatim" is decidable rather than a substring guess.
+const CCHW65_FB = "⁣cch-w65-bl caller fallback⁣";
+const cchw65Shadowed = (hooksLike, slug) => hooksLike.friendly({ error: slug }, CCHW65_FB) === CCHW65_FB;
+
+// The ERRORS keys and the detail fence's slug disjunction, both read off the
+// SHIPPED source — never a second hand-kept list that could drift from it.
+function cchw65ErrorsKeys(src) {
+  const start = src.indexOf("  var ERRORS = {");
+  assert.ok(start > 0, "the ERRORS map must be findable — if it moved, this guard is measuring nothing");
+  const end = src.indexOf("\n  };", start);
+  assert.ok(end > start, "the ERRORS map must terminate");
+  const body = src.slice(start, end);
+  const mask = cchw65MaskCode(body);
+  const re = /\n\s{4}([a-z][a-z0-9_]*)\s*:/g;
+  const keys = [];
+  let m;
+  while ((m = re.exec(body))) if (mask[m.index + m[0].indexOf(m[1])] === 1) keys.push(m[1]);
+  return keys;
+}
+function cchw65FenceSlugs(src) {
+  const at = src.indexOf('if ((key === "barkpark_required"');
+  assert.ok(at > 0, "the detail fence must be findable");
+  const block = src.slice(at, src.indexOf("data.detail) {", at));
+  return (block.match(/key === "([a-z_]+)"/g) || []).map((s) => s.slice(9, -1));
+}
+
+test("cch-w65-bl G2: every ERRORS key answers — none is shadowed by the caller's fallback", () => {
+  const keys = cchw65ErrorsKeys(APP_SRC);
+  assert.ok(keys.length >= 30, "the ERRORS key extractor must actually find the map; it found " + keys.length);
+  const shadowed = keys.filter((k) => cchw65Shadowed(hooks, k));
+  assert.deepEqual(shadowed, [],
+    "a registered slug whose curated sentence does not reach the reader is the defect this row names: " +
+    JSON.stringify(shadowed));
+});
+
+test("cch-w65-bl G2 CONTROL: deleting one ERRORS key makes its slug shadowed, and the guard names it", () => {
+  // THE MUTATION THE ROW ASKS FOR, IN BOTH DIRECTIONS.
+  //
+  // Direction A — the guard LOSES. `suspended` is deleted from the ERRORS map in
+  // a copy of the shipped file. friendly() then falls through every rung and
+  // returns the caller's fallback verbatim, so a person who suspended an
+  // instance reads "Please try again." about a state that retrying cannot
+  // change — and the guard above reports the slug by name.
+  const line = APP_SRC.split("\n").find((l) => l.trim().startsWith("suspended: \"This instance is suspended"));
+  assert.ok(line, "the mutation must anchor on a line that exists — an unapplied mutation is not a control");
+  const mutant = APP_SRC.replace(line + "\n", "");
+  assert.notEqual(mutant, APP_SRC, "the mutation must have applied");
+  const mutantHooks = cchw65Eval(mutant);
+  assert.ok(cchw65Shadowed(mutantHooks, "suspended"),
+    "with no ERRORS entry, the caller's fallback shadows the slug — that IS the defect");
+  const mutantShadowed = cchw65ErrorsKeys(APP_SRC).filter((k) => cchw65Shadowed(mutantHooks, k));
+  assert.deepEqual(mutantShadowed, ["suspended"],
+    "the guard must name exactly the key that was removed, and no other");
+  // Direction B — the guard is SILENT on the unmutated file. Re-evaluating the
+  // shipped source through the same rig (not the module-level hooks) proves the
+  // rig itself is not what makes the mutant red.
+  const cleanHooks = cchw65Eval(APP_SRC);
+  assert.ok(!cchw65Shadowed(cleanHooks, "suspended"),
+    "on the shipped file the curated sentence wins — the control is not vacuous");
+  assert.deepEqual(cchw65ErrorsKeys(APP_SRC).filter((k) => cchw65Shadowed(cleanHooks, k)), []);
+});
+
+// THE PINNED INVENTORY — the one denominator in this slice that is NOT derived
+// from the thing it measures. `cchw65ErrorsKeys(APP_SRC)` reads the map, so a
+// key DELETED from the map also leaves the denominator: the guard above is a
+// consistency check and is structurally unable to detect an absence (measured —
+// removing `suspended:` from the shipped file leaves it green). This list is
+// the absence detector. Each entry is a wire slug the console has decided to
+// answer; the guard reds when one stops answering, which is exactly the row's
+// criterion — a caller's fallback shadowing a slug the ERRORS map no longer
+// registers. Removing an entry here is a DECISION (the file's own D447(a) says
+// a key is replaced, never removed), not a way to quiet a red.
+const CCHW65_MUST_ANSWER = [
+  "billing_not_configured", "billing_test_mode", "checkout_failed", "deploy_not_started",
+  "email_invalid", "email_taken", "forbidden", "instance_not_armed", "instance_unreachable",
+  "invalid", "invalid_code", "invalid_credentials", "limit_reached", "live_twin",
+  "malformed_body", "malformed_request", "name_required", "network_error",
+  "no_active_subscription", "no_admin_token", "no_content_binding", "no_subscription",
+  "github_error", "invalid_name",
+  "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
+  "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
+  "server_error", "suspended", "unsupported_media_type", "validation_failed",
+];
+
+test("cch-w65-bl G2: no pinned slug is shadowed by a caller's fallback", () => {
+  const shadowed = CCHW65_MUST_ANSWER.filter((s) => cchw65Shadowed(hooks, s));
+  assert.deepEqual(shadowed, [],
+    "these slugs are answered by nothing now, so every caller's generic wins and the " +
+    "server's named cause is discarded — register them, or retire the pin deliberately: " +
+    JSON.stringify(shadowed));
+  // The pin and the map agree TODAY. A key added to ERRORS without a pin is a
+  // slug nothing would notice losing, so the set diff is reported both ways.
+  const keys = cchw65ErrorsKeys(APP_SRC);
+  assert.deepEqual(keys.filter((k) => CCHW65_MUST_ANSWER.indexOf(k) === -1), [],
+    "a new ERRORS key must be pinned too, or its deletion is invisible");
+});
+
+test("cch-w65-bl G2 CONTROL: the pinned inventory reds on a DELETED ERRORS key (the absence a derived denominator cannot see)", () => {
+  const line = APP_SRC.split("\n").find((l) => l.trim().startsWith("suspended: \"This instance is suspended"));
+  assert.ok(line, "the mutation must anchor on a line that exists");
+  const mutant = APP_SRC.replace(line + "\n", "");
+  assert.notEqual(mutant, APP_SRC, "the mutation must have applied");
+  const mutantHooks = cchw65Eval(mutant);
+  // Direction A — the pinned inventory LOSES where the derived one cannot.
+  assert.deepEqual(CCHW65_MUST_ANSWER.filter((s) => cchw65Shadowed(mutantHooks, s)), ["suspended"],
+    "the pin names the deleted key");
+  assert.deepEqual(cchw65ErrorsKeys(mutant).filter((k) => cchw65Shadowed(mutantHooks, k)), [],
+    "…while the DERIVED denominator stays green over the same mutant — which is why the pin exists");
+  // Direction B — silent on the shipped file, through the same rig.
+  const cleanHooks = cchw65Eval(APP_SRC);
+  assert.deepEqual(CCHW65_MUST_ANSWER.filter((s) => cchw65Shadowed(cleanHooks, s)), []);
+});
+
+test("cch-w65-bl G2: THE SHADOW LAW is mechanical now — no detail-fence slug may gain an ERRORS entry", () => {
+  // The file states this hazard twice in prose (provisioning_in_progress, and
+  // instance_not_live with its near-twin not_live) and two hand-written tests
+  // pin two of the five. Registering ANY fence slug would make the curated rung
+  // win first and silently disable that relay. This closes the set.
+  const fence = cchw65FenceSlugs(APP_SRC);
+  assert.deepEqual(fence.slice().sort(), [
+    "barkpark_required", "deploy_ability_required", "instance_not_live",
+    "nothing_to_update", "provisioning_in_progress",
+  ], "the fence's membership is pinned: a sixth slug is a decision, not a drive-by");
+  const keys = new Set(cchw65ErrorsKeys(APP_SRC));
+  const registered = fence.filter((s) => keys.has(s));
+  assert.deepEqual(registered, [],
+    "a fence slug with an ERRORS entry loses its measured server sentence to a fixed console string: " +
+    JSON.stringify(registered));
+  // …and each one still relays, so the pin is about a live path, not a dead one.
+  for (const slug of fence) {
+    assert.equal(hooks.friendly({ error: slug, detail: "the server's own sentence" }, CCHW65_FB),
+      "the server's own sentence", slug + " must relay its detail, not the caller's fallback");
+  }
+});
+
+test("cch-w65-bl G2 CONTROL: registering a fence slug reds the shadow-law guard", () => {
+  // Mutation: give instance_not_live an ERRORS entry "for symmetry" with its
+  // near-twin not_live — the exact mistake the file warns about in prose.
+  const anchor = "  var ERRORS = {\n";
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur exactly once");
+  const mutant = APP_SRC.replace(anchor, anchor + "    instance_not_live: \"The instance has no URL yet.\",\n");
+  const keys = new Set(cchw65ErrorsKeys(mutant));
+  assert.ok(keys.has("instance_not_live"), "the mutation must have applied to the map the guard reads");
+  assert.deepEqual(cchw65FenceSlugs(mutant).filter((s) => keys.has(s)), ["instance_not_live"],
+    "the guard must name the newly-registered fence slug");
+  // And the harm is real, not notional: the measured server sentence is gone.
+  const mutantHooks = cchw65Eval(mutant);
+  assert.equal(mutantHooks.friendly({ error: "instance_not_live", detail: "wait for provisioning" }, CCHW65_FB),
+    "The instance has no URL yet.",
+    "the curated rung swallows the relay — which is why the guard above must red");
+});
+
+
+// ── cch-w49-s6 · THE MONEY FENCE, GUARDED BY BEHAVIOUR (charter D556/D557) ──
+//
+// WHAT THIS REPLACES, and why a replacement was needed. Until this block the
+// billing owner fence's ONLY reacting unit assertion was a source-text
+// `billing.indexOf("if (!billingIsOwner())")` inside the D444 ORDERING pin
+// above — it protected the fence by substring ACCIDENT. Measured on origin/main
+// (162406dd8), the double dissociation that proves a grep is not a guard:
+//
+//   * inserting `if (1) { renderPlanState(box); renderBillingManage(true);
+//     renderBillingCancel(true); return; }` immediately ABOVE the intact fence
+//     left the suite 1298 pass / 0 fail GREEN — while a plain member got the
+//     plan state, Manage and Cancel. A FULL BYPASS, invisible.
+//   * rewriting the fence as the behaviour-identical `if (billingIsOwner() !==
+//     true)` RED the suite — a rename it should never have noticed.
+//
+// The binding census is blind to it too (deleting the fence outright leaves its
+// output byte-identical at rc 0), and no billing scenario in the preview corpus
+// carries an admin actor. So the fence is pinned by RUNNING renderBilling here.
+//
+// Each case gets its own vm realm: renderBilling's module state (subLoaded /
+// subCache / meCache / meTeamPin) is IIFE-scoped and would otherwise leak
+// between cases — and a fresh realm is also what lets the two mutation CONTROLS
+// below run the mutant bytes through the identical driver.
+
+const W49S6_ME_OWNER = {
+  role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" },
+  team_authority: { team_id: "t1", role: "owner", admin: true, owner: true },
+};
+// THE TRAP FIXTURE. admin:true / owner:false is the one envelope that separates
+// the admin band from the owner band, and it is the account that would be handed
+// the Stripe portal, the plan grid and Cancel by a "convert billing to
+// teamAuthorityState()" fix. The whole corpus had no billing-route admin actor.
+const W49S6_ME_ADMIN = {
+  role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "grace@acme.com" },
+  team_authority: { team_id: "t1", role: "admin", admin: true, owner: false },
+};
+const W49S6_ME_MEMBER = {
+  role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u4", email: "kim@acme.com" },
+  team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+};
+// Teamless: /v1/me sends team_authority nil for exactly this.
+const W49S6_ME_TEAMLESS = { role: "owner", user: { id: "u9", email: "solo@acme.com" } };
+const W49S6_SUB = { plan: "supporter", status: "active", current_period_end: "2030-01-01T00:00:00Z" };
+const W49S6_REFUSAL = "Only the team owner can manage billing.";
+
+// A realm whose document/localStorage/fetch this file can swap — the shared
+// `sandbox` above is deliberately inert, and renderBilling needs a DOM.
+function w49s6Realm(source) {
+  const h = {};
+  const el = {
+    addEventListener: noop, removeEventListener: noop, setAttribute: noop, removeAttribute: noop,
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    style: {}, hidden: false, value: "", innerHTML: "", textContent: "",
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading", addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+      createElement: () => ({ ...el }), documentElement: { ...el, getAttribute: () => null },
+      body: { ...el, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: memStore(), sessionStorage: memStore(), navigator: {}, URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop, console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(source, box, { filename: "app.js (cch-w49-s6 realm)" });
+  return { h, box };
+}
+
+// The billing screen's real node set, recording. Every selector renderBilling's
+// subtree can reach resolves to a node that KEEPS its innerHTML, so the
+// assertions below read rendered BYTES rather than a branch we assumed ran.
+function w49s6MountBilling(box) {
+  const nodes = {};
+  const make = () => ({
+    innerHTML: "", hidden: false, disabled: false,
+    addEventListener: noop, removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => [],
+  });
+  for (const sel of [
+    "#billing-recommended", "#billing-tiers", "#billing-manage-section", "#billing-manage",
+    "#billing-cancel-section", "#billing-cancel", "#plan-portal", "#plan-cancel",
+    "#plan-continue", "#plan-more", "#sub-retry",
+  ]) nodes[sel] = make();
+  box.document.querySelector = (sel) => nodes[sel] || null;
+  return nodes;
+}
+
+async function w49s6Settle() { for (let i = 0; i < 24; i++) await Promise.resolve(); }
+
+// Drive /v1/me through the REAL loadMe (absorbMe takes the pin here, which is
+// what makes the stale case reachable at all).
+async function w49s6DriveMe(box, h, status, payload) {
+  const saved = box.fetch;
+  box.fetch = fetchStub(status, payload);
+  try { h.loadMe(); await w49s6Settle(); } finally { box.fetch = saved; }
+}
+
+// Paint the billing screen through the REAL renderBilling: the first pass finds
+// no subscription and re-enters itself through loadSubscription().then(...).
+async function w49s6Paint(box, h, sub) {
+  const nodes = w49s6MountBilling(box);
+  const saved = box.fetch;
+  box.fetch = fetchStub(200, { subscription: sub });
+  try { h.renderBilling(); await w49s6Settle(); } finally { box.fetch = saved; }
+  return nodes;
+}
+
+// One case, end to end: a fresh realm, a pin, a /v1/me, a subscription, a paint.
+async function w49s6Case(source, me, opts) {
+  opts = opts || {};
+  const { h, box } = w49s6Realm(source || APP_SRC);
+  box.localStorage.setItem("bp.active-team", "t1");
+  if (me) await w49s6DriveMe(box, h, opts.meStatus || 200, me);
+  if (opts.movePin) box.localStorage.setItem("bp.active-team", "t2");
+  const nodes = await w49s6Paint(box, h, opts.sub === undefined ? W49S6_SUB : opts.sub);
+  return { h, box, nodes };
+}
+
+test("cch-w49-s6: billingOwnerAuthority is a NEW five-valued band on team_authority.owner — and billingIsOwner stays BOOLEAN through all five", async () => {
+  // D439, literally: the band is a string, the delegating predicate is not.
+  // Every arm is DRIVEN through loadMe, never poked into the cache.
+  const arms = [
+    ["loading", null, {}],                                   // never asked
+    ["failed", { error: "server_error" }, { meStatus: 500 }], // the read did not arrive
+    ["grant", W49S6_ME_OWNER, {}],
+    ["refuse", W49S6_ME_MEMBER, {}],
+    ["refuse", W49S6_ME_TEAMLESS, {}],                       // teamless: nil is a determinate NO
+    ["stale", W49S6_ME_OWNER, { movePin: true }],            // the pin moved under the answer
+  ];
+  const seen = [];
+  for (const [want, me, opts] of arms) {
+    const { h } = await w49s6Case(null, me, opts);
+    assert.equal(typeof h.billingOwnerAuthority, "function", "the band must be node-pinned");
+    assert.equal(h.billingOwnerAuthority(), want, "band arm: expected " + want);
+    assert.equal(typeof h.billingOwnerAuthority(), "string", "the band is a STRING — that is why it is a sibling");
+    // THE D439 CLAUSE. If someone widens billingIsOwner() into the band itself,
+    // `if (billingIsOwner())` becomes true for "failed"/"loading" — a fail-open.
+    assert.equal(typeof h.billingIsOwner(), "boolean",
+      "billingIsOwner() must stay two-valued on the " + want + " arm (it was exported by NOTHING before this slice)");
+    assert.equal(h.billingIsOwner(), want === "grant", "…and it must be exactly `band === \"grant\"`");
+    seen.push(want);
+  }
+  assert.deepEqual([...new Set(seen)].sort(), ["failed", "grant", "loading", "refuse", "stale"],
+    "all five band values were really reached — a case that silently collapsed would show up here");
+});
+
+test("cch-w49-s6: THE TRAP — an admin:true/owner:false actor is GRANTED by the admin band and REFUSED by the owner band, in one assertion", async () => {
+  const { h, nodes } = await w49s6Case(null, W49S6_ME_ADMIN, {});
+  // The one assertion the row demands: converting billing to teamAuthorityState()
+  // would ship green everywhere else and hand THIS person the Stripe portal.
+  assert.deepEqual(
+    { team: h.teamAuthorityState(), billing: h.billingOwnerAuthority(), isOwner: h.billingIsOwner() },
+    { team: "grant", billing: "refuse", isOwner: false },
+    "the ADMIN band grants and the OWNER band refuses the SAME envelope — that difference is the whole slice");
+
+  // …and the refusal is real on the screen, not just in the predicate.
+  assert.ok(nodes["#billing-manage"].innerHTML.includes(W49S6_REFUSAL),
+    "a non-owner admin reads the honest owner-gate sentence");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf('id="plan-portal"'), -1, "…and is offered no Stripe portal");
+  assert.equal(nodes["#billing-cancel"].innerHTML, "", "…and no Cancel");
+  assert.equal(nodes["#billing-cancel-section"].hidden, true, "…with the Cancel section closed");
+  assert.equal(nodes["#billing-tiers"].hidden, true, "…and the plan grid closed");
+});
+
+test("cch-w49-s6: THE STALE REGRESSION — a moved team pin must NOT print the owner refusal to a real owner", async () => {
+  // The naive one-line delegation ships this bug: meState() is still "loaded"
+  // under a moved pin, so the old `meState() !== "loaded"` arm could not fire and
+  // control reached renderBillingReadOnly -> renderBillingManage(false).
+  const { h, nodes } = await w49s6Case(null, W49S6_ME_OWNER, { movePin: true });
+  assert.equal(h.billingOwnerAuthority(), "stale", "the pin moved, so the cached answer is not about this team");
+  assert.equal(h.meState(), "loaded", "…and meState() is STILL loaded — which is exactly why branching on it is not enough");
+
+  const manage = nodes["#billing-manage"].innerHTML;
+  assert.equal(manage.indexOf(W49S6_REFUSAL), -1,
+    "the accusing sentence must be unreachable from a stale answer — rendered bytes: " + JSON.stringify(manage.slice(0, 400)));
+  assert.ok(manage.includes("data-me-retry"), "…and the surface carries the exit that actually resolves the band");
+  assert.equal(manage.indexOf('id="plan-portal"'), -1, "fail-closed: no portal on an answer about another team");
+  assert.equal(nodes["#billing-cancel"].innerHTML, "", "fail-closed: no Cancel either");
+  assert.equal(nodes["#billing-tiers"].hidden, true, "…and the plan grid stays closed");
+
+  // THE AUTHORED STALE COPY (the row's fifth criterion): a stale answer does not
+  // borrow the unknown sentence. "Until it answers" is false here — the server
+  // answered fine, about a different team.
+  assert.ok(manage.includes("This answer was fetched for a different team"),
+    "the stale arm states ITS OWN reason, not the in-flight one");
+  assert.equal(manage.indexOf("Until it answers"), -1, "…and does not silently reuse the in-flight sentence");
+});
+
+test("cch-w49-s6: the three not-an-answer bands all route to the unknown surface, and only a DETERMINATE refuse reaches the member surface", async () => {
+  for (const [name, me, opts] of [
+    ["loading", null, {}],
+    ["failed", { error: "server_error" }, { meStatus: 500 }],
+    ["stale", W49S6_ME_OWNER, { movePin: true }],
+  ]) {
+    const { nodes } = await w49s6Case(null, me, opts);
+    const manage = nodes["#billing-manage"].innerHTML;
+    assert.ok(manage.includes("data-me-retry"), name + ": the unknown surface, which carries a retry");
+    assert.equal(manage.indexOf(W49S6_REFUSAL), -1, name + ": is NOT the member refusal surface");
+  }
+  const member = await w49s6Case(null, W49S6_ME_MEMBER, {});
+  assert.ok(member.nodes["#billing-manage"].innerHTML.includes(W49S6_REFUSAL),
+    "a CONFIRMED member still reads the honest sentence — the positive control that catches an over-wide fix");
+  assert.equal(member.nodes["#billing-manage"].innerHTML.indexOf("data-me-retry"), -1,
+    "…and is offered no retry, because nothing failed");
+});
+
+test("cch-w49-s6: the owner still gets the whole money screen — the fence is a fence, not a wall", async () => {
+  const { nodes } = await w49s6Case(null, W49S6_ME_OWNER, {});
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'), "an owner gets the Stripe portal button");
+  assert.ok(nodes["#billing-cancel"].innerHTML.includes('id="plan-cancel"'), "…and Cancel plan");
+  assert.equal(nodes["#billing-manage-section"].hidden, false, "…with the Manage section open");
+  assert.equal(nodes["#billing-cancel-section"].hidden, false, "…and the Cancel section open");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf(W49S6_REFUSAL), -1, "…and no refusal sentence anywhere");
+});
+
+// ── THE TWO MUTATION CONTROLS — the guard proving it can LOSE ───────────────
+// Both mutate app.js in memory and run the MUTANT through the identical driver.
+// They are the standing answer to "would this file have noticed?", which the
+// indexOf pin could not give: it greened on the first mutation and reddened on
+// a rename.
+
+test("cch-w49-s6 CONTROL: a FULL BYPASS above the fence is now caught (it left origin/main 1298/0 GREEN)", async () => {
+  const anchor = "    var band = billingOwnerAuthority();\n";
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const bypass = "    if (1) { renderPlanState(box); renderBillingManage(true); renderBillingCancel(true); return; }\n";
+  const mutant = APP_SRC.replace(anchor, bypass + anchor);
+  assert.ok(mutant.includes(bypass) && mutant.length > APP_SRC.length, "the mutation must have APPLIED");
+
+  // A plain member, driven through the mutant: the bypass hands them the
+  // owner's whole screen. On the shipped bytes the same drive refuses them
+  // (pinned by the member case above), so this assertion is the dissociation.
+  const { nodes } = await w49s6Case(mutant, W49S6_ME_MEMBER, {});
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'),
+    "the bypass really does hand a member the Stripe portal — that is the harm the grep could not see");
+  assert.ok(nodes["#billing-cancel"].innerHTML.includes('id="plan-cancel"'), "…and Cancel");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf(W49S6_REFUSAL), -1, "…and the refusal is gone");
+});
+
+test("cch-w49-s6 CONTROL: the band's terminal line reading ta.admin instead of ta.owner is caught BY NAME", async () => {
+  // The trap, as a mutation: this is precisely "convert billing to the admin
+  // band", and it is behaviour-identical for owners and members — only the
+  // admin:true/owner:false envelope separates them.
+  const anchor = "    return ta.owner ? \"grant\" : \"refuse\";\n  }\n\n  function billingIsOwner()";
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor, anchor.replace("ta.owner", "ta.admin"));
+  assert.ok(mutant !== APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes } = await w49s6Case(mutant, W49S6_ME_ADMIN, {});
+  assert.equal(h.billingOwnerAuthority(), "grant",
+    "the mutant grants a non-owner admin — which is why the shipped assertion above must say refuse");
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'),
+    "…and the harm is the live Stripe portal on the money screen, not a predicate value");
+
+  // The owner arm is UNCHANGED by the mutation, so a test that only drove an
+  // owner would have shipped this green. That is the point of the fixture.
+  const owner = await w49s6Case(mutant, W49S6_ME_OWNER, {});
+  assert.equal(owner.h.billingOwnerAuthority(), "grant", "an owner is granted by BOTH the mutant and the shipped bytes");
+});
+// ---------------------------------------------------------------------------
+// cch-w72-bl — THE GITHUB ARM SPEAKS: three curated truths, two honest silences.
+//
+// Charter D875 (github_error claims no specific cause), D878 (invalid_name is a
+// measured lie today), D881 (the seal). Every slug below is minted BARE —
+// `json(conn, S, %{error: "<slug>"})` with no `detail` and no `reason` — so none
+// of these entries is a relay and the 5xx detail-relay fence does not bind them.
+//
+// REACHABILITY LIMITS, recorded here and in the census file header (the two
+// durable venues this merge carries) — stated because none of the three has a
+// live capture, and a guess dressed as a measurement is the fault this wave
+// exists to kill:
+//
+//   github_error       — the three emit sites (router.ex GET /v1/github/repos;
+//                        the create_repo_from_template 502 arm of POST
+//                        /v1/github/repos; connect_site_github) each match the
+//                        cause AWAY before minting (`{:error, _reason}`,
+//                        `{:error, {:github_error, _reason}}`). Outage,
+//                        rate-limit and token-death are indistinguishable at the
+//                        wire. LIMIT: reachability is by construction (any GitHub
+//                        API fault), never captured live — which is precisely why
+//                        the sentence may name NO cause.
+//   invalid_name       — minted by the router's OWN `valid_repo_name?/1`
+//                        pre-check (router.ex:12708), not by GitHub. Human-typed
+//                        and human-reachable by construction: #new-gh-name is
+//                        free text and newCreateRepo POSTs it verbatim. LIMIT: no
+//                        live capture; the reachability proof is the free-text
+//                        input plus a deterministic server-side rule, and the
+//                        rule's location is why the copy does NOT say "GitHub
+//                        refused" (see below).
+//   repo_not_in_installation — human-reachable by construction via a TOCTOU
+//                        window: the repo picker's GET /v1/github/repos lists a
+//                        repo, the operator revokes it from the GitHub App
+//                        installation, and the connect POST then refuses. LIMIT:
+//                        that race has no live capture and cannot be driven from
+//                        a test — the D870 precedent for accepting a constructed
+//                        reachability proof. (Shipped in #12128; asserted here
+//                        for the first time alongside its two siblings.)
+
+test("cch-w72-bl D875: github_error names NO cause — it locates the fault and nothing more", () => {
+  // ONE entry, THREE emit sites: openSiteGithub's fallback and the
+  // newCreateRepo / submitSiteGithub fallback both lose to the curated rung.
+  for (const fb of ["Couldn't load your repositories.", "Please try again."]) {
+    const copy = hooks.friendly({ error: "github_error" }, fb);
+    assert.notEqual(copy, fb, "github_error still renders the caller's generic");
+    assert.equal(copy,
+      "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.");
+  }
+  const copy = hooks.friendly({ error: "github_error" }, "Please try again.");
+  // D875 — the emit DISCARDS the cause, so naming one would be an invention.
+  for (const cause of [/token/i, /expired/i, /revoked/i, /rate.?limit/i, /outage/i,
+                       /permission/i, /credential/i, /unauthori[sz]ed/i]) {
+    assert.ok(!cause.test(copy), "github_error claims a cause the emit discarded: " + cause);
+  }
+  // …and it does not blame the reader's input, which is the one thing the three
+  // emit sites do prove it is not.
+  assert.ok(/not your input/.test(copy), "github_error must locate the fault away from the reader");
+});
+
+test("cch-w72-bl D878: invalid_name names the refused NAME and the rule it broke — NO transience verb", () => {
+  const copy = hooks.friendly({ error: "invalid_name" }, "Please try again.");
+  assert.notEqual(copy, "Please try again.", "invalid_name still renders the caller's generic");
+  assert.equal(copy,
+    "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name.");
+  // It names the refused thing.
+  assert.ok(/repository name/i.test(copy), "the sentence must name what was refused");
+  // WHAT THE FILING GOT WRONG: the wave's ruled copy was "GitHub refused that
+  // repository name — pick a different name." Re-derived on origin/main, the
+  // slug is minted by `valid_repo_name?/1` BEFORE any GitHub call, so GitHub
+  // never saw the name. Attributing the refusal to GitHub is the same class of
+  // measured lie D878 was opened to remove, so this guard bans it BY NAME.
+  assert.ok(!/GitHub (refused|rejected|said|declined)/i.test(copy),
+    "invalid_name must not attribute a local pre-check refusal to GitHub: " + copy);
+  // The rule is deterministic and permanent for that name — no transience verb.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i,
+                      /temporar/i, /keeps happening/i]) {
+    assert.ok(!verb.test(copy), "invalid_name paints a permanent refusal as transient: " + verb);
+  }
+});
+
+test("cch-w75-s1 D883: repo_not_in_installation still renders the permanent truth — the pin now covers it", () => {
+  const copy = hooks.friendly({ error: "repo_not_in_installation" }, "Please try again.");
+  assert.equal(copy,
+    "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.");
+  // States only the lost-visibility fact + the one remedy. No transience verb:
+  // the state is permanent until access is re-granted, so retrying cannot work.
+  for (const verb of [/try again/i, /shortly/i, /in a moment/i, /retry/i, /wait/i, /temporar/i]) {
+    assert.ok(!verb.test(copy), "repo_not_in_installation paints a permanent state as transient: " + verb);
+  }
+});
+
+test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
+  // These are NOT paid, on purpose, and their census rows STAY:
+  //
+  //   installation_not_found  — POST /v1/github/installations has zero callers in
+  //                             app.js, internal/ or js/: no GitHub App
+  //                             setup_action callback consumer was ever built, so
+  //                             no person can reach the emit.
+  //   repo_full_name_required — guard-shielded: the connect select is built only
+  //                             when repos.length is nonzero and always submits a
+  //                             member of it; only a hand-built request omits it.
+  //
+  // A curated sentence for either would be copy for a reader that does not
+  // exist. This control reds if a future diff registers one WITHOUT retiring its
+  // census row — the mirror of the rot arm, on the JS side.
+  for (const slug of ["installation_not_found", "repo_full_name_required"]) {
+    for (const fb of ["Please try again.", "Couldn't load your repositories."]) {
+      assert.equal(hooks.friendly({ error: slug }, fb), fb,
+        slug + " gained an ERRORS entry — pay it in the census too, or drop the entry");
+    }
+  }
+  // Non-vacuity: the same call shape DOES resolve for the three slugs this arm
+  // did pay, so an equal-to-fallback green above is a real absence, not a broken
+  // rig.
+  for (const slug of ["github_error", "invalid_name", "repo_not_in_installation"]) {
+    assert.notEqual(hooks.friendly({ error: slug }, "Please try again."), "Please try again.",
+      slug + ": the control's rig is broken — every slug would look unregistered");
+  }
+});
+
+// ── cch-w49-s7 · THE CONSOLE STOPS OFFERING A CHECKOUT THE SERVER CAN ONLY
+//    REFUSE ────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT. #10509 shipped D554's `billing_capability` — `{checkout, plans}`
+// on GET /v1/subscription, both values computed by CALLING the context — and the
+// console read exactly ONE field of it (`checkout`, for cch-w50-bl's test-mode
+// disclosure) and NEVER `plans`. So on a deploy with no price ids, or no webhook
+// signing secret, or only HALF its catalog priced, priced Subscribe buttons stood
+// on the money screen, and the person learned the truth AFTER the click, from a
+// toast — a declaration with no consumer, which is the class
+// cch-w45-bl-console-never-consults-caps-catalog-before-mounting-a-catalog is
+// still open on.
+//
+// DRIVEN, NOT POKED. Every rendered-bytes arm below goes through the REAL
+// renderBilling → loadSubscription().then(...) path in its own vm realm (the
+// cch-w49-s6 rig above), with the capability arriving ON THE WIRE the way the
+// router puts it there. The one thing a source read could not tell us is whether
+// the console ACTS on the key, and that is precisely what these measure.
+//
+// FAIL-OPEN IS SAFE HERE, AND ONLY HERE. `unknown` leaves the CTAs standing
+// because Billing.checkout/2 refuses :unconfigured/:unverifiable pre-flight with
+// {:error, :billing_not_configured} and :test_mode with :billing_test_mode —
+// both on main (2a2b009c2 / d0a34d7a7 are proven ancestors of this branch), both
+// BEFORE create_checkout_session/3 is called. A stale page costs a refused click
+// and never a charged card.
+
+const W49S7_TRIAL_SUB = {
+  plan: "trial", status: "active", past_due: false, cancel_at_period_end: false,
+  current_period_end: "2030-01-01T00:00:00Z", canceled_at: null,
+  started_at: "2026-01-01T00:00:00Z", is_trial: true, trial_days_remaining: 14,
+};
+
+// The billing screen painted through the REAL renderBilling, with a
+// /v1/subscription 200 that carries whatever declaration this case is about.
+// `cap === undefined` omits the key entirely — the pre-D554 payload, and the
+// unknown arm. `status` drives the FAILED read.
+async function w49s7Paint(cap, opts) {
+  opts = opts || {};
+  const { h, box } = w49s6Realm(APP_SRC);
+  box.localStorage.setItem("bp.active-team", "t1");
+  await w49s6DriveMe(box, h, 200, W49S6_ME_OWNER);
+  const nodes = w49s6MountBilling(box);
+  const body = { subscription: opts.sub === undefined ? W49S7_TRIAL_SUB : opts.sub };
+  if (cap !== undefined) body.billing_capability = cap;
+  const saved = box.fetch;
+  box.fetch = fetchStub(opts.status || 200, body);
+  try { h.renderBilling(); await w49s6Settle(); } finally { box.fetch = saved; }
+  return {
+    h, box, nodes,
+    tiers: nodes["#billing-tiers"].innerHTML || "",
+    recommended: nodes["#billing-recommended"].innerHTML || "",
+  };
+}
+
+const w49s7Offers = (html) => (html.match(/data-plan="([a-z_]+)"/g) || []).map((m) => m.slice(11, -1));
+
+test("cch-w49-s7: billingCheckoutCapability is a NEW pure sibling over the PAYLOAD — five wire values, everything else unknown", () => {
+  assert.equal(typeof hooks.billingCheckoutCapability, "function");
+  // The four the filing named, plus `test_mode` — which cch-w50-bl added to
+  // Billing.checkout_capability/0 AND to the wire after this row was written. A
+  // four-valued reader would fold a REAL wire value into "unknown" and re-offer
+  // the very button that slice disabled, so it is carried by name.
+  for (const v of ["available", "unconfigured", "unverifiable", "test_mode"]) {
+    assert.equal(hooks.billingCheckoutCapability({ billing_capability: { checkout: v, plans: [] } }), v,
+      v + " must survive the read verbatim");
+  }
+  // Every malformed shape answers UNKNOWN — never a state that withdraws an
+  // affordance on the strength of a payload nobody can parse.
+  for (const bad of [
+    undefined, null, {}, "nonsense", 7, [],
+    { billing_capability: null }, { billing_capability: "unconfigured" },
+    { billing_capability: {} }, { billing_capability: { checkout: null } },
+    { billing_capability: { checkout: "UNCONFIGURED" } },
+    { billing_capability: { checkout: "made_up" } },
+    { checkout: "unconfigured" },              // the NESTING trap: not a sibling
+  ]) {
+    assert.equal(hooks.billingCheckoutCapability(bad), "unknown",
+      JSON.stringify(bad) + " must read as unknown");
+  }
+});
+
+test("cch-w49-s7: D439 — billingIsOwner / billingCanManage are NOT widened by this slice", () => {
+  // A NEW sibling, never a widening. If someone folded the capability into
+  // either of these, `if (billingIsOwner())` would be true for the STRING
+  // "unconfigured" — the exact fail-open D439 forbids. Both are pinned by BYTES
+  // (a diff that touches either body reds here) and by TYPE.
+  const src = APP_SRC;
+  assert.ok(src.includes('function billingIsOwner() { return billingOwnerAuthority() === "grant"; }'),
+    "billingIsOwner must still be exactly the two-valued delegation cch-w49-s6 landed");
+  assert.ok(src.includes("function billingCanManage(role) { return actorRoleIn(role, CONSOLE_OWNER_ROLES); }"),
+    "billingCanManage must still be exactly the role predicate");
+  assert.equal(typeof hooks.billingCanManage("owner"), "boolean");
+  assert.equal(typeof hooks.billingCanManage("member"), "boolean");
+  // …and the new sibling is a STRING, so the two can never be confused.
+  assert.equal(typeof hooks.billingCheckoutCapability({}), "string");
+});
+
+test("cch-w49-s7: OMIT, NOT DISABLE — an `unconfigured` plane renders ZERO offers in BOTH billing regions, and says why", async () => {
+  const r = await w49s7Paint({ checkout: "unconfigured", plans: [] });
+  // NON-VACUITY FIRST: the grid really painted, and the cards are all still
+  // there. Only the OFFER is gone — this is not an empty-screen green.
+  assert.equal(r.nodes["#billing-tiers"].hidden, false, "the trial actor's grid must be OPEN, or this arm proves nothing");
+  for (const q of ["Free", "Supporter", "Support++"]) {
+    assert.ok(r.tiers.includes(">" + q + "<"), "the tier card must still name " + q);
+  }
+  // THE ASSERTION, on rendered bytes, in both regions.
+  for (const [name, html] of [["#billing-tiers", r.tiers], ["#billing-recommended", r.recommended]]) {
+    assert.deepEqual(w49s7Offers(html), [], name + " must carry ZERO [data-plan]");
+    assert.ok(!/Subscribe/.test(html), name + " must carry no Subscribe affordance at all");
+  }
+  // NOT a disabled ghost: the label cch-w50-bl's test-mode arm wears must not be
+  // borrowed, and no button element may sit where the offer was.
+  assert.ok(!r.tiers.includes("Subscribe unavailable"),
+    "test_mode's labelled ghost is a DIFFERENT state — unconfigured OMITS (D428 keeps billing in the OMIT set)");
+  // THE SENTENCE, and it is the curated string that already existed at
+  // ERRORS.billing_not_configured — the copy the post-click toast has always
+  // used — rather than a mint.
+  assert.ok(r.tiers.includes("Billing isn&#39;t set up on this deployment yet."),
+    "the grid must state the fact in the curated copy");
+  assert.equal(hooks.billingOmissionCopy("unconfigured", ["Supporter"]),
+    "Billing isn't set up on this deployment yet.",
+    "…which is ERRORS.billing_not_configured, single-sourced");
+});
+
+test("cch-w49-s7: PARTIAL WIRING IS KILLED — `available` with ONE priced plan offers exactly that one", async () => {
+  // The state the filing is really about: configured? is true, so the old
+  // console offered all three, and the tier whose price_id is nil answered
+  // plan_invalid — "That plan can't be checked out." — blaming the person for
+  // the DEPLOY. priced_plans/0 lists exactly the plans whose price resolved.
+  const r = await w49s7Paint({ checkout: "available", plans: ["supporter"] });
+  assert.deepEqual(w49s7Offers(r.tiers), ["supporter"],
+    "exactly ONE Subscribe renders, and it is the plan the server declared priced");
+  assert.ok(!r.tiers.includes('data-plan="support_plus"'), "the unpriced paid tier offers nothing");
+  assert.ok(r.tiers.includes(">Support++<"), "…while its CARD still renders — omitted, not deleted");
+  assert.ok(r.tiers.includes("Support++ isn&#39;t set up for checkout on this deployment yet."),
+    "the omitted tier is NAMED, because at this capability the fact is per-tier");
+  // The plural form, and the shape of the sentence, pinned pure.
+  assert.equal(hooks.billingOmissionCopy("available", ["Supporter", "Support++"]),
+    "Supporter and Support++ aren't set up for checkout on this deployment yet.");
+  assert.equal(hooks.billingOmissionCopy("available", []), "",
+    "nothing withheld says nothing");
+});
+
+test("cch-w49-s7: `unverifiable` gets its OWN sentence and does NOT collapse into `unconfigured`", async () => {
+  const bad = await w49s7Paint({ checkout: "unverifiable", plans: ["supporter", "support_plus"] });
+  const none = await w49s7Paint({ checkout: "unconfigured", plans: [] });
+  assert.deepEqual(w49s7Offers(bad.tiers), [], "unverifiable withdraws every offer too — a card WOULD be charged");
+  const said = (html) => (html.match(/<p class="dim tier-omit-note">([\s\S]*?)<\/p>/) || [])[1] || "";
+  const unverifiable = said(bad.tiers);
+  const unconfigured = said(none.tiers);
+  assert.ok(unverifiable.length > 0 && unconfigured.length > 0, "both states must SAY something");
+  assert.notEqual(unverifiable, unconfigured,
+    "the two states are not the same event: unconfigured touches no card, unverifiable CHARGES one that can never activate");
+  // The distinguishing claim is present in one and absent from the other, in
+  // both directions — a mere length difference would not prove they discriminate.
+  assert.ok(/could never activate/.test(unverifiable), "unverifiable must name the consequence: the money moves and activation cannot land");
+  assert.ok(!/could never activate/.test(unconfigured), "unconfigured must NOT borrow it — no card is touched in that state");
+  assert.ok(/set up on this deployment yet/.test(unconfigured));
+  assert.ok(!/set up on this deployment yet/.test(unverifiable));
+});
+
+test("cch-w49-s7: UNKNOWN IS FAIL-OPEN — an absent key AND a failed read both leave the CTAs standing", async () => {
+  // The pre-D554 payload: the key is simply not there.
+  const absent = await w49s7Paint(undefined);
+  assert.deepEqual(w49s7Offers(absent.tiers).sort(), ["support_plus", "supporter"],
+    "an undeclared capability must render exactly what it rendered before this slice");
+  assert.ok(!absent.tiers.includes("tier-omit-note"), "…and must say nothing, because nothing was withheld");
+  // A read that FAILED. loadSubscription leaves capCache untouched on a non-200,
+  // so the capability is unknown and the affordance stands. Hiding it here would
+  // refuse a real owner on a working deploy over one blipped GET.
+  const failed = await w49s7Paint({ checkout: "unconfigured", plans: [] }, { status: 500 });
+  assert.equal(failed.h.checkoutCapability(), "", "a failed read must never write the cache");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "unconfigured" } }), false);
+  assert.equal(hooks.billingPlanOffered("supporter", {}), true, "unknown offers");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "available" } }), true,
+    "a declaration with no readable plan LIST is a shape we were not told about — unknown, not a refusal");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "available", plans: "supporter" } }), true,
+    "…and a non-array `plans` is the same unknown, never a substring match");
+});
+
+test("cch-w49-s7: test_mode keeps cch-w50-bl's labelled ghost — this slice neither widens nor restructures it", async () => {
+  const r = await w49s7Paint({ checkout: "test_mode", plans: ["supporter", "support_plus"] });
+  assert.deepEqual(w49s7Offers(r.tiers), [], "test_mode was ALREADY unwired");
+  assert.ok(r.tiers.includes("Subscribe unavailable"), "…by a LABELLED disabled button, which stays");
+  assert.ok(r.tiers.includes("Checkout runs in Stripe test mode — no real card can pay."),
+    "…carrying the server's own sentence, single-sourced");
+  assert.ok(!r.tiers.includes("tier-omit-note"),
+    "and this slice adds NO second sentence on top of it — test_mode already explains itself");
+  assert.equal(hooks.billingPlanOffered("supporter", { billing_capability: { checkout: "test_mode", plans: [] } }), true,
+    "the offer predicate answers true so tierCardHtml's OWN test-mode arm — which runs first — keeps rendering it");
+});
+
+test("cch-w49-s7: BOTH grid builders are paid — launchPlanGridHtml threads the capability through its EXISTING withCta omit fork", () => {
+  const pay = (cap) => (cap === undefined ? {} : { billing_capability: cap });
+  const owner = hooks.launchPlanGridHtml("owner", pay(undefined));
+  assert.deepEqual(w49s7Offers(owner).sort(), ["support_plus", "supporter"], "unknown leaves /new's and the fold's CTAs standing");
+
+  const none = hooks.launchPlanGridHtml("owner", pay({ checkout: "unconfigured", plans: [] }));
+  assert.deepEqual(w49s7Offers(none), [], "an unconfigured plane offers nothing here either");
+  assert.ok(!/<button/.test(none), "OMIT: no button at all, never a disabled ghost");
+  assert.ok(none.includes("Billing isn&#39;t set up on this deployment yet."), "…and it says why, in curated copy");
+  assert.ok(none.includes('<div class="new-tiers">'), "the cards themselves still render — non-vacuity");
+
+  const half = hooks.launchPlanGridHtml("owner", pay({ checkout: "available", plans: ["support_plus"] }));
+  assert.deepEqual(w49s7Offers(half), ["support_plus"], "partial wiring is killed on this builder too");
+  assert.ok(half.includes("Supporter isn&#39;t set up for checkout on this deployment yet."));
+
+  // THE EXISTING FORK IS REUSED, NOT DUPLICATED: a blocked principal still gets
+  // LAUNCH_OWNER_ONLY_COPY and no CTA, and the capability sentence does NOT pile
+  // on top of it — that person was refused for a different reason and there is
+  // nothing to tell them about the deploy's Stripe config.
+  const blocked = hooks.launchPlanGridHtml("blocked", pay({ checkout: "unconfigured", plans: [] }));
+  assert.deepEqual(w49s7Offers(blocked), []);
+  assert.ok(blocked.includes(hooks.launchOwnerOnlyCopy.slice(0, 40)), "the authority sentence stays the one it always was");
+  assert.ok(!blocked.includes("Billing isn&#39;t set up on this deployment yet."),
+    "a blocked principal is not told about the deploy's billing config — they were already refused");
+
+  // 2-arg is the live shape; the 1-arg call every pre-slice caller made must be
+  // byte-identical, so no committed fixture moves.
+  assert.equal(hooks.launchPlanGridHtml("owner"), owner);
+  assert.equal(hooks.launchPlanGridHtml("blocked"), hooks.launchPlanGridHtml("blocked", {}));
+});
+
+test("cch-w49-s7: /new's added /v1/subscription read follows renderNewPricing's OWN mounted-screen re-check pattern", () => {
+  const region = appRegion(APP_SRC, "  function newAskCheckoutCapability(", "  function renderNewPricing(");
+  // ONE conditional read, asked at most once, and only while nothing is known.
+  assert.ok(/if \(newPricingCapAsked \|\| capCache\) return;/.test(region), "asked once, and never over a known capability");
+  assert.ok(/api\("GET", "\/v1\/subscription"\)/.test(region), "…and it is the route that carries the declaration");
+  // The fail-open: a non-200 leaves the cache untouched.
+  assert.ok(/if \(!r\.ok \|\| !r\.data \|\| !r\.data\.billing_capability\) return;/.test(region),
+    "a failed read must write nothing — unknown, not refused");
+  // The mounted-screen re-check, the same three clauses the /v1/me read above it
+  // already commits to, in the same order.
+  for (const clause of [
+    'var body = $("#new-body");',
+    'if (!body || typeof body.querySelector !== "function") return;',
+    'if (!body.querySelector(".new-pricing")) return;',
+    'if (body.querySelector(".new-plan[disabled]")) return;',
+  ]) assert.ok(region.includes(clause), "the repaint must re-check: " + clause);
+  // The repaint passes the authority THROUGH — renderNewPricing(tpl) alone would
+  // re-enter its `if (!authority)` arm and fire a second /v1/me.
+  assert.ok(/renderNewPricing\(tpl, authority\);/.test(region), "the repaint must not re-trigger the /v1/me read");
+  const pricing = appRegion(APP_SRC, "  function renderNewPricing(", "\n  function newClearTimers(");
+  assert.ok(pricing.includes("newAskCheckoutCapability(tpl, known);"), "…and renderNewPricing must actually call it");
+});
+
+test("cch-w49-s7: the corpus assertion reads innerHTML STRINGS and is NOT built on a #plan-more click", () => {
+  // smoke's DOM shim is flat: a `querySelectorAll("[data-plan]")` there matches
+  // NOTHING and would go green over a grid full of buttons. And D551: listeners
+  // accumulate on #plan-more, so an even number of clicks leaves the toggle dead
+  // — an assertion built on one would be measuring the toggle, not the offer.
+  const smoke = fs.readFileSync(new URL("./__preview__/smoke.mjs", import.meta.url), "utf8");
+  const arm = appRegion(smoke, '  "billing-unconfigured": {', '  // ── gr-p2 launch theater');
+  assert.ok(arm.length > 0, "the corpus arm must exist");
+  assert.ok(arm.includes('reg.get("billing-tiers").innerHTML'), "it reads the grid's BYTES");
+  assert.ok(arm.includes('reg.get("billing-recommended").innerHTML'), "…and the recommended region's");
+  assert.ok(!/querySelector/.test(arm), "no selector may appear in it — the shim is flat");
+  assert.ok(!/plan-more/.test(arm), "and it must not depend on a #plan-more click (D551)");
+  assert.ok(/hidden, false/.test(arm), "it must first prove the grid was OPEN, or the zero-offer claim is vacuous");
 });

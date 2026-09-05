@@ -1,0 +1,1 @@
+A test asserts the wire shape the ingest controller emits for a dedup outage — status, code, and retry-shaped wording — and fails if the arm is deleted.

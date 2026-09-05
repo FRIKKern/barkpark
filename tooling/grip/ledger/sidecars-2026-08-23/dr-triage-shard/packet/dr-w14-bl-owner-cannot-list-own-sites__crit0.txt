@@ -1,0 +1,1 @@
+A site owner can enumerate their own sites from the CLI with a session credential, and the output names each site's slug

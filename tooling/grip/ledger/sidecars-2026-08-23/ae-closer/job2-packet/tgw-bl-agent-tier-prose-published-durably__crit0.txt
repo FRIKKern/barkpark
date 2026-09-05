@@ -1,0 +1,1 @@
+Every published code paper either carries an explicit agent-tier marker or is gated by tooling/grip - evidence: paste a fetched document showing the marker or the gate refusal

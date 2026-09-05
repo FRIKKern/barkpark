@@ -1679,7 +1679,27 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           "claude chat: stdout buffer #{buffered} bytes exceeds #{cap}-byte cap; closing session"
         )
 
-        if port in Port.list(), do: Port.close(port)
+        # SAME SHAPE AS terminate/2, AND FOR THE SAME REASON (#13576).
+        # `if port in Port.list(), do: Port.close(port)` is a check-then-act:
+        # the port can die between the membership test and the close, and then
+        # `Port.close/1` raises badarg. #13576 removed that shape from
+        # terminate/2 and left this twin standing. The overflow stub exits the
+        # instant it finishes flooding, so the port dies at precisely the
+        # moment the cap fires — the window is not incidental here, it is the
+        # scenario. CI recorded the raise on 2026-08-24 (elixir Test), and the
+        # test saw it as the overflow message never arriving:
+        #
+        #   {:DOWN, ..., {:badarg, [{:erlang, :port_close, [#Port<0.536>], ...},
+        #                 {ClaudeChat.Session, :handle_info, 2, claude_chat.ex}]}}
+        #
+        # Raising here also skipped the `send` below AND turned the intended
+        # `{:stop, :normal, ...}` into a crash, so the sink was told nothing.
+        # Rescue the close alone; the stop and the named error always follow.
+        try do
+          Port.close(port)
+        rescue
+          _ -> :ok
+        end
 
         send(
           state.sink,

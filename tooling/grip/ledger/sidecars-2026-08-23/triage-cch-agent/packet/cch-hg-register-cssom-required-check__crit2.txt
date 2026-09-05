@@ -1,0 +1,1 @@
+The recorded branch-protection snapshot includes repository, branch, exact check context, actor, and timestamp without claiming the setting changed before read-back proves it.

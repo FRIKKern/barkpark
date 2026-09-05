@@ -1,0 +1,1 @@
+app.css:5225's second imprecision is fixed, not just its shape: the citing sentence no longer claims :2270 covers `.detail-rail`, which :2270 does not state. Evidence: the before/after text of that comment.

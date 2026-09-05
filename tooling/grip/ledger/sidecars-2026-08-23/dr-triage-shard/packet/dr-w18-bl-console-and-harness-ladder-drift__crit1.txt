@@ -1,0 +1,1 @@
+The fix is built and its gate is green - paste the exact command and the tail of the run.

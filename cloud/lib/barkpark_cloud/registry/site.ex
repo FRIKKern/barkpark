@@ -254,9 +254,13 @@ defmodule BarkparkCloud.Registry.Site do
     |> validate_domains()
     |> assoc_constraint(:barkpark)
     |> assoc_constraint(:team)
-    |> unique_constraint([:team_id, :slug],
+    # cch-w37-bl — see `TeamInvitation.changeset/2`. Opening the list with the
+    # `belongs_to` key made POST /v1/sites answer "team id already has a site
+    # with this slug" for a duplicate name; `:slug` is the field the creator
+    # typed (or the one `slugify/1` derived from the name they typed).
+    |> unique_constraint([:slug, :team_id],
       name: :sites_team_slug_unique_idx,
-      message: "already has a site with this slug"
+      message: "is already taken by another site on this team"
     )
   end
 

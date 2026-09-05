@@ -65,6 +65,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
+      {"batch_too_large/mutate-gate", {:error, {:batch_too_large, 1001, 1000}}, "batch_too_large",
+       422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},
       {"schema_unknown", {:error, :schema_unknown}, "schema_unknown", 404, []},
@@ -72,6 +74,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # Same registered `malformed` code, one step narrower: a block list whose
+      # element is not an object. It rides `malformed` on purpose (a request-body
+      # SHAPE error, not a schema validation failure), so known_codes/0 and the
+      # OpenAPI Error.code enum stay unchanged — and it carries `details` naming
+      # every offending path, which is the only way it differs from the row above.
+      {"malformed_blocks",
+       {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}}, "malformed",
+       400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -96,6 +106,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # transient-storage code (one code = one status: `halted` stays 409),
       # `reason` discriminating it from a media-volume fault.
       {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}},
+       "storage_unavailable", 503, [:reason]},
+      # THE OTHER OUTAGE (task-a0ce4e18f6776400) — the connection dropped
+      # MID-WRITE on the create path rather than during the dedup scan, so
+      # unlike the arm above the write is AMBIGUOUS. Same public code, same 503,
+      # its own `reason` and its own hint (which says to check for the debris
+      # before resending). Pinned here so a later status edit to either transient
+      # arm cannot move the other one silently.
+      {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
        "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},

@@ -69,7 +69,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
       {:ok, raw} = Accounts.build_email_token(user, "reset")
 
       body =
-        post_json(build_conn(), "/v1/auth/reset", %{
+        post_json(scoped_conn(), "/v1/auth/reset", %{
           token: raw,
           password: "a-brand-new-password"
         })
@@ -87,7 +87,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
       {:ok, raw} = Accounts.build_email_token(user, "reset")
 
       body =
-        post_json(build_conn(), "/v1/auth/reset", %{
+        post_json(scoped_conn(), "/v1/auth/reset", %{
           token: raw,
           password: "another-brand-new-password"
         })
@@ -106,7 +106,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
       {:ok, {token, _}} = Scim.mint_token(org.id, "pds-w36")
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{token}")
         |> put_req_header("content-type", "application/json")
 
@@ -132,7 +132,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
              "the active oracle answers false before any deprovision — it is not reading the rows"
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{token}")
         |> put_req_header("content-type", "application/json")
         |> patch("/scim/v2/Users/#{user.id}", Jason.encode!(%{"active" => false}))
@@ -163,7 +163,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
       seed_sessions!(user, 3)
       assert live_session_count(user.id) == 3
 
-      assert build_conn()
+      assert scoped_conn()
              |> put_req_header("authorization", "Bearer #{token}")
              |> delete("/scim/v2/Users/#{user.id}")
              |> response(204)

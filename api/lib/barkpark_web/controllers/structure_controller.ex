@@ -49,6 +49,10 @@ defmodule BarkparkWeb.StructureController do
     |> put_present(:type, node.type && Atom.to_string(node.type))
     |> put_present(:typeName, node.type_name)
     |> put_present(:filter, node.filter)
+    # Gyldendal parity E3.2 — additive keys; a client that ignores them keeps
+    # the legacy "document id == type name" reading.
+    |> put_present(:docId, node.doc_id)
+    |> put_present(:orderings, node.orderings)
     |> put_items(node.items)
     |> put_child(node.child)
   end

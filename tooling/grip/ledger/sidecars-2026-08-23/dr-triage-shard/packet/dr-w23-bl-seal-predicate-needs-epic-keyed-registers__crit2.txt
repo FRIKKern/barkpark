@@ -1,0 +1,1 @@
+A test reproduces the contamination on the OLD shape and fails on the NEW one — the guard is proved able to lose.

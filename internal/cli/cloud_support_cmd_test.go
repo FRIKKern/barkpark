@@ -1901,3 +1901,69 @@ func TestSupportDNSForSatisfiesRecordLister(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudSupportAddRefusesOnlineWithoutMeasuredCapacity pins the CAPACITY half
+// of the online-with-capacity gate — the half TestCloudSupportAddOnlineTimeout
+// cannot see, because its fixture row is status:"provisioning" and so is refused
+// on the STATUS axis before the capacity is ever consulted.
+//
+// The lie this refuses: a listener whose row reads a perfectly good status but
+// carries no measured capacity is NOT online-with-capacity, and `bp cloud support
+// add` must not print "✓ online — hex reads idle with capacity {} on the main's
+// roster" for it. The receipt names a measurement, so a measurement must exist.
+//
+// MUTATION-PROVEN: deleting `hasCap && len(capMap) > 0` from stepOnline
+// (cloud_support_cmd.go, the online-with-capacity condition) leaves the ENTIRE
+// internal/cli suite green and reds only this test — both subtests, each printing
+// the receipt the CLI would have handed the operator.
+func TestCloudSupportAddRefusesOnlineWithoutMeasuredCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  map[string]any
+	}{
+		{
+			// The row never carried a capacity key at all.
+			name: "capacity absent",
+			row:  map[string]any{"worker": "hex", "status": "idle"},
+		},
+		{
+			// The key is there and the measurement is EMPTY — the shape that
+			// renders as literally "capacity {}" in the receipt.
+			name: "capacity empty",
+			row:  map[string]any{"worker": "hex", "status": "idle", "capacity": map[string]any{}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			supportEnvIsolate(t)
+			runner := newFakeSupportRunner()
+			supportHappyWiring(t, runner)
+			main := newSupportMainRecorder()
+			main.rosterRow = tc.row
+			srv := main.serve(t)
+			supportSeedCP(t, srv.URL)
+
+			stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+
+			if code == exitOK {
+				t.Errorf("a listener whose roster row carries NO measured capacity (%v) was accepted as "+
+					"online-with-capacity — exit OK.\nstdout:\n%s", tc.row["capacity"], stdout)
+			}
+			for _, claim := range []string{"✓ online —", "is ONLINE"} {
+				if strings.Contains(stdout, claim) || strings.Contains(stderr, claim) {
+					t.Errorf("the receipt claims %q for a row with no measured capacity — the sentence names a "+
+						"measurement the main never reported.\nstdout:\n%s\nstderr:\n%s", claim, stdout, stderr)
+				}
+			}
+			if !strings.Contains(stderr, "never faking online") {
+				t.Errorf("the honest refusal line is missing — a poll that never saw capacity must SAY so.\nstderr:\n%s", stderr)
+			}
+			// The status axis is genuinely satisfied here, so a green on this test
+			// can only come from the capacity axis: assert the fixture really did
+			// present a good status, or the whole case would be vacuous.
+			if !strings.Contains(stderr, "last read: idle") {
+				t.Errorf("fixture drift: the poll never read the good status this case exists to hold fixed — "+
+					"the capacity axis was not the thing under test.\nstderr:\n%s", stderr)
+			}
+		})
+	}
+}

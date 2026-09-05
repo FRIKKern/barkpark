@@ -76,6 +76,27 @@ defmodule Barkpark.Content.Graph do
   @corpus_page_size 1000
   @corpus_max_pages 20
 
+  # Bound on the WHOLE-CORPUS scans behind `/v1/graph/orphans` and
+  # `/v1/graph/dangling`. Both used to be unbounded `Repo.all/1`s over every
+  # published document in scope, and `dangling/1` then paid a per-document
+  # reference-resolution fold on top — so a large tenant's click materialised
+  # the entire corpus into the BEAM. Five times the traversal `@node_budget`,
+  # so the derived surfaces stay strictly more generous than the graph walk
+  # they summarise, and small enough that a runaway dataset truncates instead
+  # of exhausting the node.
+  @corpus_scan_limit 5_000
+
+  @doc """
+  The derived-corpus scan bound (`orphans_bounded/1` / `dangling_bounded/1`).
+
+  Config-overridable (`:barkpark, :graph_corpus_scan_limit`) for TESTS ONLY —
+  the same escape hatch `/v1/graph`'s node budget has, and for the same reason:
+  a bound whose only proof needs 5,001 fixture rows is a bound nobody tests.
+  """
+  @spec corpus_scan_limit() :: pos_integer()
+  def corpus_scan_limit,
+    do: Application.get_env(:barkpark, :graph_corpus_scan_limit, @corpus_scan_limit)
+
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
@@ -171,7 +192,12 @@ defmodule Barkpark.Content.Graph do
     node_ids = MapSet.to_list(state.visited)
     all_edges = Enum.reverse(state.edges) |> Enum.uniq()
 
-    real_nodes = hydrate_nodes(node_ids, opts)
+    # Hydrate ONCE and KEEP the structs: `phantom_nodes/4` used to re-read every
+    # one of these rows through a keyed `Repo.one` per traversed
+    # node, up to @node_budget of them) because hydration discarded the struct
+    # and handed on only the rendered node map.
+    hydrated_docs = hydrate_docs(node_ids, opts)
+    real_nodes = Enum.map(hydrated_docs, &node_map/1)
 
     # Owner/tenancy ACL on the EDGE list (MEDIUM-5, edge-half). The BFS crosses
     # ownership boundaries freely (no per-node ACL inside `bfs/7`), and node
@@ -188,7 +214,7 @@ defmodule Barkpark.Content.Graph do
         MapSet.member?(surviving_ids, from) and MapSet.member?(surviving_ids, to)
       end)
 
-    phantoms = phantom_nodes(real_nodes, edges, perspective, opts)
+    phantoms = phantom_nodes(hydrated_docs, edges, perspective, opts)
     nodes = real_nodes ++ phantoms
 
     dependents =
@@ -672,48 +698,79 @@ defmodule Barkpark.Content.Graph do
   # its title/doc_id/type. An unscoped caller (`opts` without `:workspace_id`,
   # e.g. a single-tenant back-compat read) keeps the global read via the
   # `_or_global` bridge, matching the documented Scope posture.
-  defp hydrate_nodes([], _opts), do: []
+  defp hydrate_docs([], _opts), do: []
 
-  defp hydrate_nodes(ids, opts) do
+  defp hydrate_docs(ids, opts) do
     Document
     |> where([d], d.id in ^ids)
     |> scope_query(opts)
     |> Repo.all()
-    |> Enum.map(fn %Document{} = d ->
-      %{
-        id: d.id,
-        doc_id: d.doc_id,
-        type: d.type,
-        title: d.title,
-        phantom: false
-      }
-    end)
+  end
+
+  defp node_map(%Document{} = d) do
+    %{
+      id: d.id,
+      doc_id: d.doc_id,
+      type: d.type,
+      title: d.title,
+      phantom: false
+    }
   end
 
   # Phantom (ghost) nodes — dangling targets that are NOT in `content_edges`
   # (the FK forbids them) so they never appear as a real node. We re-derive them
   # by re-extracting the visited source docs and keeping the dangling targets,
   # capped @ghost_cap per source with a '+N more broken' overflow marker.
-  defp phantom_nodes(real_nodes, _edges, _perspective, opts) do
+  defp phantom_nodes(hydrated_docs, _edges, _perspective, opts) do
     dataset = Keyword.get(opts, :dataset)
 
     if is_nil(dataset) do
       []
     else
-      real_nodes
-      |> Enum.flat_map(fn node ->
-        case fetch_doc(node.id, opts) do
-          %Document{} = doc ->
-            doc
-            |> Content.extract_edges(opts)
-            |> Enum.filter(& &1.dangling)
-            |> cap_ghosts(node.doc_id)
+      # `hydrated_docs` are the SAME rows `hydrate_docs/2` just read (already
+      # tenancy-scoped by `scope_query/2`), so the per-node keyed re-read is
+      # gone. `:schemas` is hoisted per distinct dataset — the
+      # prefetch contract `edges.ex` documents at its `:schemas` note.
+      edge_opts_for = schema_prefetch_fun(hydrated_docs, opts)
 
-          _ ->
-            []
-        end
+      hydrated_docs
+      |> Enum.flat_map(fn %Document{} = doc ->
+        doc
+        |> Content.extract_edges(edge_opts_for.(doc))
+        |> Enum.filter(& &1.dangling)
+        |> cap_ghosts(doc.doc_id)
       end)
       |> Enum.uniq_by(& &1.broken_id)
+    end
+  end
+
+  # Hoist ONE `Content.list_schemas/2` per DISTINCT dataset above a
+  # per-document `extract_edges/2` fold, and return the per-doc opts builder.
+  #
+  # This is the contract `edges.ex` records at its `:schemas` note — "a
+  # 4096-document corpus issued 4096 identical schema queries (the dominant
+  # cost in the /v1/graph derivation — measured live: a 34s first paint)" —
+  # and `Edges.corpus_edges_for_docs/3` honors with the same
+  # `Keyword.put_new_lazy(:schemas, ...)` shape. `graph.ex` is the call site
+  # that fix never reached.
+  #
+  # Keyed by the DOCUMENT's dataset, not `opts[:dataset]`: the graph traversal
+  # is not dataset-filtered, so a fold can span datasets and a single hoisted
+  # list would resolve the wrong schema for an out-of-dataset row. Grouping
+  # keeps `extract_edges/2` byte-identical per document while making the query
+  # count O(distinct datasets) instead of O(documents). A caller that already
+  # supplies `:schemas` is passed through untouched.
+  defp schema_prefetch_fun(docs, opts) do
+    if Keyword.has_key?(opts, :schemas) do
+      fn _doc -> opts end
+    else
+      by_dataset =
+        docs
+        |> Enum.map(& &1.dataset)
+        |> Enum.uniq()
+        |> Map.new(fn ds -> {ds, Content.list_schemas(ds, opts)} end)
+
+      fn %Document{dataset: ds} -> Keyword.put(opts, :schemas, Map.fetch!(by_dataset, ds)) end
     end
   end
 
@@ -750,13 +807,6 @@ defmodule Barkpark.Content.Graph do
     else
       ghosts
     end
-  end
-
-  # Scoped keyed read for phantom re-extraction. Same tenancy posture as
-  # `hydrate_nodes/2`: a node.id that belongs to another tenant resolves to nil
-  # (and contributes no phantoms) instead of being re-read across the boundary.
-  defp fetch_doc(id, opts) do
-    Document |> where([d], d.id == ^id) |> scope_query(opts) |> Repo.one()
   end
 
   defp render_edge(%Edge{} = e) do
@@ -839,7 +889,7 @@ defmodule Barkpark.Content.Graph do
         # by `docs_by_id/2`'s `scope_to_owner`), or out-of-tenant — is REJECTED
         # entirely. Emitting a stub (its UUID as `from_id`/`title`) would leak
         # the existence of an inbound link the caller may not see; dropping it
-        # matches `hydrate_nodes/2`'s "hydrates to NOTHING" tenancy posture and
+        # matches `hydrate_docs/2`'s "hydrates to NOTHING" tenancy posture and
         # `PaperBacklinks.section_html`, which already renders nil-source rows
         # as empty.
         inbound
@@ -875,19 +925,63 @@ defmodule Barkpark.Content.Graph do
   `:dataset`). Returns hydrated node maps.
   """
   @spec orphans(keyword()) :: [map()]
-  def orphans(opts \\ []) do
-    connected =
-      from(e in Edge, select: e.from_id)
-      |> union(^from(e in Edge, select: e.to_id))
-      |> Repo.all()
-      |> MapSet.new()
+  def orphans(opts \\ []), do: orphans_bounded(opts).orphans
 
-    scoped_docs_query(opts)
-    |> Repo.all()
-    |> Enum.reject(fn d -> MapSet.member?(connected, d.id) end)
-    |> Enum.map(fn d ->
-      %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
-    end)
+  @doc """
+  `orphans/1` with the BOUND REPORTED — `%{orphans: rows, count: n, limit: l,
+  truncated: bool}`.
+
+  The scan bound (`@corpus_scan_limit`) has always been there; what was missing
+  was any way for a caller to know it FIRED. A bare list that stops at 5,000 is
+  indistinguishable from a corpus that happens to hold exactly 5,000 orphans,
+  and `/v1/graph/orphans` shipped that ambiguity to clients as if it were the
+  whole answer. This reads `limit + 1` rows and drops the probe row, so
+  `truncated` is a MEASUREMENT, not a guess — the same honesty contract
+  `/v1/graph` already holds for its node budget.
+  """
+  @spec orphans_bounded(keyword()) :: %{
+          orphans: [map()],
+          count: non_neg_integer(),
+          limit: pos_integer(),
+          truncated: boolean()
+        }
+  def orphans_bounded(opts \\ []) do
+    # The connected-set is a correlated NOT EXISTS against the SCOPED document
+    # subquery, not a UNION of every `content_edges` endpoint in the instance.
+    #
+    # The old shape read `select from_id UNION select to_id` over the WHOLE
+    # table with no tenancy predicate and no LIMIT, then built a MapSet in the
+    # BEAM — so a five-document workspace materialised every edge endpoint UUID
+    # belonging to every OTHER tenant on the box, and its cost scaled with the
+    # largest tenant's edge count. `content_edges` carries no scope column BY
+    # DESIGN (migration 20260614230000: scope is inherited from the endpoints),
+    # so the tenancy filter cannot be a `where` on the edge — it has to be this
+    # correlation to the already-scoped document row.
+    connected =
+      from(e in Edge,
+        where: e.from_id == parent_as(:doc).id or e.to_id == parent_as(:doc).id,
+        select: 1
+      )
+
+    rows =
+      from(d in subquery(scoped_docs_query(opts)),
+        as: :doc,
+        where: not exists(connected),
+        order_by: [asc: d.inserted_at, asc: d.id],
+        # +1 PROBE ROW: read one past the bound so a full page can be told
+        # apart from an exactly-full corpus. The probe is dropped below.
+        limit: ^(corpus_scan_limit() + 1)
+      )
+      |> Repo.all()
+      |> Enum.map(fn d ->
+        %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
+      end)
+
+    limit = corpus_scan_limit()
+    truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
+
+    %{orphans: rows, count: length(rows), limit: limit, truncated: truncated}
   end
 
   @doc """
@@ -900,17 +994,59 @@ defmodule Barkpark.Content.Graph do
   Returns `[%{from_id, to_id, via_field, refType}]`.
   """
   @spec dangling(keyword()) :: [map()]
-  def dangling(opts \\ []) do
-    scoped_docs_query(opts)
-    |> Repo.all()
-    |> Enum.flat_map(fn doc ->
-      doc
-      |> Content.extract_edges(opts)
-      |> Enum.filter(& &1.dangling)
-      |> Enum.map(fn e ->
-        %{from_id: e.from_id, to_id: e.to_id, via_field: e.field, refType: e.refType}
+  def dangling(opts \\ []), do: dangling_bounded(opts).dangling
+
+  @doc """
+  `dangling/1` with the BOUND REPORTED — `%{dangling: rows, count: n, limit: l,
+  truncated: bool}`. See `orphans_bounded/1` for why the bare list was dishonest.
+
+  TWO ceilings here, and `truncated` goes true when EITHER fires: the document
+  SCAN bound (the corpus walk stops at `limit` docs — the pre-existing one) and
+  the ROW bound (one document can emit many broken references, so the folded
+  output was unbounded even though its input was not).
+  """
+  @spec dangling_bounded(keyword()) :: %{
+          dangling: [map()],
+          count: non_neg_integer(),
+          limit: pos_integer(),
+          truncated: boolean()
+        }
+  def dangling_bounded(opts \\ []) do
+    scanned =
+      scoped_docs_query(opts)
+      |> order_by([d], asc: d.inserted_at, asc: d.id)
+      # +1 probe row, exactly as in `orphans_bounded/1`.
+      |> limit(^(corpus_scan_limit() + 1))
+      |> Repo.all()
+
+    limit = corpus_scan_limit()
+    scan_truncated = length(scanned) > limit
+    docs = Enum.take(scanned, limit)
+
+    # ONE schema read for the whole fold (per distinct dataset) instead of one
+    # per document — see `schema_prefetch_fun/2` and the `edges.ex` `:schemas`
+    # contract it restores.
+    edge_opts_for = schema_prefetch_fun(docs, opts)
+
+    rows =
+      Enum.flat_map(docs, fn doc ->
+        doc
+        |> Content.extract_edges(edge_opts_for.(doc))
+        |> Enum.filter(& &1.dangling)
+        |> Enum.map(fn e ->
+          %{from_id: e.from_id, to_id: e.to_id, via_field: e.field, refType: e.refType}
+        end)
       end)
-    end)
+
+    row_truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
+
+    %{
+      dangling: rows,
+      count: length(rows),
+      limit: limit,
+      truncated: scan_truncated or row_truncated
+    }
   end
 
   # ── Internal scope helpers ──────────────────────────────────────────────────
@@ -933,6 +1069,7 @@ defmodule Barkpark.Content.Graph do
       |> where([d], not like(d.doc_id, ^prefix))
       |> Barkpark.Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
       |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+      |> maybe_scope_to_types(Keyword.get(opts, :types))
 
     query =
       if is_binary(dataset) and dataset != "" do
@@ -949,6 +1086,36 @@ defmodule Barkpark.Content.Graph do
     # for every current caller (flag absent; no-op inside the wrapper).
     Scope.maybe_scope_to_grants(query, opts)
   end
+
+  # SCHEMA-VISIBILITY narrowing for the derived corpus reads (orphans/dangling).
+  #
+  # These two endpoints emit a document's `type` and `title`, so they answer the
+  # same question `/v1/graph` answers — "what lives in this corpus?" — and must
+  # honour the same clamp. `/v1/graph` runs it as
+  # `Content.list_schemas/2 |> Schema.visible_schemas/2`; the caller passes the
+  # surviving type NAMES down here as `:types` rather than this module reaching
+  # for the schema table itself (`Content.Graph` is kernel-side and has no
+  # principal). The clamp's canonical owner stays
+  # `Content.Schema.visible_schemas/2` — one predicate, not a hand-copy.
+  #
+  # `nil` means "no clamp requested" (every direct caller inside the kernel and
+  # the test suite), NOT "no types" — the narrowing is opt-in at the seam that
+  # knows the principal. An EMPTY list is a real clamp and fails CLOSED: a
+  # caller that may see no schemas sees no orphans.
+  #
+  # OBSERVABLE DELTA TODAY: ~zero, and deliberately so. `/v1/graph/orphans` and
+  # `/v1/graph/dangling` are `:require_token`, and `PublicRead.allowed_route?/1`
+  # admits only the EXACT two-segment `/v1/graph` — so the one tier the clamp
+  # narrows (public-read) is already 403 at the route. This is the same
+  # defense-in-depth posture `graph_perspective/2` documents: the route gate is
+  # load-bearing today, and this makes the derived reads safe the moment the
+  # route gate widens.
+  defp maybe_scope_to_types(query, nil), do: query
+
+  defp maybe_scope_to_types(query, types) when is_list(types),
+    do: where(query, [d], d.type in ^types)
+
+  defp maybe_scope_to_types(query, _), do: query
 
   # Resolve a slug/UUID to its documents.id, published-preferred (CASE-ordered,
   # mirroring reference_title/4), scoped by workspace/project (+ optional
@@ -1025,7 +1192,7 @@ defmodule Barkpark.Content.Graph do
   # documented single-tenant / direct-caller back-compat bridge).
   #
   # Row/ownership ACL (MEDIUM-5, core-auth). The graph hydration reads
-  # (`hydrate_nodes/2`, `fetch_doc/2`, `docs_by_id/2`) emit a document's
+  # (`hydrate_docs/2`, `docs_by_id/2`) emit a document's
   # title + doc_id + existence to the caller — the backlinks pane, the Studio
   # graph, the public papers backlinks. Like `Query.get_documents_by_ids/3`,
   # this read is TYPELESS (a graph spans many types), so `scope_to_owner/2` is
@@ -1041,7 +1208,7 @@ defmodule Barkpark.Content.Graph do
     # ResolveWorkspace / LiveScope set — so every existing caller (members,
     # tokens, anonymous, the graph_test suite's plain `[dataset: ...]` opts) is
     # byte-identical. When set, the keyed graph hydration reads (`docs_by_id/2`,
-    # `hydrate_nodes/2`, `fetch_doc/2`) are restricted to the union of the
+    # `hydrate_docs/2`) are restricted to the union of the
     # caller's grant scopes, failing CLOSED (`where: false`) on an
     # absent/uncovering grant — so a grant-derived socket's graph/blast-radius
     # pane can never hydrate a node outside its grant ladder.

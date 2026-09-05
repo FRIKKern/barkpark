@@ -88,8 +88,53 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
 
   # Advance-notice thresholds, in seconds. A trial with `remaining <= @one_day`
   # gets the T-1 notice; `@one_day < remaining <= @three_days` gets the T-3 one.
+  #
+  # These stay module attributes because the two `maybe_notice/5` guards need a
+  # compile-time literal. Everything else — the accessor, the call sites, the
+  # console mirror — reads them THROUGH `@notice_thresholds` below.
   @one_day 86_400
   @three_days 3 * 86_400
+
+  # cch-w50-s5 — THE SCHEDULE, NAMED ONCE. Until this slice the day count in the
+  # notice was a bare literal at the call site (`notify(team, sub, 3)`),
+  # structurally decoupled from the threshold that selected the recipient. Both
+  # renderers derive the whole sentence from that integer
+  # (`Notifications.Render.trial_window/1`, `EventEmail.trial_window/1`), so THE
+  # INTEGER IS THE SENTENCE: nothing anywhere connected "who we told" to "what we
+  # told them". Measured on origin/main — widening `@three_days` and
+  # `Billing.@trial_scan_horizon_seconds` to five days left the committed suite
+  # fully GREEN (37 tests, 0 failures) while a trial ending in FOUR days was
+  # noticed with `days: 3` and a body reading "Your free trial ends in 3 days."
+  @notice_thresholds [three_day: @three_days, one_day: @one_day]
+
+  @doc """
+  The advance-notice schedule in WHOLE DAYS, longest first — `[3, 1]`.
+
+  PUBLIC on purpose. This is the one statement of the schedule the rest of the
+  system is allowed to read: `notify/3`'s day count is derived from it (so the
+  number a team is told can never drift from the threshold that selected them),
+  and `cloud/test/barkpark_cloud/billing_client_mirror_test.exs` compares it to
+  the console's `TRIAL_NOTICE_DAYS` — the client half of the same promise, which
+  the billing screen renders as "We'll remind you 3 days and 1 day before the
+  trial ends." Before this accessor existed both attributes were private with no
+  reader outside this file, and that sentence was a hand-typed re-statement no
+  test connected to anything.
+
+  REACHABILITY, and it is NOT this module's to enforce. A threshold beyond
+  `Billing.trial_scan_horizon_seconds/0` is DEAD — `Billing.active_trials/1`
+  never returns a row that far out, so the arm cannot fire. That coherence is
+  asserted in `trial_expiry_worker_test.exs` rather than here, because the two
+  values belong to different modules and a runtime check in this worker would
+  raise inside an hourly cron rather than in CI.
+  """
+  @spec notice_thresholds_days() :: [pos_integer(), ...]
+  def notice_thresholds_days do
+    Enum.map(@notice_thresholds, fn {_key, seconds} -> div(seconds, 86_400) end)
+  end
+
+  # The day count for ONE threshold, derived from the same keyword list the
+  # accessor publishes. This is what makes the call sites literal-free.
+  defp notice_days(key), do: div(Keyword.fetch!(@notice_thresholds, key), 86_400)
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
@@ -177,7 +222,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   defp maybe_notice(acc, team, sub, remaining, now) when remaining <= @one_day do
     if receivable?(team) and claim_notice(team.id, :trial_notice_1d_sent_at, now) do
       _ = claim_notice(team.id, :trial_notice_3d_sent_at, now)
-      notify(team, sub, 1)
+      notify(team, sub, notice_days(:one_day))
       %{acc | noticed_1d: acc.noticed_1d + 1}
     else
       acc
@@ -186,7 +231,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
 
   defp maybe_notice(acc, team, sub, remaining, now) when remaining <= @three_days do
     if receivable?(team) and claim_notice(team.id, :trial_notice_3d_sent_at, now) do
-      notify(team, sub, 3)
+      notify(team, sub, notice_days(:three_day))
       %{acc | noticed_3d: acc.noticed_3d + 1}
     else
       acc

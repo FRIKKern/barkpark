@@ -1,0 +1,1 @@
+Where the instance's `git_commit` is rendered, the copy states it is the CHECKOUT's HEAD and over-reports during the pull -> compile -> restart window (charter D399).

@@ -1,0 +1,1 @@
+The candidate cause (cp-deploy killed mid-flight, task-454373af4288f9c0) is either confirmed or refuted against the logs, not assumed.

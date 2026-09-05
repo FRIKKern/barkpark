@@ -1,0 +1,1 @@
+Shipped horizontal overflow stays 0px at 1280 and 1024 in the same run — the bar is not bought back with the scrollbar D85 recorded and D125 ruled against.

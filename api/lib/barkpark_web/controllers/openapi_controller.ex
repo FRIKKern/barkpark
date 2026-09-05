@@ -15,9 +15,10 @@ defmodule BarkparkWeb.OpenApiController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Api.OpenApi
+  alias BarkparkWeb.Http.IfNoneMatch
 
   import Plug.Conn,
-    only: [get_req_header: 2, put_resp_content_type: 2, put_resp_header: 3, send_resp: 3]
+    only: [put_resp_content_type: 2, put_resp_header: 3, send_resp: 3]
 
   def index(conn, _params) do
     body = OpenApi.spec() |> Jason.encode!()
@@ -29,29 +30,12 @@ defmodule BarkparkWeb.OpenApiController do
 
     conn = put_resp_header(conn, "etag", etag)
 
-    if etag_matches?(conn, etag) do
+    if IfNoneMatch.match?(conn, etag) do
       send_resp(conn, 304, "")
     else
       conn
       |> put_resp_content_type("application/json")
       |> send_resp(200, body)
-    end
-  end
-
-  # Honor If-None-Match. The header may carry a comma-separated list of
-  # validators or the wildcard `*`; a match short-circuits to 304.
-  defp etag_matches?(conn, etag) do
-    case get_req_header(conn, "if-none-match") do
-      [] ->
-        false
-
-      values ->
-        candidates =
-          values
-          |> Enum.flat_map(&String.split(&1, ","))
-          |> Enum.map(&String.trim/1)
-
-        "*" in candidates or etag in candidates
     end
   end
 end

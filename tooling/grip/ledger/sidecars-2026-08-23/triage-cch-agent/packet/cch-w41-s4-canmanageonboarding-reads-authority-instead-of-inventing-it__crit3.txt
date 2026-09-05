@@ -1,0 +1,1 @@
+Every unknown arm fails CLOSED — team_authority absent, team_authority null (teamless), and a failed /v1/me read all return false — and the teamless choice between refuse and unknown is stated in a comment with its reason. Evidence: the assertions plus the comment.

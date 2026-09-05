@@ -1,0 +1,1 @@
+The 422 `duplicate_of` behaviour is RULED ON, not left implicit: state whether a refused publish should leave a draft at all, and if it should, where an agent is expected to find it. Evidence: the ruling with its decision number, or the code change.

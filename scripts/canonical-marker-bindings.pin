@@ -24,6 +24,7 @@ github-projects-sync	sync
 github-reporter-acknowledgement	criterion
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect
+if-none-match-compare	match?
 indx-index-identity	index_key
 instance-content-bootstrap	Run
 instrument-exit-vocabulary	createExitVocabulary
@@ -34,6 +35,7 @@ preview-manifest	project
 published-paper-provenance-gate	gateNodes
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
+schema-resolution-for-redaction	get_schema_for_redaction
 scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for
 secret-redaction	redact
@@ -44,6 +46,7 @@ slug-resolve	resolve_doc
 status-vocabulary	role_for_status
 studio-nav-model	default_top_menu_entries
 studio-scope-resolution	resolve_scope
+studio-shell-page-scroller	studio_page_scroll
 task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses
 task-criteria-progress	progress

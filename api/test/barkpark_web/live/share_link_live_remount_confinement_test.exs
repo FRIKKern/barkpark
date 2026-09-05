@@ -83,13 +83,8 @@ defmodule BarkparkWeb.Live.ShareLinkRemountConfinementTest do
   @sibling_body "REMOUNT-LEAK-BODY"
 
   setup %{conn: conn} do
-    prior_shares = Application.get_env(:barkpark, :shares)
-
-    on_exit(fn ->
-      if is_nil(prior_shares),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior_shares)
-    end)
+    # arpss-w8: snapshots :shares AND :shares_env (Sharing.refresh/0 reads both).
+    Barkpark.SharingFixtures.snapshot_shares!()
 
     # A NON-default workspace: the seeded Default is an open public demo in
     # test, which would grant the reads under audit for the wrong reason.
@@ -143,10 +138,12 @@ defmodule BarkparkWeb.Live.ShareLinkRemountConfinementTest do
     {raw, link}
   end
 
-  defp with_shares(env_string) do
-    Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
-    :ok
-  end
+  # arpss-w8: shares are planted as STORED rows via `Barkpark.SharingFixtures`,
+  # so `Sharing.refresh/0` — fired by add_share/remove_share, POST/DELETE
+  # /v1/shares and the Studio shares handlers — REBUILDS this fixture instead of
+  # ERASING it (a bare `put_env(:barkpark, :shares, …)` is in neither refresh
+  # input). Snapshots and restores `:shares_env` as well as `:shares`.
+  defp with_shares(env_string), do: Barkpark.SharingFixtures.plant_shares!(env_string)
 
   defp paper_path(ws, proj, slug), do: "/w/#{ws.slug}/p/#{proj.slug}/papers/#{slug}"
 

@@ -1,0 +1,1 @@
+the deferred-newest status sentence is unchanged — the fix is the renderer, not the copy

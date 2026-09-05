@@ -93,6 +93,7 @@ defmodule BarkparkWeb.ShareControllerTest do
   @junior_token "barkpark-test-junior-share"
   @attacker_token "barkpark-test-ws-a-admin-share"
   @owner_token "barkpark-test-own-ws-admin-share"
+  @host_token "barkpark-test-nil-ws-admin-share"
 
   setup do
     {:ok, admin} =
@@ -142,6 +143,30 @@ defmodule BarkparkWeb.ShareControllerTest do
     {:ok, _} = TenancyAuth.create_membership(ws.id, actor.id, "admin")
     assert TenancyAuth.workspace_admin?(actor, ws.id)
     ws
+  end
+
+  # A NIL-WORKSPACE admin token. `Auth.create_token/4|5` cannot build this shape
+  # — with no workspace given it resolves to the DEFAULT workspace and writes a
+  # membership there — so the row is inserted directly. Under the membership
+  # ruling (task-46e7d44068e7185e, option A) a nil `workspace_id` is an admin
+  # member of NOTHING, i.e. a denial on every workspace, never a global-admin
+  # signal. Asserted, not assumed: a fixture that silently acquired a workspace
+  # would turn the fail-closed tests below vacuous.
+  defp nil_workspace_admin!(raw) do
+    {:ok, token} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: "nil-ws-admin",
+        dataset: "test",
+        permissions: ["read", "write", "admin"],
+        workspace_id: nil
+      })
+      |> Repo.insert()
+
+    assert is_nil(token.workspace_id)
+    assert "admin" in token.permissions
+    token
   end
 
   # ── auth gating ─────────────────────────────────────────────────────────
@@ -296,6 +321,34 @@ defmodule BarkparkWeb.ShareControllerTest do
     test "422 when scope is missing", %{conn: conn} do
       resp = conn |> admin_conn() |> post("/v1/shares", %{surfaces: "papers"})
       assert resp.status == 422
+    end
+
+    test "422 when access is not a string, never a 500", %{conn: conn, admin: admin} do
+      # `access` was the one create attribute with no shape guard, and
+      # `do_create/4` INTERPOLATES it into `"#{scope}:#{surfaces}:#{access}"`.
+      # A map raised Protocol.UndefinedError (String.Chars is not implemented
+      # for Map) and a list of maps raised ArgumentError — both 500s, while
+      # every other malformed attribute on this action is a 422.
+      admin_ws!(admin, "gyldendal")
+
+      for bad <- [%{"x" => 1}, [%{"x" => 1}], %{}, [1, 2]] do
+        resp =
+          conn
+          |> admin_conn()
+          |> post("/v1/shares", %{
+            scope: "gyldendal/default/production",
+            surfaces: "papers",
+            access: bad
+          })
+
+        # ARRIVAL before verdict: a 429 from the suite's limiter reads like a
+        # wrong status, so name what actually came back.
+        assert resp.status == 422,
+               "POST access #{inspect(bad)} → #{resp.status}: #{resp.resp_body}"
+
+        # and nothing was stored under the interpolated garbage
+        refute Sharing.shared?("gyldendal", "default", "production", :papers)
+      end
     end
   end
 
@@ -556,6 +609,144 @@ defmodule BarkparkWeb.ShareControllerTest do
       # removing the share hard-revokes its OWN edit tokens — the intended
       # behaviour, unchanged, now reachable only by the scope's own admin.
       refute is_nil(Repo.get(ApiToken, minted_id).revoked_at)
+    end
+
+    test "list_tokens: an admin MEMBER of ws-A sees only ws-A's share tokens, and a nil-workspace token is not a global admin",
+         %{conn: conn} do
+      # THE AMENDED CONTRACT (ruling task-46e7d44068e7185e, option A). The
+      # predicate is MEMBERSHIP (`Tenancy.Auth.workspace_admin?/2`), and a nil
+      # `workspace_id` is a DENIAL, never a global-admin signal. The attacker
+      # is `cross_tenant_actor!/1`'s shape on purpose: a REAL admin of ws-A
+      # holding a REAL plain `member` row in ws-B, so swapping the filter for
+      # `authorize/3` reds this too.
+      {actor, ws_b, proj_b, scope_b} = cross_tenant_actor!("tokls")
+
+      # ws-A — a workspace the actor is a real ADMIN MEMBER of.
+      ws_a = admin_ws!(actor, "tokls-own-a")
+      proj_a = create_project!(ws_a, "tokls-proj-a")
+      scope_a = "#{ws_a.slug}/#{proj_a.slug}/production"
+
+      # Shares planted through `Sharing.add_share/1` — never a bare
+      # `Application.put_env(:barkpark, :shares, …)`, which `refresh/0` erases
+      # on the very next write (arpss-w8 fixture-wipe class).
+      assert {:ok, _} = Sharing.add_share("#{scope_a}:docs,media:edit")
+      assert {:ok, _} = Sharing.add_share("#{scope_b}:docs,media:edit")
+
+      {:ok, {_raw_a, token_a}} =
+        Auth.create_share_token(ws_a.slug, proj_a.slug, "production", ["docs"])
+
+      {:ok, {_raw_b, token_b}} =
+        Auth.create_share_token(ws_b.slug, proj_b.slug, "production", ["docs"])
+
+      # FIXTURE NON-VACUITY: BOTH rows really are in the unfiltered query the
+      # controller starts from. Without this, the refute below could pass
+      # because the ws-B token was never minted at all.
+      all_ids = Auth.list_share_tokens() |> Enum.map(& &1.id)
+      assert token_a.id in all_ids
+      assert token_b.id in all_ids
+
+      resp = conn |> bearer(@attacker_token) |> get("/v1/shares/tokens")
+
+      # ARRIVAL BEFORE VERDICT — a 429 from the suite's rate limiter would
+      # otherwise read like an authorization outcome.
+      assert resp.status == 200, "expected 200, got #{resp.status}: #{resp.resp_body}"
+      ids = json_response(resp, 200)["tokens"] |> Enum.map(& &1["id"])
+
+      # Not satisfiable by returning nothing: the actor's OWN row must remain.
+      assert token_a.id in ids
+      refute token_b.id in ids, "ws-B's share token leaked to a ws-A admin: #{inspect(ids)}"
+
+      # A NIL-WORKSPACE TOKEN IS NOT A GLOBAL ADMIN. It is an admin member of
+      # no workspace, so it sees NO foreign workspace's rows — neither ws-A's
+      # nor ws-B's. This is the half the retracted wording had backwards.
+      host = nil_workspace_admin!(@host_token)
+      refute TenancyAuth.workspace_admin?(host, ws_a.id)
+      refute TenancyAuth.workspace_admin?(host, ws_b.id)
+
+      host_resp = conn |> bearer(@host_token) |> get("/v1/shares/tokens")
+
+      assert host_resp.status == 200,
+             "expected 200, got #{host_resp.status}: #{host_resp.resp_body}"
+
+      assert json_response(host_resp, 200)["tokens"] == []
+    end
+
+    test "host-admin preservation is by MEMBERSHIP: a Default-seated admin still mints, lists and revokes; a nil-workspace admin reaches none of the three",
+         %{conn: conn} do
+      # The self-hosted host admin, built the way a real install builds one:
+      # `Auth.create_token/5` writes a real `Tenancy.Membership` row with role
+      # `admin` in the resolved workspace. THAT MEMBERSHIP — not a nil
+      # `workspace_id` — is what preserves host-is-admin end to end.
+      ws = create_workspace!("host-adm-ws")
+      proj = create_project!(ws, "host-adm-proj")
+      scope = "#{ws.slug}/#{proj.slug}/production"
+
+      {:ok, host} =
+        Auth.create_token(@owner_token, "host-admin", "test", ["read", "write", "admin"], ws.id)
+
+      assert TenancyAuth.membership_role(host, ws.id) == "admin"
+      assert TenancyAuth.workspace_admin?(host, ws.id)
+
+      assert {:ok, _} = Sharing.add_share("#{scope}:docs,media:edit")
+
+      # MINT
+      mint =
+        conn
+        |> bearer(@owner_token)
+        |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+
+      assert mint.status == 201, "expected 201, got #{mint.status}: #{mint.resp_body}"
+      minted = json_response(mint, 201)
+      minted_id = minted["share_token"]["id"]
+      assert String.starts_with?(minted["token"], "bpshare_")
+
+      # LIST
+      list = conn |> bearer(@owner_token) |> get("/v1/shares/tokens")
+      assert list.status == 200, "expected 200, got #{list.status}: #{list.resp_body}"
+      assert minted_id in (json_response(list, 200)["tokens"] |> Enum.map(& &1["id"]))
+
+      # REVOKE — the row, not the status.
+      rev = conn |> bearer(@owner_token) |> delete("/v1/shares/tokens/#{minted_id}")
+      assert rev.status == 200, "expected 200, got #{rev.status}: #{rev.resp_body}"
+      assert json_response(rev, 200)["revoked"] == true
+      refute is_nil(Repo.get(ApiToken, minted_id).revoked_at)
+
+      # ── FAIL CLOSED: the nil-workspace admin reaches NONE of the three ──
+      nil_admin = nil_workspace_admin!(@host_token)
+      refute TenancyAuth.workspace_admin?(nil_admin, ws.id)
+
+      # a live victim row for the revoke arm to aim at
+      {:ok, {victim_raw, victim}} =
+        Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])
+
+      assert {:ok, _} = Auth.verify_token(victim_raw)
+
+      nil_mint =
+        conn
+        |> bearer(@host_token)
+        |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+
+      assert nil_mint.status == 403, "expected 403, got #{nil_mint.status}: #{nil_mint.resp_body}"
+      assert json_response(nil_mint, 403)["error"]["code"] == "forbidden"
+
+      nil_list = conn |> bearer(@host_token) |> get("/v1/shares/tokens")
+
+      assert nil_list.status == 200,
+             "expected 200, got #{nil_list.status}: #{nil_list.resp_body}"
+
+      assert json_response(nil_list, 200)["tokens"] == []
+
+      nil_rev = conn |> bearer(@host_token) |> delete("/v1/shares/tokens/#{victim.id}")
+
+      assert nil_rev.status == 404,
+             "expected 404, got #{nil_rev.status}: #{nil_rev.resp_body}"
+
+      assert json_response(nil_rev, 404)["error"]["code"] == "not_found"
+
+      # THE ROW, not the status: the denial revoked nothing and minted nothing.
+      assert is_nil(Repo.get(ApiToken, victim.id).revoked_at)
+      assert {:ok, _} = Auth.verify_token(victim_raw)
+      assert length(Auth.list_share_tokens(scope)) == 2
     end
 
     test "malformed scopes are denials, never 500s", %{conn: conn} do

@@ -1759,6 +1759,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 reason={empty.reason}
                 doc_id={empty.doc_id}
                 doc_type={empty.doc_type}
+                cause={Map.get(empty, :cause)}
+                elsewhere_name={Map.get(empty, :elsewhere_name)}
+                elsewhere_href={Map.get(empty, :elsewhere_href)}
+                grant_scope={Map.get(empty, :grant_scope)}
                 list_href={
                   if empty.reason == :not_found and empty.doc_type,
                     do:

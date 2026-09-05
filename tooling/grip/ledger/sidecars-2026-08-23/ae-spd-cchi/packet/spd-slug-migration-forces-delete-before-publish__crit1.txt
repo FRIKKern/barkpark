@@ -1,0 +1,1 @@
+The duplicate guard can be satisfied for a deliberate supersede without deleting the original first

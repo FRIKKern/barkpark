@@ -166,6 +166,7 @@
                   "precondition_failed",
                   "quota_exceeded",
                   "rate_limited",
+                  "replay_unavailable",
                   "rev_mismatch",
                   "runtime_capacity",
                   "runtime_unavailable",
@@ -7041,6 +7042,15 @@
         "operationId": "doc.patch.scoped",
         "parameters": [
           {
+            "description": "Opaque client-generated key that makes this write safe to retry. The FIRST request carrying a given key executes; a later request with the same key replays that original response byte-for-byte (with `Idempotency-Replay: true`) instead of applying the mutation again — so a client whose request timed out can retry without double-filing. A concurrent request holding the same key is refused 409 `idempotency_key_in_use`; the handler never runs twice. Keys are scoped to the presenting token AND the request path, so two tenants cannot collide on one key, and they expire after 24h. Generate ONE key per logical operation and reuse it across that operation's retries — a fresh key per attempt is exactly the double-write this header prevents.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "workspace_slug",
             "required": true,
@@ -10731,6 +10741,15 @@
         "operationId": "doc.patch",
         "parameters": [
           {
+            "description": "Opaque client-generated key that makes this write safe to retry. The FIRST request carrying a given key executes; a later request with the same key replays that original response byte-for-byte (with `Idempotency-Replay: true`) instead of applying the mutation again — so a client whose request timed out can retry without double-filing. A concurrent request holding the same key is refused 409 `idempotency_key_in_use`; the handler never runs twice. Keys are scoped to the presenting token AND the request path, so two tenants cannot collide on one key, and they expire after 24h. Generate ONE key per logical operation and reuse it across that operation's retries — a fresh key per attempt is exactly the double-write this header prevents.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "dataset",
             "required": true,
@@ -11057,6 +11076,15 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "Keyset page cursor over (updated_at, id) — pass empty for page 1, then echo page.next_cursor. Walks past the 1000-row limit cap, so a missing task means closed/absent, not rotated out. Not with offset.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -12183,6 +12211,75 @@
           }
         ],
         "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/tasks/{doc_id}/renew": {
+      "post": {
+        "operationId": "task.renew",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Buy a claimed row grace while an OPEN pull request names it: stamps a bounded, self-expiring content.claim.lease_extension the TTL sweeper honours. NON-HOLDER — no worker_id, no epoch, and the epoch is NOT bumped, so a lead's stamp/close CAS is undisturbed. Requires a live in_progress claim (409 not_claimed otherwise) and is capped from the first grant (409 extension_cap_reached). --state closed|merged clears the grace it bought.",
         "tags": [
           "task"
         ],

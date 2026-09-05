@@ -1,0 +1,1 @@
+One deploy is triggered after the merge and src is shown 66/66 against its own templates marker afterwards — the self-heal, observed rather than argued.

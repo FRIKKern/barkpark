@@ -1,0 +1,1 @@
+The final public-front probe in cp-deploy.sh tests its result instead of only logging it, and the chosen behaviour on a bad code (report vs fail) is stated with charter D327's reasoning cited.

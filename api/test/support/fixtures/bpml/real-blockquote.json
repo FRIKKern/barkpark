@@ -1,0 +1,17 @@
+{
+  "blocks": [
+    {
+      "cite": "Robert K. Merton, “Social Structure and Anomie”, 1938",
+      "content": [
+        {
+          "type": "text",
+          "value": "It is only when a system of cultural values extols, virtually above all else, certain common symbols of success for the population at large while its social structure rigorously restricts or completely eliminates access to approved modes of acquiring these symbols for a considerable part of the same population that antisocial behavior ensues on a considerable scale."
+        }
+      ],
+      "id": "block-21",
+      "type": "blockquote"
+    }
+  ],
+  "paper": "criminality-constraint-frontiers-draft",
+  "type": "blockquote"
+}

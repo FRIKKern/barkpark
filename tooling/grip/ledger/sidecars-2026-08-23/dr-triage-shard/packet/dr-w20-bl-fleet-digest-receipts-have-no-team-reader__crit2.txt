@@ -1,0 +1,1 @@
+The empty-audience census registry gains a row for the digest RECEIPT read if it is a distinct signal, or the decision not to register it is stated

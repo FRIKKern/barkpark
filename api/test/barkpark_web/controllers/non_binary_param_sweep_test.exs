@@ -26,7 +26,7 @@ defmodule BarkparkWeb.NonBinaryParamSweepTest do
     * `GET /v1/media/:dataset?q[]=x` — the media index passed a list `q` through
       to `escape_like/1` (`String.replace(list, …)`).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content}
   alias Barkpark.Search.SurfaceConfigs

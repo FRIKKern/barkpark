@@ -1,0 +1,1 @@
+The 6.9x search-latency collateral is re-derived on a quiet host before it is quoted

@@ -1,0 +1,1 @@
+Anchor criterion 1 is stamped with the LEG A deployed-run evidence quoted, including the served-commit PRE==POST provenance and the created document id.

@@ -820,7 +820,7 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp as(bearer) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
   end

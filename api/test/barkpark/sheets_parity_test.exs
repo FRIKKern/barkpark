@@ -581,6 +581,113 @@ defmodule Barkpark.SheetsParityTest do
            "cells.ex @engine_errors drifted from Engine.error_values/0 — update the local mirror"
   end
 
+  # ── THE TYPESCRIPT MIRRORS, LOCKED FROM A CONTEXT THAT CAN BLOCK ─────────────
+  #
+  # The two TS surfaces below cannot call `Engine.error_values/0`, so each keeps
+  # a local `ERROR_VALUES` set. Each already has a guard in its OWN suite — the
+  # react one in `js/packages/react/tests/sheet-error-vocabulary.test.ts`, the
+  # mobile one in `apps/mobile/__tests__/sheetErrorVocabulary.test.ts` — and
+  # those guards are good: they read the shared fixture and assert both
+  # directions.
+  #
+  # They are also not enough on their own, and this is not a hypothesis. On
+  # 2026-09-02 PR #15374 added `#NAME?` engine-side, the react guard went RED on
+  # main (run 33650238539: 2 failed of 617, `missing '#NAME?'`), and the merge
+  # landed anyway — because `js-tests.yml` publishes no context in
+  # `.github/required-checks.json`. For about a day `#NAME?` rendered as plain
+  # black text through @barkpark/react. The guard fired and could not stop it.
+  #
+  # These two assertions close the direction that actually bit. A PR that adds a
+  # code engine-side touches `api/`, so `mix test` runs, so the REQUIRED and
+  # deliberately-unfiltered Elixir gate goes red here — on a context that CAN
+  # block. The opposite direction (someone edits only the .ts file) stays covered
+  # by each package's own guard, which always triggers because its own tree is in
+  # its workflow's paths filter.
+  #
+  # Deliberately a source read, not an import: Elixir cannot evaluate TypeScript,
+  # and a mirror that a build step could satisfy is not the thing being locked.
+  # `error_values_literal!/1` REFUSES rather than returning [] when it cannot
+  # find the set — an extractor that silently yields nothing would make this
+  # whole lock vacuous the first time someone reformats the file.
+  # The two paths are LITERAL on purpose. An earlier draft built them by
+  # concatenating a module attribute onto Path.expand/2, and
+  # scripts/elixir-path-escape-check.sh could not resolve them — it reported OK
+  # while two undeclared cross-tree reads sat in the suite. A read the ratchet
+  # cannot see is worse than one it rejects, so both are spelled out here and
+  # both are declared in ELIXIR_TEST_ONLY_PATHS. Declaring them also makes the
+  # lock bidirectional: editing either .ts file now dispatches the Elixir suite,
+  # so the mirror cannot drift from EITHER side without a required context going
+  # red. Two exact files, not globs — the whole tree would be far more CI than
+  # this buys.
+  test "the @barkpark/react ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../js/packages/react/src/blocks/sheet.ts", __DIR__)
+      |> error_values_literal!("js/packages/react/src/blocks/sheet.ts")
+
+    assert_mirror_equals_engine(codes, "js/packages/react/src/blocks/sheet.ts")
+  end
+
+  test "the mobile sheet block's ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../apps/mobile/src/papers/portabledoc/blocks/sheet.tsx", __DIR__)
+      |> error_values_literal!("apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+
+    assert_mirror_equals_engine(codes, "apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+  end
+
+  defp assert_mirror_equals_engine(codes, rel) do
+    assert Enum.sort(codes) == Enum.sort(Engine.error_values()),
+           "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
+             "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
+             "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
+             "Engine.error_values/0 is the source of truth; the TS mirror follows it. " <>
+             "The fix is to edit #{rel} until it matches the engine, in the SAME PR " <>
+             "as the engine change.\n" <>
+             "Do NOT make this green by deleting the code from Engine.error_values/0, " <>
+             "by trimming this assertion, or by moving the literal somewhere the " <>
+             "extractor stops finding it. This is the ONLY guard on that file that " <>
+             "runs in a context which CAN block a merge — the package's own vitest " <>
+             "runs under js-tests, which publishes no required check, so it fires and " <>
+             "is ignored. Silencing it here ships error cells as plain black text, " <>
+             "which is exactly what #15374 did for about a day."
+  end
+
+  # Pull the `ERROR_VALUES = new Set([...])` members out of a TS source file.
+  # REFUSES with the path when the shape it depends on is gone, so a refactor
+  # that moves the literal fails LOUDLY instead of quietly matching nothing — a
+  # silently-empty extractor is how a lock of this kind rots.
+  defp error_values_literal!(path, rel) do
+    src = File.read!(path)
+
+    body =
+      case Regex.run(~r/ERROR_VALUES\s*=\s*new Set\(\s*\[(.*?)\]/s, src) do
+        [_, body] ->
+          body
+
+        _ ->
+          flunk(
+            "#{rel}: could not find an `ERROR_VALUES = new Set([...])` literal. " <>
+              "If it was renamed or restructured, update this extractor — do NOT " <>
+              "delete the assertion, it is the only lock on this mirror that runs " <>
+              "in a required context."
+          )
+      end
+
+    codes =
+      ~r/['"]([^'"]+)['"]/
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, code] -> code end)
+
+    if codes == [],
+      do:
+        flunk(
+          "#{rel}: found the ERROR_VALUES literal but extracted zero codes — " <>
+            "the extractor is broken and this lock would be vacuous."
+        )
+
+    codes
+  end
+
   # Behavioural half of the same lock: the marks each surface actually stamps
   # (walk.ex → red/bold inline; cells.ex → `sheet-err` class) cover exactly the
   # engine vocabulary. This proves the mirror is WIRED, not merely present.
@@ -614,5 +721,105 @@ defmodule Barkpark.SheetsParityTest do
       )
 
     refute plain =~ "color:#dc2626;font-weight:bold"
+  end
+
+  # ── FMT_CLASSES ↔ Fmt.vocabulary/0 mirror lock ──────────────────────────────
+  #
+  # `web/lib/sheets.ts` hand-writes `FMT_CLASSES`, the set `formatDisplay`
+  # gates on (and that `densifyTab` in web/components/sheet-grid.tsx documents).
+  # It is a MIRROR of the Elixir fmt vocabulary with ONE deliberate
+  # subtraction: `"checkbox"` is display-only — Studio renders it as a
+  # toggleable glyph and the web raw-document view never formats it — so the
+  # web side excludes it ON PURPOSE. That is why this is a set-DIFFERENCE
+  # guard and not naive equality: equality would be wrong, and a guard that is
+  # wrong gets deleted.
+  #
+  # Until this test the chain had one link and needed two.
+  # `golden_parity_fixture_test.exs` pins the golden fixture's
+  # `fmt_vocabulary` to the live `Fmt.vocabulary/0`, but NOTHING compared
+  # either of them to `FMT_CLASSES` — `grep FMT_CLASSES` returned three hits
+  # and zero tests. So adding an 8th class to `Fmt`'s `@canonical` shipped
+  # green: the fixture regenerates, Elixir stays green, `FMT_CLASSES` never
+  # learns the class, and the web raw view silently falls through to the
+  # general path while the server formats it.
+  #
+  # This lives in `mix test`, i.e. under the REQUIRED Elixir gate, on purpose:
+  # a guard that only reds a non-required context does not stop a drift from
+  # shipping — measured in this repo, not theorised.
+  @web_sheets_ts Path.expand("../../../web/lib/sheets.ts", __DIR__)
+
+  # The ONE permitted exclusion. Named and singular so that a SECOND silent
+  # exclusion reds instead of hiding inside a subtraction nobody reads.
+  @fmt_web_excluded ["checkbox"]
+
+  test "web FMT_CLASSES mirrors Fmt.vocabulary/0 minus the display-only classes" do
+    web = extract_fmt_classes(File.read!(@web_sheets_ts))
+    expected = Enum.sort(Barkpark.Plugins.Sheets.Fmt.vocabulary() -- @fmt_web_excluded)
+
+    missing = expected -- web
+    extra = web -- expected
+
+    assert {missing, extra} == {[], []}, """
+    web/lib/sheets.ts FMT_CLASSES drifted from Fmt.vocabulary/0.
+
+      vocabulary/0             : #{inspect(Barkpark.Plugins.Sheets.Fmt.vocabulary())}
+      permitted web exclusions : #{inspect(@fmt_web_excluded)}
+      expected FMT_CLASSES     : #{inspect(expected)}
+      actual FMT_CLASSES       : #{inspect(web)}
+
+      in the vocabulary, MISSING from FMT_CLASSES: #{inspect(missing)}
+      in FMT_CLASSES, NOT in the vocabulary       : #{inspect(extra)}
+
+    MISSING means a fmt class exists server-side that the web raw-document
+    view will not format — it falls through to the general path and shows a
+    different string than every other surface. Add it to FMT_CLASSES in
+    web/lib/sheets.ts (and teach formatDisplay to render it).
+
+    NOT-IN-VOCABULARY means FMT_CLASSES names a class the server never emits:
+    dead code, or a rename that only landed on one side.
+
+    DO NOT make this red go away by adding the class to @fmt_web_excluded.
+    That list is not a silencer — it records the ONE class ("checkbox") that
+    is display-only and deliberately unformatted on the web. Appending to it
+    converts a drift this test just CAUGHT into a permanent silent exclusion,
+    and the next reader will believe the omission was intended. If you truly
+    have a second display-only class, say why in a comment on the line and
+    make Fmt's @display_only agree with you.
+    """
+  end
+
+  # The extractor REFUSES rather than returning empty: if the FMT_CLASSES
+  # literal is renamed or restructured (an array, a const object, a computed
+  # set), a regex that matches nothing would quietly turn the lock above
+  # vacuous — green forever, guarding nothing.
+  defp extract_fmt_classes(src) do
+    body =
+      case Regex.run(~r/const\s+FMT_CLASSES\s*=\s*new\s+Set\(\[(.*?)\]\)/s, src,
+             capture: :all_but_first
+           ) do
+        [body] -> body
+        _ -> flunk(fmt_extractor_refusal("no `const FMT_CLASSES = new Set([...])` literal"))
+      end
+
+    members = ~r/"([^"]+)"/ |> Regex.scan(body, capture: :all_but_first) |> List.flatten()
+
+    if members == [] do
+      flunk(fmt_extractor_refusal("the FMT_CLASSES literal parsed to ZERO members"))
+    end
+
+    members |> Enum.sort() |> Enum.uniq()
+  end
+
+  defp fmt_extractor_refusal(what) do
+    """
+    Could not read FMT_CLASSES out of web/lib/sheets.ts — #{what}.
+
+    This is a REFUSAL, not a pass. The mirror lock above compares that set to
+    Fmt.vocabulary/0; an extractor that returned [] here would make the lock
+    vacuous and it would stay green while the two sides drifted apart.
+
+    Someone renamed or restructured the literal. Teach this extractor the new
+    shape (api/test/barkpark/sheets_parity_test.exs) — do not delete the test.
+    """
   end
 end

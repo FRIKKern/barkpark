@@ -1,0 +1,1 @@
+seal-predicate.mjs keys its defect and human-gate registers by epic id, so an --epic scores only its own registered rows.

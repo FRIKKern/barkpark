@@ -1,0 +1,1 @@
+A bp CLI verb exposes revoke so the operation does not require database access.

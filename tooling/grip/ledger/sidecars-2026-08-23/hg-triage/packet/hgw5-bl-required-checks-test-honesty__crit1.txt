@@ -1,0 +1,1 @@
+Line 485s clause count matches what verify --selftest actually runs, and the assertion label is derived rather than typed if that is cheap

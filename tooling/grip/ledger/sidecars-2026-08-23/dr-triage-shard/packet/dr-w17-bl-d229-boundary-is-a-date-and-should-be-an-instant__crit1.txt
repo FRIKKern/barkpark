@@ -1,0 +1,1 @@
+The 37-hour method sensitivity is recorded (status-derived vs deferral_cause-derived), so a future reader cannot pick the wrong derivation silently

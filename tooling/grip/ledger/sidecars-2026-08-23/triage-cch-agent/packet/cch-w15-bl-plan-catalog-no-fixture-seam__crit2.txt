@@ -1,0 +1,1 @@
+`node --test cloud/priv/static/__app.test.mjs` exits 0 and `node cloud/priv/static/__preview__/smoke.mjs` still renders every scenario.

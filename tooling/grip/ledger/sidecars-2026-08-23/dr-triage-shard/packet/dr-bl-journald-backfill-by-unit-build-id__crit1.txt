@@ -1,0 +1,1 @@
+Every journalctl invocation reads by EXACT unit name with a bounded lifetime (timeout plus kill); no unit GLOB appears anywhere in the implementation

@@ -1,0 +1,1 @@
+THE HEADER LINE IS DERIVED FROM THE TABLE rather than hardcoding two selector names, so a widened run cannot print a sentence naming 2 of N measured hosts. Evidence: the printed header from the widened run.

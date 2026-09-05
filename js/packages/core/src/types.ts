@@ -87,7 +87,10 @@ export interface ResponseContext {
   headers: Record<string, string>
   body?: unknown // parsed JSON when content-type permits; undefined for SSE/binary
   requestId?: string // from X-Request-ID
-  etag?: string // from ETag header (unquoted)
+  // CACHE VALIDATOR from the ETag response header (unquoted) — folds the
+  // dataset schema hash, so it is NOT the write precondition. Use
+  // `DocResult.etag` (the body rev) for `ifMatch`.
+  etag?: string
   syncTags?: string[] // from envelope
   schemaHash?: string // from envelope (ADR-011 drift detection)
   durationMs: number // performance.now() - startedAt
@@ -243,6 +246,10 @@ export interface MediaAsset {
   originalName?: string
   path?: string
   originalUrl?: string
+  /** Absolute (scheme + host) delivery url — the one field fetchable as-is from
+   *  any origin. Server-derived from the configured CDN base, else the API's own
+   *  public origin. The sibling url fields stay relative delivery paths. */
+  absoluteUrl?: string
   thumbnailUrl?: string
   previewUrl?: string
   renditions?: Record<string, unknown>

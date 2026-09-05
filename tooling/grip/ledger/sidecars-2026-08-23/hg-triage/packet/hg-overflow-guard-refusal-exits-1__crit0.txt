@@ -1,0 +1,1 @@
+overflow-guard.mjs distinguishes a measured defect from a refusal to measure by exit code: every die() path (no server, STALE SERVER, Chrome/DevToolsActivePort, CDP bring-up, measurement broke) exits a code that is NOT 1, and only the failures.length path at the end of main() exits 1. Paste both exit codes from a forced refusal and a forced real failure.

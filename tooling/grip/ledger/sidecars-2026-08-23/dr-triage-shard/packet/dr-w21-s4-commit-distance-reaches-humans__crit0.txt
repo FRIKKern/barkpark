@@ -1,0 +1,1 @@
+AFTER-GATE: `git log --oneline origin/main` shows the merge commits for BOTH dr-w21-s2-plane-grades-freshness-by-commit-distance and dr-w21-s3-cloud-status-carries-the-commit, and `git merge-base --is-ancestor <each> origin/main` exits 0. Paste both.

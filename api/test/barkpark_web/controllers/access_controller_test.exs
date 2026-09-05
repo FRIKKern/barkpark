@@ -341,7 +341,7 @@ defmodule BarkparkWeb.AccessControllerTest do
       assert %{"grant" => body} = json_response(first, 200)
       refute is_nil(body["revoked_at"])
 
-      second = build_conn() |> bearer(admin_raw) |> delete("/v1/access/#{grant.id}")
+      second = scoped_conn() |> bearer(admin_raw) |> delete("/v1/access/#{grant.id}")
       assert json_response(second, 200)["grant"]["id"] == grant.id
     end
 
@@ -381,7 +381,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         conn |> bearer(user_bearer(intruder)) |> post("/v1/access/claim", %{"token" => real_raw})
 
       missing =
-        build_conn()
+        scoped_conn()
         |> bearer(user_bearer(intruder))
         |> post("/v1/access/claim", %{"token" => "this-token-never-existed"})
 
@@ -400,7 +400,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         conn |> bearer(user_bearer(user)) |> post("/v1/access/claim", %{"token" => "no-such"})
 
       expired =
-        build_conn()
+        scoped_conn()
         |> bearer(user_bearer(user))
         |> post("/v1/access/claim", %{"token" => expired_raw})
 
@@ -409,7 +409,7 @@ defmodule BarkparkWeb.AccessControllerTest do
 
       # First claim of the single-use grant succeeds…
       ok =
-        build_conn()
+        scoped_conn()
         |> bearer(user_bearer(user))
         |> post("/v1/access/claim", %{"token" => single_raw})
 
@@ -417,7 +417,7 @@ defmodule BarkparkWeb.AccessControllerTest do
 
       # …the second is the identical no-oracle failure.
       spent =
-        build_conn()
+        scoped_conn()
         |> bearer(user_bearer(user))
         |> post("/v1/access/claim", %{"token" => single_raw})
 
@@ -439,7 +439,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         conn |> bearer(user_bearer(user)) |> post("/v1/access/claim", %{"token" => raw})
 
       reference =
-        build_conn()
+        scoped_conn()
         |> bearer(user_bearer(user))
         |> post("/v1/access/claim", %{"token" => "this-token-never-existed"})
 
@@ -530,7 +530,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         Accounts.create_user_session_token(intruder, ip_address: "127.0.0.1", user_agent: "test")
 
       browser =
-        build_conn()
+        scoped_conn()
         |> init_test_session(%{"user_session" => session_raw})
         |> get("/grant/#{real_raw}")
 

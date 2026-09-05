@@ -1,0 +1,1 @@
+Doc budgets and anchors still pass: scripts/check-doc-budgets.sh and scripts/docs-anchors-check.sh. Evidence: both runs with rc on their own line.

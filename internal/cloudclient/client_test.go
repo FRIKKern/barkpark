@@ -194,6 +194,41 @@ func TestListBarkparks(t *testing.T) {
 	}
 }
 
+func TestBarkparkQueuedDeployAgeWirePresence(t *testing.T) {
+	cases := []struct {
+		name           string
+		raw            string
+		wantMissing    bool
+		wantAge        float64
+		wantAgePresent bool
+	}{
+		{name: "field omitted", raw: `{}`, wantMissing: true},
+		{name: "explicit null means nothing queued", raw: `{"queued_deploy_age_seconds":null}`},
+		{name: "measured young queue", raw: `{"queued_deploy_age_seconds":90}`, wantAge: 90, wantAgePresent: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var b Barkpark
+			if err := json.Unmarshal([]byte(tc.raw), &b); err != nil {
+				t.Fatalf("decode Barkpark: %v", err)
+			}
+			if b.QueuedDeployAgeSecondsMissing != tc.wantMissing {
+				t.Fatalf("QueuedDeployAgeSecondsMissing = %v, want %v", b.QueuedDeployAgeSecondsMissing, tc.wantMissing)
+			}
+			if !tc.wantAgePresent {
+				if b.QueuedDeployAgeSeconds != nil {
+					t.Fatalf("QueuedDeployAgeSeconds = %v, want nil", *b.QueuedDeployAgeSeconds)
+				}
+				return
+			}
+			if b.QueuedDeployAgeSeconds == nil || *b.QueuedDeployAgeSeconds != tc.wantAge {
+				t.Fatalf("QueuedDeployAgeSeconds = %v, want %v", b.QueuedDeployAgeSeconds, tc.wantAge)
+			}
+		})
+	}
+}
+
 func TestListAllBarkparks(t *testing.T) {
 	var gotPath, gotQuery string
 	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {

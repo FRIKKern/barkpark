@@ -1,0 +1,1 @@
+The dead-trigger scenario is reproduced in the crown-reconcile harness as a fixture (merges newer than the window start, no delivering runs, verified serving sha, PRESENT-EMPTY list) and the CURRENT script is shown greening it — the defect proven before the fix.

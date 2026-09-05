@@ -1,0 +1,1 @@
+A test proves marker-set and DEGRADE_ONLY agree in BOTH directions, and reds when a marked renderer is omitted from the set

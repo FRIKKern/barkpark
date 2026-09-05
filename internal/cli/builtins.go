@@ -296,9 +296,16 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	cloudURL := ""
 	cloudTeam := ""
 	cloudSession := "none"
+	// WHICH tier the credential came from — the origin label only
+	// (env:BARKPARK_CLOUD_TOKEN | config:cloud_token), never a byte of the
+	// value. token_present says a credential exists; session says the plane
+	// adjudicated it; this says WHICH ONE was adjudicated, which is the fact a
+	// CI job needs when a deploy 401s while a stale config.json sits on the box.
+	cloudTokenSource := ""
 	var cloudLoggedIn any = false // true | false | nil (null = unverifiable)
 	if cfg, _ := LoadConfig(); cfg != nil && cfg.HasCloudToken() {
 		cloudTokenPresent = true
+		cloudTokenSource = cfg.CloudTokenSource()
 		cloudURL = strings.TrimSpace(cfg.CloudURL)
 		if cloudURL == "" {
 			cloudURL = cloudclient.DefaultBaseURL
@@ -327,6 +334,19 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		}
 	}
 
+	cloudBlock := map[string]any{
+		"logged_in":     cloudLoggedIn,
+		"token_present": cloudTokenPresent,
+		"session":       cloudSession,
+		"url":           cloudURL,
+		"team":          cloudTeam,
+	}
+	// Additive and CONDITIONAL: with no Cloud credential in either tier the
+	// block is byte-identical to what it always was.
+	if cloudTokenSource != "" {
+		cloudBlock["token_source"] = cloudTokenSource
+	}
+
 	payload := map[string]any{
 		"name":          name,
 		"server":        ctx.Server,
@@ -351,13 +371,26 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		// Cloud session block — presence + probe verdict + url + team, no token
 		// value. logged_in is a tri-state: null means the probe could not reach
 		// the plane, which is a different fact from false.
-		"cloud": map[string]any{
-			"logged_in":     cloudLoggedIn,
-			"token_present": cloudTokenPresent,
-			"session":       cloudSession,
-			"url":           cloudURL,
-			"team":          cloudTeam,
-		},
+		"cloud": cloudBlock,
+	}
+	// STRUCTURED PARITY with the human scope block. `workspace`/`project` alone
+	// carry the same lie the print used to: they say what was SET, not what a
+	// request will USE. The two keys below appear ONLY when a scope is stated,
+	// so every floor-scope receipt (the onboarding spine included) keeps its
+	// exact shape, and a consumer that reads workspace= has the fate beside it
+	// the moment the value stops being ambient.
+	if stated := manifest.StatedScope(ctx); len(stated) > 0 {
+		payload["scope_stated"] = stated
+		if loadedManifest != nil {
+			t := manifest.ScopeFateTally(loadedManifest.Commands)
+			payload["scope_fate_tally"] = map[string]int{
+				"commands":                              len(loadedManifest.Commands),
+				manifest.ScopeCarried.String():          t[manifest.ScopeCarried],
+				manifest.ScopeMirrored.String():         t[manifest.ScopeMirrored],
+				manifest.ScopeUnscopedByDesign.String(): t[manifest.ScopeUnscopedByDesign],
+				manifest.ScopeRefused.String():          t[manifest.ScopeRefused],
+			}
+		}
 	}
 	// The warning goes to STDERR in every render — `-o json` included, where
 	// stdout must stay a clean document. whoami still exits 0: it reports your
@@ -405,7 +438,12 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	} else {
 		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
 	}
-	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
+	// The scope block is no longer an unconditional echo of ctx — see
+	// whoamiScopeLines. Floor scope prints exactly one byte-identical line;
+	// a stated scope is marked and carries its per-command fate tally.
+	for _, l := range whoamiScopeLines(ctx, loadedManifest) {
+		out.outf("%s", l)
+	}
 	if tokenPresent {
 		out.outf("token:     set (%s)", prov.describe())
 	} else {
@@ -418,15 +456,21 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	if cloudTeam != "" {
 		teamSuffix = fmt.Sprintf(" (team %s)", cloudTeam)
 	}
+	// The source rides on the three token-present arms only; the logged-out arm
+	// has no credential to attribute and keeps its exact former bytes.
+	sourceSuffix := ""
+	if cloudTokenSource != "" {
+		sourceSuffix = fmt.Sprintf(" [source %s]", cloudTokenSource)
+	}
 	switch cloudSession {
 	case "verified":
-		out.outf("cloud:     logged in to %s%s — session verified", cloudURL, teamSuffix)
+		out.outf("cloud:     logged in to %s%s — session verified%s", cloudURL, teamSuffix, sourceSuffix)
 	case "rejected":
-		out.outf("cloud:     token PRESENT but REJECTED by %s — the saved session is dead; run 'bp login'", cloudURL)
+		out.outf("cloud:     token PRESENT but REJECTED by %s — the saved session is dead; run 'bp login'%s", cloudURL, sourceSuffix)
 	case "unverified":
-		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session", cloudURL)
+		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session%s", cloudURL, sourceSuffix)
 	default:
-		out.outf("cloud:     not logged in — run 'bp login'")
+		out.outf("cloud:     not logged in — run 'bp login' (or set BARKPARK_CLOUD_TOKEN for a CI job)")
 	}
 
 	if reachable {
@@ -793,4 +837,69 @@ complete -c bp -f
 complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
 complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
 ` + verbLines.String() + flagLines.String()
+}
+
+// whoamiScopeLines renders whoami's scope block.
+//
+// THE DEFECT IT CLOSES. The line used to be one unconditional echo of the
+// context — `scope:     w=%s p=%s d=%s` — which reported what the operator SET
+// and never what a request would USE. After the scope-honesty contract
+// (internal/manifest/scope.go, PR #16010) those are different facts: a stated
+// -w reaches the wire on the commands whose path carries it, re-routes the URL
+// through the advertised mirror on the commands with a scoped_prefix, and is
+// REFUSED before any I/O on the rest. Printing `w=beta` and stopping told an
+// operator their session was pointed at beta when most verbs would have
+// answered about the floor.
+//
+// Two arms, and the split is the same one StatedScope draws:
+//
+//	floor scope (nothing stated) — the ambient case, which is CORRECT today.
+//	  The single line is byte-identical to what it has always been. This is
+//	  load-bearing: every operator without a -w sees no change at all.
+//	stated scope — each stated value is marked "(stated)" so it cannot be read
+//	  as ambient, and a second line gives the per-fate tally DERIVED from the
+//	  live manifest. Never hard-coded: the numbers move the moment the server
+//	  advertises one more scoped_prefix, and a stale count in an honesty line
+//	  is worse than no line.
+//
+// An unreachable manifest is a MISSING MEASUREMENT, not a fate. It says so
+// rather than guessing a tally in either direction.
+func whoamiScopeLines(ctx manifest.Context, m *manifest.Manifest) []string {
+	stated := manifest.StatedScope(ctx)
+	if len(stated) == 0 {
+		return []string{fmt.Sprintf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)}
+	}
+
+	w, p := ctx.Workspace, ctx.Project
+	var named []string
+	for _, f := range stated {
+		switch f {
+		case "-w":
+			w += " (stated)"
+			named = append(named, fmt.Sprintf("-w %s", ctx.Workspace))
+		case "-p":
+			p += " (stated)"
+			named = append(named, fmt.Sprintf("-p %s", ctx.Project))
+		}
+	}
+	lines := []string{fmt.Sprintf("scope:     w=%s p=%s d=%s", w, p, ctx.Dataset)}
+
+	subject := strings.Join(named, " / ")
+	if m == nil {
+		lines = append(lines, fmt.Sprintf(
+			"           %s is NOT ambient — which commands can carry it is UNKNOWN "+
+				"here (the server manifest was unreachable), so this line cannot "+
+				"promise any request will use it.", subject))
+		return lines
+	}
+
+	t := manifest.ScopeFateTally(m.Commands)
+	lines = append(lines, fmt.Sprintf(
+		"           %s is NOT ambient — of %d commands: %d carry it in their own path, "+
+			"%d route to the workspace mirror, %d ignore it by design, %d are REFUSED "+
+			"before any request is sent (`bp capabilities` marks them).",
+		subject, len(m.Commands),
+		t[manifest.ScopeCarried], t[manifest.ScopeMirrored],
+		t[manifest.ScopeUnscopedByDesign], t[manifest.ScopeRefused]))
+	return lines
 }

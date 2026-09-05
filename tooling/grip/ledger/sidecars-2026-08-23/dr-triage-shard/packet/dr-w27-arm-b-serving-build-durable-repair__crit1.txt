@@ -1,0 +1,1 @@
+sites.current_deployment_id ends up naming the build the box is actually serving (or the row is left in a state a later pass can still correct), never nil-with-a-terminal-failure.

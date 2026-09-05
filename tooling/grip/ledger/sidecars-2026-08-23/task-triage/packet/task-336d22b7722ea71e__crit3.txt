@@ -1,0 +1,1 @@
+A NO-TOKEN principal is treated as the NARROWEST tier, not as an unrecognised one — asserted explicitly, because the current defect is precisely that 'unrecognised' fell through to 'show everything'.

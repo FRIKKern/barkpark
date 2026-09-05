@@ -1,0 +1,1 @@
+The block-0-heading skeleton trap is surfaced honestly: a paper with a title and one heading is told it still needs content, in words a human can act on.

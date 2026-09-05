@@ -148,7 +148,103 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
+  # ── The transient-connection seam on the CREATE path ───────────────────────
+  #
+  # WHAT WAS BROKEN. `Barkpark.Tasks.Dedup.fetch_candidates/2` carries a
+  # function-wide rescue that renders a pool fault as a NAMED, retryable 503
+  # (`{:error, {:dedup_unavailable, _}}`). Its own comment says the rescue is on
+  # the wrong side of the boundary: "That DBConnection.ConnectionError is raised
+  # OUTSIDE this function, so the rescue/catch below never see it." Every OTHER
+  # Repo call on the create path sits outside that guard — the `Content.
+  # get_document` prev-doc lookup below, the four birth guards
+  # (`ensure_task_transition_legal`, `ensure_close_reason_lands_with_a_close`,
+  # `ensure_task_born_adjudicated`, `ensure_task_surface_declared`), and the
+  # `Repo.insert` in `create_after_dedup/6`. A dropped checkout at any of them
+  # propagated uncaught to Phoenix RenderErrors → `BarkparkWeb.ErrorJSON`, and
+  # the caller got 500 `internal_error / "unknown error
+  # (DBConnection.ConnectionError)"` — a TERMINAL shape for a TRANSIENT fault.
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` grants retry grace by
+  # matching the CODE, and `internal_error` is not on its transient list, so the
+  # one condition that clears on its own was the one condition every caller was
+  # told to escalate.
+  #
+  # THE FIX IS A REGION, NOT A CALL SITE. The rescue wraps the whole of
+  # `do_create_document!/5` — prev-doc lookup, all four birth guards, the dedup
+  # gate and the insert — because a checkout can be refused at ANY of them and
+  # the caller's remedy is identical at all five: resend. The refusal is
+  # `{:error, {:connection_unavailable, message}}`, which
+  # `Barkpark.Content.Errors.build/1` renders as 503 `storage_unavailable` with
+  # `reason: "connection_unavailable"` — the same transient shape
+  # `{:dedup_unavailable, _}` already wears.
+  #
+  # BLAST RADIUS, STATED. This rescue covers `Writer.create_document/4` and
+  # NOTHING ELSE. Its callers are the four Sanity-shaped create verbs through
+  # `Content.Mutations` (create / createOrReplace / createIfNotExists /
+  # replace — the door `bp task create` files through), `Tasks.Fleet.register`,
+  # `Plugins.Github.Intake`, `Plugins.Tickets.Thread`, `Media.Assets`,
+  # `Content.TagRegistry`, `BulldocsFormController`, the Studio field handler
+  # and `mix onix.import`. `upsert_document/4` — every autosave, patch, block
+  # op, media/sheets/forms/GitHub/papers/revision-restore write — is
+  # DELIBERATELY NOT WRAPPED and still raises exactly as it did before; the
+  # `:upsert_prev_doc_lookup` fault site below exists so a test can prove that
+  # untouched door is untouched rather than asserting it in prose.
+  #
+  # NO FAIL-OPEN. `rescue e in DBConnection.ConnectionError` matches that one
+  # struct. Nothing else is caught, nothing is reraised into a success, and no
+  # arm returns `{:ok, _}` or an empty result — a fault becomes a named ERROR
+  # tuple or it keeps propagating untouched. The `Tasks.Dedup` pg_trgm fallback
+  # is the precedent: narrow on purpose.
   defp do_create_document(type, attrs, dataset, doc_id, opts) do
+    do_create_document!(type, attrs, dataset, doc_id, opts)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "Barkpark.Content.Writer.create_document/4: the database connection was lost mid-write " <>
+          "(type=#{inspect(type)} dataset=#{inspect(dataset)} doc_id=#{inspect(doc_id)}) — " <>
+          "answering 503 storage_unavailable/connection_unavailable. " <>
+          "exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, connection_fault_message(e)}}
+  end
+
+  # The caller-facing sentence. It must say the one thing a bare 500 never did:
+  # the write is AMBIGUOUS. The draft row may already have landed before the
+  # connection dropped, and a blind retry then walks into the dedup wall and
+  # reads as a duplicate-of-itself refusal. So the message names the check.
+  defp connection_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was lost while writing this document " <>
+      "(#{Exception.message(e)}). Nothing was refused on its merits — this is " <>
+      "transient, and the correct move is to resend the identical request. " <>
+      "BUT THE WRITE IS AMBIGUOUS: the draft row may already have landed " <>
+      "before the connection dropped. Check before retrying — for a task, " <>
+      "`bp doc ls task --perspective drafts` lists the unpublished drafts in " <>
+      "this dataset; otherwise re-read the document id you sent. If it is " <>
+      "already there, publish or delete that draft instead of resending, or " <>
+      "the retry will be refused as a duplicate of your own first attempt."
+  end
+
+  # Test-only fault seam, mirroring `Tenancy.WorkspaceBundle.inject_copy_fault!/0`
+  # (PDS-D43) verbatim in intent: the SQL sandbox cannot produce a REAL rescuable
+  # transport failure — a pool timeout under `Ecto.Adapters.SQL.Sandbox` arrives
+  # as an ownership-shutdown EXIT and takes the test's own connection with it — so
+  # the test raises the exact exception the live 500 carried, at the exact Repo
+  # call it was raised at. The config value is `{site, exception_module, message}`
+  # so the SAME seam proves both halves of the contract: a
+  # `DBConnection.ConnectionError` becomes the named 503, and ANY OTHER exception
+  # still propagates untouched. `nil` in every non-test env — one
+  # `Application.get_env` on a path that is already about to hit Postgres.
+  defp inject_write_fault!(site) do
+    case Application.get_env(:barkpark, :writer_fault) do
+      {^site, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp do_create_document!(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
 
     # Scope the prev-doc lookup to the writer's workspace/project. An UNSCOPED
@@ -156,6 +252,8 @@ defmodule Barkpark.Content.Writer do
     # row that happens to share the (doc_id, type, dataset) leaf — the inner
     # half of the B3 mutate leak. Scoped, a same-id write from a different
     # workspace sees no prev_doc and falls through to an insert of its own row.
+    inject_write_fault!(:prev_doc_lookup)
+
     prev_doc =
       case Content.get_document(doc_id, type, dataset, opts) do
         {:ok, d} -> d
@@ -210,17 +308,26 @@ defmodule Barkpark.Content.Writer do
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                existing
-                |> Document.changeset(enc_attrs)
-                |> fenced_or_plain_update(existing, opts)
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "update",
-                  existing.rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] The doc write and its
+                # `mutation_events` row land or fail TOGETHER. Before this wrap
+                # the `Repo.update` AUTO-COMMITTED and `tap_broadcast`'s
+                # `save_event` (`Repo.insert!`) raised afterwards, leaving a
+                # committed document no consumer ever hears about. The wrap is
+                # deliberately narrow — encryption and paper-body rendering stay
+                # OUTSIDE, so the transaction covers two INSERTs and nothing else.
+                Broadcast.write_atomically(fn ->
+                  existing
+                  |> Document.changeset(enc_attrs)
+                  |> fenced_or_plain_update(existing, opts)
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "update",
+                    existing.rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
 
             _ ->
@@ -238,18 +345,24 @@ defmodule Barkpark.Content.Writer do
               # values (the ciphertext-at-rest source of truth) are encrypted.
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+                inject_write_fault!(:insert)
 
-                %Document{}
-                |> Document.changeset(enc_attrs)
-                |> Repo.insert()
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "create",
-                  nil,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] See the update branch:
+                # birth is wrapped for the same reason, and a failed
+                # `save_event` now un-births the row instead of stranding it.
+                Broadcast.write_atomically(fn ->
+                  %Document{}
+                  |> Document.changeset(enc_attrs)
+                  |> Repo.insert()
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "create",
+                    nil,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
           end
 
@@ -599,6 +712,16 @@ defmodule Barkpark.Content.Writer do
     # UPDATE/overwrite) another workspace's row sharing the (doc_id, type,
     # dataset) leaf — the write-path scoping gap. Scoped, a same-id write from
     # a different workspace sees no prev_doc and inserts its own row.
+    #
+    # NOT WRAPPED IN THE CREATE PATH'S CONNECTION RESCUE, ON PURPOSE. This fault
+    # site exists so `writer_connection_fault_test.exs` can PROVE the boundary:
+    # the identical injected `DBConnection.ConnectionError` that the create door
+    # now names as a 503 still propagates uncaught from the upsert door, so the
+    # blast radius of that rescue is a measured fact rather than a claim in a
+    # comment. Widening it to every autosave/patch/media/sheets/forms/GitHub
+    # write is a separate contract change with its own callers to survey.
+    inject_write_fault!(:upsert_prev_doc_lookup)
+
     prev_doc =
       case doc_id && Content.get_document(doc_id, type, dataset, opts) do
         {:ok, d} -> d
@@ -661,34 +784,48 @@ defmodule Barkpark.Content.Writer do
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                existing
-                |> Document.changeset(enc_attrs)
-                |> fenced_or_plain_update(existing, opts)
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "update",
-                  existing.rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] The doc write and its
+                # `mutation_events` row land or fail TOGETHER. Before this wrap
+                # the `Repo.update` AUTO-COMMITTED and `tap_broadcast`'s
+                # `save_event` (`Repo.insert!`) raised afterwards, leaving a
+                # committed document no consumer ever hears about. The wrap is
+                # deliberately narrow — encryption and paper-body rendering stay
+                # OUTSIDE, so the transaction covers two INSERTs and nothing else.
+                Broadcast.write_atomically(fn ->
+                  existing
+                  |> Document.changeset(enc_attrs)
+                  |> fenced_or_plain_update(existing, opts)
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "update",
+                    existing.rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
 
             _ ->
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                %Document{}
-                |> Document.changeset(enc_attrs)
-                |> Repo.insert()
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "create",
-                  nil,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] See the update branch:
+                # birth is wrapped for the same reason, and a failed
+                # `save_event` now un-births the row instead of stranding it.
+                Broadcast.write_atomically(fn ->
+                  %Document{}
+                  |> Document.changeset(enc_attrs)
+                  |> Repo.insert()
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "create",
+                    nil,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
           end
 
@@ -1300,7 +1437,24 @@ defmodule Barkpark.Content.Writer do
       }
       |> maybe_put_preview_url(type, attrs)
 
-    Map.put(Labels.render_opts(dataset, scope), :preview, preview)
+    # :style :article — task-605ba8bfbd54c871. This map used to carry NO :style,
+    # so `Render.render_block/2`'s `Map.get(opts, :style, :email)` decided, and
+    # the canonical `content["body"]["html"]` stored on EVERY document written
+    # through this path was EMAIL html — the surface that inlines mail-client
+    # typography on every element because mail clients strip stylesheets. The
+    # row's census found ZERO readers that want that: the Studio editor source
+    # textarea (forms.ex classic_form_value/1) and the v1 read envelope both
+    # want neutral html, search subtracts the key entirely, and the one consumer
+    # that genuinely wants inline email html — bulldocs_email_controller.ex —
+    # passes `style: :email` itself and re-renders from blocks. So the write
+    # path now NAMES its surface: :article, whose `<p>` is bare by contract
+    # (`.bp-paper-surface` owns body typography). Only documents written after
+    # this change move; existing rows re-project by attrition on their next
+    # blocks write. The renderer's four :email defaults, labels.ex's non-article
+    # fallback and the two style-less mix backfills are a filed follow-on.
+    Labels.render_opts(dataset, scope)
+    |> Map.put(:preview, preview)
+    |> Map.put(:style, :article)
   end
 
   defp maybe_put_preview_url(preview, "paper", %{"doc_id" => doc_id}) when is_binary(doc_id) do

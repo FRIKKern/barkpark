@@ -1,0 +1,1 @@
+err_5xx_per_s survives Telemetry.normalize/1 and reaches at least one human surface, or a written ruling says why it should not.

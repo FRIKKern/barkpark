@@ -401,7 +401,12 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
              "the :email callout must not lean on the stylesheet-only class"
 
       assert String.contains?(html, "note"), "callout child renders its own text"
-      assert String.contains?(html, "<p>BETA</p>"), "paragraph child renders as a real <p>"
+      # A real `<p>`, and — under `:email` — an inline-TYPED one: the walk stamps
+      # body type on every paragraph because mail clients strip stylesheets.
+      assert String.contains?(html, ~s(<p style="margin:0 0 16px;font-family:)),
+             "paragraph child renders as a real, inline-typed <p>"
+
+      assert String.contains?(html, ">BETA</p>"), "paragraph child renders its own text"
     end
 
     test "per-cell `order` reorders the stack (stable sort by CSS order)" do

@@ -383,7 +383,7 @@ function heatGridHtml(grid: number[][], block: unknown): string {
   for (const i of [0.15, 0.35, 0.55, 0.75, 1.0])
     legend += `<i class="bp-heat__c" style="--i:${fmt3(i)}"></i>`
   legend += ' more</div>'
-  return `<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},minmax(10px,28px))">${head}${body}</div>${legend}</div>`
+  return `<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},minmax(10px,44px))">${head}${body}</div>${legend}</div>`
 }
 
 function heatCalendarHtml(grid: number[][], block: unknown): string {
@@ -473,7 +473,7 @@ function heatMatrixExtrasHtml(grid: number[][], block: unknown): string {
   }
 
   const track = gutter ? 'auto ' : ''
-  const cellTrack = showVals ? 'minmax(28px,auto)' : 'minmax(10px,28px)'
+  const cellTrack = showVals ? 'minmax(28px,auto)' : 'minmax(10px,44px)'
   const sumTrack = showMarg ? ' auto' : ''
   return `<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},${cellTrack})${sumTrack}">${head}${body}${foot}</div>${dualLegend()}</div>`
 }

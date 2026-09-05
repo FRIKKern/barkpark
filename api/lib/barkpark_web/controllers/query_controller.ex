@@ -13,10 +13,11 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.Http.IfNoneMatch
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
-  action_fallback BarkparkWeb.FallbackController
+  action_fallback(BarkparkWeb.FallbackController)
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
     cond do
@@ -139,8 +140,18 @@ defmodule BarkparkWeb.QueryController do
           |> maybe_put_next_offset(has_more, limit, offset)
           |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
 
+        schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
         etag = list_etag(dataset, type, rendered)
-        respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
+
+        respond(
+          conn,
+          inner,
+          schema_hash,
+          list_sync_tags(dataset, type, rendered),
+          etag,
+          cache_validator(etag, schema_hash, page_shape(inner)),
+          t0
+        )
     end
   end
 
@@ -482,9 +493,19 @@ defmodule BarkparkWeb.QueryController do
         |> maybe_resolve_tasks(conn, params)
         |> hd()
 
+      schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
-      respond(conn, rendered, dataset, sync_tags, etag, t0)
+
+      respond(
+        conn,
+        rendered,
+        schema_hash,
+        sync_tags,
+        etag,
+        cache_validator(etag, schema_hash),
+        t0
+      )
     end
   end
 
@@ -585,8 +606,14 @@ defmodule BarkparkWeb.QueryController do
   # `project_fields/2` deliberately keeps every `_`-prefixed system key, so
   # `_id`/`_rev` survive the projection untouched); `?expand=` hydrates nested
   # references; `?resolve=tasks` swaps query blocks for snapshots. None of the
-  # three reaches `list_etag/3` or `doc_etag/1`.
-  @shaping_params ~w(fields expand resolve)
+  # three reaches `list_etag/3` or `doc_etag/1`. `?count=true` is the fourth of
+  # the same shape: `maybe_put_total/7` adds `result.total` to the body from a
+  # SECOND query (`Content.count_documents/3`) and touches `rendered` not at
+  # all, so an anonymous `?count=true` request and the plain one used to share
+  # one validator — and replaying the plain page's ETag against `?count=true`
+  # answered 304 with an empty body, the same transcript `?fields=` produced on
+  # prod.
+  @shaping_params ~w(fields expand resolve count)
 
   # PRESENCE, not parsed effect — deliberate. `?expand=false` and `?fields=,,`
   # both parse to "no shaping", so keying on the parsed spec would keep the ETag
@@ -614,9 +641,26 @@ defmodule BarkparkWeb.QueryController do
   #     distinguish which documents each caller may see; it is which FIELDS of
   #     them get rendered that the validator is blind to.
   #
+  # A third axis, SCHEMA, is handled by FOLDING rather than by suppression
+  # (task-496f010fa8f4d9dc). `Envelope.render/3` picks the visible field set out
+  # of the SCHEMA as well as the caller, and a schema edit moves no document
+  # `_rev` — so on the one branch that still emits a validator (anonymous +
+  # unshaped) an editor marking a field `private` left the ETag identical and a
+  # replayed If-None-Match answered 304 with the pre-redaction body still cached
+  # downstream. `cache_validator/2` now folds
+  # `Content.schema_hash_for_dataset/2` — the same value the envelope already
+  # carries as `schemaHash`, computed once per request and threaded down — on
+  # top of the document token, so any schema change moves the HEADER. The
+  # envelope BODY's `etag` is UNCHANGED: it is the SDK's `ifMatch` token, not a
+  # cache validator (see `cache_validator/2`). Suppression was not the right tool:
+  # the anonymous unshaped read is exactly the one this file works to keep
+  # cacheable, and the schema axis, unlike shaping and principal, has a cheap
+  # exact discriminator already in hand.
+  #
   # Direction, per charter D1: this only ever WITHDRAWS a validator. It removes
   # cacheability, never grants it — a request that used to 304 now gets a full
-  # 200, which is a cost, never a stale or cross-principal body.
+  # 200, which is a cost, never a stale or cross-principal body. Folding an
+  # extra input into the ETag has the same direction.
   defp conditional_safe?(conn) do
     unshaped? = Enum.all?(@shaping_params, fn p -> blank?(Map.get(conn.params, p)) end)
     unshaped? and anonymous_principal?(conn)
@@ -639,9 +683,17 @@ defmodule BarkparkWeb.QueryController do
       end
   end
 
-  # `Vary: Authorization` rides EVERY query response, including the ones that
-  # keep their ETag: the body's field set is a function of the Authorization
-  # header, so a shared cache must key on it.
+  # `Vary: Authorization, Accept` rides EVERY query response, including the ones
+  # that keep their ETag. Both are request headers this response is a function
+  # of: the body's field set is a function of `Authorization`, and
+  # `maybe_vendor_content_type/1` switches the response Content-Type on
+  # `conn.assigns[:barkpark_vendor_accept]`, which
+  # `BarkparkWeb.Plugs.AcceptBarkparkVendor` derives from the `Accept` REQUEST
+  # header. Two callers of one url differing only in `Accept` get different
+  # Content-Type under the SAME ETag; without `Vary: Accept` a shared cache may
+  # hand one of them the other's representation metadata. Body is unchanged
+  # there — this is metadata variance, not a body leak — but the fix costs a
+  # token.
   #
   # MERGED, never overwritten. Two `vary` writers are already known: DatasetCors
   # sets `Origin` in-app, and prod responses arrive carrying `accept-encoding`
@@ -659,16 +711,18 @@ defmodule BarkparkWeb.QueryController do
       |> Enum.reject(&(&1 == ""))
 
     merged =
-      if Enum.any?(existing, &(String.downcase(&1) == "authorization")) do
-        existing
-      else
-        existing ++ ["authorization"]
-      end
+      Enum.reduce(["authorization", "accept"], existing, fn token, acc ->
+        if Enum.any?(acc, &(String.downcase(&1) == token)) do
+          acc
+        else
+          acc ++ [token]
+        end
+      end)
 
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
-  defp respond(conn, inner, dataset, sync_tags, etag, t0) do
+  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
@@ -677,18 +731,17 @@ defmodule BarkparkWeb.QueryController do
       |> maybe_vendor_content_type()
 
     if conditional_safe?(conn) do
-      conn = put_resp_header(conn, "etag", ~s("#{etag}"))
+      entity_tag = ~s("#{validator}")
+      conn = put_resp_header(conn, "etag", entity_tag)
 
-      case get_req_header(conn, "if-none-match") do
-        [hv | _] ->
-          if etag_matches?(hv, etag) do
-            conn |> send_resp(304, "") |> halt()
-          else
-            respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
-          end
-
-        _ ->
-          respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+      # Compare against the ENTITY-TAG we just emitted (quotes included), not
+      # the bare validator: the old matcher stripped the quotes off the client's
+      # entry, so a bare `abc123` — a token this server never sends — bought a
+      # 304. It also read only the first header line.
+      if IfNoneMatch.match?(conn, entity_tag) do
+        conn |> send_resp(304, "") |> halt()
+      else
+        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
       end
     else
       # No header, and therefore no 304 branch: a validator we would refuse to
@@ -696,13 +749,13 @@ defmodule BarkparkWeb.QueryController do
       # UNCHANGED — it is the SDK's change-detection token, not a cache
       # validator (the SDK never sends If-None-Match itself — see runFetch in
       # js/packages/nextjs/src/server/core.ts), so consumers keep working.
-      respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+      respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
     end
   end
 
-  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset) do
+  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash) do
     if Map.get(conn.assigns, :barkpark_filterresponse, true) do
-      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, dataset, scope_opts(conn)))
+      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, schema_hash))
     else
       json(conn, inner)
     end
@@ -716,26 +769,19 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp envelope(result, sync_tags, etag, ms, dataset, scope) do
+  # `schema_hash` arrives ALREADY COMPUTED from the action (one
+  # `Content.schema_hash_for_dataset/2` read per request) because the same value
+  # is now folded into the cache validator. Recomputing it here would be a
+  # second identical DB read AND — worse — could disagree with the value the
+  # ETag was built from if a schema landed in between.
+  defp envelope(result, sync_tags, etag, ms, schema_hash) do
     %{
       result: result,
       syncTags: sync_tags,
       ms: ms,
       etag: etag,
-      schemaHash: Content.schema_hash_for_dataset(dataset, scope)
+      schemaHash: schema_hash
     }
-  end
-
-  defp etag_matches?(header, etag) do
-    header
-    |> String.split(",")
-    |> Enum.map(&String.trim/1)
-    |> Enum.map(&strip_etag/1)
-    |> Enum.any?(fn v -> v == etag or v == "*" end)
-  end
-
-  defp strip_etag(v) do
-    v |> String.trim_leading("W/") |> String.trim() |> String.trim("\"")
   end
 
   # Fold each doc's `_id` AND `_rev` into the ETag IN LIST ORDER (not a sorted
@@ -750,6 +796,65 @@ defmodule BarkparkWeb.QueryController do
 
   defp doc_etag(%{rev: rev}) when is_binary(rev) and rev != "", do: rev
   defp doc_etag(_), do: "0"
+
+  # THE CACHE VALIDATOR — deliberately NOT the body's `etag` (task-496f010fa8f4d9dc).
+  #
+  # Two different tokens ride one response and they answer different questions:
+  #
+  #   * the envelope BODY's `etag` answers "has this DOCUMENT changed?". It is a
+  #     documented SDK contract — `js/packages/core/src/doc.ts` returns it as
+  #     `DocResult.etag` ("Unquoted ETag ( = document _rev). Pass back as
+  #     ifMatch on writes") and `Content.Mutations.if_rev/1` compares `ifMatch`
+  #     to the stored rev. Folding anything into it turns every documented
+  #     read-then-write into a 412, so it stays EXACTLY what it was.
+  #
+  #   * the HTTP `ETag` header answers "is the cached REPRESENTATION still
+  #     valid?" (RFC 9110 §8.8.1). The representation is a function of the
+  #     SCHEMA too: `Envelope.render/3` reads the schema's `private` /
+  #     `visibility` / `readable_by` attributes per field, and
+  #     `Content.Schema.upsert_schema/3` writes the SchemaDefinition row and
+  #     touches NO document — so marking a field private moved no `_rev` and
+  #     left the validator identical. An anonymous caller replaying its pre-edit
+  #     ETag got a 304 and kept serving the field the schema now hides. So the
+  #     header folds the schema hash on top of the document token.
+  #
+  # Adding an input can only ever WITHDRAW a 304 that used to be granted, never
+  # grant a new one.
+  defp cache_validator(etag, schema_hash) do
+    :crypto.hash(:sha256, "#{etag}|#{schema_hash}")
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
+  end
+
+  # The LIST validator folds one more input: the page envelope's own scalars.
+  # `list_etag/3` folds only the `_id:_rev` tuples, so an EMPTY page collapsed
+  # to the constant `"<dataset>|<type>|"` — every past-the-end request of a type
+  # shared ONE validator, while the body still echoed `limit`/`offset`/`hasMore`
+  # back to the caller. `?offset=900&limit=10` and `?offset=500&limit=50` are
+  # both empty, return DIFFERENT bodies, and each used to 304 against the
+  # other's ETag. The same hole exists with documents present (two requests can
+  # return the same slice under different `limit`s), so this folds the shape for
+  # every page, not just the empty one.
+  #
+  # It is taken from `inner` AFTER `maybe_put_next_offset/4` and
+  # `maybe_put_total/7`, so it covers exactly the non-document keys the body
+  # actually carries — a new echoed scalar is folded the day it is added
+  # instead of the day someone remembers this function. Same direction as every
+  # other input here: an extra input can only WITHDRAW a 304, never grant one.
+  defp cache_validator(etag, schema_hash, page_shape) do
+    :crypto.hash(:sha256, "#{etag}|#{schema_hash}|#{page_shape}")
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
+  end
+
+  # Every key of the list envelope EXCEPT `documents` (whose identity `etag`
+  # already folds), rendered in a stable key order.
+  defp page_shape(inner) do
+    inner
+    |> Map.delete(:documents)
+    |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+    |> Enum.map_join(",", fn {k, v} -> "#{k}=#{inspect(v)}" end)
+  end
 
   defp list_sync_tags(dataset, type, rendered) do
     type_tag = "bp:ds:#{dataset}:type:#{type}"
@@ -772,27 +877,15 @@ defmodule BarkparkWeb.QueryController do
   # workspace_id filter decides WHICH rows come back.
 
   # Resolve the type's schema (for field-visibility redaction in Envelope.render)
-  # under the SAME tenant scope as the document read. On a scoped miss, fall back
-  # to the GLOBAL schema (mirroring content/papers.ex value_schema/3) so a
-  # globally-declared non-encrypted private field still redacts — without this
-  # fallback the schema misses at the render site and the private field renders
-  # PUBLIC (Envelope.render is lenient on a nil schema). Nil on miss otherwise.
-  #
-  # TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant
-  # rows, so accept the fallback ONLY when its workspace_id is nil — the global
-  # schema. Any non-nil workspace_id would substitute a FOREIGN tenant's schema.
+  # under the SAME tenant scope as the document read, with the GLOBAL-schema
+  # fallback. The two-step lookup and its load-bearing tenancy guard now live in
+  # ONE place — `Content.Schema.get_schema_for_redaction/3` (@canonical
+  # capability:schema-resolution-for-redaction) — which every Envelope render
+  # site shares. Nil on miss.
   defp fetch_schema(conn, type, dataset) do
-    opts = scope_opts(conn)
-
-    case Content.get_schema(type, dataset, opts) do
-      {:ok, schema} ->
-        schema
-
-      _ ->
-        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
-          {:ok, %{workspace_id: nil} = schema} -> schema
-          _ -> nil
-        end
+    case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts(conn)) do
+      {:ok, schema} -> schema
+      :error -> nil
     end
   end
 

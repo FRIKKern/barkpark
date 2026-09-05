@@ -1,0 +1,1 @@
+The dark set, the exemption set and the residual set are all DERIVED at build time and their MEMBERSHIP is printed; no count from any brief (49, 30) is hard-coded, and the exemption PATTERN is stated verbatim in the moduledoc.

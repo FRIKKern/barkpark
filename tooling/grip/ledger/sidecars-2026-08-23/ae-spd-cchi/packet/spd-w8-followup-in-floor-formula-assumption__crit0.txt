@@ -1,0 +1,1 @@
+The deployed authored floor formula is read from the served CSS and pasted, and in_floor_formula_assumed in the instrument is reconciled against it (updated, or confirmed still correct with the divergence explained by something else).

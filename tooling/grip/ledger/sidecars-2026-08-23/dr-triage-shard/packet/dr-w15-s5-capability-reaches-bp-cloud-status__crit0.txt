@@ -1,0 +1,1 @@
+The agent Report carries the capability record from the dr-w15-s1 route, and a Go test proves a 404 from an instance that predates that route yields the UNMEASURED sentinel and NOT false

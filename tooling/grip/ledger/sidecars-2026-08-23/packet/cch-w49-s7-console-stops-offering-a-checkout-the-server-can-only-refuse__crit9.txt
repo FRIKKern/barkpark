@@ -1,0 +1,1 @@
+The corpus assertion reads innerHTML STRINGS and is not built on a #plan-more click — shown by the assertion's own source and by a note in the PR body citing the accumulating-listener finding.

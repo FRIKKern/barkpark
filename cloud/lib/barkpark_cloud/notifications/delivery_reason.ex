@@ -73,6 +73,27 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
   row key off the existing constants, so their TEXT is frozen. `:econnrefused`
   (the peer answered and said no) and SMTP 421 (a genuine throttle) are unmoved.
 
+  ## The three arms wave 35 left behind (cch-w35-followup)
+
+  The same shape, one setting and one layer over:
+
+    * `:no_relay` and `:invalid_port` are the other two members of gen_smtp's
+      `validate_options_error()` — the sibling atoms of `:no_credentials`, which
+      wave 35 gave `:not_configured`. Both fell to `:unknown`, whose sentence
+      sends a reader to a server log for a fault the CONSOLE can fix, and
+      `:not_configured`'s sentence names the credentials, which is the wrong
+      missing setting for both. They get `:relay_not_configured` and
+      `:relay_port_invalid` — one class per missing setting, so the sentence
+      names what to go and set.
+    * `:ehostdown` / `:enetdown` are nobody-answered like `ehostunreach` /
+      `enetunreach`, but the observation is a `down` report rather than a
+      missing route, and `:unreachable`'s FROZEN sentence names a route. They get
+      `:network_down`.
+    * `:eacces` is ruled out and stays `:unknown` — see `posix_class/1`.
+
+  Three classes ADDED, zero sentences reworded, for the same reason as wave 35:
+  the backfill and every historical row key off the existing bytes.
+
   THE FIX IS FORWARD-ONLY. Rows already stamped with one of the wrong sentences
   keep it and cannot be repaired: `last_error` stores the classified sentence
   only, the raw transport term is gone, and nothing left on the row can say which
@@ -105,6 +126,9 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
     :auth_rejected,
     :auth_not_offered,
     :not_configured,
+    :relay_not_configured,
+    :relay_port_invalid,
+    :network_down,
     :rate_limited,
     :destination_temporary_error,
     :recipient_rejected,
@@ -121,6 +145,9 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
           | :auth_rejected
           | :auth_not_offered
           | :not_configured
+          | :relay_not_configured
+          | :relay_port_invalid
+          | :network_down
           | :rate_limited
           | :destination_temporary_error
           | :recipient_rejected
@@ -182,9 +209,16 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
   # `:no_credentials` is raised by OPTION VALIDATION (`auth: always` with no
   # username/password): no socket is ever opened, so no destination rejected
   # anything. It is a local configuration fault, not a remote verdict.
+  # Its two SIBLINGS are the same shape one setting over: `validate_options`
+  # raises `:no_relay` when the relay host is blank and `:invalid_port` when the
+  # port is not a valid one. Neither opens a socket either, and neither is about
+  # a username or a password — so `:not_configured`'s sentence (which names the
+  # credentials) is the WRONG missing setting for both, and `:unknown` (which
+  # sends the reader to a server log for a fault the console itself can fix) is
+  # no better. Each gets a class that names ITS OWN missing configuration.
   def classify(:no_credentials), do: :not_configured
-  def classify(:no_relay), do: :unknown
-  def classify(:invalid_port), do: :unknown
+  def classify(:no_relay), do: :relay_not_configured
+  def classify(:invalid_port), do: :relay_port_invalid
 
   # HTTP outcomes on the chat path.
   def classify({:http_status, status}) when is_integer(status), do: {:http_status, status}
@@ -235,6 +269,20 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
   def label(:destination_temporary_error),
     do: "The destination reported a temporary problem of its own and did not accept the message."
 
+  # ADDED cch-w35-followup — the two remaining `validate_options_error()` atoms
+  # and the two network-layer `down` reports. Each names what was observed and
+  # nothing else; no existing sentence above is reworded.
+  def label(:relay_not_configured),
+    do: "No mail relay host is configured, so the send never started."
+
+  def label(:relay_port_invalid),
+    do: "The mail relay port is not a valid port number, so the send never started."
+
+  def label(:network_down),
+    do:
+      "The connection could not be made — the network reported the destination " <>
+        "or the network itself as down."
+
   @doc """
   `classify/1` then `label/1` — the one call a write site makes. `nil` in,
   `nil` out, so a success path can pipe through it unchanged.
@@ -255,8 +303,23 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
   defp posix_class(:econnrefused), do: :connection_refused
   defp posix_class(:ehostunreach), do: :unreachable
   defp posix_class(:enetunreach), do: :unreachable
+  # `ehostdown` / `enetdown` are ALSO nobody-answered, but they are not the same
+  # observation as `*unreachable`: those two are the routing layer saying it has
+  # no path, these two are a `down` report about the destination host or about
+  # the network itself. `:unreachable`'s frozen sentence names a ROUTE ("no route
+  # from our network to it"), which is a mechanism neither of these observed, so
+  # folding them in would be a fresh instance of the defect wave 35 S3 corrected.
+  defp posix_class(:ehostdown), do: :network_down
+  defp posix_class(:enetdown), do: :network_down
   defp posix_class(:timeout), do: :timeout
   defp posix_class(:etimedout), do: :timeout
+  # RULED OUT, NOT OVERLOOKED (cch-w35-followup): `:eacces` is OUR OWN host
+  # refusing the socket — a local sandbox/firewall policy, or a bind the process
+  # is not privileged to make. It says nothing about the destination and names no
+  # setting the console can show, so every sentence in this vocabulary would be a
+  # claim nothing observed. `:unknown` — which points the operator at the server
+  # log, where the raw term still is — is the accurate answer, and
+  # `delivery_reason_test.exs` pins it so this stays a decision rather than a gap.
   defp posix_class(_other), do: :unknown
 
   # A 5xx SMTP reply, or gen_smtp's own terminal atoms.

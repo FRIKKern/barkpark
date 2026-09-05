@@ -48,6 +48,7 @@ defmodule Barkpark.Structure do
   `Barkpark.Plugins.Enablement.effective/1`.
   """
 
+  require Logger
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
   alias Barkpark.Plugins.Enablement
@@ -74,7 +75,13 @@ defmodule Barkpark.Structure do
       # child nodes
       items: [],
       # what opens when selected
-      child: nil
+      child: nil,
+      # Gyldendal parity E3.2 — a `:document` node may pin a specific document
+      # id (Sanity's `documentId`); nil = the legacy "id == type name" singleton.
+      doc_id: nil,
+      # Gyldendal parity E3.2 — a `:document_type_list` node may carry its own
+      # sort ([%{"field", "direction"}]); nil = the schema's `desk.orderings`.
+      orderings: nil
     ]
   end
 
@@ -201,16 +208,38 @@ defmodule Barkpark.Structure do
 
     curated_types = collect_claimed_types(List.flatten(curated), [])
 
+    # Gyldendal parity E3.3 — `desk.hidden: true` on a schema takes the type OUT
+    # of the desk entirely: no generic/settings node, and it is CLAIMED so the
+    # …Rest census does not resurrect it. This is the explicit opt-out the
+    # never-hide invariant demands — a precompute type (the twin's
+    # catalogueRow / frontpageResolved) is written by a worker, never edited,
+    # and only confuses an editor. The documents stay readable everywhere else.
+    hidden_types = hidden_type_set(schemas)
+    curated_types = MapSet.union(curated_types, hidden_types)
+
     # `build_generic_types_group/3` sits right before Settings: it and
     # `build_settings_group/3` read the SAME unowned, uncurated schema set and
     # partition it by the `singleton` flag ALONE, so they are kept adjacent
     # here on purpose (one catch-all immediately followed by the other).
     host_main =
-      curated ++
-        [
-          build_generic_types_group(schemas, owned_map, curated_types),
-          build_settings_group(schemas, owned_map, curated_types)
-        ]
+      case declared_desk(schemas, dataset, opts) do
+        # Gyldendal parity E3.2 — a `deskStructure` document declares the MAIN
+        # tier: order, dividers, nested lists, filtered type lists and pinned
+        # singletons. It replaces the curated + generic + settings host groups
+        # ONLY; plugin tiers and the …Rest census below are untouched, so a type
+        # the declaration forgot still surfaces (the never-hide invariant).
+        # ONE group: the declaration's own dividers are explicit nodes, so
+        # `maybe_join/2` must not interleave positional dividers between them.
+        {:ok, declared} ->
+          [declared]
+
+        :none ->
+          curated ++
+            [
+              build_generic_types_group(schemas, owned_map, curated_types),
+              build_settings_group(schemas, owned_map, curated_types)
+            ]
+      end
 
     # ── Placement-driven host groups: books follow OnixEdit, media follows
     # the media plugin. Each returns {main_placed_nodes, plugins_placed_nodes}. ──
@@ -248,7 +277,12 @@ defmodule Barkpark.Structure do
 
     # ── …Rest tier: honest census of every DB type with no home, LAST ──
     placed_nodes = List.flatten(non_rest_groups)
-    claimed = collect_claimed_types(placed_nodes, top_menu_claimed_types(enablement, owned_map))
+
+    claimed =
+      placed_nodes
+      |> collect_claimed_types(top_menu_claimed_types(enablement, owned_map))
+      |> MapSet.union(hidden_types)
+
     rest_children = build_rest_children(claimed, schemas, dataset, opts)
 
     rest_tier =
@@ -990,14 +1024,187 @@ defmodule Barkpark.Structure do
 
   # ── Helpers ────────────────────────────────────────────────────────────────
 
+  # ── Gyldendal parity E3.2 — the declared desk ──────────────────────────────
+  #
+  # A per-dataset `deskStructure` document (the consumer registers the schema;
+  # `singleton: true`, one `items` field) holds an ordered tree in a small
+  # data-only vocabulary that maps 1:1 onto existing %Node{} types, so
+  # /v1/structure and the Go TUI need no wire change:
+  #
+  #   {"kind":"singleton","type":"frontpage","documentId":"frontpage","title":"Forside","icon":"home"}
+  #   {"kind":"divider","title":"Filtrert"}
+  #   {"kind":"list","title":"Utgivelser","icon":"book","items":[…]}
+  #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
+  #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
+  #
+  # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
+  # caller's workspace. Absent → :none (the hardcoded tree). A malformed
+  # document degrades to :none with a logged reason — never a blank desk.
+  defp hidden_type_set(schemas) do
+    schemas
+    |> Map.values()
+    |> Enum.filter(&desk_hidden?/1)
+    |> MapSet.new(& &1.name)
+  end
+
+  defp desk_hidden?(%{desk: %{"hidden" => true}}), do: true
+  defp desk_hidden?(_), do: false
+
+  @desk_structure_type "deskStructure"
+
+  defp declared_desk(_schemas, dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+
+    case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
+      {:ok, %{content: %{"items" => items}}} when is_list(items) and items != [] ->
+        ctx = %{dataset: dataset, scope: scope}
+
+        nodes =
+          items
+          |> Enum.with_index()
+          |> Enum.map(fn {item, i} -> declared_item_to_node(item, "desk-#{i}", ctx) end)
+          |> Enum.reject(&is_nil/1)
+
+        if nodes == [] do
+          Logger.warning(
+            "deskStructure for #{dataset} declares no recognisable items — using the default desk"
+          )
+
+          :none
+        else
+          {:ok, nodes}
+        end
+
+      {:ok, _} ->
+        Logger.warning("deskStructure for #{dataset} has no items list — using the default desk")
+        :none
+
+      _ ->
+        :none
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "deskStructure for #{dataset} could not be read (#{Exception.message(e)}) — using the default desk"
+      )
+
+      :none
+  end
+
+  defp declared_item_to_node(%{"kind" => "singleton"} = item, idx, _ctx) do
+    type = item["type"]
+
+    if is_binary(type) and type != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document,
+        type_name: type,
+        doc_id: item["documentId"] || type,
+        visibility: :private
+      }
+    end
+  end
+
+  defp declared_item_to_node(%{"kind" => "divider"} = item, idx, _ctx),
+    do: %Node{type: :divider, id: item["id"] || idx, title: item["title"]}
+
+  defp declared_item_to_node(%{"kind" => "list"} = item, idx, ctx) do
+    children =
+      (item["items"] || [])
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.map(fn {child, j} -> declared_item_to_node(child, "#{idx}-#{j}", ctx) end)
+      |> Enum.reject(&is_nil/1)
+
+    %Node{
+      id: item["id"] || idx,
+      title: item["title"] || "Group",
+      icon: item["icon"],
+      type: :list,
+      items: children
+    }
+  end
+
+  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx, _ctx) do
+    type = item["type"]
+
+    if is_binary(type) and type != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document_type_list,
+        type_name: type,
+        visibility: :public,
+        filter: if(is_map(item["filter"]), do: item["filter"], else: nil),
+        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+      }
+    end
+  end
+
+  # Gyldendal parity E3.3 — `groupBy`: Sanity's "Etter kategori" — one child
+  # list per document of the `over` type, each filtered to the rows whose `by`
+  # path equals that document's id. Built at desk time from the PUBLISHED
+  # `over` rows (bounded); an `over` type with no rows yields an empty group.
+  #
+  #   {"kind":"groupBy","title":"Etter kategori","type":"publication",
+  #    "by":"content.category","over":"category","orderings":[…]}
+  @group_by_fanout 200
+
+  defp declared_item_to_node(%{"kind" => "groupBy"} = item, idx, ctx) do
+    type = item["type"]
+    over = item["over"]
+    by = item["by"]
+
+    if is_binary(type) and is_binary(over) and is_binary(by) do
+      children =
+        over
+        |> Content.list_documents(
+          ctx.dataset,
+          [perspective: :published, limit: @group_by_fanout] ++ ctx.scope
+        )
+        |> Enum.map(fn doc ->
+          key = Barkpark.Content.DraftId.published_id(doc.doc_id)
+
+          %Node{
+            id: "#{idx}-#{key}",
+            title: doc.title || key,
+            icon: item["icon"],
+            type: :document_type_list,
+            type_name: type,
+            visibility: :public,
+            filter: %{by => %{"eq" => key}},
+            orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+          }
+        end)
+
+      %Node{
+        id: item["id"] || idx,
+        title: item["title"] || "By #{over}",
+        icon: item["icon"],
+        type: :list,
+        items: children
+      }
+    end
+  end
+
+  defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)
   into a map suitable for `Barkpark.Content.list_documents/3`'s
   `:filter_map` option. Returns `%{}` for nil / "" / malformed input.
   """
-  @spec parse_filter(String.t() | nil) :: map()
+  @spec parse_filter(String.t() | map() | nil) :: map()
   def parse_filter(nil), do: %{}
   def parse_filter(""), do: %{}
+  # Gyldendal parity E3.1 — a node may carry a FULL `Content.Query` filter map
+  # (the shape desk_groups and :plugin_document_list already use), so a
+  # declared list such as «Uten omslag» = %{"content.cover.assetId" => %{"is"
+  # => "null"}} rides the same node type as the legacy "field=value" string.
+  def parse_filter(%{} = map), do: map
 
   def parse_filter(s) when is_binary(s) do
     case String.split(s, "=", parts: 2) do

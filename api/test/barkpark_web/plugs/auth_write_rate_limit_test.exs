@@ -57,7 +57,7 @@ defmodule BarkparkWeb.Plugs.AuthWriteRateLimitTest do
     {10, rem(div(n, 65_536), 256), rem(div(n, 256), 256), rem(n, 256)}
   end
 
-  defp from(ip), do: %{build_conn() | remote_ip: ip}
+  defp from(ip), do: %{scoped_conn() | remote_ip: ip}
 
   defp run(conn), do: AuthWriteRateLimit.call(conn, AuthWriteRateLimit.init([]))
 

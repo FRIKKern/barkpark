@@ -1,0 +1,1 @@
+The two name-collision proofs (NextCursor, BuildLogURL) are pinned by assertions that fail if the census reverts to identifier matching.

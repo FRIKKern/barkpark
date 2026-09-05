@@ -1,0 +1,1 @@
+A reader test that would only pass against the synthetic shape is identified and either fixed or documented.

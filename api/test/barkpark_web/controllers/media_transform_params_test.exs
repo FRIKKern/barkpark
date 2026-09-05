@@ -22,7 +22,7 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   tests below (they observe 200 with the original bytes instead); restoring
   the guard goes green again.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Renditions
@@ -65,7 +65,7 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   end
 
   defp get_scoped(ctx, path) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> ctx.token)
     |> get("/w/#{ctx.ws.slug}/p/#{ctx.project.slug}" <> path)
   end

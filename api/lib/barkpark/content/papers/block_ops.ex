@@ -29,7 +29,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render, Slots}
+  alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
 
   @paper_type "paper"
@@ -453,7 +453,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content type. Threading `type` through here is safe by construction.
     case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title)
+        persist_blocks_doc(
+          type,
+          content,
+          attrs,
+          existing,
+          dataset,
+          slug,
+          scope_attrs,
+          title,
+          opts
+        )
 
       {:error, _} = error ->
         error
@@ -462,7 +472,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # The Repo write + broadcast tail, reached only once the wall passed (or an
   # audited caller bypassed it).
-  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title) do
+  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title, opts) do
     doc_attrs = %{
       "doc_id" => slug,
       "type" => type,
@@ -496,6 +506,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     case result do
       {:ok, doc} ->
+        save_upsert_revision(doc, type, dataset, existing, opts)
         broadcast_paper_update(doc)
         enqueue_edge_projection(doc)
         # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
@@ -512,6 +523,59 @@ defmodule Barkpark.Content.Papers.BlockOps do
       error ->
         error
     end
+  end
+
+  # [paper-upsert-unlogged-clobber] Record the version-history row for a paper
+  # upsert. THE ASYMMETRY THIS CLOSES: `Content.upsert_document/4` pipes its
+  # result through `Broadcast.tap_broadcast/7`, which calls `save_revision/5`
+  # UNCONDITIONALLY — every write through the writer path leaves a snapshot. The
+  # paper path above instead called only `broadcast_paper_update/1`, a bare
+  # PubSub fan-out that saves NO revision. So `upsert_paper/2` replaced a
+  # PUBLISHED paper's whole `content` under a fresh opaque `rev` while
+  # `bp doc history` stood still, and the state it overwrote was never captured
+  # anywhere — not merely hard to find, gone. Every seal citing such a revision
+  # became unverifiable, and a legitimate bulk migration became
+  # indistinguishable from an accidental clobber.
+  #
+  # Measured on the live corpus before the fix by lead-corpus (2026-09-02, one
+  # `bp doc query paper --all` dump of all 1050 published papers; ledger row
+  # `task-45307192c1b0e1ef` — note its ORIGINAL description undercounts by an
+  # order of magnitude, having sampled a single 30-paper wave cohort, and was
+  # corrected in a later stage note): 485 of 1050 published papers were
+  # rewritten inside a 46-second window on 2026-08-17 (15:40:09.987Z →
+  # 15:40:55.791Z), with further sweeps on 08-23 (131 + 54), 08-25 (153) and
+  # 09-02 (51), and `intuition-atlas-verdict` is live and published with a
+  # revision history of count 0 — born here, never logged.
+  #
+  # NOT one runaway script: `barkpark-changelog-2026-07-17` has history through
+  # 2026-08-24T17:12Z and then an unlogged write on 08-25 — a different day and
+  # a different batch from the 08-17 sweep. Several callers reach this one
+  # low-level write, which is why the fix belongs HERE and not in any caller.
+  #
+  # STATED PRECISELY, because the stronger claim was never established: what was
+  # measured is that this path DID NOT RECORD WHAT IT CHANGED. Whether it was
+  # obliged to is a question nobody verified beforehand — this commit decides it
+  # by making the path log, rather than asserting an intent it inherited.
+  #
+  # WHY LOG, NOT FORBID: this is the legitimate Bulldocs ingest / `bp paper`
+  # publish entry point. Refusing a republish would break authoring outright. A
+  # migration must stay possible — it must just leave a trace. Both legs record:
+  # the UPDATE leg as "update" (the clobber), the INSERT leg as "create" (the
+  # count-0 case). `attrs` is deliberately NOT consulted for the action — the
+  # row's prior existence is the ground truth for which happened.
+  #
+  # BEST-EFFORT, matching `maybe_save_batch_revision/3` and
+  # `maybe_append_paper_event/3`: the paper save is the source of truth, and
+  # `save_revision/5` is the non-bang variant that already logs its own failures
+  # ([revision-loss-silent] in broadcast.ex). Failing an otherwise-valid content
+  # write because history could not be persisted would be worse than the write
+  # landing with a logged gap.
+  defp save_upsert_revision(%Document{} = doc, type, dataset, existing, opts) do
+    action = if existing, do: "update", else: "create"
+
+    Broadcast.save_revision(doc, type, dataset, action, Keyword.get(opts, :user_id))
+
+    :ok
   end
 
   # Append a `paper_events` row when this upsert carries a non-empty
@@ -1116,6 +1180,117 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} = err -> err
     end
   end
+
+  @doc """
+  Apply an ordered batch of block ops to ONE FIELD's block array — the write
+  path of a schema `richText` field that opted into the block editor
+  (`"editor": "blocks"`, Gyldendal parity stage E1).
+
+  The field's stored value is the shape `Projection.project_body/2` writes:
+  `%{"blocks" => [...], "html" => rendered}` — so the Classic reader
+  (`Forms.classic_form_value/1`) and every renderer keep working unchanged. A
+  legacy plain string is upgraded to one paragraph block on first edit; an
+  absent value starts empty.
+
+  Deliberately NOT `apply_document_block_op/5`: that path writes the
+  document-level `content["blocks"]` partition and re-projects every bound
+  field, so routing a field edit through it would collide with the Beta
+  document editor on any doc that has both. This one touches exactly
+  `content[field]` and nothing else.
+
+  The batch is checked against the field's declared vocabulary
+  (`FieldVocabulary.validate/2`) BEFORE anything is written — the client
+  vetoes the same vocabulary calmly, this is the truth.
+
+  Returns `{:ok, %{field, blocks, written_doc_id}}` or `{:error, reason}`.
+  """
+  @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ [])
+      when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
+    with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         {:ok, field_def} <- field_definition(type, dataset, field, opts),
+         blocks = field_blocks(Map.get(doc.content || %{}, field)),
+         {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
+         :ok <- FieldVocabulary.validate(FieldVocabulary.from_field(field_def), new_blocks) do
+      scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+
+      content =
+        (doc.content || %{})
+        |> Map.put(
+          field,
+          # task-c46967eb3dc49e77: this field body is read on a SCREEN — the
+          # Studio field editor and the paper/document readers — so it names
+          # `:article` instead of letting `Render.render_block/2`'s
+          # `Map.get(opts, :style, :email)` default stamp mail typography into
+          # a persisted field. Siblings: #15973 (document `content[body][html]`),
+          # #16037 (papers `body_html`).
+          Projection.project_body(
+            new_blocks,
+            Map.put(Labels.render_opts(dataset, scope), :style, :article)
+          )
+        )
+
+      attrs = %{
+        "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
+        "title" => doc.title,
+        "status" => doc.status,
+        "content" => content
+      }
+
+      case Content.upsert_document(type, attrs, dataset, opts) do
+        {:ok, _saved} ->
+          {:ok, %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"]}}
+
+        {:error, _} = err ->
+          err
+      end
+    else
+      {:error, _reason} = err -> err
+    end
+  end
+
+  # The field's raw schema map — the vocabulary rides on it. A field that did
+  # not opt into the block editor is refused: the Classic form owns it.
+  defp field_definition(type, dataset, field, opts) do
+    with {:ok, schema} <-
+           Content.resolve_schema(type, dataset, Keyword.take(opts, [:workspace_id, :project_id])),
+         %{} = f <- Enum.find(schema.fields || [], &(Map.get(&1, "name") == field)),
+         true <- FieldVocabulary.blocks_field?(f) do
+      {:ok, f}
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, {:no_such_field, field}}
+      false -> {:error, {:not_a_blocks_field, field}}
+      other -> other
+    end
+  end
+
+  @doc """
+  The block array behind a field value, in every shape a `richText` field has
+  ever stored: the projected body map, a legacy plain string (one paragraph),
+  or nothing.
+  """
+  @spec field_blocks(term()) :: [map()]
+  def field_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+
+  def field_blocks(text) when is_binary(text) do
+    case String.trim(text) do
+      "" ->
+        []
+
+      t ->
+        [
+          %{
+            "id" => "b-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower),
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => t}]
+          }
+        ]
+    end
+  end
+
+  def field_blocks(_), do: []
 
   # ── Papers — internal ──────────────────────────────────────────────────────
 
@@ -1724,9 +1899,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         head_errors =
           case Map.get(block, "head") || Map.get(block, "header") do
-            nil -> []
-            [] -> []
-            head -> render_table_row_errors(head, "#{path}.head")
+            nil ->
+              []
+
+            [] ->
+              []
+
+            # `head: true` (either spelling) is the PROMOTE-ROW-0 dialect the
+            # renderer already speaks: compose.ex matches `{true, [first |
+            # rest]}` and lifts row 0 into the head row, and renders `{true,
+            # []}` as a headless table. The gate spoke neither — the flag fell
+            # through to `render_table_row_errors(true, path)`, whose catch-all
+            # refused a block its own reader composes end to end. The promoted
+            # cells are `rows[0]`, which `row_errors` above has already
+            # validated, so there is nothing left for this arm to check.
+            true ->
+              []
+
+            head ->
+              render_table_row_errors(head, "#{path}.head")
           end
 
         head_errors ++ row_errors
@@ -1931,9 +2122,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # ── inline-leaf dialect (TipTap `text` → canonical `value`) ────────────────
   #
-  # The renderer reads ONLY `value` on a text leaf (render/inline.ex — no
-  # `text` fallback), so a TipTap-dialect leaf renders as "" and a paragraph
-  # whose only leaf carries it VANISHES behind a 200. Normalize at the write
+  # The canonical text leaf carries `value`. `Render.Inline.compose_inline/2`
+  # has dual-read `value || text` since 2026-08-23 (and its Go twin through
+  # `attrStrFirst(n, "value", "text")`), so a TipTap-dialect leaf no longer
+  # renders as "" — but that tolerance is a SAFETY NET at one reader, not a
+  # contract every consumer honours, and this is the chokepoint whose job is to
+  # store ONE shape. Normalize at the write
   # chokepoint over every inline-bearing surface: block `content`, list
   # `items`, table `rows`/`head` cells, and nested `blocks`/`children`
   # containers. A leaf already carrying `value` is left byte-identical
@@ -1979,10 +2173,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
           block
       end
 
-    case Map.get(block, "head") do
-      cells when is_list(cells) -> Map.put(block, "head", normalize_table_cells_leaves(cells))
-      _ -> block
-    end
+    # BOTH head spellings. `header` is first-class at the gate
+    # (`render_block_errors/2` reads `head || header`) and at the renderer
+    # (compose.ex `declared_head` falls back to `header`), but this rescue only
+    # ever reached `head` — so a TipTap text-keyed leaf inside a `header` cell
+    # got no dialect normalization and rendered as the empty string forever,
+    # exactly the failure #11616 closed on every other inline-bearing surface.
+    Enum.reduce(["head", "header"], block, fn key, acc ->
+      case Map.get(acc, key) do
+        cells when is_list(cells) -> Map.put(acc, key, normalize_table_cells_leaves(cells))
+        _ -> acc
+      end
+    end)
   end
 
   defp normalize_table_leaves(block), do: block
@@ -2798,12 +3000,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
   defp maybe_project(content, blocks, type, dataset, slug, scope) when is_list(blocks) do
+    # task-c46967eb3dc49e77 — A FIFTH style-less site, found by this row's
+    # census and NOT in its filing. `write_encrypted_blocks_doc/8` renders
+    # `content["body_html"]` through `Labels.paper_render_opts/3` (`:article`
+    # since #16037) and then projects `content["body"]["html"]` through THESE
+    # opts, which carried no `:style` — so `Render.render_block/2`'s
+    # `Map.get(opts, :style, :email)` default decided and one paper row stored
+    # its body twice, on TWO DIFFERENT SURFACES. Measured on b2529b02c via
+    # `Content.upsert_paper/1` with a plain paragraph and no `content["style"]`:
+    #
+    #     body_html      => "<p>probe copy</p>"
+    #     body["html"]   => "<p style=\"margin:0 0 16px;font-family:'Iowan Old
+    #                        Style',…;font-size:17px;line-height:1.55;
+    #                        color:#15211d\">probe copy</p>"
+    #
+    # This path persists via direct Repo writes (`persist_blocks_doc/9`), so
+    # unlike the document leg it is NOT rescued downstream by
+    # `Writer.maybe_project_document_content/2` — the email bytes really landed.
     render_opts =
-      Map.put(
-        Labels.render_opts(dataset, scope),
-        :preview,
-        blocks_doc_preview_opts(type, slug, scope)
-      )
+      Labels.render_opts(dataset, scope)
+      |> Map.put(:preview, blocks_doc_preview_opts(type, slug, scope))
+      |> Map.put(:style, :article)
 
     Projection.project(content, blocks, render_opts)
   end
@@ -2845,10 +3062,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
-    Map.put(Labels.render_opts(dataset, scope), :preview, %{
+    # task-c46967eb3dc49e77: names `:article` rather than letting
+    # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default pick.
+    # Defence in depth on THIS leg — `apply_document_block_op/5` finishes
+    # through `Content.upsert_document/4`, whose
+    # `Writer.maybe_project_document_content/2` re-projects the same keys on
+    # the already-`:article` `doc_render_opts/3`, so nothing persisted here was
+    # ever wrong. The paper leg above (`maybe_project/6`) is the one that was.
+    Labels.render_opts(dataset, scope)
+    |> Map.put(:preview, %{
       media_resolver: Preview.media_resolver(scope),
       doc_type: type
     })
+    |> Map.put(:style, :article)
   end
 
   # Tenancy scope for the media resolver: an explicit caller scope wins, else the

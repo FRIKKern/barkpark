@@ -136,6 +136,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
+  def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
   def walk(%{"kind" => "PdValueref"} = n, _width, pal), do: valueref(n, pal)
 
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
@@ -210,7 +211,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # external Pd JSON, so an open `"class"` pass-through would let any document
   # claim arbitrary paper-surface classes (class injection). Compose stamps
   # these as FIXED literals (compose_section_stack); anything else stays inert.
-  @box_class_whitelist ~w(bp-section--framed)
+  @box_class_whitelist ~w(bp-section--framed bp-section--wide)
 
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -338,8 +339,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # pane because there were no `<p>` margins to space them. compose_block
   # paragraph/ingress/byline emit PdParagraph in article mode so the editor's
   # body typography (font-size 18px, line-height 1.70, margin rhythm)
-  # actually applies. Email/default mode keeps PdText (`<span>`) for
-  # byte-stable export.
+  # actually applies. STALE-NOTE CORRECTED (2026-09-02): the old line here
+  # claimed "email/default mode keeps PdText (`<span>`) for byte-stable export".
+  # It has not been true since the gp-w3 email-view wave — compose_block/2 emits
+  # PdParagraph for paragraph, eyebrow, byline, ingress AND pullquote in EVERY
+  # style (compose.ex `_ = style` in each of those clauses), so a real `:email`
+  # render is block-level throughout. The `<span>` role output visible in
+  # `email_golden.html` is a FIXTURE artifact: ParityFixture hand-builds
+  # `PdText` role nodes (test/support/portable_doc_parity_fixture.ex text_roles/0),
+  # bypassing compose entirely.
   # Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
   # 2026-07-31): published readers emit only visible semantic groups — an empty
   # PdParagraph scaffold (Enter, Enter) stays editable in the Pd-tree (compose
@@ -397,11 +405,53 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
-    out = Enum.reverse(out)
+    out = body_type(n, pal) ++ Enum.reverse(out)
 
     style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
     class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
     "<p#{class_attr}#{style_attr}>#{inner}</p>"
+  end
+
+  # Body-copy type for the ordinary paragraph under a STYLESHEET-LESS palette
+  # (`:email`, and a bare standalone export). Mail clients strip stylesheets, so
+  # every other block already carries its type inline — headings via
+  # heading_style/2, lists via the list clause, roles via apply_text_role/4 —
+  # and the plain `<p>`, the commonest block in any paper, was the one leg that
+  # emitted NO style attribute at all. It then inherited the client default
+  # (~16px/normal, and in Outlook a system sans, because the wrapper's
+  # font-family does not descend into `<p>`), so body copy read SMALLER and
+  # looser than the 18px/1.55 ingress that introduces it.
+  #
+  # Values are sourced from the palette (`pal.font_body`, `pal.text`) — never a
+  # re-typed hex — so a theme override moves these bytes with the rest of the
+  # skin. Emitted FIRST so an author mark (weight/italic/deco/`color`) parsed
+  # later still wins the cascade: a coloured paragraph keeps its author colour.
+  #
+  # Two deliberate exemptions:
+  #   * `:article` — its `<p>` is bare BY CONTRACT; `.bp-paper-surface p` owns
+  #     the typography in both View and Edit (see the moduledoc theme-vs-data
+  #     contract). Stamping here would fork that single source.
+  #   * a role-hinted paragraph (eyebrow/byline/ingress/pullquote) — it already
+  #     carries a complete, measure-tuned stamp from apply_text_role/4; adding a
+  #     base underneath it would only be overridden.
+  defp body_type(_n, %{style: :article}), do: []
+
+  defp body_type(n, pal) do
+    if Map.get(n, "_role") do
+      []
+    else
+      # An author `color` mark already paints this paragraph; emitting the
+      # palette ink underneath it would only be overridden, so it is dropped —
+      # one `color` declaration per `<p>`, never a dead duplicate.
+      base = [
+        "margin:0 0 16px",
+        "font-family:#{pal.font_body}",
+        "font-size:17px",
+        "line-height:1.55"
+      ]
+
+      if Map.get(n, "color"), do: base, else: base ++ ["color:#{pal.text}"]
+    end
   end
 
   # Real semantic heading (the compose clause emits PdHeading exclusively under
@@ -922,6 +972,44 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     href = escape_html("/tags/" <> URI.encode(raw, &URI.char_unreserved?/1))
 
     tag_node_html(href, name, pal)
+  end
+
+  # Verdict chip (PdChip — inline `chip` node). `:article` carries the
+  # `.bp-chip` family the surface styles from the `--bp-tone-*` pairs; the
+  # email/default leg inlines the SAME tone pair through `Util.tone_palette/1`
+  # so a chip reads identically in a digest. An unknown tone degrades to
+  # neutral (never info — a verdict that failed to parse must not look like
+  # an informational one). The note is a block under the chip in the article
+  # and a soft trailing span inline in email.
+  @chip_tones ~w(success warning danger info neutral)
+
+  defp chip(n, pal) do
+    tone = if Map.get(n, "tone") in @chip_tones, do: Map.get(n, "tone"), else: "neutral"
+    strong? = Map.get(n, "strong") == true
+    text = escape_html(Map.get(n, "text") || "")
+    note = escape_html(Map.get(n, "note") || "")
+    chip_html(tone, strong?, text, note, pal)
+  end
+
+  defp chip_html(tone, strong?, text, note, %{style: :article}) do
+    strong_cls = if strong?, do: " bp-chip--strong", else: ""
+    note_html = if note == "", do: "", else: ~s(<span class="bp-chip__note">#{note}</span>)
+
+    ~s(<span class="bp-chip bp-chip--#{tone}#{strong_cls}"><i class="bp-chip__dot"></i>#{text}</span>) <>
+      note_html
+  end
+
+  defp chip_html(tone, strong?, text, note, _pal) do
+    %{bg: bg, fg: fg} = Barkpark.PortableDoc.Render.Util.tone_palette(tone)
+    {bg, fg} = if strong?, do: {fg, "#ffffff"}, else: {bg, fg}
+
+    note_html =
+      if note == "",
+        do: "",
+        else: ~s( <span style="color:#6b7280;font-size:0.85em">#{note}</span>)
+
+    ~s(<span style="display:inline-block;background:#{bg};color:#{fg};padding:1px 8px;border-radius:999px;font-size:0.85em;font-weight:600">#{text}</span>) <>
+      note_html
   end
 
   # Stage 2: `:article` carries `bp-tag` (the pill chip, styled by

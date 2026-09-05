@@ -1,0 +1,1 @@
+.github/required-checks.json is untouched by this row's diff, and the PR says so. Evidence: git diff --name-only origin/main.

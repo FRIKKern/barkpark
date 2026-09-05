@@ -148,6 +148,29 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
     doc
   end
 
+  # Same shape as `mk_gated_task!/2` but with the criteria list handed in, so a
+  # case can seed the two OTHER classifications `reconcile_merge_gate/3` names —
+  # an unmarked gate (`:no_marker`) and a marked-but-textless gate
+  # (`:no_guardable_marker`) — in the SAME default scope the scope-less webhook
+  # path resolves against.
+  defp mk_task_with_criteria!(scope, doc_id, criteria) do
+    content = %{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "acceptance_criteria" => criteria
+    }
+
+    {:ok, doc} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
   # The exact JSON string we sign AND post for a merged `pull_request` close whose
   # body carries the `Task: <doc_id>` trailer.
   defp merged_pr_body(doc_id, number, sha) do
@@ -352,6 +375,184 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
            "the replay claimed no write, but the row was touched"
 
     assert after_replay.content == after_first.content
+  end
+
+  # ── PDS w37: controller :191's OTHER two tags, bought at the WIRE ─────────
+  #
+  # `github_webhook_controller.ex:191` is one clause head guarding THREE tags:
+  # `[:already_stamped, :no_marker, :no_guardable_marker]`. Only
+  # `:already_stamped` was ever driven through the real route (the replay case
+  # above). `:no_marker` was proven two hops down, at the MergeEvents unit layer
+  # (merge_events_test.exs), and `:no_guardable_marker` was proven three hops
+  # down at the Tasks layer (reconcile_merge_gate_test.exs) and had NEVER been
+  # produced through `MergeEvents.handle/2` at all — it reaches the receipt only
+  # via the generic `{:ok, tag} -> {:ok, tag, doc_id}` passthrough at
+  # merge_events.ex:123, itself unexercised for that tag.
+  #
+  # Both cases below drive the REAL signature -> controller -> MergeEvents ->
+  # Tasks -> Postgres path with NO seam injected, assert the printed receipt,
+  # and then assert the STORE — because every one of these tags is a claim about
+  # the store ("no write happened"), which a mapping proof cannot see.
+
+  test "a merged PR on an UNMARKED gate → reconciled: no_marker and NOT ONE byte written", %{
+    scope: scope
+  } do
+    doc_id = "pds-w37-nomarker-#{System.unique_integer([:positive])}"
+
+    # Same wording as a real gate, but no `merge_gate:true` — a text heuristic
+    # would misfire here, which is exactly what the named tag exists to prevent.
+    task =
+      mk_task_with_criteria!(scope, doc_id, [
+        %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+        %{"criterion" => @gate_text, "met" => false}
+      ])
+
+    body = merged_pr_body(doc_id, 4631, "d0d0beef01")
+    sig = Signature.sign(body, @secret)
+
+    conn = deliver(body, sig, "pull_request")
+
+    # THE RECEIPT — controller line 194, verbatim shape, tag carried through the
+    # merge_events.ex:123 passthrough.
+    assert %{"ok" => true, "reconciled" => "no_marker", "task" => ^doc_id} =
+             json_response(conn, 200)
+
+    # THE STORED ROW — `no_marker` asserts the classifier REFUSED to guess. A
+    # text fallback that stamped the look-alike wording would still print this
+    # same sentence; only the row can tell the two apart.
+    reloaded = Repo.get!(Document, task.id)
+    gate = Enum.at(reloaded.content["acceptance_criteria"], 1)
+
+    assert gate["met"] == false,
+           "receipt said no_marker but the unmarked look-alike criterion was stamped anyway"
+
+    refute Map.has_key?(gate, "evidence")
+
+    refute Map.has_key?(reloaded.content, "merge_gate_autostamp"),
+           "no_marker claims no write, but an autostamp provenance record was left behind"
+
+    assert reloaded.rev == task.rev, "no_marker claims no write — the rev moved"
+    assert reloaded.content == task.content
+  end
+
+  test "a merged PR on a TEXTLESS marked gate → reconciled: no_guardable_marker, no fake stamp",
+       %{scope: scope} do
+    doc_id = "pds-w37-noguard-#{System.unique_integer([:positive])}"
+
+    # Marked `merge_gate:true` and UNMET, but with no wording to CAS against
+    # (D56). The honest answer is to leave it for a human, never to stamp
+    # through the hole.
+    task =
+      mk_task_with_criteria!(scope, doc_id, [
+        %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+        %{"criterion" => "", "met" => false, "merge_gate" => true}
+      ])
+
+    body = merged_pr_body(doc_id, 4632, "d0d0beef02")
+    sig = Signature.sign(body, @secret)
+
+    conn = deliver(body, sig, "pull_request")
+
+    # THE RECEIPT — the third tag of controller line 191, produced through
+    # `MergeEvents.handle/2` for the first time.
+    assert %{"ok" => true, "reconciled" => "no_guardable_marker", "task" => ^doc_id} =
+             json_response(conn, 200)
+
+    # THE STORED ROW — the whole point of this tag is that the gate stays UNMET.
+    reloaded = Repo.get!(Document, task.id)
+    gate = Enum.at(reloaded.content["acceptance_criteria"], 1)
+
+    assert gate["met"] == false,
+           "receipt said no_guardable_marker but the unguardable gate was stamped anyway"
+
+    refute Map.has_key?(gate, "evidence")
+
+    refute Map.has_key?(reloaded.content, "merge_gate_autostamp"),
+           "no_guardable_marker claims no write, but an autostamp record was written"
+
+    assert reloaded.rev == task.rev, "no_guardable_marker claims no write — the rev moved"
+    assert reloaded.content["lifecycle_status"] == "open"
+  end
+
+  test "a merged PR whose trailer names a doc that does not resolve → 202 unknown_task, no birth" do
+    doc_id = "pds-w37-ghost-#{System.unique_integer([:positive])}"
+
+    body = merged_pr_body(doc_id, 4633, "d0d0beef03")
+    sig = Signature.sign(body, @secret)
+
+    conn = deliver(body, sig, "pull_request")
+
+    assert %{"ok" => true, "ignored" => "unknown_task", "task" => ^doc_id} =
+             json_response(conn, 202)
+
+    # THE STORE — a refused reconcile must never CREATE the task it could not
+    # find. Scoped to this test's own doc_id (never a table-wide count).
+    assert Repo.all(
+             from(d in Document,
+               where: d.type == "task" and like(d.doc_id, ^"%#{doc_id}"),
+               select: d.doc_id
+             )
+           ) == []
+  end
+
+  # ── PDS w37: the INBOUND detach arm, bought end-to-end ────────────────────
+  #
+  # `github_webhook_controller.ex:109-111` answers `detached: true`. Every test
+  # of that line injects `:github_webhook_inbound_fun` and asserts the mapping.
+  # This drives the REAL InboundEvents: it first BIRTHS a gh-<num> task through
+  # the real Intake, then delivers a signed `issues.deleted` for the same issue
+  # and asserts BOTH post-conditions the receipt implies — the durable link-state
+  # flip on the task row, and the visible `detached` conflict row a maintainer is
+  # supposed to see. Both are read back through Repo, scoped to this test's own
+  # issue number.
+  test "a signed issues.deleted after a real birth → detached: true, the row flips and is recorded" do
+    number = 90_777 + System.unique_integer([:positive])
+
+    # 1. birth — hermetic (no `repository` key → the Intake backlink never
+    #    resolves a repo and never touches the network).
+    birth = opened_body(number)
+
+    assert %{"ok" => true, "ingested" => true} =
+             json_response(deliver(birth, Signature.sign(birth, @secret)), 200)
+
+    {:ok, born} = Content.get_document(Content.draft_id("gh-#{number}"), "task", @dataset, [])
+    assert get_in(born.content, ["github", "state"]) == "intake"
+
+    # 2. delete — this delivery DOES carry `repository.full_name`, because the
+    #    conflict recorder requires a repo and the detach path makes no network
+    #    call, so naming the repo here stays hermetic.
+    gone =
+      Jason.encode!(%{
+        "action" => "deleted",
+        "issue" => %{"number" => number, "title" => "Outsider hit a wall"},
+        "repository" => %{"full_name" => "acme/pds-w37"},
+        "sender" => %{"login" => "outsider", "type" => "User"}
+      })
+
+    conn = deliver(gone, Signature.sign(gone, @secret))
+
+    # THE RECEIPT — controller line 111, verbatim shape.
+    assert %{"ok" => true, "detached" => true} = json_response(conn, 200)
+
+    # THE STORED ROW — the correctness write the receipt claims.
+    reloaded = Repo.get!(Document, born.id)
+
+    assert get_in(reloaded.content, ["github", "state"]) == "detached",
+           "receipt said detached: true but the stored link state is still #{inspect(get_in(reloaded.content, ["github", "state"]))}"
+
+    # THE VISIBLE RECORD — bookkeeping layered on the flip, scoped to this
+    # test's own issue number (never a table-wide read).
+    conflicts =
+      Repo.all(
+        from(c in Barkpark.Plugins.Github.Conflict,
+          where: c.issue == ^number,
+          select: %{kind: c.kind, doc_id: c.doc_id, detail: c.detail}
+        )
+      )
+
+    assert [%{kind: "detached", doc_id: doc_id, detail: detail}] = conflicts
+    assert doc_id == "gh-#{number}"
+    assert detail["reason"] == "deleted"
   end
 
   # Attach a one-shot repo-query observer that reproduces a GENUINE rev-CAS race

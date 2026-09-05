@@ -1,0 +1,1 @@
+The ceiling job is BLOCKING (no continue-on-error), runs UNFILTERED with no if:, is added to the aggregator's needs AND its env AND a decide call with gate NEVER, and the advisory Format job stays visible per D10. Evidence: the diff.

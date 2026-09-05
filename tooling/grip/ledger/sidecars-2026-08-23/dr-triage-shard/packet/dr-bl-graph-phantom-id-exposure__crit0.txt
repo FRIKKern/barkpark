@@ -1,0 +1,1 @@
+DECISION ROW — this closes on a recorded ruling, not on code changing. The question is answered by MEASUREMENT: for each field shape (reference, array-of-reference, PortableDoc inline refs) it is shown live whether a public-read caller can already read the target id via the allowed GET /v1/data/doc route. Paste the response per shape.

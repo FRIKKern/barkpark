@@ -13,6 +13,7 @@ defmodule BarkparkWeb.ShareLinkDraftsClampTest do
   HTTP door has a Studio twin, and vice versa. A future change that fixes one
   and not the other reds here.
   """
+  # sync: swaps node-global Application env (:barkpark, :shares) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content}
@@ -220,7 +221,9 @@ defmodule BarkparkWeb.ShareLinkDraftsClampTest do
           ref_type: "paper",
           ref_id: "drafts.clamp-paper",
           access: "read",
-          token: raw,
+          # Only the digest — the plaintext column was retired
+          # (arpss-w8-bl-share-link-raw-token-at-rest). `resolve/1` has always
+          # matched on the hash, so `raw` still reaches this row.
           token_hash: Links.hash_token(raw)
         })
 

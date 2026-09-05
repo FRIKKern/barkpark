@@ -52,18 +52,12 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
     %{conn: conn, ws: ws, proj: proj, paper: paper}
   end
 
-  defp with_shares(env_string) do
-    prior = Application.get_env(:barkpark, :shares)
-    Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
-
-    :ok
-  end
+  # arpss-w8: shares are planted as STORED rows via `Barkpark.SharingFixtures`,
+  # so `Sharing.refresh/0` — fired by add_share/remove_share, POST/DELETE
+  # /v1/shares and the Studio shares handlers — REBUILDS this fixture instead of
+  # ERASING it (a bare `put_env(:barkpark, :shares, …)` is in neither refresh
+  # input). Snapshots and restores `:shares_env` as well as `:shares`.
+  defp with_shares(env_string), do: Barkpark.SharingFixtures.plant_shares!(env_string)
 
   defp mint_link!(ws, proj, ref_id, attrs \\ %{}) do
     {:ok, {raw, _link}} =
@@ -291,7 +285,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       seed_thumb_cache!(file)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> init_test_session(%{"api_token" => raw_token})
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
@@ -307,7 +301,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       seed_thumb_cache!(file)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{raw_token}")
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
@@ -431,7 +425,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       |> Repo.insert!()
 
       scoped =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{raw_token}")
         |> get("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@dataset}")
         |> json_response(200)

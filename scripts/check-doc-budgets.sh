@@ -244,7 +244,9 @@ if [ "$MODE" = selftest ]; then
   # exactly that. (An ordinary `set -e` failure did exit 1, which is why it
   # hid.) So completion is asserted POSITIVELY instead: the sentinel is set on
   # the last line before the PASS, and anything that leaves it unset while
-  # claiming 0 exits 70. Arm k7 pins it.
+  # claiming 0 exits 70. (On a shell that does NOT reset the status — bash 5.x,
+  # which is what CI runs — $? is already non-zero here and the trap passes it
+  # through; k7 therefore asserts NON-ZERO, not the literal 70.) Arm k7 pins it.
   SELFTEST_COMPLETED=0
   trap 'dw_rc=$?; rm -rf "$TMP";
         if [ "$SELFTEST_COMPLETED" != 1 ] && [ "$dw_rc" -eq 0 ]; then
@@ -719,8 +721,16 @@ if [ "$MODE" = selftest ]; then
   caps_out="$(DOC_BUDGETS_SELFTEST_ACTIVE=0 bash "$caps_probe" --selftest 2>&1)"
   caps_rc=$?
   set -e
-  [ "$caps_rc" -eq 70 ] \
-    || fail_selftest "a selftest that ABORTED on an unbound variable exited $caps_rc, expected 70 — the EXIT trap is resetting the status, so this harness can die having run zero arms and still report PASS. Its output was: $(printf '%s' "$caps_out" | tail -2 | tr '\n' ' ')"
+  # NON-ZERO, not 70. The two live shells answer DIFFERENTLY and both are
+  # correct: bash 3.2 resets $? to 0 on a fatal `set -u` abort, so the trap's
+  # positive-completion check is what supplies the failure (70); bash 5.x (CI,
+  # /usr/bin/bash) propagates its own 1, the trap sees a non-zero and passes it
+  # through unchanged. Pinning the literal 70 asserted the bash-3.2 PATH rather
+  # than the PROPERTY, so this arm was red on every CI run and green on every
+  # macOS one. The property under test is "the harness cannot die and report
+  # success" — that is `!= 0`, and a plain trap on bash 3.2 still exits 0 here.
+  [ "$caps_rc" -ne 0 ] \
+    || fail_selftest "a selftest that ABORTED on an unbound variable exited $caps_rc, expected NON-ZERO (70 where the shell resets the status to 0, otherwise the 1 the shell itself reports) — the EXIT trap is resetting the status, so this harness can die having run zero arms and still report PASS. Its output was: $(printf '%s' "$caps_out" | tail -2 | tr '\n' ' ')"
 
   # k8: an exemption row ADDED without bumping its pin must RED. An exemption
   #     list is the one table here whose growth is silent by nature — nothing
@@ -776,7 +786,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=36
+CAPS_ROWS_EXPECTED=37
 CAPS_ROWS_WALKED=0
 CAPS_PATHS=""
 if [ "$SPAN_ONLY" != "1" ]; then
@@ -810,6 +820,7 @@ docs/ops/merge-gates.md 64000
 docs/ops/branch-protection-and-overrides.md 10400
 
 docs/api-v1.md 14000
+docs/api/error-codes.md 1900
 
 docs/auth.md 5600
 docs/auth-user-sessions.md 16000

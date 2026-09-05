@@ -148,7 +148,7 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
   end
 
   defp fetch(raw, path) do
-    r = get(put_req_header(build_conn(), "authorization", "Bearer " <> raw), path)
+    r = get(put_req_header(scoped_conn(), "authorization", "Bearer " <> raw), path)
     {r.status, if(is_binary(r.resp_body), do: r.resp_body, else: inspect(r.resp_body))}
   end
 

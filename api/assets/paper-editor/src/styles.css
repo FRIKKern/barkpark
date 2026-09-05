@@ -44,12 +44,13 @@
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: var(--tok-reading-body-tracking);
-  --bp-h1-size: var(--tok-reading-h1-size);
+  --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));
   --bp-h1-lh: var(--tok-reading-h1-lh);
   --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);
   --bp-h2-lh: var(--tok-reading-h2-lh);
   --bp-h2-tracking: var(--tok-reading-h2-tracking);
+  --bp-h2-weight: var(--tok-reading-h2-weight);
   --bp-h3-size: var(--tok-reading-h3-size);
   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
@@ -86,7 +87,6 @@
   --bp-codeblock-pad: 0.9rem 1.1rem;
   --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
-  --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
   --st-info: #2563eb;
@@ -114,9 +114,10 @@
   --tok-reading-h1-size: 40px;
   --tok-reading-h1-lh: 1.05;
   --tok-reading-h1-tracking: -0.02em;
-  --tok-reading-h2-size: 27px;
-  --tok-reading-h2-lh: 1.2;
-  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h2-size: 36px;
+  --tok-reading-h2-lh: 1.15;
+  --tok-reading-h2-tracking: -0.015em;
+  --tok-reading-h2-weight: 400;
   --tok-reading-h3-size: 21px;
   --tok-reading-h3-lh: 1.3;
   --tok-air-beat: 22px;
@@ -510,7 +511,11 @@
  * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
  * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
 .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; overflow-wrap: break-word; }
-.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; overflow-wrap: break-word; }
+/* h2 takes the DISPLAY VOICE (device 3): the per-step `--bp-h2-weight`, not the
+ * shared `--bp-heading-weight`, plus `text-wrap: balance` — byte-identical with
+ * paper-surface.css `.bp-paper-surface h2` (which carries the reasoning) and the
+ * root.html.heex copy; view_edit_parity_test.exs §2/§5 pin both declarations. */
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; overflow-wrap: break-word; }
 .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
 /* THE SECTION HEAD — the EDIT twin of the reader's
  * `.bp-paper-surface > #paper-body > h2` (+ its keyed-stream leg) in
@@ -524,7 +529,7 @@
  * pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
 .bp-paper-editor-body > h2 {
   margin-top: var(--bp-section-beat);
-  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
 }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
@@ -569,16 +574,31 @@
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
-.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
-.bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+.bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+.bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose column
  * exactly like .bp-table (the reader's three breakout classes). Values byte-copied from
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
  * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
  * copy. */
-.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+/* The stat grid's seams are drawn per CELL, not by a container ground (the
+ * partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
+ * reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
+ * element); mirrored here for visual parity, byte-identical with the reader's
+ * `.bp-paper-surface .bp-stats .bp-stat` and the root.html.heex copy. */
+.bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
 .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+/* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption> through ONE
+ * class (paper-surface.css `.bp-paper-surface .bp-figcaption`) instead of the ~200 bytes
+ * of inline caption styling it used to repeat at three emit sites — one of which had
+ * drifted to a bare ink hex that is 2.97:1 on the dark ground. The canvas mounts figures
+ * through the SAME reader producer, so the class arrives here too and needs the twin.
+ * Values byte-copied from the View rule (view_edit_parity_test.exs §2 guards drift).
+ * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-paper-editor-body .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
@@ -629,12 +649,13 @@
 /* Canvas code node frame — out-ranks the generic pre rule above (higher
  * specificity via the .bp-canvas-code class code-node.js stamps). S9: the
  * node-view no longer sets fontFamily/whiteSpace inline (they were the drift),
- * so this rule carries the WHOLE terracotta left-accent frame incl. the mono
- * font + ink colour, all bound to the --bp-codeblock-* / --paper-* tokens so it
- * is byte-aligned AND theme-aligned with the VIEW block (figures.ex
- * code_block_html/1). Keep BYTE-IDENTICAL with the root.html.heex copy. */
+ * so this rule carries the WHOLE frame — a bare --paper-bg-deep slab, no left
+ * bar since task-ddb1e0ab09a62466 — incl. the mono font + ink colour, all bound
+ * to the --bp-codeblock-* / --paper-* tokens so it is byte-aligned AND
+ * theme-aligned with the VIEW block (figures.ex code_block_html/1). Keep
+ * BYTE-IDENTICAL with the root.html.heex copy. */
 .bp-paper-editor-body pre.bp-canvas-code {
-  background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-reading-accent); border-radius: var(--bp-codeblock-radius);
+  background: var(--paper-bg-deep); border: 0; border-radius: var(--bp-codeblock-radius);
   padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin); font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
   color: var(--paper-ink); white-space: normal; overflow-x: auto;
 }
@@ -663,16 +684,17 @@
 /* Canvas section-divider — the §-on-a-hairline the Divider atom (divider-node.js
  * renderHTML) stamps, byte-aligned with the reader's inline styles in
  * Figures.section_divider_html/0 (figures.ex:33-37). Bound off the same custom
- * props (no hex fallback — --paper-rule/--paper-bg-deep/--paper-ink-soft are
+ * props (no hex fallback — --paper-rule/--paper-bg/--paper-ink-soft are
  * defined light+dark in BOTH sinks), a dark-mode improvement over the reader's
- * light-only inline hex. Keep BYTE-IDENTICAL with the root.html.heex copy. */
+ * light-only inline hex. The mark paints the PAGE token (--paper-bg) — it masks
+ * the hairline, it is not a fill. Keep BYTE-IDENTICAL with the root.html.heex copy. */
 .bp-paper-editor-body .bp-section-divider {
   position: relative; text-align: center; margin: 2.4rem 0;
   border-top: 1px solid var(--paper-rule);
 }
 .bp-paper-editor-body .bp-section-divider__mark {
   position: relative; top: -0.7rem; display: inline-block;
-  padding: 0 0.8rem; background: var(--paper-bg-deep);
+  padding: 0 0.8rem; background: var(--paper-bg);
   color: var(--paper-ink-soft); font-size: 1.1rem;
 }
 .bp-paper-editor-body img {
@@ -1018,18 +1040,19 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * child HTML styles itself identically to /papers with NO extra CSS (D8). Keep
  * BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
 .bp-canvas-figure { margin: 1.6rem 0; }
-/* The editable caption matches the reader <figcaption> INLINE styles (compose.ex
- * figure_html:924) — the reader figcaption has NO stylesheet rule (it is inline-
- * styled), so reproduce those values + an input reset. The empty-caption resting-hide
- * is JS (configControlHidden toggles the <figcaption> display), NOT CSS — same as the
- * diagram caption. */
+/* The editable caption matches the reader <figcaption>, which since
+ * papers/captions-floor is styled by ONE class (.bp-figcaption, mirrored above) rather
+ * than by inline styles — so reproduce THAT rule's values (serif, roman, 0.9rem/1.45,
+ * --paper-ink-soft) plus an input reset. An <input> inherits none of it, which is why
+ * the copy is here at all. The empty-caption resting-hide is JS (configControlHidden
+ * toggles the <figcaption> display), NOT CSS — same as the diagram caption. */
 .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
 .bp-canvas-figure-caption-input {
   display: block; width: 100%; box-sizing: border-box;
   border: none; background: transparent; padding: 0; margin: 0;
   color: var(--paper-ink-soft, #6a6a6a);
-  font-style: italic; font-size: 0.9rem;
-  font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 0.9rem; line-height: 1.45;
+  font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
 }
 .bp-canvas-figure-caption-input:focus { outline: none; }
 

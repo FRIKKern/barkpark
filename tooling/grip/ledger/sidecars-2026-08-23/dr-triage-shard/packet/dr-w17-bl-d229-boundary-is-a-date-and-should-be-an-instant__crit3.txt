@@ -1,0 +1,1 @@
+PublishClock's censor node is given the SAME derivation-method tag vocabulary (a 2-line, no-logic change) so a reader can tell a schema fact from a data fact across both surfaces — WITHOUT extracting a shared module, which would collapse the distinction

@@ -1,0 +1,1 @@
+Their post-click arms render the server authority sentence rather than a transient retry line, matching what S1 did for update/rollback/attach. Evidence: the before/after hook outputs.

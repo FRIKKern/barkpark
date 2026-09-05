@@ -57,4 +57,31 @@ defmodule Barkpark.Sharing.LinksTest do
     {:ok, {_raw, link}} = Links.create(Map.put(base, :ttl, nil))
     assert link.expires_at == nil
   end
+
+  describe "workspace_admin?/2 — the workspace-id totality is the chokepoint's (task-83ceffc9e7e32174)" do
+    # The wrapper used to run `Repo.uuid_or_nil(workspace_id)` itself. It no
+    # longer does: `Tenancy.Auth.membership/3` casts both ids and denies on a
+    # failure, so a malformed workspace id must DENY here without raising —
+    # and, mutation-proved, it is the chokepoint doing it: with
+    # `Repo.uuid_or_nil/1` disarmed by hand these arms red with
+    # `Ecto.Query.CastError` from tenancy/auth.ex, not from this file.
+    test "a non-UUID / blank / nil workspace id denies and does not raise" do
+      user = %Barkpark.Accounts.User{id: Ecto.UUID.generate()}
+      token = %Barkpark.Auth.ApiToken{id: Ecto.UUID.generate(), permissions: ["admin"]}
+
+      for bad <- ["", "not-a-uuid", "  ", "0", "11111111-1111-1111-1111-11111111111", nil],
+          principal <- [user, token, [user, token]] do
+        refute Links.workspace_admin?(principal, bad),
+               "expected a DENIAL for workspace_id #{inspect(bad)} and principal #{inspect(principal, limit: 3)}"
+      end
+    end
+
+    test "a principal shape the chokepoint would raise on is still narrowed here" do
+      ws = create_workspace!("links-ws-shape")
+      refute Links.workspace_admin?(nil, ws.id)
+      refute Links.workspace_admin?(%Barkpark.Auth.ApiToken{id: nil}, ws.id)
+      refute Links.workspace_admin?([], ws.id)
+      refute Links.workspace_admin?(:not_a_principal, ws.id)
+    end
+  end
 end

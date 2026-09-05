@@ -1,0 +1,1 @@
+A test reads the painted-closed bucket predicate out of root.html.heex and asserts it names exactly the bucket set visually_open?/painted_closed? treat as painted-closed

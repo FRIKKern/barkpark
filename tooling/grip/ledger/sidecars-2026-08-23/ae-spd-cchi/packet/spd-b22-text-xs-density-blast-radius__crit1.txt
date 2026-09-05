@@ -1,0 +1,1 @@
+Any site that genuinely crowds at 12px is either re-laid-out or handed to spd-b11 (sub-12px has no token) — .text-xs itself is NOT reverted to 11px

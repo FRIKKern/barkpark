@@ -1,0 +1,1 @@
+The annotation never gates a verdict and never splits the rate

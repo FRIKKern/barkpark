@@ -14,7 +14,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   `subscription_past_due` said "Update your billing" and `trial_expiring` said
   "Upgrade to keep your instance running" — and both were mailed to EVERY member,
   because `Accounts.list_team_member_emails/1` has no role predicate. Both
-  imperatives route to `require_primary_team_owner` doors (`POST
+  imperatives route to `require_current_team_owner` doors (`POST
   /v1/billing/checkout`, `POST /v1/billing/portal`), whose 403 for a member AND
   for a non-owner admin is already pinned by run. The console had already written
   the honest sentence — "Only the team owner can manage billing." — so the two
@@ -28,7 +28,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   imperative, everyone else gets the consequence plus who can act.
 
   THE SPLIT IS OWNER vs NOT-OWNER, not this epic's usual `owner|admin` band: the
-  gate is `Authz.team_owner?` via `require_primary_team_owner`, which refuses a
+  gate is `Authz.team_owner?` via `require_current_team_owner`, which refuses a
   non-owner admin too. And it FAILS CLOSED — an unknown, absent or bare-string
   recipient is NOT an owner, so a caller that forgets the role gets the honest
   copy rather than an instruction the server will refuse.
@@ -82,7 +82,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   defp address_and_role(address), do: {address, nil}
 
   # OWNER vs NOT-OWNER, mirroring `Authz.team_owner?` — the predicate behind the
-  # `require_primary_team_owner` doors these two remedies point at. An admin is
+  # `require_current_team_owner` doors these two remedies point at. An admin is
   # NOT an owner here, and neither is a nil/unknown role: unknown fails closed to
   # the copy that prescribes nothing.
   defp owner?("owner"), do: true
@@ -110,6 +110,18 @@ defmodule BarkparkCloud.Notifications.EventEmail do
       {"Your Barkpark failed to provision",
        "#{name(payload)} failed to provision.#{cause_then_capture(payload)}"}
 
+  # cch-w30-bl — the success terminal reaches the inbox.
+  #
+  # `identity(payload)` and NOTHING ELSE below the sentence: the producer
+  # (`Registry.dispatch_deployment_succeeded/1`) sends the deployment identity
+  # and no `:detail`, deliberately — the row's `detail` column is only written
+  # as "live at <url>" by `Sites.Deploy.settle_live/2`, so on the agent route it
+  # still holds the PUSHING stage's note and would read as a stale sentence
+  # under a success headline. `detail/1` would render "" for the absent key
+  # anyway; the arm states the absence rather than implying a gap.
+  defp render(:deployment_succeeded, payload, _owner?),
+    do: {"Deployment live", "A deployment for #{name(payload)} is live.#{identity(payload)}"}
+
   # wave 28 S6: `deployment_failed` renders through `cause_then_capture/1`, NOT
   # `detail/1`. Its `:detail` is the deployment's `failure_reason` — reaper prose
   # like "exceeded max deploy claim attempts (stale builder lease)" — which
@@ -126,6 +138,30 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "A deployment for #{name(payload)} failed." <>
          "#{identity(payload)}#{cause_then_capture(payload)}"}
 
+  # cch-w29-bl — the auto-deploy PREBUILT refusal reaches the inbox.
+  #
+  # THE REMEDY IS NOT RE-TYPED HERE, and that is the whole point of the arm. The
+  # sentence a person must act on ("Ship new bytes with `bp cloud site deploy
+  # <site> --prebuilt <dir>`.") has exactly ONE owner —
+  # `Sites.AutoDeployWorker.refusal_detail/0`, the same string the worker writes
+  # into the deployment row's `detail` and `failure_reason`, which is what the
+  # console renders. It rides the dispatch payload as `:detail` and lands here
+  # through `detail/1`, so the inbox and the console cannot drift: a second copy
+  # of the remedy is a second thing to forget to update.
+  #
+  # `detail/1` and not `cause_then_capture/1`: this string is CONTROL-PLANE
+  # PROSE, not a provider capture, so there is no class to lead with — running it
+  # through `FailureCopy.humanize/1` would hand a failure taxonomy a sentence
+  # that has nothing to classify. `detail/1`'s `strip_ansi |> scrub` still runs
+  # (charter D354's order), which is a no-op on a constant the control plane
+  # authored and is kept rather than bypassed so this path cannot become the one
+  # unscrubbed reader of `:detail` in the email channel.
+  defp render(:deployment_refused, payload, _owner?),
+    do:
+      {"Deployment refused",
+       "A content publish for #{name(payload)} did not deploy — it was refused." <>
+         "#{identity(payload)}#{detail(payload)}"}
+
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
 
@@ -134,7 +170,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
       {"Your Barkpark is unreachable",
        "#{name(payload)} stopped reporting and may be down.#{detail(payload)}"}
 
-  # The remedy — the billing portal — is behind `require_primary_team_owner`. The
+  # The remedy — the billing portal — is behind `require_current_team_owner`. The
   # consequence is everyone's business, so it is what the non-owner arm leads
   # with, and the console's own sentence is reused verbatim rather than inventing
   # a third phrasing for the same fact.
@@ -178,7 +214,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   #
   # The role split is the same one `subscription_past_due` and `trial_expiring`
   # carry, for the same reason: the one action left routes to
-  # `POST /v1/billing/checkout`, a `require_primary_team_owner` door that refuses
+  # `POST /v1/billing/checkout`, a `require_current_team_owner` door that refuses
   # a member AND a non-owner admin. The audience is untouched (every member is
   # mailed — the reach of a teardown notice must be maximal); only the sentence
   # changes. There is no "export your data" offer here: the deprovision has been

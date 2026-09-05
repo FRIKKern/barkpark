@@ -1,0 +1,1 @@
+A fixture proves a mismatch between the served artifact and the row's claim is detectable

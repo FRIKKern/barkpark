@@ -1,0 +1,1 @@
+LIVE PROOF ON ONE BOX, not a code read: pick ONE ssh-reachable, host-key-clean box (jarl 91.98.139.58 or gyldendal 5.75.169.183), run the refreshed path, and show `strings -a /usr/local/bin/barkpark-agent | grep -c cpu_cores` going 0 -> 1, with the `load1` control still at 1 so the probe is proven non-vacuous. Paste both readings and the box hostname.

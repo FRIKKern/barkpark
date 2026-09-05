@@ -1,0 +1,1 @@
+`bash -n scripts/deploy-lag-legs.sh`, `bash scripts/deploy-lag-legs.sh --selftest`, `bash scripts/check-deploy-smoke.sh --selftest` and a YAML parse of `deploy.yml` all pass, pasted with real exit codes. No file under `deploy/` is modified (`git diff --name-only` pasted).

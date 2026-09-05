@@ -1,0 +1,1 @@
+Primary checkout back on origin/main (git rev-list --left-right --count HEAD...origin/main == 0 N) with no session's work destroyed

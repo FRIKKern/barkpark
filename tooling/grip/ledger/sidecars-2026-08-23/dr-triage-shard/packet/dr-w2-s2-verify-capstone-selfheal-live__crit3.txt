@@ -1,0 +1,1 @@
+The HEALTH verdict that deploy produced is recorded verbatim, including whether it read SLOW or BROKEN and the measured seconds — dr-w2-s6 predicts SLOW.

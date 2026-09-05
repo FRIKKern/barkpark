@@ -1,0 +1,1 @@
+docs/ops/merge-gates.md gains the present-but-stale-pass case beside its existing absent-check sentence at :277.

@@ -1,0 +1,1 @@
+The assertion reads the POSITIVE_CONTROL_RULE literal from scripts/studio-desk-measure.mjs source at RUNTIME — no hand-copied rule string anywhere. Show the extraction.

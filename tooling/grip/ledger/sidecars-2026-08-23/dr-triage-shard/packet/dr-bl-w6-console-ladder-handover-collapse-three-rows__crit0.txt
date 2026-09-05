@@ -1,0 +1,1 @@
+The three duplicate rows are collapsed into one HANDOVER row with a named owning epic. Evidence: the surviving row id and the disposition recorded on the other two via `bp task stage`.

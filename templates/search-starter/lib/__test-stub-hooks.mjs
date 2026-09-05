@@ -6,15 +6,27 @@
 // and nothing else — so importing bp-fetch.ts there would die on module
 // resolution before a single assertion ran.
 //
+// `doc-absence.ts` is in the same position for a different dependency: it
+// imports `isBarkparkError` from `@barkpark/core`, which ships as a `file:`
+// vendor tarball and so is equally unresolvable without an install.
+//
 // A test registers these hooks with `module.register()` and then dynamically
 // imports the module under test. `server-only` becomes an empty module (its
-// only job in a real build is to make a client import fail at BUILD time) and
-// `undici` becomes the stub below, whose `fetch` the test drives directly. The
-// rest of bp-fetch.ts — the retry ladder, the `res.ok` guard, the envelope
-// decode, the throw — runs as written, unstubbed.
+// only job in a real build is to make a client import fail at BUILD time),
+// `@barkpark/core` becomes a four-line port of its `isBarkparkError` plus the
+// error class, and `undici` becomes the stub below, whose `fetch` the test
+// drives directly. The rest of the module under test — bp-fetch.ts's retry
+// ladder, `res.ok` guard, envelope decode and throw; doc-absence.ts's entire
+// ruling — runs as written, unstubbed.
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === "server-only") {
     return { url: "data:text/javascript,export{}", shortCircuit: true };
+  }
+  if (specifier === "@barkpark/core") {
+    return {
+      url: new URL("./__test-stub-barkpark-core.mjs", import.meta.url).href,
+      shortCircuit: true,
+    };
   }
   if (specifier === "undici") {
     return {

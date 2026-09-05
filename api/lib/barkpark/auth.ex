@@ -53,6 +53,25 @@ defmodule Barkpark.Auth do
     end
   end
 
+  @doc """
+  Resolve a raw bearer to its `ApiToken` id, or nil.
+
+  The IDENTITY half of `verify_token/1` — same WHERE clause, same fail-closed
+  `kind == "api"` boundary, no `%ApiToken{}` handed to the caller. Exists for
+  `BarkparkWeb.Plugs.RateLimit`, which needs a stable per-credential key and
+  nothing else, and which registers this alongside `Scim.resolve_token_id/1`
+  as one entry in its resolver list.
+  """
+  @spec verify_token_id(binary()) :: binary() | nil
+  def verify_token_id(raw_token) when is_binary(raw_token) do
+    case verify_token(raw_token) do
+      {:ok, %ApiToken{id: id}} -> id
+      _ -> nil
+    end
+  end
+
+  def verify_token_id(_), do: nil
+
   # ── dwb-7: single-use login handoff tickets ─────────────────────────────
 
   @doc """
@@ -250,9 +269,29 @@ defmodule Barkpark.Auth do
   # connected. `UserSocket.id/1` now returns a token-derived topic — the handle
   # Phoenix's own disconnect mechanism needs — and this is the broadcast
   # against it, so teardown is caused by the revoke itself with no action
-  # required from the client. Both other revoke entry points
-  # (`revoke_app_tokens_for_email/2`, `revoke_app_token_by_id/2`) funnel through
-  # `revoke_token/1`, so this one hook covers every revoke in the tree.
+  # required from the client.
+  #
+  # WHO STAMPS `api_tokens.revoked_at` (the full census on main, derived with
+  # `git grep -n "revoked_at" -- 'api/lib/**'` and filtered to the api_tokens
+  # table — other tables' `revoked_at` columns, e.g. user_sessions, grants,
+  # share_links, are NOT this hook's business):
+  #
+  #   * `revoke_token/1` (right above) — the audited primitive.
+  #   * `revoke_app_tokens_for_email/2` and `revoke_app_token_by_id/2` — funnel
+  #     through `revoke_token/1`, so they audit and tear down sockets.
+  #   * `revoke_share_tokens/3` (this module, share-token section) — funnels too,
+  #     as of this change; it WAS a bare `update_all` that skipped both effects.
+  #   * `Barkpark.Plugins.Tickets.Keys.revoke/2` — ticket keys ARE api_tokens
+  #     rows (kind-fenced), stamped via that module's own `stamp/3`. Does NOT
+  #     funnel: no `token_revoked` audit row, no teardown broadcast.
+  #   * `Barkpark.Scim.revoke_owner_tokens/2` — bulk `update_all` over a
+  #     deprovisioned user's owner-bound PATs. Does NOT funnel either, but it
+  #     emits its OWN `token/user_tokens_revoked` audit event; the teardown
+  #     broadcast is still missed.
+  #
+  # So this hook covers every revoke in THIS module, not every revoke in the
+  # tree. The last two live in other lanes' files — do not silently widen this
+  # claim back to "every revoke" without re-running that grep.
   #
   # BEST-EFFORT ON PURPOSE: a pubsub or endpoint hiccup must never make a
   # revoke fail. The DB row is the source of truth for every other consumer,
@@ -1003,18 +1042,31 @@ defmodule Barkpark.Auth do
   @doc """
   Hard-revoke (stamp `revoked_at`) every share token bound to the exact
   `(ws, proj, dataset)` scope. Called from `Sharing.remove_share/3` so deleting
-  a share also kills its edit tokens. Returns `{:ok, count_revoked}`.
+  a share also kills its edit tokens. Returns `{:ok, count_revoked}` — the
+  number of rows this call actually revoked, so a repeat call is `{:ok, 0}`.
+
+  SELECTS then funnels each row through `revoke_token/1` rather than issuing one
+  bulk `update_all`. A bulk stamp closes the HTTP door (`verify_token/1` re-runs
+  its `revoked_at` predicate per request) but skips BOTH of `revoke_token/1`'s
+  side effects: the `token/token_revoked` audit row and the socket teardown
+  broadcast. Killing a standing credential with no audit trail is the defect
+  this shape exists to prevent — keep the funnel.
   """
   @spec revoke_share_tokens(binary(), binary(), binary()) :: {:ok, non_neg_integer()}
   def revoke_share_tokens(ws_slug, proj_slug, dataset)
       when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(dataset) do
     scope = "#{ws_slug}/#{proj_slug}/#{dataset}"
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    {count, _} =
+    count =
       ApiToken
       |> where([t], t.share_scope == ^scope and is_nil(t.revoked_at))
-      |> Repo.update_all(set: [revoked_at: now])
+      |> Repo.all()
+      |> Enum.reduce(0, fn token, acc ->
+        case revoke_token(token) do
+          {:ok, _} -> acc + 1
+          _ -> acc
+        end
+      end)
 
     {:ok, count}
   end

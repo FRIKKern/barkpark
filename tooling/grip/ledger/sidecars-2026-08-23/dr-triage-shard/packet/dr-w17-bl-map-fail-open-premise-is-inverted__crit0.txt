@@ -1,0 +1,1 @@
+dr-bl-map-landing-empty-marker's description and criterion 1 are corrected to the fail-OPEN framing, naming the `!LISTINGS_TYPE` early return (not the catch) as the live path

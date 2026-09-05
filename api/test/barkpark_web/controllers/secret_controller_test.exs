@@ -5,7 +5,7 @@ defmodule BarkparkWeb.SecretControllerTest do
   Covers: 401 no token, 403 non-admin, admin reveal/set/list/delete lifecycle.
   Unlike plugin-settings, GET /:name REVEALS the unmasked value.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -215,7 +215,7 @@ defmodule BarkparkWeb.SecretControllerTest do
 
     defp scoped_conn(raw),
       do:
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw)
         |> put_req_header("content-type", "application/json")
 

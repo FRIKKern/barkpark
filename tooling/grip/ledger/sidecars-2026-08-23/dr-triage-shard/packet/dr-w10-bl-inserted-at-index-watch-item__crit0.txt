@@ -1,0 +1,1 @@
+At the trigger, the counterfactual is re-run with EXPLAIN (ANALYZE, BUFFERS) both with and without the index, and the decision is recorded either way

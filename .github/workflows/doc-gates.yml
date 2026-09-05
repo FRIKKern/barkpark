@@ -57,6 +57,7 @@ on:
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
@@ -93,6 +94,11 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # cloud-console-hardening D21/D41: the SAME fence, proved on the OTHER two
+      # writers of the paper-editor mirror region. It shipped in #15455 executed by
+      # no workflow at all — a regression test nobody runs is a comment with a
+      # process cost, so it is wired here beside its emit-fence sibling.
+      - "design/mirror-fence.test.mjs"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -228,6 +234,7 @@ on:
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
@@ -264,6 +271,11 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # cloud-console-hardening D21/D41: the SAME fence, proved on the OTHER two
+      # writers of the paper-editor mirror region. It shipped in #15455 executed by
+      # no workflow at all — a regression test nobody runs is a comment with a
+      # process cost, so it is wired here beside its emit-fence sibling.
+      - "design/mirror-fence.test.mjs"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -439,8 +451,11 @@ jobs:
       # a committed literal and the harness proves that ratchet bites in both
       # directions.
       - name: Doc byte budgets (fails this job)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-doc-budgets.sh --selftest
           bash scripts/check-doc-budgets.sh
 
@@ -459,8 +474,11 @@ jobs:
       # dedup lands, so zero is a legitimate tree. The selftest is what makes a
       # zero here mean "the repo has none" instead of "the scanner went blind".
       - name: Doc anchors + headers (fails this job)
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/docs-anchors-check.sh --selftest
           bash scripts/docs-anchors-check.sh
 
@@ -474,8 +492,11 @@ jobs:
       # it). The bundled --selftest is a durable tripwire (distrust vacuous green):
       # it proves the gate REDs on a planted one-column drift, plants nothing.
       - name: Connectors DDL drift gate (fails this job)
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/connectors-ddl-drift-check.sh --selftest
           bash scripts/connectors-ddl-drift-check.sh
 
@@ -493,8 +514,11 @@ jobs:
       # gate REDs on a dropped connect member and plants nothing in the tree. The
       # static list in catalog.ex stays the fail-closed runtime fallback.
       - name: Connectors catalog drift gate (fails this job)
+        id: s4
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/connectors-catalog-drift-check.sh --selftest
           bash scripts/connectors-catalog-drift-check.sh
 
@@ -511,8 +535,11 @@ jobs:
       # tripwire (distrust vacuous green): it proves the gate REDs on the
       # hazardous shape and greens on each safe one, and plants nothing.
       - name: Never-cancel-main concurrency ratchet (fails this job)
+        id: s5
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/never-cancel-main-check.sh --selftest
           bash scripts/never-cancel-main-check.sh
 
@@ -532,28 +559,42 @@ jobs:
       # reintroduces the hazard must run them. --selftest first (distrust
       # vacuous green), then the real assertion.
       - name: Deploy paths↔filters drift gate (fails this job)
+        id: s6
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-deployyml-filters.sh --selftest
           bash scripts/check-deployyml-filters.sh
 
       - name: Control-plane smoke can-fail gate (fails this job)
+        id: s7
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-deploy-smoke.sh --selftest
           bash scripts/check-deploy-smoke.sh
 
       - name: Paper-editor style mirror lockstep (fails this job)
+        id: s8
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/paper-editor-mirror-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-editor-mirror-check.sh
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
       # is the ONE source of the white ladder; the Elixir emitters read it at
       # compile time, and the --st-* CSS tone tokens are GENERATED from it. This
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
       - name: Status manifest drift gate (fails this job)
+        id: s9
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/status-manifest-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/status-manifest-check.sh
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,
       # charter D20 Layer 2). Field parity is proven by the golden-fixture tests
@@ -573,8 +614,11 @@ jobs:
       # and to exit 2 REFUSED TO MEASURE rather than report a clean tree it never
       # read. It plants nothing in this repo and runs in about a second.
       - name: Preview parity + D10 no-oEmbed gate (fails this job)
+        id: s10
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/preview-parity-check.sh --selftest
           bash scripts/preview-parity-check.sh
 
@@ -586,8 +630,11 @@ jobs:
       # artifact, plus a §6 cross-surface parity assertion (Go lifecycle literals ==
       # CSS glyph tones == tokens) so a GUI/TUI divergence cannot slip through.
       - name: Design-token drift gate (fails this job)
+        id: s11
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node design/validate.mjs
           node design/check.mjs
           # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
@@ -606,6 +653,11 @@ jobs:
           # Deleting the run() pre-flight block reds this (proven able to fail).
           node design/emit-fence.test.mjs
 
+          # cloud-console-hardening D21/D41: the mirror-region half of the same
+          # attribution fence — paper-editor-mirror.mjs and the Studio writer.
+          # Zero-dep (node:test + node:assert), 7 assertions.
+          node design/mirror-fence.test.mjs
+
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
       # via var(--…) — never a copied hex / hsl() channel literal. Fails on any
@@ -613,8 +665,12 @@ jobs:
       # block, rgb() shadows, the paper-surface/Sheets skip region, and annotated
       # per-line resisters). See scripts/studio-literal-check.sh for the full list.
       - name: Studio literal-color gate (fails this job)
+        id: s12
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-literal-check.sh
 
       # Durable tripwire (spd-w19; mirrors the Go + link-gate self-tests): prove
       # the gate actually REDs on a planted literal — a temp-dir self-test that
@@ -626,8 +682,12 @@ jobs:
       # Plants nothing in the tree; guards the detector against a future edit
       # that silently blinds LITERAL, the comment strip, or the corpus walk.
       - name: Studio literal-color gate self-test (tripwire)
+        id: s13
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-literal-check.sh --selftest
 
       # Studio link/path gate (bp-studio-deep-link W1). Every Studio destination
       # has ONE canonical path, built through BarkparkWeb.Studio.StudioLive.Paths.
@@ -636,24 +696,36 @@ jobs:
       # that literal is how the deep-vs-shallow path drift (different breadcrumbs
       # / back-nav / scope per arrival) crept in. See scripts/studio-link-lint.sh.
       - name: Studio link/path gate (fails this job)
+        id: s14
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-link-lint.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-link-lint.sh
 
       # Tripwire (mirrors the Go literal self-test): prove the link gate actually
       # REDs on a planted hand-built href — a temp-dir self-test that asserts the
       # scanner exits non-zero naming the file:line, then asserts a clean file
       # (static singleton + ~p verified route) passes. Plants nothing in the tree.
       - name: Studio link/path gate self-test (tripwire)
+        id: s15
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-link-lint.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-link-lint.sh --selftest
 
       # --selftest FIRST (distrust vacuous green): the studio and go literal gates
       # below each run their bundled tripwire before the real scan; the web gate
       # ran only the scan, so an edit that blinded its detector would have kept
       # reporting a clean web/ tree. Plants nothing in the tree.
       - name: Web literal-color gate self-test (tripwire)
+        id: s16
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/web-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/web-literal-check.sh --selftest
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
@@ -663,8 +735,12 @@ jobs:
       # GENERATED block, rgb()/rgba() overlay tints, and annotated per-line
       # resisters). See scripts/web-literal-check.sh for the full list.
       - name: Web literal-color gate (fails this job)
+        id: s17
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/web-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
       # (cmd/barkpark/** + internal/cli/** + internal/taskboard/theme.go)
@@ -676,8 +752,12 @@ jobs:
       # per-line resisters earmarking au-w4-cli-chrome-tokens). See
       # scripts/go-literal-check.sh for the full list.
       - name: Go literal-color gate (fails this job)
+        id: s18
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/go-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-literal-check.sh
 
       # Durable tripwire (au-w4-cli-ratchet, AC5): prove the gate actually REDs on
       # a planted literal — a temp-dir self-test that plants #ff0000, asserts the
@@ -685,8 +765,12 @@ jobs:
       # commented-hex files pass. Plants nothing in the tree; guards the gate
       # against a future edit that silently weakens the lexer/LITERAL/allow logic.
       - name: Go literal-color gate self-test (tripwire)
+        id: s19
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/go-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-literal-check.sh --selftest
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE and ordinary `#`//`//` comments.
@@ -707,8 +791,11 @@ jobs:
       #     and proves the arm can still RED on a planted drift, so a green sweep
       #     is evidence about the tree rather than about a broken scanner.
       - name: Code-comment citation guard (fails this job)
+        id: s20
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
           node tooling/doc-truth/lineref-sweep.mjs --selftest
@@ -740,8 +827,11 @@ jobs:
       # instead of passing, and HEAD == base reports SKIPPED rather than OK so a
       # reader can tell "found nothing" from "never looked".
       - name: New file:line citations in comments (fails this job)
+        id: s21
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/new-lineref-check.sh --selftest
           bash scripts/new-lineref-check.sh
 
@@ -756,15 +846,23 @@ jobs:
       # a reviewed `# global-read:` justification. Defense-in-depth against the next
       # w9dg. See scripts/tenant-scope-check.sh.
       - name: Tenant fail-open read baseline gate (fails this job)
+        id: s22
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/tenant-scope-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/tenant-scope-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
       # planted fail-open + by-PK read — a temp-dir self-test that plants nothing in
       # the tree. Guards the gate against a future edit that weakens the scanner.
       - name: Tenant fail-open read gate self-test (tripwire)
+        id: s23
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/tenant-scope-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/tenant-scope-check.sh --selftest
 
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal is the MOST RESTRICTIVE anonymous one — never a full-content
@@ -775,8 +873,11 @@ jobs:
       # green): it proves the gate REDs on each planted fail-open shape and greens
       # on the fail-closed forms, planting nothing in the tree.
       - name: Nil-polarity fail-closed gate (fails this job)
+        id: s24
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/nil-polarity-check.sh --selftest
           bash scripts/nil-polarity-check.sh
 
@@ -788,16 +889,24 @@ jobs:
       # preview-env mutation is always a real bug. See
       # scripts/preview-env-isolation-check.sh.
       - name: Preview-env isolation gate (fails this job)
+        id: s25
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/preview-env-isolation-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/preview-env-isolation-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
       # on a planted async:true / on_exit-less preview-env mutation — a temp-dir
       # self-test that plants nothing in the tree. Guards the scanner against a
       # future edit that silently weakens it.
       - name: Preview-env isolation gate self-test (tripwire)
+        id: s26
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/preview-env-isolation-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/preview-env-isolation-check.sh --selftest
 
       # PortableDoc render-parity completeness guard (render-unification D8/D45).
       # The ONE canonical JS renderer (@barkpark/react) must render EVERY in-scope
@@ -809,8 +918,12 @@ jobs:
       # created, invisible until now) can no longer merge unnoticed. MUST run under
       # bash (its shebang); under zsh the coverage loop word-splits vacuously.
       - name: PortableDoc render-parity completeness (fails this job)
+        id: s27
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/pd-parity-completeness.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # repo-aware validator (internal/scaffy/repocheck.go, opt-in via --repo)
@@ -827,8 +940,12 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Scaffy anchor-drift gate (fails this job)
+        id: s28
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
       # on a drifted anchor. A mktemp fixture — a text-clean command whose fenced
@@ -837,8 +954,11 @@ jobs:
       # exit non-zero with R-002. Plants nothing in the tree; guards RepoCheck
       # against a future edit that silently stops resolving anchors.
       - name: Scaffy anchor-drift gate self-test (tripwire)
+        id: s29
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           set -u
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
@@ -869,3 +989,20 @@ jobs:
             echo "TRIPWIRE FAILED: validate --repo passed on a drifted anchor"; exit 1
           fi
           echo "tripwire OK: anchor-drift gate REDs on drift (R-002)"
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s15\": \"Studio link/path gate self-test (tripwire)\", \"s16\": \"Web literal-color gate self-test (tripwire)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s23\": \"Tenant fail-open read gate self-test (tripwire)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\"}"
+          JOB_NAME: "Doc budgets + anchors"
+          WORKFLOW_FILE: doc-gates.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+

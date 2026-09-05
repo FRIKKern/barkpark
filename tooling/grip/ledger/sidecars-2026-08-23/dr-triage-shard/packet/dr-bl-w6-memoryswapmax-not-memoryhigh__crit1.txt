@@ -1,0 +1,1 @@
+The bound's placement is decided — parent slice vs per-unit — with the cutover doubling explicitly accounted for. Evidence: the written decision and the arithmetic against the swapfile size.

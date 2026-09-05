@@ -45,7 +45,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 22, not 20: scripts/node-test-floor.mjs imports globSync from node:fs
+          # (Node 22+, since #14004 on 2026-08-24). On 20 the selftest died with a
+          # SyntaxError on every run, every later step was skipped, and the job-level
+          # continue-on-error read the corpse as green (task-6891e8f620c1bdea).
+          node-version: "22"
 
       # THE PREDICATE'S OWN SELFTEST, BEFORE THE INSTRUMENT IT GOVERNS.
       #
@@ -79,6 +83,102 @@ jobs:
           otp-version: "27.0"
           elixir-version: "1.18.1"
 
+      # ── THE api/_build/dev CACHE, AND WHY IT MAY HOLD OUR OWN .beam FILES ──
+      #
+      # MEASURED, run 33438876591: "Warm the mix-xref module graph" took 125 s
+      # of a 177 s job, and effectively all of it is a cold `mix compile` of the
+      # ~825 api .ex files. build-index.mjs compiles only when api/_build is
+      # ABSENT, and on a fresh runner it always is, so every PR touching api/,
+      # internal/, js/, apps/, tooling/concept-map/ or tooling/symbol-graph/
+      # paid a full cold compile for an ADVISORY number.
+      #
+      # TWO CACHE SHAPES WERE AVAILABLE. The dependency-only shape used by
+      # elixir.yml's prod-compile job (see "THE DEPENDENCY BUILD CACHE" there)
+      # restores `_build/<env>/lib/<dep>` and nothing of ours, which is
+      # unimpeachable but buys only the dependency half of the compile. This job
+      # needs the other half — our own ~825 modules — so this cache DOES carry
+      # first-party .beam files, and that choice has to earn itself:
+      #
+      #   * The key is runner OS + OTP + Elixir + api/mix.lock, and NOTHING
+      #     ELSE — one entry per mix.lock lifetime, exact, no `restore-keys:`.
+      #     It deliberately does NOT hash the api sources. It did, through v1,
+      #     and that key was WRONG FOR THE SHARED RESOURCE: every api-touching
+      #     PR head misses it, recompiles, and writes a BRAND-NEW archive.
+      #     MEASURED on run 33739862034: api/_build/dev is 38 MB (39,338,156 B)
+      #     and api/deps 6 MB (6,160,722 B). At the 100+ runs/day this workflow
+      #     actually sees, a per-push key pushes multiple GB/day through the
+      #     repo-wide 10 GB Actions cache, which is LRU — and the things it
+      #     would evict are the dependency caches of the REQUIRED Elixir gate.
+      #     This job's cache churn must never evict a required job's cache.
+      #     Keyed on the lock, a branch writes ONE archive no matter how many
+      #     times it is pushed.
+      #   * A restored tree can therefore be arbitrarily stale in SOURCES, and
+      #     that is the intended, bounded staleness: it can never be stale in
+      #     toolchain or in dependency versions, which is the near-miss that
+      #     made a prefix match unacceptable in elixir.yml. Note that Actions
+      #     cache scoping makes cross-PR reuse impossible here anyway — this
+      #     workflow has no `push:` arm, so no main-scoped entry is ever
+      #     written and a branch can only ever restore its own.
+      #   * A source-only difference is precisely what an incremental
+      #     `mix compile` is for, and it is the WHOLE justification for the
+      #     lock-only key: mix's compile.elixir manifest records each
+      #     source with its digest plus the module-to-module dependencies, and
+      #     recompiles every changed file and everything that depends on it.
+      #     That is the same guarantee every developer relies on locally against
+      #     a build tree far staler than a day-old cache. The workflow runs that
+      #     compile EXPLICITLY below rather than leaving it to build-index.mjs,
+      #     whose rule is "compile only if _build is absent" — with a restored
+      #     _build that rule would skip the compile entirely and hand the graph
+      #     builder a stale tree.
+      #   * The residue the manifest does not cover — a node that should have
+      #     DISAPPEARED because its source was deleted or renamed — is caught by
+      #     scripts/boundary-build-cache-tripwire.mjs after the graph is built,
+      #     which also refuses to pass over a graph below a node floor. Its own
+      #     --selftest runs first, so the tripwire is proven able to fail on
+      #     every run of the gate it protects.
+      #   * The save is an explicit `actions/cache/save` AFTER the tripwire has
+      #     passed, not a post-job hook: a tree the tripwire condemned never
+      #     becomes the next run's starting point. A post-job hook would also be
+      #     DEAD here — `actions/cache` is `post-if: success()` and this job's
+      #     last step exits 1 on every real finding, so nothing would ever be
+      #     saved. That was measured, not reasoned: attempt 1 of run
+      #     33738585565 skipped every post-job cache save.
+      #
+      # MIX_ENV IS dev, EVERYWHERE HERE, and that is load-bearing rather than
+      # incidental: build-index.mjs runs both `mix compile` and `mix xref graph`
+      # with MIX_ENV=dev, so a cache of any other env restores into a tree the
+      # warm step never reads and buys exactly nothing.
+      #
+      # THE ONE THING THIS MUST NEVER BECOME is a reason to drop back to
+      # heuristic edges (removing the warm step, or --no-elixir-compile). That
+      # was the state that understated the debt for the gate's whole life: 115
+      # sideways reported where the comparable figure was 247. A cheap wrong
+      # number is worse than a slow right one; the cache exists so the right
+      # number gets cheaper, not so a wrong one comes back.
+      # RESTORE/SAVE, NOT `actions/cache`, AND THAT IS NOT STYLE. MEASURED on
+      # attempt 1 of run 33738585565: `actions/cache` declares
+      # `post-if: success()`, and this job's LAST step — the advisory boundary
+      # gate — exits 1 whenever it finds architectural debt, which on today's
+      # tree it does every run. So the post-job save was SKIPPED, and the next
+      # run re-fetched api/deps with fresh mtimes; mix then rebuilt every
+      # dependency into the restored `_build/dev`, which is where 93 s of the
+      # 98 s warm-run compile went. An explicit save runs before the gate can
+      # red. The dependency SOURCES are unconditionally safe to cache: they are
+      # exactly what mix.lock names, and the key is that lock.
+      - name: Restore Elixir dependency sources
+        id: depsrc
+        uses: actions/cache/restore@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+
+      - name: Restore the api dev build tree
+        id: devbuild
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/dev
+          key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+
       # `build-index.mjs` (next step) runs `mix compile` + `mix xref graph` to
       # produce the EXACT module graph. It does NOT fetch deps, so fetch them
       # here first, same as codebase-intel.yml. build-symbols.mjs never compiles
@@ -91,6 +191,38 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
           mix deps.get
+
+      # SAVED HERE, before anything compiles: api/deps holds dependency SOURCES
+      # and nothing of ours, and restoring it with its mtimes intact is what
+      # stops the next run from recompiling every dependency into the restored
+      # build tree.
+      - name: Save Elixir dependency sources
+        if: steps.depsrc.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+
+      # COMPILE EXPLICITLY, over whatever the cache restored. build-index.mjs
+      # compiles ONLY when api/_build is absent, so with a restored tree its own
+      # compile branch is dead — this step is what makes an incremental
+      # recompile happen at all, and it is the step whose cost the cache is
+      # meant to collapse. Same cwd, same MIX_ENV, same command build-index.mjs
+      # would have run, so on a cache MISS the work simply moves here and the
+      # job costs what it always did.
+      #
+      # NOT --warnings-as-errors: this is an advisory architecture job, not the
+      # compile gate. elixir.yml owns that verdict and must keep owning it.
+      - name: Compile the api tree (incremental over the restored cache)
+        working-directory: api
+        env:
+          MIX_ENV: dev
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          mix compile
+          echo "api-compile-seconds=$(( $(date +%s) - START ))" | tee -a "$GITHUB_ENV"
+          echo "devbuild-cache-hit=${{ steps.devbuild.outputs.cache-hit }}" | tee -a "$GITHUB_ENV"
 
       # WARM THE EXACT MODULE GRAPH BEFORE THE GATE READS IT.
       #
@@ -172,6 +304,35 @@ jobs:
               process.exitCode = 2;
             }
           '
+
+      # THE CACHE TRIPWIRE, and its own mutation harness first. The assert step
+      # above proves the graph EXISTS and is non-empty; it cannot tell a graph
+      # of today's sources from a graph of yesterday's. This one checks that
+      # every api/ file the graph names still exists in the working tree — the
+      # one staleness the incremental compile manifest does not make obvious —
+      # and faults rather than passing when the graph is below its node floor.
+      #
+      # --selftest runs FIRST and in-process (5 cases, milliseconds): it plants
+      # a ghost path as a graph key and as an edge target and asserts a RED both
+      # times, and shrinks the graph to nothing and asserts that cannot buy a
+      # pass. A tripwire proven only once at authoring time is not a tripwire.
+      - name: Prove the cache tripwire can fail (--selftest)
+        run: node scripts/boundary-build-cache-tripwire.mjs --selftest
+
+      - name: Audit the warm graph against the working tree
+        run: node scripts/boundary-build-cache-tripwire.mjs tooling/blast-radius/index.json
+
+      # SAVED ONLY AFTER THE TRIPWIRE PASSED, and only when the exact key was
+      # not already a hit (a hit means this exact tree is already the cache).
+      # A post-job save would archive whatever the job ended with, tripwire
+      # verdict or not; this shape means a condemned tree is never what the
+      # next run starts from.
+      - name: Save the api dev build tree
+        if: steps.devbuild.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/dev
+          key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
 
       - name: Run boundary gate
         run: |

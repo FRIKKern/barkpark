@@ -1,0 +1,1 @@
+The command prints NO population percentage anywhere; paste a grep over the renderer for '%' showing every remaining occurrence is a format verb or a per-sha attribution, not a population rate.

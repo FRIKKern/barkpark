@@ -1,0 +1,1 @@
+absorption is NOT added as a row in census.deferred: the two exact-shape assertions over census.deferred (deploy_ledger_test.exs:708, a single-element list pattern; and :785, an exact 3-key map equality) still pass unchanged, and the diff shows the deferred class list untouched

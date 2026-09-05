@@ -1349,9 +1349,12 @@ defmodule BarkparkCloud.DeployLedger do
       # wait above answers "how long did the re-queue take" over DEFERRED rows
       # only; this answers "is anything sitting there un-rebuilt" over the
       # deferred AND the failed-terminating rows, which is the reading the daily
-      # digest carries to a human. Emitted HERE, at the top level of `census/3`,
-      # and not inside a helper: a key added inside `class_rows/3` is invisible
-      # to both payload censuses (proved by mutation, D550).
+      # digest carries to a human. Emitted at the top level of `census/3` because
+      # that is where the cohort partition belongs beside the totals it
+      # partitions — NOT, any longer, to stay visible to a census: the
+      # source-reading censuses' blind spot below a helper is closed by
+      # `BarkparkCloud.EvaluatedCensusKeySetTest`, which walks the evaluated
+      # payload and sees a helper-written key exactly as it sees this one.
       coverage_cohorts: coverage_cohorts(scoped, to),
       # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
       completeness: completeness(scoped, volume, not_attempted_rows),
@@ -1940,10 +1943,18 @@ defmodule BarkparkCloud.DeployLedger do
   # because `census/3`'s map is already serialised whole by
   # `Web.Router.deploy_census_json/2` (router.ex:9901): putting the accusation
   # on the class row puts it in front of an operator WITHOUT this slice touching
-  # router.ex, which belongs to a sibling fence. Measured, not assumed — the
-  # payload key-set census (`payload_key_set_census_test.exs`) stays 23/0 with
-  # this key present, so the wire shape gains a name no Go decoder has to grow
-  # for the suite to pass.
+  # router.ex, which belongs to a sibling fence.
+  #
+  # WHAT STOOD HERE WAS A BLIND SPOT READ AS A CLEARANCE
+  # (dr-w32-bl-census-helper-emit-escapes-both-gates). The sentence said the
+  # payload key-set census "stays 23/0 with this key present, so the wire shape
+  # gains a name no Go decoder has to grow for the suite to pass" — offering the
+  # escape as a convenience. It was never a clearance: that census reads the
+  # SOURCE and does not follow a value that is a CALL, so it could not see
+  # `agency` at all, and the same green would have greeted a typo. The escape no
+  # longer exists. `BarkparkCloud.EvaluatedCensusKeySetTest` evaluates `census/3`
+  # and censuses the key PATHS of the real payload, where this key is
+  # `classes[].agency` and a new one beside it reds by name.
   defp class_rows(groups, denominator, basis) do
     groups
     |> Enum.filter(& &1.class)

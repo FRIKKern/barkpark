@@ -1,0 +1,1 @@
+grep -rn "no branch protection" scripts/check-bp-graph-drift.sh .github/workflows/bp-graph-drift.yml returns no hits, and both files instead state the ADVISORY reason as topology plus non-registration.

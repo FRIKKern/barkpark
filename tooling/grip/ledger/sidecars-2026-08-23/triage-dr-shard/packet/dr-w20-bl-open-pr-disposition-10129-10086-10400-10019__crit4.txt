@@ -1,0 +1,1 @@
+Each disposition is recorded with the measurement that justified it (behind-count and conflict set from `git merge-tree --write-tree`, not mergeStateStatus).

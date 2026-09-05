@@ -1,0 +1,1 @@
+The four blind spots (prebuilt, lost fenced CAS, production-only, scan-depth vs bound) are named in code comments or the charter, not discovered again later. Evidence: where each is written down.

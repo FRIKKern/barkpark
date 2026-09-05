@@ -1,0 +1,1 @@
+An assertion covering a real internal/cli or internal/builder behaviour lives in a file a REQUIRED aggregator already runs, and the source file is declared so the harness dispatches on it.

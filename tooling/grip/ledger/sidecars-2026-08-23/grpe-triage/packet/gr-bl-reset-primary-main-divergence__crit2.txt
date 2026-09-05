@@ -1,0 +1,1 @@
+Reconcile local main to the verified origin/main commit without force-pushing or deleting any worktree data; record before/after SHAs and status output.

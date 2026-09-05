@@ -161,7 +161,7 @@ test("the raw grep over-counts @media — comment-stripping is why the parser do
 
 test("index.html's registered screens are exactly the screens CELLS drives", () => {
   const views = parseViewIds(INDEX_HTML);
-  assert.equal(views.length, 13);
+  assert.equal(views.length, 12);
   assert.deepEqual([...views].sort(), COVERED_VIEWS);
 });
 
@@ -193,9 +193,18 @@ test("a NEW screen with no cell is REFUSED by name", () => {
 });
 
 test("a screen the sweep still drives after index.html DROPS it is refused as a phantom", () => {
-  const r = coverageReport({ css: APP_CSS, html: INDEX_HTML.replace('<section class="view" id="view-env" hidden>', '<section class="gone" hidden>') });
+  // cch-w53-bl env-var Option A: this leg used to mutate `view-env`, which the
+  // team env-var deletion removed from index.html — a `.replace` whose needle
+  // is gone is a SILENT no-op, so the mutation is asserted to have APPLIED
+  // before the refusal is read. `view-members` is the sibling settings screen
+  // and is cell-driven exactly as `view-env` was.
+  const NEEDLE = '<section class="view" id="view-members" hidden>';
+  assert.ok(INDEX_HTML.includes(NEEDLE), "the mutation's needle must exist, or this leg proves nothing");
+  const mutated = INDEX_HTML.replace(NEEDLE, '<section class="gone" hidden>');
+  assert.notEqual(mutated, INDEX_HTML, "the mutation must actually change the artifact");
+  const r = coverageReport({ css: APP_CSS, html: mutated });
   assert.equal(r.ok, false);
-  assert.deepEqual(r.phantomViews, ["view-env"]);
+  assert.deepEqual(r.phantomViews, ["view-members"]);
 });
 
 test("THE IMPORT PROOF: the refusal reads the widths the sweep DRIVES, not a second literal", () => {
@@ -575,8 +584,8 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 972);
-  assert.equal(all, 2916);
+  assert.equal(one, 900);
+  assert.equal(all, 2700);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -778,10 +787,13 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // cch-w29-bl-deploy-rail-live-site-open-still-nowrap moved it by ONE:
 // `site-deploy-rail-live` — the first fixture in this harness able to render
 // `.deploy-rail-live`, the rail's OTHER footer, and so the first that can measure
-// the site URL inside it — is the 120th scenario and the 94th residue entry. It
+// the site URL inside it — is the 117th scenario and the 92nd residue entry. It
 // refused exactly as designed: the bare sweep exited 2 with `UNLISTED scenario
 // "site-deploy-rail-live" (family hash:#site)` and this test exited 1 on 119/93
-// before the numbers below were RE-READ from `scenarioReport`. They are NOT
+// before the numbers below were RE-READ from `scenarioReport`. (It LANDED as the
+// 120th/94th; cch-w53-bl's env-var Option A then deleted three scenarios and two
+// residue entries beneath it — a chronicle ordinal is a landing SLOT, and the
+// ceiling arm below re-reads the census rather than trusting the slot.) They are NOT
 // 109/84: several scenarios landed between the block above and this one without
 // writing a chronicle block, so the last typed ordinal is never the next slot —
 // only the measured census is.
@@ -807,13 +819,62 @@ const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 121);
-  assert.equal(r.cells, 27);
-  assert.equal(r.distinctCovered, 26, "mixed-fleet is used twice — 27 cells cover 26 DISTINCT scenarios");
-  assert.equal(r.residue, 95, "95 is the RESIDUE, not the census");
+  // cch-w53-bl env-var Option A (ruled 2026-09-02): 121 -> 118 scenarios
+  // (`env-populated`, `env-write-once-409`, `env-member` deleted with the team
+  // env-var feature) and 27 -> 25 cells (the `env` cell, plus the `env-editor`
+  // cell that drove the SITE env-blob scenario at the now-deleted
+  // `#settings/env` route). Residue 95 -> 94: two env entries left, `env-editor`
+  // joined `hash:#site`, the family its own deepLink names. Every integer here
+  // was RE-DERIVED after the rebase onto origin/main by running
+  // `scenarioReport({scenarios: SCENARIOS})` against the merged tree and reading
+  // what it printed — main had moved the census to 121/27/26/95 while this
+  // branch was in flight, so the pre-rebase 117/25/24/93 was stale arithmetic.
+  // cch-w50-s4 moved it by TWO in ONE commit: `billing-free-owner` (the
+  // UNSUBSCRIBED owner — the first fixture ever to reach renderPlanState's
+  // upsell arm) and `billing-support-plus` (the first `support_plus` fixture the
+  // corpus has held at all). Total 118 -> 120, residue 94 -> 96. CELLS (25),
+  // distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: both land
+  // in the residue, not a cell, so no cell is added and no scenario changes
+  // which cell renders it; and `hash:#billing` already had five members, so two
+  // more cannot create a 14th family — a family is created only by a residue
+  // scenario whose `familyOf` is new, and both of these are `hash:#billing`.
+  // Every integer here was RE-DERIVED at THIS branch's merge base by running
+  // `scenarioReport({scenarios: SCENARIOS})` and reading the `>> scenarios`
+  // line, never carried from the filing — whose 110->112 / 85->87 / 26 cells /
+  // 25 distinct were all stale against a base that already measured
+  // 118/25/24/94.
+  // cch-w12-followup-login-fixture-gap moves it by ONE: `activity-identity-change`,
+  // the corpus's ONLY fixture that answers POST /v1/auth/login with a session —
+  // until it, route()'s own `status < 400` login branch was unreachable from
+  // every committed scenario and no drive in this harness had ever completed a
+  // sign-in. Total 120 -> 121, residue 96 -> 97. CELLS (25), distinctCovered
+  // (24) and families (13) are DELIBERATELY UNMOVED: it lands in the residue,
+  // not a cell, and its `familyOf` is `hash:#overview` — a family that already
+  // had eleven members, so it cannot create a 14th. Its deepLink is #overview
+  // and NOT #activity on purpose: `hash:#activity` is one of the two ZERO-residue
+  // families this file names by hand ("the two ZERO-residue families are named"),
+  // and a fixture landing there would silently retire that arm's subject. The
+  // Activity screen it ends on is reached by a warm hash navigation inside
+  // smoke.mjs, which is what the drive is measuring anyway.
+  // Both integers were RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on this
+  // branch and reading what it PRINTED, never by adding one.
+  // cch-w49-s7 moves it by ONE: `billing-unconfigured`, the corpus's first
+  // fixture to carry D554's `billing_capability` on the /v1/subscription 200 —
+  // so the first from which the console's consumption of that key can be
+  // asserted from rendered bytes rather than assumed. Total 121 -> 122, residue
+  // 97 -> 98. CELLS (25), distinctCovered (24) and families (13) are
+  // DELIBERATELY UNMOVED: it lands in the residue, not a cell, and its familyOf
+  // is `hash:#billing` — a family that already had seven members, so it cannot
+  // create a 14th. Both integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED, never by adding one to the line above.
+  assert.equal(r.total, 122);
+  assert.equal(r.cells, 25);
+  assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
+  assert.equal(r.residue, 98, "98 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 95, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 98, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

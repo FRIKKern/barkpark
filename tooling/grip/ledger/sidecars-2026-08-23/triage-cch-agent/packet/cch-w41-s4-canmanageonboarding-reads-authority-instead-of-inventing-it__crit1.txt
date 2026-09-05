@@ -1,0 +1,1 @@
+The predicate KEEPS its boolean return per charter D439, and a NEW three-valued sibling carries grant/refuse/unknown. Evidence: both function bodies.

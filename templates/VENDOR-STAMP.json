@@ -1,0 +1,27 @@
+{
+  "_readme": "Freshness stamp for the vendored starter SDKs. source_digest and tarball_digest are mtime-free content hashes (see scripts/check-vendor-freshness.mjs); a .tgz is NOT byte-reproducible so its archive checksum is deliberately not recorded. Regenerate with: node scripts/check-vendor-freshness.mjs --write, and only after a real re-cut.",
+  "templates": [
+    "templates/search-starter",
+    "templates/astro-search-starter"
+  ],
+  "packages": {
+    "@barkpark/core": {
+      "source": "js/packages/core",
+      "tarball": "barkpark-core.tgz",
+      "version": "1.0.0-preview.3",
+      "source_digest": "sha256:b7e6141a4454a6a0ea7362abcbaa6b11cb5a544698db3d0066ba7de8d7482cae",
+      "tarball_digest": "sha256:dcfa876a699d6c4f8afbb540a94fbbe7c02957929f29fc8d122b0a391bf6c69b",
+      "cut_at": "2026-09-05",
+      "cut_from_commit": "ea4fc7bc5127bc5727b3a7f962ebf04eb2f0969a"
+    },
+    "@barkpark/react": {
+      "source": "js/packages/react",
+      "tarball": "barkpark-react.tgz",
+      "version": "1.0.0-preview.1",
+      "source_digest": "sha256:4c135ba94f32d039bc417ec117dd516859c154dba51a845ed765c9ce629beaee",
+      "tarball_digest": "sha256:d34dd2ba3704fcefb47d5ae330cd099f358dc2b0c5c4c51416971566e32833cd",
+      "cut_at": "2026-09-05",
+      "cut_from_commit": "ea4fc7bc5127bc5727b3a7f962ebf04eb2f0969a"
+    }
+  }
+}

@@ -388,6 +388,13 @@ defmodule Barkpark.Content do
   def get_schema(name, dataset, opts \\ []), do: Schema.get_schema(name, dataset, opts)
 
   @doc """
+  Tenant-scoped schema resolution WITH the shared-global fallback — the lookup a
+  request-driven surface (Studio pane walk, secondary pane) must use. See
+  `Barkpark.Content.Schema.resolve_schema/3` for the #34 history.
+  """
+  def resolve_schema(name, dataset, opts \\ []), do: Schema.resolve_schema(name, dataset, opts)
+
+  @doc """
   Whether `type` in `dataset` is an OWNER-SCOPED type (row/ownership ACL,
   Phase 4 core-auth).
 
@@ -568,6 +575,10 @@ defmodule Barkpark.Content do
   @doc "Get a single revision by ID, scoped to a dataset and (optionally) workspace/project."
   def get_revision(id, dataset, opts \\ []), do: Revisions.get_revision(id, dataset, opts)
 
+  @doc "Resolve a document `_rev` HASH to the revision that captured it. See `Content.Revisions.get_revision_by_rev/3`."
+  def get_revision_by_rev(rev, dataset, opts \\ []),
+    do: Revisions.get_revision_by_rev(rev, dataset, opts)
+
   @doc "Restore a document to a specific revision."
   def restore_revision(revision_id, type, dataset, opts \\ []),
     do: Revisions.restore_revision(revision_id, type, dataset, opts)
@@ -734,6 +745,13 @@ defmodule Barkpark.Content do
   @doc "Apply a single portable-doc op to any Expectation-bearing document. See `Content.Papers`."
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
+
+  @doc "Field-scoped block ops for a `richText` field with `editor: blocks` — see `Papers.apply_field_block_ops/6`."
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
+    do: Papers.apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+
+  @doc "The block array behind a field value — see `Papers.field_blocks/1`."
+  def field_blocks(value), do: Papers.field_blocks(value)
 
   @doc "Propose insert-only draft paper edits with provenance (lvw-t4). See `Content.Papers`."
   def propose_paper_blocks(

@@ -1,0 +1,1 @@
+THE COST IS MEASURED, NOT ESTIMATED: the step's real wall time is read off a GitHub Actions run on this PR and recorded in a comment beside the step, alongside the cells-rendered count.

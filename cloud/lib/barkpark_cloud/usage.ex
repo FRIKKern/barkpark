@@ -168,6 +168,16 @@ defmodule BarkparkCloud.Usage do
   @history_window_ms @history_window_days * 86_400_000
 
   @doc """
+  The closed vocabulary of typed FAILURE reasons a meter read can carry —
+  exported so a reader can compare it with the plane's OTHER closed vocabulary
+  for the same class of fact (`Registry.Barkpark.update_unavailable_reasons/0`)
+  instead of guessing. `BarkparkCloud.UnavailableVocabulary` states which words
+  of the two name the SAME fact, and a census pins it.
+  """
+  @spec unavailable_reasons() :: [String.t()]
+  def unavailable_reasons, do: @unavailable_reasons
+
+  @doc """
   Compose the full usage envelope from resolved inputs. Total — never raises.
   """
   @spec compose(map()) :: %{meters: map()}
@@ -794,6 +804,13 @@ defmodule BarkparkCloud.Usage do
   # bad shape, a per-call timeout, or the whole fan-out overrunning the aggregate
   # budget — because a partial cross-dataset total would silently undercount.
   # `ordered: false` lets fast datasets report while a slow one is still in flight.
+  #
+  # The short-circuit carries the FIRST failing element's OWN reason out
+  # (`fanout_failure_reason/1`) instead of flattening it. `count_documents/3` and
+  # `count_webhooks/3` already mint the typed vocabulary — `unauthorized`,
+  # `instance_error`, `refused`, `unreachable`, `bad_shape` — and squashing them
+  # into one unlisted atom made `unavailable_reason/1` normalise every per-dataset
+  # failure to "unknown": a 401 on one dataset read the same as a timeout.
   defp sum_across_datasets(slugs, fetch_one, deadline) do
     within_deadline(deadline, fn ->
       slugs
@@ -807,11 +824,27 @@ defmodule BarkparkCloud.Usage do
         {:ok, {:ok, n}}, {:ok, acc} when is_integer(n) and n >= 0 ->
           {:cont, {:ok, acc + n}}
 
-        _other, _acc ->
-          {:halt, {:error, :dataset_fetch_failed}}
+        other, _acc ->
+          {:halt, {:error, fanout_failure_reason(other)}}
       end)
     end)
   end
+
+  # One fan-out element that is not a landed `{:ok, n>=0}`, mapped to the word the
+  # surface should say. Every arm lands INSIDE `@unavailable_reasons`, so no new
+  # console copy is required and nothing normalises to "unknown":
+  #
+  #   * the fetch itself returned a typed `{:error, reason}` → carry it verbatim
+  #     (`unauthorized` / `instance_error` / `refused` / `unreachable` / `bad_shape`)
+  #   * `on_timeout: :kill_task` yields `{:exit, :timeout}` → `deadline_exceeded`,
+  #     the same word the aggregate-budget overrun already uses
+  #   * any other child exit → `exception`
+  #   * an `{:ok, _}` we cannot trust (a non-integer / negative count) → `bad_shape`,
+  #     matching what `decode_scalar_total/2` says about a body it cannot read
+  defp fanout_failure_reason({:ok, {:error, reason}}) when is_atom(reason), do: reason
+  defp fanout_failure_reason({:exit, :timeout}), do: :deadline_exceeded
+  defp fanout_failure_reason({:exit, _}), do: :exception
+  defp fanout_failure_reason(_), do: :bad_shape
 
   # One dataset's webhook count — `{"webhooks": [...]}` (instance
   # WebhookController.index). Any other shape is an honest degrade.

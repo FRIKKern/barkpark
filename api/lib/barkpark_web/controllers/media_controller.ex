@@ -5,6 +5,7 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
+  alias Barkpark.Media.WhereUsed
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -228,7 +229,41 @@ defmodule BarkparkWeb.MediaController do
       # instead of the attacker-typed segment removes any raw-input flow into
       # `send_file` / the presigned key. A `../…` URL never matches a stored row
       # → {:error, :not_found}.
-      mime = MIME.from_path(file.path)
+      # THE ROW IS THE EVIDENCE, NOT THE PATH (task-57ee9fff4aae9217 #4).
+      # This used to be `MIME.from_path(file.path)` — a SECOND, independent
+      # derivation of the type from a filename, which could only ever agree
+      # with the persisted `mime_type` when the extension happened to be
+      # right. Ingest now content-sniffs (`Media.Probe.sniff_mime/2`), so for
+      # an extensionless blob (Gyldendal's `remote.axd`) the row knows
+      # `image/png` while the path still says octet-stream. Reading the row is
+      # what makes the ingest fix observable at the edge — it is the same
+      # shape `tickets_attachments_controller.ex:334` already uses.
+      #
+      # THE COLLAPSE STILL HAPPENS HERE. `mime` is not served raw: it goes
+      # through `MediaFile.serve_content_type/1` below (and into the presigned
+      # `response-content-*` for the redirect branch), so even a row whose
+      # `mime_type` column was written to a dangerous value out of band is
+      # served as a non-executable octet-stream with `nosniff` + an
+      # `attachment` disposition. Trusting the row for the TYPE does not mean
+      # trusting it for SAFETY.
+      #
+      # AND THE PATH SIGNAL IS NOT DISCARDED, it is the STRICTER of two.
+      # `mime` here drives BOTH the served content-type and the
+      # `content-disposition`, so switching wholesale to the row would have
+      # QUIETLY WEAKENED an honestly-named `.svg`: its row is already
+      # neutralized to octet-stream by `neutralize_dangerous_mime/1`, which is
+      # not in the dangerous family, so `disposition/1` would have flipped it
+      # from `attachment` back to `inline`. Fixing octet-stream must not cost
+      # a defence. When the PATH says dangerous, the path wins and the old
+      # attachment+collapse answer is preserved byte-for-byte; otherwise the
+      # row's sniffed type is used, and `MIME.from_path/1` remains the floor
+      # for a legacy row with no `mime_type` at all.
+      path_mime = MIME.from_path(file.path)
+
+      mime =
+        if MediaFile.dangerous_mime?(path_mime),
+          do: path_mime,
+          else: file.mime_type || path_mime
 
       # The stored-XSS defense travels with the strategy: the LOCAL branch sets
       # collapse/nosniff/disposition headers itself (maybe_send_file), and the
@@ -740,13 +775,42 @@ defmodule BarkparkWeb.MediaController do
   end
 
   @doc "Delete a media file."
-  def delete(conn, %{"id" => id}) do
-    # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row `Repo.delete/2`
-    # removed (media.ex:425-452). This used to discard it and echo the `:id` path
-    # param; `filename` is stored state the request never carries, so reverting
-    # to the echo reds the differential.
-    with {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+  def delete(conn, %{"id" => id} = params) do
+    # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed media as
+    # RAW `/media/files/...` URL STRINGS, invisible to every reference graph, so
+    # this door used to answer 200 while blanking a live page. Consult usage
+    # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         :ok <- refuse_if_referenced(conn, file, params),
+         # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
+         # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
+         # and echo the `:id` path param; `filename` is stored state the request
+         # never carries, so reverting to the echo reds the differential.
+         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
       json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
+    end
+  end
+
+  # `:ok` to proceed, or a HALTED conn carrying the 409 census. Returning the
+  # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
+  # envelope reuses the public `conflict` code but carries a `details` census
+  # that no shared builder would know how to assemble.
+  defp refuse_if_referenced(conn, file, params) do
+    if WhereUsed.forced?(params) do
+      :ok
+    else
+      case WhereUsed.referrers(file) do
+        %{count: 0} ->
+          :ok
+
+        census ->
+          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: env})
+          |> halt()
+      end
     end
   end
 

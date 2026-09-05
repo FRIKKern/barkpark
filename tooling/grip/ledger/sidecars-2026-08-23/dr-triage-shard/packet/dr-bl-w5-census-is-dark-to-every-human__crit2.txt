@@ -1,0 +1,1 @@
+ONLY AFTER the above: a CLI reader renders the census with volume beside the rate, BOTH scoring conventions side by side (D34), and per-site rows whose REFUSALS below n=200 are PRINTED rather than hidden.

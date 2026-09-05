@@ -7,12 +7,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   import Phoenix.LiveView
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def select(%{"pane" => pane_str, "id" => id}, socket) do
     case Integer.parse(pane_str) do
       {pane_idx, ""} when pane_idx >= 0 ->
-        new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
+        # The clicked pane's own address (`:path`, stamped by PaneBuilder.build/3
+        # from the NORMALIZED segments) is the prefix — never a slice of the raw
+        # URL by rendered index, which appended the id whenever the desk had
+        # normalized a demoted type into its group (#35b). The fallback keeps the
+        # old formula for a pane built without the stamp (plugin panes that
+        # bypass build/3).
+        prefix =
+          case Enum.at(socket.assigns[:panes] || [], pane_idx) do
+            %{path: path} when is_list(path) -> path
+            _ -> Enum.take(socket.assigns.nav_path, pane_idx)
+          end
+
+        new_path = prefix ++ [id]
 
         # spd-bl-focus-after-select — THE DECISION, bucket by bucket (full
         # write-up in studio_focus_after_select_test.exs):
@@ -124,10 +137,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
   def toggle_create(_params, socket), do: {:noreply, socket}
 
+  # BOTH create affordances decide on the SAME principal the scope menu itself
+  # is built from (`ScopeResolver.principal_from_assigns/1`: a token, else the
+  # account session's %User{}, else nil) — not on `:api_token` alone. This is
+  # the StudioLive half of the #16012 fix: `StudioChrome.chrome_fallback/3`
+  # only runs on NON-StudioLive views, so on the MAIN Studio surface these
+  # handlers still told a signed-in account session "Sign in to create a
+  # workspace". The message was false and the affordance dead.
+  #
+  # The authority is REUSED, never invented: `create_workspace_with_owner/2`
+  # already has a `%User{}` head that writes a `principal_type: "user"` owner
+  # membership. Only a `nil` principal — a genuinely anonymous / public-demo
+  # session — still gets "Sign in", and for that one it is TRUE.
+  #
+  # The MEMBERSHIP half is NOT re-asked here, unlike the chrome copy. On
+  # StudioLive `Caps.gate/3` already classifies `create-workspace` and
+  # `create-project` as `:write` and halts a principal-carrying socket that
+  # lacks write with "You don't have access to do that." — an honest sentence
+  # that never claims the person is signed out. A `Tenancy.Auth.member?/2` arm
+  # underneath it would be unreachable code (proved: the signed-in non-member
+  # test below never reaches this module). `chrome_fallback/3` needs its own
+  # copy only because those surfaces run without the gate.
   def create_workspace(%{"name" => name}, socket) do
-    case socket.assigns[:api_token] do
-      %Barkpark.Auth.ApiToken{} = token ->
-        case Tenancy.create_workspace_with_owner(%{name: name}, token) do
+    case principal(socket) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Sign in to create a workspace")}
+
+      principal ->
+        case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
           {:ok, workspace} ->
             project = Shared.initial_project(workspace)
 
@@ -141,9 +178,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
           {:error, changeset} ->
             {:noreply, put_flash(socket, :error, Shared.create_error(changeset, "workspace"))}
         end
-
-      _ ->
-        {:noreply, put_flash(socket, :error, "Sign in to create a workspace")}
     end
   end
 
@@ -153,7 +187,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
     ws = socket.assigns[:current_workspace]
 
     cond do
-      not match?(%Barkpark.Auth.ApiToken{}, socket.assigns[:api_token]) ->
+      is_nil(principal(socket)) ->
         {:noreply, put_flash(socket, :error, "Sign in to create a project")}
 
       is_nil(ws) ->
@@ -178,6 +212,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   end
 
   def create_project(_params, socket), do: {:noreply, socket}
+
+  # Who is asking, by the ONE precedence rule the flat->scoped funnel and the
+  # scope menu already share. Never re-encoded here (two copies of "token wins
+  # over user" drift, and a create gate that disagrees with the menu that
+  # rendered it is #34 all over again).
+  defp principal(socket), do: ScopeResolver.principal_from_assigns(socket.assigns)
 
   # Activating the collapsed strip DESTROYS it (the <button> is replaced by the
   # expanded <div>), so the browser drops focus to <body> — measured live on the

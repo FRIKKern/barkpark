@@ -15,7 +15,7 @@ defmodule BarkparkWeb.PlaygroundControllerTest do
 
   Plus the admin gate: a non-admin token → 403, no token → 401.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth

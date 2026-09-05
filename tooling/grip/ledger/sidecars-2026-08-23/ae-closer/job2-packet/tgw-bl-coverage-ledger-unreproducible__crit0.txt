@@ -1,0 +1,1 @@
+research-ledger.json is reproducible from a clean checkout - evidence: paste `node tooling/research-coverage/coverage.mjs scan` from a fresh worktree showing a non-zero, matching coverage figure

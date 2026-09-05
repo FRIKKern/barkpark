@@ -1,0 +1,1 @@
+internal/semrole/semrole.go For/1 gains an 'unavailable' case in the warn arm. Confirmed still absent on origin/main dad66869e: `grep -n unavailable internal/semrole/semrole.go` exits 1 with no output, so the token falls through to the neutral default and paints identically to the deliberate 'unmetered' it must be distinguishable from.

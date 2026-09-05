@@ -1,0 +1,1 @@
+Deployed-image or deployed-sha provenance survives past the reflog expiry window on the control plane, or the delivery record is shown to cover the same question with a durable row.

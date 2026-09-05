@@ -116,21 +116,43 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
        row's flags flip and the dashboard and agent gate honour them. Whether
        any machine is physically stopped is out of its reach — the same
        boundary `Registry.delete_barkpark/1` documents.
-    4. The rows here are the promises this wave read. A promise the console
-       makes that has no row is simply unexamined; this register cannot see it.
-       That is what the ADD direction of `sold_capability_manifest_test.exs`
-       does for the plan card's bullets, and it is deliberately NOT duplicated
-       here — this file is a sibling guard, not an extension of that one.
+    4. RETRACTED, cch-w56-bl. This item used to read "a promise the console
+       makes that has no row is simply unexamined; this register cannot see
+       it", and that is no longer true: `__future_act_dump.mjs` censuses the
+       shipped `app.js` for DEFERRED-ACT sentences and the ADD arm below reds
+       on any one no row claims. What remains true, and is now the whole of
+       this item: the census's reach is the closed deadline vocabulary in that
+       script, so copy about an IMMEDIATE act ("The instance will restart.")
+       is still outside this register — deliberately, because such a sentence
+       has no day for a clock to reach — and so is every promise made outside
+       `cloud/priv/static/app.js`. The ~14 future-act promises in
+       `internal/cli` are operator-facing and no app.js census can see them.
 
   ── WHAT THIS INSTRUMENT STILL CANNOT DO ───────────────────────────────────
 
-  It has NO ADD DIRECTION. Every arm below iterates `@register`, so the only
-  promises it can be wrong about are the ones somebody already wrote down. A
-  console sentence about a future act that has no row here is not "verified
-  absent" and not "verified present" — it is UNEXAMINED, and this file will
-  stay green while it rots. Nothing in this file notices a new promise
-  appearing in `cloud/priv/static/app.js`. Widening it is a copy census's job,
-  not a resolver's.
+  IT HAS AN ADD DIRECTION NOW (cch-w56-bl), and the paragraph that used to
+  stand here — "it has NO ADD DIRECTION … nothing in this file notices a new
+  promise appearing in cloud/priv/static/app.js" — is retracted. Widening it
+  was a copy census's job, and the census exists:
+  `priv/static/__preview__/__future_act_dump.mjs` is SPAWNED by this file with
+  `System.cmd/3` and a non-zero exit reds the suite. Every deferred-act
+  sentence it emits must be claimed by `@promised_sentences`, whose every value
+  is a `@register` key; a new promise in the console reds here by its own text.
+
+  The DELETE direction is the half that is only possible because
+  `@promised_sentences` is pinned in THIS file. The ADD arm iterates what the
+  census emits, so a census that emitted NOTHING would pass it at zero
+  iterations — vacuously green over a console full of promises (the D564 shape
+  `sold_capability_manifest_test.exs:261` was measured on). The DELETE arm
+  iterates the pin instead and reds when a pinned sentence stops being emitted,
+  so an emptied census, a broken lexer and a deleted promise all lose.
+
+  WHAT IT STILL CANNOT DO. The census keys on a CLOSED VOCABULARY of deadline
+  constructions (`VOCABULARY` in the dump). A promise phrased outside that list
+  is not seen — the vocabulary is the honest boundary of the ADD direction, and
+  widening it is a deliberate act that reds this file until the new sentences
+  are claimed. It also reads ONE file: `cloud/priv/static/app.js`. Operator
+  copy in `internal/cli` is invisible to it by construction.
 
   It also does not own the TLS claim end to end. The `custom_domain` row below
   proves the EXTERNAL half — that this tree arms Caddy's on-demand ACME, and
@@ -148,11 +170,12 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
 
-  alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
-  alias BarkparkCloud.Accounts.{TeamInvitation, UserToken}
+  alias BarkparkCloud.{Accounts, Billing, DeviceAuth, Registry, Repo}
+  alias BarkparkCloud.Accounts.{Team, TeamInvitation, UserToken}
   alias BarkparkCloud.Billing.Subscription
+  alias BarkparkCloud.DeviceAuth.Request, as: DeviceAuthRequest
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
-  alias BarkparkCloud.Workers.TrialExpiryWorker
+  alias BarkparkCloud.Workers.{AutoupdateRolloutWorker, TrialExpiryWorker}
 
   @password "correct horse battery staple"
 
@@ -172,6 +195,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker},
     {"7,22,37,52 * * * *", BarkparkCloud.Workers.UsageSamplerWorker},
     {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
+    {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
     {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
     {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
   ]
@@ -294,8 +318,133 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
       clock: {:crontab_row, TrialExpiryWorker, "0 * * * *"},
       actor: {:producer_run, :teardown_enqueued},
       effect: {:absent, :free_plan_write}
+    },
+
+    # ── THE THREE ROWS THE ADD DIRECTION FOUND (cch-w56-bl) ─────────────────
+    #
+    # Not authored from a reading of the console: the census emitted their
+    # sentences, nothing in @register claimed them, and the ADD arm reds until
+    # a row exists. That is the direction working the first time it ran.
+
+    # "We'll remind you 3 days and 1 day before the trial ends." (app.js:18679,
+    # and the alerts-unknown variant at :18684). A SECOND promise on the same
+    # `trial` reason, and it is not the teardown: the act promised is a piece of
+    # MAIL, on a day before the one the teardown row pins. Its effect is the
+    # per-team notice STAMP, which is the whole budget for that warning — an
+    # `UPDATE … WHERE <stamp> IS NULL` that can never match twice — so the
+    # effect resolver runs the producer TWICE and the second run must send
+    # nothing.
+    {"trial", :remind_before_expiry} => %{
+      clock: {:crontab_row, TrialExpiryWorker, "0 * * * *"},
+      actor: {:producer_run, :reminder_claimed},
+      effect: {:produced, :trial_notice_stamp}
+    },
+
+    # "New releases won't roll out to any instance until you resume."
+    # (app.js:10658) and the confirm-modal's "No instance in any team advances
+    # to a new release until you resume." (:11405). A NEGATIVE promise — the
+    # act is that nothing happens — which is exactly the shape a register that
+    # only reads its own rows never gets asked about. The ACTOR resolver's
+    # non-vacuity control is the load-bearing half: it asserts
+    # `next_autoupdate_candidate/0` really returns the fixture box BEFORE the
+    # halted run, so "nothing advanced" is a measurement and not an empty
+    # candidate set answering trivially.
+    {"autoupdate_halted", :no_advance_until_resume} => %{
+      clock: {:crontab_row, AutoupdateRolloutWorker, "*/5 * * * *"},
+      actor: {:producer_run, :halt_blocks_advance},
+      effect: {:absent, :no_trigger_stamped}
+    },
+
+    # "expires in 4m 30s" on /activate (app.js:24928, both the with-minutes and
+    # the sub-minute arm). The device-activation code's TTL. Its clock is
+    # IN-BAND, not the per-minute `DeviceAuthReaper` cron: that worker is
+    # hygiene by its own moduledoc ("Correctness never depends on it running")
+    # and every DeviceAuth query carries `expires_at > now`, so labelling the
+    # cron row as this promise's clock would credit the wrong mechanism —
+    # exactly the D635 error in the CLOCK column.
+    {"device_activation", :code_expiry} => %{
+      clock: {:in_band, :device_code_expiry},
+      actor: {:in_band_guard, :device_approve},
+      effect: {:refused, :expired_device_code_mints_nothing}
     }
   }
+
+  # ── THE SENTENCE INDEX: the ADD direction's other half ────────────────────
+  #
+  # Written HERE, declared by neither side, for the same reason
+  # `sold_capability_manifest_test.exs`'s `@sold` is (D564): it is the only
+  # reason the DELETE direction can lose. Key = the sentence EXACTLY as
+  # `__future_act_dump.mjs` emits it (HTML stripped, entities resolved, `…`
+  # standing for an interpolated value); value = the `@register` key that
+  # carries its CLOCK/ACTOR/EFFECT verdict.
+  #
+  # A sentence appears here ONLY if a row genuinely covers it. There is no
+  # "unexamined" escape value on purpose — an allowlist of promises this file
+  # has decided not to look at would grow one entry at a time until the eighth
+  # is waved through by the seven above it, and the ADD arm would stop
+  # discriminating. The cost is real: a new deferred promise reds this file
+  # until somebody resolves its three columns. That cost IS the direction.
+  @promised_sentences %{
+    "Cancelling keeps your plan until the end of the current billing period." =>
+      {"billing_lapsed", :cancel_at_period_end},
+    "Your plan stays active until the end of the current billing period." =>
+      {"billing_lapsed", :cancel_at_period_end},
+    "Your access continues until the end of the current billing period." =>
+      {"billing_lapsed", :cancel_at_period_end},
+    "When the trial ends, the instance is torn down." => {"trial", :expire_teardown},
+    "Yours when the trial ends" => {"trial", :expire_teardown},
+    "We'll remind you … before the trial ends." => {"trial", :remind_before_expiry},
+    "If your team's alerts are on, we'll remind you … before the trial ends." =>
+      {"trial", :remind_before_expiry},
+    "Invitation links are emailed, work once, and expire after 7 days." =>
+      {"team_invitation", :expire_after_seven_days},
+    "You can also share this link — it works once and expires in 7 days:" =>
+      {"team_invitation", :expire_after_seven_days},
+    "It expires in an hour." => {"password_reset", :expire_after_one_hour},
+    "New releases won't roll out to any instance until you resume." =>
+      {"autoupdate_halted", :no_advance_until_resume},
+    "No instance in any team advances to a new release until you resume." =>
+      {"autoupdate_halted", :no_advance_until_resume},
+    "expires in …m …s" => {"device_activation", :code_expiry},
+    "expires in …s" => {"device_activation", :code_expiry}
+  }
+
+  ## ── The client half: the deferred-act census, read BY RUNNING ──────────
+
+  # Spawn `__future_act_dump.mjs` and return its rows. There is NO regex and no
+  # `File.read!` over app.js in this file: the census is a program with its own
+  # self-test, and this side's only job is to refuse anything short of a clean
+  # exit 0 with parseable JSON.
+  #
+  # THE PATH IS A SINGLE "../…" LITERAL, deliberately — `scripts/cloud-path-
+  # escape-check.sh` greps `"\.\./[^"]*"`, and a path spliced through
+  # `Path.join/1` over a bare ".." segment is invisible to it (there is an arm
+  # below asserting this file contains no such splice). This one resolves
+  # INSIDE cloud/, so it is not an escape and needs no CLOUD_PATHS entry; the
+  # `cloud/**` pattern already dispatches this suite on it.
+  defp console_deferred_acts! do
+    node = System.find_executable("node")
+
+    # A guard that cannot run must RED, never skip.
+    assert node,
+           "node is not on PATH — the future-act census cannot read the console's promises, and " <>
+             "an unread console must never pass as a console that promises nothing"
+
+    script = Path.expand("../../priv/static/__preview__/__future_act_dump.mjs", __DIR__)
+
+    assert File.exists?(script),
+           "the future-act census script is missing at #{script} — the ADD direction has no input"
+
+    {out, status} = System.cmd(node, [script], stderr_to_stdout: true)
+
+    assert status == 0,
+           "the future-act census failed (exit #{status}) — exit 2 is an unreadable app.js, " <>
+             "exit 3 is the lexer losing its own fixture, exit 4 is a lexer that desynchronised " <>
+             "and found no literals at all. NONE of them is 'the console promises nothing'. " <>
+             "The census said: #{out}"
+
+    Jason.decode!(out)
+  end
 
   ## ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -354,6 +503,62 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     n = System.unique_integer([:positive])
     {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
     bp
+  end
+
+  # A box that satisfies EVERY clause of `Registry.next_autoupdate_candidate/0`
+  # (registry.ex:5176) — host present, unsuspended, `behind`, autoupdate on and
+  # unpaused, unpinned, not already in flight, arming not "unarmed". Written to
+  # the row rather than through `refresh_update_status/1`, which would POST to
+  # the box. The resolver that uses it asserts the query really returns it, so
+  # a clause added to that query reds here instead of quietly emptying the
+  # candidate set and making "nothing advanced" true for the wrong reason.
+  defp behind_candidate!(team) do
+    bp = barkpark_fixture(team)
+    {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.10"})
+
+    Repo.get!(Barkpark, bp.id)
+    |> Ecto.Changeset.change(%{
+      update_state: "behind",
+      autoupdate_enabled: true,
+      autoupdate_paused: false,
+      pinned_release: nil,
+      autoupdate_triggered_at: nil,
+      # OLDER THAN EVERY EARLIER FIXTURE, monotonically. The candidate query
+      # orders `asc: update_checked_at`, and the ACTOR and EFFECT columns of
+      # this row each build their own box inside the SAME test process — with a
+      # shared `utc_now()` the second one is never the pick and its control
+      # reds as vacuous for a reason that has nothing to do with the halt.
+      #
+      # `:monotonic` IS LOAD-BEARING. `System.unique_integer([:positive])` is
+      # unique but UNORDERED, so the second box's offset can be the smaller
+      # one; measured, that passed alone and failed one run in two under the
+      # whole `test/barkpark_cloud` directory — a load-dependent red in a
+      # control whose entire job is to prove the measurement was not vacuous.
+      update_checked_at:
+        DateTime.utc_now()
+        |> DateTime.add(-System.unique_integer([:positive, :monotonic]), :second)
+        |> DateTime.truncate(:microsecond)
+    })
+    |> Repo.update!()
+  end
+
+  # Move every live device-activation request's deadline into the past WITHOUT
+  # touching the guard — the rows stay real, only the clock has passed. Same
+  # shape as `expire_invitation!/1` and `expire_reset_tokens!/1` above: the
+  # negative control every `:in_band` deadline resolver runs.
+  defp expire_device_requests! do
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:microsecond)
+    {count, _} = Repo.update_all(DeviceAuthRequest, set: [expires_at: past])
+    count
+  end
+
+  # A lapsed request and a live one, in that order, so the live control is
+  # created AFTER the expiry sweep and survives it.
+  defp lapsed_and_live_device_codes! do
+    {:ok, dead} = DeviceAuth.start(%{client_name: "promise-register"})
+    expired = expire_device_requests!()
+    {:ok, live} = DeviceAuth.start(%{client_name: "promise-register"})
+    {dead, live, expired}
   end
 
   defp trial_sub(team, offset_seconds) do
@@ -699,6 +904,33 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   end
 
   # The in-band DOWNGRADE ceiling, same before/after controls.
+  # THE DEVICE-CODE DEADLINE, both controls. The positive one is the non-obvious
+  # half and the whole reason this is not a one-liner: a resolver that only
+  # checked the expired case PASSES when `inspect/1` is broken in every
+  # direction (a typo'd hash, a dropped table, an always-`{:error, _}` clause)
+  # — it would be proving that the lookup fails, not that the deadline is
+  # enforced. Both codes go through the SAME call.
+  defp resolve_clock({:in_band, :device_code_expiry}) do
+    {dead, live, expired} = lapsed_and_live_device_codes!()
+
+    case {DeviceAuth.inspect(live.user_code), DeviceAuth.inspect(dead.user_code)} do
+      {{:ok, _row}, {:error, :expired_or_invalid}} ->
+        {:ok,
+         "IN-BAND — DeviceAuth.inspect/1 (device_auth.ex:148) filters `r.expires_at > ^now`: it " <>
+           "answered the LIVE code and refused the lapsed one (#{expired} row(s) aged out). " <>
+           "The per-minute DeviceAuthReaper cron is hygiene by its own moduledoc and is NOT " <>
+           "what keeps this promise"}
+
+      {{:error, why}, _} ->
+        {:error,
+         "the POSITIVE control failed: a freshly started device code was already refused " <>
+           "(#{inspect(why)}), so a refusal of the expired one proves nothing about the deadline"}
+
+      {_, other} ->
+        {:error, "an EXPIRED device code was still resolvable: #{inspect(other)}"}
+    end
+  end
+
   defp resolve_clock({:in_band, :reconcile_completes_in_band}) do
     team = team_with_owner()
     {:ok, sub} = Billing.subscribe(team, "support_plus")
@@ -828,18 +1060,35 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
          "a bare mark_past_due/2 DID suspend the box — the grace branch is reachable after all, " <>
            "so this row's ACTOR verdict must be re-derived"}
 
-      is_nil(sub.current_period_end) ->
+      # cch-w57-bl RE-POINTED these three arms from `current_period_end` to
+      # `grace_ends_at`. They assert the SAME property — the attr-less path
+      # anchors a FUTURE grace window, which is why maybe_enforce/1's suspend is
+      # unreachable — off the column that now actually carries the dunning
+      # anchor. Leaving them on `current_period_end` would have turned the
+      # verdict's whole basis into a read of a column mark_past_due/2 no longer
+      # writes: the FIRST arm would fire on every run and the row would report a
+      # missing anchor that is in fact present, one column over.
+      is_nil(sub.grace_ends_at) ->
         {:error, "the grace anchor was not written at all — re-derive this row"}
 
-      DateTime.compare(sub.current_period_end, DateTime.utc_now()) != :gt ->
+      DateTime.compare(sub.grace_ends_at, DateTime.utc_now()) != :gt ->
         {:error,
-         "the grace anchor landed in the PAST (#{inspect(sub.current_period_end)}) — the " <>
+         "the grace anchor landed in the PAST (#{inspect(sub.grace_ends_at)}) — the " <>
            "re-anchor this verdict rests on is gone"}
+
+      # The SPLIT itself, pinned here rather than in a new row: the dunning path
+      # must leave `current_period_end` — the TRIAL expiry — untouched. A future
+      # re-merge of the two clocks reds this arm.
+      not is_nil(sub.current_period_end) ->
+        {:error,
+         "mark_past_due/2 wrote current_period_end (#{inspect(sub.current_period_end)}) — the " <>
+           "dunning anchor is back on the trial-expiry column, so cch-w57-bl's split is gone"}
 
       true ->
         {:ok,
          "UNREACHABLE — two deliveries of the only event that reaches maybe_enforce/1 left the " <>
-           "box live and pushed the grace anchor forward to #{inspect(sub.current_period_end)}"}
+           "box live and pushed grace_ends_at forward to #{inspect(sub.grace_ends_at)}, with " <>
+           "current_period_end still nil"}
     end
   end
 
@@ -959,6 +1208,94 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
   # NOT "unverified" — resolved by the same equality read that backs the clock,
   # plus the absence of any local reader (proven in the clock arm above).
+  # THE REMINDER PRODUCER, run. A trial 12 h from its boundary is inside the
+  # worker's one-day threshold, so a real `perform_job/2` must report
+  # `noticed_1d: 1`. The observer is pre-armed: the team's 1-day stamp must be
+  # nil BEFORE the run, or a stamp found afterwards would prove nothing.
+  defp resolve_actor({:producer_run, :reminder_claimed}) do
+    {team, _user} = team_and_owner()
+    _sub = trial_sub(team, 12 * 3600)
+
+    assert is_nil(Repo.get!(Team, team.id).trial_notice_1d_sent_at),
+           "the observer was not pre-armed — the 1-day notice stamp was already claimed"
+
+    case perform_job(TrialExpiryWorker, %{}) do
+      {:ok, %{noticed_1d: noticed}} when noticed >= 1 ->
+        {:ok,
+         "RAN — perform_job(TrialExpiryWorker) reported noticed_1d=#{noticed} for a trial 12 h " <>
+           "from its boundary; the reminder is produced by the same hourly worker the teardown " <>
+           "rows pin, on an earlier day"}
+
+      other ->
+        {:error,
+         "the reminder producer sent nothing for a trial inside the 1-day window: " <>
+           "#{inspect(other)}"}
+    end
+  end
+
+  # THE HALT, run — a NEGATIVE promise, so the non-vacuity control carries the
+  # weight. `next_autoupdate_candidate/0` must return the fixture box BEFORE
+  # the halted tick; without that assertion an empty candidate set would make
+  # "nothing advanced" true for a reason that has nothing to do with the halt.
+  #
+  # No un-halted control, deliberately and by measurement: the advance step
+  # calls `Registry.trigger_self_update/1`, which POSTs to the box's host. The
+  # fixture host is TEST-NET-3 and unroutable, so an un-halted arm would hang
+  # on a socket rather than measure anything. The halted branch returns before
+  # any network call, which is exactly why this arm is hermetic.
+  defp resolve_actor({:producer_run, :halt_blocks_advance}) do
+    team = team_with_owner()
+    bp = behind_candidate!(team)
+
+    case Registry.next_autoupdate_candidate() do
+      %Barkpark{id: id} when id == bp.id ->
+        :ok
+
+      other ->
+        flunk(
+          "the candidate control is VACUOUS: next_autoupdate_candidate/0 returned #{inspect(other)}, not the fixture box #{bp.id} — 'nothing advanced' would be true with no halt at all"
+        )
+    end
+
+    {:ok, _settings} = Registry.set_autoupdate_halted(true)
+    assert Registry.autoupdate_halted?(), "the kill switch did not persist"
+
+    case perform_job(AutoupdateRolloutWorker, %{}) do
+      :ok ->
+        {:ok,
+         "RAN — perform_job(AutoupdateRolloutWorker) ticked with box #{bp.id} standing as the " <>
+           "next candidate and the fleet halted; the worker settles and returns without " <>
+           "reaching advance/0"}
+
+      other ->
+        {:error, "perform_job(AutoupdateRolloutWorker, %{}) returned #{inspect(other)}"}
+    end
+  end
+
+  # THE DEVICE-APPROVE GUARD, both controls, through the one call a browser
+  # makes. `approve/2` is the only write that can turn a pending request into a
+  # mintable one, so it is where the deadline has to hold.
+  defp resolve_actor({:in_band_guard, :device_approve}) do
+    {_team, user} = team_and_owner()
+    {dead, live, _expired} = lapsed_and_live_device_codes!()
+
+    case {DeviceAuth.approve(live.user_code, user.id),
+          DeviceAuth.approve(dead.user_code, user.id)} do
+      {:ok, {:error, :expired_or_invalid}} ->
+        {:ok,
+         "IN-BAND GUARD — DeviceAuth.approve/2 (device_auth.ex:176) approved the LIVE code and " <>
+           "refused the lapsed one; the same predicate that gates inspect/1 gates the write"}
+
+      {other, _} when other != :ok ->
+        {:error,
+         "the POSITIVE control failed: approving a LIVE device code returned #{inspect(other)}, " <>
+           "so refusing the expired one proves nothing"}
+
+      {_, other} ->
+        {:error, "an EXPIRED device code was APPROVED: #{inspect(other)}"}
+    end
+  end
+
   defp resolve_actor(:none_local) do
     with {:ok, detail} <- crontab_agrees() do
       {:ok, "NONE LOCAL — #{detail}; no scheduled worker and no in-band caller reaches this act"}
@@ -1111,6 +1448,106 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
+  # THE NOTICE STAMP IS THE EFFECT. The console promises MAIL, and this plane
+  # cannot observe an inbox — what it CAN observe is the write that makes the
+  # send happen at most once: `claim_notice/3`'s `UPDATE … WHERE <stamp> IS
+  # NULL`. So the resolver runs the producer TWICE. The first run must stamp;
+  # the second must send NOTHING. Without the second run this would pass on a
+  # worker that re-sent the same reminder every hour forever — which is a
+  # different promise from the one the copy makes.
+  defp resolve_effect({:produced, :trial_notice_stamp}) do
+    {team, _user} = team_and_owner()
+    _sub = trial_sub(team, 12 * 3600)
+
+    {:ok, %{noticed_1d: first}} = perform_job(TrialExpiryWorker, %{})
+    stamped = Repo.get!(Team, team.id).trial_notice_1d_sent_at
+    {:ok, %{noticed_1d: second}} = perform_job(TrialExpiryWorker, %{})
+    still = Repo.get!(Team, team.id).trial_notice_1d_sent_at
+
+    cond do
+      first < 1 or is_nil(stamped) ->
+        {:error,
+         "the first run produced no 1-day notice (noticed_1d=#{first}, stamp=#{inspect(stamped)})"}
+
+      second > 0 ->
+        {:error,
+         "a SECOND hourly run sent the same reminder again (noticed_1d=#{second}) — the notice " <>
+           "budget is not claimed, and the console's one-off promise is not what this plane does"}
+
+      still != stamped ->
+        {:error,
+         "the second run rewrote the notice stamp: #{inspect(stamped)} -> #{inspect(still)}"}
+
+      true ->
+        {:ok,
+         "PRODUCED — one run claimed trial_notice_1d_sent_at (#{inspect(stamped)}) and the next " <>
+           "hourly run sent nothing (noticed_1d=#{second}), so the reminder is produced exactly once"}
+    end
+  end
+
+  # THE ABSENCE THE COPY PROMISES. "won't roll out … until you resume" is kept
+  # by NOT writing: no `autoupdate_triggered_at`, nothing in flight. The
+  # candidate control is re-asserted here rather than inherited from the ACTOR
+  # column — the two columns resolve independently, and an effect that trusted
+  # another resolver's fixture would be reading a claim, not a row.
+  defp resolve_effect({:absent, :no_trigger_stamped}) do
+    team = team_with_owner()
+    bp = behind_candidate!(team)
+
+    assert %Barkpark{id: id} = Registry.next_autoupdate_candidate()
+
+    assert id == bp.id,
+           "the candidate control is VACUOUS — the fixture box is not what the rollout would pick"
+
+    {:ok, _settings} = Registry.set_autoupdate_halted(true)
+    :ok = perform_job(AutoupdateRolloutWorker, %{})
+
+    after_run = reload_bp(bp)
+
+    cond do
+      not is_nil(after_run.autoupdate_triggered_at) ->
+        {:error,
+         "the halted tick STAMPED box #{bp.id} in flight at " <>
+           "#{inspect(after_run.autoupdate_triggered_at)} — the console's \"until you resume\" " <>
+           "is not what this plane does"}
+
+      Registry.autoupdate_in_flight() != [] ->
+        {:error,
+         "the halted tick left #{length(Registry.autoupdate_in_flight())} box(es) in flight"}
+
+      true ->
+        {:ok,
+         "ABSENT — with the fleet halted and box #{bp.id} standing as the next candidate, the " <>
+           "tick stamped no autoupdate_triggered_at and left nothing in flight"}
+    end
+  end
+
+  # A lapsed activation code MINTS NOTHING. `poll/1` is the only path from a
+  # device code to a token, so the refusal has to hold there and not only at
+  # approve/2 — and the LIVE control (`{:pending}`, not a token and not a
+  # refusal) is what proves the poll query still works at all.
+  defp resolve_effect({:refused, :expired_device_code_mints_nothing}) do
+    {_team, user} = team_and_owner()
+    {dead, live, _expired} = lapsed_and_live_device_codes!()
+
+    {:error, :expired_or_invalid} = DeviceAuth.approve(dead.user_code, user.id)
+
+    case {DeviceAuth.poll(live.device_code), DeviceAuth.poll(dead.device_code)} do
+      {{:pending}, {:error, :expired_or_invalid}} ->
+        {:ok,
+         "REFUSED — polling the LIVE code answers {:pending} while the lapsed one is refused: " <>
+           "the expired request is unapprovable AND unmintable, so no token exists to be issued"}
+
+      {other, _} when other != {:pending} ->
+        {:error,
+         "the POSITIVE control failed: polling a LIVE pending device code returned " <>
+           "#{inspect(other)}, so refusing the expired one proves nothing"}
+
+      {_, other} ->
+        {:error, "polling an EXPIRED device code returned #{inspect(other)}, not a refusal"}
+    end
+  end
+
   # The four columns a suspend writes. Named here so a fifth column (or a lost
   # one) reds with the diff rather than passing as "some flags moved".
   @suspend_columns [:suspended, :suspended_at, :suspended_reason, :updated_at]
@@ -1175,7 +1612,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # ArrearsWorker slips past a heuristic and the register would keep claiming
     # ABSENT while the clock had arrived.
     assert {:ok, detail} = crontab_agrees()
-    assert detail =~ "14 rows"
+    assert detail =~ "15 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 
@@ -1254,6 +1691,58 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
            "the Caddy arming read is no longer a single literal — the census would stop seeing it"
   end
 
+  test "ADD: every deferred-act sentence the console ships is claimed by a register row" do
+    rows = console_deferred_acts!()
+
+    for row <- rows do
+      sentence = Map.fetch!(row, "sentence")
+      lines = Map.fetch!(row, "lines")
+
+      key =
+        Map.get(@promised_sentences, sentence) ||
+          flunk(
+            "the console promises #{inspect(sentence)} (app.js:" <>
+              "#{Enum.join(lines, ", :")}) and NOTHING in this register claims it. A deferred " <>
+              "act with no row is not 'verified absent' and not 'verified present' — it is " <>
+              "UNEXAMINED. Either add a row resolving its CLOCK, ACTOR and EFFECT and index the " <>
+              "sentence in @promised_sentences, or stop promising it."
+          )
+
+      assert Map.has_key?(@register, key),
+             "@promised_sentences maps #{inspect(sentence)} to #{inspect(key)}, which is not a " <>
+               "row of @register — the index points at a promise nobody resolves"
+    end
+  end
+
+  test "DELETE: every indexed sentence is still shipped — an emptied census reds as a stale pin" do
+    # WHY THIS TEST EXISTS AT ALL. The ADD test above iterates what the census
+    # EMITS, so a census returning [] passes it at ZERO ITERATIONS — vacuously
+    # green while the console's promises go unread. This is the other
+    # direction, and it is only possible because @promised_sentences is pinned
+    # in this file rather than derived from the census. Same shape, same
+    # reason, as sold_capability_manifest_test.exs:261 (charter D564).
+    rows = console_deferred_acts!()
+    shipped = MapSet.new(rows, &Map.fetch!(&1, "sentence"))
+
+    assert map_size(@promised_sentences) > 0,
+           "the sentence index is EMPTY — an empty index claims nothing and can red at nothing"
+
+    refute Enum.empty?(rows),
+           "the census emitted NO deferred-act sentence at all while this file pins " <>
+             "#{map_size(@promised_sentences)}. Either every promise was deleted from the " <>
+             "console in one commit, or the census stopped seeing them — and the two must not " <>
+             "read alike."
+
+    for {sentence, key} <- @promised_sentences do
+      assert MapSet.member?(shipped, sentence),
+             "@promised_sentences pins #{inspect(sentence)} (row #{inspect(key)}) but the " <>
+               "console no longer ships it. The census emits: " <>
+               "#{inspect(Enum.sort(MapSet.to_list(shipped)))}. If the copy was deleted on " <>
+               "purpose, delete its index entry in the same commit — and check whether its " <>
+               "@register row still has a promise to be about."
+    end
+  end
+
   test "META: the register actually iterated every row and exercised every resolver kind" do
     # Without this, gutting a resolver to `{:ok, "fine"}` — or emptying
     # @register — would leave a green suite that compared nothing.
@@ -1261,15 +1750,28 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
     assert length(resolved) == map_size(@register)
 
-    assert map_size(@register) == 9,
-           "the register seeded 9 rows; it now holds #{map_size(@register)}"
+    assert map_size(@register) == 12,
+           "the register seeded 9 rows and the cch-w56-bl ADD direction found 3 more; it now " <>
+             "holds #{map_size(@register)}"
+
+    # THE CONVERSE IS DELIBERATELY NOT ASSERTED. Five rows here are claimed by
+    # no indexed sentence — billing_past_due, cancel_immediate,
+    # quota_exceeded, custom_domain and trial/land_on_free — because the copy
+    # they are about is not phrased as a DEADLINE ("your instances are
+    # suspended", "Custom domains with automatic TLS"). Requiring every row to
+    # carry a census sentence would force those five to be deleted or their
+    # copy to be re-written to suit the instrument, which is the instrument
+    # choosing the population again. The census widens what this register can
+    # SEE; it does not become the only reason a row may exist.
 
     reasons = @register |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
 
     assert reasons == [
+             "autoupdate_halted",
              "billing_lapsed",
              "billing_past_due",
              "custom_domain",
+             "device_activation",
              "password_reset",
              "quota_exceeded",
              "team_invitation",

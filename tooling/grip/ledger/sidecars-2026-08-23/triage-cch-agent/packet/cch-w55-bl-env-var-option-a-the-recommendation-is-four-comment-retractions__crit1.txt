@@ -1,0 +1,1 @@
+If retract-and-reserve is chosen, all four stale comments (router.ex:11065-11070, registry.ex:486, registry.ex:4228, registry/env_var.ex:14) are corrected in one PR and none of them still asserts that the worker bakes these values into the box. Evidence: the four diff hunks.

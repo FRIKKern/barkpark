@@ -7,6 +7,7 @@ package apiclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -202,7 +203,12 @@ func New(cfg Config) *Client {
 	// HTTP 500 only, error.code "internal_error" only, announced on stderr.
 	// Installed here rather than at ~20 call sites so there is ONE owner of the
 	// policy and no read path can be forgotten.
-	rt := &retryTransport{onRetry: stderrRetryNotifier, onExhausted: stderrExhaustedNotifier}
+	rt := &retryTransport{
+		onRetry:                 stderrRetryNotifier,
+		onExhausted:             stderrExhaustedNotifier,
+		onBackpressure:          stderrBackpressureNotifier,
+		onBackpressureExhausted: stderrBackpressureExhaustedNotifier,
+	}
 	return &Client{
 		baseURL:     cfg.BaseURL,
 		token:       cfg.Token,
@@ -319,11 +325,28 @@ func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) 
 	return c.getConditionalBounded(url, ifNoneMatch, maxBytes, "response")
 }
 
+// GetConditionalCallerOwnsBackpressure is GetConditional for a caller that has a
+// BETTER answer to a 429 than waiting — a validated cache, a queue, its own
+// paced re-ask. The transport hands such a 429 straight back, unretried and
+// unannounced, so the two layers do not stack their waits on top of each other.
+//
+// internal/manifest.Fetch is the caller this exists for: it re-asks once after
+// the interval the refusal named and otherwise serves a cached manifest, which
+// no amount of transport backoff improves on. See WithCallerOwnedBackpressure.
+func (c *Client) GetConditionalCallerOwnsBackpressure(url, ifNoneMatch string) (*ConditionalGetResult, error) {
+	return c.getConditionalBoundedCtx(WithCallerOwnedBackpressure(context.Background()),
+		url, ifNoneMatch, maxManifestBytes, "capabilities manifest response")
+}
+
 func (c *Client) getConditionalBounded(url, ifNoneMatch string, maxBytes int64, subject string) (*ConditionalGetResult, error) {
+	return c.getConditionalBoundedCtx(context.Background(), url, ifNoneMatch, maxBytes, subject)
+}
+
+func (c *Client) getConditionalBoundedCtx(ctx context.Context, url, ifNoneMatch string, maxBytes int64, subject string) (*ConditionalGetResult, error) {
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("%s limit must be positive", subject)
 	}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}

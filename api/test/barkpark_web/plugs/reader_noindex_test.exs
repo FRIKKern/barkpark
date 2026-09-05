@@ -42,7 +42,7 @@ defmodule BarkparkWeb.Plugs.ReaderNoindexTest do
     assert [etag] = get_resp_header(conn200, "etag")
 
     conn304 =
-      build_conn()
+      scoped_conn()
       |> put_req_header("if-none-match", etag)
       |> get("/papers/noindex-paper")
 
@@ -52,7 +52,7 @@ defmodule BarkparkWeb.Plugs.ReaderNoindexTest do
 
   test "API surfaces carry NO x-robots-tag", %{conn: conn} do
     for path <- ["/api/schemas", "/v1/openapi.json"] do
-      conn = get(build_conn(), path)
+      conn = get(scoped_conn(), path)
       assert get_resp_header(conn, "x-robots-tag") == [], "expected no x-robots-tag on #{path}"
       refute conn.status == 404, "#{path} should exist for this pin to mean anything"
     end

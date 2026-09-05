@@ -178,6 +178,14 @@ defmodule Barkpark.Content.Errors do
                          "session_restarting",
                          "session_start_failed",
                          "invalid_request_id",
+                         # 503 + retry-after: the exactly-once replay ring has no
+                         # table to read, so the session refuses the batch
+                         # (fail-CLOSED) rather than re-apply a non-idempotent op
+                         # it can no longer recognise. Nothing was applied; the
+                         # same request_id succeeds once the ring is back. Its own
+                         # token rather than `session_restarting` because the
+                         # SESSION is fine — only the ring is gone.
+                         "replay_unavailable",
                          # Media collection share link expired — v1/media_collections_controller.ex
                          "share_expired",
                          # Access-grant claim + token / ticket-key create (422) —
@@ -384,6 +392,22 @@ defmodule Barkpark.Content.Errors do
       message: "workspace write quota exceeded",
       status: 402,
       details: %{quota: quota}
+    }
+
+  # Oversize mutate batch — BarkparkWeb.Plugs.RequireWithinQuota. Deliberately
+  # REUSES the sheets ops door's already-registered `batch_too_large` (422): the
+  # meaning ("your batch exceeds this endpoint's cap — split and resend") and the
+  # status are identical, and a second token for it would have grown the public
+  # Error.code enum and docs/api-v1.md §9 for no client-visible gain. The hint is
+  # set here rather than in @hints because the code lives in
+  # @public_inline_codes, whose entries are owned by their inline emitters.
+  defp build({:error, {:batch_too_large, n, max}}) when is_integer(n) and is_integer(max),
+    do: %{
+      code: "batch_too_large",
+      message: "the mutations list carries #{n} mutations; the cap is #{max} per request",
+      status: 422,
+      details: %{count: n, max: max},
+      hint: "Split the batch into requests of at most #{max} mutations and resend."
     }
 
   defp build({:error, :forbidden_origin}),
@@ -594,8 +618,12 @@ defmodule Barkpark.Content.Errors do
   # AND 503 (this arm) reddened main on 2026-09-02. Minting `dedup_unavailable`
   # as a new code is blocked too: a code must be registered in `@hints`, which
   # puts it in `known_codes/0`, which drives the served OpenAPI `Error.code`
-  # enum (docs/openapi.json, behind a CI drift gate) and `docs/api-v1.md` §9
-  # (errors_doc_coverage_test) under a cap with 3 bytes of headroom. So the arm
+  # enum (docs/openapi.json, behind a CI drift gate) and the documented
+  # vocabulary `docs/api-v1.md` §9 UNION `docs/api/error-codes.md`
+  # (errors_doc_coverage_test). PDS wave 25's relocation freed the §9 bytes
+  # that used to make that unaffordable, so minting the code is now a cheap
+  # change filed on its own row — what stays unaffordable is a SECOND status
+  # for `halted`, which is the constraint this arm actually answers. So the arm
   # wears the code that already IS the transient-storage shape — public, 503,
   # exit 8, retry-is-the-right-reflex — and `reason: "dedup_unavailable"`
   # discriminates it from a media-volume fault, exactly as `:replay` does under
@@ -612,6 +640,52 @@ defmodule Barkpark.Content.Errors do
           "neither stored nor refused on its merits. Resend the identical " <>
           "request. If it keeps failing the database is degraded — this is an " <>
           "outage to report, not a document to fix."
+    }
+
+  # The database connection was lost MID-WRITE on the create path
+  # (`Content.Writer.do_create_document/5`'s rescue): a pool checkout dropped
+  # from the queue, a `tcp recv: closed`, a statement killed with the
+  # connection. Before this arm existed the raise escaped the Writer entirely
+  # and Phoenix RenderErrors rendered it through `BarkparkWeb.ErrorJSON` as 500
+  # `internal_error / "unknown error (DBConnection.ConnectionError)"` — the
+  # WRONG CLASS of answer. `BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # grants retry grace by matching the error CODE and `internal_error` is not on
+  # its transient list, and the CLI's `internal_error` hint says to "report the
+  # request_id to the API operator": a condition that clears on its own was
+  # described to every caller as a permanent server defect to escalate.
+  #
+  # WHY THE `code` IS "storage_unavailable" (the `dedup_unavailable` reasoning
+  # above, applied a second time). One public code maps to ONE status —
+  # `internal/cli/errors.go` keys the CLI exit code on `code` and
+  # `internal/cli/errors_api_parity_test.go` refuses a code this file emits at
+  # two statuses — and minting a brand-new code is a four-place change
+  # (`@hints` → `known_codes/0` → the served OpenAPI `Error.code` enum behind a
+  # drift gate → `docs/api-v1.md` §9 under a byte cap). This arm is the same
+  # transient-storage SHAPE the sibling already wears: public, 503, CLI exit 8,
+  # retry-is-the-right-reflex. `reason: "connection_unavailable"` discriminates
+  # it from a media-volume fault and from the dedup-scan outage, exactly as
+  # `:replay` does under "unauthorized".
+  #
+  # THE MESSAGE CARRIES THE AMBIGUITY. Unlike the dedup outage — where the scan
+  # never ran, so provably nothing was written — a connection lost mid-write
+  # leaves the caller unable to know whether the draft row landed. The Writer
+  # builds that sentence (it names `bp doc ls task --perspective drafts`) and it
+  # rides through verbatim, because telling a caller to "resend the identical
+  # request" without telling them to CHECK FIRST walks them into the dedup wall
+  # and a duplicate-of-your-own-first-attempt refusal.
+  defp build({:error, {:connection_unavailable, reason}}),
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "connection_unavailable",
+      hint:
+        "Transient: the database connection dropped mid-write, so this write " <>
+          "was neither confirmed nor refused on its merits. CHECK WHETHER IT " <>
+          "LANDED before retrying — `bp doc ls task --perspective drafts` for " <>
+          "a task, otherwise re-read the id you sent — then resend the " <>
+          "identical request only if it did not. If it keeps failing the " <>
+          "database is degraded: an outage to report, not a document to fix."
     }
 
   # The publish wall's label spine (authoring-excellence D5): the document

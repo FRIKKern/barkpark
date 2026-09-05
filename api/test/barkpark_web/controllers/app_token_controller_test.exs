@@ -66,7 +66,7 @@ defmodule BarkparkWeb.AppTokenControllerTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
 
   defp unique_email, do: "mobile-#{System.unique_integer([:positive])}@example.com"
 
@@ -85,7 +85,7 @@ defmodule BarkparkWeb.AppTokenControllerTest do
   describe "admin gate (mint_login_ticket idiom)" do
     test "no bearer → 401" do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("content-type", "application/json")
         |> post("/v1/auth/app-tokens", Jason.encode!(%{email: unique_email()}))
 

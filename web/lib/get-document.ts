@@ -3,7 +3,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { client } from "./barkpark-client";
 import { bpAll, bpType } from "./bp-tags";
-import { docResultFromError } from "./doc-absence";
+import { resolveDocOutcome } from "./doc-absence";
 
 /**
  * The raw document, type-agnostic. Every reader (post / paper / sheet / meta)
@@ -76,22 +76,19 @@ const cachedDoc = (type: string) =>
  * `getPost` exactly.
  *
  * The two absent-doc shapes are kept DISTINCT (they render differently):
- *   { doc: null, error: null }   → not found           → the page 404s honestly
- *   { doc: null, error: "…" }    → upstream unavailable → inline error panel
- * An upstream 404 belongs to the FIRST bucket: the by-id leg already maps it to
- * null inside `@barkpark/core`, but the slug-query leg THROWS
- * `BarkparkNotFoundError` when the TYPE itself is unknown or private to this
- * token (a decided asymmetry — `js/packages/core/src/docs.ts`, wave-7 D72). It
- * used to be caught here and reported as a failure, so a document that does not
- * exist wore a red panel behind an HTTP 200 instead of 404ing. The ruling lives
- * in `./doc-absence.ts`.
+ *   { doc: null, error: null }   → absent, honestly     → the page 404s
+ *   { doc: null, error: "…" }    → the reader must see it → inline error panel
+ *
+ * The FIRST bucket is the SUCCESS path, not a catch: `.findOne()` resolved null
+ * and the by-id fallback resolved null too (core maps the by-id 404 to null
+ * itself). The slug-query leg REJECTS with `BarkparkNotFoundError` when the
+ * TYPE is unknown or private to this token (a decided asymmetry —
+ * `js/packages/core/src/docs.ts`, wave-7 D72), and because the route gates on
+ * its own hard-coded `KNOWN_TYPES` set that can only mean THIS SITE'S config is
+ * wrong — so it lands in the SECOND bucket with a message naming the type.
+ * The ruling and its full reasoning live in `./doc-absence.ts`.
  */
 export const getDocument = cache(
-  async (type: string, slug: string): Promise<DocResult> => {
-    try {
-      return { doc: await cachedDoc(type)(slug), error: null };
-    } catch (err) {
-      return docResultFromError(err);
-    }
-  },
+  async (type: string, slug: string): Promise<DocResult> =>
+    resolveDocOutcome<GenericDoc>(type, () => cachedDoc(type)(slug)),
 );

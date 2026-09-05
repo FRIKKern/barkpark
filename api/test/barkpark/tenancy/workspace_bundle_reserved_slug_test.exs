@@ -22,15 +22,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
       simply become the holder.
 
     * ALLOWED, and deliberately so — the same bundle arriving while the seat is
-      held by an EMPTY shell. That is `bp cloud support add --ws default`
-      (internal/cli/cloud_support_cmd.go): SupportResetDefaultWorkspaceStep →
-      SupportAdminTokenStep (whose `Seeds.Shared.ensure_default_scope/0`
-      re-mints an empty default) → merge-import, where the PDS-D9 adopt branch
-      replaces the shell with the imported workspace ON PURPOSE. The engine
-      cannot tell that flow from an eviction by database state alone — only the
-      caller's intent does, and `WorkspaceController.import/2` discards the
-      `:workspace_slug` the operator named in the path. That residue is pinned
-      here as a live fact, not claimed closed.
+      held by an EMPTY shell **and the caller named that seat**. That is
+      `bp cloud support add --ws default` (internal/cli/cloud_support_cmd.go):
+      SupportResetDefaultWorkspaceStep → SupportAdminTokenStep (whose
+      `Seeds.Shared.ensure_default_scope/0` re-mints an empty default) →
+      merge-import, where the PDS-D9 adopt branch replaces the shell with the
+      imported workspace ON PURPOSE.
+
+  The engine still cannot tell that flow from an eviction by database state
+  alone — but it no longer has to. `WorkspaceController.import/2` now threads
+  the `:workspace_slug` the operator named in the path down as
+  `:expected_root_slug`, and a bundle that disagrees with it is refused before
+  the empty-shell DELETE (task-b8218812cee2e4cc). The adopt arm below is
+  therefore driven with the expectation the support chain actually sends —
+  `"default"` — and is a CONTROL for the supported flow, not a pinned residue.
+  The refused arm lives at the HTTP edge, in
+  `test/barkpark_web/controllers/workspace_import_expected_root_slug_test.exs`.
   """
 
   use Barkpark.DataCase, async: false
@@ -166,8 +173,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
       refute reminted.id == seeded.id, "fixture assumption: the re-mint is a NEW workspace"
     end
 
-    test "RESIDUE, pinned — an empty-shell seat is still adopted (the `bp cloud support add " <>
-           "--ws default` flow), so this guard does not break provisioning" do
+    test "CONTROL — an empty-shell seat is still adopted when the CALLER NAMED \"default\" " <>
+           "(the `bp cloud support add --ws default` flow), so this guard does not break " <>
+           "provisioning" do
       {src, bundle, src_manifest} = exported_source_with_slug!(@singleton_slug)
       purge!(src, src_manifest)
 
@@ -179,14 +187,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
       assert shell
       refute shell.id == src.id
 
-      assert {:imported, {:ok, stats}} = import_outcome(bundle, mode: :merge)
+      # THE EXPECTATION IS THE WHOLE POINT (task-b8218812cee2e4cc). The support
+      # chain POSTs to /api/workspaces/default/import, so the engine is driven
+      # with expected_root_slug: "default" — the manifest agrees, and the
+      # PDS-D9 adopt branch runs exactly as it always did. The eviction arm this
+      # test used to pin as RESIDUE is now closed at the door: a caller who
+      # names ANY other workspace is refused before the delete (proven over HTTP
+      # in workspace_import_expected_root_slug_test.exs).
+      assert {:imported, {:ok, stats}} =
+               import_outcome(bundle, mode: :merge, expected_root_slug: @singleton_slug)
+
       assert stats.total_rows > 0
 
       landed = Tenancy.get_default_workspace()
 
       assert landed.id == src.id,
              "the supported support-chain flow regressed: the merge-import no longer adopts " <>
-               "the empty default shell; get_default_workspace/0 = #{inspect(landed.id)}"
+               "the empty default shell when the caller NAMED it; get_default_workspace/0 = " <>
+               "#{inspect(landed.id)}"
 
       assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [shell.id]) == 0
     end

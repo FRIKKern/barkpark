@@ -43,7 +43,7 @@ on:
       - ".github/workflows/bp-graph-drift.yml"
 
 concurrency:
-  group: bp-graph-drift-${{ github.ref }}
+  group: bp-graph-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

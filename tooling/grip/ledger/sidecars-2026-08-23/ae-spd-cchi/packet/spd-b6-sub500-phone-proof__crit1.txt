@@ -1,0 +1,1 @@
+At 375px and 420px, the primary list, breadcrumb drill, collapsed back control, and detail reader remain reachable by touch and keyboard without horizontal page overflow.

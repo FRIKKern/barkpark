@@ -1,0 +1,1 @@
+The four remaining silently-dropped top-level keys (coalesced_attempts, completeness, truncated, total_sites) are decoded, and completeness is rendered so the census certifies its own arithmetic.

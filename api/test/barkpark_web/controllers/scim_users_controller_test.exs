@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.ScimUsersControllerTest do
   @moduledoc "SCIM 2.0 /scim/v2/Users — provision + instant deprovision (era-w4-scim-users)."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Accounts, Auth, Repo, Scim, Tenancy}
   alias Barkpark.Auth.ApiToken

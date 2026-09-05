@@ -1,0 +1,1 @@
+BOX_UNREACHABLE gains an operator surface, proved by a grep over internal/ returning a hit where it returns rc=1 today.

@@ -122,7 +122,9 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
-BP_LOG_TAG="site-deploy-node"
+# Read by log() in deploy/lib/site-deploy-common.sh (sourced below). Exported so
+# the linter sees a use (SC2034) and any child shell carries the same tag.
+export BP_LOG_TAG="site-deploy-node"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
 # meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
@@ -731,6 +733,34 @@ if [ "$MODE" = selftest ]; then
     exit 0
   fi
 
+  # -------------------------------------------------------------------------
+  # SELF-TEST FLOOR — two LITERAL, COMMITTED constants (task-7843c92e00b0a13a).
+  #
+  # Same defect and same remedy as the static engine's floor: the verdict below
+  # was `[ "$FAILS" -eq 0 ]` alone, so a run that executed a handful of checks
+  # and a run that executed 334 both printed `[selftest] PASS`. Two blocks below
+  # drop out on a condition (a real flock(1) for the fleet admission gate,
+  # api/lib/barkpark/sites/deploy_runner.ex for the DeployRunner doctrine row) —
+  # both already hard-fail under BARKPARK_SELFTEST_REQUIRE_E2E=1; the floor
+  # catches a block vanishing for a reason nobody guarded. The outer python3/curl
+  # skip above never reaches here (it exits before TESTS exists).
+  #
+  # LITERALS, never derived from the run. Measured 2026-09-03 at origin/main
+  # 0cb244bfb:
+  #
+  #   MIN  = 326  no flock and no api/ in the tree (the two optional blocks skip)
+  #   FULL = 343  all blocks run — this is what CI gets
+  #
+  # 2026-09-04: +9 (317->326, 334->343) for the rejecting-caddy-through-SWITCH
+  # block — the exit-16 fail-closed arm that no fixture had ever driven. It sits
+  # outside both optional blocks, so BOTH floors move by the same 9.
+  #
+  # FULL applies under BARKPARK_SELFTEST_REQUIRE_E2E=1, the venue
+  # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
+  # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
+  # ADD rows -> raise the literal in the SAME commit.
+  SELFTEST_FLOOR_MIN=342
+  SELFTEST_FLOOR_FULL=359
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -1783,6 +1813,540 @@ FAKENPM
   # separate a retired slot from a crashed one. This is a STATIC check of the file
   # instance-deploy.sh installs, because nothing else in this suite reads it: a
   # fake systemctl cannot observe a real unit's exit-status policy.
+  # =========================================================================
+  # STAGE MUST NOT DESTROY A LIVE-OR-PREVIOUS RELEASE.
+  # purge_failed_release_node deliberately KEEPS the bytes of a release a live or
+  # warm-previous slot still points at ("keeping its bytes, marking it
+  # health-failed") precisely so the <1s rollback path survives.  PLAN then routes
+  # a redeploy of that build into its health-failed arm (SKIP_BUILD=0) — which is
+  # the ONLY path on this engine that runs STAGE against an already-existing
+  # release dir, and therefore the only path the up-front `rm -rf "$RELDIR"`
+  # could ever reach.  It reached it: one function preserved the rollback target
+  # and the next one deleted it, and a copy that then failed (exit 13, ordinary on
+  # a full mount) left .previous naming a directory that no longer existed.
+  # Driven through the REAL verbs below, with a REAL mid-STAGE copy failure —
+  # never read off the source.
+  # =========================================================================
+  echo "[selftest] e2e: MUTATION — the pre-fix STAGE loses the rollback target, this one keeps it"
+
+  # A cp that copies genuine bytes and THEN reports failure (the ENOSPC shape).
+  # Armed only by BP_CP_FAIL_LOG and only for the staging copy (destination ends
+  # in `.partial/`), so every other cp in this suite is the real one, and the log
+  # it appends to is the non-vacuity sentinel: an empty cp.log means the copy the
+  # whole proof rests on never ran.
+  RBBIN="$TD/rb-bin"; mkdir -p "$RBBIN"
+  cat > "$RBBIN/cp" <<'FAKECP'
+#!/usr/bin/env bash
+real=/bin/cp; [ -x "$real" ] || real=/usr/bin/cp
+"$real" "$@"; rc=$?
+[ "$rc" -ne 0 ] && exit "$rc"
+dest=""; for a in "$@"; do dest="$a"; done
+if [ -n "${BP_CP_FAIL_LOG:-}" ]; then
+  case "$dest" in *.partial/) printf '%s\n' "$dest" >> "$BP_CP_FAIL_LOG"; exit 1;; esac
+fi
+exit 0
+FAKECP
+  chmod +x "$RBBIN/cp"
+
+  # An mv that REFUSES the recovery rename without touching a byte (the EPERM /
+  # cross-device shape) — the case where STAGE cannot put the interrupted swap
+  # back.  Armed only by BP_MV_ASIDE_FAIL_LOG and only for a SOURCE ending in
+  # `.aside` (the recovery direction), so the swap's own `mv <rel> <rel>.aside`
+  # and every other mv in this suite are the real one.  Same non-vacuity contract
+  # as the cp shim: the log it appends to is the sentinel — an empty mv.log means
+  # the rename the whole proof rests on never ran.
+  cat > "$RBBIN/mv" <<'FAKEMV'
+#!/usr/bin/env bash
+real=/bin/mv; [ -x "$real" ] || real=/usr/bin/mv
+if [ -n "${BP_MV_ASIDE_FAIL_LOG:-}" ]; then
+  src=""
+  for a in "$@"; do case "$a" in -*) ;; *) [ -z "$src" ] && src="$a";; esac; done
+  case "$src" in *.aside) printf '%s\n' "$src" >> "$BP_MV_ASIDE_FAIL_LOG"; exit 1;; esac
+fi
+exec "$real" "$@"
+FAKEMV
+  chmod +x "$RBBIN/mv"
+
+  # The mutant: restore the pre-fix line, nothing else.  A mutation that did not
+  # apply is not a catch, so the swap is asserted three ways below (exactly one
+  # changed line, the pre-fix line present, the guarded line absent).
+  RBMUTD="$TD/rb-mutant"; RBMUT="$RBMUTD/site-deploy-node.sh"
+  mkdir -p "$RBMUTD/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$RBMUTD/lib/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  rm -rf \"$RELDIR.partial\" \"$RELDIR.aside\"") print "  rm -rf \"$RELDIR\" \"$RELDIR.partial\""; else print }' \
+    "$SELF" > "$RBMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$RBMUT" | grep -c '^[<>]')" = 2 ]
+  check "the mutant carries the PRE-FIX line"      grep -qF 'rm -rf "$RELDIR" "$RELDIR.partial"' "$RBMUT"
+  # Counted, not merely absent: this file mentions the guarded text in its OWN
+  # assertions, so "the mutant does not contain it" would be false for a reason
+  # that has nothing to do with STAGE.  The mutant must carry EXACTLY ONE FEWER
+  # occurrence than this engine, and this engine must carry at least one.
+  rb_guard_n() { grep -cF 'rm -rf "$RELDIR.partial" "$RELDIR.aside"' "$1" || true; }
+  check "this engine carries the guarded STAGE line" \
+    [ "$(rb_guard_n "$SELF")" -ge 1 ]
+  check "the mutant lost EXACTLY ONE occurrence of it (the STAGE line)" \
+    [ "$(( $(rb_guard_n "$SELF") - $(rb_guard_n "$RBMUT") ))" = 1 ]
+
+  RBSRC="$TD/rbsrc"; mkdir -p "$RBSRC"
+  printf '{"name":"selftest-rbguard","private":true}\n' > "$RBSRC/package.json"
+
+  # ONE fixture, run twice — the arms differ ONLY by which engine binary runs.
+  rb_arm() { # <engine> <slug> -> populates $TD/rb-<slug>/, echoes the STAGE-failure exit code
+    local eng="$1" slug="$2" base="$TD/rb-$2" pa pb
+    pa="$(free_port)"; pb="$(free_port)"
+    mkdir -p "$base/sites"
+    rb_deploy() { # <build_id>
+      env PATH="$RBBIN:$FAKEBIN:$PATH" \
+        SITE_SLUG="$slug" BUILD_ID="$1" CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+        SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$base/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$base/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+        BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+        BP_CP_FAIL_LOG="${RB_CP_FAIL:-}" \
+        bash "$eng" > "$base/out.$1.log" 2>&1
+      echo $?
+    }
+    RB_CP_FAIL="" rb_deploy rb1 > "$base/rc1"                 # slot a goes live on rb1
+    printf 'ORIGINAL-%s\n' "$slug" > "$base/sites/$slug/releases/rb1/.rb-origin"
+    RB_CP_FAIL="" rb_deploy rb2 > "$base/rc2"                 # slot b goes live; .previous -> rb1
+    # Poison rb1 EXACTLY as purge_failed_release_node does for a live/previous
+    # release: keep every byte, drop the marker.  Same constant, so a rename of
+    # the marker cannot leave this fixture testing a file nothing reads.
+    : > "$base/sites/$slug/releases/rb1/$HEALTH_FAIL_MARK"
+    : > "$base/cp.log"
+    RB_CP_FAIL="$base/cp.log" rb_deploy rb1 > "$base/rc3"     # the re-deploy that must not cost rb1
+    rb_rollback() {
+      env PATH="$RBBIN:$FAKEBIN:$PATH" \
+        SITE_SLUG="$slug" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$base/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$base/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+        BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" \
+        BARKPARK_SITE_NO_CAP=1 BP_CP_FAIL_LOG="" \
+        bash "$eng" --rollback > "$base/rb.log" 2>&1
+      echo $?
+    }
+    rb_rollback > "$base/rbrc"
+    cat "$base/rc3"
+  }
+
+  # ---- FIXED arm (this engine) --------------------------------------------
+  rbfix_rc="$(rb_arm "$SELF" rbfix)"; RBF="$TD/rb-rbfix"
+  check "FIXED: the two setup deploys landed"      sh -c "[ \"\$(cat '$RBF/rc1')\" = 0 ] && [ \"\$(cat '$RBF/rc2')\" = 0 ]"
+  check "FIXED: .previous names rb1 (rb1 IS the warm rollback target)" \
+    sh -c "awk '{print \$3}' '$RBF/sites/rbfix/.previous' | grep -qx rb1"
+  check "FIXED: the staging copy REALLY ran (cp.log non-empty — not a vacuous pass)" \
+    [ -s "$RBF/cp.log" ]
+  check "FIXED: the re-deploy failed in STAGE with the typed 13"  [ "$rbfix_rc" = 13 ]
+  check "FIXED: and said so on the machine channel"  grep -q '^BPSTAGE name=STAGE status=failed build_id=rb1' "$RBF/out.rb1.log"
+  check "FIXED: releases/rb1 SURVIVED the failed deploy"          [ -d "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …with its ORIGINAL bytes, not a half-copy"        grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1/.rb-origin"
+  check "FIXED: …and still bootable (server.js present)"          [ -f "$RBF/sites/rbfix/releases/rb1/server.js" ]
+  check "FIXED: no .partial residue"                              [ ! -e "$RBF/sites/rbfix/releases/rb1.partial" ]
+  check "FIXED: no .aside residue"                                [ ! -e "$RBF/sites/rbfix/releases/rb1.aside" ]
+  # The failure path PROVES the target is still there instead of leaving the
+  # operator to guess — the exit-13 detail says so in words.
+  check "FIXED: the exit-13 detail names the surviving release"   grep -q 'is UNTOUCHED, so any rollback target it held is still there' "$RBF/out.rb1.log"
+  # An interrupted swap must not be a second way to lose the release: drop the
+  # bytes at <id>.aside with nothing at <id> (the kill-between-the-renames state)
+  # and the next STAGE picks them back up.
+  mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
+  rb_recover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    BP_CP_FAIL_LOG="$RBF/cp2.log" \
+    bash "$SELF" > "$RBF/out.recover.log" 2>&1; echo $?)"
+  check "FIXED: an INTERRUPTED swap is recovered, not deleted (.aside -> release)" \
+    [ -d "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …with the original bytes"          grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1/.rb-origin"
+  check "FIXED: …and the recovery is on the record" grep -q 'recovered releases/rb1 from an interrupted swap' "$RBF/out.recover.log"
+  check "FIXED: …and this run still failed in STAGE (the copy really ran)" \
+    sh -c "[ \"$rb_recover_rc\" = 13 ] && [ -s '$RBF/cp2.log' ]"
+
+  # …and when the recovery rename ITSELF fails, STAGE must REFUSE rather than
+  # fall through to the cleanup that would delete the .aside it just failed to
+  # rescue.  Silence is the actual defect here — a run that loses the only copy
+  # of a live-or-previous release while printing nothing — so this asserts the
+  # bytes SURVIVE, that the run SAID so on both channels, and the typed 13.
+  mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
+  : > "$RBF/mv.log"
+  rb_norecover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    BP_CP_FAIL_LOG="" BP_MV_ASIDE_FAIL_LOG="$RBF/mv.log" \
+    bash "$SELF" > "$RBF/out.norecover.log" 2>&1; echo $?)"
+  check "FIXED: the recovery rename REALLY was attempted (mv.log non-empty — not a vacuous pass)" \
+    [ -s "$RBF/mv.log" ]
+  check "FIXED: a FAILED recovery does NOT delete the .aside — the bytes SURVIVE" \
+    [ -d "$RBF/sites/rbfix/releases/rb1.aside" ]
+  check "FIXED: …with the original bytes still in it" \
+    grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1.aside/.rb-origin"
+  check "FIXED: …and STAGE refused rather than staging over it (releases/rb1 not re-created)" \
+    [ ! -e "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …and it SAID so in the log, naming the .aside as the surviving copy" \
+    grep -q 'left releases/rb1.aside UNTOUCHED' "$RBF/out.norecover.log"
+  check "FIXED: …and on the machine channel too (a silent loss is the defect)" \
+    grep -q '^BPSTAGE name=STAGE status=failed build_id=rb1' "$RBF/out.norecover.log"
+  check "FIXED: …with the typed 13 the other STAGE refusals speak" \
+    [ "$rb_norecover_rc" = 13 ]
+  # Put the fixture back the way the rest of this block expects it.
+  mv "$RBF/sites/rbfix/releases/rb1.aside" "$RBF/sites/rbfix/releases/rb1"
+
+  # =========================================================================
+  # SWITCH IS FAIL-CLOSED WHEN CADDY REJECTS THE ARM (exit 16).
+  #
+  # Every deploy in this suite runs against a fake caddy whose `validate` ALWAYS
+  # exits 0, so the two `exit 16` arms of SWITCH — `could not arm …` and
+  # `could not flip …` — were asserted by nobody: no fixture had ever driven a
+  # REJECTING caddy through SWITCH in this engine. That is the arm whose whole
+  # job is to refuse: on a rejected arm the run must stop the slot it just
+  # booted, leave NOTHING live, and exit 16 — the static engine deliberately
+  # stays exit 0 here (charter-D327) because its bytes go live on a symlink flip
+  # that Caddy plays no part in, while a NODE site is served ONLY through the
+  # Caddy upstream, so an unarmed route means the deploy did not happen.
+  #
+  # Own slug, own Caddyfile, own ports, so it cannot disturb the selftest site.
+  # =========================================================================
+  echo "[selftest] e2e: a REJECTING caddy through SWITCH fails CLOSED with exit 16 (the arm nobody drove)"
+  SFB="$TD/switchfail-bin"; mkdir -p "$SFB"
+  # shellcheck disable=SC2016  # $1 is the fake script's own arg — must NOT expand here
+  printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$SFB/caddy"
+  chmod +x "$SFB/caddy"
+  SFCF="$TD/Caddyfile.switchfail"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$SFCF"
+  cp "$SFCF" "$SFCF.orig"
+  SF_PORT_A="$(free_port)"; SF_PORT_B="$(free_port)"
+  sf_rc="$(env PATH="$SFB:$FAKEBIN:$PATH" \
+    SITE_SLUG=switchfail BUILD_ID=sf1 CONTENT_REV=sf-rev SITE_SRC="$SRC" \
+    SITE_PORT_A="$SF_PORT_A" SITE_PORT_B="$SF_PORT_B" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$SFCF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$TD/switchfail.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" > "$TD/sf.out" 2> "$TD/sf.err"; echo $?)"
+  check "rejected arm fails the deploy CLOSED with the typed 16"  [ "$sf_rc" = 16 ]
+  check "…and HEALTH had already passed (the refusal is SWITCH's, not the gate's)" \
+    grep -q '^BPSTAGE name=HEALTH status=ok build_id=sf1' "$TD/sf.out"
+  check "…SWITCH failed on the machine channel"  grep -q '^BPSTAGE name=SWITCH status=failed build_id=sf1' "$TD/sf.out"
+  check "…and the detail says the new slot was stopped and nothing is live" \
+    grep -q 'new slot stopped, nothing live' "$TD/sf.out"
+  check "…caddy validate's refusal is on the record (the revert really ran)" \
+    grep -q 'caddy validate rejected the /sites/switchfail change — reverting' "$TD/sf.out"
+  check "…the Caddyfile is byte-identical (the arm reverted its write)" \
+    cmp -s "$SFCF" "$SFCF.orig"
+  check "…no route marker was left behind" \
+    sh -c "! grep -q 'BARKPARK_SITE_ROUTE:switchfail' '$SFCF'"
+  check "…and NO ROUTE ok claims an armed route the box does not have" \
+    sh -c "! grep -q '^BPSTAGE name=ROUTE status=ok build_id=sf1' '$TD/sf.out'"
+  check "…and RETIRE never ran (the run stopped AT the failed switch)" \
+    sh -c "! grep -q '^BPSTAGE name=RETIRE' '$TD/sf.out'"
+
+  # =========================================================================
+  # THE OTHER exit 16: A REJECTED **RE-DEPLOY** FLIP (the second arm).
+  #
+  # `grep -n 'exit 16' deploy/site-deploy-node.sh` finds TWO sites, and they are
+  # NOT the same experiment. The block above drives the FIRST — `arm_caddy_node_
+  # route` on a site with no route yet, reached only when $CUR_SLOT is empty. The
+  # `else` branch — `flip_caddy_node_port` on a site that IS already live — is
+  # the one every ordinary deploy after the first one takes, and no fixture had
+  # ever driven a REJECTING caddy through it. The arm fixture structurally
+  # cannot reach it: with no CUR_SLOT the engine never enters the else.
+  #
+  # And the two arms have DIFFERENT things to lose. A rejected ARM leaves
+  # nothing live, so "did the revert work" is a question about a file. A rejected
+  # FLIP happens while a slot is SERVING TRAFFIC, so the property is stronger:
+  # the run must stop only the slot it just booted, leave the Caddyfile
+  # byte-identical, and leave the PREVIOUS slot still routed and still up. A
+  # flip that half-applied — marker rewritten to the new port, new slot then
+  # stopped — points production's upstream at a dead port while every stage
+  # reports a clean refusal. So the fixture arms with an ACCEPTING caddy first,
+  # snapshots the Caddyfile it produced, and re-deploys the SAME slug against a
+  # REJECTING one.
+  #
+  # Own slug, own Caddyfile, own ports, own lock — it cannot disturb the site
+  # above or the selftest site.
+  # =========================================================================
+  echo "[selftest] e2e: a REJECTED RE-DEPLOY flip fails CLOSED with exit 16 and leaves the LIVE slot routed"
+  FLCF="$TD/Caddyfile.flipfail"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$FLCF"
+  FL_PORT_A="$(free_port)"; FL_PORT_B="$(free_port)"
+  fl_deploy() { # <build_id> <extra-PATH-prefix> -> exit code, logs $TD/fl.<id>.out
+    env PATH="${2}$FAKEBIN:$PATH" \
+      SITE_SLUG=flipfail BUILD_ID="$1" CONTENT_REV="fl-$1" SITE_SRC="$SRC" \
+      SITE_PORT_A="$FL_PORT_A" SITE_PORT_B="$FL_PORT_B" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$FLCF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/flipfail.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/fl.$1.out" 2> "$TD/fl.$1.err"
+    echo $?
+  }
+  # ---- 1. ARM, with the ACCEPTING caddy: this is the state under test --------
+  fl1_rc="$(fl_deploy fl1 '')"
+  check "the arm deploy landed (accepting caddy) — the fixture really is live" [ "$fl1_rc" = 0 ]
+  check "…and it armed the route (this is a FLIP fixture, not a second arm)" \
+    grep -q "BARKPARK_SITE_ROUTE:flipfail" "$FLCF"
+  fl_port() { awk 'index($0,"BARKPARK_SITE_ROUTE:flipfail"){i=1} i&&match($0,/localhost:[0-9]+/){print substr($0,RSTART+10,RLENGTH-10); exit}' "$FLCF"; }
+  check "…serving slot a :$FL_PORT_A"                 [ "$(fl_port)" = "$FL_PORT_A" ]
+  cp "$FLCF" "$FLCF.armed"
+  # ---- 2. RE-DEPLOY the same slug, now against the REJECTING caddy -----------
+  # $SFB holds the `validate) exit 1` stub built for the arm block above.
+  fl2_rc="$(fl_deploy fl2 "$SFB:")"
+  check "rejected FLIP fails the re-deploy CLOSED with the typed 16"  [ "$fl2_rc" = 16 ]
+  check "…and HEALTH had already passed on the new slot (SWITCH's refusal, not the gate's)" \
+    grep -q '^BPSTAGE name=HEALTH status=ok build_id=fl2' "$TD/fl.fl2.out"
+  check "…SWITCH failed on the machine channel"  grep -q '^BPSTAGE name=SWITCH status=failed build_id=fl2' "$TD/fl.fl2.out"
+  check "…and the detail names the LIVE slot as still serving (the flip wording, not the arm's)" \
+    grep -q 'live slot a still serving' "$TD/fl.fl2.out"
+  check "…caddy validate's refusal is on the record (the revert really ran)" \
+    grep -q 'caddy validate rejected the /sites/flipfail change — reverting' "$TD/fl.fl2.out"
+  check "…the Caddyfile is BYTE-IDENTICAL to the armed one (the flip reverted its write)" \
+    cmp -s "$FLCF" "$FLCF.armed"
+  check "…and the PREVIOUS slot is still the routed upstream (:A, never the dead :B)" \
+    [ "$(fl_port)" = "$FL_PORT_A" ]
+  check "…the new port never reached the marker block" \
+    sh -c "! grep -q 'localhost:$FL_PORT_B' '$FLCF'"
+  check "…the live slot a is still UP (a fail-closed flip must not stop the server)" \
+    env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet barkpark-site@flipfail__a
+  check "…and the slot it just booted was stopped (nothing is left half-live)" \
+    sh -c "! env PATH='$FAKEBIN:$PATH' systemctl is-active --quiet barkpark-site@flipfail__b"
+  check "…and NO ROUTE ok claims a flip the Caddyfile does not carry" \
+    sh -c "! grep -q '^BPSTAGE name=ROUTE status=ok build_id=fl2' '$TD/fl.fl2.out'"
+  check "…and RETIRE never ran (the run stopped AT the failed flip)" \
+    sh -c "! grep -q '^BPSTAGE name=RETIRE' '$TD/fl.fl2.out'"
+  check "…and .previous was NOT rewritten to a build that never went live" \
+    sh -c "! grep -q 'fl2' '$TD/sites/flipfail/.previous' 2>/dev/null"
+
+  check "FIXED: --rollback refuses on the HEALTH MARKER (the target exists)" \
+    sh -c "[ \"\$(cat '$RBF/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is marked health-failed\" '$RBF/rb.log'"
+  check "FIXED: …and NEVER reports the target as gone"            sh -c "! grep -q \"previous release 'rb1' is gone\" '$RBF/rb.log'"
+
+  # ---- MUTANT arm (pre-fix line restored), IDENTICAL fixture ---------------
+  rbmut_rc="$(rb_arm "$RBMUT" rbmut)"; RBM="$TD/rb-rbmut"
+  check "MUTANT: the two setup deploys landed the same way"       sh -c "[ \"\$(cat '$RBM/rc1')\" = 0 ] && [ \"\$(cat '$RBM/rc2')\" = 0 ]"
+  check "MUTANT: the staging copy REALLY ran here too"            [ -s "$RBM/cp.log" ]
+  check "MUTANT: the re-deploy failed in STAGE with the same 13"  [ "$rbmut_rc" = 13 ]
+  check "MUTANT: releases/rb1 is GONE — the failed deploy destroyed the rollback target" \
+    [ ! -d "$RBM/sites/rbmut/releases/rb1" ]
+  check "MUTANT: .previous still names rb1 (a pointer to nothing)" \
+    sh -c "awk '{print \$3}' '$RBM/sites/rbmut/.previous' | grep -qx rb1"
+  check "MUTANT: --rollback reports the target GONE"              sh -c "[ \"\$(cat '$RBM/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is gone\" '$RBM/rb.log'"
+  echo "  mutation proof: with the one line back to 'rm -rf \"\$RELDIR\" \"\$RELDIR.partial\"', the SAME fixture (rb1 warm-previous + health-failed, re-deployed, staging cp fails at exit 13) leaves releases/rb1 DELETED and --rollback saying the previous release is gone; with the guard, rb1 keeps its original bytes and the refusal is the honest one (marked health-failed)"
+
+  # =========================================================================
+  # …AND ON ALL FOUR EXIT-13 ARMS, not just the standalone copy.
+  # The arm above arms its fake cp on the DESTINATION (`*.partial/`).  Only ONE
+  # of STAGE's three copies has a destination that ends there — the standalone
+  # one.  The other two land in `<id>.partial/.next/static/` and
+  # `<id>.partial/public/`, and the fourth exit-13 arm is not a copy at all but
+  # the `.partial` -> release rename, for which there was no shim.  So three of
+  # the four arms could never be induced to fail, and a regression that put the
+  # up-front delete back on the public/ arm alone would have sailed through
+  # green.  (Credit: lead-platform-2's builder found the gap and wrote the
+  # four-arm harness this block is ported from.)
+  #
+  # The fix is to arm on the SOURCE — argument 2, where `*/.next/standalone/.`,
+  # `*/.next/static/.` and `*/public/.` are cleanly distinguishable — plus an mv
+  # armed on a `.partial` FIRST ARGUMENT, which is the rename and NOT the
+  # move-aside (whose first argument is the release dir itself).  Getting that
+  # predicate wrong relocates the proof to a different, already-correct call
+  # site and produces a green that means nothing, so every arm asserts WHICH
+  # call site the shim fired on, and that it fired exactly once.
+  #
+  # Each arm restores a byte-identical snapshot and runs it through BOTH the
+  # mutant (pre-fix line) and this engine, so the four arms and the two engines
+  # are the same experiment.
+  # =========================================================================
+  echo "[selftest] e2e: MUTATION — all FOUR exit-13 arms of STAGE, mutant vs fixed"
+  SWP="$TD/swpstage"; mkdir -p "$SWP"
+  SWPSRC="$SWP/src"; mkdir -p "$SWPSRC"
+  printf '{"name":"selftest-swpstage","private":true}\n' > "$SWPSRC/package.json"
+
+  # The shims.  Both do REAL work (or none) and then fail, both are armed ONLY
+  # by BP_SWP_FAIL — so the fixture deploys that BUILD the rollback target use
+  # the real binaries — and both append the exact call site they intercepted to
+  # BP_SWP_LOG, which is what the per-arm assertions read.
+  SWPBIN="$SWP/bin"; mkdir -p "$SWPBIN"
+  cat > "$SWPBIN/cp" <<'SWPCP'
+#!/usr/bin/env bash
+real=/bin/cp; [ -x "$real" ] || real=/usr/bin/cp
+if [ -n "${BP_SWP_FAIL:-}" ] && [ "$#" -eq 3 ] && [ "$1" = "-a" ]; then
+  hit=""
+  case "$BP_SWP_FAIL:$2" in
+    standalone:*/.next/standalone/.) hit=1 ;;
+    static:*/.next/static/.)         hit=1 ;;
+    public:*/public/.)               hit=1 ;;
+  esac
+  if [ -n "$hit" ]; then
+    src="${2%/.}"
+    /bin/mkdir -p "$3" 2>/dev/null
+    # Land ONE real entry first, so the failure has the shape of an ENOSPC
+    # part-way through a copy rather than a copy that never started.
+    for f in "$src"/*; do [ -e "$f" ] && { "$real" -a "$f" "$3" 2>/dev/null; break; }; done
+    printf 'cp %s -> %s\n' "$2" "$3" >> "${BP_SWP_LOG:-/dev/null}"
+    exit 1
+  fi
+fi
+exec "$real" "$@"
+SWPCP
+  cat > "$SWPBIN/mv" <<'SWPMV'
+#!/usr/bin/env bash
+real=/bin/mv; [ -x "$real" ] || real=/usr/bin/mv
+# Fails ONLY the partial -> release rename.  The move-aside (`mv <rel>
+# <rel>.aside`) and the recovery (`mv <rel>.aside <rel>`) have a first argument
+# that is NOT the .partial, so they run for real — if this predicate matched
+# them the proof would silently move to a different call site.
+if [ "${BP_SWP_FAIL:-}" = mv ] && [ "$#" -eq 2 ]; then
+  case "$1" in
+    *.partial)
+      printf 'mv %s -> %s\n' "$1" "$2" >> "${BP_SWP_LOG:-/dev/null}"
+      exit 1 ;;
+  esac
+fi
+exec "$real" "$@"
+SWPMV
+  chmod +x "$SWPBIN/cp" "$SWPBIN/mv"
+
+  swp_deploy() { # <engine> <slug> <caddyfile> <pA> <pB> <build> [fail] [faillog] -> rc
+    env PATH="$SWPBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG="$2" BUILD_ID="$6" CONTENT_REV=swp-rev SITE_SRC="$SWPSRC" \
+      SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$3" \
+      BARKPARK_SITE_DEPLOY_LOCK="$SWP/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BP_SWP_FAIL="${7:-}" BP_SWP_LOG="${8:-/dev/null}" \
+      bash "$1" > "$SWP/out.log" 2>&1
+    echo $?
+  }
+  swp_rollback() { # <engine> <slug> <caddyfile> <pA> <pB> -> rc
+    env PATH="$SWPBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG="$2" SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$3" \
+      BARKPARK_SITE_DEPLOY_LOCK="$SWP/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" \
+      BARKPARK_SITE_NO_CAP=1 \
+      bash "$1" --rollback > "$SWP/rb.log" 2>&1
+    echo $?
+  }
+
+  # Build each engine's fixture ONCE, then snapshot it, so every arm below
+  # starts from identical bytes.  The setup deploys are ASSERTED to have
+  # succeeded: a fixture that silently failed (exit 14 on the health gate is the
+  # easy one) would hand every arm a "the release is gone" that proves nothing.
+  swp_fixture() { # <arm> <slug> <engine> <pA> <pB>
+    local arm="$1" slug="$2" eng="$3" pa="$4" pb="$5" d1 d2
+    local cf="$SWP/$arm.Caddyfile"
+    printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$cf"
+    d1="$(swp_deploy "$eng" "$slug" "$cf" "$pa" "$pb" n1)"
+    check "fixture ($arm): the n1 deploy LANDED (exit 0, not a silent failure)" [ "$d1" = 0 ]
+    d2="$(swp_deploy "$eng" "$slug" "$cf" "$pa" "$pb" n2)"
+    check "fixture ($arm): the n2 deploy LANDED (exit 0, not a silent failure)" [ "$d2" = 0 ]
+    # n1 is now the .previous rollback target on the still-warm slot a.  Poison
+    # it exactly as purge_failed_release_node does for a live/previous release —
+    # bytes KEPT, marker dropped — the state PLAN's health-failed arm sends back
+    # through BUILD + STAGE.
+    : > "$TD/sites/$slug/releases/n1/$HEALTH_FAIL_MARK"
+    printf 'SWP-ORIGINAL-n1\n' > "$TD/sites/$slug/releases/n1/.swp-origin"
+    rm -rf "$SWP/$arm-snap"; mkdir -p "$SWP/$arm-snap"
+    cp -a "$TD/sites/$slug" "$SWP/$arm-snap/site"
+    cp -a "$SENV/${slug}__a.env" "$SWP/$arm-snap/a.env"
+    cp -a "$SENV/${slug}__b.env" "$SWP/$arm-snap/b.env"
+    cp -a "$cf" "$SWP/$arm-snap/Caddyfile"
+  }
+  swp_restore() { # <arm> <slug>
+    rm -rf "$TD/sites/$2"
+    cp -a "$SWP/$1-snap/site" "$TD/sites/$2"
+    cp -a "$SWP/$1-snap/a.env" "$SENV/${2}__a.env"
+    cp -a "$SWP/$1-snap/b.env" "$SENV/${2}__b.env"
+    cp -a "$SWP/$1-snap/Caddyfile" "$SWP/$1.Caddyfile"
+  }
+
+  SWP_PA="$(free_port)"; SWP_PB="$(free_port)"   # the FIXED arm's two slots
+  SWP_PC="$(free_port)"; SWP_PD="$(free_port)"   # the MUTANT arm's two slots
+  swp_fixture fixed  swpfix "$SELF"   "$SWP_PA" "$SWP_PB"
+  swp_fixture mutant swpmut "$RBMUT"  "$SWP_PC" "$SWP_PD"
+  check "fixture (fixed):  .previous names n1 (n1 IS the rollback target)" \
+    sh -c "awk '{print \$3}' '$TD/sites/swpfix/.previous' | grep -qx n1"
+  check "fixture (mutant): .previous names n1 too (the same experiment)" \
+    sh -c "awk '{print \$3}' '$TD/sites/swpmut/.previous' | grep -qx n1"
+  check "fixture (fixed):  n1 carries the poison marker purge would have left" \
+    [ -f "$TD/sites/swpfix/releases/n1/$HEALTH_FAIL_MARK" ]
+
+  # One variant = one exit-13 arm.  <site-regex> pins WHICH call site the shim
+  # intercepted: a predicate that drifted onto the move-aside, or onto a
+  # different copy, reds here instead of passing for the wrong reason.
+  swp_variant() { # <BP_SWP_FAIL> <expected-call-site-regex>
+    local what="$1" site="$2"
+    local f_cf="$SWP/fixed.Caddyfile" m_cf="$SWP/mutant.Caddyfile"
+    local f_rel="$TD/sites/swpfix/releases/n1" m_rel="$TD/sites/swpmut/releases/n1"
+    local f_rc m_rc f_rb m_rb
+    swp_restore fixed swpfix; swp_restore mutant swpmut
+    : > "$SWP/fixed.log"; : > "$SWP/mutant.log"
+    m_rc="$(swp_deploy "$RBMUT" swpmut "$m_cf" "$SWP_PC" "$SWP_PD" n1 "$what" "$SWP/mutant.log")"
+    cp "$SWP/out.log" "$SWP/mutant.out"
+    f_rc="$(swp_deploy "$SELF"  swpfix "$f_cf" "$SWP_PA" "$SWP_PB" n1 "$what" "$SWP/fixed.log")"
+    cp "$SWP/out.log" "$SWP/fixed.out"
+    # THE SHIM FIRED, ONCE, ON THE CALL SITE THIS ARM IS ABOUT.
+    check "[$what] fixed:  the shim fired on the RIGHT call site" \
+      grep -qE "$site" "$SWP/fixed.log"
+    check "[$what] fixed:  …and on nothing else (exactly one interception)" \
+      [ "$(grep -c '' "$SWP/fixed.log")" = 1 ]
+    check "[$what] mutant: the shim fired on the RIGHT call site here too" \
+      grep -qE "$site" "$SWP/mutant.log"
+    check "[$what] mutant: …and on nothing else (exactly one interception)" \
+      [ "$(grep -c '' "$SWP/mutant.log")" = 1 ]
+    # BOTH engines REACHED the same failing line — else the outcomes below are
+    # not comparable.
+    check "[$what] mutant: the deploy exits 13 (STAGE failed)"     [ "$m_rc" = 13 ]
+    check "[$what] fixed:  the deploy exits 13 too (same failure)" [ "$f_rc" = 13 ]
+    check "[$what] mutant: STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=n1' "$SWP/mutant.out"
+    check "[$what] fixed:  STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=n1' "$SWP/fixed.out"
+    # THE DEFECT, reproduced on THIS arm.
+    check "[$what] MUTANT LOSES IT: releases/n1 is GONE" [ ! -d "$m_rel" ]
+    check "[$what] MUTANT LOSES IT: .previous still names the release it deleted" \
+      sh -c "awk '{print \$3}' '$TD/sites/swpmut/.previous' | grep -qx n1"
+    # THE FIX, on the identical fixture.
+    check "[$what] FIX KEEPS IT: releases/n1 survived"   [ -d "$f_rel" ]
+    check "[$what] FIX KEEPS IT: with its ORIGINAL bytes (fixture marker intact)" \
+      grep -qx 'SWP-ORIGINAL-n1' "$f_rel/.swp-origin"
+    check "[$what] FIX KEEPS IT: still bootable (server.js present)" [ -f "$f_rel/server.js" ]
+    check "[$what] FIX KEEPS IT: no .partial residue" [ ! -e "$f_rel.partial" ]
+    check "[$what] FIX KEEPS IT: no .aside residue"   [ ! -e "$f_rel.aside" ]
+    check "[$what] fixed: the exit-13 detail SAYS the release survived" \
+      grep -qE 'is UNTOUCHED, so any rollback target it held is still there|previously staged tree was restored' "$SWP/fixed.out"
+    # THE VERDICT — the same remediation on both engines, opposite answers.
+    # Clearing the poison marker is what a SUCCESSFUL restage would have done;
+    # on the mutant there is nothing left to clear.
+    rm -f "$m_rel/$HEALTH_FAIL_MARK" "$f_rel/$HEALTH_FAIL_MARK" 2>/dev/null
+    m_rb="$(swp_rollback "$RBMUT" swpmut "$m_cf" "$SWP_PC" "$SWP_PD")"
+    check "[$what] MUTANT LOSES IT: the rollback is now IMPOSSIBLE (21 no_previous)" [ "$m_rb" = 21 ]
+    check "[$what] MUTANT LOSES IT: and it says the previous release is gone" \
+      grep -q "previous release 'n1' is gone" "$SWP/rb.log"
+    f_rb="$(swp_rollback "$SELF" swpfix "$f_cf" "$SWP_PA" "$SWP_PB")"
+    check "[$what] FIX KEEPS IT: the rollback still WORKS (exit 0)" [ "$f_rb" = 0 ]
+    check "[$what] FIX KEEPS IT: and it lands on n1"  grep -qx 'TARGET_BUILD=n1' "$SWP/rb.log"
+  }
+
+  swp_variant standalone '^cp .*/\.next/standalone/\. -> .*/releases/n1\.partial/$'
+  swp_variant static     '^cp .*/\.next/static/\. -> .*/releases/n1\.partial/\.next/static/$'
+  swp_variant public     '^cp .*/public/\. -> .*/releases/n1\.partial/public/$'
+  swp_variant mv         '^mv .*/releases/n1\.partial -> .*/releases/n1$'
   echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
   UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
   unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
@@ -1794,6 +2358,16 @@ FAKENPM
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # The floor (see SELFTEST_FLOOR_* above). `FAILED (1)` is the shape
+  # internal/cli/cloud_site_preflight.go recognises as terminal.
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_FULL"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_FULL (BARKPARK_SELFTEST_REQUIRE_E2E=1: every block is required here)"
+  else
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_MIN"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_MIN (bare run: the flock/api optional blocks may skip honestly)"
+  fi
+  [ "$TESTS" -ge "$SELFTEST_FLOOR" ] || { echo "[selftest] FAILED (1) - only $TESTS checks ran, the floor is $SELFTEST_FLOOR from $SELFTEST_FLOOR_NAME: a block went missing, and a suite that stopped running rows must not report PASS. If rows were removed on purpose, lower the literal in the same commit."; exit 1; }
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
   echo "[selftest] PASS"
   exit 0
@@ -2159,7 +2733,45 @@ if [ "$SKIP_BUILD" = 0 ]; then
     DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
-  rm -rf "$RELDIR" "$RELDIR.partial"
+  # NEVER delete releases/<build_id> before the new bytes exist.  That dir can be
+  # the LIVE release or the build .previous names as the warm-rollback target —
+  # and PLAN routes a redeploy of exactly such a build straight here:
+  # purge_failed_release_node KEEPS a live/previous release's bytes and only drops
+  # the poison marker (precisely so the rollback path survives), after which PLAN's
+  # health-failed arm sets SKIP_BUILD=0 and STAGE runs against that same dir.  An
+  # up-front `rm -rf` followed by a copy that fails (exit 13, ordinary on a full
+  # mount) therefore destroyed the very release a rollback would flip to: .previous
+  # kept naming it while its bytes were gone, and --rollback returned 21.
+  # A FAILED DEPLOY MUST NEVER COST THE ROLLBACK TARGET.
+  # So: copy into a fresh .partial, then SWAP — move the old dir ASIDE, rename the
+  # partial in, and remove the aside copy only once the rename has landed.  Every
+  # failure path before that last step leaves the existing release, and therefore
+  # the rollback path, byte-for-byte intact.  (Mirrors stage_dir_into_release in
+  # the static engine, deploy/site-deploy.sh — one shape for both runtimes.)
+  # The swap narrows the exposure to the gap BETWEEN the two renames (a
+  # microsecond, versus the whole copy the pre-fix `rm -rf` was exposed for), and
+  # even that gap is now recoverable rather than fatal: a kill in it leaves the
+  # old release under .aside and nothing at $RELDIR, so pick it back up instead
+  # of deleting it — it can be the only copy of a live-or-previous release left
+  # on the box.  Only when $RELDIR is genuinely absent; a present $RELDIR means
+  # the swap landed and the .aside is the stale half.
+  # And the recovery is REFUSED-ON-FAILURE, not best-effort: the `rm -rf` three
+  # lines down would otherwise delete the very bytes a failed `mv` just left in
+  # place — the row's own defect shape, reappearing inside its own remedy and
+  # silently (no log, no emit, no non-zero exit; an operator sees a clean deploy
+  # and finds the missing rollback target only when they reach for it).  STAGE
+  # cannot honestly stage over a release it could not first put back, so read the
+  # return code and stop BEFORE the cleanup, leaving the .aside untouched.
+  if [ ! -e "$RELDIR" ] && [ -d "$RELDIR.aside" ]; then
+    mv "$RELDIR.aside" "$RELDIR"; recover_rc=$?
+    if [ "$recover_rc" -ne 0 ]; then
+      DETAIL="could not recover releases/$BUILD_ID from an interrupted swap (mv exit $recover_rc) — releases/$BUILD_ID.aside still holds those bytes and can be the only copy of a live-or-previous release left on this box, so STAGE refused to stage over a release it could not first put back and left releases/$BUILD_ID.aside UNTOUCHED; move it back to releases/$BUILD_ID by hand (check ownership and free space on the releases mount) and redeploy"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    log "STAGE: recovered releases/$BUILD_ID from an interrupted swap (.aside) before re-staging"
+  fi
+  STAGE_ASIDE=""
+  rm -rf "$RELDIR.partial" "$RELDIR.aside"
   mkdir -p "$RELDIR.partial"
   # cp/mv carry no forensic of their own — capture the exit code + a disk read (a
   # copy that fails on a real box almost always fails on a full mount) so each
@@ -2168,7 +2780,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
   cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; cp_rc=$?
   if [ "$cp_rc" -ne 0 ]; then
     disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # 2) .next/static -> <release>/.next/static (standalone omits it by design).
@@ -2177,7 +2789,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
       disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-      DETAIL="copy of .next/static into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      DETAIL="copy of .next/static into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
       log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
@@ -2187,16 +2799,28 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
       disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-      DETAIL="copy of public/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      DETAIL="copy of public/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
       log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
+  if [ -e "$RELDIR" ]; then
+    mv "$RELDIR" "$RELDIR.aside"; aside_rc=$?
+    if [ "$aside_rc" -ne 0 ]; then
+      rm -rf "$RELDIR.partial"
+      DETAIL="could not move the existing releases/$BUILD_ID aside before the swap (mv exit $aside_rc) — the staged tree was discarded and the existing release is UNTOUCHED, so any rollback target it held is still there; check ownership of the releases dir"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    STAGE_ASIDE="$RELDIR.aside"
+  fi
   mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
   if [ "$mv_rc" -ne 0 ]; then
+    # Put the old release BACK.  The swap is only a swap if it is reversible.
+    [ -n "$STAGE_ASIDE" ] && mv "$STAGE_ASIDE" "$RELDIR" 2>/dev/null
     rm -rf "$RELDIR.partial"
-    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership. Any previously staged tree was restored"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
+  [ -n "$STAGE_ASIDE" ] && rm -rf "$STAGE_ASIDE"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"

@@ -1,0 +1,1 @@
+The unmatchable bare-range shape at app.css:5279 (`:2913-2957`, no filename) is either given a shape the gate can see, or named in the gate's own header as a known-unreachable form. Evidence: the diff.

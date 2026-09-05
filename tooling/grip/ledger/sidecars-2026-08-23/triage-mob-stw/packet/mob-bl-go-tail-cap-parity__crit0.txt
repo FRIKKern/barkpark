@@ -1,0 +1,1 @@
+internal/chat/reduce.go bounds State.Tail at 262144 bytes with FREEZE semantics on BOTH the claude and runtime delta arms, mirroring apps/mobile appendTail

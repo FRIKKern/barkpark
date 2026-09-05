@@ -1,0 +1,1 @@
+Genuinely-missing retrieval verbs are shipped (or their absence ruled acceptable with a written why) — each new verb has a test

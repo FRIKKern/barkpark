@@ -1,0 +1,1 @@
+The test waits until the child has created the capture file before closing the session, so the assertion measures cleanup rather than spawn latency - shown by the diff.

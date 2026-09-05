@@ -72,6 +72,12 @@ defmodule BarkparkCloud.Notifications do
   # offer to be un-told a fact. It still honours `alerts_enabled`.
   @always_send ~w(test trial_expiring trial_expired)a
 
+  # cch-w52-s3 — the carrier every TRANSACTIONAL send rides, named once. This is
+  # provable from code, not inferred from state: `Mailer`'s moduledoc says
+  # transactional email always rides the platform, and none of the six
+  # transactional senders has an override seam to ride anything else.
+  @platform_carrier "platform"
+
   # Seconds a team must wait between "send test" presses (Coolify's 10s/team).
   @test_rate_limit_seconds 10
 
@@ -82,8 +88,15 @@ defmodule BarkparkCloud.Notifications do
 
   # Failure events that fan to EVERY enabled chat channel by default until the team
   # customizes the matrix (failures opt-out, successes opt-in — Coolify's rule).
-  @chat_default_on ~w(provision_failed deployment_failed agent_unreachable
-                      subscription_past_due)
+  #
+  # cch-w29-bl: `deployment_refused` joins them under the same rule — a content
+  # publish that did not deploy is a failure, and a Slack-only team that is
+  # never told is the silence this epic exists to kill. It has a checkbox behind
+  # it (the `email_notification_settings.deployment_refused` column landed in the
+  # same change), so D342(d)'s objection to a column-less per-event mute does not
+  # apply.
+  @chat_default_on ~w(provision_failed deployment_failed deployment_refused
+                      agent_unreachable subscription_past_due)
 
   # Events that ignore `event_routes` and always fan to every enabled chat channel.
   #
@@ -273,28 +286,37 @@ defmodule BarkparkCloud.Notifications do
   @doc "Deliver a team-invite email over the PLATFORM transport. See `Transactional`."
   def deliver_invite(invite) do
     result = Transactional.deliver_invite(invite)
-    record_delivery(Map.get(invite, :team_id), invite[:to], "invite", "transactional", result)
+
+    record_delivery(
+      Map.get(invite, :team_id),
+      invite[:to],
+      "invite",
+      "transactional",
+      result,
+      @platform_carrier
+    )
+
     result
   end
 
   @doc "Deliver a password-reset email over the PLATFORM transport."
   def deliver_password_reset(to, url) do
     result = Transactional.deliver_password_reset(to, url)
-    record_delivery(nil, to, "password_reset", "transactional", result)
+    record_delivery(nil, to, "password_reset", "transactional", result, @platform_carrier)
     result
   end
 
   @doc "Deliver an email-verification email over the PLATFORM transport."
   def deliver_email_verification(to, url) do
     result = Transactional.deliver_email_verification(to, url)
-    record_delivery(nil, to, "email_verification", "transactional", result)
+    record_delivery(nil, to, "email_verification", "transactional", result, @platform_carrier)
     result
   end
 
   @doc "Deliver a verified-email-change 6-digit code over the PLATFORM transport."
   def deliver_email_change_code(to, code) do
     result = Transactional.deliver_email_change_code(to, code)
-    record_delivery(nil, to, "email_change_code", "transactional", result)
+    record_delivery(nil, to, "email_change_code", "transactional", result, @platform_carrier)
     result
   end
 
@@ -349,7 +371,16 @@ defmodule BarkparkCloud.Notifications do
               Transactional.deliver_test(recipient, selected_transport: settings.transport)
 
             _ = stamp_test_sent(settings)
-            record_delivery(settings.team_id, recipient, "test", "transactional", result)
+
+            record_delivery(
+              settings.team_id,
+              recipient,
+              "test",
+              "transactional",
+              result,
+              @platform_carrier
+            )
+
             result
         end
 
@@ -547,7 +578,16 @@ defmodule BarkparkCloud.Notifications do
           for {team_id, summary, recipient} <- targets do
             email = DigestEmail.build(summary, recipient)
             result = Mailer.deliver(email)
-            record_delivery(team_id, recipient, "fleet_digest", "transactional", result)
+
+            record_delivery(
+              team_id,
+              recipient,
+              "fleet_digest",
+              "transactional",
+              result,
+              @platform_carrier
+            )
+
             {recipient, result}
           end
 
@@ -720,8 +760,16 @@ defmodule BarkparkCloud.Notifications do
             role: Map.get(roles, recipient)
           })
 
-        result = deliver_alert(settings, email)
-        record_delivery(settings.team_id, recipient, Atom.to_string(event), "alert", result)
+        {result, carrier} = deliver_alert(settings, email)
+
+        record_delivery(
+          settings.team_id,
+          recipient,
+          Atom.to_string(event),
+          "alert",
+          result,
+          carrier
+        )
       end
     end
 
@@ -805,14 +853,24 @@ defmodule BarkparkCloud.Notifications do
   # and `transport_manifest_test.exs` reds — in BOTH directions — if a third
   # option is ever offered without a clause, or a clause ever answers to a
   # transport nobody can select.
+  #
+  # cch-w52-s3 — RETURNS `{result, carrier}`, not a bare result. The `:error`
+  # arm below is the whole reason: a team that SELECTED `smtp` and whose secrets
+  # would not decrypt rides the PLATFORM mailer, and until this seam existed the
+  # row it wrote was byte-identical to a carried one. The carrier is decided
+  # HERE — the only frame that knows which branch ran — because `record_delivery`
+  # is not passed the settings struct and could not re-derive it from
+  # `settings.transport` without asserting the fallback never happened.
+  @spec deliver_alert(EmailSettings.t(), Swoosh.Email.t()) ::
+          {{:ok, term()} | {:error, term()}, String.t()}
   defp deliver_alert(%EmailSettings{transport: "smtp"} = settings, email) do
     case smtp_override(settings) do
-      {:ok, override} -> Mailer.deliver(email, override)
-      :error -> Mailer.deliver(email)
+      {:ok, override} -> {Mailer.deliver(email, override), "team_smtp"}
+      :error -> {Mailer.deliver(email), "platform"}
     end
   end
 
-  defp deliver_alert(_settings, email), do: Mailer.deliver(email)
+  defp deliver_alert(_settings, email), do: {Mailer.deliver(email), "platform"}
 
   # Build the per-call Swoosh SMTP config from a team's decrypted secrets. Any
   # decrypt failure (tampered ciphertext) → :error, and the caller rides the
@@ -1044,7 +1102,14 @@ defmodule BarkparkCloud.Notifications do
   # host itself is Vault-sealed and masked even from the owner. The raw term
   # still goes to the operator log below — publication is what we take away,
   # not debuggability.
-  defp record_delivery(team_id, recipient, event, kind, result) do
+  # cch-w52-s3: `carrier` is a REQUIRED argument, not a defaulted one. A default
+  # would let a new call site record a carrier it never measured, which is
+  # exactly the class of silent claim this field exists to end — the six
+  # transactional callers above pass the constant `@platform_carrier` because
+  # `Mailer`'s own moduledoc says transactional email ALWAYS rides the platform
+  # (`Transactional.deliver_test/1` is arity-1 with no override seam), and the
+  # one alert caller passes what `deliver_alert/2` measured.
+  defp record_delivery(team_id, recipient, event, kind, result, carrier) do
     {status, last_error} =
       case result do
         {:ok, _} ->
@@ -1066,7 +1131,8 @@ defmodule BarkparkCloud.Notifications do
       kind: kind,
       status: status,
       attempts: 1,
-      last_error: last_error
+      last_error: last_error,
+      carrier: carrier
     })
     |> Repo.insert()
     |> case do
@@ -1205,22 +1271,59 @@ defmodule BarkparkCloud.Notifications do
   same way. So the mute is not a refusal here; it TRAVELS WITH THE MESSAGE:
   the payload carries `alerts_muted`, and `Render.render/2`'s `test` arm
   discloses it on the wire.
+
+  cch-w32-bl — THE OTHER HALF OF THE ENDPOINT NOW COSTS THE SAME.
+
+  `POST /v1/notifications/test` has two legs and ONE budget: the same
+  `#{@test_rate_limit_seconds}`s-per-team stamp (`last_test_sent_at`) that
+  `deliver_test/2` reads and writes. This leg used to skip it entirely — the
+  router's `cond` routes a chat body here BEFORE `test_email/1` — so three
+  rapid presses enqueued three fan-outs, each one an outbound POST to a
+  third-party webhook URL of the caller's choosing, from Barkpark's IP. An
+  admin gate bounds WHO can do that; it does not bound HOW OFTEN.
+
+  ONE SHARED STAMP, NOT TWO, and the cost is stated rather than hidden: an
+  email test now holds the chat test for #{@test_rate_limit_seconds}s and vice
+  versa. That is deliberate. The thing being rationed is the ENDPOINT — one
+  button, one team, one budget — and a per-leg stamp would hand a caller
+  exactly 2x for free while making "the test button is rate-limited" a sentence
+  with a footnote. The chat leg is also the worse half to double: an email test
+  reaches ONE recipient, a chat test fans out to EVERY enabled channel.
+
+  THE STAMP IS WRITTEN ONLY WHEN SOMETHING WAS ACTUALLY QUEUED. A fan-out that
+  reached zero channels (no channels; only a disabled one; a `channel_type`
+  matching nothing) burns no window — it sent nothing, so there is nothing to
+  ration — and that mirrors `deliver_test/2`, which does not stamp on
+  `:no_recipient` either. A refusal must never spend a real user's budget.
+
+  Returns `{:ok, n}` or `{:error, {:rate_limited, seconds_remaining}}` — the
+  SAME refusal tuple `deliver_test/2` returns, so the router renders the same
+  `429 {error: "rate_limited", retry_after: n}` the console already reads.
   """
   @spec send_test_chat(Team.t() | binary(), String.t() | nil) ::
-          {:ok, non_neg_integer()}
+          {:ok, non_neg_integer()} | {:error, {:rate_limited, non_neg_integer()}}
   def send_test_chat(team, channel_type \\ nil) do
     settings = get_or_create_settings(team)
-    payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    queued =
-      settings
-      |> channels_for_event("test")
-      |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
-      |> Enum.count(fn cfg ->
-        match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
-      end)
+    case test_rate_limit_remaining(settings) do
+      0 ->
+        payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    {:ok, queued}
+        queued =
+          settings
+          |> channels_for_event("test")
+          |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
+          |> Enum.count(fn cfg ->
+            match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
+          end)
+
+        if queued > 0, do: stamp_test_sent(settings)
+
+        {:ok, queued}
+
+      remaining ->
+        {:error, {:rate_limited, remaining}}
+    end
   end
 
   @doc """

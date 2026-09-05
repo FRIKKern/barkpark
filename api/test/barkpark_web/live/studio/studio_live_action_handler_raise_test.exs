@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Studio.StudioLiveActionHandlerRaiseTest do
   alias Barkpark.Plugins.Registry
 
   @dataset "production"
+  @admin_token "action-raise-admin"
 
   # `Barkpark.Plugins.Registry` is a process-global singleton (same
   # constraint documented on `Barkpark.RegistryCase`, which this test can't
@@ -118,8 +119,26 @@ defmodule BarkparkWeb.Studio.StudioLiveActionHandlerRaiseTest do
     :ok
   end
 
+  # `schema_action` + `confirm-modal-real` are ADMIN-tier Caps events
+  # (arpss-schema-action-write-tier-ruling) and the :admin tier is enforced on
+  # EVERY Studio socket, including the anonymous public-demo one. This suite is
+  # about the handler's crash guard, not the gate, so it mounts an admin
+  # principal — without one the gate halts before `dispatch_action/5` and the
+  # crash guard under test is never reached.
+  defp admin_conn(conn) do
+    {:ok, _} =
+      Barkpark.Auth.create_token(@admin_token, "action raise admin", @dataset, [
+        "read",
+        "write",
+        "admin"
+      ])
+
+    Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
+  end
+
   defp open_confirm_modal_and_run_real(conn, action_name) do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/stub-doc"))
+    {:ok, view, _html} =
+      live(admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/post/stub-doc"))
 
     _html = render_click(view, "schema_action", %{"name" => action_name})
     html = render_click(view, "confirm-modal-real", %{})

@@ -1,0 +1,1 @@
+The agent block builds to a tmpdir and installs with install(1), matching the barkpark-mcp block, and bash -n stays green.

@@ -1,0 +1,1 @@
+The census's own blind spot — composite-literal writes of request structs — is measured and stated as a number, not assumed away.

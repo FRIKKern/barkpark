@@ -202,9 +202,14 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # instead of standing up (and billing) a second box. Terminal
     # succeeded/failed rows are outside the index, so a legitimate retry after a
     # failure still enqueues.
-    |> unique_constraint([:barkpark_id, :kind],
+    # cch-w37-bl — keyed on `:kind` rather than the `belongs_to` `:barkpark_id`,
+    # the same reordering as `TeamInvitation.changeset/2`. Safe by construction
+    # here: `Registry.translate_active_job_conflict/2` matches on the
+    # `:constraint_name` option, never on the error's FIELD, so the atoms
+    # `:already_provisioning` / `:already_deprovisioning` are unaffected.
+    |> unique_constraint([:kind, :barkpark_id],
       name: :provision_jobs_one_active_per_barkpark_kind_idx,
-      message: "already has an active job of this kind"
+      message: "of job is already in flight for this box"
     )
   end
 

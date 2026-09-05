@@ -1,0 +1,1 @@
+THE TWO REFUSAL FAMILIES ARE DISTINGUISHABLE: readiness-timeout and stale-server print visibly different headline text, quoted side by side.

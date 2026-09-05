@@ -1,0 +1,1 @@
+patchAutoupdate's OFFER is three-valued on instanceAdminAuthority(): grant offers the live buttons, refuse renders disable-and-explain, unknown offers nothing and says it is still checking WITH an exit. Evidence: all three rendered frames.

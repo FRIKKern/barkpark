@@ -1,0 +1,1 @@
+A test inside a REQUIRED context reads the Go reader's rendered bytes

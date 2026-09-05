@@ -1,0 +1,1 @@
+Gate green: cd api && elixir -e 'ExUnit.start(autorun: false); Code.require_file(hd(System.argv())); ExUnit.run()' test/barkpark_web/studio/editor_panel_containment_test.exs — baseline after spd-b10f is 11 tests / 0 failures

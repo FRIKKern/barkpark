@@ -27,7 +27,7 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
   reds THE CLOSE (`expected owner_workspace_id=…, got nil`) and CROSS-TENANT
   (leak) — the suite fails for the right reason, not a vacuous green.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, StudioChat, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
       minted = mint_token!(conn, raw, "install")
 
       resp =
-        build_conn()
+        scoped_conn()
         |> authed(minted)
         |> post(
           "/w/chat-mint-a/p/default/v1/chat/tokens",
@@ -205,7 +205,7 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
       minted = mint_token!(conn, raw, "install")
 
       resp =
-        build_conn()
+        scoped_conn()
         |> authed(minted)
         |> post("/v1/chat/sessions", Jason.encode!(%{mode: "plan"}))
 
@@ -238,14 +238,14 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
 
       assert sess_b.owner_workspace_id == ws_b.id
 
-      resp = build_conn() |> authed(tok_a) |> get("/v1/chat/sessions/#{sess_b.id}")
+      resp = scoped_conn() |> authed(tok_a) |> get("/v1/chat/sessions/#{sess_b.id}")
 
       assert resp.status == 404,
              "ws_A's chat token READ ws_B's session (status #{resp.status}) — CROSS-TENANT LEAK"
 
       # And it is absent from the list read too — a 404 on the id route with a
       # leaky index would still expose the title in the sidebar.
-      list = build_conn() |> authed(tok_a) |> get("/v1/chat/sessions")
+      list = scoped_conn() |> authed(tok_a) |> get("/v1/chat/sessions")
       ids = Jason.decode!(list.resp_body)["sessions"] |> Enum.map(& &1["id"])
 
       refute sess_b.id in ids, "ws_A's chat token LISTED ws_B's session — CROSS-TENANT LEAK"

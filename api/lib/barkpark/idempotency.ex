@@ -36,6 +36,8 @@ defmodule Barkpark.Idempotency do
 
   @default_ttl_seconds 86_400
   @default_pending_ttl_seconds 60
+  # Upper bound on rows one `sweep_batch/1` statement removes.
+  @default_sweep_batch_limit 5_000
 
   defmodule Key do
     use Ecto.Schema
@@ -218,6 +220,37 @@ defmodule Barkpark.Idempotency do
     n
   end
 
+  @doc """
+  ONE BOUNDED PASS of `sweep/1` — deletes at most `sweep_batch_limit` expired
+  rows, OLDEST first, and returns how many it removed.
+
+  `sweep/1` is a single unbounded DELETE. That is fine for a table that is
+  swept regularly; it is not fine for the first pass over a table that has
+  never been swept at all, which is exactly the state this store was in
+  (`Barkpark.Idempotency.Sweeper` explains why). The subquery picks the oldest
+  `limit` expired keys by primary key and the outer DELETE removes just those,
+  so one statement is bounded no matter how deep the backlog is. Returning 0
+  means "nothing left past the TTL" and is the loop's terminator.
+  """
+  @spec sweep_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_batch(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -ttl_seconds(), :second)
+
+    victims =
+      from(k in Key,
+        where: k.inserted_at < ^cutoff,
+        order_by: [asc: k.inserted_at],
+        limit: ^sweep_batch_limit(),
+        select: k.key_hash
+      )
+
+    {n, _} =
+      from(k in Key, where: k.key_hash in subquery(victims))
+      |> Repo.delete_all()
+
+    n
+  end
+
   defp stale?(nil, _now), do: true
 
   defp stale?(%DateTime{} = ts, now) do
@@ -232,6 +265,11 @@ defmodule Barkpark.Idempotency do
   defp pending_ttl_seconds do
     Application.get_env(:barkpark, :idempotency, [])
     |> Keyword.get(:pending_ttl_seconds, @default_pending_ttl_seconds)
+  end
+
+  defp sweep_batch_limit do
+    Application.get_env(:barkpark, :idempotency, [])
+    |> Keyword.get(:sweep_batch_limit, @default_sweep_batch_limit)
   end
 
   defp headers_to_map(list) when is_list(list), do: Map.new(list)

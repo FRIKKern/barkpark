@@ -1,0 +1,1 @@
+GATE: cd api && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark/plugins/manifest_test.exs test/barkpark/plugins/cli_commands_manifest_test.exs is green, output pasted

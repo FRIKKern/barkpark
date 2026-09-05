@@ -1,0 +1,1 @@
+THE FLEET READS BACK: after that box refreshes, its `/v1/barkparks` pressure block carries a non-null `cpu_cores` where it was null before. Paste the BEFORE and AFTER blocks with their `reported_at` timestamps.

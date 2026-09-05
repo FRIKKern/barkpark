@@ -1,0 +1,1 @@
+The census is gated in CI without contending with #9920's console-harness.yml anchor: either through __app.test.mjs's existing spawnSync seam (mid-file, never the tail) or at a distinct named workflow position, stated in the PR body.

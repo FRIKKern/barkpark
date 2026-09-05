@@ -1,0 +1,1 @@
+A 2-space-indented heredoc body inside the scanned job no longer truncates the scan: mutation run, fail-before and pass-after.

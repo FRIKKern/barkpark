@@ -319,7 +319,7 @@ defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
   # ── helpers ─────────────────────────────────────────────────────────────
 
   defp import_body(%{raw_admin: raw_admin}, body, query) do
-    build_conn()
+    scoped_conn()
     |> authed(raw_admin)
     |> put_req_header("content-type", "application/x-tar")
     |> post("/api/workspaces/any-slug/import" <> query, body)

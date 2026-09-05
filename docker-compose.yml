@@ -61,6 +61,12 @@ services:
       # NEVER ${BARKPARK_PLUGINS:-} — the empty string is the plugin KILL
       # SWITCH server-side, so an unset var must stay unset.
       - BARKPARK_PLUGINS
+      # Platform operators, DB statement wall, indx state (census 2026-09-03:
+      # all four read in api/config/runtime.exs, none had a passthrough line)
+      - BARKPARK_DB_STATEMENT_TIMEOUT
+      - BARKPARK_INDX_STATE_DIR
+      - BARKPARK_OPERATOR_EMAILS
+      - BARKPARK_OPERATOR_TOKEN_IDS
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST
@@ -186,6 +192,13 @@ services:
       - BARKPARK_RELEASE_CAPTURE_TOKEN
       # Claude chat / console
       - ANTHROPIC_API_KEY
+      # gh-9531 residual (task-eeabfd9bf3ed8371): the Anthropic-compatible
+      # Messages endpoint (judge + Studio chat titles) and the ONIX
+      # RecordReference host namespace. Both passthrough-only and optional —
+      # unset keeps api.anthropic.com / barkpark.cloud, and a MALFORMED value
+      # refuses the node at boot rather than silently using ours.
+      - ANTHROPIC_API_URL
+      - ONIX_DATASET_HOST
       - BARKPARK_CLAUDE_CHAT
       - BARKPARK_TMUX_CONSOLE
     volumes:

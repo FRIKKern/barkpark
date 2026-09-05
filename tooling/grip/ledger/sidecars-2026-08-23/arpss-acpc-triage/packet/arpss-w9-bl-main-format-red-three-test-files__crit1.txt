@@ -1,0 +1,1 @@
+The diff is formatting-only — no test assertion, name or behaviour changes; the evidence names the files and the line counts touched

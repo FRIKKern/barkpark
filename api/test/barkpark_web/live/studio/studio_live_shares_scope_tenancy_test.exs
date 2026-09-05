@@ -8,17 +8,47 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
   against the mounted one. `Sharing.parse_scope/1` accepts any slug, so an
   admin of workspace A could declare a public read share over workspace B.
 
-  ## Why the SESSION arm is the whole test
+  ## RETRACTED — "Why the SESSION arm is the whole test" (task-9e9b49d5787a90be)
 
-  The escalation exists ONLY for an account principal. `Caps.admin?/1`'s token
-  arm requires `token_admin?/1` — the same `admin` permission that
-  `/v1/shares`'s `:require_admin` pipeline requires — so a token principal
-  already holds instance-wide declare authority by design, and the LiveView
-  path is in fact STRICTER (it also demands a membership). An account admin of
-  one workspace holds no such authority: `POST /v1/shares` refuses them.
+  This moduledoc used to argue, verbatim:
 
-  A token fixture here would certify nothing, exactly as
-  `studio_account_session_scope_test.exs` records for its own defect.
+  > The escalation exists ONLY for an account principal. … a token principal
+  > already holds instance-wide declare authority by design, and the LiveView
+  > path is in fact STRICTER (it also demands a membership). … A token fixture
+  > here would certify nothing.
+
+  THAT WAS FALSE WHEN IT WAS WRITTEN, in both halves.
+
+    * "instance-wide declare authority by design" — `cef6ee8465` (#12701,
+      2026-08-19) moved `POST`/`DELETE /v1/shares` underneath `:require_admin`:
+      `ShareController.create/2` and `delete/2` resolve the SCOPE's workspace
+      and demand `Tenancy.Auth.workspace_admin?/2`. A global-`admin` token
+      holding a plain `member` row in workspace B gets 403 there. So the token
+      arm's authority was NOT instance-wide at the HTTP edge, and the LiveView
+      panel was WIDER than its twin, not stricter.
+    * "it also demands a membership" — `2f2f7dffcb` (#12695, 2026-08-19) is
+      where `Caps.admin?/1`'s token arm acquired the membership requirement,
+      and it says so in `caps.ex` verbatim: "arpss-w10 / D22 OVERTURNS the
+      former 'the token arm is deliberately membership-FREE'". But that seat is
+      read on the MOUNTED workspace, never on the SUBMITTED scope's — which is
+      precisely the gap, not a closure of it.
+
+  `bb3b203f58` (#12929, 2026-08-21) added the clamp below and this file with
+  the exemption above — TWO DAYS AFTER both commits it contradicts. A "token
+  fixture would certify nothing" is the sentence that kept the third door open
+  for three days; the token-arm section at the bottom of this file is that
+  fixture, and it reproduces a real cross-tenant declare and revoke.
+
+  ## What this file now covers
+
+    * the ACCOUNT arm (`describe "an account admin of ONE workspace"`) — the
+      original `arpss-w10` defect;
+    * the LIST half (`task-c91e5e19da811fe5`);
+    * the TOKEN arm (`task-9e9b49d5787a90be`) — the foreign-scope arm held to
+      `ShareController`'s own predicate, including the GHOST SHARE (a scope
+      naming a workspace that does not exist), which is fail-closed per the
+      lead-security ruling of 2026-09-02 and denied with the SAME sentence a
+      foreign workspace gets, so this surface is not an existence oracle.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -26,15 +56,25 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Accounts, Sharing, Tenancy}
+  alias Barkpark.{Accounts, Auth, Sharing, Tenancy}
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
+  alias Barkpark.Sharing.StoredShare
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
+
+  # `Handlers.Shares.@not_workspace_admin_error` as it reaches the DOM, apostrophe
+  # already HTML-escaped. Pinned here so the oracle test proves the denial is
+  # PRESENT before it proves the two denials are equal.
+  @denial_sentence "You are not an admin of that scope&#39;s workspace. " <>
+                     "POST/DELETE /v1/shares refuses the same request."
 
   setup %{conn: conn} do
     ws_a = create_workspace!("arpss-shares-a-#{System.unique_integer([:positive])}")
     proj_a = create_project!(ws_a, "arpss-shares-pa-#{System.unique_integer([:positive])}")
     ws_b = create_workspace!("arpss-shares-b-#{System.unique_integer([:positive])}")
-    _proj_b = create_project!(ws_b, "arpss-shares-pb-#{System.unique_integer([:positive])}")
+    proj_b = create_project!(ws_b, "arpss-shares-pb-#{System.unique_integer([:positive])}")
 
     {default_ws, _default_proj} = ensure_default_scope!()
 
@@ -48,7 +88,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
       restore(:shares_env, prior_env)
     end)
 
-    {:ok, conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, default_ws: default_ws}
+    {:ok,
+     conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b, default_ws: default_ws}
   end
 
   defp restore(key, nil), do: Application.delete_env(:barkpark, key)
@@ -273,4 +314,432 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
              "instance declare authority was over-clamped out of its own inventory"
     end
   end
+
+  # ─── THE TOKEN ARM (task-9e9b49d5787a90be) ──────────────────────────────────
+  #
+  # THE THIRD DOOR. The describes above prove the ACCOUNT arm is confined and
+  # the LIST half is scoped. The WRITE half's FOREIGN arm was neither: when the
+  # submitted scope's first segment did not match the mounted workspace,
+  # `Shared.declarable_scope?/2` fell back to `instance_declare_authority?/1` —
+  # a bare `Barkpark.Auth.has_permission?(token, "admin")`, a GLOBAL bit with no
+  # membership lookup and no target-workspace resolution. Its HTTP twin resolves
+  # the scope to a workspace id and demands `Tenancy.Auth.workspace_admin?/2`.
+  # Same actor, same request: ALLOWED in the panel, 403 over HTTP.
+  #
+  # THE ACTOR SHAPE THE PREDICATE CHOICE TURNS ON. The token below is a genuine
+  # seat admin of ws-A (a real `admin` membership row, so `Caps.admin?/1` passes
+  # on its own seat and no denial here can be the panel's admin gate firing) and
+  # holds a REAL but plain `member` row in ws-B. A stranger to B would be denied
+  # under BOTH candidate predicates and would prove nothing.
+  #
+  # That shape is also why the predicate must be `workspace_admin?/2` and NEVER
+  # `Tenancy.Auth.authorize/3`: `authorize/3`'s api_token arm ORs the token's
+  # GLOBAL `permissions[]` with membership, so this actor PASSES
+  # `authorize(tok, B, :admin)` and FAILS `workspace_admin?(tok, B)`. Both are
+  # asserted in `token_preconditions!/3`, so swapping the handler's call for
+  # `authorize/3` turns the leak tests green on a leaking handler.
+
+  defp instance_admin_token!(conn, ws_a, ws_b, default_ws) do
+    raw = "shares-scope-tenancy-" <> Ecto.UUID.generate()
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "shares scope tenancy",
+        @dataset,
+        ~w(read write admin),
+        default_ws.id
+      )
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws_a.id, token.id, "admin", "api_token")
+    {:ok, _} = Tenancy.Auth.create_membership(ws_b.id, token.id, "member", "api_token")
+
+    token_preconditions!(token, ws_a, ws_b)
+    {token, Plug.Test.init_test_session(conn, %{"api_token" => raw})}
+  end
+
+  defp token_preconditions!(token, ws_a, ws_b) do
+    assert TenancyAuth.workspace_admin?(token, ws_a.id),
+           "the actor must be a genuine seat admin of the MOUNTED workspace, or a denial " <>
+             "below could come from Caps.admin?/1 and would prove nothing"
+
+    assert TenancyAuth.membership_role(token, ws_b.id) == "member"
+    assert TenancyAuth.authorize(token, ws_b.id, :admin) == :ok
+    refute TenancyAuth.workspace_admin?(token, ws_b.id)
+
+    # The global bit the OLD foreign arm rode. Asserting it is what makes the
+    # leak tests non-vacuous: the reverted handler WOULD have allowed this.
+    assert Auth.has_permission?(token, "admin")
+  end
+
+  # Mounts ws-A's Studio and OPENS the panel. Opening requires `Caps.admin?/1`,
+  # so a socket that reaches "Network shares" has cleared the panel's own admin
+  # gate.
+  defp token_panel(conn, ws_a, proj_a, ws_b, default_ws) do
+    {token, conn} = instance_admin_token!(conn, ws_a, ws_b, default_ws)
+    {:ok, view, _html} = mount_on(conn, ws_a, proj_a)
+
+    assert render_hook(view, "shares-open", %{}) =~ "Network shares"
+    {token, view}
+  end
+
+  defp stored_share_count, do: Repo.aggregate(StoredShare, :count)
+
+  describe "the TOKEN arm — the disclosure half" do
+    test "LEAK CLOSED: a global-admin token seated in ws-A cannot declare over ws-B", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+
+      refute Sharing.shared?(ws_b.slug, "default", @dataset, :docs)
+      before_count = stored_share_count()
+
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ws_b.slug}/default/#{@dataset}",
+        "surfaces" => ["docs", "media"]
+      })
+
+      # THE STORE IS THE PROOF, not the flash. A "denial" that still wrote the
+      # row would be the same cross-tenant disclosure in disguise.
+      refute Sharing.shared?(ws_b.slug, "default", @dataset, :docs),
+             "a global-admin token seated in #{ws_a.slug} declared a public share over #{ws_b.slug}"
+
+      refute Sharing.shared?(ws_b.slug, "default", @dataset, :media)
+      refute Sharing.shared?(ws_b.slug, "default", @dataset, :papers)
+      assert stored_share_count() == before_count
+
+      # ...and the panel says why, in the HTTP twin's own terms.
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+    end
+
+    test "a BARE ws-B slug is refused too (parse_scope defaults the missing segments)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+      before_count = stored_share_count()
+
+      render_hook(view, "shares-add", %{"scope" => ws_b.slug, "surfaces" => ["docs"]})
+
+      refute Sharing.shared?(ws_b.slug, "default", @dataset, :docs)
+      assert stored_share_count() == before_count
+    end
+
+    test "a foreign workspace that EXISTS with a project that does not is still refused", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+      before_count = stored_share_count()
+
+      # The clamp resolves the WORKSPACE segment only — matching
+      # `ShareController.delete/2`'s shape — so an unknown project under a real
+      # foreign workspace must not become an escape hatch.
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ws_b.slug}/no-such-project/#{@dataset}",
+        "surfaces" => ["docs"]
+      })
+
+      refute Sharing.shared?(ws_b.slug, "no-such-project", @dataset, :docs)
+      assert stored_share_count() == before_count
+    end
+  end
+
+  describe "the TOKEN arm — the availability half" do
+    setup %{ws_b: ws_b, proj_b: proj_b} do
+      # ws-B's OWN live share, plus the edit token that rides it. This is the
+      # asset `remove_share/3` destroys: it deletes the row AND hard-revokes
+      # every ApiToken bound to the scope (`Auth.revoke_share_tokens/3`).
+      # `create_share_token/5` REQUIRES an `:edit` share, so this fixture also
+      # states the ceiling from the other side: `shares_add/2` hardcodes
+      # `:read`, so the panel could never have forged this precondition itself.
+      # ws-B's REAL project: `Auth.create_share_token/5` resolves the workspace
+      # AND the project, so a ghost project slug would fail the fixture, not the
+      # gate under test.
+      scope_b = "#{ws_b.slug}/#{proj_b.slug}/#{@dataset}"
+      {:ok, _} = Sharing.add_share("#{scope_b}:docs,media:edit")
+      assert Sharing.access_for(ws_b.slug, proj_b.slug, @dataset) == :edit
+
+      {:ok, {raw_b, token_b}} =
+        Auth.create_share_token(ws_b.slug, proj_b.slug, @dataset, ["docs", "media"])
+
+      assert is_nil(Repo.get(ApiToken, token_b.id).revoked_at)
+
+      %{scope_b: scope_b, raw_b: raw_b, token_b: token_b}
+    end
+
+    test "LEAK CLOSED: ws-B's share stays live and its edit tokens stay unrevoked", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      proj_b: proj_b,
+      default_ws: default_ws,
+      scope_b: scope_b,
+      raw_b: raw_b,
+      token_b: token_b
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+
+      render_hook(view, "shares-remove", %{"scope" => scope_b})
+
+      # Disclosure side: the share was NOT deleted.
+      assert Sharing.shared?(ws_b.slug, proj_b.slug, @dataset, :docs),
+             "a global-admin token seated in #{ws_a.slug} revoked #{ws_b.slug}'s share"
+
+      assert Sharing.shared?(ws_b.slug, proj_b.slug, @dataset, :media)
+      assert Sharing.access_for(ws_b.slug, proj_b.slug, @dataset) == :edit
+
+      # Availability side, RELOADED FROM THE DB: B's live credential did not go
+      # dark. The status/flash is not trusted.
+      assert is_nil(Repo.get(ApiToken, token_b.id).revoked_at)
+      assert {:ok, _} = Auth.verify_token(raw_b)
+
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+    end
+
+    test "a BARE ws-B slug cannot reach B's tokens either", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws,
+      token_b: token_b
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+
+      render_hook(view, "shares-remove", %{"scope" => ws_b.slug})
+
+      assert is_nil(Repo.get(ApiToken, token_b.id).revoked_at)
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+    end
+  end
+
+  describe "the TOKEN arm — the legit path is not collateral damage" do
+    # HONEST LIMIT: every assertion in this describe is PERMISSIVE, so it can
+    # NEVER go red under a full reversion of the confinement — removing a clamp
+    # cannot turn an allowed action into a denied one. Its mutation receipt is
+    # against OVER-confinement (drop the mounted fast path AND raise the role
+    # floor from ~w(owner admin) to `owner`), quoted in the commit body.
+    test "a mounted-workspace admin still declares AND removes its OWN share, on the store", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      default_ws: default_ws
+    } do
+      {_token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+      scope_a = "#{ws_a.slug}/#{proj_a.slug}/#{@dataset}"
+
+      refute Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :docs)
+
+      render_hook(view, "shares-add", %{"scope" => scope_a, "surfaces" => ["docs", "papers"]})
+
+      assert Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :docs)
+      assert Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :papers)
+      assert Sharing.access_for(ws_a.slug, proj_a.slug, @dataset) == :read
+      refute render(view) =~ "not an admin of that scope&#39;s workspace"
+
+      render_hook(view, "shares-remove", %{"scope" => scope_a})
+
+      refute Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :docs)
+      refute Sharing.shared?(ws_a.slug, proj_a.slug, @dataset, :papers)
+    end
+  end
+
+  # ─── TOTALITY: a denial, never a crash oracle ───────────────────────────────
+  #
+  # `Tenancy.Auth.workspace_admin?/2` raises `FunctionClauseError` on a nil id
+  # and `Ecto.Query.CastError` on a non-UUID binary (including ""). The handler
+  # never hands it a raw scope segment: `target_workspace_admits?/2` RESOLVES
+  # the slug to a `%Tenancy.Workspace{}` first and only the DB row's own `id`
+  # reaches the predicate, so the crash oracle is structurally unreachable —
+  # the same shape the HTTP controllers buy with `Repo.uuid_or_nil/1`. These
+  # tests prove it from the outside: the LiveView must stay alive and keep
+  # serving the panel in every shape below.
+  describe "the TOKEN arm — totality" do
+    setup %{conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, default_ws: default_ws} do
+      {token, view} = token_panel(conn, ws_a, proj_a, ws_b, default_ws)
+      %{token: token, view: view}
+    end
+
+    test "an empty or whitespace-only scope is a refusal, never a crash", %{view: view} do
+      before_count = stored_share_count()
+
+      for blank <- ["", "   "] do
+        render_hook(view, "shares-add", %{"scope" => blank, "surfaces" => ["docs"]})
+
+        html = render(view)
+        assert html =~ "Scope is required."
+        assert html =~ "Network shares"
+      end
+
+      assert stored_share_count() == before_count
+    end
+
+    test "a malformed scope is a refusal, never a crash", %{view: view} do
+      before_count = stored_share_count()
+
+      # GRAMMAR failures — a wildcard, an empty segment, too many segments.
+      # `Sharing.add_share/1` owns this sentence, exactly as `create/2` answers
+      # 422 `:invalid_scope` rather than 403. Deliberately NOT folded into the
+      # authorization denial: a grammar refusal reveals nothing about which
+      # workspaces exist, so it is not an existence oracle.
+      for bad <- ["*/default/production", "//production", "a/b/c/d/e"] do
+        render_hook(view, "shares-add", %{"scope" => bad, "surfaces" => ["docs"]})
+
+        html = render(view)
+        assert html =~ "Network shares", "the panel died on scope #{inspect(bad)}"
+        assert html =~ "Invalid share"
+      end
+
+      assert stored_share_count() == before_count
+    end
+
+    # A COLON-INJECTED SCOPE IS NOT A GRAMMAR FAILURE, and the distinction is
+    # worth pinning. `Sharing.scope_triple/1` splits on "/" only, so
+    # "ws:docs:read" is a well-formed BARE SLUG naming a workspace called
+    # "ws:docs:read" — which does not exist. It is therefore refused by the
+    # fail-closed ghost rule (the authorization denial), NOT by `add_share/1`'s
+    # "Invalid share". It never reaches `parse/1`, where the extra colons would
+    # have made it a 4-segment entry. Either way it is a refusal with no store
+    # change; this test records WHICH refusal, so a future reordering of
+    # grammar-vs-authorize is visible rather than silent.
+    test "a colon-injected scope is refused as an unresolvable workspace", %{view: view} do
+      before_count = stored_share_count()
+
+      render_hook(view, "shares-add", %{"scope" => "ws:docs:read", "surfaces" => ["docs"]})
+
+      html = render(view)
+      assert html =~ "Network shares"
+      assert html =~ "not an admin of that scope&#39;s workspace"
+      assert stored_share_count() == before_count
+    end
+
+    test "shares-remove on an empty or malformed scope is a refusal, never a crash", %{
+      view: view
+    } do
+      for bad <- ["", "   ", "*/default/production", "//production"] do
+        render_hook(view, "shares-remove", %{"scope" => bad})
+
+        html = render(view)
+        assert html =~ "Network shares", "the panel died on scope #{inspect(bad)}"
+        assert html =~ "Could not parse that scope."
+      end
+    end
+
+    test "a scope naming a workspace that does NOT exist is refused, on both halves", %{
+      view: view
+    } do
+      ghost = "no-such-workspace-#{System.unique_integer([:positive])}"
+      ghost_scope = "#{ghost}/default/#{@dataset}"
+      before_count = stored_share_count()
+
+      render_hook(view, "shares-add", %{"scope" => ghost_scope, "surfaces" => ["docs"]})
+
+      # FAIL-CLOSED (lead-security ruling, 2026-09-02). A ghost share is an
+      # AUTHORISATION ATTACHED TO A NAME: whoever later creates that slug would
+      # inherit a public exposure they never made, because the registry already
+      # says the scope is shared. Pre-provisioning belongs to the operator env
+      # registry (`BARKPARK_SHARES` / `Sharing.shares_env/0`), not this panel.
+      #
+      # THE STORE IS THE PROOF, not the flash.
+      refute Sharing.shared?(ghost, "default", @dataset, :docs)
+      assert stored_share_count() == before_count
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+
+      # The REMOVE half is confined WITH the add half — the ruling names both.
+      render_hook(view, "shares-remove", %{"scope" => ghost_scope})
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+      assert render(view) =~ "Network shares"
+    end
+
+    # THE POINT OF THE RULING, ASSERTED DIRECTLY. If a nonexistent slug were
+    # refused with a DIFFERENT sentence than a foreign one, this surface would
+    # be an existence oracle: an admin of A could walk slugs and learn which
+    # workspaces are taken without administering any of them. The two denials
+    # must be indistinguishable.
+    #
+    # THE COMPARISON IS THE PANEL, NOT THE PAGE (task-f0ad13818246990c). This
+    # test used to read `assert render(view) == ghost_render` — a whole-page
+    # byte compare of two renders taken at different moments. `render(view)`
+    # carries the Studio footer's nested `BarkparkWeb.ServerVitalsLive`, a
+    # sticky child LiveView showing live HOST vitals fed by the singleton
+    # `Barkpark.HostVitals.Sampler` (CPU %, RAM used/total, disk %, load1,
+    # uptime). Those bytes move with the MACHINE and its sampler tick, not with
+    # this socket or this sandbox, so the byte compare was a coin flip: main run
+    # 33797695867 lost it, and `gh run rerun --failed` on the same sha won.
+    # A probe that re-rendered the SAME unchanged state 40x over ~4s captured
+    # the moving bytes with `String.myers_difference/2`:
+    #
+    #     [del: "—", ins: "41%",            # · CPU
+    #      del: "—", ins: "13.5/16.0 GB",   # · RAM
+    #      del: "—", ins: "31%",            # · disk
+    #      del: "—", ins: "16.47"]          # · load
+    #
+    # Nothing inside the shares panel moved. So the invariant is asserted over
+    # `div.shares-modal` — the whole panel, still byte for byte, which keeps
+    # every part of the old assertion that could ever have been an oracle (the
+    # sentence, the scope field, the active-share list) and drops only the
+    # unrelated chrome. The two `refute`s below pin the point of the ruling
+    # directly, so the test still fails loudly if the panel selector ever stops
+    # matching and the comparison would otherwise go vacuous.
+    test "NO EXISTENCE ORACLE: nonexistent and foreign-but-real deny identically", %{
+      view: view,
+      ws_b: ws_b
+    } do
+      ghost = "no-such-workspace-#{System.unique_integer([:positive])}"
+
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ghost}/default/#{@dataset}",
+        "surfaces" => ["docs"]
+      })
+
+      ghost_panel = shares_panel(view)
+      ghost_denial = denial_line(view)
+
+      # NON-VACUITY. `element/2 |> render/1` raises when the selector matches
+      # nothing, so a markup rename reds this test instead of silently comparing
+      # two empty strings; the sentence itself is pinned as well.
+      assert ghost_panel =~ "Network shares"
+      assert ghost_denial =~ @denial_sentence
+
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ws_b.slug}/default/#{@dataset}",
+        "surfaces" => ["docs"]
+      })
+
+      foreign_panel = shares_panel(view)
+
+      assert foreign_panel == ghost_panel,
+             "the panel distinguishes a nonexistent workspace from a foreign one — " <>
+               "that difference is an existence oracle"
+
+      # The oracle this test guards, stated as itself: neither denial may name
+      # the slug it was handed.
+      refute ghost_denial =~ ghost
+      refute denial_line(view) =~ ws_b.slug
+    end
+  end
+
+  # ── denial extraction (task-f0ad13818246990c) ─────────────────────────────
+  #
+  # `div.shares-modal` is the panel `Modals.shares_modal/1` renders and
+  # `p.shares-error` is the single denial line inside it. `element/2 |> render/1`
+  # renders ONLY that node — no Studio shell, so no host-vitals bytes — and
+  # raises `ArgumentError` when the selector matches nothing.
+
+  defp shares_panel(view), do: view |> element("div.shares-modal") |> render()
+
+  defp denial_line(view), do: view |> element("p.shares-error") |> render()
 end

@@ -1,0 +1,1 @@
+dr-bl-w6-update-state-current-is-an-unearned-green is NOT re-filed; the PR body names it as the defect this reader makes fixable.

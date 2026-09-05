@@ -1,0 +1,1 @@
+The converted assertion can also WIN: restoring the declaration takes it back to rc=0 with the walked count intact. Evidence: the run.

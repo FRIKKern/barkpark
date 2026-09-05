@@ -9,6 +9,8 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  alias Barkpark.QueryCounter
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
@@ -18,8 +20,6 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
   @admin_token "github-ops-admin-test-token"
 
   # Ecto's per-query telemetry event; `metadata.source` is the queried table.
-  @repo_query_event [:barkpark, :repo, :query]
-
   # The `oban_jobs` table is read exactly ONCE per `Health.snapshot/0` (its
   # `queue_snapshot` reads the `github_mirror` queue depth) and nothing else on
   # this admin-gated mount touches it — Oban runs `testing: :manual` in the test
@@ -240,30 +240,30 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
     end
   end
 
-  # Count Repo queries that touch the `oban_jobs` table within `fun` — the unique
-  # once-per-`Health.snapshot/0` signature (`queue_snapshot`). No pid filter: the
-  # connected mount runs in a spawned LiveView process, so the counter must see
-  # queries from ANY process during the block (safe — this module is async:
-  # false, so nothing else runs concurrently, and Oban is `testing: :manual`).
+  # Count Repo queries against `oban_jobs` within `fun` — the unique signature of
+  # `Health.snapshot/0`'s `queue_snapshot`.
+  #
+  # LINEAGE-SCOPED, via the shared `Barkpark.QueryCounter`. The connected mount
+  # runs in a spawned LiveView process, so a `self()` filter would drop the very
+  # leg being measured — but an unscoped handler is NODE-global and counts the
+  # application's own background processes too, which `async: false` does not
+  # fence (it fences sibling TEST processes, not the supervision tree). The
+  # counter therefore reports from any process and decides ownership afterwards:
+  # this test process, the LiveView pid named below, and their
+  # `$callers`/`$ancestors` lineage. See `Barkpark.QueryCounterTest`.
   defp count_health_queries(fun) do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-    handler_id = {__MODULE__, make_ref()}
+    QueryCounter.count_source(
+      fn ->
+        result = fun.()
 
-    :telemetry.attach(
-      handler_id,
-      @repo_query_event,
-      fn _event, _measurements, %{source: source}, _config ->
-        if source == "oban_jobs", do: Agent.update(counter, &(&1 + 1))
+        case result do
+          {:ok, %Phoenix.LiveViewTest.View{pid: pid}, _html} -> QueryCounter.own(pid)
+          _ -> :ok
+        end
+
+        result
       end,
-      nil
+      "oban_jobs"
     )
-
-    try do
-      result = fun.()
-      {result, Agent.get(counter, & &1)}
-    after
-      :telemetry.detach(handler_id)
-      Agent.stop(counter)
-    end
   end
 end

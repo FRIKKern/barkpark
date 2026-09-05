@@ -1,0 +1,1 @@
+A test or harness proves the chosen path can LOSE: with the reporting deliberately broken, the guard/log/counter reflects the loss rather than a silent 200.

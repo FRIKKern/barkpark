@@ -92,10 +92,9 @@ defmodule Barkpark.Content.Papers do
     had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
 
     schema =
-      case Content.get_schema(@paper_type, dataset, scope_opts) do
+      case Content.Schema.get_schema_for_redaction(@paper_type, dataset, scope_opts) do
         {:ok, value} -> value
-        value when is_struct(value, SchemaDefinition) -> value
-        _ -> nil
+        :error -> nil
       end
 
     envelope = Envelope.render(paper, schema, CallerContext.anonymous())
@@ -937,16 +936,13 @@ defmodule Barkpark.Content.Papers do
     end
   end
 
+  # The two-step scoped→global lookup lives in ONE place now:
+  # `Content.Schema.get_schema_for_redaction/3` (@canonical
+  # capability:schema-resolution-for-redaction).
   defp value_schema(type, dataset, opts) do
-    case Content.get_schema(type, dataset, opts) do
-      {:ok, schema} ->
-        schema
-
-      _ ->
-        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
-          {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> schema
-          _ -> nil
-        end
+    case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
+      {:ok, schema} -> schema
+      :error -> nil
     end
   end
 
@@ -1682,6 +1678,12 @@ defmodule Barkpark.Content.Papers do
   `Barkpark.Content.Papers.BlockOps.apply_document_block_op/5`.
   """
   defdelegate apply_document_block_op(doc_id, type, op, dataset, opts \\ []), to: BlockOps
+
+  @doc "Field-scoped block ops — `Barkpark.Content.Papers.BlockOps.apply_field_block_ops/6`."
+  defdelegate apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []), to: BlockOps
+
+  @doc "The block array behind a field value — `Barkpark.Content.Papers.BlockOps.field_blocks/1`."
+  defdelegate field_blocks(value), to: BlockOps
 
   @doc """
   The AI-proposes loop (lvw-t4): apply INSERT-ONLY block ops to the paper's
