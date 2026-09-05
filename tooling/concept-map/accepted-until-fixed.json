@@ -14,13 +14,6 @@
       "row": "task-5641006da86bfa74",
       "intent": "kernel concept portable_doc reaches feature sheets. Accepted while the row untangles the PortableDoc <-> Sheets direction; the gate stays blocking meanwhile.",
       "since": "2026-09-05"
-    },
-    {
-      "identity": "sharing>plugin",
-      "dimension": "sideways",
-      "row": "task-2a47502792773c6c",
-      "intent": "feature concept sharing reaches feature concept plugin sideways (a new edge vs the baseline, first seen on the 2026-09-05 PR runs). Accepted while the security lane names the reference and either inverts it or records the design intent here; the gate stays blocking meanwhile.",
-      "since": "2026-09-05"
     }
   ]
 }
