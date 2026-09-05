@@ -786,7 +786,8 @@ defmodule BarkparkWeb.MediaController do
          # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
       json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
     end
   end

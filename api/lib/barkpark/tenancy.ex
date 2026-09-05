@@ -1745,7 +1745,9 @@ defmodule Barkpark.Tenancy do
     |> where([m], m.workspace_id == ^ws_id)
     |> Repo.all()
     |> Enum.reduce_while(:ok, fn %MediaFile{} = file, :ok ->
-      case Media.delete_file(file.id, workspace_id: ws_id) do
+      # CASCADE: the workspace that owns both the blob and every document that
+      # could reference it is being torn down. See `Media.delete_file/2`.
+      case Media.delete_file(file.id, workspace_id: ws_id, where_used: :cascade) do
         {:ok, _} -> {:cont, :ok}
         {:error, :not_found} -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}

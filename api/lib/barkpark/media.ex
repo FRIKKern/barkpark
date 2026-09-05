@@ -586,6 +586,36 @@ defmodule Barkpark.Media do
   @doc """
   Delete a media file from disk and DB.
 
+  ## `:where_used` is REQUIRED — there is no default, in either direction
+
+  Every call site must state its where-used policy as `where_used: :guard` or
+  `where_used: :cascade`. Omitting it raises `ArgumentError` at the call, so a
+  NEW caller cannot inherit a policy nobody chose for it.
+
+  The reason the option exists at all: papers embed self-hosted media as RAW
+  `/media/files/...` URL STRINGS inside their block JSON, invisible to every
+  reference graph (see `Barkpark.Media.WhereUsed`). This function removes the
+  row, the blob, the renditions and the CDN copy IRREVERSIBLY and answers a
+  clean `{:ok, deleted}`, so an unconsulted delete blanks a live page behind a
+  200 receipt. PR #15557 closed that hole at the TWO HTTP doors — and only
+  there. The next engineer to add a media-delete door (a Studio handler, a
+  bulk-cleanup mix task, a plugin) reaches for THIS function, which is the
+  obvious API, and re-opens the same door.
+
+    * `:guard` — the CALL SITE consults `Media.WhereUsed` before calling and
+      refuses (or takes an explicit operator override) when the blob is
+      referenced. Both HTTP doors are `:guard`.
+    * `:cascade` — the referring content is being torn down in the same
+      operation, so a reference is not a reason to stop. `Tenancy` workspace
+      teardown and `Plugins.Tickets.Attachments` are `:cascade`.
+
+  This option is a DECLARATION, not a second guard: `delete_file/2` behaves
+  identically for both values and deliberately runs no scan of its own, because
+  the cascade callers must keep deleting unconditionally and the doors need the
+  referrer census to build their own 409 envelope. What it buys is that the
+  decision is UNAVOIDABLE and greppable — `git grep "where_used:" api` lists
+  every media-delete policy in the tree.
+
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); the
   about-to-delete read is scoped through `get_file/2` so a delete in workspace B
   returns `{:error, :not_found}` for a blob owned by workspace A (barkpark-af50).
@@ -656,7 +686,9 @@ defmodule Barkpark.Media do
   connection without telling us, and even THAT may not escape as an unmatched
   tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
-  def delete_file(id, opts \\ []) do
+  def delete_file(id, opts) when is_list(opts) do
+    _policy = where_used_policy!(opts)
+
     case get_file(id, opts) do
       {:ok, file} ->
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
@@ -712,6 +744,32 @@ defmodule Barkpark.Media do
 
       error ->
         error
+    end
+  end
+
+  # The forced decision. `Keyword.fetch/2` (not `get/3`) is the whole point: a
+  # missing key is a RAISE at the call, not a silent `:cascade`. An unknown value
+  # raises too — `where_used: true` or `where_used: "guard"` from a hurried new
+  # caller must not read as "guarded".
+  defp where_used_policy!(opts) do
+    case Keyword.fetch(opts, :where_used) do
+      {:ok, policy} when policy in [:guard, :cascade] ->
+        policy
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "Media.delete_file/2 got where_used: #{inspect(other)} — it must be " <>
+                ":guard (this call site consults Barkpark.Media.WhereUsed first) or " <>
+                ":cascade (the referring content is being torn down too)."
+
+      :error ->
+        raise ArgumentError,
+              "Media.delete_file/2 requires a :where_used policy and has NO default. " <>
+                "Pass where_used: :guard if this call site consults " <>
+                "Barkpark.Media.WhereUsed before deleting, or where_used: :cascade if " <>
+                "the referring content is being torn down in the same operation. " <>
+                "Deleting a blob a published document references blanks a live page " <>
+                "behind a 200 receipt, irreversibly."
     end
   end
 

@@ -540,7 +540,8 @@ defmodule BarkparkWeb.V1.MediaController do
          # edges only), so this door used to answer 200 while blanking a live
          # page. Consult usage BEFORE the irreversible delete.
          :ok <- refuse_if_referenced(conn, file, params),
-         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+         {:ok, deleted} <-
+           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
       # This used to discard it and echo the `:id` path param. NOTE the trap the

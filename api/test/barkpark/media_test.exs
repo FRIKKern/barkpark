@@ -479,7 +479,7 @@ defmodule Barkpark.MediaTest do
 
   describe "delete_file/2" do
     test "returns {:error, :not_found} for an unknown id" do
-      assert {:error, :not_found} = Media.delete_file(Ecto.UUID.generate())
+      assert {:error, :not_found} = Media.delete_file(Ecto.UUID.generate(), where_used: :cascade)
     end
 
     test "deletes the DB row and returns {:ok, file}" do
@@ -490,7 +490,7 @@ defmodule Barkpark.MediaTest do
       File.mkdir_p!(Path.dirname(full))
       File.write!(full, "")
 
-      assert {:ok, deleted} = Media.delete_file(file.id)
+      assert {:ok, deleted} = Media.delete_file(file.id, where_used: :cascade)
       assert deleted.id == file.id
 
       # Verify the row is gone
@@ -504,7 +504,7 @@ defmodule Barkpark.MediaTest do
 
       file_a = insert_file!(%{workspace_id: ws_a.id, project_id: proj_a.id})
 
-      assert {:error, :not_found} = Media.delete_file(file_a.id, workspace_id: ws_b.id)
+      assert {:error, :not_found} = Media.delete_file(file_a.id, workspace_id: ws_b.id, where_used: :cascade)
 
       # The file must still exist — it was not deleted
       assert {:ok, _} = Media.get_file(file_a.id, workspace_id: ws_a.id)
@@ -523,7 +523,7 @@ defmodule Barkpark.MediaTest do
       File.mkdir_p!(rendition_dir)
       File.write!(Path.join(rendition_dir, "thumb.jpg"), "")
 
-      assert {:ok, deleted} = Media.delete_file(file.id)
+      assert {:ok, deleted} = Media.delete_file(file.id, where_used: :cascade)
       assert deleted.id == file.id
 
       assert {:error, :not_found} = Media.get_file(file.id)
@@ -543,7 +543,7 @@ defmodule Barkpark.MediaTest do
       # row must not touch the blob nor dispatch media.deleted.
       {1, _} = Repo.delete_all(from(m in MediaFile, where: m.id == ^file.id))
 
-      assert {:error, :not_found} = Media.delete_file(file.id)
+      assert {:error, :not_found} = Media.delete_file(file.id, where_used: :cascade)
       assert File.exists?(full)
       assert File.read!(full) == "keep-me"
     end
