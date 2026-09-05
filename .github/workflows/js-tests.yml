@@ -103,7 +103,6 @@ jobs:
             echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (push)"; exit 0
           fi
           base="origin/${{ github.base_ref }}"
-          git fetch -q origin "${{ github.base_ref }}" --depth=1 2>/dev/null || true
           changed=$(git -C .. diff --name-only "$base"...HEAD)
           printf '%s\n' "$changed" | sed 's/^/  changed: /'
           if printf '%s\n' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
