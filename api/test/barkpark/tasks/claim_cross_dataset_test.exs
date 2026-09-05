@@ -52,13 +52,24 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
 
   # The shape the uniqueness index permits and the resolver did not survive:
   # the SAME doc_id, type "task", in two datasets.
-  # `Content.create_document/4` lands a DRAFT (`drafts.<id>`), so each copy is
-  # published afterwards — the collision this row is about is between two
-  # PUBLISHED rows carrying one slug in two datasets, which is what the
-  # published-first arm of the order has to break.
+  # TWO DRAFTS, NOT TWO PUBLISHED ROWS, and that is deliberate.
+  # `Content.create_document/4` lands a DRAFT (`drafts.<id>`), and publishing
+  # from a test would have to satisfy the authoring wall's label spine — a 20+
+  # character description AND 1-12 weighted tags that must already exist as
+  # registered `type:tag` documents, which a test database does not carry.
+  #
+  # The collision does not need publishing to exist. `documents` is unique on
+  # (doc_id, type, dataset_id), so ONE `drafts.<id>` slug in TWO datasets is
+  # already two matching rows, and the targeted-claim resolver reaches them
+  # through its `drafts.` fallback. That is the raise this row is about.
+  #
+  # WHAT THIS FILE THEREFORE DOES NOT COVER: the published-first arm of the
+  # order. That arm is inherited verbatim from `fetch_task_exact/3`, where
+  # #15551 already covers it; here the tie falls through to `dataset` ASC,
+  # which is what the determinism and ordering tests below assert.
   defp mk_in_both!(scope, doc_id) do
     for dataset <- [@primary, @secondary] do
-      {:ok, _draft} =
+      {:ok, draft} =
         Content.create_document(
           "task",
           %{
@@ -76,8 +87,7 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
           scope
         )
 
-      {:ok, published} = Content.publish_document(doc_id, "task", dataset, scope)
-      published
+      draft
     end
   end
 
@@ -114,9 +124,9 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
       doc_id = uniq("cross-published")
       twins = mk_in_both!(scope, doc_id)
 
-      # The order is published-first, then dataset ascending. "aker-brygge"
-      # sorts before "production", so the expected winner is named by the RULE
-      # rather than by whichever row happened to be inserted first.
+      # Both twins are drafts, so the published-first arm ties and `dataset`
+      # ASC decides. "aker-brygge" sorts before "production", so the winner is
+      # named by the RULE rather than by whichever row was inserted first.
       expected = Enum.min_by(twins, & &1.dataset)
 
       # The exact match wins over the drafts. fallback, and among the exact
