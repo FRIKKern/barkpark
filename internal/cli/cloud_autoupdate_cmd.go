@@ -110,7 +110,7 @@ func applyAutoupdate(out *writer, verb, ref string, patch map[string]any) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to manage autoupdate", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to manage autoupdate, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	id, rerr := resolveOpenBarkparkID(cfg, ref)
@@ -297,7 +297,7 @@ func runRolloutAction(out *writer, g globals, args []string, verb string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to manage the fleet rollout", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to manage the fleet rollout, or set BARKPARK_CLOUD_TOKEN for a CI job", exitAuth)
 	}
 
 	client := cfg.CloudClient()

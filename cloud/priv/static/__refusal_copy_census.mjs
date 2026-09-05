@@ -894,6 +894,11 @@ const PIN = [
   { key: "FN|webhookMutationError|7f668201", verdict: "UNREVIEWED", copy: "Couldn't reach the instance — the change is unconfirmed." },
   { key: "FN|webhookMutationError|a052e1db", verdict: "UNREVIEWED", copy: "This instance needs an update to manage webhooks." },
   { key: "ARG|webhookMutationError|faultCopy|d0fc6b0a", verdict: "DELEGATED", copy: "Please check the details and try again." },
+  // cch-w31-bl — the sibling of the row above, and pinned the same way for the
+  // same reason. This sentence used to be webhookErrorHtml's BARE terminal
+  // fall-through; it is now the 4xx-only fallback ARGUMENT to faultCopy, so a
+  // 5xx and a status-0 never reach it and the site is DELEGATED, not AUTHORED.
+  { key: "ARG|webhookErrorHtml|faultCopy|ff43a844", verdict: "DELEGATED", copy: "Something went wrong reaching this instance." },
   { key: "ARG|loadTimeline|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },
   { key: "FN|loadInstanceVerify|b0f904bc", verdict: "UNREVIEWED", copy: "You don't have access to this instance's events." },
   { key: "FN|loadInstanceVerify|4ae00515", verdict: "UNREVIEWED", copy: "The verification history couldn't be loaded, and the answer..." },

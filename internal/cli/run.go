@@ -512,6 +512,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// changes `code`, and never touches stdout, so `-o json` stays one
 		// byte-identical document (publish_cites_guard.go).
 		emitPublishCiteAdvisory(out, g, ctx, m, publishCites)
+		// `doc mutate` / `doc patch` write the DRAFT lens while every canonical
+		// reader is published-first, so a bare `rev:` receipt reads the same for
+		// a landed ledger edit and for a write parked on a draft twin. This
+		// names which lens moved, derived from the envelope's own
+		// results[].document._draft/_publishedId/_type — zero extra requests —
+		// and folds in #15851's fork advisory codes. stderr in every output
+		// shape, so `-o json` stays byte-identical (mutate_perspective.go).
+		emitMutatePerspective(out, cmd, respBody)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
