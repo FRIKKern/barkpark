@@ -404,8 +404,14 @@ defmodule BarkparkWeb.TasksController do
     # was never read: the response was a 200 carrying the UNFILTERED page — a
     # false confirmation an operator can act on. A filter this route cannot
     # honour now 400s naming the key; one it can honour is applied below.
-    case Params.parse_index_filters(params) do
-      {:ok, filters} -> do_index(conn, params, filters)
+    # task-233cb8a1d033c738: the FLAT namespace is closed too. The container was
+    # fail-closed by #12780 while the top level stayed fail-OPEN, so
+    # `?parent_id=X` and `?bogus=1` both returned a 200 carrying the UNFILTERED
+    # page — a false confirmation, not a missing feature.
+    with :ok <- Params.reject_unknown_flat_params(params, :index),
+         {:ok, filters} <- Params.parse_index_filters(params) do
+      do_index(conn, params, filters)
+    else
       {:error, reason} -> invalid_filter(conn, reason)
     end
   end
@@ -456,7 +462,11 @@ defmodule BarkparkWeb.TasksController do
     # one does. The filter CLAUSES are applied independently (see the query
     # below) — a caller who passes both spellings with different values gets the
     # honest conjunction (zero rows), never a silently-dropped predicate.
-    parent = params["parent"] || filters["parent"] || filters["parent_id"]
+    # `parent_id` is the spelling content.parent_id teaches, so it is an ACCEPTED
+    # ALIAS rather than a refusal — refusing the name the schema itself uses
+    # would trade a wrong answer for a wrong lesson.
+    parent =
+      params["parent"] || params["parent_id"] || filters["parent"] || filters["parent_id"]
 
     # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
     # published twin exists in the same scope is suppressed, so a twinned task
@@ -483,7 +493,12 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_kind(params["kind"])
       |> Params.maybe_filter_lifecycle(params["lifecycle_status"])
       |> Params.maybe_filter_parent(params["phase_id"])
-      |> Params.maybe_filter_parent_id(params["parent"])
+      # The RESOLVED `parent` (bound above), not `params["parent"]` — otherwise
+      # the `parent_id` alias reaches the cursor axis and not the filter, and
+      # `?parent_id=X` returns the UNFILTERED page while looking like it worked.
+      # That is the original defect wearing a new hat, and a helper-level test
+      # would not have caught it: this is why the tests assert on RETURNED ROWS.
+      |> Params.maybe_filter_parent_id(parent)
       |> Params.maybe_filter_label(params["label"])
       # The bracket spelling composes as ADDITIONAL where-clauses on the same
       # `Barkpark.Tasks.Query` fragments (nil = no-op), so `?kind=a&filter[kind]=b`
