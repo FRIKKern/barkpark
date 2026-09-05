@@ -1555,7 +1555,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@schema_unserialized_floor` (24) were NOT among them — neither #14795 nor
   # #14886 adds a barkparks column, so this branch's schema deltas stand
   # unchanged on top of both.
-  @go_tag_pinned 323
+  # #16101 (bp cloud instance top renders pressure + space): internal/cloudclient
+  # gained the `pressure` block decoders (MetricsPressure / MetricsPressureSignal)
+  # — seven new json tag NAMES (323 -> 330) at one site each, and three names
+  # that were declared once and now twice (`pressure`, `state`, `unit`) plus
+  # `value` 4 -> 5, so the SITE register below moves by four rows as well.
+  # Measured by this file's own arms on the rebased tree (their printed
+  # right-hand column), never summed.
+  @go_tag_pinned 330
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1784,7 +1791,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "updated_at" => 5,
     "url" => 5,
     "usage" => 2,
-    "value" => 4,
+    "value" => 5,
     "volume" => 2,
     "window" => 2,
     "workspace" => 2
