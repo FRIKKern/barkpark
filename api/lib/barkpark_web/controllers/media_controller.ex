@@ -812,14 +812,19 @@ defmodule BarkparkWeb.MediaController do
     # this door used to answer 200 while blanking a live page. Consult usage
     # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
-         :ok <- refuse_if_referenced(conn, file, params),
+         {:ok, override} <- refuse_if_referenced(conn, file, params),
          # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
          # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
          {:ok, deleted} <-
            Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
-      json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
+      # `override` is nil unless the caller disarmed the where-used guard, so an
+      # ordinary delete's receipt is byte-for-byte what it always was and only a
+      # FORCED one grows `forced` + `referencedByCount`.
+      receipt = %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset}
+
+      json(conn, Map.merge(receipt, override || %{}))
     end
   end
 
@@ -827,13 +832,19 @@ defmodule BarkparkWeb.MediaController do
   # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
   # envelope reuses the public `conflict` code but carries a `details` census
   # that no shared builder would know how to assemble.
+  #
+  # Returns `{:ok, override}` — `override` is `nil` on the unforced path and the
+  # witness receipt fields on the forced one (task-ef676cfc88e71fae). The forced
+  # branch used to return a bare `:ok` and skip the census, so an override left
+  # no trace anywhere: no log line, and a 200 indistinguishable from an unforced
+  # delete of an unreferenced blob.
   defp refuse_if_referenced(conn, file, params) do
     if WhereUsed.forced?(params) do
-      :ok
+      {:ok, WhereUsed.witness_forced_delete(conn, file)}
     else
       case WhereUsed.referrers(file) do
         %{count: 0} ->
-          :ok
+          {:ok, nil}
 
         census ->
           env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
