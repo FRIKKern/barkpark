@@ -82,13 +82,19 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       `DeployLedger.census/3` over a window pinned at send time. No constant in
       this module is a measurement, and no measurement outlives the send that
       took it.
-    * **EVERY POST-DOOR RATE PRINTS ITS DEFERRED POPULATION BESIDE IT.** A
-      failure percentage over the attempted door is unreadable without the
-      deferral mass inside that door — a box refusing a slot is the platform
-      working as designed, and the two windows disagree by an order of magnitude
-      about how much of the door it is. So the line is always
-      `<door> attempted, of which <deferred> deferred … — <pct> failed`, and a
-      rate cannot be rendered on its own.
+    * **EVERY RATE PRINTS BOTH BASES AND ITS DEFERRED POPULATION.** A failure
+      percentage over the attempted door is unreadable without the deferral mass
+      inside that door — a box refusing a slot is the platform working as
+      designed, and the two windows disagree by an order of magnitude about how
+      much of the door it is. So the line is always
+      `<door> attempted, of which <deferred> deferred … — <pct> failed on
+      attempted (…); <pct> failed on settled (…)`, and neither basis can be
+      rendered on its own (dr-w31/D525). A deferral is a WAIT, not an outcome:
+      capacity pressure raises deferrals, which lowers the ATTEMPTED-basis
+      percentage with no change in reliability at all, so a digest quoting that
+      number alone can report a repair nobody performed. The SETTLED basis
+      (`failed + live`) cannot be moved that way, and it stands beside its twin
+      precisely so a reader can see the gap the deferrals opened.
     * **UNMEASURED RENDERS AS UNMEASURED.** A refused rate (sample below
       `DeployLedger.min_sample/0`, or a window straddling the deferred-status
       vocabulary boundary), a window with no rows at all, or a ledger this
@@ -128,8 +134,18 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   @typedoc """
   One deploy door, as the digest reports it: the attempted population, the
-  deferral mass INSIDE that population, and the post-door failure rate — the
-  three always travelling together so a percentage can never be printed alone.
+  deferral mass INSIDE that population, and the failure rate on BOTH bases —
+  all of them always travelling together so a percentage can never be printed
+  alone, and neither basis can be quoted without its twin.
+
+  TWO RATES AND TWO DENOMINATORS (dr-w31/D525). `rate` is the ATTEMPTED-basis
+  node (`census.failure_rate`, denominator `door`, deferrals included);
+  `terminal_rate` is the SETTLED-basis node (`census.terminal_failure_rate`,
+  denominator `settled = failed + live`). They share a numerator and differ by
+  exactly the deferral mass, which is why `deferred` rides beside them: a
+  deferral is a WAIT, not an outcome, so pressure that raises deferrals lowers
+  `rate` while `terminal_rate` does not move. A digest that printed only `rate`
+  would let a morning email report a fleet getting better because it waited more.
   """
   @type deploy_window :: %{
           label: String.t(),
@@ -138,7 +154,9 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
           door: non_neg_integer(),
           deferred: non_neg_integer(),
           failed: non_neg_integer(),
-          rate: map()
+          settled: non_neg_integer(),
+          rate: map(),
+          terminal_rate: map()
         }
 
   @typedoc """
@@ -313,7 +331,15 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       door: census.volume,
       deferred: Enum.reduce(census.deferred, 0, &(&1.count + &2)),
       failed: census.failed,
+      # THE SETTLED DENOMINATOR, taken from the census's OWN counts and never
+      # re-derived as `door - deferred`: that subtraction folds in-flight,
+      # cancelled and residual rows into the settled cohort, which is the same
+      # forbidden subtraction `census/3` refuses one level up (D257).
+      settled: census.failed + census.live,
       rate: census.failure_rate,
+      # THE SAME NUMERATOR OVER THE SETTLED DENOMINATOR (dr-w31/D525). Carried
+      # BESIDE `rate`, never instead of it: both bases print or neither does.
+      terminal_rate: census.terminal_failure_rate,
       # The wait was ALREADY in this census and was being thrown away here: the
       # deferral count answers "how often did a box say not now", and only the
       # wait answers "and how long did that cost the site". One key, no second
@@ -506,25 +532,50 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       "#{coverage_clause(w)}."
   end
 
-  # The rate node's OWN refusal, carried through verbatim. The counts survive a
-  # refusal (they are real rows); it is the ratio that is withheld, exactly as
-  # `DeployLedger.census/3` withholds it one level up.
-  defp rate_clause(%{rate: %{refused: true, reason: reason}} = w) do
-    "failure rate UNMEASURED (#{reason}); #{number(w.failed)} of #{number(w.door)} " <>
-      "attempted are settled failures"
+  # BOTH BASES OR NEITHER (dr-w31/D525), in ONE clause that cannot emit half of
+  # itself. The two arms below are rendered by the SAME function over the SAME
+  # numerator, so there is no code path on which a reader receives one
+  # percentage and no second denominator: `basis_clause/4` prints its own
+  # UNMEASURED sentence when its node refuses or is absent, and it is called
+  # unconditionally for both bases.
+  #
+  # WHY IT IS NOT COSMETIC (this is dr-w29's dilution, in the surface that
+  # reaches a human every morning). The attempted door INCLUDES deferrals; the
+  # settled door does not. Capacity pressure raises deferrals, which lowers the
+  # attempted-basis percentage with zero change in reliability — so the
+  # attempted number alone can report a repair that the settled number,
+  # standing right beside it, refuses to confirm.
+  defp rate_clause(w) do
+    attempted = basis_clause(Map.get(w, :rate), w.failed, w.door, "attempted")
+    settled = basis_clause(Map.get(w, :terminal_rate), w.failed, Map.get(w, :settled, 0), "settled")
+
+    attempted <> "; " <> settled
   end
 
-  defp rate_clause(%{rate: %{pct: pct}} = w) when is_number(pct) do
-    "#{pct}% failed post-door (#{number(w.failed)} of #{number(w.door)} attempted)"
-  end
-
-  # A rate node that is neither refused nor a number is a producer this renderer
-  # does not understand. It renders as UNMEASURED and never as a percentage —
-  # the one direction this block is never allowed to fail in.
-  defp rate_clause(w),
+  # ONE basis, rendered with its OWN denominator beside it — three endings and
+  # not one of them is a bare percentage.
+  #
+  #   * the node REFUSES: its reason verbatim, and the counts, which survive a
+  #     refusal because they are real rows (exactly as `DeployLedger.census/3`
+  #     withholds the ratio and keeps the counts one level up);
+  #   * the node is ABSENT or a shape this renderer does not understand: also
+  #     UNMEASURED, never a percentage. This is the arm a control plane older
+  #     than `terminal_failure_rate` lands on, and it must still print, because
+  #     an omitted settled line reads as "there is only one denominator";
+  #   * the node has a percentage: the percentage, its numerator and its
+  #     denominator, together.
+  defp basis_clause(%{refused: true, reason: reason}, failed, denom, label),
     do:
-      "failure rate UNMEASURED (the ledger returned no usable rate); " <>
-        "#{number(w.failed)} of #{number(w.door)} attempted are settled failures"
+      "failure rate on #{label} UNMEASURED (#{reason}); #{number(failed)} of " <>
+        "#{number(denom)} #{label} are settled failures"
+
+  defp basis_clause(%{pct: pct}, failed, denom, label) when is_number(pct),
+    do: "#{pct}% failed on #{label} (#{number(failed)} of #{number(denom)} #{label})"
+
+  defp basis_clause(_node, failed, denom, label),
+    do:
+      "failure rate on #{label} UNMEASURED (the ledger returned no usable rate); " <>
+        "#{number(failed)} of #{number(denom)} #{label} are settled failures"
 
   # THE COST OF A DEFERRAL, in the same shape as the rate: the number when the
   # census can name one, the census's OWN refusal reason when it cannot, and the

@@ -11319,15 +11319,40 @@
         "Nothing was attempted, so there is no rate to report and no class table to draw — " +
         "an empty window is not a healthy one, and a table of zeroes would say the opposite.</p>";
     }
-    var basis = data.failure_rate && data.failure_rate.basis
-      ? '<p class="op-foot">Denominator: ' + esc(String(data.failure_rate.basis)) + "</p>"
+    // ONE foot, BOTH denominators — each beside the rate it belongs to. The
+    // basis strings are the SERVER's own sentences (`@basis_attempted` /
+    // `@basis_terminal`), never re-worded here: a console-side paraphrase of a
+    // denominator is a second definition of the population.
+    var bases = [];
+    if (data.failure_rate && data.failure_rate.basis) {
+      bases.push("attempted: " + String(data.failure_rate.basis));
+    }
+    if (data.terminal_failure_rate && data.terminal_failure_rate.basis) {
+      bases.push("settled: " + String(data.terminal_failure_rate.basis));
+    }
+    var basis = bases.length
+      ? '<p class="op-foot">Denominator: ' + esc(bases.join(" · ")) + "</p>"
       : "";
     var table = data.classes.length
       ? '<div class="set-list">' + data.classes.map(operatorCensusClassRowHtml).join("") + "</div>"
       : '<p class="set-empty">No failure class was recorded in this window — the ledger names ' +
         "no failed row here. The counts below are still the whole population.</p>";
+    // BOTH BASES OR NEITHER (dr-w31). The same numerator over two denominators:
+    // `failure_rate` divides by ATTEMPTED rows, which include deferrals — a
+    // deferral is a WAIT, not an outcome, so adding capacity pressure raises
+    // deferrals and MECHANICALLY LOWERS this number with zero change in
+    // reliability. `terminal_failure_rate` divides by SETTLED rows (failed +
+    // live) and cannot be moved that way. Rendering one alone lets a reader
+    // quote a rate that a fleet can improve by waiting more.
+    //
+    // The settled line prints on EVERY path, including a control plane that
+    // sends no `terminal_failure_rate` at all: operatorCensusRateHtml's
+    // no-node arm says "not reported" in the settled line's own place. That is
+    // the "or NEITHER" half of the rule — an omitted line reads as "there is
+    // only one convention", which is the claim this row exists to remove.
     return win +
-      operatorCensusRateHtml(data.failure_rate, "Failure rate") +
+      operatorCensusRateHtml(data.failure_rate, "Failure rate (attempted)") +
+      operatorCensusRateHtml(data.terminal_failure_rate, "Failure rate (settled)") +
       basis + table + operatorCensusTotalsHtml(data);
   }
 

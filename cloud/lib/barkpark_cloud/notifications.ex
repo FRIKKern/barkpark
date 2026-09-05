@@ -470,7 +470,7 @@ defmodule BarkparkCloud.Notifications do
   Scope, as of dr-w28-s5: dr-w19-s5 fixed the ADDRESS and this rail now also
   carries the PAYLOAD. `DigestEmail.summary/2` takes a `:deploy` reading from
   `DigestEmail.deploy_health/1`, so the delivered body names deploy doors, their
-  deferral mass and their post-door failure rate — or the word UNMEASURED.
+  deferral mass and their failure rate on BOTH bases (attempted and settled) — or the word UNMEASURED.
   Before that, a digest that arrived said nothing whatsoever about deploy
   failures (`dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`).
 
