@@ -432,8 +432,8 @@ if [ "$MODE" = selftest ]; then
     printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-$selftest_freeze_rows | budget: 1tok -->" \
       > "$caps_root/$plant_path"
   done < <(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$')
-  selftest_docs_floor=$(grep -E '^GATED_DOCS_FLOOR=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
-  selftest_caps_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  selftest_docs_floor=$(grep -E '^GATED_DOCS_FLOOR=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
+  selftest_caps_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   selftest_discovery_min=$((selftest_docs_floor - selftest_caps_literal))
   plant_i="$selftest_freeze_rows"
   while [ "$plant_i" -lt "$selftest_discovery_min" ]; do
@@ -461,7 +461,7 @@ if [ "$MODE" = selftest ]; then
   # `grep -c` exits 1 on a count of ZERO, and under `set -e` that would kill the
   # harness before it could report — while zero is precisely what arm j1 plants.
   rows_in_table=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
-  expected_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  expected_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   [ "$rows_in_table" = "$expected_literal" ] \
     || fail_selftest "CAPS_ROWS_EXPECTED=$expected_literal but the table holds $rows_in_table row(s)"
 
@@ -553,7 +553,7 @@ if [ "$MODE" = selftest ]; then
   #     as j0 — if these drift, every assertion below is about a number nobody
   #     maintains.
   freeze_rows_in_table=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
-  freeze_expected_literal=$(grep -E '^FREEZE_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  freeze_expected_literal=$(grep -E '^FREEZE_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   [ "$freeze_rows_in_table" = "$freeze_expected_literal" ] \
     || fail_selftest "FREEZE_ROWS_EXPECTED=$freeze_expected_literal but the freeze table holds $freeze_rows_in_table row(s)"
 
@@ -615,7 +615,7 @@ if [ "$MODE" = selftest ]; then
        /^FREEZE$/          { intab = 0; print; next }
        intab == 1 && done_shrink == 0 && $0 ~ /^[A-Za-z].* [0-9]+$/ { $NF = 1; print; done_shrink = 1; next }
        { print }' "$SELF" > "$caps_probe"
-  sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$caps_probe" | grep -qE '^[A-Za-z][^ ]* 1$' \
+  sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$caps_probe" | grep -cE '^[A-Za-z][^ ]* 1$' >/dev/null \
     || fail_selftest "the freeze-shrinking step did not produce a 1-byte freeze row — this arm would have proven nothing"
   set +e
   caps_out="$(bash "$caps_probe" 2>&1)"
@@ -632,7 +632,7 @@ if [ "$MODE" = selftest ]; then
   #     the author to DELETE the row. Without this the freeze list only ever
   #     grows, and a paid debt keeps buying slack forever.
   cp "$SELF" "$caps_probe"
-  selftest_first_frozen=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | head -1 | cut -d' ' -f1)
+  selftest_first_frozen=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | sed -n 1p | cut -d' ' -f1)
   printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-paid | budget: 1000tok -->" \
     > "$caps_root/$selftest_first_frozen"
   set +e
@@ -688,7 +688,7 @@ if [ "$MODE" = selftest ]; then
   #     row appearing without review, so that is the direction pinned here.
   #     The added row DUPLICATES the first one, so lookup (first match wins) is
   #     unchanged and the row count is the ONLY thing that differs.
-  selftest_dup_freeze=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | head -1)
+  selftest_dup_freeze=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | sed -n 1p)
   awk -v add="$selftest_dup_freeze" '
        { print }
        /^done <<.FREEZE.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
@@ -738,8 +738,8 @@ if [ "$MODE" = selftest ]; then
   #     count is the only thing standing between one argued exception and a
   #     drawer of them. The added row DUPLICATES the existing one, so lookup is
   #     unchanged and the count is the ONLY difference.
-  ao_expected_literal=$(grep -E '^APPEND_ONLY_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
-  ao_dup_row=$(sed -n "/^done <<.APPEND_ONLY.$/,/^APPEND_ONLY$/p" "$SELF" | grep -E '^[A-Za-z].*\.md$' | head -1)
+  ao_expected_literal=$(grep -E '^APPEND_ONLY_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
+  ao_dup_row=$(sed -n "/^done <<.APPEND_ONLY.$/,/^APPEND_ONLY$/p" "$SELF" | grep -E '^[A-Za-z].*\.md$' | sed -n 1p)
   awk -v add="$ao_dup_row" '
        { print }
        /^done <<.APPEND_ONLY.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
@@ -1024,7 +1024,7 @@ APPEND_ONLY
   while IFS= read -r dpath; do
     if [ ! -f "$dpath" ]; then continue; fi
     dhead=$(head -n 1 "$dpath")
-    printf '%s\n' "$dhead" | grep -Eq "$DISCOVERY_HEADER_RE" || continue
+    printf '%s\n' "$dhead" | grep -Ec "$DISCOVERY_HEADER_RE" >/dev/null || continue
     # cold is exempt — see the block comment above
     case "$dhead" in *"doc-tier: cold"*) continue ;; esac
     # precedence: an explicit rule wins
@@ -1050,7 +1050,7 @@ $dpath
     dtok=$(printf '%s\n' "$dhead" | sed -E 's/.*budget: ([0-9]+)tok.*/\1/')
     dcap=$((dtok * DOC_BUDGET_BYTES_PER_TOKEN))
     dsize=$(wc -c < "$dpath" | tr -d ' ')
-    dfrozen=$(printf '%s' "$FREEZE_TABLE" | awk -v p="$dpath" '$1 == p { print $2; exit }')
+    dfrozen=$(printf '%s' "$FREEZE_TABLE" | awk -v p="$dpath" '!hit && $1 == p { print $2; hit = 1 }')
 
     if [ -n "$dfrozen" ]; then
       if [ "$dsize" -le "$dcap" ]; then
