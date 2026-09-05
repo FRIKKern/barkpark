@@ -149,13 +149,69 @@ defmodule Barkpark.Content.Mutations do
 
         _ ->
           Broadcast.clear_deferred_broadcasts()
-          result
+          compensating_discard(result, mutations, dataset, opts)
       end
     rescue
       e ->
         Broadcast.clear_deferred_broadcasts()
         reraise(e, __STACKTRACE__)
     end
+  end
+
+  # ── The `duplicate_of` compensation, OUTSIDE the batch transaction ─────────
+  #
+  # `Lifecycle.publish_after_gate/5` discards the draft a `duplicate_of` (E4)
+  # refusal rejected — the wall's ONE terminal code, whose body names the
+  # incumbent published document that survives. That delete is correct and
+  # commits for a direct `Content.publish_document/4` caller, but under THIS
+  # door it runs inside the batch transaction and `Repo.rollback/1` above puts
+  # the draft straight back. A publish refused through `POST /v1/data/mutate`
+  # would therefore still strand a `drafts.<id>` that no published-first reader
+  # (`bp task ready`, the board, the epic roster) can see — the exact row the
+  # 2026-09-04 census counted 409 of.
+  #
+  # So the delete is re-run HERE, after the rollback has unwound, keyed on
+  # `payload.refused_draft_id` (stamped by Lifecycle, and dropped from the wire
+  # body by `Content.Errors.build/1`'s `Map.take`). Two properties make this
+  # safe rather than a second guess at the batch's intent:
+  #
+  #   * it fires ONLY on `{:duplicate_of, _}` — the other four wall refusals
+  #     (label_spine / unknown_tag / invalid_epic_paper_quality / the transient
+  #     dedup_unavailable) are author-fixable or retryable and their draft must
+  #     survive, so they never reach this clause.
+  #   * the id must be named by a `publish` op IN THIS BATCH, so a rollback
+  #     reason can never authorise a delete the caller did not ask for. A batch
+  #     that created the draft in the same transaction needs no compensation —
+  #     the rollback already removed it, and `discard_draft/4` then answers
+  #     `{:error, :not_found}`, which is discarded here.
+  #
+  # The refusal itself is returned UNCHANGED: the caller still gets the 409 and
+  # the incumbent id.
+  defp compensating_discard(
+         {:error, {:duplicate_of, %{refused_draft_id: draft_id}}} = result,
+         mutations,
+         dataset,
+         opts
+       )
+       when is_binary(draft_id) do
+    case publish_op_type(mutations, draft_id) do
+      nil -> result
+      type -> with _ <- Content.discard_draft(draft_id, type, dataset, opts), do: result
+    end
+  end
+
+  defp compensating_discard(result, _mutations, _dataset, _opts), do: result
+
+  defp publish_op_type(mutations, draft_id) do
+    bare = DraftId.published_id(draft_id)
+
+    Enum.find_value(mutations, fn
+      %{"publish" => %{"id" => id, "type" => type}} when is_binary(id) ->
+        if DraftId.published_id(id) == bare, do: type
+
+      _ ->
+        nil
+    end)
   end
 
   # Resolve the type's schema for the redacted echo, memoised across the batch.
