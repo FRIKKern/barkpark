@@ -3,8 +3,8 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Broadcast
-  alias Barkpark.Idempotency
   alias Barkpark.Repo
+  alias Barkpark.Repo.IdempotencyStore
   alias Barkpark.Tenancy
   alias Barkpark.TenancyFixtures
 
@@ -58,8 +58,8 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
     assert stored.content["rev"] == receipt.rev
     assert Enum.count(stored.content["blocks"], &(&1["id"] == "inserted")) == 1
 
-    assert [%Idempotency.Key{state: "completed", response_body: body}] =
-             Repo.all(from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%")))
+    assert [%IdempotencyStore.Key{state: "completed", response_body: body}] =
+             Repo.all(from(k in IdempotencyStore.Key, where: like(k.scope, "paper_ops:v1:%")))
 
     assert {:ok, %{"slug" => ^slug, "rev" => ^applied_rev}} = Jason.decode(body)
   end
@@ -126,7 +126,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
                "user:rollback",
                before_idempotency_complete: fn ->
                  Repo.delete_all(
-                   from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%"))
+                   from(k in IdempotencyStore.Key, where: like(k.scope, "paper_ops:v1:%"))
                  )
                end
              )
@@ -138,7 +138,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
     assert block_text(unchanged, "anchor") == "Seed"
 
     assert Repo.aggregate(
-             from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%")),
+             from(k in IdempotencyStore.Key, where: like(k.scope, "paper_ops:v1:%")),
              :count
            ) == 0
 
@@ -184,7 +184,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
     assert block_text(stored, "anchor") == "Seed"
 
     assert Repo.aggregate(
-             from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%")),
+             from(k in IdempotencyStore.Key, where: like(k.scope, "paper_ops:v1:%")),
              :count
            ) == 0
   end
@@ -222,7 +222,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
     assert block_text(stored, "anchor") == "Seed"
 
     assert Repo.aggregate(
-             from(k in Idempotency.Key, where: like(k.scope, "paper_ops:v1:%")),
+             from(k in IdempotencyStore.Key, where: like(k.scope, "paper_ops:v1:%")),
              :count
            ) == 0
   end
@@ -311,7 +311,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
           if Process.alive?(task.pid), do: Task.shutdown(task, :brutal_kill)
         end)
 
-        Repo.delete_all(from(k in Idempotency.Key, where: k.key_hash == ^key_hash))
+        Repo.delete_all(from(k in IdempotencyStore.Key, where: k.key_hash == ^key_hash))
         assert {:ok, _workspace} = Tenancy.delete_workspace(ws)
       end
     end)
@@ -395,7 +395,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
 
     old = DateTime.add(DateTime.utc_now(), -3_600, :second)
 
-    Repo.insert!(%Idempotency.Key{
+    Repo.insert!(%IdempotencyStore.Key{
       key_hash: String.duplicate("a", 64),
       scope: "paper_ops:v1:fingerprint",
       state: "pending",
@@ -404,7 +404,7 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
 
     assert {:ok, :in_progress} =
              Repo.transaction(fn ->
-               Idempotency.claim_exact(
+               IdempotencyStore.claim_exact(
                  String.duplicate("a", 64),
                  "paper_ops:v1:fingerprint"
                )

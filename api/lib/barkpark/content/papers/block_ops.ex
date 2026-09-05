@@ -27,11 +27,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
-  alias Barkpark.Idempotency
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
+  alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -819,7 +819,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
 
       Repo.transaction(fn ->
-        case Idempotency.claim_exact(key_hash, exact_scope) do
+        case IdempotencyStore.claim_exact(key_hash, exact_scope) do
           :claimed ->
             maybe_after_idempotency_claim(opts)
 
@@ -829,7 +829,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
                   {:ok, receipt, effects} ->
                     maybe_before_idempotency_complete(opts)
 
-                    case Idempotency.complete_exact(key_hash, exact_scope, receipt) do
+                    case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
                       :ok -> {:applied, receipt, effects}
                       {:error, reason} -> Repo.rollback(reason)
                     end
