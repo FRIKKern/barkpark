@@ -263,6 +263,37 @@ defmodule Barkpark.Media.Delivery.Search do
       |> limit(^fetch)
       |> select([m, _d], {m.id, m.inserted_at})
 
+    # KEYSET CURSOR — a ROW comparator, not the OR-decomposition
+    # (cch-w34-bl-media-search-cursor-or-decomposition; same defect class as
+    # cch-w34-s4 / charter D389 in cloud/).
+    #
+    # `inserted_at < ^at or (inserted_at == ^at and id < ^id)` selects EXACTLY
+    # the same rows as `(inserted_at, id) < (^at, ^id)`. The two differ only in
+    # whether the planner can SEEK — a property no assertion about ROWS can
+    # observe, which is why the guard for this line is a SQL-SHAPE test
+    # (test/barkpark/media/cursor_sql_shape_test.exs), not a behavioural one.
+    #
+    # MEASURED before the rewrite, 200k-row clone of this table with its exact
+    # seven indexes; EXPLAIN (ANALYZE, BUFFERS) in the PR body for
+    # cch-w34-bl-media-search-cursor-or-decomposition:
+    #
+    #   * `media_files` has NO index on `inserted_at` today. On that index set
+    #     BOTH forms are a Parallel Seq Scan with identical buffers (3742) and
+    #     identical `Rows Removed by Filter` — the comparator alone changes
+    #     nothing, and is not a regression either.
+    #   * Add `(dataset_id, inserted_at DESC, id DESC)` and the forms diverge
+    #     hard: the OR form keeps the stamp bound in `Filter` (100001 rows
+    #     removed, 718 buffers, 6.832 ms); the comparator becomes an
+    #     `Index Cond` — a real seek (4 buffers, 0.067 ms). 102x.
+    #
+    # So this shape is the free half that makes the index worth adding. The
+    # index itself is a `priv/repo/migrations/` change, filed separately.
+    #
+    # The stamp param stays UNCAST. `type(^at, :utc_datetime_usec)` would render
+    # `$N::timestamp`, and a cast on the left/right of the ROW is what drops the
+    # bound out of `Index Cond` back into `Filter`. (The timezone-slip motive
+    # from D389 does NOT apply here: `media_files.inserted_at` is
+    # `timestamp without time zone`, not `timestamptz`.)
     rows =
       if cursor do
         decode_cursor(cursor)
@@ -271,7 +302,7 @@ defmodule Barkpark.Media.Delivery.Search do
             ordered
             |> where(
               [m, _d],
-              m.inserted_at < ^cursor_at or (m.inserted_at == ^cursor_at and m.id < ^cursor_id)
+              fragment("(?,?) < (?,?)", m.inserted_at, m.id, ^cursor_at, type(^cursor_id, Ecto.UUID))
             )
             |> Repo.all()
 
