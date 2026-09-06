@@ -200,9 +200,10 @@ defmodule BarkparkWeb.PublishKeepsTaskClaimHttpTest do
     assert patch_result["document"]["_draft"] == false
     patched_rev = patch_result["document"]["_rev"]
 
-    assert {:error, :not_found} =
-             Content.get_document(DraftId.draft_id(id), "task", @dataset, scope),
-           "the patch must leave no draft twin behind"
+    draft_twin = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
+
+    assert draft_twin == {:error, :not_found},
+           "the patch must leave no draft twin behind, got: #{inspect(draft_twin)}"
 
     # ── CALL 2: `bp doc publish task <id> --yes`, a SEPARATE request.
     publish_resp = mutate(conn, [%{"publish" => %{"id" => id, "type" => "task"}}])
