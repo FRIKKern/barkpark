@@ -422,7 +422,12 @@ defmodule Barkpark.Content.Mutations do
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
               is_map_key(patch, "append") or is_map_key(patch, "prepend") do
-    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
+    # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
+    # address nothing here; refuse BEFORE the read so the answer does not depend
+    # on whether the document exists. See Writer.refuse_bare_id/2.
+    with :ok <- Writer.refuse_bare_id(Map.get(patch, "set"), :patch),
+         :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
+         {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
       set_fields = Map.get(patch, "set", %{})
@@ -460,7 +465,9 @@ defmodule Barkpark.Content.Mutations do
          dataset,
          opts
        ) do
-    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
+    # [bare-id-refusal] task-eeaf3a622b6c74c7 — see the ops arm above.
+    with :ok <- Writer.refuse_bare_id(fields, :patch),
+         {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       warn_on_nested_content(fields)
 
