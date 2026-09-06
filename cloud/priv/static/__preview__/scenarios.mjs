@@ -5489,6 +5489,58 @@ export const SCENARIOS = {
     },
   },
 
+  // ── cch-w50-bl · THE COMP TIER, WHICH THE CORPUS HAD NEVER BOOTED ─────────
+  // THE HOLE THIS CLOSES. `forever` is a plan the SERVER CAN MINT — Billing.
+  // Subscription's `@plans ~w(free trial supporter support_plus forever)` admits
+  // it and `mix barkpark_cloud.grant_forever TEAM` writes it — and three teams on
+  // the live plane are on it. `git grep -n forever` over this file returned ZERO
+  // before this fixture, so every console consumer of the comp tier was green BY
+  // CONSTRUCTION: planName painted the raw lowercase slug `forever` into the
+  // sidebar chip and the card title, planFeatsHtml emitted an EMPTY bullet list,
+  // and the Manage-billing section silently vanished. Nothing rendered it, so
+  // nothing could red.
+  //
+  // WHY NOT FLIP `activeSub` OFF "pro" INSTEAD. `activeSub.plan` is "pro" — a
+  // plan the server CANNOT mint — and it leaks that slug into #ws-plan on 12 of
+  // the corpus's scenario boots with zero assertions over that text. Flipping it
+  // to `supporter` would delete the corpus's ONLY non-catalog-plan boot while
+  // fixing nothing: the full rendered-DOM delta is exactly those 12 #ws-plan
+  // lines and nothing else moves, it adds zero bullet-rendering scenarios, and it
+  // would leave `forever` — the plan that actually ships to real teams — still
+  // unbooted. It also UNBLINDS nothing: the slug-leak class would then have no
+  // fixture at all. A new comp ACTOR is the fixture; correcting `activeSub`'s
+  // fictional plan is a separate fixture-fidelity chore and is deliberately not
+  // bundled here, because doing both in one commit would make the 12 moved lines
+  // indistinguishable from this row's own delta.
+  //
+  // The envelope is `grant_forever/1`'s own row shape: `active`, no gateway ids
+  // to model, and NO `current_period_end` — a comp licence has no billing period,
+  // which is exactly why the portal and cancel routes both answer 422 for it.
+  "billing-forever": {
+    label: "Billing — the COMP owner (admin-granted `forever`): a human plan name, real feature bullets, and a stated reason there is nothing to manage or cancel",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "forever",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        // No period: grant_forever/1 writes no renewal date. The card's
+        // billingPeriodLine has nothing to print, and that is the point.
+        current_period_end: null,
+        canceled_at: null,
+        started_at: tMinus(200 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // ── cch-w49-s7 · THE DEPLOY THAT CANNOT TAKE MONEY ────────────────────────
   // THE HOLE THIS CLOSES. #10509 put `billing_capability` on GET
   // /v1/subscription and NO fixture in this corpus had ever carried one — so
