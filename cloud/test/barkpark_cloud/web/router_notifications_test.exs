@@ -190,6 +190,62 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       assert conn.status == 401
     end
 
+    # dr-w26. `status: "sent"` is the mail transport's ACCEPTANCE — Barkpark has
+    # no delivery receipt for email and `http_status` is NULL on every email row
+    # — and reading the word as "arrived" is what made the 2026-08-08 outage
+    # alerts look audited when their only evidence (the maillog) had been
+    # destroyed by a deploy. The caveat therefore travels IN THE PAYLOAD, beside
+    # the word, so no reader can pick up one without the other. Delete
+    # `status_meaning` from `delivery_json/1` and this goes red.
+    test "every delivery row carries status_meaning beside status, and it says sent is NOT delivered" do
+      {_owner, team, token} = user_with_team()
+
+      for {status, recipient} <- [
+            {"sent", "a@example.com"},
+            {"failed", "b@example.com"},
+            {"pending", "c@example.com"},
+            {"suppressed", "d@example.com"}
+          ] do
+        insert_delivery(team, %{status: status, recipient: recipient})
+      end
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, token)
+      assert conn.status == 200
+      rows = body(conn)["deliveries"]
+      assert length(rows) == 4
+
+      # Every row, not just the interesting one: a payload that carries the
+      # sentence for `sent` alone still lets `failed` be misread.
+      for row <- rows do
+        assert row["status_meaning"] == Delivery.status_meaning(row["status"]),
+               "row #{row["status"]} carried #{inspect(row["status_meaning"])}"
+
+        refute row["status_meaning"] in [nil, ""]
+      end
+
+      sent = Enum.find(rows, &(&1["status"] == "sent"))
+      assert sent["status_meaning"] =~ "Accepted"
+      assert sent["status_meaning"] =~ "NOT confirmed delivered"
+
+      # THE NEGATIVE ARM. The sentence must not be a generic banner glued onto
+      # every row — then it would say nothing. `failed` and `sent` must differ.
+      failed = Enum.find(rows, &(&1["status"] == "failed"))
+      refute failed["status_meaning"] == sent["status_meaning"]
+    end
+
+    # A word this version does not know must still get a sentence. A `nil`
+    # caveat renders as a blank, and a blank caveat is indistinguishable from a
+    # confident claim — which is the whole defect being fixed.
+    test "status_meaning is total: an unknown status word still gets a sentence, never nil" do
+      assert Delivery.status_meaning("not_a_status") == Delivery.status_meaning(nil)
+      refute Delivery.status_meaning("not_a_status") in [nil, ""]
+
+      for status <- Delivery.statuses() do
+        assert Delivery.status_meaning(status) != Delivery.status_meaning(nil),
+               "#{status} fell through to the unknown-word sentence"
+      end
+    end
+
     # cch-w31-s8. THE PIN THIS REPLACED asserted "a plain member is 403", and it
     # was TRUE — this route was the one surface built to answer "was I notified?"
     # and it 403'd the people it notifies. The pin is REWRITTEN, never deleted:

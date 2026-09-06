@@ -12,7 +12,9 @@ set -euo pipefail
 : "${MAIL_HOSTNAME:=mail.barkpark.cloud}"
 : "${MAIL_DOMAIN:=barkpark.cloud}"
 : "${DKIM_SELECTOR:=mail}"
-: "${MAILLOG_FILE:=/dev/stdout}"
+: "${MAILLOG_FILE:=/var/log/postfix/maillog}"
+: "${MAILLOG_MAX_BYTES:=10485760}"
+: "${MAILLOG_ROTATE_INTERVAL:=60}"
 
 # ── DKIM keypair ──────────────────────────────────────────────────────────
 DKIM_DIR="/etc/opendkim/keys/${MAIL_DOMAIN}"
@@ -143,9 +145,52 @@ adduser postfix sasl >/dev/null 2>&1 || true
 #      which under `exec postfix start-fg` (PID 1) is the container's
 #      stdout, i.e. `docker logs`. /dev/stdout is allowed by the default
 #      maillog_file_prefixes (`/var, /dev/stdout`).
-# Left overridable so an operator can point it at a file on a mounted
-# volume instead, but the default is the one the README documents.
-postconf -e "maillog_file = ${MAILLOG_FILE:-/dev/stdout}"
+#
+# dr-w26 — WHY THE DEFAULT IS A FILE ON A VOLUME AND NOT /dev/stdout ANY MORE.
+# /dev/stdout reaches `docker logs`, and `docker logs` is PER CONTAINER: it is
+# json-file state under /var/lib/docker/containers/<container-id>/, and a
+# control-plane deploy that RECREATES this service (deploy/cp-deploy.sh
+# `compose_up_repair "db/postfix up" db postfix`, any image or config change)
+# mints a new container id and deletes the old directory.
+#
+# BE PRECISE ABOUT 2026-08-08, BECAUSE THE OBVIOUS READING IS WRONG. The
+# 23:51Z cutover recreated cloud-postfix-1 and `docker logs cloud-postfix-1 |
+# grep -c .` read 7 lines afterwards — but that day's 30 outage alerts were
+# NOT deleted by that deploy. They were never written: on that box
+# `postconf maillog_file` was EMPTY and no syslog daemon was running, so
+# Postfix logged nothing per message at all (recorded in
+# tooling/grip/ledger/digest-delivered-and-freeze-date-w27-2026-08-09.md R3).
+# That was a MISSING WRITER, closed by the maillog_file line above. The
+# delivery rows still said `status=sent`, but that word is Swoosh's
+# mailer-ACCEPTED claim (see `Notifications.Delivery.status_meaning/1`), not
+# proof anything left the box — so there was a claim and, from the start, no
+# evidence to check it against. That batch is UNRECOVERABLE.
+#
+# The durability hole is the separate, still-live half: now that the writer
+# exists, /dev/stdout would hand its whole output to the next recreate. This
+# change fixes that FORWARD.
+#
+# So the log now lands on the named volume `postfix_log` (cloud/docker-compose.yml),
+# which a recreate does NOT touch, exactly like postfix_queue and postfix_dkim.
+# BOTH sinks are kept: `tail_maillog_to_stdout` below streams the same lines to
+# stdout, so `docker logs`, the README's one-liner and check-maillog.sh's
+# --live arm all keep working unchanged. The volume is the DURABLE copy; stdout
+# is the convenient one.
+#
+# Still overridable — `MAILLOG_FILE=/dev/stdout` restores the pre-dr-w26
+# ephemeral behaviour — but an operator who does that is choosing to lose the
+# audit trail on the next deploy.
+postconf -e "maillog_file = ${MAILLOG_FILE}"
+
+# The durable sink has to exist, and be writable by postlogd (which drops to
+# the `postfix` user), BEFORE `postfix start-fg` boots — postlogd does not
+# create parent directories and FATALs if it cannot open the path.
+if [ "$MAILLOG_FILE" != "/dev/stdout" ]; then
+  mkdir -p "$(dirname "$MAILLOG_FILE")"
+  touch "$MAILLOG_FILE"
+  chown postfix:postfix "$(dirname "$MAILLOG_FILE")" "$MAILLOG_FILE"
+  chmod 0640 "$MAILLOG_FILE"
+fi
 
 postconf -e "myhostname = ${MAIL_HOSTNAME}"
 postconf -e "mydomain = ${MAIL_DOMAIN}"
@@ -210,6 +255,38 @@ EOF
 fi
 
 mkdir -p /var/spool/postfix/pid
+
+# ── The two sidecars that make a FILE maillog behave like the stdout one ───
+# Only when the log is a real file; with MAILLOG_FILE=/dev/stdout neither is
+# meaningful (nothing to follow, nothing to rotate) and both are skipped.
+if [ "$MAILLOG_FILE" != "/dev/stdout" ]; then
+  # 1. STREAM. `tail -F` follows BY NAME, so it re-opens across a rotation
+  #    rather than holding the unlinked inode. This is what keeps `docker
+  #    logs cloud-postfix-1` and check-maillog.sh's --live arm working while
+  #    the durable copy accumulates on the volume.
+  tail -F -n 0 "$MAILLOG_FILE" 2>/dev/null &
+
+  # 2. ROTATE. A file on a volume has no docker log driver capping it, and
+  #    this relay now writes a line per message, so an uncapped file is the
+  #    boot-disk hazard the json-file `max-size` used to hold off. Keep two
+  #    generations of MAILLOG_MAX_BYTES each; that is the same order of
+  #    headroom as the old 10m x 5 at this volume (~3400 messages in two
+  #    months) and it is BOUNDED, which is the property that matters.
+  #
+  #    `mv` + a fresh empty file is safe for postlogd specifically: it opens
+  #    the path per write batch and re-opens on the next one, so no reload is
+  #    needed and no line is lost to a stale fd. `tail -F` re-opens too.
+  (
+    while sleep "$MAILLOG_ROTATE_INTERVAL"; do
+      size="$(stat -c %s "$MAILLOG_FILE" 2>/dev/null || echo 0)"
+      [ "$size" -gt "$MAILLOG_MAX_BYTES" ] || continue
+      mv -f "$MAILLOG_FILE" "${MAILLOG_FILE}.1" 2>/dev/null || continue
+      touch "$MAILLOG_FILE"
+      chown postfix:postfix "$MAILLOG_FILE" 2>/dev/null || true
+      chmod 0640 "$MAILLOG_FILE" 2>/dev/null || true
+    done
+  ) &
+fi
 
 opendkim -x /etc/opendkim.conf -u opendkim &
 exec postfix start-fg

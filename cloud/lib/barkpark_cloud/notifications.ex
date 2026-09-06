@@ -956,7 +956,12 @@ defmodule BarkparkCloud.Notifications do
     * `:limit`   — page size, default 50. The ROUTER owns the hard cap; the
                    context stays honest about what it was asked for.
     * `:channel` — one egress channel (`"email"`, `"discord"`, …).
-    * `:status`  — one send outcome (`"pending"` | `"sent"` | `"failed"`).
+    * `:status`  — one send outcome (`"pending"` | `"sent"` | `"failed"` |
+                   `"suppressed"`). dr-w26: `"sent"` means the mail transport
+                   ACCEPTED the message, not that it was delivered — this
+                   system has no delivery receipt for email. `Delivery.status_meaning/1`
+                   carries that sentence, and `Web.Router.delivery_json/1`
+                   ships it beside the word.
     * `:event`   — one event name (`"test"`, `"deploy.failed"`, …).
     * `:before`  — a `DateTime` cursor; only rows strictly older are returned
                    (keyset pagination on `inserted_at`, the `/v1/audit`
@@ -1141,6 +1146,14 @@ defmodule BarkparkCloud.Notifications do
   defp record_delivery(team_id, recipient, event, kind, result, carrier) do
     {status, last_error} =
       case result do
+        # dr-w26 — WHAT `{:ok, _}` ACTUALLY PROVES. It is the Swoosh adapter
+        # returning without error: for the platform SMTP carrier, the relay
+        # answered 250 at the submission hop. The message may still be sitting
+        # in a queue, or bounce an hour later, and nothing here would ever
+        # learn of it — there is no receipt feed. So `"sent"` is ACCEPTED, and
+        # `Delivery.status_meaning/1` is the sentence that says so at every
+        # reader. Do not upgrade this word without a source that knows about
+        # delivery.
         {:ok, _} ->
           {"sent", nil}
 

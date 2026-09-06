@@ -24,6 +24,43 @@ defmodule BarkparkCloud.Notifications.Delivery do
   A `suppressed` row is written by `Notifications.Withhold` ONLY, one row per
   team member with that member's own address as `recipient`, so "was I notified?"
   is answerable by the person who was not.
+
+  ## `sent` means ACCEPTED, not DELIVERED (dr-w26)
+
+  `record_delivery/6` stamps `"sent"` on the `{:ok, _}` arm of `Mailer.deliver/1`.
+  That tuple means the SWOOSH ADAPTER handed the message off without raising —
+  for the platform SMTP carrier, that the relay answered `250` at the submission
+  hop. It is not a claim the message left the box, and it is emphatically not a
+  claim it reached a human. `http_status` does not close the gap either: it is
+  NULL for every email row by construction (it is the chat providers' HTTP code).
+
+  Nobody was lying; the word was just read as more than it says. On 2026-08-08
+  thirty outage alerts carried `status=sent, http_status=NULL`, and when the
+  question "did the tenant actually hear about the outage?" was finally asked,
+  the answer was level-3 hearsay. The artefact that could have settled it,
+  Postfix's maillog, did not exist: on that box `postconf maillog_file` was
+  EMPTY with no syslog daemon running, so no per-message log was ever written
+  (`tooling/grip/ledger/digest-delivered-and-freeze-date-w27-2026-08-09.md`
+  R3). That batch is UNRECOVERABLE — a missing writer cannot be re-read.
+
+  Two separate fixes came out of it, both forward-looking. The writer exists
+  now (`cloud/postfix/entrypoint.sh` sets `maillog_file`), and it is DURABLE
+  now — that log goes to the `postfix_log` volume, so the next control-plane
+  recreate does not take it, which `cloud/postfix/check-maillog.sh --recreate`
+  proves. Neither retrieves 2026-08-08.
+
+  THE HONEST FIX IS A SENTENCE, NOT A NEW WORD. A `"delivered"` status would
+  need a writer that KNOWS about delivery — an upstream relay receipt or a
+  bounce/DSN feed — and this system has neither yet. Minting the word without
+  the evidence would repeat the exact defect: a stronger-sounding claim resting
+  on the same weak measurement. And no historical row may be rewritten: every
+  existing `sent` was accurate about what it measured. So the meaning ships
+  instead, as `status_meaning/1` — one sentence per status, carried in the API
+  payload beside `status` (`Web.Router.delivery_json/1`) so no reader can pick
+  up the word without the caveat attached to it.
+
+  When a receipt source does arrive, `"delivered"` becomes a real fourth word
+  and `status_meaning/1` is where its sentence goes.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -88,6 +125,33 @@ defmodule BarkparkCloud.Notifications.Delivery do
   def statuses, do: @statuses
   def kinds, do: @kinds
   def carriers, do: @carriers
+
+  @status_meanings %{
+    "pending" => "Queued by Barkpark; no transport result yet.",
+    "sent" =>
+      "Accepted by the mail transport — NOT confirmed delivered to the recipient. " <>
+        "Barkpark has no delivery receipt for email; check the relay log for the actual outcome.",
+    "failed" => "The transport rejected or could not complete the send; see the reason.",
+    "suppressed" => "Barkpark decided not to send this one; see the reason."
+  }
+
+  @doc """
+  The one sentence that says what a `status` word actually MEASURED.
+
+  Exists because `"sent"` reads as "arrived" and means "the transport took it"
+  (see the moduledoc). Total over `statuses/0`, and total over the unknown
+  string too — an unrecognised word gets an explicit "not a status this version
+  knows" rather than `nil`, because a reader that renders a blank caveat is
+  indistinguishable from one that renders a confident claim.
+  """
+  @spec status_meaning(String.t() | nil) :: String.t()
+  def status_meaning(status) when is_binary(status) do
+    Map.get(@status_meanings, status, "Not a status this version of Barkpark knows.")
+  end
+
+  def status_meaning(_status), do: "Not a status this version of Barkpark knows."
+
+  def status_meanings, do: @status_meanings
 
   def changeset(delivery, attrs) do
     delivery
