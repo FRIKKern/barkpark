@@ -81,10 +81,12 @@ defmodule Barkpark.Tasks.DependencySourceAgreementTest do
       refute candidate.id in ready_ids(scope, phase_id),
              "the queue withholds it — that half was never broken"
 
-      assert {:error, :blocked_by_unsatisfied_deps} =
-               Tasks.claim_by_id(candidate.doc_id, "worker-json", scope),
+      claim = Tasks.claim_by_id(candidate.doc_id, "worker-json", scope)
+
+      assert claim == {:error, :blocked_by_unsatisfied_deps},
              "the claim door must see the SAME dependency the queue saw; reading only " <>
-               "task_edges here hands out a row the queue is deliberately withholding"
+               "task_edges here hands out a row the queue is deliberately withholding " <>
+               "(got #{inspect(claim)})"
     end
 
     test "satisfying the JSON dependency opens BOTH doors together", %{scope: scope} do
@@ -118,9 +120,10 @@ defmodule Barkpark.Tasks.DependencySourceAgreementTest do
 
       refute candidate.id in ready_ids(scope, phase_id)
 
-      assert {:error, :blocked_by_unsatisfied_deps} =
-               Tasks.claim_by_id(candidate.doc_id, "worker-dangling", scope),
-             "a dependency that resolves to nothing is UNSATISFIED, not absent"
+      claim = Tasks.claim_by_id(candidate.doc_id, "worker-dangling", scope)
+
+      assert claim == {:error, :blocked_by_unsatisfied_deps},
+             "a dependency that resolves to nothing is UNSATISFIED, not absent (got #{inspect(claim)})"
     end
   end
 
