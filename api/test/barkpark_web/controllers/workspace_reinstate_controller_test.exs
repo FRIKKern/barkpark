@@ -61,6 +61,7 @@ defmodule BarkparkWeb.WorkspaceReinstateControllerTest do
   alias Barkpark.Tenancy.Quota
   alias Barkpark.Tenancy.Workers.PlaygroundReaper
   alias Barkpark.Tenancy.Workspace
+  alias BarkparkWeb.PlaygroundController
   alias BarkparkWeb.Plugs.RequireWithinQuota
 
   @dataset "production"
@@ -90,7 +91,15 @@ defmodule BarkparkWeb.WorkspaceReinstateControllerTest do
     raw_owner = uniq("ws-admin")
     {:ok, _tok_owner} = admin_token(raw_owner, uniq("lbl-ws-admin"), ws.id)
 
-    %{ws: ws, operator: raw_op, operator_token: tok_op, ws_admin: raw_owner}
+    %{
+      ws: ws,
+      # The elapsed TTL the fixture minted, kept so a refusal can be checked
+      # against the value it must NOT have moved.
+      expires_at: reload(ws).expires_at,
+      operator: raw_op,
+      operator_token: tok_op,
+      ws_admin: raw_owner
+    }
   end
 
   # ── helpers ────────────────────────────────────────────────────────────
@@ -158,7 +167,7 @@ defmodule BarkparkWeb.WorkspaceReinstateControllerTest do
   # The real mutate seam: RequireWithinQuota is the plug the two scoped mutate
   # pipelines run before RequireWritePermission. Halted => writes refused.
   defp seam(%Workspace{} = ws) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.assign(:current_workspace, ws)
     |> RequireWithinQuota.call(RequireWithinQuota.init([]))
   end
@@ -240,6 +249,46 @@ defmodule BarkparkWeb.WorkspaceReinstateControllerTest do
 
       assert DateTime.compare(back.expires_at, DateTime.utc_now()) == :gt,
              "the TTL was not re-armed, so the row is still stage-1 eligible"
+
+      # AND the window is EXACTLY the mint TTL, read from the same function
+      # `PlaygroundController.provision/2` stamps with — never a second literal
+      # beside the controller's, which would assert nothing but itself. Drift
+      # between the front door and the rescue reds here.
+      granted = DateTime.diff(back.expires_at, DateTime.utc_now(), :second)
+      mint = PlaygroundController.ttl_seconds()
+
+      assert_in_delta granted,
+                      mint,
+                      120,
+                      "the re-arm granted #{granted}s but the playground mint TTL is #{mint}s: " <>
+                        "the rescue and the front door have drifted apart"
+    end
+
+    test "a LIVE (future) playground TTL is NOT extended — the re-arm is elapsed-only", _ctx do
+      # THE OTHER HALF OF THE RULING: "The same path ... applying to a
+      # still-live expires_at, would be the limit removing itself." A playground
+      # whose TTL has NOT elapsed is suspended for some OTHER reason, and
+      # lifting that suspension must not silently buy it another 48 hours.
+      future = DateTime.add(DateTime.utc_now(), 5, :hour)
+      ws = playground!(future)
+      {:ok, _} = Quota.suspend(ws, "manual operator suspend")
+
+      before = reload(ws).expires_at
+
+      raw = uniq("op-live")
+      {:ok, tok} = admin_token(raw, uniq("lbl-op-live"), ws.id)
+      put_allowlist([], [tok.id])
+
+      body = raw |> reinstate(ws.slug) |> json_response(200)
+
+      refute body["suspended"]
+
+      refute body["ttl_extended"],
+             "a still-live expires_at was extended: the re-arm must fire ONLY on an " <>
+               "already-elapsed TTL"
+
+      assert reload(ws).expires_at == before,
+             "expires_at moved on a workspace whose TTL had not elapsed"
     end
 
     test "a NON-playground suspension is lifted WITHOUT touching expires_at", _ctx do
@@ -282,9 +331,17 @@ defmodule BarkparkWeb.WorkspaceReinstateControllerTest do
       assert body["error"]["code"] == "forbidden"
       assert body["error"]["required"] == "platform_operator"
 
-      # The halt is REAL — the write never happened.
-      assert reload(ctx.ws).suspended,
+      # The halt is REAL — NEITHER write happened. Asserting only `suspended`
+      # would leave the second door unchecked: a permit enforced at one write
+      # and not at the other is not a permit, and the TTL re-arm is a write.
+      back = reload(ctx.ws)
+
+      assert back.suspended,
              "a refused caller still lifted the suspension: the plug ran after the write"
+
+      assert back.expires_at == ctx.expires_at,
+             "a refused caller still moved expires_at: the operator gate guards the " <>
+               "reinstate write but not the TTL re-arm beside it"
     end
 
     test "an anonymous caller gets RequireToken's 401, never the operator 403", ctx do

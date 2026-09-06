@@ -60,6 +60,19 @@ defmodule BarkparkWeb.PlaygroundController do
   # seeded into.
   @production_dataset "production"
 
+  @doc """
+  The disposable-playground lifetime in seconds — the TTL `provision/2` stamps
+  into `expires_at` and the one the reaper sweeps against.
+
+  Public because it is now read by a SECOND caller:
+  `BarkparkWeb.WorkspaceReinstateController` re-arms an ALREADY-ELAPSED
+  playground TTL by exactly this window, and a second literal `48 * 60 * 60`
+  beside this one would let the mint and the rescue drift apart silently. One
+  constant, two readers.
+  """
+  @spec ttl_seconds() :: pos_integer()
+  def ttl_seconds, do: @ttl_seconds
+
   # The curated showcase paper seeded into a fresh playground so the front door
   # is not empty (charter D47). A modest multi-block PortableDoc — NOT the full
   # 101-block showcase — carrying its own top-level description so it is a real,

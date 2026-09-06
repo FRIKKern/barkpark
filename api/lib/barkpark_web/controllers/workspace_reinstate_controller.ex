@@ -50,16 +50,30 @@ defmodule BarkparkWeb.WorkspaceReinstateController do
   past — so the reaper's NEXT TICK (once a minute) re-suspends the workspace,
   and the rescue survives under 60 seconds. A reinstate that a timer undoes is
   not a rescue, so this route also pushes an ALREADY-ELAPSED `expires_at`
-  forward by the playground mint TTL (48h, `PlaygroundController`'s
-  `@ttl_seconds`) — and only then. Concretely:
+  forward by the playground mint TTL, read from its one definition
+  (`PlaygroundController.ttl_seconds/0`) — and only then. Concretely:
 
     * `tier = "playground"` with `expires_at` in the PAST → extended to
-      `now + 48h`, `"ttl_extended": true`. The workspace gets a fresh window,
-      the reaper's stage-1 predicate no longer matches it, and the operator has
-      granted time rather than permanence.
+      `now + PlaygroundController.ttl_seconds()`, `"ttl_extended": true`. The
+      workspace gets a fresh window, the reaper's stage-1 predicate no longer
+      matches it, and the operator has granted time rather than permanence.
     * anything else (a future `expires_at`, a `NULL` one, a non-playground
       workspace) → `expires_at` UNTOUCHED, `"ttl_extended": false`. A NULL
       never matched `expires_at < now()` in the first place.
+
+  RULING ON THE RE-ARM (owner, binding), quoted verbatim:
+
+  > A bare reinstate is a 60-second flicker, so the re-arm is necessary, not
+  > scope creep. It is acceptable because it is operator-gated and re-arms ONLY
+  > an already-elapsed expires_at by the 48h mint TTL: an operator extending an
+  > expired playground is an override with an accountable actor. The same path
+  > reachable by the workspace owner, or applying to a still-live expires_at,
+  > would be the limit removing itself.
+
+  Both halves of that condition are pinned by test, in the direction that can
+  fail: a LIVE (future) `expires_at` comes back byte-identical, and the
+  workspace owner's refused call leaves `expires_at` unchanged as well as
+  `suspended` — a permit checked at one door and not the other is not a permit.
 
   Stage 2 needs no help: it selects on `suspended = true`, and
   `Tenancy.delete_workspace/1`'s id overload re-fetches inside the delete, so a
@@ -79,12 +93,13 @@ defmodule BarkparkWeb.WorkspaceReinstateController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Quota
   alias Barkpark.Tenancy.Workspace
+  alias BarkparkWeb.PlaygroundController
 
-  # The playground mint TTL, mirrored from `PlaygroundController.@ttl_seconds`.
-  # Duplicated as a literal rather than imported so this controller's file set
-  # stays disjoint from the provisioning slice's; the two are pinned together by
-  # `WorkspaceReinstateControllerTest`.
-  @playground_ttl_seconds 48 * 60 * 60
+  # The playground mint TTL, read from its ONE definition —
+  # `PlaygroundController.ttl_seconds/0`, the same value `provision/2` stamps
+  # into `expires_at`. Deliberately NOT a second literal beside that one: a
+  # re-arm that drifted from the mint would hand a rescued playground a window
+  # the front door never grants, and nothing would say so.
 
   @doc """
   Lift the suspension on the workspace named by `:slug`.
@@ -124,7 +139,7 @@ defmodule BarkparkWeb.WorkspaceReinstateController do
     now = DateTime.utc_now()
 
     if DateTime.compare(expires_at, now) == :lt do
-      fresh = DateTime.add(now, @playground_ttl_seconds, :second)
+      fresh = DateTime.add(now, PlaygroundController.ttl_seconds(), :second)
 
       case Quota.set_expires_at(ws, fresh) do
         {:ok, updated} -> {updated, true}
