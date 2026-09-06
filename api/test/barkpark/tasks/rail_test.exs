@@ -189,7 +189,7 @@ defmodule Barkpark.Tasks.RailTest do
   end
 
   describe "unsatisfied_blockers/1" do
-    test "returns non-done blockers' doc_ids; empty when none / all done",
+    test "returns unsatisfied blockers' doc_ids; empty when none / all satisfied",
          %{scope: scope} do
       task = mk_task!(uniq("t"), scope, %{})
       assert Tasks.unsatisfied_blockers(task.id) == []
@@ -198,8 +198,56 @@ defmodule Barkpark.Tasks.RailTest do
       {:ok, _} = Tasks.add_dep(task.id, blocker.id, :blocks)
       assert Tasks.unsatisfied_blockers(task.id) == [blocker.doc_id]
 
-      # Flip the blocker done → no longer surfaced.
+      # Flip the blocker DONE AND ATTRIBUTABLE → no longer surfaced. A bare
+      # `lifecycle_status: "done"` is NOT enough: the claim door refuses such a
+      # blocker (Tasks.DependencySatisfaction — done AND a record of the close),
+      # and this notice reads the same set, so the fixture has to close it the
+      # way a close actually does. See the next test.
+      _ =
+        update_content!(blocker, fn c ->
+          c
+          |> Map.put("lifecycle_status", "done")
+          |> Map.put("close_reason", "fixture: closed through the verb")
+        end)
+
+      assert Tasks.unsatisfied_blockers(task.id) == []
+    end
+
+    test "a blocker that reads done but records NO close still surfaces",
+         %{scope: scope} do
+      task = mk_task!(uniq("t-forged"), scope, %{})
+      blocker = mk_task!(uniq("blk-forged"), scope, %{})
+      {:ok, _} = Tasks.add_dep(task.id, blocker.id, :blocks)
+
       _ = update_content!(blocker, &Map.put(&1, "lifecycle_status", "done"))
+
+      assert Tasks.unsatisfied_blockers(task.id) == [blocker.doc_id],
+             "the claim door refuses an unattributable `done` blocker; the notice " <>
+               "that exists to SAY WHY must not report the row as unblocked"
+    end
+
+    test "a blocker recorded only in content.dependencies surfaces too",
+         %{scope: scope} do
+      blocker = mk_task!(uniq("blk-json"), scope, %{})
+
+      task =
+        mk_task!(uniq("t-json"), scope, %{"dependencies" => [blocker.doc_id]})
+
+      # No edge at all — the dependency lives only in the JSON list.
+      assert Tasks.dependencies(task.id, kind: :blocks) == []
+
+      assert Tasks.unsatisfied_blockers(task.id) == [blocker.doc_id],
+             "task-814b2d28bdb4b2f5: this probe used to read `blocks` edges ONLY, so " <>
+               "the claim door refused with blocked_by_unsatisfied_deps while the " <>
+               "notice reported nothing blocking"
+
+      _ =
+        update_content!(blocker, fn c ->
+          c
+          |> Map.put("lifecycle_status", "done")
+          |> Map.put("close_reason", "fixture: closed through the verb")
+        end)
+
       assert Tasks.unsatisfied_blockers(task.id) == []
     end
   end
