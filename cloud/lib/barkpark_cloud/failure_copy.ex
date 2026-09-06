@@ -433,6 +433,42 @@ defmodule BarkparkCloud.FailureCopy do
   def raw(value), do: value |> strip_ansi() |> scrub()
 
   @doc """
+  Clamp a failure string to the one-line CAPTION length the `deployments.detail`
+  column is read at — 255, with an ellipsis in the 255th position.
+
+  THE ONE OWNER OF THIS CLAMP. `failure_reason` is `:text` and holds the whole
+  story untruncated; `detail` is the caption rendered under the status pill, and
+  the terminal paths must not render the SAME failure at two different lengths.
+  This function existed three times before it existed once: as
+  `Sites.Deploy.short_detail/1`, as `Registry.failure_detail/1` (added by
+  PR #14571 and knowingly disclosed there as a duplicate — "folding both onto
+  one `FailureCopy` helper is a follow-up, not a silent fork"), and it was about
+  to be written a third time for the two transition routes. That third copy is
+  the point the duplication was ruled to stop, so both prior copies now delegate
+  here and no call site carries its own arithmetic.
+
+  Non-binaries — `nil` above all — pass through unchanged, because a caller that
+  has no reason to render must not be handed the string "nil".
+  """
+  # @canonical capability:failure-caption-clamp aka:short_detail,failure_detail,detail-clamp,255
+  @spec caption(term()) :: term()
+  def caption(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  def caption(other), do: other
+
+  @doc """
+  The caption for a failure that named NO cause — a NAMED UNKNOWN, never a blank
+  and never the progress caption the deploy happened to be wearing when it died.
+
+  The parent epic's rule is that a failure's final `detail` is a cause or a named
+  unknown; a row that says nothing at all is the defect, not the absence of one.
+  """
+  @spec no_reason_caption() :: String.t()
+  def no_reason_caption, do: "the deploy failed and no reason was reported"
+
+  @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
 
