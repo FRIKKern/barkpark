@@ -165,9 +165,9 @@ defmodule Barkpark.Content.Errors do
                          # BPML working-copy rev anchor — bulldocs_source_controller.ex
                          # (the format=bpml pull) + bulldocs_ingest_controller.ex
                          # (the sync precondition). Both read ONE owner,
-                         # `Content.Papers.op_rev/1`: an ABSENT `content["rev"]`
+                         # `Content.Papers.op_rev/1`: an ABSENT `content.rev`
                          # is the legitimate revless shape and anchors on 0, but a
-                         # `content["rev"]` that is PRESENT and not an integer is a
+                         # `content.rev` that is PRESENT and not an integer is a
                          # failed READ, and a failed read must never be spelled as
                          # a rev mismatch. Both routes refuse it with this 422
                          # naming the doc and the field instead of comparing

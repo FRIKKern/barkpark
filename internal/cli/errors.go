@@ -273,6 +273,7 @@ var codeExit = map[string]int{
 	"invalid_text":               exitValidation, // 422, bulldocs_ingest_controller.ex:1635
 	"missing_slug":               exitValidation, // 422, bulldocs_ingest_controller.ex:938
 	"missing_source":             exitValidation, // 422, bulldocs_ingest_controller.ex:1446
+	"paper_rev_unreadable":       exitValidation, // 422, bulldocs_ingest_controller.ex + bulldocs_source_controller.ex
 	"slug_mismatch":              exitValidation, // 422, bulldocs_ingest_controller.ex:401
 	"source_not_found":           exitValidation, // 422, bulldocs_ingest_controller.ex:1478
 	"payload_too_large":          exitValidation, // 413, errors.ex:736
