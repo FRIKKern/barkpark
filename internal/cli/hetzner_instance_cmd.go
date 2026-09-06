@@ -656,13 +656,26 @@ func hzLabelOfRRSetName(name string) string {
 // live co-tenant's record down with ours. The orphan is the lesser failure, and
 // it is loud in the zone rather than silent on someone else's running site.
 func instTeardownDNS(ctx context.Context, dns *hcloud.Client, zone, label, ip string, exclusive bool) ([]string, error) {
-	if strings.TrimSpace(ip) != "" && exclusive {
-		return instSweepAByValue(ctx, dns, zone, ip)
-	}
+	// The by-name delete ALWAYS fires, sweep or no sweep. It is strictly the old
+	// behaviour and it is not redundant: a platform record whose value has
+	// drifted off the box IP (a hand-repointed A, a stale row) is invisible to a
+	// by-value sweep, and dropping the name delete in favour of the sweep would
+	// have made this teardown NARROWER than the one it replaces. Idempotent —
+	// absent is a no-op — so it costs one call.
 	if derr := instDeleteA(ctx, dns, zone, label); derr != nil {
 		return nil, derr
 	}
-	return []string{hzRRSetName(label)}, nil
+	deleted := []string{hzRRSetName(label)}
+	if strings.TrimSpace(ip) == "" || !exclusive {
+		return deleted, nil
+	}
+	swept, serr := instSweepAByValue(ctx, dns, zone, ip)
+	for _, n := range swept {
+		if n != hzRRSetName(label) {
+			deleted = append(deleted, n)
+		}
+	}
+	return deleted, serr
 }
 
 // instLookupA returns the A values currently at label.zone (nil when absent).

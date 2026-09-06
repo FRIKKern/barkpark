@@ -1500,3 +1500,79 @@ func TestInstanceDecommissionSharedIPDegradesToByNameAndReportsResidue(t *testin
 		t.Errorf("the degraded sweep was not narrated on stderr:\n%s", stderr)
 	}
 }
+
+// task-688ebffc4b0aa50a — THE NARROWING GUARD. The by-value sweep must never
+// REPLACE the by-name delete: a platform A record whose value has drifted off
+// the box IP (hand-repointed, or a stale row) is invisible to a value match, so
+// a sweep-only teardown would be NARROWER than the by-name one it replaces and
+// would leave the instance's own name resolving after its box is gone. Both
+// fire, always.
+func TestInstanceDecommissionStillDeletesPlatformRecordWhenValueDrifted(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	var mu sync.Mutex
+	deleted := false
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		mu.Lock()
+		gone := deleted
+		mu.Unlock()
+		if gone {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/9/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":777,"type":"snapshot"},"action":{"id":31,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/9", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		deleted = true
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":90,"status":"success","progress":100}}`)
+	})
+
+	// The platform record points at a DIFFERENT address than the box it names —
+	// a by-value sweep at 192.0.2.9 can never see it.
+	zone := map[string]string{"okey": "203.0.113.4"}
+	f.mux.HandleFunc("DELETE /zones/barkpark.cloud/rrsets/{name}/A", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		delete(zone, r.PathValue("name"))
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":91,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		names := make([]string, 0, len(zone))
+		for n := range zone {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, `{"id":"`+n+`/A","name":"`+n+`","type":"A","records":[{"value":"`+zone[n]+`"}]}`)
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"rrsets":[`+strings.Join(parts, ",")+`]}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success"},{"id":90,"status":"success"},{"id":91,"status":"success"}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "decommission", "okey.barkpark.cloud")
+
+	mu.Lock()
+	_, platformLeft := zone["okey"]
+	mu.Unlock()
+	if platformLeft {
+		t.Error("the platform A record survived because its value had drifted off the box IP — the by-value sweep REPLACED the by-name delete instead of adding to it")
+	}
+	if code != exitOK {
+		t.Fatalf("decommission exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+	}
+}
