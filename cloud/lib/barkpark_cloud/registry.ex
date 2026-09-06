@@ -5747,12 +5747,21 @@ defmodule BarkparkCloud.Registry do
     dataset = Map.get(attrs, :bootstrap_dataset) || Map.get(attrs, "bootstrap_dataset")
 
     if kind in @content_bound_kinds and is_binary(dataset) and dataset != "" do
-      secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      secret = new_content_secret()
       {secret, Map.put(attrs, :content_webhook_secret_encrypted, Vault.encrypt(secret))}
     else
       {nil, attrs}
     end
   end
+
+  # THE ONE generator for a site's content-publish secret. Create-time
+  # (`maybe_mint_content_secret/1`) and the operator repair
+  # (`mint_content_publish_secret/2`) both call it, which is what makes the
+  # INVARIANT stated on the repair verb true: a secret minted years apart by two
+  # different doors has the same shape, so the webhook the repair registers is the
+  # one the receiving route already verifies. A second literal here would be a
+  # second contract nothing compares.
+  defp new_content_secret, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
   # Register ONE dataset-scoped webhook on the box (via the admin-token relay — the
   # `wire_site_url` prior art) pointed at THIS site's content-publish receiver, so
@@ -5961,6 +5970,195 @@ defmodule BarkparkCloud.Registry do
       is_nil(site.content_webhook_secret_encrypted) -> :absent
       true -> :present
     end
+  end
+
+  @doc """
+  The population `mint_missing_content_secrets/1` repairs: every content-bound
+  site with a bound dataset and NO content-publish secret — exactly the sites
+  `publish_trigger/1` reports `:absent`.
+
+  It is the EXACT COMPLEMENT of `list_content_webhook_sites/1` within the
+  content-bound population: the same two `kind`/`bootstrap_dataset` predicates,
+  the secret predicate inverted. The two lists partition the sites that owe a
+  publish trigger — one is what the hourly sweep can reach, the other is what it
+  structurally cannot — and no site is in both.
+
+  Ordered oldest-first and `limit`-bounded for the same reason the sweep is: one
+  operator call makes a bounded number of cross-host box calls.
+  """
+  @spec list_sites_missing_content_secret(pos_integer()) :: [Site.t()]
+  def list_sites_missing_content_secret(limit \\ @content_webhook_reconcile_limit)
+      when is_integer(limit) and limit > 0 do
+    Site
+    |> where([s], s.kind in ^@content_bound_kinds)
+    |> where([s], not is_nil(s.bootstrap_dataset) and s.bootstrap_dataset != "")
+    |> where([s], is_nil(s.content_webhook_secret_encrypted))
+    |> order_by([s], asc: s.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Mint `site`'s content-publish secret if — and ONLY if — it has none, then
+  register its box webhook so the trigger is live, not merely configured.
+
+  THE HOLE THIS CLOSES. `ensure_content_webhook/2` REVEALS a secret and never
+  MINTS one, and `reconcile_content_webhooks/1` inherits that: a content-bound
+  site whose secret was never minted is a `:noop` no matter how often it is
+  swept, so `publish_trigger/1` could report it `:absent` forever and nothing in
+  this plane could repair it. This is the missing WRITE.
+
+  IT IS AN OPERATOR ACT, NOT A SCHEDULE (the ruling on this row). Minting a
+  credential turns a site into a live publish target, including a site a human
+  deliberately left un-wired; a schedule that did it would perform a write nobody
+  asked for on its next tick and leave no trace of who wanted it. Behind
+  `POST /v1/operator/sites/content-secrets/mint` it stays an intentional act with
+  an audit row naming the operator. The hourly reconciler is unchanged and still
+  never mints.
+
+  NEVER OVERWRITES. The guard is `publish_trigger/1` itself, so the three states
+  it reports are the three answers here: `:absent` mints, `:present` is `:noop`
+  (rotating a live secret would silently break the box row that carries the old
+  one — rotation is its own verb and is not this), `:not_applicable` is `:noop`
+  (a container binds no dataset and is owed no trigger). Running this twice
+  therefore mints exactly once.
+
+  ATOMIC WITH ITS RECORD. The row write and the audit row commit together through
+  `Accounts.audit/3` — a refused audit insert refuses the mint, because a minted
+  credential nothing recorded is worse than one that was never minted. The BOX
+  call is deliberately OUTSIDE that transaction: it is a cross-host HTTP request,
+  and holding a database transaction open across one is how a slow box becomes a
+  connection-pool outage.
+
+  REGISTERS IN `:reconcile` MODE, the narrow one: it POSTs a row that is genuinely
+  absent and no-ops on a row that already exists, never the re-enabling PUT. An
+  operator asking for a secret asked for a MISSING trigger, not for a hook someone
+  disabled by hand to come back.
+
+  `opts`: `:actor_user_id` — the operator the audit row names (nil is the audit
+  register's declared shape for a system-driven fact).
+
+  Returns `{:ok, site, registration}` where `registration` is `:ok | :noop |
+  :error` from the box write, `:noop` when nothing was owed, or
+  `{:error, reason}` when the mint (or its audit row) was refused.
+  """
+  @spec mint_content_publish_secret(Site.t(), keyword()) ::
+          {:ok, Site.t(), :ok | :noop | :error} | :noop | {:error, any()}
+  def mint_content_publish_secret(%Site{} = site, opts \\ []) do
+    if publish_trigger(site) == :absent do
+      secret = new_content_secret()
+
+      audited =
+        BarkparkCloud.Accounts.audit(
+          %{
+            team_id: site.team_id,
+            actor_user_id: Keyword.get(opts, :actor_user_id),
+            action: "site.content_secret_minted",
+            target_type: "site",
+            metadata: %{
+              "slug" => site.slug,
+              "kind" => site.kind,
+              "dataset" => site.bootstrap_dataset
+            }
+          },
+          fn ->
+            site
+            |> Ecto.Changeset.change(content_webhook_secret_encrypted: Vault.encrypt(secret))
+            |> Repo.update()
+          end,
+          fn minted -> %{target_id: minted.id} end
+        )
+
+      case audited do
+        {:ok, minted} -> {:ok, minted, register_minted_content_webhook(minted, secret)}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :noop
+    end
+  end
+
+  # The box half of a fresh mint. The URL check lives HERE rather than being left
+  # to `do_ensure_content_webhook/4`'s `else -> :noop` so a `:noop` can only ever
+  # mean "the row already existed", never "the box was not live" — the same
+  # honesty `reconcile_one_content_webhook/1` buys for the sweep. Never raises:
+  # the secret is already committed, and a box that refused must not turn a
+  # successful mint into an exception the operator reads as "nothing happened".
+  defp register_minted_content_webhook(%Site{} = site, secret) do
+    case get_barkpark(site.barkpark_id) do
+      %Barkpark{url: url} = barkpark when is_binary(url) and url != "" ->
+        do_ensure_content_webhook(barkpark, site, secret, :reconcile)
+
+      _ ->
+        :noop
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "content-publish webhook registration after mint for site #{site.id} raised: " <>
+          Exception.message(e)
+      )
+
+      :error
+  end
+
+  @doc """
+  ONE bounded, idempotent operator pass over `list_sites_missing_content_secret/1`:
+  every content-bound site that could never receive a publish trigger gets the
+  secret that makes one possible, and the webhook itself.
+
+  Called by `POST /v1/operator/sites/content-secrets/mint` and by nothing on a
+  schedule — `mint_content_publish_secret/2` states why that is the ruling and not
+  an accident.
+
+  IDEMPOTENT BY POPULATION, not by a flag: the second run's query returns the
+  sites that still have no secret, which after a successful first run excludes
+  every site it just minted. `swept: 0` is the honest answer to "run it twice".
+
+  ONE BAD BOX DOES NOT STOP THE PASS: each site is reduced independently and every
+  failure lands in a bucket.
+
+  THE TALLY, and what partitions what (charter D3). `swept` is the denominator and
+  `minted + skipped + errored` partitions it. `registered` is deliberately NOT one
+  of those buckets — it is a SUB-COUNT OF `minted` saying how many of the fresh
+  secrets also got their box row in this same call. A site can be `minted` and not
+  `registered` (its box is not live yet); the hourly reconciler now reaches it,
+  because it finally has a secret.
+  """
+  @spec mint_missing_content_secrets(keyword()) :: %{
+          swept: non_neg_integer(),
+          minted: non_neg_integer(),
+          registered: non_neg_integer(),
+          skipped: non_neg_integer(),
+          errored: non_neg_integer()
+        }
+  def mint_missing_content_secrets(opts \\ []) do
+    limit = Keyword.get(opts, :limit, @content_webhook_reconcile_limit)
+    zero = %{swept: 0, minted: 0, registered: 0, skipped: 0, errored: 0}
+
+    limit
+    |> list_sites_missing_content_secret()
+    |> Enum.reduce(zero, fn site, acc ->
+      acc = Map.update!(acc, :swept, &(&1 + 1))
+
+      case mint_content_publish_secret(site, opts) do
+        {:ok, _site, :ok} ->
+          acc |> Map.update!(:minted, &(&1 + 1)) |> Map.update!(:registered, &(&1 + 1))
+
+        {:ok, _site, _registration} ->
+          Map.update!(acc, :minted, &(&1 + 1))
+
+        :noop ->
+          Map.update!(acc, :skipped, &(&1 + 1))
+
+        {:error, reason} ->
+          Logger.warning(
+            "content-publish secret mint for site #{site.id} was refused: #{inspect(reason)}"
+          )
+
+          Map.update!(acc, :errored, &(&1 + 1))
+      end
+    end)
   end
 
   defp do_ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret, mode)

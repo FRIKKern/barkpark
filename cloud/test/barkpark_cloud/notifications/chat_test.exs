@@ -50,7 +50,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
   describe "put_channel/4 sealing" do
     test "seals plaintext credentials — the ciphertext is never the plaintext" do
       team = team_fixture()
-      creds = %{"url" => "https://discord.com/api/webhooks/1/abc"}
+      creds = %{"url" => "https://203.0.113.11/api/webhooks/1/abc"}
 
       assert {:ok, settings} = Notifications.put_channel(team, "discord", true, creds)
       [chan] = settings.channels
@@ -58,14 +58,14 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       assert chan.enabled
 
       # Stored value is ciphertext, not the plaintext URL.
-      refute chan.credentials_encrypted =~ "discord.com"
+      refute chan.credentials_encrypted =~ "203.0.113.11"
       assert {:ok, json} = Vault.decrypt(chan.credentials_encrypted)
       assert Jason.decode!(json) == creds
     end
 
     test "a toggle (creds: nil) keeps the previously-sealed credentials" do
       team = team_fixture()
-      creds = %{"url" => "https://discord.com/api/webhooks/1/abc"}
+      creds = %{"url" => "https://203.0.113.11/api/webhooks/1/abc"}
       {:ok, s1} = Notifications.put_channel(team, "discord", true, creds)
       [c1] = s1.channels
 
@@ -118,10 +118,10 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_fixture()
 
       {:ok, _} =
-        Notifications.put_channel(team, "discord", true, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", true, %{"url" => "https://203.0.113.11/x"})
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", false, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", false, %{"url" => "https://203.0.113.12/x"})
 
       %{team: team}
     end
@@ -163,7 +163,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
   describe "settings_view/1 credential no-leak" do
     test "the view reports configured/enabled but NEVER the ciphertext" do
       team = team_fixture()
-      creds = %{"url" => "https://discord.com/api/webhooks/1/secret"}
+      creds = %{"url" => "https://203.0.113.11/api/webhooks/1/secret"}
       {:ok, _} = Notifications.put_channel(team, "discord", true, creds)
 
       view = Notifications.settings_view(Notifications.get_or_create_settings(team))
@@ -183,7 +183,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "discord", true, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", true, %{"url" => "https://203.0.113.11/x"})
 
       # provision_failed is default-on → discord is selected.
       :ok = Notifications.dispatch_event(team, :provision_failed, %{name: "acme"})
@@ -198,7 +198,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "discord", true, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", true, %{"url" => "https://203.0.113.11/x"})
 
       :ok = Notifications.dispatch_event(team, :provision_succeeded, %{name: "acme"})
 
@@ -209,7 +209,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "discord", true, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", true, %{"url" => "https://203.0.113.11/x"})
 
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
 
@@ -227,7 +227,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
 
@@ -252,7 +252,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       # No route written, no matrix touched, nothing default-on: a fresh account.
       :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "acme"})
@@ -270,7 +270,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
 
@@ -283,7 +283,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       # This is the property that chose `@chat_always_send` over
       # `@chat_default_on`: an event routed through the matrix would accept an
@@ -311,13 +311,13 @@ defmodule BarkparkCloud.Notifications.ChatTest do
 
       # (2) only a DISABLED channel
       {:ok, _} =
-        Notifications.put_channel(team, "discord", false, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", false, %{"url" => "https://203.0.113.11/x"})
 
       assert {:ok, 0} = Notifications.send_test_chat(team)
 
       # (3) a channel_type filter that matches nothing
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       assert {:ok, 0} = Notifications.send_test_chat(team, "telegram")
 
@@ -331,7 +331,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       assert {:ok, 1} = Notifications.send_test_chat(team)
       assert [%{args: %{"payload" => %{"alerts_muted" => false}}}] = all_enqueued()
@@ -366,7 +366,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       {:ok, _} = Notifications.update_settings(team, %{"alerts_enabled" => false})
 
@@ -389,7 +389,7 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       FakeHttpClient.program([{:ok, %{status: 200, body: ""}}])
       assert {:ok, 1} = Notifications.send_test_chat(team)
@@ -424,10 +424,10 @@ defmodule BarkparkCloud.Notifications.ChatTest do
       team = team_with_member()
 
       {:ok, _} =
-        Notifications.put_channel(team, "slack", true, %{"url" => "https://hooks.slack.com/x"})
+        Notifications.put_channel(team, "slack", true, %{"url" => "https://203.0.113.12/x"})
 
       {:ok, _} =
-        Notifications.put_channel(team, "discord", true, %{"url" => "https://discord.com/x"})
+        Notifications.put_channel(team, "discord", true, %{"url" => "https://203.0.113.11/x"})
 
       # A disabled third channel is SELECTED by nothing and must not be counted.
       {:ok, _} =

@@ -108,6 +108,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
+      POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
@@ -4523,6 +4524,40 @@ defmodule BarkparkCloud.Web.Router do
     else
       rows = Enum.map(Registry.barkparks_without_live_agent_token(), &no_agent_token_json/1)
       json(conn, 200, %{barkparks: rows, count: length(rows)})
+    end
+  end
+
+  # POST /v1/operator/sites/content-secrets/mint → 200
+  # {swept, minted, registered, skipped, errored} — THE MINT
+  # (task-bf9a5199484a5a6b), the WRITE half of the repair whose visibility half
+  # shipped with the hourly `ContentWebhookReconciler`.
+  #
+  # A VERB, NOT A TICK — the ruling on that row. The hourly reconcile can only
+  # register a webhook for a site that ALREADY has a content-publish secret;
+  # `ensure_content_webhook/2` reveals one and never mints one, so a content-bound
+  # site that never got a secret reports `publish_trigger: absent` forever and no
+  # schedule can repair it. Folding the mint into that schedule was the other
+  # option and was refused: minting a credential silently turns every content-bound
+  # site into a live publish target on the next tick, including sites a human
+  # deliberately left un-wired, and it is a write nobody asked for with nobody's
+  # name on it. Behind an operator route the mint is an intentional act with an
+  # audit row (`site.content_secret_minted`) naming the operator who asked, and the
+  # registration happens INLINE rather than an hour later.
+  #
+  # Thin, like every other handler in this seam: one call over
+  # `Registry.mint_missing_content_secrets/1`, zero business logic here. The
+  # NEVER-OVERWRITE rule, the idempotence and the narrow `:reconcile` registration
+  # mode are all stated and enforced there, not in the router.
+  post "/v1/operator/sites/content-secrets/mint" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      tally =
+        Registry.mint_missing_content_secrets(actor_user_id: conn.assigns.current_user.id)
+
+      json(conn, 200, tally)
     end
   end
 

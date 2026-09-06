@@ -44,6 +44,8 @@ defmodule BarkparkCloud.Notifications do
     Channels,
     Delivery,
     DeliveryReason,
+    DeployRateAlert,
+    DeployRateAlertState,
     DigestEmail,
     DigestRun,
     EmailSettings,
@@ -657,6 +659,192 @@ defmodule BarkparkCloud.Notifications do
 
         {:ok, %{sent: sent, recipients: recipients}}
     end
+  end
+
+  @doc """
+  dr-bl-rate-notice — THE FLEET-RATE NOTICE PASS. One reading per team, one
+  email per RED EPISODE, and never one per deployment (charter D14).
+
+  Driven hourly by `Workers.DeployRateAlertWorker`. For every team that owns an
+  instance it takes the SAME reading the daily digest takes —
+  `DigestEmail.deploy_health/1`, scoped to that team's own site ids, which is
+  the one `DeployLedger.census/3` call site on this rail — grades it through
+  `DeployRateAlert.verdict/1`, advances that team's `DeployRateAlertState`, and
+  sends only on the EDGE.
+
+  ## The three gates a send must clear, in order
+
+    1. **The rate is RED** — settled-basis failure percentage at or above
+       `DeployRateAlert.alert_pct/0`. A refused node (sample below
+       `DeployLedger.min_sample/0`) is `:unmeasured` and can never reach this
+       gate, so the n≈200 floor is inherited from the census rather than
+       re-implemented here.
+    2. **It has been red for `DeployRateAlert.consecutive_ticks/0` CONSECUTIVE
+       readings.** Any non-red reading — `:clear` OR `:unmeasured` — resets the
+       counter to zero.
+    3. **No notice is latched.** `alerted_at` is stamped on the send and cleared
+       when the verdict leaves red, so an incident lasting fourteen hours is one
+       email and not fourteen.
+
+  ## Why it rides the `deployment_failed` toggle and adds no vocabulary
+
+  A new per-event column would be a new promise on the console surface, a
+  migration, and a row in the bidirectional notification census — for a switch
+  that answers the question the team already answered. This notice has the SAME
+  SUBJECT as `deployment_failed` (deploys of this team's sites are failing) at a
+  different GRAIN, so it honours that team's existing answer: `alerts_enabled`
+  off, or `deployment_failed` off, and nothing is sent. A team that muted the
+  torrent is not signed up for a summary of it.
+
+  It rides `Mailer` + `record_delivery/6` directly, exactly as
+  `deliver_fleet_digest/1` does, and NOT `dispatch_event/3`: the dispatcher fans
+  one event to a team's whole membership through the per-event vocabulary, and
+  putting a rate through it would mean adding an event atom nothing else can
+  produce. The receipt lands in `notification_deliveries` under the event
+  `"deploy_failure_rate"` with `kind: "alert"`.
+
+  Returns `%{teams: n, red: n, sent: n, latched: n}` — the accounting, so a run
+  that mailed nobody can be told apart from a run that never happened.
+  """
+  @spec deliver_deploy_rate_notices(keyword()) :: %{
+          teams: non_neg_integer(),
+          red: non_neg_integer(),
+          sent: non_neg_integer(),
+          latched: non_neg_integer()
+        }
+  def deliver_deploy_rate_notices(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    team_ids =
+      Registry.all_barkparks()
+      |> Enum.map(& &1.team_id)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    Enum.reduce(team_ids, %{teams: 0, red: 0, sent: 0, latched: 0}, fn team_id, acc ->
+      health = DigestEmail.deploy_health(now: now, site_ids: team_site_ids(team_id))
+      verdict = DeployRateAlert.verdict(health)
+      state = advance_deploy_rate_state(team_id, verdict, health, now)
+
+      acc = %{acc | teams: acc.teams + 1}
+      acc = if verdict == :red, do: %{acc | red: acc.red + 1}, else: acc
+
+      cond do
+        verdict != :red ->
+          acc
+
+        state.consecutive_red < DeployRateAlert.consecutive_ticks() ->
+          acc
+
+        # THE LATCH. `alerted_at` is non-nil for as long as this episode lasts;
+        # `advance_deploy_rate_state/4` clears it the moment the verdict leaves
+        # red, which is what re-arms the notice for the NEXT episode.
+        not is_nil(state.alerted_at) ->
+          %{acc | latched: acc.latched + 1}
+
+        true ->
+          sent = send_deploy_rate_notice(team_id, health, state.consecutive_red)
+
+          # STAMPED WHATEVER THE TRANSPORT SAID. A send that failed still
+          # happened, and re-trying it on the next tick would turn one bad relay
+          # hour into an hourly retry storm against the same inbox — the exact
+          # volume shape this slice exists to refuse. The failure is visible as
+          # a `failed` Delivery row, which is this system's documented retry
+          # seam.
+          latch_deploy_rate_state(state, now)
+
+          %{acc | sent: acc.sent + sent}
+      end
+    end)
+  end
+
+  # ONE SEND FOR ONE TEAM. Gated on the team's EXISTING answer about deployment
+  # failure mail — no new column, no new checkbox (see the moduledoc above).
+  defp send_deploy_rate_notice(team_id, health, consecutive) do
+    settings = get_or_create_settings(team_id)
+
+    if EmailSettings.event_enabled?(settings, :deployment_failed) do
+      recipients = team_id |> team_member_emails() |> Enum.uniq()
+
+      Enum.count(recipients, fn recipient ->
+        result =
+          health
+          |> DeployRateAlert.build(consecutive, recipient)
+          |> Mailer.deliver()
+
+        record_delivery(
+          team_id,
+          recipient,
+          "deploy_failure_rate",
+          "alert",
+          result,
+          @platform_carrier
+        )
+
+        match?({:ok, _}, result)
+      end)
+    else
+      0
+    end
+  end
+
+  # THE STATE MACHINE, and the whole of it is three lines of arithmetic.
+  #
+  # `consecutive_red` counts UP only on red and is reset to zero by every other
+  # reading, `:unmeasured` INCLUDED: a run of red interrupted by an hour nobody
+  # could measure is not a run of red, and treating an unmeasurable hour as a
+  # continuation would let a fleet that went quiet keep accruing toward an alert.
+  #
+  # `alerted_at` is cleared by every non-red reading. That is the re-arm: it is
+  # not a cooldown clock, so a fleet that recovers and fails again in the same
+  # hour is alerted again, while a fleet that never recovers is alerted once.
+  defp advance_deploy_rate_state(team_id, verdict, health, now) do
+    existing =
+      Repo.get_by(DeployRateAlertState, team_id: team_id) ||
+        %DeployRateAlertState{team_id: team_id, consecutive_red: 0}
+
+    node = DeployRateAlert.rate_node(health) || %{}
+
+    attrs =
+      case verdict do
+        :red ->
+          %{
+            verdict: "red",
+            consecutive_red: (existing.consecutive_red || 0) + 1,
+            alerted_at: existing.alerted_at
+          }
+
+        other ->
+          %{verdict: to_string(other), consecutive_red: 0, alerted_at: nil}
+      end
+
+    attrs =
+      Map.merge(attrs, %{
+        team_id: team_id,
+        observed_at: now,
+        last_pct: Map.get(node, :pct),
+        last_sample: Map.get(node, :sample)
+      })
+
+    {:ok, state} =
+      existing
+      |> DeployRateAlertState.changeset(attrs)
+      |> Repo.insert_or_update()
+
+    state
+  end
+
+  defp latch_deploy_rate_state(%DeployRateAlertState{} = state, now) do
+    {:ok, latched} =
+      state
+      |> DeployRateAlertState.changeset(%{
+        team_id: state.team_id,
+        verdict: "red",
+        alerted_at: now
+      })
+      |> Repo.update()
+
+    latched
   end
 
   # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is
@@ -1320,11 +1508,13 @@ defmodule BarkparkCloud.Notifications do
   BEFORE it touches the changeset — the `Registry.connect_provider/3` pattern.
   Passing `creds: nil` keeps any previously-sealed credentials (a pure toggle).
 
-  THE SSRF BOUNDARY IS HERE, at SAVE time: a `webhook` channel whose URL resolves
-  to a private / loopback / link-local / cloud-metadata address is REJECTED before
-  it is ever stored (`SafeUrl.check/1`), not merely at send time. `Channels.Webhook`
-  re-checks at send for DNS-rebind defense in depth, but a save-time reject means a
-  poisoned URL never persists in the first place.
+  THE SSRF BOUNDARY IS HERE, at SAVE time, for EVERY url-bearing channel — not the
+  literal `webhook` alone. `discord`, `slack` and `webhook` all carry the same
+  `%{"url" => …}` credential and all three are URL-controlled by the operator, so
+  the guard keys on that shape: a URL resolving to a private / loopback /
+  link-local / cloud-metadata address is REJECTED before it is ever stored
+  (`SafeUrl.check/1`). Send time re-checks the same shape for DNS-rebind defense in
+  depth, but a save-time reject means a poisoned URL never persists at all.
   """
   @spec put_channel(Team.t() | binary(), String.t(), boolean(), map() | nil) ::
           {:ok, EmailSettings.t()} | {:error, Ecto.Changeset.t()}
@@ -1341,23 +1531,28 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  # Save-time SSRF guard for the generic webhook channel. The first-party channels
-  # post to known provider domains and are not user-URL-controlled, so they skip.
-  defp validate_channel_url("webhook", %{"url" => url}) when is_binary(url) do
+  # Save-time SSRF guard, keyed on the CREDENTIAL SHAPE rather than the type name.
+  # `discord`, `slack` and `webhook` all carry the same `%{"url" => …}` plaintext
+  # credential (see `ChannelConfig`'s moduledoc) and all three are user-URL-
+  # controlled — a Slack/Discord incoming webhook IS a URL the operator pastes.
+  # Matching on the literal "webhook" fenced one of the three; matching on the
+  # `"url"` key fences every url-bearing type, including one added later.
+  defp validate_channel_url(type, %{"url" => url}) when is_binary(url) do
     case SafeUrl.check(url) do
       :ok -> :ok
-      {:error, reason} -> {:error, channel_url_error(reason)}
+      {:error, reason} -> {:error, channel_url_error(type, reason)}
     end
   end
 
   defp validate_channel_url(_type, _creds), do: :ok
 
   # An invalid changeset the router renders as 422 — a save-time SSRF/URL reject
-  # never persists a poisoned webhook channel.
-  defp channel_url_error(reason) do
+  # never persists a poisoned channel. The message names the type the operator
+  # typed, so a refused `slack` save does not read as a complaint about a webhook.
+  defp channel_url_error(type, reason) do
     %EmailSettings{}
     |> Ecto.Changeset.change()
-    |> Ecto.Changeset.add_error(:channels, "include an unsafe webhook url", reason: reason)
+    |> Ecto.Changeset.add_error(:channels, "include an unsafe #{type} url", reason: reason)
   end
 
   @doc """
@@ -1506,6 +1701,7 @@ defmodule BarkparkCloud.Notifications do
 
   defp do_deliver_chat(team_id, %ChannelConfig{type: type} = cfg, event, payload) do
     with {:ok, creds} <- reveal_credentials(cfg),
+         :ok <- check_credential_url(creds),
          {:ok, url, body, headers} <- shape(type, creds, event, payload, team_id: team_id) do
       post_chat(team_id, type, event, url, body, headers)
     else
@@ -1515,9 +1711,17 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  # PURE envelope builder — dispatch on channel `type` to the right shaper. The
-  # generic `webhook` type is the only one routed through `SafeUrl` (send-time
-  # DNS-rebind defense, inside `Channels.Webhook`).
+  # Send-time SSRF re-check for EVERY url-bearing credential — the DNS-rebind
+  # defense. Keyed on the credential shape, not on the type name, so discord,
+  # slack and webhook are all covered here (and so is a url-bearing type added
+  # later); a credential with no `"url"` — telegram, pushover — passes through.
+  # `Channels.Webhook` keeps its own check as defense in depth.
+  defp check_credential_url(%{"url" => url}) when is_binary(url), do: SafeUrl.check(url)
+  defp check_credential_url(_creds), do: :ok
+
+  # PURE envelope builder — dispatch on channel `type` to the right shaper. Every
+  # url-bearing credential has already passed `check_credential_url/1` in
+  # `do_deliver_chat/4` before a shaper runs.
   defp shape(type, creds, event, payload, opts) do
     case type do
       "discord" -> Channels.Discord.shape(creds, event, payload)

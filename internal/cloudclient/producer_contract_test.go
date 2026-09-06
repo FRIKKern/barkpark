@@ -249,41 +249,117 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 		}
 	}
 
-	// EXACT COUNT, not a floor — and the upper half is the load-bearing one.
+	// THE SET, not the count. Until 2026-09-06 this arm pinned `len(producer)`
+	// to an integer. That integer moved four times in one day on honest field
+	// additions (31 -> 34, #15095; 34 -> 36, #16511) and each move reddened
+	// main's Go gate with a message that named a NUMBER — "extracted 36, expected
+	// 34" — and left the reader to diff two source files by hand to learn WHICH
+	// key had appeared. A cardinality pin is a tripwire on GROWTH, not a guard
+	// against drift: it fires on every legitimate change and cannot tell an added
+	// top-level key from a regex that started matching a nested one, because
+	// both read as "+1". Four re-pins in a day is the shape of a guard that is
+	// about to be waved through, and the eighth re-pin is what lets the wide
+	// regex in.
 	//
-	// A LOWER count means the parse went blind, which the spot checks above
-	// already catch. A HIGHER count means it went WIDE: matching identifiers
-	// that are not top-level keys (a field inside `console:`'s Enum.map, an
-	// argument name, a nested map) silently ENLARGES the set of keys the
-	// producer is believed to send, and every extra key is one that can mask a
-	// genuinely dormant field by coincidence. Measured: a regex relaxed from
-	// `^\s{6}(\w+):` to a bare `(\w+):` still let the guard PASS — it found the
-	// same two dormant tags, but only because nothing nested happened to be
-	// named `port`. That is a guard passing by luck, which is the exact defect
-	// this file exists to prevent, so the count is pinned in both directions.
+	// The set keeps BOTH directions the count had, and names the offender:
 	//
-	// This number MOVES when the serializer legitimately gains or loses a key.
-	// That is intended: the contract changed, and someone should look.
-	// 31 -> 34 (#15095, task-5d3febd051e63c1d): deployment_json/1 gained `slot`, `port`
-	// and `health_exit_code` (the served-slot truth, nullable health). `port` left
-	// dormantTags in the same change — the producer now sends it, so the waiver
-	// was stale and this guard said so on main (measured 2026-09-02).
-	// 34 -> 36 (#16511, task-f156b5e43bfbfe91): deployment_json/1 gained
-	// `failure_code` and `failure_message` — the fused refusal string unfused
-	// into a typed code + message beside the composite `failure_reason`. This
-	// pin was the only consumer that noticed; it reddened main's Go gate from
-	// 3d238fdd8 (2026-09-06 17:21Z) until this line moved.
-	const producerKeyCount = 36 // deployment_json/1's 34 + site_deployment_json/3's stages + url
-	if len(producer) != producerKeyCount {
-		direction := "WIDE — it is matching identifiers that are not top-level keys, " +
-			"which can mask a dormant field"
-		if len(producer) < producerKeyCount {
-			direction = "BLIND — it is missing real keys, so live fields will be " +
-				"reported as never-sent"
+	//   MISSING a key  -> the parse went BLIND (a real key no longer found), or the
+	//                     serializer genuinely dropped it. Either way, the message
+	//                     says which one.
+	//   EXTRA key      -> the parse went WIDE (matching an identifier that is not
+	//                     a top-level key — a field inside `console:`'s Enum.map,
+	//                     an argument name, a nested map), or the serializer
+	//                     genuinely gained a key. The NAME tells the two apart in
+	//                     one glance: `failure_code` is a key deployment_json/1
+	//                     now emits, `port` inside a nested map is not.
+	//
+	// Every extra key is also one that can mask a genuinely dormant field by
+	// coincidence (measured: a regex relaxed from `^\s{6}(\w+):` to a bare
+	// `(\w+):` still let the dormant-tag guard PASS, only because nothing nested
+	// happened to be named `port`), which is why the wide direction is pinned at
+	// all rather than being a floor.
+	//
+	// This list MOVES when the serializer legitimately gains or loses a key.
+	// That is intended: the contract changed, and someone should look — and the
+	// diff of this literal IS the look. The fix for an honest addition is one
+	// line: add the key here, in its place in the serializer's order, with the PR
+	// that taught deployment_json/1 to send it. History of the pin:
+	//   31 -> 34 (#15095, task-5d3febd051e63c1d): +slot, +port, +health_exit_code.
+	//   34 -> 36 (#16511, task-f156b5e43bfbfe91): +failure_code, +failure_message —
+	//            reddened main's Go gate from 3d238fdd8 (2026-09-06 17:21Z) until
+	//            the count moved (#16547); this arm would have printed the two
+	//            names instead.
+	if missing, extra := producerKeySetDiff(producer); len(missing)+len(extra) > 0 {
+		if len(missing) > 0 {
+			t.Errorf("the extractor no longer finds %v, which deployment_json/1 (+ "+
+				"site_deployment_json/3) is pinned to emit. Either the parse has gone BLIND "+
+				"(a real key stopped matching reTopKey — live fields will be reported as "+
+				"never-sent) or the serializer genuinely dropped the key. If the serializer "+
+				"changed, remove the key from expectedProducerKeys and say why.", missing)
 		}
-		t.Errorf("extracted %d producer keys, expected exactly %d. The parse has gone %s. "+
-			"If the serializer genuinely changed, update producerKeyCount and say why.",
-			len(producer), producerKeyCount, direction)
+		if len(extra) > 0 {
+			t.Errorf("the extractor found %v, which expectedProducerKeys does not list. "+
+				"Either the parse has gone WIDE (matching an identifier that is not a "+
+				"top-level key, which can mask a dormant field) or the serializer genuinely "+
+				"gained the key. If it is a real top-level key of deployment_json/1 or a "+
+				"Map.put in site_deployment_json/3, add it to expectedProducerKeys in the "+
+				"serializer's order and cite the PR that added it.", extra)
+		}
+	}
+}
+
+// expectedProducerKeys is the pinned key SET of deployment_json/1 (in the
+// serializer's own order, so a diff of this literal reads like a diff of the
+// serializer) followed by site_deployment_json/3's two Map.put additions.
+// Pinned 2026-09-06 against origin/main 4e7dd109f: 34 + 2 = 36 keys, the same
+// population the retired producerKeyCount named.
+var expectedProducerKeys = []string{
+	// deployment_json/1
+	"id", "site_id", "status", "git_ref", "artifact_url", "image_tag",
+	"build_log_url", "failure_reason", "failure_class", "failure_reason_raw",
+	"refusal_phase", "failure_code", "failure_message", "deferral_depth",
+	"deferral_bound", "deferral_cause", "became_live_at", "environment", "branch",
+	"preview_host", "preview_url", "trigger", "source", "artifact_sha256",
+	"console", "detail", "build_id", "content_rev", "stage", "slot", "port",
+	"health_exit_code", "inserted_at", "updated_at",
+	// site_deployment_json/3
+	"stages", "url",
+}
+
+// producerKeySetDiff returns the pinned keys the extractor did NOT find
+// (missing) and the keys it found that are NOT pinned (extra), both sorted so
+// the failure message is stable.
+func producerKeySetDiff(producer map[string]bool) (missing, extra []string) {
+	expected := make(map[string]bool, len(expectedProducerKeys))
+	for _, k := range expectedProducerKeys {
+		expected[k] = true
+		if !producer[k] {
+			missing = append(missing, k)
+		}
+	}
+	for k := range producer {
+		if !expected[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return missing, extra
+}
+
+// THE PIN MUST BE A SET. A duplicate entry in expectedProducerKeys would let a
+// 36-line literal describe 35 keys and nobody would notice, because the diff
+// arm above is keyed on membership. Refuse it here.
+func TestExpectedProducerKeysHasNoDuplicates(t *testing.T) {
+	seen := map[string]bool{}
+	for _, k := range expectedProducerKeys {
+		if seen[k] {
+			t.Errorf("expectedProducerKeys lists %q twice", k)
+		}
+		seen[k] = true
+	}
+	if len(seen) == 0 {
+		t.Fatal("expectedProducerKeys is empty — with nothing pinned, the diff arm cannot fail")
 	}
 }
 
