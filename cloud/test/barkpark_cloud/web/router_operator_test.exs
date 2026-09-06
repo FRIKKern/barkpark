@@ -640,6 +640,7 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
         -(Registry.stale_after_seconds("provision_support") + 60),
         :second
       )
+
     {:ok, _} = old |> Ecto.Changeset.change(inserted_at: past) |> Repo.update()
 
     conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
