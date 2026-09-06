@@ -14,6 +14,39 @@
 
 (function () {
   const Hooks = {};
+
+  // Native on-page text fields keep browser selection/undo and the ordinary
+  // form save coordinator. Only their height is managed here.
+  Hooks.BarkparkPaperAutoSize = {
+    mounted() {
+      this._fit = () => {
+        if (this._disposed || !this.el.isConnected) return;
+        this.el.style.height = "0px";
+        this.el.style.height = `${this.el.scrollHeight}px`;
+      };
+      this._fit();
+      this.el.addEventListener("input", this._fit);
+      this._width = null;
+      if (window.ResizeObserver) {
+        this._resize = new window.ResizeObserver(([entry]) => {
+          if (!entry || entry.contentRect.width === this._width) return;
+          this._width = entry.contentRect.width;
+          this._fit();
+        });
+        this._resize.observe(this.el.parentElement);
+      } else {
+        window.addEventListener("resize", this._fit);
+      }
+      document.fonts?.ready.then(this._fit);
+    },
+    updated() { this._fit(); },
+    destroyed() {
+      this._disposed = true;
+      this.el.removeEventListener("input", this._fit);
+      this._resize?.disconnect();
+      window.removeEventListener("resize", this._fit);
+    },
+  };
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
   const PAPER_FLUSH_TARGETS =
     '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"], ' +

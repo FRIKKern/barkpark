@@ -1685,6 +1685,32 @@
   box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
 }
 .bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
+.bp-paper-edit-form.bp-paper-stage-form { display: block; }
+.bp-paper-stage-form .bp-paper-contextual-panel { display: grid; gap: 0.65rem; }
+.bp-paper-contextual-preview textarea.bp-paper-inline-text {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  resize: none;
+  overflow: hidden;
+  outline-offset: 3px;
+}
+.bp-paper-contextual-preview textarea.bp-paper-inline-text:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-contextual-preview textarea.bp-paper-inline-text::placeholder {
+  color: var(--paper-ink-soft);
+}
 .bp-paper-contextual-panel .bp-paper-edit-fieldlabel {
   display: grid; gap: 0.3rem; min-width: 0; color: var(--paper-ink-soft);
 }
