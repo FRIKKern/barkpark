@@ -868,10 +868,63 @@ write_remote_reader() {
   cat > "$WORK/remote.sh" <<'REMOTE'
 set -u
 QS="$1"
-CID="$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)"
-if [ -z "$CID" ]; then echo "CR_ERROR=no_control_plane_container"; exit 0; fi
-WT="$(docker exec "$CID" printenv WORKER_TOKEN)"
-if [ -z "$WT" ]; then echo "CR_ERROR=empty_worker_token"; exit 0; fi
+# THE CONTAINER IS FOUND BY A STABLE IDENTITY, NEVER BY THE IMAGE TAG.
+# This used to be `docker ps -q --filter ancestor=cloud-control_plane:latest`.
+# That filter matches by IMAGE, and `latest` is the one thing about the control
+# plane that MOVES: deploy/cp-deploy.sh:133 retags the serving image to
+# `cloud-control_plane:rollback`, `docker compose build` (cp-deploy.sh:452) then
+# points `latest` at the NEW image, and only after the health gate does the new
+# slot boot (cp-deploy.sh:470). For that whole window the OLD container is still
+# the one serving and `ancestor=...:latest` matches NOTHING — the read comes back
+# empty and the reconciler, correctly, refuses to call it a green. Three rc-2
+# SILENCE runs on 2026-09-06 (34048569972, 34050639617, 34049400499) are exactly
+# that window. The reconciler was right; the KEY was wrong.
+#
+# The stable identity is the CONTAINER NAME PREFIX, which compose derives from
+# the project name plus the service name and which no image rebuild touches:
+# cloud/docker-compose.yml:196,202 define the services `control_plane_blue` and
+# `control_plane_green`, and deploy/cp-deploy.sh:286 builds the very same string
+# itself — `"${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1"`.
+# Matching the SLOT-LESS prefix is what makes this immune to the blue/green
+# rename the old comment in deploy.yml warned about: both slots match, and the
+# reader wants either — any live control plane carries the same WORKER_TOKEN,
+# and the token is all this read needs before it talks to the public route.
+#
+# AND IT RETRIES, BOUNDED AND OUT LOUD. Even the right key sees nothing in the
+# instant between the old slot stopping and the new one being up. The retry is
+# capped, every attempt is printed as CR_CP_RETRY=<n>/<max>, and the total is
+# printed as CR_CP_ATTEMPTS=<n> so the caller can say how hard it looked. It is
+# NOT a way to turn an absence into a pass: after the last attempt an absent
+# container is still CR_ERROR=no_control_plane_container and the run still exits
+# 2 SILENCE. Fail-closed is the invariant; the retry only removes the FALSE
+# absences.
+CP_PROJECT="${COMPOSE_PROJECT_NAME:-cloud}"
+CP_NAME_FILTER="${CP_PROJECT}-control_plane_"
+CP_ATTEMPTS="${CR_CP_ATTEMPTS:-6}"
+CP_DELAY="${CR_CP_DELAY:-5}"
+CID=""
+WT=""
+CP_SEEN=0
+CP_TRIES=0
+while [ "$CP_TRIES" -lt "$CP_ATTEMPTS" ]; do
+  CP_TRIES=$((CP_TRIES + 1))
+  for c in $(docker ps -q --filter "name=$CP_NAME_FILTER" 2>/dev/null); do
+    CP_SEEN=1
+    t="$(docker exec "$c" printenv WORKER_TOKEN 2>/dev/null)"
+    if [ -n "$t" ]; then CID="$c"; WT="$t"; break; fi
+  done
+  if [ -n "$CID" ]; then break; fi
+  echo "CR_CP_RETRY=$CP_TRIES/$CP_ATTEMPTS"
+  if [ "$CP_TRIES" -lt "$CP_ATTEMPTS" ]; then sleep "$CP_DELAY"; fi
+done
+echo "CR_CP_ATTEMPTS=$CP_TRIES"
+if [ -z "$CID" ]; then
+  # A container that was THERE but handed back no token is a different fault from
+  # no container at all, and the two must not be merged: one is a swap window or
+  # a dead box, the other is a mis-provisioned control plane.
+  if [ "$CP_SEEN" = "1" ]; then echo "CR_ERROR=empty_worker_token"; else echo "CR_ERROR=no_control_plane_container"; fi
+  exit 0
+fi
 CODE="$(curl -s -o /tmp/cr-body.json -w '%{http_code}' --max-time 30 -H "authorization: Bearer $WT" "https://barkpark.cloud/v1/deliveries?$QS")"
 echo "CR_HTTP=$CODE"
 if [ "$CODE" = "200" ]; then
@@ -901,7 +954,7 @@ REMOTE
 
 # crown_read <query-string> <out-file> -> 0 read / 2 could not read
 crown_read() {
-  local qs="$1" out="$2" body http via err det
+  local qs="$1" out="$2" body http via err det cpat
   case "$READER" in
     fixture)
       [ -f "$CROWN_FIXTURE" ] || { READS_FAILED=$((READS_FAILED + 1)); warn "  crown fixture is unreadable: ${CROWN_FIXTURE:-<none>}"; return 2; }
@@ -947,7 +1000,8 @@ crown_read() {
             reason "${det:-GET /v1/deliveries answered HTTP $http to the WORKER principal (WORKER_TOKEN) — PR #14979 admitted that principal to this route, so this is a REGRESSION of that fix, not a tier mismatch} [${err:-http_$http}, ?$qs]"
             ;;
           *)
-            warn "  the crown could not be read on the box for ?$qs: ${err:-<none>}"
+            cpat="$(printf '%s\n' "$body" | sed -n 's/^CR_CP_ATTEMPTS=//p' | head -1)"
+            warn "  the crown could not be read on the box for ?$qs: ${err:-<none>}${cpat:+ (the control-plane container was looked for $cpat time(s) before the absence was named)}"
             ;;
         esac
         return 2
