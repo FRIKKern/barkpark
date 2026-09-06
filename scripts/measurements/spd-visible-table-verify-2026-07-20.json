@@ -32,6 +32,21 @@
     "sha_read_method": "ssh root@157.180.90.121 \"cd /opt/barkpark && git rev-parse HEAD\""
   },
   "provenance_note": "BRACKETED (D97): `provenance` is the PRE-sweep read and `provenance_post` the POST-sweep read of the same two facts. `provenance_bracket.matched` false means the run FAILED — a published matrix always carries a matched bracket. Each row also carries its own `measured_at`, so a mid-sweep rotation can be located in time rather than inferred.",
+  "historical_status": {
+    "classification": "HISTORICAL RECORD — NOT A COMPARAND",
+    "verdict": "This artefact was measured PRE-LADDER and PRE-RETURN-GRAMMAR. Do not row-compare a fresh run against it: the comparison reports DIVERGENT by construction and that verdict carries no information.",
+    "measured_at_served_sha": "65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f",
+    "missing_product_generations": [
+      "Tier-2 ladder — merge 4074d1986 (#4922). `git merge-base --is-ancestor 4074d1986 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f` exits NON-ZERO, so the ladder is absent from the measured build.",
+      "Tier-3 return grammar — merge 37740a5e9ce4e416a31b87f3afdb0ef6eb085aac (#5014). `git merge-base --is-ancestor 37740a5e9 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f` exits NON-ZERO, so the return grammar is absent too.",
+      "The current instrument's per-row non-emptiness summary, which this artefact predates entirely — its rows carry no such block, so any header-field diff against a current run differs on schema alone."
+    ],
+    "instrument_distance_note": "The distance from the measured sha to main GROWS DAILY — recompute it, never quote a frozen number: `git rev-list --count 65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f..origin/main`.",
+    "what_it_still_proves": "The BEFORE picture, and it is load-bearing. At viewport 1024 / user-opened this build painted a REAL scrim: panel_px 720, scrim.renders true, scrim_alpha 0.55, dimmed_content_px 378.958, panes.visible_pane_widths_px [44, 260]. Cite it for the pre-ladder state and for nothing else.",
+    "use_this_instead": "scripts/measurements/spd-bracketed-deployed-bracket-2026-07-22.json (raw runs: spd-bracketed-deployed-run1-2026-07-22.json, spd-bracketed-deployed-run2-2026-07-22.json) is the post-ladder comparand baseline, measured on deployed served_sha bdd7dac40dfbc3e1c91e252e202163480031a730, which HAS both merges named above as ancestors.",
+    "determinism_note": "A determinism claim must be run-1 vs run-2 of the SAME build. This file cannot serve as either leg for any build but its own.",
+    "readme": "scripts/measurements/README-visible-table-2026-07-20.md"
+  },
   "warnings": [
     "viewport 764px / user-opened / face \"native\": in-floor ch diverges from the probe by -5.7107% (assumed formula calc(55ch + 80px), resolved 598.591px). The floor's authored formula has probably changed — `in_floor_px_per_ch` in these rows is derived from a stale assumption. The probe ch (and every ch in the table above) is unaffected.",
     "viewport 764px / user-opened / face \"georgia\": in-floor ch diverges from the probe by -5.2579% (assumed formula calc(55ch + 80px), resolved 655.632px). The floor's authored formula has probably changed — `in_floor_px_per_ch` in these rows is derived from a stale assumption. The probe ch (and every ch in the table above) is unaffected.",
