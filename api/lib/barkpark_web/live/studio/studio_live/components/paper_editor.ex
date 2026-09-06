@@ -2005,7 +2005,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <% end %>
               </div>
             </div>
-            <details id={"columns-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--columns" phx-mounted={JS.ignore_attributes("open")}>
+            <details
+              id={"columns-controls-" <> @id}
+              class={[
+                "bp-paper-contextual-controls bp-paper-contextual-controls--columns",
+                Enum.all?(@block["columns"], &(&1 == [])) && "bp-paper-contextual-controls--columns-empty"
+              ]}
+              phx-mounted={JS.ignore_attributes("open")}
+            >
               <summary class="bp-paper-contextual-toggle">Configure columns</summary>
               <div class="bp-paper-contextual-panel">
                 <form id={"columns-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-columns-structure-editor">

@@ -99,6 +99,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     assert css =~ ".bp-paper-contextual-controls--section[open]"
     assert css =~ ".bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel"
+    assert css =~ ".bp-paper-contextual-controls--columns-empty {"
   end
 
   test "stack Section keeps reader chrome and mounts maximal contextual canvas runs" do
@@ -315,11 +316,18 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
            ]
 
     assert Enum.count(LazyHTML.query(tree, ".bp-paper-contextual-controls--columns")) == 1
+    assert Enum.empty?(LazyHTML.query(tree, ".bp-paper-contextual-controls--columns-empty"))
 
     assert LazyHTML.attribute(LazyHTML.query(form, "button[value='remove:1:first']"), "disabled") ==
              [""]
 
     assert Enum.count(LazyHTML.query(form, "[data-test-id='paper-structure-locked-note']")) == 1
+
+    empty = render_fields(%{"id" => "empty-columns", "type" => "columns", "columns" => [[], []]})
+    empty_tree = LazyHTML.from_fragment(empty)
+
+    assert Enum.count(LazyHTML.query(empty_tree, ".bp-paper-contextual-controls--columns-empty")) ==
+             1
   end
 
   test "generic Beta recursively edits every canonical Columns child" do
