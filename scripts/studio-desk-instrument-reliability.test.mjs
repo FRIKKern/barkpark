@@ -410,7 +410,18 @@ test('the run records which browser measured it', () => {
 });
 
 test('--help states the browser policy and the install command', () => {
-  const helpSrc = SRC.slice(SRC.indexOf('function usage()'), SRC.indexOf('const DEFAULT_DOC'));
+  // ANCHOR REPAIR (#16355). This slice used to end at `const DEFAULT_DOC`, which
+  // no longer exists — the committed default slug was deleted because it aged off
+  // the Papers window. `indexOf` would have returned -1, `slice(start, -1)` would
+  // have handed this test the WHOLE REST OF THE FILE, and every assertion below
+  // would have passed on prose that is not the help text at all. Both ends are
+  // now asserted present, so an anchor that moves reds THIS test rather than
+  // quietly widening it.
+  const usageStart = SRC.indexOf('function usage()');
+  const usageEnd = SRC.indexOf('const ANY_DOC', usageStart);
+  assert.ok(usageStart !== -1, 'the --help slice lost its start anchor `function usage()`');
+  assert.ok(usageEnd > usageStart, 'the --help slice lost its end anchor `const ANY_DOC`');
+  const helpSrc = SRC.slice(usageStart, usageEnd);
   assert.match(helpSrc, /BP_DESK_BROWSER/);
   assert.match(helpSrc, /npx playwright install chromium|p\.fix/,
     'the deployed-run slice reads --help first; the fix has to be there');
