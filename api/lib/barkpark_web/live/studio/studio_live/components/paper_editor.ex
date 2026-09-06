@@ -143,6 +143,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
+    assigns =
+      if assigns.canvas_eligible and assigns.doc_type == "paper",
+        do: assign(assigns, :blocks, Barkpark.Content.ensure_block_ids(assigns.blocks)),
+        else: assigns
+
     # Gate the bound/free split on having descriptors: only the Beta editor (with
     # an Expectation) shows the Properties panel. The paper pane passes
     # descriptors=[] ⇒ properties?=false ⇒ free == all blocks, panel self-hides.
@@ -484,7 +489,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"code", "Code"},
          {"blockquote", "Blockquote"},
          {"divider", "Divider"},
-         {"section", "Section"}
+         {"section", "Section"},
+         {"steps", "Steps"}
        ]},
       {"Article chrome",
        [
@@ -737,6 +743,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_rev, :any, default: nil)
   attr(:document_rev, :string, default: nil)
   attr(:container_id, :string, default: nil)
+  attr(:container_kind, :string, default: nil)
+  attr(:container_row_id, :string, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
@@ -758,6 +766,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}
       data-paper-container-id={@container_id}
+      data-paper-container-run={@container_id && @run_ordinal}
+      data-paper-container-kind={@container_kind}
+      data-paper-container-row-id={@container_row_id}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -1768,6 +1779,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </div>
           </details>
         </div>
+      <% "steps" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-steps-editor">
+          <%= if not editable_steps?(@block) do %>
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <p class="bp-paper-edit-readonly">Step identities need repair before editing; original content is preserved.</p>
+          <% else %>
+          <ol class="bp-steps">
+            <li :for={row <- editable_step_rows(@block)} class="bp-steps__step" data-step-row-id={row["id"]}>
+              <div :if={is_binary(row["title"]) and row["title"] != ""} class="bp-steps__title"><%= row["title"] %></div>
+              <div class="bp-steps__body">
+                <%= for segment <- step_body_segments(row, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.steps_run_slug(@root_slug, @id, row["id"])}
+                        run_blocks={run_blocks} run_ordinal={ordinal}
+                        dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="steps" container_row_id={row["id"]}
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key}
+                        canvas_enabled={@canvas_enabled} paper_links={@paper_links}
+                      />
+                  <% end %>
+                <% end %>
+              </div>
+            </li>
+          </ol>
+          <details id={"paper-steps-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure steps</summary>
+            <div class="bp-paper-contextual-panel">
+              <form id={"steps-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500">
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="step-count" value={length(editable_step_rows(@block))} />
+                <input type="hidden" name="step-new-row-id" value={Blocks.new_block_id()} />
+                <input type="hidden" name="step-new-child-id" value={Blocks.new_block_id()} />
+                <fieldset :for={{row, index} <- Enum.with_index(editable_step_rows(@block))}>
+                  <legend>Step <%= index + 1 %></legend>
+                  <input type="hidden" name={"step-#{index}-id"} value={row["id"]} />
+                  <label>Title
+                    <input type="text" name={"step-#{index}-title"} value={row["title"] || ""}
+                           class="bp-paper-edit-text" />
+                  </label>
+                  <button type="submit" name="step-action" value={"up:" <> row["id"]}
+                          disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                  <button type="submit" name="step-action" value={"down:" <> row["id"]}
+                          disabled={index == length(editable_step_rows(@block)) - 1}
+                          class="btn btn-ghost btn-sm">Move down</button>
+                  <button type="submit" name="step-action" value={"remove:" <> row["id"]}
+                          class="btn btn-destructive btn-sm">Remove step</button>
+                  <button :if={empty_step_body?(row)}
+                          type="submit" name="step-action" value={"add-body:" <> row["id"]}
+                          class="btn btn-ghost btn-sm">Add paragraph</button>
+                </fieldset>
+                <button type="submit" name="step-action" value="add" class="btn btn-ghost btn-sm">Add step</button>
+              </form>
+            </div>
+          </details>
+          <% end %>
+        </div>
       <% "expandable" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-expandable-editor">
           <details
@@ -2234,6 +2315,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </p>
     <% end %>
     """
+  end
+
+  defp editable_step_rows(%{"steps" => rows}) when is_list(rows),
+    do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and &1["id"] != ""))
+
+  defp editable_step_rows(_block), do: []
+
+  defp editable_steps?(%{"steps" => rows} = block) when is_list(rows) do
+    editable = editable_step_rows(block)
+    ids = Enum.map(editable, & &1["id"])
+
+    length(editable) == length(rows) and length(Enum.uniq(ids)) == length(ids) and
+      Enum.all?(editable, &(is_nil(&1["title"]) or is_binary(&1["title"])))
+  end
+
+  defp editable_steps?(block), do: Map.get(block, "steps") == nil
+
+  defp empty_step_body?(%{"children" => children}) when is_list(children), do: children == []
+  defp empty_step_body?(%{"children" => children}) when children not in [nil, false], do: false
+  defp empty_step_body?(row), do: Map.get(row, "blocks") in [nil, []]
+
+  defp step_body_segments(row, canvas_enabled) do
+    children = Blocks.container_children(Map.put(row, "type", "expandable"))
+
+    if canvas_enabled,
+      do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
+      else: Enum.map(Enum.filter(children, &is_map/1), &{:block, &1})
   end
 
   # Tolerant readers for the image block's `src` / `role` (t13). A raw-API

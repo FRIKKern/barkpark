@@ -12,6 +12,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
 
   @doc false
+  def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
+
+  @doc false
+  def resolve_block_form(blocks, %{"block_id" => id} = source) when is_binary(id) do
+    case find_paper_block(blocks, id) do
+      %{} = block ->
+        case validate_block_patch(block, source) do
+          {:ok, patch} -> {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
+          {:error, reason} -> {:error, {:source_validation, reason}}
+        end
+
+      nil ->
+        {:error, :block_not_found}
+    end
+  end
+
+  def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+
+  @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
   # by patch.ex regardless. Mirrors the EXACT block shapes in

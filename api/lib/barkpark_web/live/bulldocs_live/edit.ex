@@ -199,13 +199,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def apply_op(socket, op), do: failed_save(socket, is_map(op) && op["request_id"])
 
   defp apply_op_once(socket, op, request_id) do
+    form_source = Map.get(op, :__server_block_form_source__)
     op = stable_request_op(op, request_id)
 
     case apply_ops(
            socket,
-           [Map.drop(op, ["if_rev", "request_id"])],
+           [Map.drop(op, ["if_rev", "request_id", :__server_block_form_source__])],
            request_id,
-           op["if_rev"]
+           op["if_rev"],
+           {:ok, nil},
+           form_source
          ) do
       {:ok, socket, receipt, outcome} ->
         assign(socket, :last_save_result, %{
@@ -280,6 +283,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   end
 
   def apply_ops(socket, ops, request_id, supplied_rev, context_result) do
+    apply_ops(socket, ops, request_id, supplied_rev, context_result, nil)
+  end
+
+  defp apply_ops(socket, ops, request_id, supplied_rev, context_result, form_source) do
     paper = socket.assigns[:paper_doc]
     workspace_id = doc_field(paper, :workspace_id)
     slug = socket.assigns[:slug]
@@ -314,14 +321,34 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         # `:revision_action`, `:actor_user_id`); dropping to the bare scope here
         # would leave every real reader edit unattributed while the tests that
         # drive the legacy seam stayed green.
-        case Content.apply_paper_block_ops_once(
-               slug,
-               ops,
-               socket.assigns[:dataset],
-               request_id,
-               replay_principal_key(assigns),
-               opts
-             ) do
+        result =
+          if is_map(form_source) do
+            resolver = fn blocks ->
+              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+            end
+
+            Content.apply_paper_block_form_once(
+              slug,
+              "block_form:v1",
+              form_source,
+              socket.assigns[:dataset],
+              request_id,
+              replay_principal_key(assigns),
+              resolver,
+              opts
+            )
+          else
+            Content.apply_paper_block_ops_once(
+              slug,
+              ops,
+              socket.assigns[:dataset],
+              request_id,
+              replay_principal_key(assigns),
+              opts
+            )
+          end
+
+        case result do
           {:ok, receipt, outcome} ->
             # One access row per ACCEPTED op, exactly as the legacy seam records
             # it in `handle_result/3`. A REPLAY changed nothing about the paper —
@@ -339,6 +366,9 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
             {:ok, socket, receipt, outcome}
 
+          {:error, {:source_validation, _reason}} ->
+            {:error, failed_save(socket, request_id, :validation)}
+
           {:error, reason} ->
             {:error, handle_result({:error, reason}, socket, request_id)}
         end
@@ -348,6 +378,13 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # ── the MVP editor events, each mapping to exactly ONE op ───────────────────
 
   @doc "Form submit / autosave on one block → a `patch-block` op."
+  def edit_block(socket, %{"block_id" => id, "request_id" => request_id} = params)
+      when is_binary(id) and is_binary(request_id) do
+    source = Blocks.block_form_source(params)
+    op = %{"op" => "patch-block", "id" => id, :__server_block_form_source__ => source}
+    apply_op(socket, write_meta(op, params))
+  end
+
   def edit_block(socket, %{"block_id" => id} = params) when is_binary(id) do
     case Blocks.validate_block_patch(block_by_id(socket, id), params) do
       {:ok, patch} ->
@@ -544,7 +581,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Find a block by id anywhere in the editor buffer (recurses sections)."
   def block_by_id(socket, id) do
-    Blocks.find_paper_block(socket.assigns[:edit_blocks] || [], id)
+    socket.assigns[:edit_blocks]
+    |> Kernel.||([])
+    |> Content.ensure_block_ids()
+    |> Blocks.find_paper_block(id)
   end
 
   defp paper_link_details(socket, paper) do

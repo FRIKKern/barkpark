@@ -29,6 +29,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @server_minted_block :__server_minted_block__
+  @server_form_source :__server_block_form_source__
+
+  @doc false
+  def paper_form_op(socket, %{"block_id" => id} = params) do
+    op = %{
+      "op" => "patch-block",
+      "id" => id,
+      "if_rev" => params["if_rev"],
+      "request_id" => params["request_id"],
+      @server_form_source => Blocks.block_form_source(params)
+    }
+
+    paper_op(socket, op)
+  end
 
   @doc false
   def paper_op(socket, op) do
@@ -272,13 +286,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   defp paper_pane_op_once(socket, op) do
     request_id = op["request_id"]
+    form_source = Map.get(op, @server_form_source)
     op = stable_request_op(op, request_id)
 
     case paper_ops(
            socket,
-           [Map.drop(op, ["if_rev", "request_id"])],
+           [Map.drop(op, ["if_rev", "request_id", @server_form_source])],
            request_id,
-           op["if_rev"]
+           op["if_rev"],
+           {:ok, nil},
+           form_source
          ) do
       {:ok, socket, receipt, outcome} ->
         assign(socket,
@@ -411,6 +428,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do: paper_ops(socket, ops, request_id, supplied_rev, {:ok, nil})
 
   def paper_ops(socket, ops, request_id, supplied_rev, context_result) do
+    paper_ops(socket, ops, request_id, supplied_rev, context_result, nil)
+  end
+
+  defp paper_ops(socket, ops, request_id, supplied_rev, context_result, form_source) do
     socket = failed_result(socket, %{"request_id" => request_id})
     {socket, revoked_token?} = refresh_replay_token(socket)
     paper = socket.assigns[:paper_doc]
@@ -454,14 +475,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
             [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
 
-        case Content.apply_paper_block_ops_once(
-               slug,
-               ops,
-               dataset,
-               request_id,
-               replay_principal_key(socket),
-               opts
-             ) do
+        result =
+          if is_map(form_source) do
+            resolver = fn blocks ->
+              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+            end
+
+            Content.apply_paper_block_form_once(
+              slug,
+              "block_form:v1",
+              form_source,
+              dataset,
+              request_id,
+              replay_principal_key(socket),
+              resolver,
+              opts
+            )
+          else
+            Content.apply_paper_block_ops_once(
+              slug,
+              ops,
+              dataset,
+              request_id,
+              replay_principal_key(socket),
+              opts
+            )
+          end
+
+        case result do
           {:ok, receipt, outcome} ->
             socket =
               socket
@@ -474,6 +515,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               |> assign(paper_halt: nil)
 
             {:ok, socket, receipt, outcome}
+
+          {:error, {:source_validation, _reason}} ->
+            {:error, form_validation_failed(socket, request_id)}
 
           {:error, :precondition_failed} ->
             socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
@@ -1064,6 +1108,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
+    blocks = Content.ensure_block_ids(blocks)
     run_entries(slug, blocks) ++ nested_canvas_echo_runs(slug, blocks)
   end
 
@@ -1113,6 +1158,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     Enum.flat_map(blocks, fn
       %{"type" => "expandable"} = block ->
         children = expandable_children(block)
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "steps", "steps" => rows} = block when is_list(rows) ->
+        children = Enum.flat_map(rows, &expandable_children/1)
         [block | expandable_render_blocks(children)]
 
       block ->
@@ -1210,15 +1259,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   defp document_op_once(socket, doc, type, dataset, op) do
-    case Content.apply_document_block_op_once(
-           doc.doc_id,
-           type,
-           Map.drop(op, ["if_rev", "request_id"]),
-           dataset,
-           op["request_id"],
-           replay_principal_key(socket),
-           Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
-         ) do
+    source = Map.get(op, @server_form_source)
+    opts = Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
+
+    result =
+      if is_map(source) do
+        Content.apply_document_block_form_once(
+          doc.doc_id,
+          type,
+          "block_form:v1",
+          source,
+          dataset,
+          op["request_id"],
+          replay_principal_key(socket),
+          fn blocks -> Blocks.resolve_block_form(blocks, source) end,
+          opts
+        )
+      else
+        Content.apply_document_block_op_once(
+          doc.doc_id,
+          type,
+          Map.drop(op, ["if_rev", "request_id"]),
+          dataset,
+          op["request_id"],
+          replay_principal_key(socket),
+          opts
+        )
+      end
+
+    case result do
       {:ok, receipt, outcome} ->
         socket
         |> sync_editor_blocks()
@@ -1231,6 +1300,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             rev: receipt.rev
           }
         )
+
+      {:error, {:source_validation, _reason}} ->
+        form_validation_failed(socket, op["request_id"])
 
       {:error, {:rev_mismatch, current_rev}} ->
         document_conflict(socket, op["request_id"], current_rev)
@@ -1253,6 +1325,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         request_id: request_id,
         conflict: true,
         current_rev: current_revision(current_rev)
+      }
+    )
+  end
+
+  defp form_validation_failed(socket, request_id) do
+    beta? = socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta
+    socket = if beta?, do: sync_editor_blocks(socket), else: sync_paper_edit_doc(socket)
+
+    rev =
+      if beta?, do: doc_field(socket.assigns[:editor_doc], :rev), else: socket.assigns[:paper_rev]
+
+    socket
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: "validation",
+        current_rev: rev
       }
     )
   end
@@ -1422,8 +1513,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       true ->
         case socket.assigns[:paper_doc] do
-          %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
-          _ -> []
+          %{content: %{"blocks" => blocks}} when is_list(blocks) ->
+            Content.ensure_block_ids(blocks)
+
+          _ ->
+            []
         end
     end
   end

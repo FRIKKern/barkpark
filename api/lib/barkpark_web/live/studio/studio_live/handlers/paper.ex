@@ -48,6 +48,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     end
   end
 
+  def paper_edit_block(%{"block_id" => id, "request_id" => request_id} = params, socket)
+      when is_binary(id) and is_binary(request_id),
+      do: paper_reply(Shared.paper_form_op(socket, params))
+
   def paper_edit_block(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
 
@@ -66,6 +70,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_edit_block(params, socket), do: failed_reply(socket, params)
+
+  def paper_block_autosave(%{"block_id" => id, "request_id" => request_id} = params, socket)
+      when is_binary(id) and is_binary(request_id),
+      do: paper_reply(Shared.paper_form_op(socket, params))
 
   def paper_block_autosave(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)

@@ -76,5 +76,23 @@ defmodule BarkparkWeb.Studio.SharedPaperStepsCanvasTest do
     end
   end
 
+  test "server-painted descendants inside steps share visible-body traversal" do
+    stats = %{"id" => "stats", "type" => "stats"}
+
+    parent = %{
+      "id" => "steps",
+      "type" => "steps",
+      "steps" => [
+        %{
+          "id" => "row",
+          "children" => [stats],
+          "blocks" => [%{"id" => "shadow", "type" => "cards"}]
+        }
+      ]
+    }
+
+    assert Enum.map(Paper.expandable_render_blocks([parent]), & &1["id"]) == ["steps", "stats"]
+  end
+
   defp paragraph(id), do: %{"type" => "paragraph", "id" => id, "content" => []}
 end

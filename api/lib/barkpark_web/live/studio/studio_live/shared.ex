@@ -205,6 +205,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_op(socket, op), to: Paper
+  defdelegate paper_form_op(socket, params), to: Paper
 
   @doc false
   defdelegate paper_ops(socket, ops), to: Paper
