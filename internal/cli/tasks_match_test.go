@@ -59,6 +59,16 @@ func ledgerServer(t *testing.T, rows []taskRow) (*httptest.Server, *int32) {
 			_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no task with that id"}}`))
 			return
 		}
+		// The `?id_prefix=` probe is NOT a page of the walk: this fake serves
+		// the ordinary task envelope for it (no `id_prefix` echo), which is how
+		// a server that does not implement the server-side lookup behaves, and
+		// the CLI then falls back to the walk. Counting it would make `pages`
+		// mean "requests" rather than "pages of the scan", which is what every
+		// assertion on this counter is about.
+		if r.URL.Query().Get("id_prefix") != "" {
+			_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
+			return
+		}
 		atomic.AddInt32(&pages, 1)
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -526,9 +536,12 @@ func TestTaskWalksRequestTheRoutesMaxPageSize(t *testing.T) {
 	var mu sync.Mutex
 	var limits []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		limits = append(limits, r.URL.Query().Get("limit"))
-		mu.Unlock()
+		// Skip the `?id_prefix=` probe — this test pins what the WALK asks for.
+		if r.URL.Query().Get("id_prefix") == "" {
+			mu.Lock()
+			limits = append(limits, r.URL.Query().Get("limit"))
+			mu.Unlock()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
 	}))
@@ -616,9 +629,12 @@ func TestTaskPrefixSuggestion_AsksForTheCheapProjection(t *testing.T) {
 	var mu sync.Mutex
 	var views []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		views = append(views, r.URL.Query().Get("view"))
-		mu.Unlock()
+		// Skip the `?id_prefix=` probe — this test pins the WALK's projection.
+		if r.URL.Query().Get("id_prefix") == "" {
+			mu.Lock()
+			views = append(views, r.URL.Query().Get("view"))
+			mu.Unlock()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
 	}))

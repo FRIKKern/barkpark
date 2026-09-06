@@ -160,7 +160,8 @@ defmodule BarkparkWeb.TasksIdPrefixLookupTest do
 
       assert [[indexdef]] = rows
       assert indexdef =~ "text_pattern_ops"
-      assert indexdef =~ "WHERE (type = 'task'::text)"
+      assert indexdef =~ "((type)::text = 'task'::text)"
+      assert indexdef =~ "regexp_replace"
     end
 
     test "the lookup's predicate CAN ride that index (seq scans disabled)" do

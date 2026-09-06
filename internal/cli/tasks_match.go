@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,12 @@ const (
 	taskLsCommandID  = "task.ls"
 	taskGetCommandID = "task.get"
 )
+
+// taskIDPrefixParam is the server-side lookup this file prefers over the walk:
+// `GET /v1/tasks?id_prefix=<id>` answers with doc_id + title only, from one
+// indexed query (Barkpark.Tasks.Query.id_prefix_lookup/2). It is spelled here
+// once so the probe and the doc comments cannot drift.
+const taskIDPrefixParam = "id_prefix"
 
 // extractTaskMatchFlag removes `--match <value>` / `--match=<value>` from tail
 // and returns the LAST value given, tail without it, and a usage error when the
@@ -286,6 +293,81 @@ func taskPrefixSuggestion(out *writer, m *manifest.Manifest, ctx manifest.Contex
 		return "", false
 	}
 	headers := authHeaders(lsCmd, ctx)
+
+	// SERVER FIRST. `?id_prefix=` asks the route the question directly and
+	// answers it in ONE request from an indexed lookup, so on a server that
+	// implements it the walk below never runs and the 404 stays a 404-shaped
+	// wait. `served` is false ONLY when this server cannot answer — see
+	// taskPrefixLookupServer for how that is decided — and the walk is then the
+	// fallback, unchanged, still honest about giving up.
+	if suggestion, served := taskPrefixLookupServer(lsCmd, ctx, baseURL, headers, typed); served {
+		return suggestion, true
+	}
+	return taskPrefixScanWalk(out, lsCmd, baseURL, headers, typed)
+}
+
+// taskPrefixLookupServer asks `GET /v1/tasks?id_prefix=<typed>` — the
+// server-side lookup (cchi-bl-task-get-needs-a-server-side-prefix-lookup) —
+// and returns (suggestion, served).
+//
+// served=true means THIS SERVER ANSWERED THE QUESTION, and the answer is
+// complete: "" then means zero-or-many, a real absence claim, never silence.
+// served=false means the server could not be asked, and the caller must fall
+// back rather than infer anything.
+//
+// HOW "COULD NOT BE ASKED" IS DECIDED, and why it is not a manifest lookup.
+// `task.ls` declares no per-param contract in the manifest (the same reason
+// `view=brief` is sent as a raw param above), so there is nothing to read a
+// capability off. The route itself is the capability probe: `GET /v1/tasks`
+// fail-CLOSES on an unknown top-level param, so a server without this filter
+// answers 400 naming `id_prefix` — a definitive "I do not have it" — while a
+// server with it answers 200. A 400 therefore means fall back, and so does any
+// other non-2xx, a transport error, or a 200 whose body is not this lookup's
+// envelope (an HTTP 200 is no proof the body came from Barkpark).
+//
+// The `id_prefix` ECHO is what makes the 200 arm safe. A hypothetical server
+// that accepted the param and IGNORED it would return the ordinary task page:
+// its rows would be arbitrary tasks, and one of them could carry the typed id
+// as a prefix by luck. Requiring the echo — a field the ordinary page does not
+// have — means an ignored param reads as "not served" rather than as a
+// suggestion computed over the wrong set.
+func taskPrefixLookupServer(cmd manifest.Command, ctx manifest.Context, baseURL string, headers map[string]string, typed string) (string, bool) {
+	sep := "?"
+	if strings.Contains(baseURL, "?") {
+		sep = "&"
+	}
+	lookupURL := baseURL + sep + taskIDPrefixParam + "=" + url.QueryEscape(typed)
+
+	status, body, err := doRequest(cmd.HTTP.Method, lookupURL, headers, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return "", false
+	}
+
+	var payload struct {
+		IDPrefix *string `json:"id_prefix"`
+		Matches  []struct {
+			DocID string `json:"doc_id"`
+		} `json:"matches"`
+	}
+	if json.Unmarshal(unwrapResult(body), &payload) != nil || payload.IDPrefix == nil {
+		return "", false
+	}
+
+	// EXACTLY ONE is the same contract the walk holds: two candidates mean the
+	// CLI does not know which one the caller meant, and a STRICT extension is
+	// required because an id equal to what was typed is the id that just 404'd.
+	if len(payload.Matches) == 1 && len(payload.Matches[0].DocID) > len(typed) {
+		return payload.Matches[0].DocID, true
+	}
+	return "", true
+}
+
+// taskPrefixScanWalk is the pre-server-filter client-side walk, kept verbatim
+// as the fallback for a server that does not implement `?id_prefix=`. The CLI
+// is manifest-driven and talks to instances it did not ship with, so deleting
+// this would turn a working (if slow) suggestion into no suggestion at all on
+// every older box. Against a server that HAS the filter it is unreachable.
+func taskPrefixScanWalk(out *writer, lsCmd manifest.Command, baseURL string, headers map[string]string, typed string) (string, bool) {
 
 	// ANNOUNCE THE WAIT. This walk can take seconds, and it hangs off a
 	// refusal — the one place a caller expects an instant answer. A silent
