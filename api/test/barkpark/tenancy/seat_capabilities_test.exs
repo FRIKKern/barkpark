@@ -16,12 +16,25 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
 
   What this file owns is the property that is NEW because the arity takes a
   PRELOADED ROW rather than loading one itself: **a row can only answer for the
-  workspace it belongs to.** Every other predicate in `Tenancy.Auth` loads its
-  own row from the (principal, workspace) pair and cannot be handed a foreign
-  one; this one can. The clause heads bind `%Membership{workspace_id:
-  workspace_id}` to the `workspace_id` ARGUMENT, and the tests below are what
-  make that binding load-bearing rather than decorative — delete it and
-  `a row loaded for ANOTHER workspace confers nothing` reds with an admit.
+  workspace it belongs to, AND for the principal it belongs to.** Every other
+  predicate in `Tenancy.Auth` loads its own row from the (principal, workspace)
+  pair and cannot be handed a foreign one; this one can, so it owes TWO
+  bindings and each is a pattern rather than a sentence:
+
+    * `%Membership{workspace_id: workspace_id}` bound to the `workspace_id`
+      ARGUMENT — delete it and `a row loaded for ANOTHER workspace confers
+      nothing` reds with an admit;
+    * `principal_type` / `principal_id` bound to the PRINCIPAL argument —
+      delete it and `a row belonging to ANOTHER PRINCIPAL confers nothing` reds
+      with the other principal's seat.
+
+  The second binding closes a hazard with NO reachable instance today: both
+  live call sites zip correctly (`Caps.load_memberships/2` pairs each row with
+  its principal, `admin?/1` loads per principal). It is here because the
+  introducing caller holds a LIST of two principals' rows, and a transposition
+  there would return the WRONG SEAT with no raise, no red and no log. Added on
+  lead-studio-10's review of #16586. A test is the only thing that keeps a
+  guarded-against-nothing binding alive through the next refactor.
 
   It also pins the D9/D22 conjunct that makes the `:admin` column neither
   canonical verbatim, and the fail-closed catch-all.
@@ -119,6 +132,62 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
       # CORRECT rather than merely conservative.
       assert TAuth.authorize(user, ws_b.id, :read) == {:error, :forbidden}
       refute TAuth.workspace_admin?(user, ws_b.id)
+    end
+
+    test "a row belonging to ANOTHER PRINCIPAL confers nothing — both kinds, and crossed kinds" do
+      ws = workspace!("seat-principal")
+      owner = user!()
+      bystander = user!()
+
+      # OWNER seat for `owner`; `bystander` holds the weakest built-in seat in
+      # the SAME workspace ("member" — the role enum is owner|admin|member), so
+      # the two rows differ ONLY in whom they belong to.
+      owner_row = seat!(ws, owner, "owner")
+      bystander_row = seat!(ws, bystander, "member")
+
+      # The control: each principal WITH ITS OWN ROW answers as itself, so a
+      # denial below cannot be "this fixture confers nothing anyway".
+      assert TAuth.seat_capabilities(owner, owner_row, ws.id).admin
+      refute TAuth.seat_capabilities(bystander, bystander_row, ws.id).admin
+
+      # THE TRANSPOSITION. Same workspace, right shapes, wrong pairing — the
+      # exact slip a caller holding a LIST of principals and a LIST of rows can
+      # make. Without the principal binding this answers with the OWNER's seat.
+      assert TAuth.seat_capabilities(bystander, owner_row, ws.id) == @none
+      assert TAuth.seat_capabilities(owner, bystander_row, ws.id) == @none
+
+      # CROSSED KINDS: a token holding a USER's row, and a user holding a
+      # TOKEN's row. `principal_type` refuses these even when the ids collide,
+      # which is the reason the type is in the pattern and not just the id.
+      {:ok, token} = mint_token(~w(read write admin))
+      token_row = seat!(ws, token, "owner")
+
+      assert TAuth.seat_capabilities(token, token_row, ws.id).admin
+      assert TAuth.seat_capabilities(token, owner_row, ws.id) == @none
+      assert TAuth.seat_capabilities(owner, token_row, ws.id) == @none
+    end
+
+    test "a HAND-BUILT %Membership{} naming ANOTHER principal confers nothing" do
+      ws = workspace!("seat-fabricated-principal")
+      user = user!()
+      other = user!()
+
+      # The workspace is real and matches, the role is real, the principal_type
+      # is right — only the principal_id is somebody else's. This is the arm the
+      # workspace binding alone cannot catch.
+      row = %Membership{
+        role: "owner",
+        workspace_id: ws.id,
+        principal_type: "user",
+        principal_id: other.id
+      }
+
+      assert TAuth.seat_capabilities(user, row, ws.id) == @none
+
+      # Positive control on the SAME struct shape: hand it its own principal and
+      # it answers, so the denial above is the principal binding and not the
+      # hand-built provenance.
+      assert TAuth.seat_capabilities(other, row, ws.id).admin
     end
 
     test "a HAND-BUILT %Membership{} that names no workspace confers nothing" do

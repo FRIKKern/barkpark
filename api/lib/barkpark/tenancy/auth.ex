@@ -658,15 +658,36 @@ defmodule Barkpark.Tenancy.Auth do
   its read/write access comes from the grant arm at the call site, never from
   here.
 
-  ## The row must belong to THIS workspace
+  ## The row must belong to THIS workspace AND TO THIS PRINCIPAL
 
-  The `%Membership{workspace_id: workspace_id}` pattern binds the row's own
-  workspace to the `workspace_id` argument, so a row loaded for workspace A can
-  never answer a question about workspace B. That is the one guarantee an arity
-  which ACCEPTS a preloaded row owes its callers, and it is what makes the
-  workspace-blind built-in role resolution (see `role_permits?/3`) unreachable
-  from a hand-built struct: a fabricated `%Membership{role: "admin"}` with no
-  matching `workspace_id` answers all-false.
+  An arity that ACCEPTS a preloaded row owes its callers TWO guarantees, and
+  each is a pattern binding rather than a sentence:
+
+    * the `%Membership{workspace_id: workspace_id}` pattern binds the row's own
+      workspace to the `workspace_id` argument, so a row loaded for workspace A
+      can never answer a question about workspace B;
+    * the `principal_type` / `principal_id` pattern binds the row to the
+      PRINCIPAL in the first argument — the same `{id, type}` pairing
+      `membership/2` uses to LOAD a row (`%ApiToken{}` -> `"api_token"`,
+      `%User{}` -> `"user"`), so a row that belongs to somebody else cannot
+      answer for you.
+
+  The second one is why a crossed pair denies instead of answering. This
+  function's whole contract is "I trust the row you hand me", and its own
+  introducing caller (`Caps.derive_from_assigns/1`) holds a LIST of two
+  principals' rows: a transposition there would otherwise return the WRONG
+  SEAT — silently, with no raise, no red and no log. Both live call sites zip
+  correctly today (`load_memberships/2` pairs each row with its principal, and
+  `admin?/1` loads per principal), so this closes a hazard with no reachable
+  instance rather than a live defect — added on lead-studio-10's review of
+  pds-w42/#16586, on the reasoning that a newly PUBLIC function on the
+  authorization chokepoint should not rely on every future caller zipping
+  correctly.
+
+  Both bindings together make the workspace-blind built-in role resolution (see
+  `role_permits?/3`) unreachable from a hand-built struct: a fabricated
+  `%Membership{role: "admin"}` with no matching `workspace_id` — or with no
+  matching principal — answers all-false.
 
   ## Cost
 
@@ -678,11 +699,16 @@ defmodule Barkpark.Tenancy.Auth do
   @spec seat_capabilities(principal(), Membership.t() | nil, binary()) ::
           %{read: boolean(), write: boolean(), admin: boolean()}
   def seat_capabilities(
-        %ApiToken{} = token,
-        %Membership{role: role, workspace_id: workspace_id},
+        %ApiToken{id: principal_id} = token,
+        %Membership{
+          role: role,
+          workspace_id: workspace_id,
+          principal_type: "api_token",
+          principal_id: principal_id
+        },
         workspace_id
       )
-      when is_binary(workspace_id) do
+      when is_binary(principal_id) and is_binary(workspace_id) do
     %{
       read: permits?(token, :read),
       write: permits?(token, :write),
@@ -694,11 +720,16 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   def seat_capabilities(
-        %User{},
-        %Membership{role: role, workspace_id: workspace_id},
+        %User{id: principal_id},
+        %Membership{
+          role: role,
+          workspace_id: workspace_id,
+          principal_type: "user",
+          principal_id: principal_id
+        },
         workspace_id
       )
-      when is_binary(role) and is_binary(workspace_id) do
+      when is_binary(principal_id) and is_binary(role) and is_binary(workspace_id) do
     # ONE resolution, three answers. `role_permits?/3` is `action in
     # granted_actions(role, ws)`; asking it three times asks the resolver three
     # times, which on a CUSTOM role is three `Repo.all`s for one row.
@@ -711,8 +742,9 @@ defmodule Barkpark.Tenancy.Auth do
     }
   end
 
-  # Non-member (nil row), foreign row, unrecognised principal shape, non-binary
-  # workspace id: nothing. Fails closed, never raises.
+  # Non-member (nil row), a row from another WORKSPACE, a row belonging to
+  # another PRINCIPAL, an unrecognised principal shape, a non-binary workspace
+  # id or principal id: nothing. Fails closed, never raises.
   def seat_capabilities(_principal, _membership, _workspace_id), do: @no_seat
 
   # The seat half of a TOKEN's `:admin` conjunct. Same resolver, same
