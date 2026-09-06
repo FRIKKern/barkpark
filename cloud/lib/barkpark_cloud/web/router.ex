@@ -4555,9 +4555,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       tally =
-        Registry.mint_missing_content_secrets(
-          actor_user_id: conn.assigns.current_user.id
-        )
+        Registry.mint_missing_content_secrets(actor_user_id: conn.assigns.current_user.id)
 
       json(conn, 200, tally)
     end

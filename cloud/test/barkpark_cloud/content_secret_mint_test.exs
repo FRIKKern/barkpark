@@ -56,7 +56,9 @@ defmodule BarkparkCloud.ContentSecretMintTest do
 
   defp live_bp(team \\ nil) do
     n = System.unique_integer([:positive])
-    {:ok, bp} = Registry.register_barkpark(team || team_fixture(), %{name: "BP #{n}", slug: "bp-#{n}"})
+
+    {:ok, bp} =
+      Registry.register_barkpark(team || team_fixture(), %{name: "BP #{n}", slug: "bp-#{n}"})
 
     bp
     |> Ecto.Changeset.change(
