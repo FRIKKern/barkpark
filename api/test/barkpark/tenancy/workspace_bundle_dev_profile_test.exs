@@ -106,19 +106,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
       assert Catalog.dev_doc_type_deny() == ["ticket"]
     end
 
-    test "a seeded ticket AND its content_edges / plugin_doc_state children are absent from the dev bundle; the full bundle carries all three" do
+    test "a seeded ticket AND its content_edges / task_edges children are absent from the dev bundle; the full bundle carries all three" do
       f = seed_dev_fixture!()
 
       {:ok, full} = WorkspaceBundle.export(f.ws.id)
       {_fm, full_dumps} = Archive.unpack(full)
 
-      # Positive control: the full profile carries the ticket, both edges (the
-      # ticket is the TO endpoint of one and the FROM endpoint of the other) and
-      # the plugin_doc_state row.
+      # Positive control: the full profile carries the ticket and both edges
+      # (the ticket is the TO endpoint of one and the FROM endpoint of the
+      # other).
       assert full_dumps["documents"] =~ f.ticket_marker
       assert full_dumps["content_edges"] =~ f.ticket_id
       assert full_dumps["task_edges"] =~ f.ticket_id
-      assert full_dumps["plugin_doc_state"] =~ f.plugin_state_marker
 
       {:ok, dev} = WorkspaceBundle.export(f.ws.id, profile: :dev)
       {_dm, dev_dumps} = Archive.unpack(dev)
@@ -128,13 +127,39 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
       # carrying the denied conversation's graph.
       refute dev_dumps["content_edges"] =~ f.ticket_id
       refute dev_dumps["task_edges"] =~ f.ticket_id
-      refute dev_dumps["plugin_doc_state"] =~ f.plugin_state_marker
 
-      # No over-cascade: the ordinary doc, its ordinary edge and its own
-      # plugin_doc_state row all still travel.
+      # No over-cascade: the ordinary doc and its ordinary edge still travel.
+      # (`plugin_doc_state` is no longer part of this proof — the 2026-09-02
+      # ruling denies the whole table, covered by its own test below.)
       assert dev_dumps["documents"] =~ f.post_marker
       assert dev_dumps["content_edges"] =~ f.plain_edge_id
-      assert dev_dumps["plugin_doc_state"] =~ f.plain_plugin_state_marker
+    end
+
+    test "RULED 2026-09-02: plugin_doc_state is denied TABLE-WIDE — the ordinary row travels in :full and in NO dev bundle" do
+      f = seed_dev_fixture!()
+
+      {:ok, full} = WorkspaceBundle.export(f.ws.id)
+      {_fm, full_dumps} = Archive.unpack(full)
+
+      # Positive control on BOTH markers so neither refute below can pass
+      # vacuously: the ticket-owned row AND the ordinary post-owned row are
+      # really in the seed, and the full profile really carries them.
+      assert full_dumps["plugin_doc_state"] =~ f.plugin_state_marker
+      assert full_dumps["plugin_doc_state"] =~ f.plain_plugin_state_marker
+
+      {:ok, dev} = WorkspaceBundle.export(f.ws.id, profile: :dev)
+      {_dm, dev_dumps} = Archive.unpack(dev)
+
+      # A table-level deny, not a row cascade: the table is absent ENTIRELY,
+      # so even the ordinary post-owned row — which the D27 cascade would have
+      # let through — does not travel.
+      refute Map.has_key?(dev_dumps, "plugin_doc_state")
+      refute dev =~ f.plugin_state_marker
+      refute dev =~ f.plain_plugin_state_marker
+
+      assert Catalog.dev_action("plugin_doc_state") == :deny
+      assert "plugin_doc_state" in Catalog.dev_deny_tables()
+      refute "plugin_doc_state" in Catalog.dev_copy_tables()
     end
 
     test "the E3 doc-keyed semi-join cascades too — a denied ticket's authoring_exemption never travels" do

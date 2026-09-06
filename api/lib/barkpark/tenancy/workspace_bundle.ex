@@ -84,8 +84,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     * it CASCADES (PDS-D27): every FK column pointing at `documents.id` is
       derived LIVE and the child row is excluded when its document is denied,
       because `copy_where/3`'s doc semi-join and the E2 parent-joins are all
-      type-BLIND — a denied ticket's `content_edges` / `task_edges` /
-      `plugin_doc_state` rows would otherwise travel as FK-violating orphans.
+      type-BLIND — a denied ticket's `content_edges` / `task_edges` rows would
+      otherwise travel as FK-violating orphans. (`plugin_doc_state` used to be
+      a third cascade beneficiary here; since the 2026-09-02 ruling the whole
+      table is `:deny` in the dev profile, so it never reaches the cascade.)
 
   The dataset arbiter deliberately does NOT resolve through
   `dataset_slugs_for/1` (PDS-D29): that helper drops any slug a sibling
