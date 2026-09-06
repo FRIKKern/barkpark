@@ -140,7 +140,8 @@ defmodule Barkpark.PortableDoc.Patch do
     # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
     # never mask one.
     with {:ok, new_blocks} <- apply_to_blocks(blocks, op),
-         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op) do
+         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
+         {:ok, new_blocks} <- check_patch_duplicate_ratchet(blocks, new_blocks, op) do
       check_constraints(blocks, new_blocks, op, opts)
     end
   end
@@ -395,6 +396,73 @@ defmodule Barkpark.PortableDoc.Patch do
         end
     end
   end
+
+  # A patch-block may replace a container's whole nested collection. Guard that
+  # root-level write against introducing a duplicate authored identity anywhere
+  # else in the document. Existing legacy duplicates remain editable: only an
+  # occurrence count that grows beyond both one and its pre-patch count is
+  # rejected.
+  defp check_patch_duplicate_ratchet(before_blocks, after_blocks, %{"op" => "patch-block"}) do
+    before_counts = before_blocks |> authored_ids() |> Enum.frequencies()
+    after_ids = authored_ids(after_blocks)
+    after_counts = Enum.frequencies(after_ids)
+
+    case Enum.find(after_ids, fn id ->
+           after_counts[id] > 1 and after_counts[id] > Map.get(before_counts, id, 0)
+         end) do
+      nil -> {:ok, after_blocks}
+      id -> {:error, {:duplicate_id, id, "patch-block"}}
+    end
+  end
+
+  defp check_patch_duplicate_ratchet(_before_blocks, after_blocks, _op),
+    do: {:ok, after_blocks}
+
+  defp authored_ids(blocks) when is_list(blocks),
+    do: Enum.flat_map(blocks, &authored_block_ids/1)
+
+  defp authored_block_ids(block) when is_map(block) do
+    own = authored_id(block)
+
+    nested =
+      case block do
+        %{"type" => "section", "blocks" => children} when is_list(children) ->
+          authored_ids(children)
+
+        %{"type" => "expandable"} ->
+          authored_alias_ids(block)
+
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_step_row_ids/1)
+
+        _ ->
+          []
+      end
+
+    own ++ nested
+  end
+
+  defp authored_block_ids(_block), do: []
+
+  defp authored_step_row_ids(row) when is_map(row),
+    do: authored_id(row) ++ authored_alias_ids(row)
+
+  defp authored_step_row_ids(_row), do: []
+
+  # Both renderer body aliases are authored block lists when present. Count the
+  # shadow too: replacing a parent must not smuggle an identity collision into
+  # metadata merely because the other alias currently wins renderer precedence.
+  defp authored_alias_ids(container) do
+    Enum.flat_map(["children", "blocks"], fn key ->
+      case Map.get(container, key) do
+        children when is_list(children) -> authored_ids(children)
+        _other -> []
+      end
+    end)
+  end
+
+  defp authored_id(%{"id" => id}) when is_binary(id) and id != "", do: [id]
+  defp authored_id(_value), do: []
 
   # Top-level id → index for every template-locked block.
   defp locked_index_map(blocks) do
