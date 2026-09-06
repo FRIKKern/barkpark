@@ -112,8 +112,12 @@ var codeExit = map[string]int{
 	// so a retry wrapper could not tell "the world moved, re-claim and retry"
 	// apart from "your arguments are wrong, give up". They split by RETRYABILITY:
 	//   6 (conflict): the lease/state moved under you — re-read, re-claim, retry.
-	"not_holder":              exitConflict,
-	"not_in_progress":         exitConflict,
+	"not_holder":      exitConflict,
+	"not_in_progress": exitConflict,
+	// One id, one row (#16474): the twin resolver REFUSES an ambiguous task id and
+	// the producer fence refuses a second copy — both answer 409.
+	"ambiguous_dataset":       exitConflict,
+	"dataset_twin":            exitConflict,
 	"doc_changed_since_claim": exitConflict,
 	"claimed_has_worker":      exitConflict,
 	//   5 (validation): the REQUEST is wrong — never retryable as sent.
