@@ -34,8 +34,18 @@ on:
       - ".github/workflows/studio-instrument-selftests.yml"
 
 concurrency:
-  group: studio-instrument-selftests-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # One group per PUSH SHA on main, per REF everywhere else — the shape every
+  # main-triggered workflow carries (elixir.yml:72) and the one
+  # scripts/main-run-concurrency-check.sh keys on. GitHub keeps ONE
+  # not-yet-started run per group, so a shared main group lets each merge evict
+  # the pending main run (measured 2026-09-02: 37 of 40 main runs cancelled).
+  # The previous stanza keyed PRs on the PR number and main on the sha, which is
+  # semantically close but not the canonical expression, and its
+  # cancel-in-progress was `github.event_name == 'pull_request'` — the gate
+  # accepts only the literal false or the never-cancel-main guard below.
+  # (Shell harnesses red on main from #16423 until this landed; task-99bb8ca0d64618b1.)
+  group: studio-instrument-selftests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   selftests:
