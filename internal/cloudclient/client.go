@@ -1666,21 +1666,35 @@ type Site struct {
 	LastDeployment *SiteDeploymentEmbed `json:"last_deployment"`
 }
 
-// SiteDeploymentEmbed is the four-key slice of a deployment that GET /v1/sites
-// embeds per site. The keyset is deliberately narrow and is fenced by the
-// search-template D24 honesty law: status, trigger and the two timestamps, and
-// NOTHING else — no console URL, no build_log_url, no content_rev, and no
-// environment key (the query is already `environment == "production"`).
+// SiteDeploymentEmbed is the slice of a deployment that GET /v1/sites embeds
+// per site. The keyset is deliberately narrow and is fenced by the
+// search-template D24 honesty law: status, trigger, the two timestamps and the
+// CAUSE PAIR, and NOTHING else — no console URL, no build_log_url, no
+// content_rev, no failure_reason_raw, and no environment key (the query is
+// already `environment == "production"`).
 //
 // Do not widen this struct to chase a field the wire does not carry: an absent
 // key decoded into a zero value is exactly the "measured empty" lie this epic
 // exists to remove. `Trigger` is a POINTER for that reason — the control plane
 // genuinely sends null for a deployment nobody attributed.
+//
+// FailureClass and FailureReason are the WHY the fleet list could not say.
+// Both are POINTERS for the same reason `Trigger` is: the control plane sends
+// an explicit null on a row that did not fail, and a `""` decoded out of a
+// missing key would be indistinguishable from "the server told us there was no
+// cause". A nil here means EITHER the deploy did not fail OR the server
+// predates the embed — never "the cause is empty".
+//
+// FailureReason is the HUMANIZED string (router.ex folds it through
+// `FailureCopy.humanize/1`, the scrub carrier). The raw capture is deliberately
+// not on this surface, so there is nothing here to redact a second time.
 type SiteDeploymentEmbed struct {
-	Status     string  `json:"status"`
-	Trigger    *string `json:"trigger"`
-	InsertedAt string  `json:"inserted_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	Status        string  `json:"status"`
+	Trigger       *string `json:"trigger"`
+	InsertedAt    string  `json:"inserted_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	FailureClass  *string `json:"failure_class"`
+	FailureReason *string `json:"failure_reason"`
 }
 
 // Deployment is one build-and-release of a Site, as returned by the

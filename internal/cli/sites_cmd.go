@@ -419,9 +419,15 @@ func statusColor(out *writer, status string) string {
 	return code + status + "\033[0m"
 }
 
-// renderSitesTable prints the aligned `bp sites` table. The four columns
-// (NAME · DOMAINS · STATUS · LAST DEPLOY) are width-driven from the data so
-// the output is stable for golden compare. Empty domains print "—".
+// renderSitesTable prints the aligned `bp sites` table. The columns
+// (NAME · SLUG · DOMAINS · STATUS · LAST DEPLOY [· WHY]) are width-driven from
+// the data so the output is stable for golden compare. Empty domains print "—".
+//
+// WHY IS CONDITIONAL, and deliberately: it appears only when at least one site
+// in the fleet actually has a cause to name. A fleet where nothing failed gets
+// the table it always had, with no column of "—" implying the CLI lost
+// something. When it DOES appear, it is the last column so the variable-length
+// prose cannot push the fixed columns around.
 func renderSitesTable(out *writer, sites []cloudclient.Site) {
 	const (
 		hName = "NAME"
@@ -434,9 +440,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 		hDom    = "DOMAINS"
 		hStat   = "STATUS"
 		hDeploy = "LAST DEPLOY"
+		hWhy    = "WHY"
 	)
 	nameW, slugW, domW, statW := len(hName), len(hSlug), len(hDom), len(hStat)
-	rows := make([][5]string, len(sites))
+	deployW := len(hDeploy)
+	anyWhy := false
+	rows := make([][6]string, len(sites))
 	for i, s := range sites {
 		dom := strings.Join(s.Domains, ", ")
 		if dom == "" {
@@ -446,7 +455,7 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 		if slug == "" {
 			slug = "—"
 		}
-		status, when := "—", "—"
+		status, when, why := "—", "—", "—"
 		if s.LastDeployment != nil {
 			if v := strings.TrimSpace(s.LastDeployment.Status); v != "" {
 				status = v
@@ -454,8 +463,16 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 			if v := strings.TrimSpace(s.LastDeployment.InsertedAt); v != "" {
 				when = v
 			}
+			// The CLASS first — it is the name an operator can group and act
+			// on — then the humanized sentence, which is what makes a single
+			// row readable. A row that carries only one of the two prints only
+			// that one; nothing is invented to fill the cell.
+			why = siteFailureCause(s.LastDeployment)
+			if why != "—" {
+				anyWhy = true
+			}
 		}
-		rows[i] = [5]string{s.Name, slug, dom, status, when}
+		rows[i] = [6]string{s.Name, slug, dom, status, when, why}
 		if n := len(s.Name); n > nameW {
 			nameW = n
 		}
@@ -468,14 +485,57 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 		if n := len(status); n > statW {
 			statW = n
 		}
+		if n := len(when); n > deployW {
+			deployW = n
+		}
 	}
 
-	out.outf("%-*s  %-*s  %-*s  %-*s  %s", nameW, hName, slugW, hSlug, domW, hDom, statW, hStat, hDeploy)
+	if !anyWhy {
+		out.outf("%-*s  %-*s  %-*s  %-*s  %s", nameW, hName, slugW, hSlug, domW, hDom, statW, hStat, hDeploy)
+		for _, r := range rows {
+			// Pad the raw status to the column width FIRST, then colorize, so
+			// the ANSI escape bytes never count toward statW and misalign the
+			// table.
+			stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[3]))
+			out.outf("%-*s  %-*s  %-*s  %s  %s", nameW, r[0], slugW, r[1], domW, r[2], stat, r[4])
+		}
+		return
+	}
+
+	out.outf("%-*s  %-*s  %-*s  %-*s  %-*s  %s",
+		nameW, hName, slugW, hSlug, domW, hDom, statW, hStat, deployW, hDeploy, hWhy)
 	for _, r := range rows {
-		// Pad the raw status to the column width FIRST, then colorize, so the
-		// ANSI escape bytes never count toward statW and misalign the table.
 		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[3]))
-		out.outf("%-*s  %-*s  %-*s  %s  %s", nameW, r[0], slugW, r[1], domW, r[2], stat, r[4])
+		out.outf("%-*s  %-*s  %-*s  %s  %-*s  %s",
+			nameW, r[0], slugW, r[1], domW, r[2], stat, deployW, r[4], r[5])
+	}
+}
+
+// siteFailureCause renders the embed's cause pair as ONE cell, or "—" when the
+// control plane sent no cause (the deploy did not fail, or the server predates
+// the embed — see SiteDeploymentEmbed's pointer fields).
+//
+// This is a RENDER of what the server sent, never a computation: the class is
+// `DeployLedger.classify/1`'s answer and the sentence is already humanized and
+// scrubbed by `FailureCopy.humanize/1`. The CLI must not classify prose itself
+// — that is the drift that made `bp sites deployments` disagree with the API.
+func siteFailureCause(d *cloudclient.SiteDeploymentEmbed) string {
+	class, reason := "", ""
+	if d.FailureClass != nil {
+		class = strings.TrimSpace(*d.FailureClass)
+	}
+	if d.FailureReason != nil {
+		reason = strings.TrimSpace(*d.FailureReason)
+	}
+	switch {
+	case class != "" && reason != "":
+		return class + " — " + reason
+	case class != "":
+		return class
+	case reason != "":
+		return reason
+	default:
+		return "—"
 	}
 }
 
@@ -502,8 +562,14 @@ func siteBaseRow(s cloudclient.Site) map[string]any {
 
 // siteListRow projects one site onto the JSON shape `bp sites -o json` emits.
 // `last_deployment` here is the SERVER's embed, verbatim and unwidened —
-// status/trigger/inserted_at/updated_at — so the machine reader sees exactly
-// the four keys the control plane measured, and no key invented by the CLI.
+// status/trigger/inserted_at/updated_at plus the cause pair
+// (failure_class/failure_reason) — so the machine reader sees exactly the keys
+// the control plane measured, and no key invented by the CLI.
+//
+// The cause pair is emitted as an explicit null on a row that did not fail,
+// never omitted: a consumer must be able to tell "this deploy succeeded" from
+// "this CLI is older than the server" by reading the payload, and a MISSING key
+// says only the second.
 //
 // It is ABSENT (not null, not an empty object) when the site has no production
 // deployment, and `never_deployed` says which absence that is: `true` means the
@@ -515,13 +581,21 @@ func siteListRow(s cloudclient.Site) map[string]any {
 	row := siteBaseRow(s)
 	if s.LastDeployment != nil {
 		last := map[string]any{
-			"status":      s.LastDeployment.Status,
-			"trigger":     nil,
-			"inserted_at": s.LastDeployment.InsertedAt,
-			"updated_at":  s.LastDeployment.UpdatedAt,
+			"status":         s.LastDeployment.Status,
+			"trigger":        nil,
+			"inserted_at":    s.LastDeployment.InsertedAt,
+			"updated_at":     s.LastDeployment.UpdatedAt,
+			"failure_class":  nil,
+			"failure_reason": nil,
 		}
 		if s.LastDeployment.Trigger != nil {
 			last["trigger"] = *s.LastDeployment.Trigger
+		}
+		if s.LastDeployment.FailureClass != nil {
+			last["failure_class"] = *s.LastDeployment.FailureClass
+		}
+		if s.LastDeployment.FailureReason != nil {
+			last["failure_reason"] = *s.LastDeployment.FailureReason
 		}
 		row["last_deployment"] = last
 	} else {
@@ -1534,8 +1608,12 @@ WHAT 'bp sites' PRINTS
 
   -o json carries the same buckets under 'cohort' (with 'rate': null, on
   purpose). NOTE: each site's 'last_deployment' in the LIST view is the
-  server's four-key embed — status/trigger/inserted_at/updated_at. It no longer
-  carries 'id' or 'image_tag'; 'bp sites show -o json' still does.
+  server's six-key embed — status/trigger/inserted_at/updated_at plus the CAUSE
+  pair, failure_class/failure_reason (both explicitly null on a deploy that did
+  not fail; failure_reason is the humanized, scrubbed sentence, never the raw
+  capture). It does not carry 'id' or 'image_tag'; 'bp sites show -o json'
+  still does. The table grows a WHY column only when some site in the fleet
+  actually has a cause to name.
 
   'bp sites env set' REPLACES the whole env blob (the blob is stored encrypted
   and never echoed back, so there is no per-key merge); list every key you

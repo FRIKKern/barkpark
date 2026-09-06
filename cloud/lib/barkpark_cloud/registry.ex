@@ -2962,7 +2962,8 @@ defmodule BarkparkCloud.Registry do
 
   @doc """
   The latest deployment per site id in `ids`, as a SLIM freshness map
-  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:}}`. One query via
+  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:, stage:,
+  failure_reason:}}`. One query via
   Postgres `DISTINCT ON (site_id) ... ORDER BY site_id, inserted_at DESC` (the
   `[:site_id, :inserted_at]` index already backs it — no migration) so the
   dashboard fleet list can render an at-a-glance freshness badge — amber while a
@@ -2970,10 +2971,20 @@ defmodule BarkparkCloud.Registry do
   WITHOUT an N+1 per row.
 
   Mirrors `latest_provision_status_map/1` in shape and intent. HONESTY LAW
-  (charter D24): only `status`, `trigger`, and the two timestamps ride along —
+  (charter D24): `status`, `trigger`, and the two timestamps ride along —
   NEVER `console`, `build_log_url`, `content_rev`, or any build internal. Sites
   with no deployment are simply absent (nil-honest at the caller). Empty `ids` →
   empty map (no query).
+
+  THE CAUSE PAIR (`stage` + the RAW `failure_reason`) rides too, and it is NOT a
+  widening of the honesty law — it is the INPUT the caller needs to obey it.
+  `DeployLedger.classify/1` reads `status`, `stage` AND the RAW `failure_reason`;
+  a select carrying only a subset classifies EVERY row `UNCLASSIFIED` while
+  looking like it works, which is the exact failure this pair exists to prevent.
+  Both are INTERNAL: `failure_reason` here is the unscrubbed capture off the
+  column, so the ONLY caller (`GET /v1/sites`) must fold it through
+  `FailureCopy.humanize/1` — the same scrub boundary `deployment_json/1` uses on
+  the per-site route — and must never hand this map to a reader verbatim.
 
   PRODUCTION ONLY (cch-w14-s6). Branch previews are excluded — the badge names
   the site's PRODUCTION state, which is the only thing the fleet row claims.
@@ -2990,7 +3001,9 @@ defmodule BarkparkCloud.Registry do
             status: String.t(),
             trigger: String.t() | nil,
             inserted_at: DateTime.t(),
-            updated_at: DateTime.t()
+            updated_at: DateTime.t(),
+            stage: String.t() | nil,
+            failure_reason: String.t() | nil
           }
         }
   def latest_deployment_status_map([]), do: %{}
@@ -3001,12 +3014,20 @@ defmodule BarkparkCloud.Registry do
       where: d.environment == "production",
       order_by: [asc: d.site_id, desc: d.inserted_at, desc: d.id],
       distinct: d.site_id,
-      select: {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at}
+      select:
+        {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at, d.stage, d.failure_reason}
     )
     |> Repo.all()
-    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at} ->
+    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at, stage, failure_reason} ->
       {site_id,
-       %{status: status, trigger: trigger, inserted_at: inserted_at, updated_at: updated_at}}
+       %{
+         status: status,
+         trigger: trigger,
+         inserted_at: inserted_at,
+         updated_at: updated_at,
+         stage: stage,
+         failure_reason: failure_reason
+       }}
     end)
   end
 
