@@ -80,8 +80,9 @@
 # It is threshold-free, so it cannot go stale, and it needs no workflow-to-
 # context name mapping. Honest caveat: it is per-TIP, not per-context, so a tip
 # whose elixir run was cancelled while another workflow is still running waits
-# one extra tick before the scream lands. The header below already accepts a
-# 30-45 minute verdict lag, so that is affordable; being late is not being mute.
+# one extra tick before the scream lands. The workflow's schedule header already
+# accepts a multi-hour verdict lag (GitHub delivers this repo's */30 cron every
+# 2.1-4.7 h, measured 2026-09-06), so that is affordable; being late is not being mute.
 #
 # WHY NOT AN AGE THRESHOLD (measured, and it is worse than it sounds)
 #
@@ -365,7 +366,7 @@ EOF
       red "repaired to stop emitting. This run FAILS rather than guessing."
       red ""
       # THE REMEDY, NAMED (added in review, cch-w61). Exit 3 is honest, but a
-      # fault that recurs every 30 minutes and does not say how to clear itself
+      # fault that recurs on every scheduled run and does not say how to clear itself
       # is how a watch gets muted by the people it is shouting at. This is the
       # one predictable way the new read fails: the workflow runs `gh` under
       # GH_TOKEN, which is `secrets.BREAKGLASS_TOKEN` when that secret exists and
