@@ -1,0 +1,38 @@
+{
+  "_doc": [
+    "RUNNER-LOCAL FAILURE SIGNATURES — data for scripts/main-red-breaker.sh.",
+    "",
+    "A red whose own failure body matches one of these patterns was caused by the",
+    "HOST the job landed on, not by the tree. The breaker classifies it",
+    "RUNNER-LOCAL: neither inherited from main nor the PR's own, never attributed",
+    "to the author, and it does not red the PR's check (a ::warning names it).",
+    "",
+    "THIS FILE IS AN ALLOWLIST, AND AN ALLOWLIST THAT GROWS STOPS DISCRIMINATING.",
+    "Every entry MUST carry a `date` (ISO YYYY-MM-DD) and a `measurement` that",
+    "says how the host-property claim was ESTABLISHED — a count, a population, a",
+    "control. The loader REFUSES an entry missing either, names the refusal in",
+    "the job log, and the refused entry buys nothing: the red is attributed",
+    "exactly as it would have been without the file. Prose in `measurement` is",
+    "not optional decoration; it is the only thing standing between this file and",
+    "a silent 'ignore this failure' switch. scripts/main-red-breaker.test.sh",
+    "proves the refusal (arm 22c) and proves an entry actually suppresses the",
+    "accusation (arm 22a) on a real captured log.",
+    "",
+    "`pattern` is a Python regular expression matched against each RAW line of",
+    "the capture file scripts/breaker-capture.sh wrote (BREAKER_ERROR_LOG), after",
+    "the runner timestamp and ANSI colour are stripped. Keep it anchored on text",
+    "the RUNTIME emits, never on text a gate script emits — a gate's own wording",
+    "is a property of the tree and belongs in the signature comparison instead."
+  ],
+  "signatures": [
+    {
+      "id": "beam-sigaltstack-boot-abort",
+      "title": "BEAM aborts at boot: sys_sigaltstack() cannot set the alternate signal stack",
+      "date": "2026-09-06",
+      "task": "task-572a62485cb1f8da",
+      "evidence_task": "task-f21e6a627ca13ef8",
+      "pattern": "sys_sigaltstack\\(\\): Internal error: Failed to set alternate signal stack",
+      "measurement": "Measured 2026-09-06 (task-f21e6a627ca13ef8, f21e classification). HOST property, established twice over. (1) Hardware census: every crash since the compose-smoke.yml 'Runner hardware census' step landed ran on INTEL(R) XEON(R) PLATINUM 8573C — runs 34020171927, 34020897938, 34020905909 — while 0 of 7 clean census runs did. (2) Region census over 85 executed runs: 9 of 16 runs in Azure westus3+centralus crashed and 0 of 69 elsewhere (p~1e-8), with runner version, image version, agent and OS identical across all 85 and time controlled by a 26-run interleaved window. The abort happens inside the musl runtime image before the BEAM finishes booting, so no repo diff can cause or repair it. Four PRs were told they broke the compose stack when a runner did: runs 33981944988, 33985199172, 33988481430, 34018218144 (two of them via the 'main PASSED that step' path, which never compares signatures at all)."
+    }
+  ]
+}

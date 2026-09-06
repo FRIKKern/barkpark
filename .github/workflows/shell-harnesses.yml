@@ -164,6 +164,7 @@ on:
       - "scripts/relandcheck-diff-producer.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
+      - "scripts/main-red-breaker.runner-local.json"
       - "scripts/breaker-capture.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
@@ -383,6 +384,7 @@ on:
       - "scripts/relandcheck-diff-producer.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
+      - "scripts/main-red-breaker.runner-local.json"
       - "scripts/breaker-capture.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
@@ -684,6 +686,7 @@ jobs:
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
+          tooling-harnesses scripts/main-red-breaker.runner-local.json
           tooling-harnesses scripts/breaker-capture.sh
           tooling-harnesses scripts/stale-tree-regression-check.sh
           tooling-harnesses scripts/stale-tree-ci-wiring.test.sh
