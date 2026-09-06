@@ -318,8 +318,15 @@ jobs:
           # scripts/deploy-concurrency-check.sh reds if any SSH=/SCP= here loses the pair.
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
-          $SCP deploy/cp-deploy.sh bp-provisioner "root@${CP_HOST}:/tmp/"
-          $SSH "root@${CP_HOST}" 'bash /tmp/cp-deploy.sh /tmp/bp-provisioner'
+          # PER-RUN paths: /tmp/cp-deploy.sh is SHARED, and bash reads a script by
+          # byte offset while executing it, so a later run's scp rewrote it under a
+          # running deploy (runs 34021843141, 34025907184 died on parse errors).
+          # The script also re-execs from a private copy of itself; this closes the
+          # same door for the provisioner BINARY, which cannot self-protect.
+          R="${GITHUB_RUN_ID}"
+          $SCP deploy/cp-deploy.sh "root@${CP_HOST}:/tmp/cp-deploy.$R.sh"
+          $SCP bp-provisioner "root@${CP_HOST}:/tmp/bp-provisioner.$R"
+          $SSH "root@${CP_HOST}" "bash /tmp/cp-deploy.$R.sh /tmp/bp-provisioner.$R; rc=\$?; rm -f /tmp/cp-deploy.$R.sh /tmp/bp-provisioner.$R; exit \$rc"
       - name: Smoke test
         # Through Caddy, not a direct port — blue/green means the live slot
         # alternates between :4100 and :4101; the domain always hits it.
@@ -499,11 +506,13 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
-          $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
+          # PER-RUN path — same clobber class as the control-plane leg above.
+          R="${GITHUB_RUN_ID}"
+          $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/instance-deploy.$R.sh"
           # The remote env assignment is quoted on the REMOTE side too, so a
           # malformed secret can only ever land in the script's validated variable
           # — never split into extra words of the remote command line.
-          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
       - name: Smoke test
         # THREE assertions, because the single `test "$code" = "200"` this step
         # used to be covers the dead-pool class and NOTHING else (charter D369,
