@@ -452,6 +452,44 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
              )
     end
 
+    test "#{host} distinguishes validation rejection from other failures and accepts correction",
+         ctx do
+      replace_blocks(ctx, progress_navigation_blocks())
+      view = mount_editor(ctx, @host)
+      before = stored(ctx)
+      rejected_request = Ecto.UUID.generate()
+      validation_rev = :sys.get_state(view.pid).socket.assigns.paper_rev
+
+      render_hook(
+        view,
+        "paper-block-autosave",
+        wire(
+          view,
+          "criteria",
+          %{"criterion-count" => "2", "criterion-0-met" => "bad"},
+          rejected_request
+        )
+      )
+
+      assert_reply(view, %{
+        saved: false,
+        request_id: ^rejected_request,
+        rejected: "validation",
+        current_rev: ^validation_rev
+      })
+
+      assert stored(ctx) == before
+
+      save(view, "criteria", %{"criterion-count" => "2", "criterion-0-met" => "3"})
+      assert hd(stored(ctx)["criteria"]["rows"])["met"] == 3
+
+      missing_request = Ecto.UUID.generate()
+      render_hook(view, "paper-block-autosave", wire(view, "missing-block", %{}, missing_request))
+      assert_reply(view, %{saved: false, request_id: ^missing_request} = reply)
+      refute Map.has_key?(reply, :rejected)
+      assert hd(stored(ctx)["criteria"]["rows"])["met"] == 3
+    end
+
     test "#{host} rejects invalid toc and criteria progress numbers and counts", ctx do
       replace_blocks(ctx, progress_navigation_blocks())
       view = mount_editor(ctx, @host)
@@ -472,7 +510,7 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
           ] do
         request_id = Ecto.UUID.generate()
         render_hook(view, "paper-block-autosave", wire(view, id, params, request_id))
-        assert_reply(view, %{saved: false, request_id: ^request_id})
+        assert_reply(view, %{saved: false, request_id: ^request_id, rejected: "validation"})
         assert stored(ctx) == before
       end
 

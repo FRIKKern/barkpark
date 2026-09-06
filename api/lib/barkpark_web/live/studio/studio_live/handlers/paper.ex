@@ -61,7 +61,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         )
 
       {:error, _reason} ->
-        failed_reply(socket, params)
+        failed_reply(socket, params, :validation)
     end
   end
 
@@ -81,7 +81,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         paper_reply(socket)
 
       {:error, _reason} ->
-        failed_reply(socket, params)
+        failed_reply(socket, params, :validation)
     end
   end
 
@@ -680,17 +680,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   defp paper_reply(socket),
     do: {:reply, socket.assigns[:last_paper_save_result] || %{saved: false}, socket}
 
-  defp failed_reply(socket, params) do
+  defp failed_reply(socket, params, rejection \\ nil) do
     request_id = if is_map(params), do: params["request_id"]
+    result = %{saved: false, request_id: request_id}
+
+    result =
+      if rejection == :validation,
+        do: Map.merge(result, %{rejected: "validation", current_rev: socket.assigns[:paper_rev]}),
+        else: result
 
     socket =
       assign(socket,
         save_status: "Save failed",
         last_paper_save_ok?: false,
-        last_paper_save_result: %{saved: false, request_id: request_id}
+        last_paper_save_result: result
       )
 
-    {:reply, %{saved: false, request_id: request_id}, socket}
+    {:reply, result, socket}
   end
 
   defp write_meta(op, params) do

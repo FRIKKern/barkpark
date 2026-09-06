@@ -357,7 +357,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         )
 
       {:error, _reason} ->
-        failed_save(socket, params["request_id"])
+        failed_save(socket, params["request_id"], :validation)
     end
   end
 
@@ -610,11 +610,18 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp refuse_save(socket, request_id), do: socket |> refuse() |> failed_save(request_id)
 
-  defp failed_save(socket, request_id) do
+  defp failed_save(socket, request_id, rejection \\ nil) do
+    result = %{saved: false, request_id: request_id}
+
+    result =
+      if rejection == :validation,
+        do: Map.merge(result, %{rejected: "validation", current_rev: socket.assigns[:paper_rev]}),
+        else: result
+
     socket
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, result)
   end
 
   # Connected item-share readers retain the signed mount session in the
