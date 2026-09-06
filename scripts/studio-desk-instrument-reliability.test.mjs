@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   BROWSER_POLICIES,
+  PAGE_MEASURE,
   MeasureError,
   RETRYABLE_ABORTS,
   browserPolicy,
@@ -145,6 +146,48 @@ test('the gate exit happens AFTER the artifact is written — never a zero-byte 
   assert.ok(write < gate,
     'D138 rules a zero-byte run an INSTRUMENT FAILURE. A gate that exits before the artifact is ' +
     'on disk manufactures exactly that, and the finding it was gating would be unreadable.');
+});
+
+// ── RULING 1b — is the flake REACHABLE into D107's seven desktop widths? ────
+//
+// D138 saw failure A once, at 640 / user-opened / source-serif-4 — a phone
+// width, outside D107's seven. The open question the ledger row names is not
+// "how often" but "can it land on a RULING cell", because if it can, a later
+// wave's re-run can move the failing-cell count and 'overturn' a ruling that
+// was never wrong.
+//
+// It cannot be settled by waiting for it: an N-run sweep that never sees it
+// proves nothing about reachability (absence of an event is not a proof of
+// impossibility), and one that does see it at 1280 would have settled it by
+// luck. It IS settled mechanically, here: the face is forced and resolved by a
+// single stretch of `PAGE_MEASURE` that reads no viewport quantity at all. Same
+// code, same inputs, at every one of the nine widths — so a substitution
+// possible at 640 is possible at 1280, and the answer is PROVEN POSSIBLE.
+
+test('the face-forcing path reads NO viewport quantity — so it cannot be width-bound', () => {
+  const from = PAGE_MEASURE.indexOf('if (faceOverride) surface.style.setProperty');
+  const to = PAGE_MEASURE.indexOf('let winner = null;');
+  assert.ok(from > 0 && to > from, 'the force -> resolve stretch must be locatable');
+  const region = PAGE_MEASURE.slice(from, to);
+  for (const viewportRead of ['innerWidth', 'outerWidth', 'matchMedia', 'devicePixelRatio', 'screen.',
+                              'width_bucket', 'clientWidth']) {
+    assert.ok(!region.includes(viewportRead),
+      `the face is forced and resolved without reading ${viewportRead}. If that ever stops being ` +
+      'true, D138 failure A acquires a width dependence and this test\'s reachability argument — ' +
+      "PROVEN POSSIBLE at all nine widths, D107's seven included — has to be re-made from scratch.");
+  }
+  assert.match(region, /document\.fonts\.load/,
+    'non-vacuity: this region must really be the face-forcing stretch — if the anchors ever drift ' +
+    'past it, the loop above would pass over an empty string and prove nothing');
+});
+
+test('face_applied is derived from the resolved family alone, not from the width', () => {
+  const line = PAGE_MEASURE.match(/face_applied: [^\n]*/);
+  assert.ok(line, 'face_applied must still be a single derived expression');
+  assert.match(line[0], /winner === wantedFamilies\[0\]/);
+  assert.doesNotMatch(line[0], /width|viewport|bucket/i,
+    'a width term here would make the flake width-bound — and would also make the matrix lie about ' +
+    'which cells were measured on the face they name');
 });
 
 // ── RULING 2 — bounded retries, on the named aborts only ─────────────────────
