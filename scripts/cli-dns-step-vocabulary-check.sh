@@ -50,10 +50,12 @@
 #
 # THE PREFIX ANCHOR IS LOAD-BEARING, and was measured, not assumed. Matching the
 # family anywhere on a `fmt.Errorf` line — rather than immediately after the
-# `("` — picks up `hetzner dns record` from internal/cli/hetzner_dns_cmd.go:598,
-# where the phrase sits inside a backticked `run this` hint and is not a step
-# prefix at all. That one false pair would have made this check red on a clean
-# tree, i.e. an instrument nobody could satisfy.
+# `("` — picks up `hetzner dns record` from internal/cli/hetzner_dns_cmd.go's
+# `record get` not-found error, where the phrase sits inside a backticked `run
+# this` hint (`see \`bp cloud hetzner dns record list --zone …\``) and is not a
+# step prefix at all. That one false pair would have made this check red on a
+# clean tree, i.e. an instrument nobody could satisfy. The selftest's `hint.go`
+# fixture is that shape, and asserts it contributes nothing.
 #
 # COUNT FLOORS, ON BOTH SIDES. Zero is a pass in every set comparison: two empty
 # sets are equal. A `find` that stopped matching, or a regex extractor that
