@@ -352,6 +352,163 @@ defmodule Barkpark.Tasks.LandedTest do
     end
   end
 
+  # ── 5b. Merge-SHAPED is not merge-DISCHARGED (task-48ff3f84e68aecbb) ──────
+  #
+  # `merge_gate: true` means "THE LEAD closes this row, not the builder" — the
+  # same sentence `Tasks.Stamp` and `Tasks.Close.autostamp_merge_gate/6` read
+  # it as. It never meant "a merge discharges this", and leads set it on rows
+  # demanding far more than a merge. Until `merge_discharges?/1` existed, this
+  # verb read the one boolean for both questions and flipped criteria a merge
+  # could not have satisfied — claimlessly, with the caller's own `--note` left
+  # behind as the evidence.
+  #
+  # BOTH DIRECTIONS LIVE IN THIS DESCRIBE ON PURPOSE. A permit that refuses
+  # everything is the same defect with the sign flipped, so every refusal test
+  # here is paired with a flip that must still succeed. The five parametrised
+  # wording tests above are the wider positive control: over-broadening the
+  # demonstration vocabulary reds them by name.
+  describe "merge_discharges? — the permit's second question" do
+    # The row this defect was found from: task-6d80c6cc7d97b1d1 criterion 6.
+    # Merge-shaped TWICE (the flag and the MERGE-GATED marker), and a merge
+    # cannot produce one syllable of what it asks for.
+    @live_example "MERGE-GATED -- THE LEAD CLOSES THIS, AND ONLY ON THE DEMO. " <>
+                    "An editor completes the full round trip -- open, edit rich text, " <>
+                    "set alt text, preview, publish -- in a NON-DEFAULT workspace, " <>
+                    "WITHOUT touching the API, with the run shown."
+
+    test "the live example is REFUSED, and nothing is written", %{scope: scope} do
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => @live_example, "met" => false, "merge_gate" => true}
+          ]
+        })
+
+      assert {:error, :criterion_demands_demonstration} =
+               Tasks.record_landing(doc.id,
+                 note: "PROBE: a landing notice claiming a live demo happened. It did not.",
+                 pr: "99999",
+                 criterion: 0
+               )
+
+      # The flip and the landing sentence ride ONE CAS, so a refused flip must
+      # leave the row completely untouched — not merely unflipped.
+      after_row = hd(criteria(doc))
+      assert after_row["met"] == false
+      assert after_row["evidence"] in [nil, ""]
+      refute Map.has_key?(reload(doc).content, "landed")
+      assert landed_events(doc.doc_id) == []
+    end
+
+    for {label, text} <- [
+          {"a demo", "the lead closes this ON THE DEMO"},
+          {"the run shown", "MERGE-GATED: lead seals it, with the run shown"},
+          {"a screenshot", "PR merged to main and a screenshot of the result"},
+          {"an operator", "merged to main, then an operator confirms the switch"},
+          {"by hand", "MERGE GATE — the lead reruns it by hand first"},
+          {"production", "merged into main and read back in production"}
+        ] do
+      test "a merge-shaped row demanding #{label} is refused", %{scope: scope} do
+        doc =
+          task!(scope, %{
+            "acceptance_criteria" => [
+              %{"criterion" => unquote(text), "met" => false, "merge_gate" => true}
+            ]
+          })
+
+        assert {:error, :criterion_demands_demonstration} =
+                 Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+
+        assert hd(criteria(doc))["met"] == false
+      end
+    end
+
+    # ── and the other direction ──
+    test "a genuinely merge-discharged criterion is STILL PERMITTED", %{scope: scope} do
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" =>
+                "MERGE-GATED: the lead seals this when the PR is merged to main with CI green.",
+              "met" => false,
+              "merge_gate" => true
+            }
+          ]
+        })
+
+      assert {:ok, _} =
+               Tasks.record_landing(doc.id, note: "#15001 merged", pr: "15001", criterion: 0)
+
+      after_row = hd(criteria(doc))
+      assert after_row["met"] == true
+      assert after_row["evidence"] == "#15001 merged"
+    end
+
+    test "merge_discharges:true clears a false veto permanently", %{scope: scope} do
+      # The escape hatch that keeps the veto honest: it is allowed to be a
+      # little eager BECAUSE the author can clear it in one key, per row, for
+      # good. Without this door an eager phrase would be a permanent wall.
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" => "merged to main — this is the demo branch's gate",
+              "met" => false,
+              "merge_gate" => true,
+              "merge_discharges" => true
+            }
+          ]
+        })
+
+      assert {:ok, _} = Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+      assert hd(criteria(doc))["met"] == true
+    end
+
+    test "merge_discharges:false vetoes while merge_gate:true is KEPT", %{scope: scope} do
+      # THE SHAPE THE LIVE EXAMPLE WANTED AND COULD NOT SPELL. Today the only
+      # way to stop a landing notice on that row is `merge_gate: false` — which
+      # also tells `Tasks.Stamp` to stop refusing the builder and tells
+      # `Close.autostamp_merge_gate/6` the row is not a gate. Two signals means
+      # the lead keeps every one of those and still bars the landing notice.
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" => "the lead seals this when the PR merged",
+              "met" => false,
+              "merge_gate" => true,
+              "merge_discharges" => false
+            }
+          ]
+        })
+
+      assert {:error, :criterion_demands_demonstration} =
+               Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+
+      # The row is still a merge gate for every OTHER reader — that is the
+      # whole point of splitting the signal, and the assertion that proves the
+      # split is real rather than a rename.
+      assert Barkpark.Tasks.Criteria.merge_gated?(hd(criteria(doc))) == true
+    end
+
+    test "the veto only ever SUBTRACTS — a non-merge row keeps its own refusal",
+         %{scope: scope} do
+      # Ordering guard: a row that is not merge-shaped must still answer
+      # :criterion_not_merge_shaped, not the newer reason. Otherwise the new
+      # arm would be silently reclassifying every existing refusal.
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "an operator runs the demo", "met" => false}
+          ]
+        })
+
+      assert {:error, :criterion_not_merge_shaped} =
+               Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+    end
+  end
+
   # ── 6. Shape refusals, before any DB work ────────────────────────────────
 
   describe "shape refusals" do
