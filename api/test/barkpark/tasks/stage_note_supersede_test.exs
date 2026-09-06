@@ -47,7 +47,9 @@ defmodule Barkpark.Tasks.StageNoteSupersedeTest do
   @dataset "production"
 
   setup do
-    {:ok, _} = Auth.create_token(@token, "test-stage-supersede", "test", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(@token, "test-stage-supersede", "test", ["read", "write", "admin"])
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
     register_schemas!(scope)
@@ -118,7 +120,8 @@ defmodule Barkpark.Tasks.StageNoteSupersedeTest do
       doc_id = uniq("supersede-refuse")
       task = mk_task!(doc_id, scope, %{"disposition_reason" => @caution})
 
-      resp = stage(conn, doc_id, %{state: "considering", note: "re-adjudicated: looks fine to me"})
+      resp =
+        stage(conn, doc_id, %{state: "considering", note: "re-adjudicated: looks fine to me"})
 
       assert resp.status == 409
       body = json_response(resp, 409)
@@ -200,7 +203,10 @@ defmodule Barkpark.Tasks.StageNoteSupersedeTest do
     test "a stage over a BLANK or ABSENT reason is not refused",
          %{conn: conn, scope: scope} do
       absent = mk_task!(uniq("supersede-absent"), scope)
-      assert stage(conn, absent.doc_id, %{state: "considering", note: "first reason"}).status == 200
+
+      assert stage(conn, absent.doc_id, %{state: "considering", note: "first reason"}).status ==
+               200
+
       assert reload(absent).content["disposition_reason"] == "first reason"
 
       blank = mk_task!(uniq("supersede-blank"), scope, %{"disposition_reason" => "   "})
@@ -253,7 +259,8 @@ defmodule Barkpark.Tasks.StageNoteSupersedeTest do
       assert note =~ "--supersede"
       # The recovery sentence #16557's parser reads: a backticked bp command
       # and a backticked payload path, both intact.
-      assert note =~ "recoverable from `bp task events --payload` as `payload.staged.superseded_note`"
+      assert note =~
+               "recoverable from `bp task events --payload` as `payload.staged.superseded_note`"
 
       supersede = Map.fetch!(flags, "supersede")
       assert supersede.type == "bool"
