@@ -656,16 +656,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
          # locked-placement checks Patch already runs. The PAPER declaration set
          # is passed by the caller (core stays generic, D10); D12's
          # only-when-before-valid guard keeps the legacy corpus untouched (D3).
          {:ok, patched} <-
-           Patch.apply_patch(blocks, op, constraints: Papers.Template.paper_declarations()),
+           Patch.apply_patch(blocks, applied_op,
+             constraints: Papers.Template.paper_declarations()
+           ),
          # Quality-gate RATCHET (p-quality-gate): an op may not hollow OUT a
          # paper that had real content — papers publish in place, so a
          # hollowed canvas edit would BE a hollow published paper. A fresh,
@@ -692,7 +696,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # encrypted field. No-op when nothing in the "paper" schema is marked;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset, doc.workspace_id),
-         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
+         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
       # Carry the doc's stored article marker into the render so both the
@@ -801,7 +805,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
-    with {:ok, opts} <- normalize_canvas_run_opts(opts),
+    with :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
       run_paper_batch_effects(effects, dataset, opts)
@@ -839,6 +844,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
          {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
       key_hash = paper_ops_key_hash(doc, request_id, principal_key)
@@ -1034,6 +1040,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
     with if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
@@ -1424,9 +1431,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # id-bearing ops is byte-identical through it, and the post-fold
       # `ensure_block_ids` at the caller is then a no-op that stays as the
       # belt-and-braces chokepoint.
-      with {:ok, patched} <- Patch.apply_patch(acc, op, constraints: constraints),
+      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op, constraints: constraints),
            next = ensure_block_ids(patched),
-           {:ok, affected} <- locate_paper_affected(op, next) do
+           {:ok, affected} <- locate_paper_affected(applied_op, next) do
         new_ids =
           case affected.block_id do
             nil -> ids
@@ -1705,11 +1713,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_document_if_rev(doc, if_rev),
          {blocks, _synth?} = Papers.resolve_blocks_for_edit(doc, type, dataset),
          {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
-         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
-         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
+         {:ok, applied_op} <- lower_editor_block_op(blocks, op),
+         {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
+         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
       if not is_nil(if_rev) and new_blocks == blocks do
         {:ok, document_no_op_receipt(doc, op, affected)}
       else
@@ -2392,6 +2402,212 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # `apply_document_block_op/5` still does not (its ids are minted downstream in
   # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
   # nil — a known, untouched gap on a different surface, not this contract.
+  defp lower_editor_block_op(
+         blocks,
+         %{"op" => "patch-card-body", "id" => id, "content" => content} = op
+       )
+       when is_binary(id) and id != "" and is_list(content) do
+    if Map.keys(op) |> MapSet.new() |> MapSet.subset?(MapSet.new(~w(op id content))) and
+         valid_card_editor_inline?(content) do
+      case paper_blocks_with_id(blocks, id) do
+        [] ->
+          {:error, {:block_not_found, id, "patch-card-body"}}
+
+        [%{"type" => "card"} = card] ->
+          with {:ok, slots, body} <- strict_card_slots_and_body(card) do
+            body =
+              case body do
+                nil -> %{"type" => "paragraph", "content" => content}
+                paragraph -> Map.put(paragraph, "content", content)
+              end
+
+            {:ok,
+             %{
+               "op" => "patch-block",
+               "id" => id,
+               "patch" => %{"slots" => Map.put(slots, "body", [body])}
+             }}
+          else
+            :error -> {:error, {:invalid_op, op}}
+          end
+
+        [_not_card] ->
+          {:error, {:type_mismatch, id, "patch-card-body"}}
+
+        _duplicates ->
+          {:error, {:duplicate_id, id, "patch-card-body"}}
+      end
+    else
+      {:error, {:invalid_op, op}}
+    end
+  end
+
+  defp lower_editor_block_op(_blocks, %{"op" => "patch-card-body"} = op),
+    do: {:error, {:invalid_op, op}}
+
+  defp lower_editor_block_op(_blocks, op), do: {:ok, op}
+
+  # Card body edits are authoritative read/merge/write operations, not ordinary
+  # shallow patches. They must always carry an optimistic revision fence so the
+  # slots map used for lowering cannot overwrite newer Card chrome or bypass the
+  # safe identity projection reserved for revision-fenced editor writes.
+  defp require_editor_op_revision(%{"op" => "patch-card-body"}, nil),
+    do: {:error, :precondition_failed}
+
+  defp require_editor_op_revision(_op, _if_rev), do: :ok
+
+  defp require_editor_ops_revision(ops, if_rev) when is_list(ops) do
+    Enum.reduce_while(ops, :ok, fn op, :ok ->
+      case require_editor_op_revision(op, if_rev) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp strict_card_slots_and_body(card) do
+    with true <- optional_binary_or_nil?(card, "tone"),
+         {:ok, slots} <- strict_card_slots(card),
+         {:ok, _title} <- strict_card_slot(slots, "title", &strict_card_title?/1),
+         {:ok, body} <- strict_card_slot(slots, "body", &strict_card_body?/1),
+         {:ok, _media} <- strict_card_slot(slots, "media", &strict_card_media?/1),
+         {:ok, _action} <- strict_card_slot(slots, "action", &strict_card_action?/1) do
+      {:ok, slots, body}
+    else
+      _ -> :error
+    end
+  end
+
+  defp strict_card_slots(card) do
+    case Map.fetch(card, "slots") do
+      :error -> {:ok, %{}}
+      {:ok, nil} -> {:ok, %{}}
+      {:ok, slots} when is_map(slots) -> {:ok, slots}
+      _ -> :error
+    end
+  end
+
+  defp strict_card_slot(slots, name, validator) do
+    case Map.fetch(slots, name) do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:ok, nil}
+      {:ok, []} -> {:ok, nil}
+      {:ok, [%{} = element]} -> if validator.(element), do: {:ok, element}, else: :error
+      _ -> :error
+    end
+  end
+
+  defp strict_card_title?(element),
+    do: element["type"] == "heading" and optional_binary_or_nil?(element, "text")
+
+  defp strict_card_body?(element),
+    do:
+      element["type"] == "paragraph" and
+        (not Map.has_key?(element, "content") or is_nil(element["content"]) or
+           valid_card_editor_inline?(element["content"]))
+
+  defp strict_card_media?(element),
+    do:
+      element["type"] in [nil, "image"] and optional_binary_or_nil?(element, "src") and
+        optional_binary_or_nil?(element, "alt")
+
+  defp strict_card_action?(element),
+    do:
+      element["type"] == "action" and optional_binary_or_nil?(element, "label") and
+        optional_binary_or_nil?(element, "href") and optional_binary_or_nil?(element, "priority")
+
+  defp optional_binary_or_nil?(map, key),
+    do: not Map.has_key?(map, key) or is_nil(map[key]) or is_binary(map[key])
+
+  defp valid_card_editor_inline?(nodes) when is_list(nodes),
+    do: Enum.all?(nodes, &valid_card_editor_inline_node?(&1, 0))
+
+  defp valid_card_editor_inline?(_nodes), do: false
+
+  defp valid_card_editor_inline_node?(%{"type" => "text", "value" => value} = node, _rank)
+       when is_binary(value) and value != "",
+       do: exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_inline_node?(%{"type" => "code", "value" => value} = node, rank)
+       when is_binary(value) and value != "",
+       do: card_inline_rank("code") >= rank and exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_inline_node?(%{"type" => type, "children" => [child]} = node, rank)
+       when type in ["strong", "em", "underline", "strikethrough"] do
+    node_rank = card_inline_rank(type)
+
+    node_rank >= rank and exact_map_keys?(node, ~w(type children)) and
+      valid_card_editor_inline_node?(child, node_rank)
+  end
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "link", "href" => href, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(href),
+       do:
+         card_inline_rank("link") >= rank and exact_map_keys?(node, ~w(type href children)) and
+           valid_card_editor_inline_node?(child, card_inline_rank("link"))
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "wikilink", "target" => target, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(target) do
+    allowed = ~w(type target children alias docId)
+
+    card_inline_rank("wikilink") >= rank and subset_map_keys?(node, allowed) and
+      required_map_keys?(node, ~w(type target children)) and
+      optional_non_nil?(node, "alias") and optional_non_nil?(node, "docId") and
+      valid_card_editor_inline_node?(child, card_inline_rank("wikilink"))
+  end
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "blockref", "target" => target, "anchor" => anchor} = node,
+         rank
+       )
+       when is_binary(target) and is_binary(anchor),
+       do:
+         card_inline_rank("blockref") >= rank and
+           exact_map_keys?(node, ~w(type target anchor))
+
+  defp valid_card_editor_inline_node?(%{"type" => "tag", "name" => name} = node, rank)
+       when is_binary(name),
+       do: card_inline_rank("tag") >= rank and exact_map_keys?(node, ~w(type name))
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "valueref", "target" => target, "field" => field} = node,
+         rank
+       )
+       when is_binary(target) and is_binary(field) do
+    allowed = ~w(type target field as fallback label children)
+
+    card_inline_rank("valueref") >= rank and subset_map_keys?(node, allowed) and
+      required_map_keys?(node, ~w(type target field)) and
+      Enum.all?(~w(as fallback label children), &optional_non_nil?(node, &1))
+  end
+
+  defp valid_card_editor_inline_node?(_node, _rank), do: false
+
+  defp card_inline_rank("link"), do: 0
+  defp card_inline_rank("wikilink"), do: 1
+  defp card_inline_rank("strong"), do: 2
+  defp card_inline_rank("em"), do: 3
+  defp card_inline_rank("underline"), do: 4
+  defp card_inline_rank("strikethrough"), do: 5
+  defp card_inline_rank("code"), do: 6
+  defp card_inline_rank("blockref"), do: 7
+  defp card_inline_rank("tag"), do: 8
+  defp card_inline_rank("valueref"), do: 9
+
+  defp exact_map_keys?(map, keys), do: MapSet.new(Map.keys(map)) == MapSet.new(keys)
+
+  defp subset_map_keys?(map, keys),
+    do: MapSet.subset?(MapSet.new(Map.keys(map)), MapSet.new(keys))
+
+  defp required_map_keys?(map, keys), do: Enum.all?(keys, &Map.has_key?(map, &1))
+  defp optional_non_nil?(map, key), do: not Map.has_key?(map, key) or not is_nil(map[key])
+
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
     position = length(new_blocks) - 1
     stored = Enum.at(new_blocks, position) || block
@@ -2453,6 +2669,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       _ ->
         nil
+    end)
+  end
+
+  defp paper_blocks_with_id(blocks, id) do
+    Enum.flat_map(blocks, fn
+      block when is_map(block) ->
+        own = if Map.get(block, "id") == id, do: [block], else: []
+        own ++ Enum.flat_map(paper_child_lists(block), &paper_blocks_with_id(&1, id))
+
+      _ ->
+        []
     end)
   end
 
