@@ -2283,7 +2283,7 @@ function startFixture() {
 // ─────────────────────────────────────────────────────────────────────────────
 const MARK = { [PASS]: "✓", [FAIL]: "✗", [PENDING]: "·" };
 
-function report(ledger, { base, mode, wall, pre, post }) {
+function report(ledger, { base, mode, wall, pre, post, legs = "abc" }) {
   const lines = [`\n   ${mode}  ${base}`, `   served ${pre.commit} → ${post.commit}${pre.commit === post.commit ? "" : "  ** MOVED **"}\n`];
   for (const beat of ledger.beats) {
     const tag = beat.gating ? "" : "  (report-only)";
@@ -2293,7 +2293,11 @@ function report(ledger, { base, mode, wall, pre, post }) {
     }
   }
   const g = ledger.gatingBeats;
-  lines.push(`\n   LEG A ${g.filter((b) => b.status === PASS).length}/${g.length} beats PASS · ${(wall / 1000).toFixed(1)}s wall`);
+  // NAME WHAT WAS TALLIED. With `--legs c` the gating beats are AUTH alone, and
+  // printing them under "LEG A" would report a census run as a create-journey
+  // run — the exact species of lie this harness exists to stop.
+  const gatedLabel = String(legs).includes("a") ? "LEG A" : `legs=${legs} gating`;
+  lines.push(`\n   ${gatedLabel} ${g.filter((b) => b.status === PASS).length}/${g.length} beats PASS · ${(wall / 1000).toFixed(1)}s wall`);
   return lines.join("\n") + "\n";
 }
 
@@ -2629,7 +2633,7 @@ async function main() {
     const srv = readServer();
     const ctx = { ...srv, dataset: opts.dataset };
     const { ledger, run, wall, pre, post } = await withChrome((cdp) => journeyOne(cdp, ctx, opts));
-    process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post }));
+    process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post, legs: opts.legs }));
     if (run.cleanup) {
       const c = run.cleanup;
       process.stdout.write(
@@ -2656,10 +2660,14 @@ async function main() {
     }
 
     if (ledger.clean) {
-      process.stdout.write(`\nJOURNEY PASS — a person can create a document, type a heading and a paragraph, and it persists.\n`);
+      process.stdout.write(
+        opts.legs.includes("a")
+          ? `\nJOURNEY PASS — a person can create a document, type a heading and a paragraph, and it persists.\n`
+          : `\nLEGS ${opts.legs.toUpperCase()} PASS — every gating beat that RAN is green. LEG A did not run, so nothing here claims a person can create a document.\n`,
+      );
       process.exit(0);
     }
-    const summary = `\nJOURNEY ${ledger.failed.length ? "FAIL" : "UNPROVEN"} — ${ledger.failed.length} LEG A beats failed, ${ledger.pending.length} unproven.\n`;
+    const summary = `\nJOURNEY ${ledger.failed.length ? "FAIL" : "UNPROVEN"} — ${ledger.failed.length} gating beats failed, ${ledger.pending.length} unproven.\n`;
     if (opts.report) {
       process.stdout.write(
         summary + `Report mode: exiting 0 on purpose — this run TELLS you what is broken, it does not gate on it.\n` +
