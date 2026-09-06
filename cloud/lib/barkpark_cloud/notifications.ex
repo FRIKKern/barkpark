@@ -45,6 +45,7 @@ defmodule BarkparkCloud.Notifications do
     Delivery,
     DeliveryReason,
     DigestEmail,
+    DigestRun,
     EmailSettings,
     EventEmail,
     SafeUrl,
@@ -492,9 +493,31 @@ defmodule BarkparkCloud.Notifications do
   row and invents no recipient — charter D362 names this digest verbatim as a
   consented recipient-less withhold, and `Delivery.changeset/2` requires a
   recipient. It is also not a new alert PRODUCER (D14): it is one counted record
-  on an existing rail, at WARNING when the rail lost, so `journalctl -u
-  barkpark-cloud | grep fleet_digest` answers "did anyone get today's digest?"
-  without a metrics pipeline.
+  on an existing rail, at WARNING when the rail lost, so an operator can answer
+  "did anyone get today's digest?" without a metrics pipeline.
+
+  WHERE THAT RECORD LIVES, corrected (dr-w27). This doc used to name `journalctl
+  -u barkpark-cloud | grep fleet_digest` as the read affordance. That command has
+  never worked: there is no `barkpark-cloud` systemd unit on the control plane
+  (`systemctl list-units --all | grep -c barkpark-cloud` returns 0, `journalctl
+  -u barkpark-cloud` returns `-- No entries --`); the control plane is a docker
+  container with the `json-file` log driver. And the sink it does write to is
+  DESTROYED BY DEPLOYS: `deploy/cp-deploy.sh`'s `compose_up_repair` recreates the
+  container, and json-file state under `/var/lib/docker/containers/<id>/` goes
+  with it — measured 2026-08-09, when the digest delivered at 06:00Z and the
+  accounting grep returned zero lines over EVERY container on the host after a
+  07:31 recreate. So the count is now written twice: the `Logger` line, still,
+  for whoever is tailing the deploy, and a `DigestRun` row, which is in Postgres
+  and therefore outlives any container. The read affordances that actually
+  exist, in order of durability:
+
+      # survives a recreate; from code, `Notifications.list_digest_runs/2`
+      docker exec -i cloud-db-1 psql -U barkpark -d barkpark_cloud -c "SELECT
+        inserted_at, recipients, sent, instances, covered, reason, withheld FROM
+        digest_runs WHERE event = 'fleet_digest' ORDER BY inserted_at DESC LIMIT 14;"
+
+      # this container's lifetime only
+      docker logs cloud-app-1 2>&1 | grep fleet_digest
 
   Scope, as of dr-w28-s5: dr-w19-s5 fixed the ADDRESS and this rail now also
   carries the PAYLOAD. `DigestEmail.summary/2` takes a `:deploy` reading from
@@ -662,14 +685,24 @@ defmodule BarkparkCloud.Notifications do
   # fan-out's settled record (`Barkpark.Webhooks.Dispatcher.account/3`), which
   # solved this exact shape for a different zero-audience event.
   #
-  # Two observable seams, neither of which needs a read route or a metrics
-  # pipeline: a `:telemetry` event (a test, or a future reporter, can attach) and
-  # one key=value line that `grep fleet_digest` finds in journald. WARNING when
-  # the run lost anyone — `recipients=0` is the loss this slice exists to make
-  # visible, and a partial send is the same class one degree softer.
+  # THREE observable seams, none of which needs a metrics pipeline:
   #
-  # `safely/1`: accounting is a side path on a best-effort operator email. It
-  # must never be able to break the send it is counting.
+  #   * a `:telemetry` event — a test, or a future reporter, can attach;
+  #   * a `digest_runs` ROW (dr-w27) — the DURABLE one, and the reason this
+  #     comment no longer says "journald". The telemetry event is in-process and
+  #     the log line below dies with the container: the control plane runs under
+  #     the docker `json-file` driver and `deploy/cp-deploy.sh` recreates it. A
+  #     row in Postgres is the only copy a deploy cannot take with it, and it is
+  #     queryable rather than greppable. Read it back with
+  #     `Notifications.list_digest_runs/2`;
+  #   * one key=value line `grep fleet_digest` finds in `docker logs` — kept,
+  #     because it is what a human tailing a deploy actually reads. WARNING when
+  #     the run lost anyone: `recipients=0` is the loss this slice exists to make
+  #     visible, and a partial send is the same class one degree softer.
+  #
+  # `safely/1` around each: accounting is a side path on a best-effort operator
+  # email. It must never be able to break the send it is counting — and that
+  # holds for the row too, so a DB failure loses the record, never the digest.
   defp account_fleet_digest(measurements, metadata) do
     metadata = Map.put(metadata, :phase, :settled)
 
@@ -681,9 +714,45 @@ defmodule BarkparkCloud.Notifications do
       )
     end)
 
+    safely(fn -> record_digest_run(measurements, metadata) end)
+
     safely(fn -> log_fleet_digest(measurements, metadata) end)
 
     :ok
+  end
+
+  # THE DURABLE HALF of the accounting record. Same measurements as the log
+  # line, one column each, so "which mornings lost somebody?" is a query and not
+  # fourteen greps against fourteen containers that no longer exist.
+  #
+  # `Map.get(meta, :withheld)` and not `Map.fetch!/2`: only the branches that
+  # funnel through `Withhold.record/4` carry the key, and the column is NULLABLE
+  # precisely so its absence is not silently written as a zero — the same rule
+  # the log line follows by omitting the key entirely.
+  defp record_digest_run(m, meta) do
+    %DigestRun{}
+    |> DigestRun.changeset(%{
+      event: "fleet_digest",
+      phase: to_string(meta.phase),
+      recipients: m.recipients,
+      sent: m.sent,
+      instances: meta.instances,
+      covered: Map.get(meta, :covered, 0),
+      reason: meta.reason,
+      withheld: Map.get(meta, :withheld)
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, run} ->
+        run
+
+      {:error, changeset} ->
+        # Never raised into the send. Logged, because an accounting record that
+        # silently fails to write is the defect this row exists to close, one
+        # layer down.
+        Logger.error("fleet_digest accounting row rejected: #{inspect(changeset.errors)}")
+        nil
+    end
   end
 
   defp log_fleet_digest(m, meta) do
@@ -1122,6 +1191,41 @@ defmodule BarkparkCloud.Notifications do
     Delivery
     |> where([d], d.event == "fleet_digest")
     |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  THE DIGEST'S OWN ACCOUNTING RECORDS — newest first, limit-capped.
+
+  One row per `deliver_fleet_digest/1` run, written by `account_fleet_digest/2`.
+  This is the read path that replaces a promise that never worked: the
+  accounting used to exist only as a `Logger` line, the code named `journalctl
+  -u barkpark-cloud | grep fleet_digest` as the way to read it, and there is no
+  such systemd unit — the control plane is a docker container whose json-file
+  logs are deleted every time `deploy/cp-deploy.sh` recreates it.
+
+  This function reads Postgres, so what it returns SURVIVES a control-plane
+  recreate. That is the whole point of the table, and it is why the digest's
+  worst outcome — `recipients: 0`, nobody mailed — is still answerable the next
+  morning. `DigestRun.lost?/1` is the predicate for "this run lost somebody",
+  shared with the log line's WARNING/INFO choice so the two can never disagree.
+
+  DISTINCT FROM `list_fleet_deliveries/1`. That one lists RECEIPTS: one row per
+  recipient who was mailed. This one lists RUNS, including the runs that mailed
+  nobody and therefore produced no receipt at all. A digest that lost the whole
+  fleet is invisible in the first list by construction and is exactly what the
+  second exists to show.
+
+  No addresses here — the columns are counts. A cross-team operator record
+  naming recipients would be the disclosure `deliver_fleet_digest/1`'s per-team
+  tenancy ruling exists to prevent.
+  """
+  @spec list_digest_runs(String.t(), pos_integer()) :: [DigestRun.t()]
+  def list_digest_runs(event \\ "fleet_digest", limit \\ 50) do
+    DigestRun
+    |> where([r], r.event == ^event)
+    |> order_by([r], desc: r.inserted_at, desc: r.id)
     |> limit(^limit)
     |> Repo.all()
   end
