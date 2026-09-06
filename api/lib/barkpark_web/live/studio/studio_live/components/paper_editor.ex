@@ -1059,9 +1059,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp beta_doc_stats(_), do: %{blocks: 0, words: 0}
 
   # Recursively gather plain text from a block / inline node — a string, a list,
-  # or a map carrying text/value/children/content/items/body. Unknown → "".
+  # or a map carrying text/value/children/content/items/body. Steps contribute
+  # their visible row bodies, but not row titles. Unknown → "".
   defp beta_node_text(s) when is_binary(s), do: s
   defp beta_node_text(list) when is_list(list), do: Enum.map_join(list, " ", &beta_node_text/1)
+
+  defp beta_node_text(%{"type" => "steps", "steps" => steps}) when is_list(steps) do
+    Enum.map_join(steps, " ", fn
+      row when is_map(row) ->
+        row
+        |> Map.put("type", "expandable")
+        |> Blocks.container_children()
+        |> beta_node_text()
+
+      _ ->
+        ""
+    end)
+  end
 
   defp beta_node_text(%{} = m) do
     ["text", "value", "children", "content", "items", "body"]
