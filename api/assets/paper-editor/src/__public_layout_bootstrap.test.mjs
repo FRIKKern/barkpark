@@ -94,6 +94,106 @@ async function tick() {
 }
 
 {
+  const { dom, window, requested, connections } = setup({ editable: false });
+  await tick();
+
+  const toggle = window.document.createElement("button");
+  toggle.id = "paper-edit-toggle";
+  toggle.setAttribute("phx-hook", "BarkparkPaperEditToggle");
+  window.document.querySelector("main").prepend(toggle);
+
+  const lazyToggle = connections[0].options.hooks.BarkparkPaperEditToggle;
+  assert.equal(
+    typeof lazyToggle?.mounted,
+    "function",
+    "the initial hook map must recognize an Edit toggle introduced by the connected mount",
+  );
+
+  const firstHook = { el: toggle };
+  lazyToggle.mounted.call(firstHook);
+  await tick();
+
+  assert.deepEqual(requested.map(pathOf), [editorStyle, editorScripts[0]]);
+  assert.equal(connections.length, 1, "connected-only authorization must keep the original socket");
+  assert.equal(toggle.disabled, true, "Edit stays inert until every editor dependency is ready");
+
+  toggle.disabled = false;
+  toggle.removeAttribute("aria-busy");
+  lazyToggle.updated.call(firstHook);
+  assert.equal(toggle.disabled, true, "a pending LiveView patch cannot make Edit clickable");
+  assert.equal(toggle.getAttribute("aria-busy"), "true");
+
+  lazyToggle.destroyed.call(firstHook);
+  toggle.remove();
+  const replacement = window.document.createElement("button");
+  replacement.id = "paper-edit-toggle-reconnected";
+  replacement.setAttribute("phx-hook", "BarkparkPaperEditToggle");
+  window.document.querySelector("main").prepend(replacement);
+  const replacementHook = { el: replacement };
+  lazyToggle.mounted.call(replacementHook);
+  await tick();
+  assert.equal(requested.length, 2, "a reconnect must share the in-flight asset load");
+
+  for (let index = 0; index < editorScripts.length; index += 1) {
+    const script = requested.find((node) => pathOf(node) === editorScripts[index]);
+    assert.ok(script, `lazy loader must request ${editorScripts[index]} in order`);
+    if (index === editorScripts.length - 1) {
+      installDefinitions(window);
+      window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle.mounted = function mounted() {
+        window.lazyToggleMounted = (window.lazyToggleMounted || 0) + 1;
+      };
+    }
+    script.dispatchEvent(new window.Event("load"));
+    await tick();
+  }
+
+  requested.find((node) => pathOf(node) === editorStyle).dispatchEvent(new window.Event("load"));
+  await tick();
+
+  assert.equal(window.lazyToggleMounted, 1, "the authorized toggle must activate after lazy load");
+  assert.equal(toggle.disabled, true, "a destroyed hook must never mount stale editor handlers");
+  assert.equal(replacement.disabled, false);
+  lazyToggle.updated.call(replacementHook);
+  assert.equal(
+    replacement.disabled,
+    false,
+    "an installed real toggle with no updated callback must remain usable after a LiveView patch",
+  );
+  assert.equal(
+    connections[0].options.hooks.BarkparkPaperCanvas,
+    window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+    "later editor nodes must resolve against the loaded hook definitions",
+  );
+  dom.window.close();
+}
+
+{
+  const { dom, window, requested, connections } = setup({ editable: false });
+  await tick();
+
+  const toggle = window.document.createElement("button");
+  toggle.id = "paper-edit-toggle-lazy-failure";
+  toggle.setAttribute("phx-hook", "BarkparkPaperEditToggle");
+  window.document.querySelector("main").prepend(toggle);
+  const lazyToggle = connections[0].options.hooks.BarkparkPaperEditToggle;
+  const hook = { el: toggle };
+  lazyToggle.mounted.call(hook);
+  await tick();
+  requested.find((node) => pathOf(node) === editorScripts[0]).dispatchEvent(new window.Event("error"));
+  await tick();
+
+  toggle.disabled = false;
+  toggle.removeAttribute("aria-disabled");
+  toggle.removeAttribute("title");
+  lazyToggle.updated.call(hook);
+
+  assert.equal(toggle.disabled, true, "a patch after lazy-load failure must keep Edit inert");
+  assert.equal(toggle.getAttribute("aria-disabled"), "true");
+  assert.match(toggle.title, /Reload the page/);
+  dom.window.close();
+}
+
+{
   const { dom, window, requested, connections } = setup({ editable: true });
   await tick();
 
@@ -157,4 +257,4 @@ for (const missing of ["hooks", "elements"]) {
   dom.window.close();
 }
 
-console.log("public layout editor bootstrap: 6 scenarios passed");
+console.log("public layout editor bootstrap: 8 scenarios passed");

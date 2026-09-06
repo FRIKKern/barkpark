@@ -611,6 +611,10 @@
         const wire = { ...entry.payload, request_id: entry.requestId };
         if (entry.ifRev != null) wire.if_rev = entry.ifRev;
         const token = coordinator.beginSave(entry.source);
+        if (token && entry.source.matches?.(".bp-paper-edit-form[phx-change]")) {
+          entry.formVersion ??= token.version;
+          token.version = entry.formVersion;
+        }
         mutationActive = true;
         let sent;
         try {
@@ -626,6 +630,14 @@
           coordinator.finishSave(token, saved);
           if (saved) {
             confirmedRevision = reply.rev ?? confirmedRevision;
+            const newerForm = sources.get(entry.source);
+            if (newerForm?.dirty && newerForm.documentKey === entry.documentKey &&
+                entry.source.matches?.(".bp-paper-edit-form[phx-change]")) {
+              // A later form snapshot continues this acknowledged local save,
+              // not the stale revision from before it. External revisions still
+              // remain fenced; only this exact request's receipt advances it.
+              newerForm.authoredRev = confirmedRevision;
+            }
             ownRevisions.set(entry.requestId, confirmedRevision);
             mutationQueue.shift();
             mutationById.delete(entry.requestId);
@@ -662,14 +674,18 @@
           target.closest?.(PAPER_FLUSH_TARGETS) ||
           target.closest?.(".bp-paper-edit-form[phx-change]");
         if (!source || !main.contains(source)) return;
-        if (sources.get(source)?.active > 0) return;
+        // Fallback forms can receive newer input while an older snapshot is
+        // saving. Advance their dirty version so that acknowledgement cannot
+        // clear the newer edit or let View discard it.
+        if (sources.get(source)?.active > 0 &&
+            !source.matches?.(".bp-paper-edit-form[phx-change]")) return;
         coordinator.markDirty(source);
         if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
           // Own the legacy form's debounce so the actual autosave reply clears
           // the exit guard. Let target/form listeners run, but do not also let
           // LiveView's window-level phx-change binding enqueue a duplicate.
           event.stopPropagation();
-          coordinator._scheduleFallback(source);
+          if (!(sources.get(source)?.active > 0)) coordinator._scheduleFallback(source);
         }
       };
       coordinator._sendFallback = (source, driver = null) => {
@@ -678,13 +694,16 @@
         if (record.active > 0) return record.pending || Promise.resolve(false);
         driver ||= [...members].find((member) => typeof member.pushEventTo === "function");
         if (!driver || !source.isConnected) return Promise.resolve(false);
+        if (source.checkValidity?.() === false) {
+          source.reportValidity?.();
+          return Promise.resolve(false);
+        }
 
         clearTimeout(record.timer);
         record.timer = null;
         const event = source.getAttribute("phx-change");
         const target = source.getAttribute("phx-target") || source;
         const params = Object.fromEntries(new FormData(source));
-        const version = record.version;
         const mutation = record.mutationEntry
           ? { promise: coordinator.retryMutation(record.mutationEntry), entry: record.mutationEntry }
           : bpPaperMutation(driver, source, event, params, {
@@ -694,15 +713,16 @@
             },
           });
         record.mutationEntry = mutation.entry || record.mutationEntry;
+        let snapshotSaved = false;
         const pending = mutation.promise
           .then((saved) => {
+            snapshotSaved = saved;
             return saved;
           })
           .finally(() => {
             if (record.pending === pending) record.pending = null;
             if (
-              source.isConnected && record.dirty && record.active === 0 &&
-              record.version !== version
+              snapshotSaved && source.isConnected && record.dirty && record.active === 0
             ) coordinator._scheduleFallback(source);
           });
         record.pending = pending;

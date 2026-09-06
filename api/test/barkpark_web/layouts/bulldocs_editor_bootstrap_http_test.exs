@@ -1,7 +1,11 @@
 defmodule BarkparkWeb.Layouts.BulldocsEditorBootstrapHttpTest do
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content}
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.{Accounts, Auth, Content}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.TenancyFixtures
 
   @dataset "production"
 
@@ -38,7 +42,7 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorBootstrapHttpTest do
     assert html =~ ~s(phx-hook="BarkparkPaperEditToggle")
     assert html =~ "data-bp-paper-editor-loader"
 
-    loader = byte_offset(html, "await loadPaperEditorAssets()")
+    loader = byte_offset(html, "await ensurePaperEditorAssets()")
     connect = byte_offset(html, "new LiveView.LiveSocket(")
 
     assert loader < connect
@@ -53,6 +57,40 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorBootstrapHttpTest do
         ] do
       assert html =~ asset
     end
+  end
+
+  test "account authorization lifecycle retains the connected-only lazy bootstrap", %{
+    conn: conn,
+    slug: slug
+  } do
+    {workspace, project} = TenancyFixtures.ensure_default_scope!()
+
+    {:ok, user} =
+      Accounts.register_user(%{
+        email: "editor-bootstrap-#{System.unique_integer([:positive])}@example.com",
+        password: "correct-horse-battery"
+      })
+
+    {:ok, _membership} = TenancyAuth.create_membership(workspace.id, user.id, "member", "user")
+    {:ok, raw} = Accounts.create_user_session_token(user)
+    conn = Plug.Test.init_test_session(conn, %{"user_session" => raw})
+    path = "/w/#{workspace.slug}/p/#{project.slug}/papers/#{slug}"
+
+    dead_html = conn |> get(path) |> html_response(200)
+
+    dead_toggle =
+      dead_html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(~s([phx-hook="BarkparkPaperEditToggle"]))
+      |> LazyHTML.to_html()
+
+    assert dead_toggle =~ ~s(id="paper-edit-toggle")
+    assert dead_html =~ "PaperHooks.BarkparkPaperEditToggle"
+
+    {:ok, _view, connected_html} = live(conn, path)
+    assert connected_html =~ ~s(phx-hook="BarkparkPaperEditToggle")
+
+    assert length(:binary.matches(dead_html, "new LiveView.LiveSocket(")) == 1
   end
 
   defp byte_offset(haystack, needle) do

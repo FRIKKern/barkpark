@@ -72,7 +72,7 @@ function inlineText(nodes) {
 }
 
 try {
-  for (const type of ["callout", "ingress", "pullquote", "list"]) {
+  for (const type of ["callout", "ingress", "pullquote", "blockquote", "list"]) {
     const block = {
       id: `fallback-${type}`,
       type,
@@ -80,6 +80,9 @@ try {
     };
     if (type === "callout") {
       Object.assign(block, { tone: "warning", title: "Keep this chrome" });
+    }
+    if (type === "blockquote") {
+      Object.assign(block, { cite: "Keep this attribution", source_note: "Keep metadata" });
     }
 
     const editor = document.createElement("bp-paper-editor");
@@ -99,6 +102,8 @@ try {
     assert.equal("type" in emitted.patch, false, `${type} patch excludes immutable type`);
     assert.equal("tone" in emitted.patch, false, `${type} body patch excludes callout chrome`);
     assert.equal("title" in emitted.patch, false, `${type} body patch excludes title chrome`);
+    assert.equal("cite" in emitted.patch, false, `${type} body patch excludes attribution`);
+    assert.equal("source_note" in emitted.patch, false, `${type} body patch excludes metadata`);
 
     const inline = inlineFromPatch(type, emitted.patch);
     assert.equal(inline[0].type, "link", `${type} retains the link wrapper`);

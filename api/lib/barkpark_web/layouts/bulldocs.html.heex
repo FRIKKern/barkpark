@@ -2828,6 +2828,16 @@
     if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
 
     const publicBootNonce = document.currentScript && document.currentScript.nonce;
+    const paperEditorHookNames = [
+      "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
+      "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
+      "BarkparkPaperSortable", "BarkparkPaperContextMenu"
+    ];
+    const paperEditorElementNames = [
+      "bp-paper-editor", "bp-paper-canvas", "bp-media-picker",
+      "bp-reference-picker", "bp-rich-text-editor"
+    ];
+    let paperEditorAssetsReady;
 
     function loadPaperEditorStyle(href) {
       return new Promise((resolve, reject) => {
@@ -2870,13 +2880,45 @@
       await Promise.all([styleReady, scriptsReady]);
     }
 
-    function showPaperEditorLoadError(error) {
-      const toggle = document.querySelector('[phx-hook="BarkparkPaperEditToggle"]');
+    function installPaperEditorDefinitions() {
+      // A load event can follow an empty or runtime-failing script. Require
+      // usable definitions as well as successful requests before activation.
+      for (const name of paperEditorHookNames) {
+        if (typeof window.BarkparkPaperEditorHooks?.[name]?.mounted !== "function") {
+          throw new Error(`Editor hook unavailable: ${name}`);
+        }
+      }
+      for (const name of paperEditorElementNames) {
+        if (!window.customElements?.get(name)) {
+          throw new Error(`Editor component unavailable: ${name}`);
+        }
+      }
+      Object.assign(PaperHooks, window.BarkparkPaperEditorHooks);
+    }
+
+    function ensurePaperEditorAssets() {
+      if (!paperEditorAssetsReady) {
+        paperEditorAssetsReady = loadPaperEditorAssets().then(installPaperEditorDefinitions);
+      }
+      return paperEditorAssetsReady;
+    }
+
+    function disablePaperEditorToggle(toggle, failed) {
       if (toggle) {
         toggle.disabled = true;
-        toggle.setAttribute("aria-disabled", "true");
-        toggle.title = "Editor failed to load. Reload the page to try again.";
+        if (failed) {
+          toggle.setAttribute("aria-disabled", "true");
+          toggle.removeAttribute("aria-busy");
+          toggle.title = "Editor failed to load. Reload the page to try again.";
+        } else {
+          toggle.setAttribute("aria-busy", "true");
+        }
       }
+    }
+
+    function showPaperEditorLoadError(error) {
+      const toggle = document.querySelector('[phx-hook="BarkparkPaperEditToggle"]');
+      disablePaperEditorToggle(toggle, true);
 
       const message = document.createElement("p");
       message.setAttribute("role", "alert");
@@ -2885,31 +2927,55 @@
       console.error("Barkpark public editor assets failed to load", error);
     }
 
+    // An account credential can become available only on the connected mount.
+    // Register one inert hook up front so LiveView can mount the server-authorized
+    // Edit toggle without logging an unknown hook. Its own mounted lifecycle then
+    // lazily loads the editor on this SAME socket and hands the live hook instance
+    // to the real implementation. No toggle means this hook never runs and an
+    // anonymous/read-only reader requests zero editor assets.
+    PaperHooks.BarkparkPaperEditToggle = {
+      mounted() {
+        if (this.paperEditorLoading || this.paperEditorDelegate) return;
+        this.paperEditorLoading = true;
+        disablePaperEditorToggle(this.el, false);
+
+        ensurePaperEditorAssets()
+          .then(() => {
+            if (this.paperEditorDestroyed) return;
+            this.paperEditorDelegate = window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle;
+            this.el.disabled = false;
+            this.el.removeAttribute("aria-busy");
+            this.paperEditorDelegate.mounted.call(this);
+          })
+          .catch((error) => {
+            if (this.paperEditorDestroyed) return;
+            this.paperEditorFailed = true;
+            showPaperEditorLoadError(error);
+          });
+      },
+      updated() {
+        if (!this.paperEditorDelegate) {
+          // A server patch replaces element attributes. Reassert inertness so
+          // it cannot transiently remove `disabled` while dependencies load.
+          disablePaperEditorToggle(this.el, this.paperEditorFailed === true);
+        } else if (this.paperEditorDelegate.updated) {
+          this.paperEditorDelegate.updated.call(this);
+        }
+      },
+      destroyed() {
+        this.paperEditorDestroyed = true;
+        if (this.paperEditorDelegate?.destroyed) {
+          this.paperEditorDelegate.destroyed.call(this);
+        }
+      }
+    };
+
     async function connectPublicLiveView() {
       // This hook exists only in the server-authorized editable static render.
       // Wait for every required definition and the editor shell CSS before the
       // one public LiveSocket binds hooks; do not create a second socket later.
       if (document.querySelector('[phx-hook="BarkparkPaperEditToggle"]')) {
-        await loadPaperEditorAssets();
-        // A load event can follow an empty or runtime-failing script. Require
-        // usable definitions as well as successful requests before binding.
-        for (const name of [
-          "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
-          "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
-          "BarkparkPaperSortable", "BarkparkPaperContextMenu"
-        ]) {
-          if (typeof window.BarkparkPaperEditorHooks?.[name]?.mounted !== "function") {
-            throw new Error(`Editor hook unavailable: ${name}`);
-          }
-        }
-        for (const name of [
-          "bp-paper-editor", "bp-paper-canvas", "bp-media-picker",
-          "bp-reference-picker", "bp-rich-text-editor"
-        ]) {
-          if (!window.customElements?.get(name)) {
-            throw new Error(`Editor component unavailable: ${name}`);
-          }
-        }
+        await ensurePaperEditorAssets();
       }
 
       Object.assign(PaperHooks, window.BarkparkPaperEditorHooks || {});

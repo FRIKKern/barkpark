@@ -78,10 +78,9 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
   test "editor assets finish before hook registration and LiveSocket construction" do
     html = render_layout(%{})
 
-    [load, merge, connect] =
+    [load, connect] =
       for needle <- [
-            "await loadPaperEditorAssets();",
-            "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks",
+            "await ensurePaperEditorAssets();",
             "new LiveView.LiveSocket("
           ] do
         idx = :binary.match(html, needle)
@@ -89,8 +88,12 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
         elem(idx, 0)
       end
 
-    assert load < merge, "all editor assets must load before the merge reads the hooks global"
-    assert merge < connect, "hooks must be registered before the LiveSocket connects"
+    assert load < connect, "static editor assets must finish before the LiveSocket connects"
+
+    assert html =~
+             "paperEditorAssetsReady = loadPaperEditorAssets().then(installPaperEditorDefinitions);"
+
+    assert html =~ "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks);"
     assert html =~ "script.async = false;"
 
     assert length(:binary.matches(html, "new LiveView.LiveSocket(")) == 1,

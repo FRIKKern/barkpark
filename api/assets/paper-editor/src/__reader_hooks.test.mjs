@@ -340,6 +340,79 @@ await tick();
 assert.deepEqual(calls, ['paper-toggle-edit'],
   'an acknowledged fallback autosave is not duplicated at exit');
 
+// Native validation must keep invalid authoring input local and block exit.
+const numericForm = window.document.createElement('form');
+numericForm.className = 'bp-paper-edit-form';
+numericForm.setAttribute('phx-change', 'paper-block-autosave');
+numericForm.setAttribute('phx-debounce', '0');
+numericForm.innerHTML = '<input name="block_id" value="number-1"><input type="number" name="value" min="2" value="3">';
+window.document.querySelector('main').append(numericForm);
+let validityReports = 0;
+numericForm.reportValidity = () => { validityReports += 1; return numericForm.checkValidity(); };
+const numericInput = numericForm.querySelector('[name=value]');
+numericInput.value = '1';
+calls.length = 0;
+numericInput.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+click();
+await tick();
+assert.deepEqual(calls, [], 'invalid numeric input must neither save nor exit');
+assert.ok(validityReports > 0, 'invalid input receives visible validity feedback');
+numericInput.value = '4';
+numericInput.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave']);
+assert.equal(replies[0].payload.value, '4');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+numericForm.remove();
+
+// Typing during a form save must create a later snapshot, not disappear when
+// the earlier acknowledgement arrives or when View is clicked immediately.
+calls.length = 0;
+fallbackText.value = 'First in-flight value';
+fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+const earlierFormRevision = replies[0].payload.if_rev;
+fallbackText.value = 'Newest in-flight value';
+fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+click();
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave', 'paper-block-autosave'],
+  'View waits for the later form snapshot too');
+assert.equal(replies[0].payload.text, 'Newest in-flight value');
+assert.equal(replies[0].payload.if_rev, Number(earlierFormRevision) + 1);
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.deepEqual(calls, ['paper-block-autosave', 'paper-block-autosave', 'paper-toggle-edit']);
+
+calls.length = 0;
+fallbackText.value = 'Retry original snapshot';
+fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+await tick();
+const originalFormWire = JSON.parse(JSON.stringify(replies[0].payload));
+fallbackText.value = 'Retained while retrying';
+fallbackText.dispatchEvent(new window.Event('input', {bubbles:true}));
+settleNext([{status:'fulfilled', value:{reply:{saved:false}}}]);
+await tick();
+await tick();
+assert.equal(replies.length, 0, 'a refused older snapshot is not retried automatically');
+click();
+await tick();
+assert.deepEqual(JSON.parse(JSON.stringify(replies[0].payload)), originalFormWire,
+  'retry preserves the original request identity, revision and content');
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+await tick();
+assert.equal(replies[0].payload.text, 'Retained while retrying');
+assert.notEqual(replies[0].payload.request_id, originalFormWire.request_id);
+assert.equal(replies[0].payload.if_rev, Number(originalFormWire.if_rev) + 1);
+settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
+await tick();
+assert.equal(calls.at(-1), 'paper-toggle-edit');
+
 // Keep the click lock until the toggle event itself is acknowledged. Otherwise
 // a fast second click can enqueue a reverse toggle before the first diff lands.
 delayedToggle = true;
