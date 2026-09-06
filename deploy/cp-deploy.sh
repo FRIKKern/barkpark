@@ -225,7 +225,7 @@ log "git pull"
 # inherits it (measured: the fetch advertises v0, not `version 2`).
 # Remove this pin only once barkpark-cp's git is >= 2.43 AND you have re-run the
 # v2 fetch from the box and watched it succeed.
-git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main || { log "pull failed"; exit 11; }
+git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
 
