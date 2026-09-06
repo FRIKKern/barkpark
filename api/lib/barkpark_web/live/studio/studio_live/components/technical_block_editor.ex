@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
   @moduledoc """
-  Typed fallback forms and pure patch builders for technical PortableDoc blocks.
+  Contextual controls and pure patch builders for technical PortableDoc blocks.
 
   Collection patches are accepted only when the submitted row count matches the
   stored list. Every row starts from its stored value, so unknown keys, legacy
@@ -9,11 +9,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
 
   use Phoenix.Component
 
+  alias Barkpark.PortableDoc.Render
+  alias Phoenix.LiveView.JS
+
   attr :block, :map, required: true
   attr :id, :string, required: true
 
   def technical_block_editor(assigns) do
+    assigns =
+      assigns
+      |> assign(:preview, Render.render_block(assigns.block, %{style: :article}))
+      |> assign(:label, technical_label(Map.get(assigns.block, "type")))
+
     ~H"""
+    <div class="bp-paper-contextual-editor" data-test-id="paper-technical-contextual-editor">
+      <div class="bp-paper-contextual-preview" data-test-id="paper-technical-preview">
+        <%= if @preview == "" do %>
+          <p class="bp-paper-edit-readonly">Configure {@label} to add content.</p>
+        <% else %>
+          {Phoenix.HTML.raw(@preview)}
+        <% end %>
+      </div>
+      <details id={"technical-controls-" <> @id} class="bp-paper-contextual-controls"
+               phx-mounted={JS.ignore_attributes("open")}>
+        <summary class="bp-paper-contextual-toggle">Configure {@label}</summary>
+        <div class="bp-paper-contextual-panel">
     <form
       id={"technical-block-form-" <> @id}
       class="bp-paper-edit-form"
@@ -40,8 +60,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
         <% _ -> %>
       <% end %>
     </form>
+        </div>
+      </details>
+    </div>
     """
   end
+
+  defp technical_label("diff"), do: "diff"
+  defp technical_label("filetree"), do: "file tree"
+  defp technical_label("footnote"), do: "footnotes"
+  defp technical_label("code-tabs"), do: "code tabs"
+  defp technical_label(_), do: "technical block"
 
   attr :name, :string, required: true
   attr :label, :string, required: true

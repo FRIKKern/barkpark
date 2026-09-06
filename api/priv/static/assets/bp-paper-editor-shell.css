@@ -1597,7 +1597,7 @@
   box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
 }
 .bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
-.bp-paper-contextual-panel .bp-paper-edit-fieldlabel { min-width: 0; }
+.bp-paper-contextual-panel .bp-paper-edit-fieldlabel { min-width: 0; color: var(--paper-ink-soft); }
 .bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 2px;
 }

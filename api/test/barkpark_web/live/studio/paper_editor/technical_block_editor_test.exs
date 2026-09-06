@@ -5,6 +5,34 @@ defmodule BarkparkWeb.Studio.PaperEditor.TechnicalBlockEditorTest do
 
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
 
+  test "technical blocks retain the canonical reader above closed contextual settings" do
+    for block <- [
+          %{"id" => "diff", "type" => "diff", "diff" => "+new", "file" => "new.ex"},
+          %{"id" => "tree", "type" => "filetree", "text" => "src/\n  new.ex"},
+          %{
+            "id" => "notes",
+            "type" => "footnote",
+            "notes" => [%{"id" => "1", "text" => "Source"}]
+          },
+          %{
+            "id" => "tabs",
+            "type" => "code-tabs",
+            "tabs" => [%{"label" => "Code", "value" => "saved"}]
+          }
+        ] do
+      html = render_editor(block)
+      doc = LazyHTML.from_fragment(html)
+      assert html =~ Barkpark.PortableDoc.Render.render_block(block, %{style: :article})
+      controls = LazyHTML.query(doc, ~s(details[id="technical-controls-#{block["id"]}"]))
+      assert Enum.count(controls) == 1
+      assert LazyHTML.attribute(controls, "open") == []
+      assert LazyHTML.attribute(controls, "phx-mounted") |> hd() =~ "ignore_attrs"
+
+      assert controls |> LazyHTML.query("form[phx-change=paper-block-autosave]") |> Enum.count() ==
+               1
+    end
+  end
+
   describe "scalar technical blocks" do
     test "diff and filetree preserve omitted metadata while accepting explicit clears" do
       diff = %{"type" => "diff", "diff" => "+old", "file" => "lib/a.ex", "lang" => "elixir"}
