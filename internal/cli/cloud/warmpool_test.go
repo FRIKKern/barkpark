@@ -833,14 +833,17 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 	r, w, _ := os.Pipe()
 	origStderr := os.Stderr
 	os.Stderr = w
+	// Drain concurrently: a darwin pipe buffers only 512 bytes (64 KiB on Linux),
+	// so reading only after the call returns deadlocks once the code under test
+	// writes more warning text than the buffer holds.
+	stderrCh := make(chan string, 1)
+	go func() { var b strings.Builder; io.Copy(&b, r); stderrCh <- b.String() }()
 
 	_, err := wp.ProvisionOneShot(context.Background(), acmeSpec())
 
 	w.Close()
 	os.Stderr = origStderr
-	var buf strings.Builder
-	io.Copy(&buf, r)
-	logged := buf.String()
+	logged := <-stderrCh
 
 	if err == nil {
 		t.Fatal("ProvisionOneShot: want the (health) provision error, got nil")
@@ -1746,14 +1749,17 @@ func TestProvision_SitePlaneFailureDoesNotFailGoLive(t *testing.T) {
 	r, w, _ := os.Pipe()
 	origStderr := os.Stderr
 	os.Stderr = w
+	// Drain concurrently: a darwin pipe buffers only 512 bytes (64 KiB on Linux),
+	// so reading only after the call returns deadlocks once the code under test
+	// writes more warning text than the buffer holds.
+	stderrCh := make(chan string, 1)
+	go func() { var b strings.Builder; io.Copy(&b, r); stderrCh <- b.String() }()
 
 	live, err := wp.Provision(context.Background(), spec)
 
 	w.Close()
 	os.Stderr = origStderr
-	var buf strings.Builder
-	io.Copy(&buf, r)
-	warning := buf.String()
+	warning := <-stderrCh
 
 	if err != nil {
 		t.Fatalf("a failed site-plane install must NOT fail the go-live, got err: %v", err)
