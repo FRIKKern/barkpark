@@ -376,6 +376,25 @@ config :barkpark, Oban,
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
        {"* * * * *", Barkpark.Audit.ExportWorker},
+       # security-8 / task-e4d5cc40193a3ef5 — GC for `login_tickets`.
+       # `Auth.sweep_login_tickets/0` has existed since the table was created
+       # and, until this entry, was called by NOTHING outside its own test: the
+       # table was append-only in production. It is NOT the housekeeping case
+       # its two sibling GCs are — a spent or expired row still holds the RAW
+       # operator bearer (`Barkpark.EncryptedBinary`, decrypted by any plain
+       # Ecto load), and that recovered bearer was measured returning 201 on a
+       # route where a garbage bearer returns 401. Per-minute, NOT the hourly
+       # :17/:43 slots, because the TTL is 60 SECONDS with no grace window:
+       # nothing downstream sets a retention floor, so the cadence IS the
+       # floor. Hourly would retain a live re-entry credential ~60x its
+       # documented life; per-minute bounds it at ~2 minutes. Belongs with the
+       # other per-minute slots, where lateness IS the cost. Runs on the static
+       # `default` queue; the worker bounds one tick by construction
+       # (`Auth.sweep_login_tickets_batch/1`), so a cold first pass over a
+       # never-swept table cannot become one giant transaction. No migration:
+       # see the worker's moduledoc on what the `expires_at` index does and
+       # does not serve.
+       {"* * * * *", Barkpark.Auth.LoginTicketSweeper},
        # bl-api-task-create-idempotency C4 — GC for the `idempotency_keys`
        # dedup store. `Idempotency.sweep/1` has existed since the table was
        # created and, until this entry, was called by NOTHING outside its own
