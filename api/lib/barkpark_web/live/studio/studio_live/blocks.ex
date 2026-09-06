@@ -84,6 +84,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_criteria_progress_rows(block, params)
   end
 
+  def build_block_patch(%{"type" => "steps"} = block, params) do
+    case validate_steps_form(block, params) do
+      {:ok, rows, submitted, action} -> build_steps_patch(block, rows, submitted, action, params)
+      {:error, _reason} -> %{}
+    end
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   def build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -233,6 +240,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
          :ok <- validate_collection_text_fields(params, "criterion", ~w(label), "rows"),
          :ok <- validate_criteria_progress_numbers(block, params) do
       {:ok, build_block_patch(block, params)}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "steps"} = block, params) do
+    case validate_steps_form(block, params) do
+      {:ok, rows, submitted, action} ->
+        {:ok, build_steps_patch(block, rows, submitted, action, params)}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -435,6 +452,265 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_form_param_preserving_shape(params, prefix <> "label", "label")
     |> put_number_form_field(item, params, prefix <> "met", "met")
     |> put_number_form_field(item, params, prefix <> "total", "total")
+  end
+
+  defp validate_steps_form(block, params) do
+    if step_form_params?(params) do
+      with {:ok, rows} <- stored_steps_rows(block),
+           true <- Enum.all?(rows, &valid_step_row?/1),
+           true <- unique_step_row_ids?(rows),
+           true <- exact_submitted_count?(params["step-count"], length(rows)),
+           :ok <- validate_step_param_names(params, length(rows)),
+           {:ok, submitted} <- submitted_step_rows(params, rows),
+           true <- Enum.map(submitted, &elem(&1, 0)) == Enum.map(rows, &Map.fetch!(&1, "id")),
+           {:ok, action} <- validate_step_action(params["step-action"], block, rows, params) do
+        {:ok, rows, submitted, action}
+      else
+        {:error, _reason} = error -> error
+        _ -> {:error, {:malformed_collection, "steps"}}
+      end
+    else
+      {:ok, [], [], nil}
+    end
+  end
+
+  defp build_steps_patch(_block, [], [], nil, _params), do: %{}
+
+  defp build_steps_patch(_block, rows, submitted, action, params) do
+    titled =
+      Enum.zip(rows, submitted)
+      |> Enum.map(fn {row, {_id, title}} ->
+        put_form_param_preserving_shape(row, %{"title" => title}, "title", "title")
+      end)
+
+    updated = apply_step_action(titled, action, params)
+    if updated == rows, do: %{}, else: %{"steps" => updated}
+  end
+
+  defp step_form_params?(params) do
+    Enum.any?(Map.keys(params), &(is_binary(&1) and String.starts_with?(&1, "step-")))
+  end
+
+  defp stored_steps_rows(block) do
+    case Map.fetch(block, "steps") do
+      :error -> {:ok, []}
+      {:ok, nil} -> {:ok, []}
+      {:ok, rows} when is_list(rows) -> {:ok, rows}
+      _ -> {:error, {:malformed_collection, "steps"}}
+    end
+  end
+
+  defp valid_step_row?(%{"id" => id}) when is_binary(id) and id != "", do: true
+  defp valid_step_row?(_row), do: false
+
+  defp unique_step_row_ids?(rows) do
+    ids = Enum.map(rows, &Map.fetch!(&1, "id"))
+    length(ids) == MapSet.size(MapSet.new(ids))
+  end
+
+  defp validate_step_param_names(params, count) do
+    allowed =
+      MapSet.new(~w(step-count step-action step-new-row-id step-new-child-id))
+      |> then(fn allowed ->
+        if count == 0 do
+          allowed
+        else
+          Enum.reduce(0..(count - 1), allowed, fn index, acc ->
+            acc
+            |> MapSet.put("step-#{index}-id")
+            |> MapSet.put("step-#{index}-title")
+          end)
+        end
+      end)
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "step-") and not MapSet.member?(allowed, key)
+      end)
+
+    if unexpected?, do: {:error, {:malformed_collection, "steps"}}, else: :ok
+  end
+
+  defp submitted_step_rows(params, rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {_row, index}, {:ok, acc} ->
+      id_key = "step-#{index}-id"
+      title_key = "step-#{index}-title"
+
+      case {Map.fetch(params, id_key), Map.fetch(params, title_key)} do
+        {{:ok, id}, {:ok, title}} when is_binary(id) and is_binary(title) ->
+          {:cont, {:ok, [{id, title} | acc]}}
+
+        _ ->
+          {:halt, {:error, {:malformed_collection, "steps"}}}
+      end
+    end)
+    |> case do
+      {:ok, submitted} -> {:ok, Enum.reverse(submitted)}
+      error -> error
+    end
+  end
+
+  defp validate_step_action(action, _block, _rows, _params) when action in [nil, ""],
+    do: {:ok, nil}
+
+  defp validate_step_action("add", block, _rows, params) do
+    case validate_new_step_id(params["step-new-row-id"], block) do
+      :ok -> {:ok, :add}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_step_action("remove:" <> id, _block, rows, _params) do
+    with {:ok, {:remove, ^id}} <- validate_existing_step_action(:remove, id, rows),
+         %{} = row <- Enum.find(rows, &(Map.get(&1, "id") == id)),
+         nil <- locked_step_descendant_id(row) do
+      {:ok, {:remove, id}}
+    else
+      locked_id when is_binary(locked_id) ->
+        {:error, {:locked_block, locked_id, "remove-block"}}
+
+      {:error, _reason} = error ->
+        error
+
+      _ ->
+        {:error, {:malformed_collection, "steps"}}
+    end
+  end
+
+  defp validate_step_action("up:" <> id, _block, rows, _params),
+    do: validate_existing_step_action(:up, id, rows)
+
+  defp validate_step_action("down:" <> id, _block, rows, _params),
+    do: validate_existing_step_action(:down, id, rows)
+
+  defp validate_step_action("add-body:" <> id, block, rows, params) do
+    with {:ok, {:add_body, ^id}} <- validate_existing_step_action(:add_body, id, rows),
+         :ok <- validate_new_step_id(params["step-new-child-id"], block),
+         %{} = row <- Enum.find(rows, &(Map.get(&1, "id") == id)),
+         {:ok, _updated} <- add_first_step_body(row, params["step-new-child-id"]) do
+      {:ok, {:add_body, id}}
+    else
+      {:error, _reason} = error -> error
+      _ -> {:error, {:malformed_collection, "steps"}}
+    end
+  end
+
+  defp validate_step_action(_action, _block, _rows, _params),
+    do: {:error, {:malformed_collection, "steps"}}
+
+  defp validate_existing_step_action(kind, id, rows) do
+    if is_binary(id) and Enum.any?(rows, &(Map.get(&1, "id") == id)),
+      do: {:ok, {kind, id}},
+      else: {:error, {:malformed_collection, "steps"}}
+  end
+
+  defp apply_step_action(rows, nil, _params), do: rows
+
+  defp apply_step_action(rows, :add, params) do
+    id = params["step-new-row-id"]
+    rows ++ [%{"id" => id, "title" => "", "blocks" => []}]
+  end
+
+  defp apply_step_action(rows, {:remove, id}, _params) do
+    Enum.reject(rows, &(Map.get(&1, "id") == id))
+  end
+
+  defp apply_step_action(rows, {direction, id}, _params) when direction in [:up, :down] do
+    index = Enum.find_index(rows, &(Map.get(&1, "id") == id))
+    offset = if direction == :up, do: -1, else: 1
+    move_at_index(rows, index, offset)
+  end
+
+  defp apply_step_action(rows, {:add_body, id}, params) do
+    child_id = params["step-new-child-id"]
+    index = Enum.find_index(rows, &(Map.get(&1, "id") == id))
+    {:ok, row} = add_first_step_body(Enum.at(rows, index), child_id)
+    List.replace_at(rows, index, row)
+  end
+
+  defp validate_new_step_id(id, block) when is_binary(id) do
+    cond do
+      String.trim(id) == "" -> {:error, {:malformed_collection, "steps"}}
+      MapSet.member?(step_tree_ids(block), id) -> {:error, {:duplicate_id, id}}
+      true -> :ok
+    end
+  end
+
+  defp validate_new_step_id(_id, _block), do: {:error, {:malformed_collection, "steps"}}
+
+  defp step_tree_ids(value), do: collect_step_ids(value, MapSet.new())
+
+  defp collect_step_ids(values, ids) when is_list(values),
+    do: Enum.reduce(values, ids, &collect_step_ids/2)
+
+  defp collect_step_ids(%{} = value, ids) do
+    ids =
+      case Map.get(value, "id") do
+        id when is_binary(id) and id != "" -> MapSet.put(ids, id)
+        _ -> ids
+      end
+
+    ids = collect_step_ids(Map.get(value, "children"), ids)
+    ids = collect_step_ids(Map.get(value, "blocks"), ids)
+    collect_step_ids(Map.get(value, "steps"), ids)
+  end
+
+  defp collect_step_ids(_value, ids), do: ids
+
+  defp locked_step_descendant_id(%{"locked" => true} = value), do: Map.get(value, "id") || ""
+
+  defp locked_step_descendant_id(%{} = value) do
+    Enum.find_value(~w(children blocks steps), fn key ->
+      locked_step_descendant_id(Map.get(value, key))
+    end)
+  end
+
+  defp locked_step_descendant_id(values) when is_list(values),
+    do: Enum.find_value(values, &locked_step_descendant_id/1)
+
+  defp locked_step_descendant_id(_value), do: nil
+
+  defp add_first_step_body(row, child_id) do
+    child = default_block("paragraph", child_id)
+
+    case Map.get(row, "children") do
+      children when is_list(children) ->
+        if children == [], do: {:ok, Map.put(row, "children", [child])}, else: malformed_steps()
+
+      children when children in [nil, false] ->
+        case Map.get(row, "blocks") do
+          blocks when is_list(blocks) ->
+            if blocks == [], do: {:ok, Map.put(row, "blocks", [child])}, else: malformed_steps()
+
+          blocks when blocks in [nil, false] ->
+            {:ok, Map.put(row, "blocks", [child])}
+
+          _ ->
+            malformed_steps()
+        end
+
+      _ ->
+        malformed_steps()
+    end
+  end
+
+  defp malformed_steps, do: {:error, {:malformed_collection, "steps"}}
+
+  defp move_at_index(items, index, offset) when is_integer(index) do
+    target = index + offset
+
+    if target >= 0 and target < length(items) do
+      source_item = Enum.at(items, index)
+      target_item = Enum.at(items, target)
+
+      items
+      |> List.replace_at(index, target_item)
+      |> List.replace_at(target, source_item)
+    else
+      items
+    end
   end
 
   defp put_editor_collection(patch, block, params, field, prefix, update, default) do
@@ -1188,6 +1464,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       "rows" => [],
       "detail" => "rows"
     }
+
+  def default_block("steps", id) do
+    row_id = id <> "-step-0"
+
+    %{
+      "id" => id,
+      "type" => "steps",
+      "steps" => [
+        %{
+          "id" => row_id,
+          "title" => "Step 1",
+          "blocks" => [default_block("paragraph", row_id <> "-0")]
+        }
+      ]
+    }
+  end
 
   def default_block("diff", id),
     do: %{"id" => id, "type" => "diff", "diff" => "", "file" => "", "lang" => ""}
