@@ -32,12 +32,24 @@ defmodule Barkpark.Tasks.Edges do
   to find its blockers.
 
   ## Arguments
-    * `child_id`  — binary_id of the dependent document (the task that's
-      blocked on something).
-    * `parent_id` — binary_id of the blocker document.
-    * `kind`      — `:blocks` (default), `:"discovered-from"`, or the
+    * `child`  — the dependent document (the task that's blocked on
+      something): the `%Document{}` the caller resolved, or its binary_id.
+    * `parent` — the blocker document, same two shapes.
+    * `kind`   — `:blocks` (default), `:"discovered-from"`, or the
       string form `"blocks"` / `"discovered-from"`. Other strings are
       rejected by the changeset.
+
+  ## Endpoint shape decides canonicalisation
+
+  Pass the `%Document{}` structs and a `drafts.<id>` endpoint is swapped for
+  its same-scope PUBLISHED twin (see `canonical_endpoint/1`). Pass a bare
+  uuid and it is stored AS GIVEN — no twin lookup, and no read of any kind:
+  this function never fetches a document by primary key, because a by-PK
+  read carries no tenant clause and the only thing it could learn (the row's
+  scope) is what the caller already holds in the struct
+  (`scripts/tenant-scope-check.sh`, `by-pk-document-get`). The one production
+  writer, `TasksController.add_edge/2`, resolves both endpoints through the
+  scoped `find_task_by_doc_id` pre-flight and passes the structs.
 
   ## Idempotency
 
@@ -50,9 +62,11 @@ defmodule Barkpark.Tasks.Edges do
   Returns `{:ok, %Edge{}}` on success, `{:error, %Ecto.Changeset{}}` on
   validation failure (missing FK target, self-edge, unknown kind).
   """
-  @spec add_dep(binary(), binary(), atom() | String.t()) ::
+  @type endpoint :: Document.t() | binary()
+
+  @spec add_dep(endpoint(), endpoint(), atom() | String.t()) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks) do
+  def add_dep(child, parent, kind \\ :blocks) do
     kind_str = normalize_kind(kind)
 
     # TWIN-EDGE CANONICALISATION (task-85bba5cb33dbd59b).
@@ -76,8 +90,8 @@ defmodule Barkpark.Tasks.Edges do
     # ONE CHOKEPOINT, verified rather than assumed: every task-edge writer
     # reaches this function (`Tasks.add_dep/4` -> `Fence.add_dep/4` -> here).
     # `Barkpark.Content.Edges` writes a DIFFERENT table.
-    child_id = canonical_endpoint(child_id)
-    parent_id = canonical_endpoint(parent_id)
+    child_id = canonical_endpoint(child)
+    parent_id = canonical_endpoint(parent)
 
     attrs = %{from_id: child_id, to_id: parent_id, kind: kind_str}
     changeset = Edge.changeset(%Edge{}, attrs)
@@ -227,18 +241,25 @@ defmodule Barkpark.Tasks.Edges do
     )
   end
 
-  # Resolve a document uuid to its CANONICAL twin's uuid: if the row is a
+  # Resolve an endpoint to its CANONICAL twin's uuid: if the document is a
   # `drafts.<id>` shadow and a published `<id>` exists in the SAME scope
   # (type + dataset + workspace + project), return the published row's uuid.
   #
-  # Everything else is returned UNCHANGED — an unknown uuid, a row that is
-  # already published, and a draft with NO published twin. That last case is
-  # deliberate: an unpaired draft is admitted to the ready queue AS ITSELF
-  # (queue.ex axis 3 suppresses a draft only when a published twin exists), so
-  # its edges must keep binding to it or the blocker would vanish entirely.
-  defp canonical_endpoint(id) when is_binary(id) do
-    with %Document{doc_id: doc_id} = doc <- Repo.get(Document, id),
-         true <- String.starts_with?(doc_id, "drafts."),
+  # Everything else is returned UNCHANGED — a row that is already published,
+  # and a draft with NO published twin. That last case is deliberate: an
+  # unpaired draft is admitted to the ready queue AS ITSELF (queue.ex axis 3
+  # suppresses a draft only when a published twin exists), so its edges must
+  # keep binding to it or the blocker would vanish entirely.
+  #
+  # The scope the twin lookup needs comes off the STRUCT the caller resolved.
+  # This clause never reads the endpoint back by primary key: `Repo.get(
+  # Document, id)` has no tenant clause, and every production caller already
+  # holds the row (task-8f9d3ea8926f387f). A bare uuid therefore takes the
+  # last clause and is stored as given — canonicalisation is something the
+  # caller opts into by handing over the document, not something this module
+  # can recover from an id alone.
+  defp canonical_endpoint(%Document{id: id, doc_id: doc_id} = doc) do
+    with true <- String.starts_with?(doc_id, "drafts."),
          published_id <- String.replace_prefix(doc_id, "drafts.", ""),
          %Document{id: canonical} <- fetch_twin(doc, published_id) do
       canonical

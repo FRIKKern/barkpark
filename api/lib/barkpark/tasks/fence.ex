@@ -41,10 +41,16 @@ defmodule Barkpark.Tasks.Fence do
   This is the fencing wrapper `Tasks.add_dep/3` delegates to; it preserves the
   `{:ok, %Edge{}}` / `{:error, %Ecto.Changeset{}}` contract of the bare
   `Edges.add_dep/3` so every existing caller is untouched.
+
+  Endpoints are passed through to `Edges.add_dep/3` in the shape received —
+  `%Document{}` structs (twin-canonicalised there) or bare uuids (stored as
+  given). The lock and the fence key on the dependent's uuid either way.
   """
-  @spec add_dep(binary(), binary(), atom() | String.t(), binary() | nil) ::
+  @spec add_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
           {:ok, Barkpark.Tasks.Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_uuid, parent_uuid, kind \\ :blocks, caller_token_id \\ nil) do
+  def add_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil) do
+    child_uuid = endpoint_uuid(child)
+
     result =
       Repo.transaction(fn ->
         # Advisory lock on the DEPENDENT — the task we may fence. Same key
@@ -52,7 +58,7 @@ defmodule Barkpark.Tasks.Fence do
         # with them per-task; edges on OTHER tasks pass through unimpeded.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{child_uuid}"])
 
-        case Edges.add_dep(child_uuid, parent_uuid, kind) do
+        case Edges.add_dep(child, parent, kind) do
           {:ok, edge} ->
             bundle =
               fence_in_progress(
@@ -87,6 +93,9 @@ defmodule Barkpark.Tasks.Fence do
         {:error, cs}
     end
   end
+
+  defp endpoint_uuid(%Document{id: id}), do: id
+  defp endpoint_uuid(id) when is_binary(id), do: id
 
   # Bump the epoch of an `in_progress` task (the fencing kick) under the caller's
   # already-held advisory lock + transaction. Returns a broadcast bundle to emit

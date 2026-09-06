@@ -2295,7 +2295,10 @@ defmodule BarkparkWeb.TasksController do
          {:ok, to_doc} <- find_task_by_doc_id(to_id, conn) do
       kind = params["kind"] || "blocks"
 
-      case Tasks.add_dep(from_doc.id, to_doc.id, kind, caller_token_id(conn)) do
+      # The STRUCTS, not their ids: both were resolved through the scoped
+      # pre-flight above, and `Edges.add_dep/3` twin-canonicalises from the
+      # struct so it never has to read an endpoint back by primary key.
+      case Tasks.add_dep(from_doc, to_doc, kind, caller_token_id(conn)) do
         {:ok, %Edge{} = edge} ->
           json(conn, %{
             ok: true,
