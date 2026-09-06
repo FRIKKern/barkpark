@@ -183,7 +183,7 @@ defmodule BarkparkWeb.Router do
 
   # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
   pipeline :scim do
-    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ScimMediaType)
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireScimToken)
@@ -1982,7 +1982,9 @@ defmodule BarkparkWeb.Router do
     # Discovery (RFC 7644 §4) — an IdP probes these before it provisions.
     get("/ServiceProviderConfig", ScimDiscoveryController, :service_provider_config)
     get("/ResourceTypes", ScimDiscoveryController, :resource_types)
+    get("/ResourceTypes/:id", ScimDiscoveryController, :show_resource_type)
     get("/Schemas", ScimDiscoveryController, :schemas)
+    get("/Schemas/:id", ScimDiscoveryController, :show_schema)
 
     post("/Users", ScimUsersController, :create)
     get("/Users", ScimUsersController, :index)

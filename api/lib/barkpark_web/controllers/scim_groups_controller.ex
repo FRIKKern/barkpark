@@ -11,6 +11,7 @@ defmodule BarkparkWeb.ScimGroupsController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Scim
+  alias BarkparkWeb.ScimPatch
   alias BarkparkWeb.ScimResponse
 
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -104,51 +105,111 @@ defmodule BarkparkWeb.ScimGroupsController do
     json(conn, ScimResponse.list_response(resources, total, start_index))
   end
 
-  # PATCH /scim/v2/Groups/:id — add/remove members.
+  # PATCH /scim/v2/Groups/:id — add/remove members, or replace the resource.
+  #
+  # Two shapes now, where only the first used to be read: path-keyed
+  # `{"op":"add","path":"members","value":[…]}` operations, and Azure AD's
+  # PATH-LESS `{"op":"replace","value":{"displayName":…,"members":[…]}}` — the
+  # whole resource pushed through PATCH (RFC 7644 §3.5.2.3). The path-less form
+  # matched no `path == "members"` filter, so it fell out of `member_ops/1` and
+  # the request answered `200` with the group's UNCHANGED name and membership:
+  # a rename or a full membership reconcile the IdP believed had landed.
   def update(conn, %{"id" => id} = params) do
     org = conn.assigns.scim_org
 
-    case Scim.get_org_group(org, id) do
-      nil ->
-        ScimResponse.error(conn, 404, "group not found in this organization")
+    # Body shape is judged BEFORE the group is read or written, so a refused
+    # PATCH leaves no partial write behind.
+    with {:ok, patch} <- ScimPatch.classify(params) do
+      case Scim.get_org_group(org, id) do
+        nil ->
+          ScimResponse.error(conn, 404, "group not found in this organization")
 
-      group ->
-        with_precondition(conn, group, fn conn ->
-          # Every op's outcome is READ: an add/remove that matched nobody in
-          # this org is collected, never discarded into a 200 that claims it.
-          # `:invalid_role` halts the loop: the role is a property of the
-          # group, so every remaining :add would refuse for the same reason.
-          outcome =
-            Enum.reduce_while(member_ops(params["Operations"]), [], fn {op, uid}, miss ->
-              result =
-                case op do
-                  :add -> Scim.add_group_member(org, group, uid)
-                  :remove -> Scim.remove_group_member(org, group, uid)
-                end
-
-              case result do
-                {:ok, _n} -> {:cont, miss}
-                {:error, :no_membership} -> {:cont, miss ++ [uid]}
-                {:error, :invalid_role} -> {:halt, {:error, :invalid_role}}
-              end
-            end)
-
-          case outcome do
-            {:error, :invalid_role} ->
-              invalid_role_error(conn)
-
-            unmatched ->
-              # Re-read AFTER the loop: `group` was fetched before the writes,
-              # so rendering it would answer for the PRE-mutation resource
-              # (PDS-D551).
-              group = Scim.get_org_group(org, id) || group
-
-              conn
-              |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
-              |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
-          end
-        end)
+        group ->
+          with_precondition(conn, group, fn conn ->
+            apply_patch(conn, org, group, id, patch)
+          end)
+      end
+    else
+      {:error, scim_type, detail} -> ScimResponse.error(conn, 400, detail, scim_type)
     end
+  end
+
+  # Whole-resource first (same two `Barkpark.Scim` calls PUT makes — the
+  # mutation boundary is never forked for a provider shape), then whatever
+  # path-keyed member operations rode along in the same Operations array.
+  defp apply_patch(conn, org, group, id, patch) do
+    case whole_resource(org, group, patch.whole_resource) do
+      {:error, :invalid_role} ->
+        invalid_role_error(conn)
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        changeset_error(conn, cs)
+
+      {:ok, group, unmatched_whole} ->
+        case member_ops_outcome(org, group, patch.ops) do
+          {:error, :invalid_role} ->
+            invalid_role_error(conn)
+
+          unmatched_ops ->
+            # Re-read AFTER the writes: `group` was fetched before them, so
+            # rendering it would answer for the PRE-mutation resource
+            # (PDS-D551).
+            group = Scim.get_org_group(org, id) || group
+
+            conn
+            |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
+            |> json(
+              render_group(
+                conn,
+                group,
+                Scim.group_member_ids(org, group),
+                Enum.uniq(unmatched_whole ++ unmatched_ops)
+              )
+            )
+        end
+    end
+  end
+
+  defp whole_resource(_org, group, nil), do: {:ok, group, []}
+
+  defp whole_resource(org, group, attrs) do
+    with {:ok, updated} <- Scim.update_group(org, group, attrs) do
+      # `members` is reconciled ONLY when the operation actually named it. A
+      # path-less replace carries "a list of attributes to be replaced" — the
+      # ones it names, not the ones it omits — so `{"displayName":"X"}` must not
+      # silently empty the group the way `member_ids(attrs["members"]) == []`
+      # would have.
+      case Map.fetch(attrs, "members") do
+        :error ->
+          {:ok, updated, []}
+
+        {:ok, members} ->
+          case Scim.replace_group_members(org, updated, member_ids(members)) do
+            {:ok, %{unmatched: unmatched}} -> {:ok, updated, unmatched}
+            {:error, :invalid_role} = err -> err
+          end
+      end
+    end
+  end
+
+  # Every op's outcome is READ: an add/remove that matched nobody in this org is
+  # collected, never discarded into a 200 that claims it. `:invalid_role` halts
+  # the loop: the role is a property of the group, so every remaining :add would
+  # refuse for the same reason.
+  defp member_ops_outcome(org, group, ops) do
+    Enum.reduce_while(member_ops(ops), [], fn {op, uid}, miss ->
+      result =
+        case op do
+          :add -> Scim.add_group_member(org, group, uid)
+          :remove -> Scim.remove_group_member(org, group, uid)
+        end
+
+      case result do
+        {:ok, _n} -> {:cont, miss}
+        {:error, :no_membership} -> {:cont, miss ++ [uid]}
+        {:error, :invalid_role} -> {:halt, {:error, :invalid_role}}
+      end
+    end)
   end
 
   # PUT /scim/v2/Groups/:id — full replace (displayName + members set).
