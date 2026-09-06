@@ -29,8 +29,12 @@ defmodule BarkparkWeb.Plugs.PaperReaderCspTest do
       assert policy =~ "https://cdn.jsdelivr.net"
       assert policy =~ "object-src 'none'"
       assert policy =~ "base-uri 'self'"
-      # crucially NOT unsafe-inline — that would re-open inline injection.
-      refute policy =~ "'unsafe-inline'"
+      # crucially NOT unsafe-inline IN script-src — that would re-open inline
+      # injection. Scoped to the script-src directive because `style-src` DOES
+      # carry 'unsafe-inline' (unavoidable: the renderer stamps `style=`
+      # attributes — see the plug's @moduledoc), and a whole-header refute
+      # would silently conflate the two.
+      refute policy =~ ~r/script-src[^;]*'unsafe-inline'/
       # the nonce is assigned for the layout to stamp on its inline scripts.
       assert is_binary(conn.assigns.csp_nonce)
       assert policy =~ "'nonce-#{conn.assigns.csp_nonce}'"
@@ -87,9 +91,74 @@ defmodule BarkparkWeb.Plugs.PaperReaderCspTest do
 
     test "policy/1 renders the exact directive order for a given nonce" do
       assert PaperReaderCsp.policy("ABC123") ==
-               "script-src 'self' 'nonce-ABC123' 'wasm-unsafe-eval' 'unsafe-eval' " <>
-                 "https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; " <>
-                 "frame-ancestors 'self'"
+               "default-src 'self'; " <>
+                 "script-src 'self' 'nonce-ABC123' 'wasm-unsafe-eval' 'unsafe-eval' " <>
+                 "https://cdn.jsdelivr.net; " <>
+                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " <>
+                 "img-src 'self' data: blob: https: http:; " <>
+                 "media-src 'self' data: blob: https: http:; " <>
+                 "font-src 'self' data:; " <>
+                 "connect-src 'self' https: ws: wss:; " <>
+                 "frame-src 'self'; object-src 'none'; base-uri 'self'; " <>
+                 "form-action 'self'; frame-ancestors 'self'"
+    end
+  end
+
+  describe "non-script directives (the markup-injection floor)" do
+    setup do
+      %{policy: PaperReaderCsp.policy("N")}
+    end
+
+    # The three directives the task names, each one an INDEPENDENT assertion so
+    # a mutation that drops exactly one reds exactly one test.
+    test "form-action 'self' — the reader emits zero <form>, so this is free", %{policy: p} do
+      assert p =~ "form-action 'self'"
+    end
+
+    test "frame-src 'self' — the only frame is the same-origin /email view", %{policy: p} do
+      assert p =~ "frame-src 'self'"
+    end
+
+    test "default-src 'self' — the floor for the unnamed fetch directives", %{policy: p} do
+      assert p =~ "default-src 'self'"
+    end
+
+    test "font-src is pinned to self (+ data:), the genuine tightening", %{policy: p} do
+      assert p =~ "font-src 'self' data:;"
+      refute p =~ ~r/font-src[^;]*https:/
+    end
+
+    # These two are DELIBERATELY permissive and the lock says so, so a later
+    # "tighten it" edit has to argue with a named test instead of a comment.
+    test "img-src/media-src keep remote hosts — paper blocks carry any https URL", %{policy: p} do
+      assert p =~ "img-src 'self' data: blob: https: http:"
+      assert p =~ "media-src 'self' data: blob: https: http:"
+    end
+
+    test "connect-src keeps https: — asciicast srcs come from paper content", %{policy: p} do
+      assert p =~ "connect-src 'self' https: ws: wss:"
+    end
+
+    test "style-src carries 'unsafe-inline' — inline style= attrs cannot be nonced", %{
+      policy: p
+    } do
+      assert p =~ "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+    end
+
+    test "every directive appears exactly once (no duplicate/shadowed directive)", %{policy: p} do
+      names =
+        p
+        |> String.split(";")
+        |> Enum.map(&(&1 |> String.trim() |> String.split(" ") |> List.first()))
+        |> Enum.reject(&(&1 in [nil, ""]))
+
+      assert length(names) == length(Enum.uniq(names))
+
+      assert Enum.sort(names) ==
+               Enum.sort(~w(
+                 default-src script-src style-src img-src media-src font-src
+                 connect-src frame-src object-src base-uri form-action frame-ancestors
+               ))
     end
   end
 end
