@@ -1599,6 +1599,12 @@
 :is(.bp-section__cell, .bp-cols__c) > .bp-paper-edit-wc:first-child bp-paper-editor[data-editor-mode="table"] .bp-table {
   margin-top: 0;
 }
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-test-id="paper-terminal-readonly"] > .bp-term {
+  margin-top: 0;
+}
 .bp-paper-card-body-editor,
 .bp-paper-card-body-editor > bp-paper-editor {
   display: contents;
@@ -1623,6 +1629,7 @@
 .bp-paper-contextual-controls--columns[open],
 .bp-paper-contextual-controls--card[open],
 .bp-paper-contextual-controls--action[open],
+.bp-paper-contextual-controls--terminal[open],
 .bp-paper-contextual-controls--form[open] {
   position: relative; inset: auto; width: 100%; max-width: none;
 }
@@ -1638,6 +1645,7 @@
 .bp-paper-contextual-controls--columns[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--card[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--action[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--terminal[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
   max-height: none; overflow: visible;
 }

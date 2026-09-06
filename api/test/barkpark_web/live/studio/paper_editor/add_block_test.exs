@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   @addable_block_types ~w(
     paragraph heading list callout code blockquote divider section steps tabs
     eyebrow byline ingress pullquote
-    action card table diagram figure equation route toc criteria-progress gauge-list
+    action card table terminal diagram figure equation route toc criteria-progress gauge-list
     diff filetree footnote code-tabs api-endpoint form questionnaire
     field-string field-slug field-text field-boolean field-select field-datetime field-color field-number
     field-image field-reference video
@@ -71,6 +71,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
 
   defp addable_block_valid?(%{"type" => "table"} = table),
     do: match?({:ok, _}, Barkpark.PortableDoc.TableEditing.project(table))
+
+  defp addable_block_valid?(%{"type" => "terminal", "children" => []} = terminal),
+    do: not Map.has_key?(terminal, "blocks")
 
   defp addable_block_valid?(%{
          "type" => "card",

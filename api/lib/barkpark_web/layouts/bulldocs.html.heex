@@ -2983,7 +2983,11 @@
       let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
       let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
         params: { _csrf_token: csrfToken },
-        hooks: PaperHooks
+        hooks: PaperHooks,
+        dom: {
+          onBeforeElUpdated: (fromEl, toEl) =>
+            window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl)
+        }
       });
       liveSocket.connect();
       // Expose for hooks / debugging (Wave 4 block-streaming).

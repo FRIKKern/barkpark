@@ -28,8 +28,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
+  alias Barkpark.PortableDoc.Render.{Compose, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
-  alias Barkpark.PortableDoc.Render.SectionLayout
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias Phoenix.LiveView.JS
@@ -552,6 +552,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"action", "Action"},
          {"card", "Card"},
          {"table", "Table"},
+         {"terminal", "Terminal"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
@@ -1596,6 +1597,126 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <p class="bp-paper-edit-readonly">
                 This Action's authored fields are malformed and cannot be edited here; original content is preserved.
               </p>
+          <% end %>
+        </div>
+      <% "terminal" -> %>
+        <% terminal_state = terminal_editor_state(@block, @tree_identity_safe) %>
+        <div
+          id={"paper-terminal-boundary-" <> @id}
+          class="bp-paper-contextual-editor"
+          data-test-id="paper-terminal-contextual-editor"
+          data-paper-terminal-boundary
+          data-paper-terminal-id={@id}
+          data-paper-terminal-document-key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+          data-paper-terminal-rev={@doc_type == "paper" && @paper_rev || @document_rev}
+          data-paper-rev={@doc_type == "paper" && @paper_rev}
+          data-document-rev={@doc_type != "paper" && @document_rev}
+          data-paper-terminal-supported={match?({:ok, _state}, terminal_state) && "true" || "false"}
+          phx-hook="BarkparkTerminalBoundary"
+        >
+          <%= case terminal_state do %>
+            <% {:ok, state} -> %>
+              <% parts = Compose.terminal_article_parts(@block) %>
+              <div class="bp-term" data-paper-terminal-editor-frame>
+                <%= raw(parts.bar_html) %>
+                <div class="bp-term__body" data-test-id="paper-terminal-body">
+                  <%= for segment <- terminal_segments(state.children, @canvas_enabled) do %>
+                    <%= case segment do %>
+                      <% {:run, run_blocks, ordinal} -> %>
+                        <.canvas_run
+                          slug={PaperCanvas.terminal_run_slug(@root_slug, @id)}
+                          run_blocks={run_blocks}
+                          run_ordinal={ordinal}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                          paper_rev={@doc_type == "paper" && @paper_rev}
+                          document_rev={@doc_type != "paper" && @document_rev}
+                          container_id={@id}
+                          container_kind="terminal"
+                        />
+                      <% {:block, child} -> %>
+                        <.paper_block_fields
+                          block={child}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_type={@doc_type}
+                          paper_rev={@paper_rev}
+                          document_rev={@document_rev}
+                          root_slug={@root_slug}
+                          doc_key={@doc_key}
+                          canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
+                        />
+                    <% end %>
+                  <% end %>
+                </div>
+                <%= raw(parts.footer_html) %>
+              </div>
+              <details
+                id={"terminal-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--terminal"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure terminal</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"terminal-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-terminal-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"terminal-title-" <> @id}>Title</label>
+                    <input id={"terminal-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" value={state.title} />
+                    <label class="bp-paper-edit-fieldlabel" for={"terminal-footer-" <> @id}>Footer</label>
+                    <input id={"terminal-footer-" <> @id} type="text" name="footer" class="bp-paper-edit-text" value={state.footer} />
+                    <label class="bp-paper-edit-check" for={"terminal-live-" <> @id}>
+                      <input type="hidden" name="live" value="false" />
+                      <input id={"terminal-live-" <> @id} type="checkbox" name="live" value="true" checked={state.live} />
+                      Live
+                    </label>
+                  </form>
+                  <form
+                    id={"terminal-structure-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    data-test-id="paper-terminal-structure-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <input type="hidden" name="terminal-child-count" value={length(state.children)} />
+                    <input
+                      :for={{child, index} <- Enum.with_index(state.children)}
+                      type="hidden"
+                      name={"terminal-child-#{index}-id"}
+                      value={child["id"]}
+                    />
+                    <input type="hidden" name="terminal-new-child-id" value={Blocks.new_block_id()} />
+                    <button
+                      :if={state.children == []}
+                      type="submit"
+                      name="terminal-action"
+                      value="add"
+                      class="btn btn-ghost btn-sm"
+                    >Add paragraph</button>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _reason} -> %>
+              <div data-test-id="paper-terminal-readonly">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <p class="bp-paper-edit-readonly">
+                  This Terminal's authored body needs a canonical shape and stable identities before editing; original content is preserved.
+                </p>
+              </div>
           <% end %>
         </div>
       <% "card" -> %>
@@ -3330,6 +3451,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   defp editable_section?(_block, _tree_identity_safe), do: false
+
+  defp terminal_editor_state(block, true) do
+    with {:ok, %{children: children} = state} <- Blocks.terminal_form_state(block),
+         true <- valid_nested_blocks?(children) do
+      {:ok, state}
+    else
+      _ -> {:error, :unsafe_terminal}
+    end
+  end
+
+  defp terminal_editor_state(_block, _tree_identity_safe), do: {:error, :unsafe_terminal}
+
+  defp terminal_segments(children, true),
+    do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp terminal_segments(children, false), do: Enum.map(children, &{:block, &1})
 
   defp section_frame_attributes(block) do
     case SectionLayout.frame_class(block) do

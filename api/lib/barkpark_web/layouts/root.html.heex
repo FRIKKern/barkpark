@@ -5845,7 +5845,11 @@
         user_name: userName,
         user_color: userColor
       },
-      hooks: Hooks
+      hooks: Hooks,
+      dom: {
+        onBeforeElUpdated: (fromEl, toEl) =>
+          window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl)
+      }
     });
     liveSocket.connect();
   </script>

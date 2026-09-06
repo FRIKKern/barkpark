@@ -90,6 +90,11 @@ async function tick() {
   assert.equal(requested.length, 0, "anonymous readers must request no editor assets");
   assert.equal(connections.length, 1, "anonymous readers still connect their one LiveSocket");
   assert.equal(connections[0].connected, true);
+  assert.equal(
+    typeof connections[0].options.dom?.onBeforeElUpdated,
+    "function",
+    "the LiveSocket always installs the Terminal-safe DOM update boundary",
+  );
   dom.window.close();
 }
 
@@ -107,6 +112,15 @@ async function tick() {
     typeof lazyToggle?.mounted,
     "function",
     "the initial hook map must recognize an Edit toggle introduced by the connected mount",
+  );
+  let boundaryCalls = 0;
+  connections[0].options.dom.onBeforeElUpdated({}, {});
+  window.BarkparkPaperEditorBeforeElUpdated = () => { boundaryCalls += 1; };
+  connections[0].options.dom.onBeforeElUpdated({}, {});
+  assert.equal(
+    boundaryCalls,
+    1,
+    "an already-connected reader socket late-binds the editor DOM boundary after lazy assets load",
   );
 
   const firstHook = { el: toggle };

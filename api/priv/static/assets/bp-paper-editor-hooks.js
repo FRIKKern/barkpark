@@ -878,6 +878,23 @@
           return [...main.querySelectorAll("bp-paper-canvas, bp-paper-editor")]
             .some((editor) => editor.hasPendingChanges?.() === true);
         },
+        firstUnsavedWithin(root) {
+          if (!root) return null;
+          for (const [source, record] of sources) {
+            if ((source === root || root.contains?.(source)) &&
+                (record.dirty || record.active > 0)) return source;
+          }
+          const queued = mutationQueue.find((entry) =>
+            entry.source === root || root.contains?.(entry.source));
+          if (queued) return queued.source;
+          const editor = [...(root.querySelectorAll?.("bp-paper-canvas, bp-paper-editor") || [])]
+            .find((candidate) => candidate.hasPendingChanges?.() === true);
+          return editor?.closest?.(PAPER_FLUSH_TARGETS) || null;
+        },
+        requestReloadWhenClean() {
+          reloadWhenClean = true;
+          return coordinator._reloadIfClean();
+        },
         async drain() {
           while (main.isConnected) {
             const pending = [];
@@ -969,7 +986,9 @@
           coordinator._pumpMutations();
           return promise;
         },
-        observeRevision({ rev, requestId, apply, observedDocumentKey, source }) {
+        observeRevision({
+          rev, requestId, apply, observedDocumentKey, source, reloadOnLatest = false,
+        }) {
           if (rev == null) return false;
           if (observedDocumentKey && observedDocumentKey !== documentKey) {
             if (!coordinator._hasUnsavedForDocument(documentKey) && !mutationQueue.length) {
@@ -979,7 +998,7 @@
             }
             pendingIdentity = { key: observedDocumentKey, rev };
             quarantinedEchoes.push({
-              rev, requestId, apply, documentKey: observedDocumentKey,
+              rev, requestId, apply, documentKey: observedDocumentKey, reloadOnLatest,
             });
             return false;
           }
@@ -992,8 +1011,10 @@
             return true;
           }
           if (mutationQueue.length || coordinator.hasUnsaved()) {
-            quarantinedEchoes.push({ rev, requestId, apply, documentKey });
-            if (!mutationActive) {
+            quarantinedEchoes.push({
+              rev, requestId, apply, documentKey, reloadOnLatest, source,
+            });
+            if (!mutationActive && !reloadOnLatest) {
               for (const [fallbackSource, fallbackRecord] of sources) {
                 if (!fallbackRecord.dirty ||
                     !fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") ||
@@ -1004,8 +1025,18 @@
                 fallbackRecord.fallbackUnsafe = true;
               }
               coordinator._setConflict(
-                { current_rev: rev }, source, observedDocumentKey,
+                {
+                  current_rev: rev,
+                  ...(reloadOnLatest
+                    ? { fallback_unsafe: true, reload_on_latest: true }
+                    : {}),
+                },
+                source,
+                observedDocumentKey,
               );
+            }
+            if (!mutationActive && reloadOnLatest) {
+              coordinator._reviewQuarantinedReloadConflict();
             }
             return false;
           }
@@ -1158,6 +1189,39 @@
         latest.forEach((echo) => echo.apply?.("external"));
         return true;
       };
+      coordinator._reviewQuarantinedReloadConflict = () => {
+        const echo = quarantinedEchoes.findLast((candidate) =>
+          candidate.reloadOnLatest &&
+          (!candidate.documentKey || candidate.documentKey === documentKey));
+        if (mutationActive || !echo) return false;
+        if (conflict?.reloadOnLatest) {
+          conflict.currentRev = echo.rev;
+          conflict.reply = { ...conflict.reply, current_rev: echo.rev };
+          coordinator._renderConflict();
+          return true;
+        }
+        if (conflict) return false;
+        if (!mutationQueue.length && !coordinator.hasUnsaved()) return false;
+        for (const [fallbackSource, fallbackRecord] of sources) {
+          if (!fallbackRecord.dirty ||
+              !fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") ||
+              fallbackRecord.documentKey !== documentKey) continue;
+          clearTimeout(fallbackRecord.timer);
+          fallbackRecord.timer = null;
+          fallbackRecord.fallbackDeferred = true;
+          fallbackRecord.fallbackUnsafe = true;
+        }
+        coordinator._setConflict(
+          {
+            current_rev: echo.rev,
+            fallback_unsafe: true,
+            reload_on_latest: true,
+          },
+          echo.source,
+          echo.documentKey,
+        );
+        return true;
+      };
       coordinator._reloadIfClean = () => {
         if (!reloadWhenClean || mutationActive || mutationQueue.length ||
             coordinator.hasUnsaved()) return false;
@@ -1205,6 +1269,7 @@
           latestSnapshot: null,
           positional,
           keepUnavailable: reply?.fallback_unsafe === true || positional || !entry,
+          reloadOnLatest: reply?.reload_on_latest === true,
         };
         mutationPaused = true;
         coordinator._renderConflict();
@@ -1216,6 +1281,31 @@
           banner?.remove();
           return;
         }
+        const renderDetail = (notify = false) => {
+          const detail = banner.querySelector("[data-conflict-detail]");
+          const head = conflict.entry;
+          const positional = conflict.positional;
+          detail.hidden = false;
+          detail.querySelector("[data-conflict-message]").textContent = positional
+            ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+            : conflict.keepUnavailable
+              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
+              : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+          const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
+          const reviewDraft = conflict.latestSnapshot
+            ? {
+                retainedDraftBeforeAcknowledgement: retainedDraft,
+                currentDraftDuringReview: bpPaperConflictDraft(head, conflict.latestSnapshot),
+              }
+            : retainedDraft;
+          detail.querySelector("[data-conflict-draft]").textContent =
+            JSON.stringify(reviewDraft, null, 2);
+          if (notify) {
+            main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
+              detail: { documentKey, conflict: conflict.reply }, bubbles: true,
+            }));
+          }
+        };
         if (!banner) {
           banner = document.createElement("div");
           banner.dataset.bpPaperConflict = "true";
@@ -1226,27 +1316,7 @@
           banner.addEventListener("click", (event) => {
             const action = event.target.closest?.("[data-action]")?.dataset.action;
             if (action === "review") {
-              const detail = banner.querySelector("[data-conflict-detail]");
-              const head = conflict.entry;
-              const positional = conflict.positional;
-              detail.hidden = false;
-              detail.querySelector("[data-conflict-message]").textContent = positional
-                ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
-                : conflict.keepUnavailable
-                  ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
-                : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
-              const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
-              const reviewDraft = conflict.latestSnapshot
-                ? {
-                    retainedDraftBeforeAcknowledgement: retainedDraft,
-                    currentDraftDuringReview: bpPaperConflictDraft(head, conflict.latestSnapshot),
-                  }
-                : retainedDraft;
-              detail.querySelector("[data-conflict-draft]").textContent =
-                JSON.stringify(reviewDraft, null, 2);
-              main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
-                detail: { documentKey, conflict: conflict.reply }, bubbles: true,
-              }));
+              renderDetail(true);
             } else if (action === "keep") {
               coordinator._keepMine();
             } else if (action === "latest") {
@@ -1259,6 +1329,8 @@
         keep.disabled = keepUnavailable;
         keep.setAttribute("aria-disabled", String(keepUnavailable));
         keep.title = keepUnavailable ? "This retained draft has no safe exact rebase path." : "";
+        const openDetail = banner.querySelector("[data-conflict-detail]:not([hidden])");
+        if (openDetail) renderDetail();
       };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
@@ -1281,9 +1353,13 @@
       coordinator._useLatest = () => {
         const chosenSource = conflict?.source;
         const chosenRecord = sources.get(chosenSource);
+        const reloadBoundary = conflict?.reloadOnLatest
+          ? chosenSource?.closest?.("[data-paper-terminal-boundary]")
+          : null;
         const requiresReload = Boolean(
-          chosenRecord &&
-          !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]'),
+          conflict?.reloadOnLatest ||
+          (chosenRecord &&
+            !chosenSource.matches?.('[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]')),
         );
         const latestRevision = conflict?.currentRev ?? quarantinedEchoes.at(-1)?.rev;
         const latest = quarantinedEchoes.filter((echo) =>
@@ -1298,12 +1374,49 @@
           coordinator._notifyResult(entry, false, { discarded: true });
           coordinator._resolveWaiters(entry, false);
         }
+        if (reloadBoundary) bpPaperDiscardPendingSource(chosenSource);
         sources.delete(chosenSource);
+        const retainedReloadReply = conflict?.reply;
+        const retainedDocumentKey = conflict?.documentKey;
         conflict = null;
         mutationPaused = false;
+        const nextReloadSource = reloadBoundary && coordinator.firstUnsavedWithin(reloadBoundary);
+        if (nextReloadSource) {
+          coordinator._setConflict(
+            {
+              ...retainedReloadReply,
+              current_rev: latestRevision,
+              fallback_unsafe: true,
+              reload_on_latest: true,
+            },
+            nextReloadSource,
+            retainedDocumentKey,
+          );
+          return false;
+        }
+        const nextReloadEcho = reloadBoundary && [...quarantinedEchoes].reverse().find((echo) => {
+          if (!echo.reloadOnLatest ||
+              (echo.documentKey && echo.documentKey !== retainedDocumentKey)) return false;
+          const boundary = echo.source?.closest?.("[data-paper-terminal-boundary]");
+          return boundary && boundary !== reloadBoundary &&
+            coordinator.firstUnsavedWithin(boundary);
+        });
+        if (nextReloadEcho) {
+          const boundary = nextReloadEcho.source.closest("[data-paper-terminal-boundary]");
+          coordinator._setConflict(
+            {
+              current_rev: nextReloadEcho.rev,
+              fallback_unsafe: true,
+              reload_on_latest: true,
+            },
+            coordinator.firstUnsavedWithin(boundary),
+            nextReloadEcho.documentKey || retainedDocumentKey,
+          );
+          return false;
+        }
         if (latestRevision != null) {
           confirmedRevision = latestRevision;
-          latest.forEach((echo) => echo.apply?.("external-resync"));
+          if (!reloadBoundary) latest.forEach((echo) => echo.apply?.("external-resync"));
         }
         for (let index = quarantinedEchoes.length - 1; index >= 0; index--) {
           const echo = quarantinedEchoes[index];
@@ -1374,16 +1487,18 @@
               continuingSource.authoredRev = confirmedRevision;
             }
             coordinator._notifyResult(entry, true, reply);
-            coordinator._advanceFallbackDrafts(entry);
             coordinator._resolveWaiters(entry, true);
             for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
               const echo = quarantinedEchoes[i];
-              if ((echo.requestId === entry.requestId || echo.rev === confirmedRevision) &&
+              if ((echo.requestId === entry.requestId ||
+                   (!echo.reloadOnLatest && echo.rev === confirmedRevision)) &&
                   (!echo.documentKey || echo.documentKey === documentKey)) {
                 quarantinedEchoes.splice(i, 1);
                 echo.apply?.("own");
               }
             }
+            coordinator._reviewQuarantinedReloadConflict();
+            if (!conflict) coordinator._advanceFallbackDrafts(entry);
             if (!coordinator._maybeAdoptPendingIdentity()) {
               coordinator._flushQuarantinedIfClean();
             }
@@ -1393,6 +1508,9 @@
             const validationReply =
               reply?.saved === false && reply?.request_id === entry.requestId &&
               reply?.rejected === "validation";
+            const outdatedTerminalReply =
+              reply?.saved === false && reply?.request_id === entry.requestId &&
+              reply?.rejected === "outdated_terminal_canvas";
             const matchingValidationRevision =
               validationReply && reply.current_rev === entry.ifRev;
             const record = sources.get(entry.source);
@@ -1420,10 +1538,16 @@
               coordinator._resolveWaiters(entry, false);
               mutationPaused = true;
               if (newerVersion) coordinator._scheduleFallback(entry.source);
-            } else if (validationReply) {
+            } else if (validationReply || outdatedTerminalReply) {
               mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
               coordinator._setConflict(
-                { ...reply, conflict: true },
+                {
+                  ...reply,
+                  conflict: true,
+                  ...(outdatedTerminalReply
+                    ? { fallback_unsafe: true, reload_on_latest: true }
+                    : {}),
+                },
                 entry.source,
                 entry.documentKey,
               );
@@ -1435,6 +1559,7 @@
                 mutationPaused = true;
               }
             }
+            coordinator._reviewQuarantinedReloadConflict();
           }
           renderSaveStatus(saved);
         });
@@ -1796,6 +1921,36 @@
     hook._bpPaperExitCoordinator?.release(hook);
   }
 
+  function bpPaperBeforeElUpdated(fromEl, toEl) {
+    if (!fromEl?.matches?.("[data-paper-terminal-boundary]") ||
+        !toEl?.matches?.("[data-paper-terminal-boundary]") ||
+        fromEl.id !== toEl.id) return;
+    const guardActive = fromEl.dataset.paperTerminalGuarded === "true" ||
+      (fromEl.dataset.paperTerminalSupported === "true" &&
+       toEl.dataset.paperTerminalSupported !== "true");
+    if (!guardActive) return;
+    const main = fromEl.closest?.("main");
+    const coordinator = main && paperExitCoordinators.get(main);
+    if (!coordinator?.firstUnsavedWithin(fromEl)) return;
+    toEl.replaceChildren(...Array.from(fromEl.childNodes, (child) => child.cloneNode(true)));
+    toEl.dataset.paperTerminalGuarded = "true";
+  }
+
+  function bpPaperDiscardPendingSource(source) {
+    const editor = source?.matches?.("bp-paper-canvas, bp-paper-editor")
+      ? source
+      : source?.querySelector?.("bp-paper-canvas, bp-paper-editor");
+    if (typeof editor?.resolveConflictWithServerBlock === "function") {
+      editor.resolveConflictWithServerBlock(editor.block);
+      return true;
+    }
+    if (typeof editor?.resolveConflictWithServerBlocks === "function") {
+      editor.resolveConflictWithServerBlocks(editor.blocks);
+      return true;
+    }
+    return false;
+  }
+
   function bpRunPaperAction(coordinator, action) {
     if (coordinator) return coordinator.run(action).catch(() => false);
     return Promise.resolve().then(action).then(() => true).catch(() => false);
@@ -1833,6 +1988,42 @@
     },
     destroyed() {
       this.el.removeEventListener("click", this._onClick, true);
+      bpReleasePaperExitCoordinator(this);
+    },
+  };
+
+  // Preserve a dirty nested Terminal editor when an authoritative update makes
+  // the parent unsupported. The LiveSocket DOM callback keeps the old subtree;
+  // this hook turns the matching revision into the ordinary conflict flow.
+  Hooks.BarkparkTerminalBoundary = {
+    mounted() {
+      this._exitCoordinator = bpPaperExitCoordinator(this);
+      this._observeGuardedRevision = (rev, requestId = null) => {
+        if (this.el.dataset.paperTerminalGuarded !== "true" ||
+            rev == null || this._guardedTerminalRevision === rev) return false;
+        this._guardedTerminalRevision = rev;
+        const source = this._exitCoordinator?.firstUnsavedWithin(this.el) || this.el;
+        return this._exitCoordinator?.observeRevision({
+          rev,
+          requestId,
+          observedDocumentKey: this.el.dataset.paperTerminalDocumentKey ||
+            this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
+          source,
+          reloadOnLatest: true,
+          apply: () => this._exitCoordinator?.requestReloadWhenClean(),
+        });
+      };
+      this._onBlockUpdate = (payload) => {
+        if (!payload || payload.block_id !== this.el.dataset.paperTerminalId ||
+              this.el.dataset.paperTerminalGuarded !== "true") return;
+        this._observeGuardedRevision(payload.rev, payload.request_id);
+      };
+      this.handleEvent("bp:block-update", this._onBlockUpdate);
+    },
+    updated() {
+      this._observeGuardedRevision?.(bpPaperRevisionFrom(this.el));
+    },
+    destroyed() {
       bpReleasePaperExitCoordinator(this);
     },
   };
@@ -3261,7 +3452,6 @@
         this._pendingRequests.forEach((request) => request.finish(false));
       }
     };
-
-
+  window.BarkparkPaperEditorBeforeElUpdated = bpPaperBeforeElUpdated;
   window.BarkparkPaperEditorHooks = Hooks;
 })();

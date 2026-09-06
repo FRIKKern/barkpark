@@ -208,17 +208,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # and task-list-node.js BP_TASK_LIST_NODE_NAME.
   @canvas_task_list_types ~w(task-list)
 
-  # Direct canvas container kinds. Section and Columns retain JS receive
-  # compatibility for legacy mounted canvases, but new Elixir rendering routes
-  # them to contextual reader-shaped boundaries with scoped child runs.
-  # `terminal` remains a direct canvas container:
-  # a bpTerminal holding prose/divider body children (+ a bpTerminalAtom verbatim
-  # carrier for any non-first-class child) wrapped in reader chrome (title bar + live
-  # badge + footer); EDITABLE, emitting a COARSE whole-body+chrome patch-block.
-  #
-  # This new-mount partition set is intentionally narrower than the JS legacy
-  # receive vocabulary.
-  @canvas_container_types ~w(terminal)
+  # Direct container nodes now render as contextual reader-shaped boundaries
+  # with scoped child runs. JS retains compatibility for already-mounted legacy
+  # coarse canvases, but new Elixir partitions mount no container directly.
+  @canvas_container_types []
 
   # STEP 4: the card WIDGET — a slots-native block (media/title/body/action slots)
   # the canvas mounts as its OWN node (bpCard) so a card FOLDS INTO a run instead of
@@ -263,7 +256,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
   # atoms (t12a, excluding contextual `form` / `questionnaire` boundaries) ∪ canvas
   # article-chrome ROLE prose ∪ canvas
-  # direct CONTAINER nodes (terminal). A run is a maximal contiguous stretch of
+  # direct CONTAINER nodes (currently none). A run is a maximal contiguous stretch of
   # these; any other kind is a run boundary. Keep this aligned with run-convert.js
   # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
   # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
@@ -372,8 +365,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
   prose matching the reader) OR the canvas TABLE node tree (`table` as of
   editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
-  editable inline runs) OR the direct `terminal` CONTAINER node. `form`, `questionnaire`,
-  `figure`, `section`, and `columns` are intentionally NOT canvas-eligible:
+  editable inline runs). `form`, `questionnaire`, `figure`, `section`, `columns`, and
+  `terminal` are intentionally NOT canvas-eligible:
   they remain boundary blocks so their contextual authored-field editors render.
   Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
