@@ -2056,24 +2056,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # ── the SheetGrid capability prop ───────────────────────────────────────────
   #
   # May the socket's principal WRITE the mounted sheet? This does NOT state the
-  # rule — it CALLS the one owner, `Shared.sheet_write_capable?/1`, which the
-  # COMPONENT's own write seam calls too. The component-targeted path never
+  # rule — it CALLS the one owner in `Shared`, whose authorizing twin
+  # (`sheet_write_capable?/1`) the COMPONENT's own write seam calls. The component-targeted path never
   # reaches the socket-level deny-gate (a `phx-target`ed event runs the
   # COMPONENT socket's lifecycle), so a fork here would be a security rule
   # maintained in two places.
   #
-  # pds-w42 — WHAT CHANGED. This used to pass `Map.get(assigns, :caps)`, the
-  # MOUNT-TIME snapshot `StudioLive.refresh_caps/1` only re-stamps on GRANT
-  # events. `Shared.sheet_write_capable?/1` DERIVES instead
-  # (`Caps.write_capable_now?/1`), so a membership deleted or a role downgraded
-  # mid-session denies here in the same instant it denies at the socket gate.
+  # pds-w42 — WHAT CHANGED, AND WHAT DELIBERATELY DID NOT.
   #
-  # AND THE PROP IS NO LONGER THE ONLY COPY. A cid-targeted event does not
-  # re-render the parent, so a value computed HERE is still as old as the last
-  # parent render. `write_authz={Shared.sheet_authz_ctx(assigns)}` carries the
-  # inputs into the component, which re-derives on its write seam — that, not
-  # this line, is what makes the window ZERO rather than merely smaller.
-  defp sheet_write_capable?(assigns), do: Shared.sheet_write_capable?(assigns)
+  # THE PROP IS NO LONGER THE ONLY COPY. A cid-targeted event does not re-render
+  # the parent, so any value computed HERE is as old as the last parent render
+  # by the time the component authorizes a write.
+  # `write_authz={Shared.sheet_authz_ctx(assigns)}` carries the authorization
+  # INPUTS into the component, whose write seam re-derives them
+  # (`Shared.sheet_write_capable?/1`, over freshly-read membership and grant
+  # rows) before any mutation. THAT is what makes the mount-snapshot window
+  # zero.
+  #
+  # THIS LINE STAYS A SNAPSHOT, ON PURPOSE. `render/1` is a hot path and a
+  # `Repo` round trip per parent render is not a thing to add to it — the
+  # prohibition this file has always carried. Deriving here would only SHORTEN
+  # the window, and against the pds-w42 repro (revoke, then write, with no
+  # intervening parent event) it would not fire at all. So the prop is a UI
+  # AFFORDANCE: a stale-TRUE one costs a denied write at the seam, never a
+  # persisted one.
+  defp sheet_write_capable?(assigns), do: Shared.sheet_write_capable_snapshot?(assigns)
 
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.

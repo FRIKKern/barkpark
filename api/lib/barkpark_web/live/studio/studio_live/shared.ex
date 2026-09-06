@@ -1840,16 +1840,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   ]
 
   @doc """
-  MAY THIS SOCKET'S PRINCIPAL WRITE THE MOUNTED SHEET? The one owner of the
-  `SheetGrid` capability, called from BOTH ends of the prop:
+  MAY THIS SOCKET'S PRINCIPAL WRITE THE MOUNTED SHEET, **RIGHT NOW**? The
+  AUTHORIZING form of the `SheetGrid` capability, called from ONE place:
+  `SheetGrid`'s own write seam, which re-asks it at the instant it authorizes
+  (`grep -n 'refresh_write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
 
-    * `StudioLive.Components`' callsite, which renders it into `write_capable`;
-    * `SheetGrid`'s own write seam, which re-asks it at the instant it
-      authorizes (`grep -n 'refresh_write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
+  Its render-time twin is `sheet_write_capable_snapshot?/1`, which answers the
+  SAME rule off the `:caps` ASSIGN and issues NO query. The two share every
+  line of the rule below; they differ only in the caps map's provenance, and
+  the split exists so the DB read lands on the write seam and not in render.
 
-  It lives HERE, and not as a `defp` at the callsite, precisely so those two
+  It lives HERE, and not as a `defp` at either callsite, precisely so the two
   ends cannot fork. It takes an ASSIGNS MAP (a full LiveView assigns, or the
-  `authz_ctx/1` subset the component carries) and no socket.
+  `sheet_authz_ctx/1` subset the component carries) and no socket.
 
   ## WHY IT DERIVES INSTEAD OF READING `@caps` (pds-w42, the hole this closes)
 
@@ -1881,6 +1884,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @spec sheet_write_capable?(map()) :: boolean
   def sheet_write_capable?(assigns) when is_map(assigns) do
     Caps.write_capable_now?(assigns) and not sheet_grant_target_denied?(assigns)
+  end
+
+  @doc """
+  THE RENDER-TIME TWIN — the same rule, off the `:caps` ASSIGN, WITHOUT a query.
+
+  `render/1` is a hot path and a `Repo` round trip per parent render is not a
+  thing to add to it. That prohibition is older than this change and was
+  written at this exact callsite; pds-w42 restores it after briefly deleting
+  it, because the DERIVE BUYS NOTHING HERE:
+
+    * a `phx-target`ed event does NOT re-render the parent, so a value computed
+      in render is already as old as the last parent render by the time the
+      component authorizes a write. Deriving here shortens that window; it does
+      not close it, and against the pds-w42 repro (revoke, then write, with no
+      intervening parent event) it would not fire AT ALL;
+    * what closes it is the SECOND derivation, at the seam:
+      `write_authz={sheet_authz_ctx(assigns)}` carries the inputs into the
+      component and `SheetGrid.refresh_write_capable/1` re-asks
+      `sheet_write_capable?/1` before any mutation. The security property is
+      owned there, not here.
+
+  So this prop is a UI AFFORDANCE — which chrome to render — and a stale-TRUE
+  affordance costs a denied write at the seam, never a persisted one. The
+  narrowing half (`sheet_grant_target_denied?/1`, pds-w41) is applied here too,
+  identically, because it reads captured assigns and issues no query either.
+  """
+  @spec sheet_write_capable_snapshot?(map()) :: boolean
+  def sheet_write_capable_snapshot?(assigns) when is_map(assigns) do
+    Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{}) and
+      not sheet_grant_target_denied?(assigns)
   end
 
   @doc """

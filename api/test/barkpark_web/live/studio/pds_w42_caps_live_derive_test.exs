@@ -35,6 +35,16 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
   re-asks `Shared.sheet_write_capable?/1` — freshly-read membership and grant
   rows — before `Ops.send_ops/2`'s last wall reads the assign.
 
+  ## SO THE RENDER CALLSITE STAYS A SNAPSHOT, AND SECTION 5 HOLDS IT THERE
+
+  Because the derive buys nothing at the callsite, it does not get to cost a
+  `Repo` round trip per parent render — the prohibition `components.ex` has
+  always carried at that line. The render prop reads
+  `Shared.sheet_write_capable_snapshot?/1` (the `:caps` assign, zero queries)
+  and the write seam reads `Shared.sheet_write_capable?/1` (fresh). Section 5
+  asserts BOTH halves — the query budget and the wiring — so re-pointing the
+  callsite at the deriving twin reds.
+
   ## THE SECOND STALENESS IS NOT CLOSED, AND IS ASSERTED OPEN
 
   `Tenancy.Auth.permits?/2` reads the `%ApiToken{}` STRUCT captured at mount by
@@ -56,6 +66,7 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
   alias Barkpark.{Accounts, Auth, Content, Repo}
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Tenancy.{Membership, Role, RolePermission}
+  alias Barkpark.QueryCounter
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -412,6 +423,70 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
 
       component_write(view, sheet, "1337")
       assert persisted_a1(ws, sheet) == %{"v" => 1337}
+    end
+  end
+
+  # ── 5. THE RENDER CALLSITE IS A SNAPSHOT, AND COSTS NO QUERY ────────────────
+
+  describe "the render-time twin issues no query" do
+    test "snapshot? is 0 statements and write_capable_now? is not — same assigns", %{
+      conn: conn,
+      default_ws: ws,
+      default_proj: proj
+    } do
+      {user, _conn} = user_session(conn)
+      member!(ws, user, "member")
+
+      ctx = %{
+        current_user: user,
+        current_workspace: ws,
+        current_project: proj,
+        dataset: @dataset,
+        sheet_doc: %{type: "sheet", doc_id: "anything"},
+        caps: %{read: true, write: true, admin: false}
+      }
+
+      {snapshot, snapshot_n} =
+        QueryCounter.count(fn -> Shared.sheet_write_capable_snapshot?(ctx) end)
+
+      {fresh, fresh_n} = QueryCounter.count(fn -> Shared.sheet_write_capable?(ctx) end)
+
+      # THE POSITIVE CONTROL IS THE SECOND COUNT. A counter that cannot see any
+      # statement would report 0 for both and this test would pass over a
+      # render callsite that queries on every frame. The authorizing twin MUST
+      # be non-zero — it is the whole reason the split exists.
+      assert fresh_n > 0,
+             "the counter saw nothing at all — it cannot certify the snapshot's zero"
+
+      assert snapshot_n == 0,
+             "the render-time predicate issued #{snapshot_n} statement(s); " <>
+               "render is a hot path and this is the prohibition pds-w42 restored"
+
+      # Same verdict from both, on assigns where the snapshot is not yet a lie:
+      # the split is about PROVENANCE and cost, never about the rule.
+      assert snapshot == true
+      assert fresh == true
+    end
+
+    test "the components.ex prop is wired to the snapshot twin, not the deriving one" do
+      src = File.read!("lib/barkpark_web/live/studio/studio_live/components.ex")
+
+      callsite =
+        src
+        |> String.split("\n")
+        |> Enum.filter(&String.contains?(&1, "defp sheet_write_capable?(assigns)"))
+
+      # Positive control: the grep found the definition it is judging. Without
+      # this, a renamed function makes both assertions below vacuously true.
+      assert length(callsite) == 1,
+             "expected exactly one `defp sheet_write_capable?(assigns)`, found #{length(callsite)}"
+
+      line = hd(callsite)
+      assert String.contains?(line, "Shared.sheet_write_capable_snapshot?")
+
+      refute String.contains?(line, "Shared.sheet_write_capable?("),
+             "the render prop is calling the DERIVING twin — that is a Repo round trip " <>
+               "per parent render, and it closes no window a cid-targeted event travels"
     end
   end
 end
