@@ -1714,6 +1714,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     slug={Content.published_id(@editor_doc.doc_id)}
                     doc_type={@editor_doc.type}
                     blocks={@editor_blocks}
+                    table_editor_target_ids={Map.get(assigns, :editor_table_target_ids, MapSet.new())}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
                     descriptors={beta_all_descriptors(@editor_schema, @editor_blocks)}
                     document_rev={@editor_doc.rev}

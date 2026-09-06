@@ -2535,21 +2535,78 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp preflight_table_editor_ops(blocks, ops) do
     table_ops = Enum.filter(ops, &table_editor_op?/1)
 
-    Enum.reduce_while(table_ops, :ok, fn op, :ok ->
-      id = op["id"]
-
-      if is_binary(id) and id != "" and String.trim(id) == id and
-           match?([%{"type" => "table"}], paper_blocks_with_id(blocks, id)) do
-        {:cont, :ok}
-      else
-        {:halt, {:error, {:invalid_op, op}}}
+    if table_ops == [] do
+      :ok
+    else
+      with {:ok, eligible_ids} <- table_editor_target_ids(blocks) do
+        Enum.reduce_while(table_ops, :ok, fn op, :ok ->
+          if MapSet.member?(eligible_ids, op["id"]),
+            do: {:cont, :ok},
+            else: {:halt, {:error, {:invalid_op, op}}}
+        end)
       end
-    end)
-    |> case do
-      :ok when table_ops != [] -> table_normalization_safe(blocks)
-      result -> result
     end
   end
+
+  @doc false
+  # UI callers must supply raw authored blocks, before editor ID projection.
+  # This is the same gate used by persistence, not a separate HEEx grammar.
+  def table_editor_target_ids(blocks) when is_list(blocks) do
+    with {:ok, _projected} <- project_block_ids_safely(blocks),
+         :ok <- table_normalization_safe(blocks) do
+      ids =
+        blocks
+        |> table_snapshot([])
+        |> Enum.reduce(MapSet.new(), fn {_path, table}, ids ->
+          id = table["id"]
+
+          if is_binary(id) and id != "" and String.trim(id) == id and
+               paper_blocks_with_id(blocks, id) == [table] and
+               match?({:ok, _}, TableEditing.project(table)),
+             do: MapSet.put(ids, id),
+             else: ids
+        end)
+
+      {:ok, ids}
+    end
+  end
+
+  def table_editor_target_ids(_blocks), do: {:error, :invalid_blocks}
+
+  @doc false
+  # Echo every authored Table identity, including explicit nil projections when
+  # an external update makes a mounted editor unsafe. Never send raw carriers
+  # as though they were the editor's canonical inline grid.
+  def table_editor_projections(blocks) when is_list(blocks) do
+    eligible_ids =
+      case table_editor_target_ids(blocks) do
+        {:ok, ids} -> ids
+        {:error, _} -> MapSet.new()
+      end
+
+    blocks
+    |> table_snapshot([])
+    |> Enum.reduce(%{}, fn {_path, table}, projections ->
+      id = table["id"]
+
+      if is_binary(id) and id != "" and String.trim(id) == id do
+        projection =
+          with true <- MapSet.member?(eligible_ids, id),
+               [authored] <- paper_blocks_with_id(blocks, id),
+               {:ok, grid} <- TableEditing.project(authored) do
+            Map.merge(grid, %{id: id, type: "table"})
+          else
+            _ -> nil
+          end
+
+        Map.put(projections, id, projection)
+      else
+        projections
+      end
+    end)
+  end
+
+  def table_editor_projections(_blocks), do: %{}
 
   # The write pipeline normalizes the entire document. A Table edit must not
   # silently migrate a different, legacy Table. Compare exact Table terms at

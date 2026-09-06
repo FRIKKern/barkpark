@@ -11,6 +11,41 @@ defmodule Barkpark.Content.Papers.TableEditingOpTest do
   @dataset "production"
   @doc_type "table_editing_op_post"
 
+  test "editor eligibility uses authored identity and the full raw Table census" do
+    source = metadata_table()
+    eligibility = &Barkpark.Content.Papers.BlockOps.table_editor_target_ids/1
+
+    assert {:ok, ids} = eligibility.([source])
+    assert ids == MapSet.new(["table"])
+
+    assert %{"table" => %{id: "table", type: "table", rows: [[cell]]}} =
+             Barkpark.Content.Papers.BlockOps.table_editor_projections([source])
+
+    assert cell == inline("Original cell")
+
+    assert {:ok, ^ids} =
+             eligibility.([%{"id" => "section", "type" => "section", "blocks" => [source]}])
+
+    for blocks <- [
+          [Map.delete(source, "id")],
+          [source, source],
+          [source, %{"id" => "legacy", "type" => "table", "rows" => [["legacy"]]}],
+          [source, Map.delete(%{source | "id" => "other"}, "id")]
+        ] do
+      assert {:error, _} = eligibility.(blocks)
+
+      assert Enum.all?(Barkpark.Content.Papers.BlockOps.table_editor_projections(blocks), fn {_id,
+                                                                                              projection} ->
+               is_nil(projection)
+             end)
+    end
+
+    unsupported = %{source | "id" => "ragged", "rows" => [[inline("one")], [inline("two"), []]]}
+    assert {:ok, ^ids} = eligibility.([source, unsupported])
+    assert {:ok, empty} = eligibility.([%{"id" => "p", "type" => "paragraph", "content" => []}])
+    assert empty == MapSet.new()
+  end
+
   setup do
     {:ok, _schema} =
       Content.upsert_schema(

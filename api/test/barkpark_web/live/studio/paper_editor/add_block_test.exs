@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   @addable_block_types ~w(
     paragraph heading list callout code blockquote divider section steps tabs
     eyebrow byline ingress pullquote
-    action card diagram figure equation route toc criteria-progress gauge-list
+    action card table diagram figure equation route toc criteria-progress gauge-list
     diff filetree footnote code-tabs api-endpoint form questionnaire
     field-string field-slug field-text field-boolean field-select field-datetime field-color field-number
     field-image field-reference video
@@ -68,6 +68,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   # shape Render.Compose.compose_block/2's "diagram" clause reads).
   defp addable_block_valid?(%{"type" => "diagram", "source" => "", "caption" => ""}), do: true
   defp addable_block_valid?(%{"type" => "action", "href" => "", "label" => ""}), do: true
+
+  defp addable_block_valid?(%{"type" => "table"} = table),
+    do: match?({:ok, _}, Barkpark.PortableDoc.TableEditing.project(table))
 
   defp addable_block_valid?(%{
          "type" => "card",

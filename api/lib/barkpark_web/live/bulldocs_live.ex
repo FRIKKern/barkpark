@@ -1154,6 +1154,12 @@ defmodule BarkparkWeb.BulldocsLive do
       socket.assigns[:paper_link_refs] != [] ->
         {:noreply, refetch(socket)}
 
+      # An in-order external delta must refresh the ignored contextual editors,
+      # not only the reader stream. Reconcile from the same authoritative tree
+      # so a Table's shape/eligibility echo cannot lag its stored revision.
+      socket.assigns[:editing?] == true ->
+        {:noreply, refetch(socket)}
+
       # First block delta to a view still in HTML-only mode: we have no stream
       # to append onto, so adopt the block list wholesale via a refetch rather
       # than blindly inserting one item over the opaque HTML body.

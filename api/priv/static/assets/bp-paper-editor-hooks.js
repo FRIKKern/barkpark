@@ -648,6 +648,7 @@
   }
 
   function bpPaperPositionalCollectionEntry(entry) {
+    if (entry?.payload?.op === "patch-table-structure") return true;
     return Object.keys(entry?.payload || {}).some((key) =>
       PAPER_POSITIONAL_COLLECTION_PARAM.test(key));
   }
@@ -1440,7 +1441,9 @@
 
       coordinator._onInput = (event) => {
         const target = event.target;
-        if (target.closest?.('bp-paper-editor[data-editor-mode="card-body"]')) return;
+        if (target.closest?.(
+          'bp-paper-editor[data-editor-mode="card-body"], bp-paper-editor[data-editor-mode="table"]',
+        )) return;
         const source = target.closest?.("form[data-paper-field-flush]") ||
           target.closest?.(PAPER_FLUSH_TARGETS) ||
           target.closest?.(".bp-paper-edit-form[phx-change]");
@@ -1845,15 +1848,49 @@
         this._exitCoordinator = bpPaperExitCoordinator(this);
         this._pendingSaves = new Set();
         this._mutationEntries = [];
-        const pushOp = (op) => {
+        const pushOp = (op, editor) => {
           let mutation;
           mutation = bpPaperMutation(this, this.el, "paper-op", op, {
             onResult: (saved, result) => {
+              let tableProjectionApplied = true;
+              if (saved && op?.op?.startsWith?.("patch-table-")) {
+                const hasProjection = Object.prototype.hasOwnProperty.call(
+                  result || {},
+                  "table_projection",
+                );
+                let applied = false;
+                const observed = hasProjection && result?.table_projection_rev != null &&
+                  this._exitCoordinator?.observeRevision({
+                    rev: result.table_projection_rev,
+                    requestId: result.request_id,
+                    source: this.el,
+                    apply: () => {
+                      applied = editor?.applyTableProjection?.(result.table_projection, {
+                        requestId: result.request_id,
+                        rev: result.table_projection_rev,
+                      }) === true;
+                    },
+                  });
+                tableProjectionApplied = observed === true && applied;
+                if (!tableProjectionApplied) {
+                  this._exitCoordinator?.markDirty(this.el);
+                  editor?.dispatchEvent?.(new CustomEvent("bp-error", {
+                    detail: {
+                      code: "table_projection_receipt_invalid",
+                      error: "The saved Table result could not be verified. Your draft is retained.",
+                    },
+                    bubbles: true,
+                    composed: true,
+                  }));
+                }
+              }
+              editor?.tableMutationResult?.(op, saved && tableProjectionApplied, result);
               if (saved || result?.discarded) this._mutationEntries = this._mutationEntries.filter(
                 (entry) => entry !== mutation.entry,
               );
             },
           });
+          editor?.trackTableMutation?.(op, mutation.requestId);
           if (mutation.entry) this._mutationEntries.push(mutation.entry);
           const pending = mutation.promise
             .finally(() => this._pendingSaves.delete(pending));
@@ -1861,14 +1898,18 @@
           return pending;
         };
         this._onOp = (e) => {
-          if (!e.target?.matches?.('bp-paper-editor[data-editor-mode="card-body"]')) {
+          if (!e.target?.matches?.(
+            'bp-paper-editor[data-editor-mode="card-body"], bp-paper-editor[data-editor-mode="table"]',
+          )) {
             this._exitCoordinator?.markDirty(this.el);
           }
-          pushOp(e.detail);
+          pushOp(e.detail, e.target);
         };
         this.el.addEventListener("bp-op", this._onOp);
         this._onLocalChange = (e) => {
-          if (!e.target?.matches?.('bp-paper-editor[data-editor-mode="card-body"]') ||
+          if (!e.target?.matches?.(
+            'bp-paper-editor[data-editor-mode="card-body"], bp-paper-editor[data-editor-mode="table"]',
+          ) ||
               !e.detail || typeof e.detail !== "object") return;
           e.detail.token = this._exitCoordinator?.markDirty(this.el) || null;
         };
@@ -1878,7 +1919,9 @@
         };
         this.el.addEventListener("bp-noop", this._onNoop);
         this._onFlushPending = (event) => {
-          this.el.querySelector("bp-paper-editor")?.flushPendingChanges?.();
+          const editor = this.el.querySelector("bp-paper-editor");
+          editor?.flushPendingChanges?.();
+          const tableSettlement = editor?.waitForTableSettlement?.();
           if (!this._pendingSaves.size && this._mutationEntries.length) {
             const retry = this._exitCoordinator?.retryMutation(this._mutationEntries[0]);
             if (retry) {
@@ -1886,8 +1929,19 @@
               this._pendingSaves.add(pending);
             }
           }
-          if (this._pendingSaves.size) {
-            event.detail.waitUntil(Promise.all([...this._pendingSaves]).then((results) => results.every(Boolean)));
+          if (this._pendingSaves.size || tableSettlement) {
+            event.detail.waitUntil((async () => {
+              while (this._pendingSaves.size) {
+                const results = await Promise.all([...this._pendingSaves]);
+                if (!results.every(Boolean)) return false;
+              }
+              if (tableSettlement && await tableSettlement !== true) return false;
+              while (this._pendingSaves.size) {
+                const results = await Promise.all([...this._pendingSaves]);
+                if (!results.every(Boolean)) return false;
+              }
+              return true;
+            })());
           }
         };
         this.el.addEventListener("bp-flush-pending", this._onFlushPending);
@@ -1962,12 +2016,31 @@
           if (this.el.id !== `paper-ed-${payload.block_id}`) return; // not my block
           const wc = this.el.querySelector("bp-paper-editor");
           if (!wc) return;
+          const tableMode = wc.getAttribute("data-editor-mode") === "table";
+          const hasTableProjection = Object.prototype.hasOwnProperty.call(
+            payload,
+            "table_projection",
+          );
+          const nextBlock = tableMode && hasTableProjection
+            ? payload.table_projection
+            : payload.block;
           const apply = (mode) => {
+            if (tableMode && typeof wc.applyTableProjection === "function") {
+              if (mode === "external-resync") {
+                wc.resolveConflictWithServerBlock(nextBlock);
+              } else {
+                wc.applyTableProjection(nextBlock, {
+                  requestId: payload.request_id,
+                  rev: payload.rev,
+                });
+              }
+              return;
+            }
             if (mode === "external-resync" &&
                 typeof wc.resolveConflictWithServerBlock === "function") {
-              wc.resolveConflictWithServerBlock(payload.block);
+              wc.resolveConflictWithServerBlock(nextBlock);
             } else {
-              wc.block = payload.block;
+              wc.block = nextBlock;
             }
           };
           this._exitCoordinator?.observeRevision({

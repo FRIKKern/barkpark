@@ -101,6 +101,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
   attr(:slug, :string, required: true)
   attr(:blocks, :list, required: true)
+  attr(:table_editor_target_ids, :any, default: nil)
   # spd-w18 — the document's REAL type. This editor is opened by every blocks-doc
   # type (paper today, session too), and the empty-body sentence below used to
   # tell a session's author "This paper has no body blocks yet". Default "paper"
@@ -146,6 +147,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :table_editor_target_ids,
+        assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
+      )
+
     case Content.project_block_ids_safely(assigns.blocks) do
       {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
       {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
@@ -287,6 +295,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         canvas_enabled={@canvas_on?}
         paper_links={@paper_links}
         tree_identity_safe={@tree_identity_safe}
+        table_editor_target_ids={@table_editor_target_ids}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -353,6 +362,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 doc_key={@paper_doc_key}
                 canvas_enabled={@canvas_on?}
                 tree_identity_safe={@tree_identity_safe}
+                table_editor_target_ids={@table_editor_target_ids}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -453,6 +463,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             canvas_enabled={@canvas_on?}
             paper_links={@paper_links}
             tree_identity_safe={@tree_identity_safe}
+            table_editor_target_ids={@table_editor_target_ids}
           />
         </div>
       <% end %>
@@ -540,6 +551,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
        [
          {"action", "Action"},
          {"card", "Card"},
+         {"table", "Table"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
@@ -905,6 +917,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: true)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -999,6 +1012,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         canvas_enabled={@canvas_enabled}
         paper_links={@paper_links}
         tree_identity_safe={@tree_identity_safe}
+        table_editor_target_ids={@table_editor_target_ids}
       />
     </div>
     """
@@ -1244,6 +1258,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: true)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def properties_panel(assigns) do
     ~H"""
@@ -1284,6 +1299,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           canvas_enabled={@canvas_enabled}
           paper_links={@paper_links}
           tree_identity_safe={@tree_identity_safe}
+          table_editor_target_ids={@table_editor_target_ids}
         />
       </div>
 
@@ -1312,6 +1328,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp descriptor_for(descriptors, block) do
     name = Map.get(block, "fieldName")
     Enum.find(descriptors, fn d -> d.name == name end)
+  end
+
+  defp table_editor_ids(blocks) do
+    case Barkpark.Content.Papers.BlockOps.table_editor_target_ids(blocks) do
+      {:ok, ids} -> ids
+      {:error, _} -> MapSet.new()
+    end
+  end
+
+  defp table_editor_projection(block, ids) do
+    with true <- MapSet.member?(ids, block["id"]),
+         {:ok, projection} <- Barkpark.PortableDoc.TableEditing.project(block) do
+      {:ok, Map.merge(projection, %{id: block["id"], type: "table"})}
+    else
+      _ -> :readonly
+    end
   end
 
   defp prop_label(_block, %{label: label}) when is_binary(label) and label != "", do: label
@@ -1376,6 +1408,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
   attr(:tree_identity_safe, :boolean, default: nil)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -1387,6 +1420,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     assigns =
       assigns
       |> assign(:tree_identity_safe, tree_identity_safe)
+      |> assign(:table_editor_target_ids, assigns.table_editor_target_ids || MapSet.new())
       |> assign(id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
       |> assign(
         :expandable_segments,
@@ -1402,6 +1436,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     ~H"""
     <%= case @type do %>
+      <% "table" -> %>
+        <%!-- Keep the ignored boundary stable even when a later authoritative
+              echo becomes unsupported: the WC must retain a pending draft. --%>
+        <div
+          phx-update="ignore"
+          id={"paper-ed-" <> @id}
+          phx-hook="BarkparkPaperEditor"
+          class="bp-paper-edit-wc"
+          data-test-id="paper-table-contextual-editor"
+        >
+          <%= case table_editor_projection(@block, @table_editor_target_ids) do %>
+            <% {:ok, projection} -> %>
+              <bp-paper-editor data-editor-mode="table" data-block={Jason.encode!(projection)}></bp-paper-editor>
+            <% :readonly -> %>
+              <div data-test-id="paper-table-readonly">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <p class="bp-paper-edit-readonly">
+                  This Table's authored structure is not yet supported for lossless editing; original content is preserved.
+                </p>
+              </div>
+          <% end %>
+        </div>
       <% t when t in ["diff", "filetree", "footnote", "code-tabs"] -> %>
         <.technical_block_editor block={@block} id={@id} />
       <%!-- Rich-text blocks are edited by the
@@ -1648,6 +1704,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       canvas_enabled={@canvas_enabled}
                       paper_links={@paper_links}
                       tree_identity_safe={@tree_identity_safe}
+                      table_editor_target_ids={@table_editor_target_ids}
                     />
                 <% end %>
               </div>
@@ -2068,6 +2125,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
                       paper_links={@paper_links}
                       tree_identity_safe={@tree_identity_safe}
+                      table_editor_target_ids={@table_editor_target_ids}
                     />
                   </div>
                 </div>
@@ -2095,6 +2153,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
                       />
                   <% end %>
                 <% end %>
@@ -2158,6 +2217,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
                         paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
                       />
                   <% end %>
                 <% end %>
@@ -2551,6 +2611,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           canvas_enabled={@canvas_enabled}
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
                         />
                     <% end %>
                   <% end %>
@@ -2662,6 +2723,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         root_slug={@root_slug} doc_key={@doc_key}
                         canvas_enabled={@canvas_enabled} paper_links={@paper_links}
                         tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
                       />
                   <% end %>
                 <% end %>
@@ -2750,6 +2812,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           canvas_enabled={@canvas_enabled}
                           paper_links={@paper_links}
                           tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
                         />
                       </div>
                   <% end %>
@@ -2775,6 +2838,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     canvas_enabled={false}
                     paper_links={@paper_links}
                     tree_identity_safe={@tree_identity_safe}
+                    table_editor_target_ids={@table_editor_target_ids}
                   />
                 </div>
               <% end %>

@@ -211,12 +211,23 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
            form_source
          ) do
       {:ok, socket, receipt, outcome} ->
-        assign(socket, :last_save_result, %{
+        result = %{
           saved: true,
           request_id: request_id,
           replayed: outcome == :replayed,
           rev: receipt.rev
-        })
+        }
+
+        assign(
+          socket,
+          :last_save_result,
+          SharedPaper.table_confirmation(
+            result,
+            op,
+            blocks_of(socket.assigns[:paper_doc]),
+            socket.assigns[:paper_rev]
+          )
+        )
 
       {:error, socket} ->
         socket

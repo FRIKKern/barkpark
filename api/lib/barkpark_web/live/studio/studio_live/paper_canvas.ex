@@ -181,17 +181,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_ROLE_TYPES and role-nodes.js.
   @canvas_role_types ~w(eyebrow byline ingress pullquote)
 
-  # editable-table: the `table` block the canvas handles as FOUR hand-rolled NESTED
-  # ProseMirror nodes (bpTable > bpTableRow > bpTableHeaderCell|bpTableCell;
-  # run-convert.js CANVAS_TABLE_TYPES → the bpTable node tree; table-node.js). UNLIKE
-  # the callout content node (ONE inline body) or the fleet atoms (whole block verbatim),
-  # a table is a CONTAINER of PM structure — each cell body is an inline* hole reusing
-  # the shared inline serializer, so bold/italic/links round-trip. It CAN emit a
-  # patch-block on a cell/grid edit (a COARSE whole-table rows+head patch) and no longer
-  # SPLITS a run.
-  #
-  # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
-  @canvas_table_types ~w(table)
+  # New mounts use the lossless contextual Table editor. JS retains the node,
+  # coarse save receiver and slash insertion for already-mounted legacy runs.
+  @canvas_table_types []
 
   # `figure` intentionally remains a server-rendered run boundary. Its singular
   # child receives a nested contextual canvas. JS retains the old bpFigure atom
@@ -270,14 +262,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
   # atoms (t12a, excluding contextual `form` / `questionnaire` boundaries) ∪ canvas
-  # article-chrome ROLE prose ∪ the canvas TABLE node tree (editable-table) ∪ canvas
+  # article-chrome ROLE prose ∪ canvas
   # direct CONTAINER nodes (terminal). A run is a maximal contiguous stretch of
   # these; any other kind is a run boundary. Keep this aligned with run-convert.js
   # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
   # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
   # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_CONTAINER_TYPES),
   # except that JS keeps receive-only legacy recognition for form/questionnaire/figure/
-  # section/columns while this partition intentionally routes them to contextual
+  # section/columns/table while this partition intentionally routes them to contextual
   # boundary editors. The
   # remaining boundaries also include nested-structure fields (composite / object /
   # arrayOf / codelist / localizedText).

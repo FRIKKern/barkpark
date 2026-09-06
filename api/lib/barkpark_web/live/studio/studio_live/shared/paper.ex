@@ -299,13 +299,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
            form_source
          ) do
       {:ok, socket, receipt, outcome} ->
+        result = %{
+          saved: true,
+          request_id: request_id,
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        }
+
         assign(socket,
-          last_paper_save_result: %{
-            saved: true,
-            request_id: request_id,
-            replayed: outcome == :replayed,
-            rev: receipt.rev
-          }
+          last_paper_save_result:
+            table_confirmation(
+              result,
+              op,
+              (doc_field(socket.assigns[:paper_doc], :content) || %{})["blocks"],
+              socket.assigns[:paper_rev]
+            )
         )
 
       {:error, socket} ->
@@ -1088,6 +1096,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # cumulative-from-mount. No-op when the canvas flag is OFF (no canvas is mounted
   # to receive the event, but we also gate so the OFF path pushes nothing).
   def push_canvas_echo(socket, request_id \\ nil) do
+    paper = socket.assigns[:paper_doc]
+    content = doc_field(paper, :content) || %{}
+    socket = push_table_echo(socket, content["blocks"] || [], content["rev"], request_id)
+
     if PaperCanvas.paper_canvas_enabled?() do
       {slug, blocks} =
         case socket.assigns[:paper_doc] do
@@ -1106,6 +1118,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       socket
     end
   end
+
+  @doc false
+  def push_table_echo(socket, raw_blocks, rev, request_id \\ nil) do
+    raw_blocks
+    |> Barkpark.Content.Papers.BlockOps.table_editor_projections()
+    |> Enum.reduce(socket, fn {id, projection}, current ->
+      push_event(current, "bp:block-update", %{
+        block_id: id,
+        table_projection: projection,
+        rev: rev,
+        request_id: request_id
+      })
+    end)
+  end
+
+  @doc false
+  # A successful mutation reply confirms its current Table projection too.
+  # Push notifications remain useful for other editors, but losing one must
+  # not strand the initiating editor waiting for its structural coordinates.
+  # On ledger replay, receipt.rev can be older than this fresh projection.
+  def table_confirmation(result, %{"op" => kind, "id" => id}, blocks, rev)
+      when kind in ["patch-table-cells", "patch-table-structure"] do
+    projection = Barkpark.Content.Papers.BlockOps.table_editor_projections(blocks)[id]
+    Map.merge(result, %{table_projection: projection, table_projection_rev: rev})
+  end
+
+  def table_confirmation(result, _op, _blocks, _rev), do: result
 
   @doc false
   def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
@@ -1288,7 +1327,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
              ) do
           {:ok, _result} ->
             socket
-            |> sync_editor_blocks()
+            |> sync_editor_blocks(op["request_id"])
             |> assign(save_status: "Auto-saved")
             |> assign(last_paper_save_ok?: true)
             |> then(fn saved ->
@@ -1354,17 +1393,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
     case result do
       {:ok, receipt, outcome} ->
-        socket
-        |> sync_editor_blocks()
-        |> assign(save_status: "Auto-saved")
-        |> assign(last_paper_save_ok?: true)
-        |> assign(
-          last_paper_save_result: %{
-            saved: true,
-            request_id: op["request_id"],
-            replayed: outcome == :replayed,
-            rev: receipt.rev
-          }
+        socket =
+          socket
+          |> sync_editor_blocks(op["request_id"])
+          |> assign(save_status: "Auto-saved")
+          |> assign(last_paper_save_ok?: true)
+
+        result = %{
+          saved: true,
+          request_id: op["request_id"],
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        }
+
+        assign(socket,
+          last_paper_save_result: document_table_confirmation(socket, result, op)
         )
 
       {:error, {:source_validation, _reason}} ->
@@ -1380,6 +1423,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
     end
   end
+
+  defp document_table_confirmation(socket, result, %{"op" => kind} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"] do
+    doc = socket.assigns[:editor_doc]
+
+    case Content.resolve_blocks_for_edit(
+           doc,
+           socket.assigns[:editor_type],
+           socket.assigns.dataset
+         ) do
+      {blocks, _synth?} when is_list(blocks) ->
+        table_confirmation(result, op, blocks, doc_field(doc, :rev))
+
+      _ ->
+        table_confirmation(result, op, [], doc_field(doc, :rev))
+    end
+  end
+
+  defp document_table_confirmation(_socket, result, _op), do: result
 
   defp document_conflict(socket, request_id, current_rev) do
     socket
@@ -1446,16 +1508,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def resolve_editor_blocks(doc, type, dataset) do
     case Content.resolve_blocks_for_edit(doc, type, dataset) do
       {:error, reason} ->
-        {[], false, reason}
+        {[], false, reason, MapSet.new()}
 
       {blocks, synth?} when is_list(blocks) and is_boolean(synth?) ->
+        table_ids =
+          case Barkpark.Content.Papers.BlockOps.table_editor_target_ids(blocks) do
+            {:ok, ids} -> ids
+            {:error, _} -> MapSet.new()
+          end
+
         {blocks, identity_error} = project_editor_blocks(blocks)
-        {blocks, synth?, identity_error}
+        {blocks, synth?, identity_error, table_ids}
     end
   end
 
   @doc false
-  def sync_editor_blocks(socket) do
+  def sync_editor_blocks(socket, request_id \\ nil) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
@@ -1463,19 +1531,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     with %{doc_id: doc_id} <- doc,
          target_doc_id = Content.draft_id(Content.published_id(doc_id)),
          {:ok, fresh} <- get_fresh_editor_doc(target_doc_id, doc_id, type, dataset, socket) do
-      {blocks, synth?, identity_error} = resolve_editor_blocks(fresh, type, dataset)
+      {blocks, synth?, identity_error, table_ids} = resolve_editor_blocks(fresh, type, dataset)
 
       assign(socket,
         editor_doc: fresh,
         editor_blocks: blocks,
+        editor_table_target_ids: table_ids,
         editor_blocks_identity_error: identity_error,
         editor_mode:
           if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
         editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
       )
+      |> push_document_table_echo(request_id)
     else
       _ -> socket
+    end
+  end
+
+  @doc false
+  def push_document_table_echo(socket, request_id \\ nil) do
+    if socket.assigns[:editor_mode] == :beta do
+      doc = socket.assigns[:editor_doc]
+
+      case Content.resolve_blocks_for_edit(
+             doc,
+             socket.assigns[:editor_type],
+             socket.assigns.dataset
+           ) do
+        {raw_blocks, synth?} when is_list(raw_blocks) and is_boolean(synth?) ->
+          push_table_echo(socket, raw_blocks, doc_field(doc, :rev), request_id)
+
+        _ ->
+          socket
+      end
+    else
+      socket
     end
   end
 
