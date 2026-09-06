@@ -367,6 +367,92 @@ got=0; bash "$MGATE" --bogus >/dev/null 2>&1 || got=$?
 if [ "$got" -eq 2 ]; then ok "C9 unknown argument is rc 2 (rc=$got)"; else bad "C9 unknown argument — wanted rc=2, got rc=$got"; fi
 
 echo ""
+echo "── PART D: the ssh keepalive leg (task-8811b4b25c529dbe) ───────────────"
+
+# The SECOND half of "a merge to main must reach production": a run that is
+# merely QUEUED behind the on-box deploy lock must not be reported FAILED. The
+# on-box wait is silent, so without a client keepalive the runner NAT drops the
+# ssh session after ~5 min and ssh exits 255 (ten of the last fourteen failed
+# deploy.yml runs on main, 2026-09-05..06). PART A case A1 already runs the gate
+# over the live workflow; these cases prove the keepalive leg is what makes that
+# green MEAN something — that it can still LOSE, and that it is not vacuous on
+# the real file.
+
+# grep_out <label> <file> <pattern> — the gate over <file> must print <pattern>.
+grep_out() {
+  local label="$1" file="$2" pat="$3" out
+  out="$(DEPLOY_CONCURRENCY_TARGET="$file" bash "$GATE" 2>&1)" || true
+  # A HERESTRING, never `printf | grep -q`: this harness runs under `set -o
+  # pipefail` and grep -q exits the moment it matches, so printf dies of SIGPIPE
+  # with 141 and the pipeline reports FAILURE on the very case that PASSED.
+  if grep -qE "$pat" <<<"$out"; then
+    ok "$label"
+  else
+    bad "$label — no line matching /$pat/" "$(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  fi
+}
+
+# D1 — NON-VACUITY on the REAL workflow. A1 greens whether the leg inspected
+# seven strings or zero; this pins that it actually found them. The floor is a
+# LOWER bound (strings get added), never an exact count.
+KA_LIVE="$(DEPLOY_CONCURRENCY_TARGET="$WORKFLOW" bash "$GATE" 2>&1 | sed -n 's/^ssh keepalive: \([0-9][0-9]*\) ssh.*/\1/p')"
+if [ -n "$KA_LIVE" ] && [ "$KA_LIVE" -ge 5 ]; then
+  ok "D1 the live deploy.yml really has ssh/scp strings under the leg ($KA_LIVE >= 5)"
+else
+  bad "D1 the keepalive leg inspected ${KA_LIVE:-no} strings in the live workflow — a green over zero strings is not a verdict"
+fi
+
+# D2 — THE POSITIVE CONTROL. One string loses the pair; the gate must red.
+# Every string, not the first: the defect this forbids is ONE forgotten option
+# string on a leg nobody edited, which is exactly how the instance leg was the
+# only job that died while the control-plane job in the same run stayed green.
+KA_TOTAL_STRIPPED=0
+KA_STRIPPED_RED=0
+while IFS=: read -r ln _rest; do
+  [ -n "$ln" ] || continue
+  KA_TOTAL_STRIPPED=$((KA_TOTAL_STRIPPED + 1))
+  sed "${ln}s/ -o ServerAliveInterval=[0-9]* -o ServerAliveCountMax=[0-9]*//" "$WORKFLOW" > "$TMP/ka-strip.yml"
+  # The mutation must have APPLIED — an anchor that matched nothing would make
+  # this case green by doing nothing at all.
+  if cmp -s "$WORKFLOW" "$TMP/ka-strip.yml"; then
+    bad "D2 line $ln: the strip mutation changed NOTHING — this case would be vacuous"
+    continue
+  fi
+  krc=0
+  DEPLOY_CONCURRENCY_TARGET="$TMP/ka-strip.yml" bash "$GATE" >/dev/null 2>&1 || krc=$?
+  if [ "$krc" -eq 1 ]; then
+    KA_STRIPPED_RED=$((KA_STRIPPED_RED + 1))
+  else
+    bad "D2 line $ln: stripping the keepalive pair left the gate at rc=$krc, wanted 1"
+  fi
+done <<EOF
+$(grep -n 'SSH="ssh \|SCP="scp ' "$WORKFLOW")
+EOF
+if [ "$KA_TOTAL_STRIPPED" -gt 0 ] && [ "$KA_STRIPPED_RED" -eq "$KA_TOTAL_STRIPPED" ]; then
+  ok "D2 stripping the pair from ANY ONE of the $KA_TOTAL_STRIPPED ssh/scp strings reds the gate"
+else
+  bad "D2 only $KA_STRIPPED_RED of $KA_TOTAL_STRIPPED stripped strings reddened the gate"
+fi
+
+# D3 — the pair is PRESENT but the window does not exceed the 1800 s on-box
+# lock wait. A presence-only check would green this and ship a session that
+# still dies mid-queue.
+sed 's/ServerAliveInterval=30 -o ServerAliveCountMax=90/ServerAliveInterval=30 -o ServerAliveCountMax=60/g' "$WORKFLOW" > "$TMP/ka-short.yml"
+cmp -s "$WORKFLOW" "$TMP/ka-short.yml" && bad "D3 the shrink mutation changed nothing — vacuous"
+expect_rc "D3 a 30x60=1800s window does not EXCEED the 1800s lock wait — reds" 1 "$TMP/ka-short.yml"
+
+# D4 — THE NEGATIVE DIRECTION. The gate must not be pinned to the literal
+# 30/90 it happens to ship: any pair whose product clears the floor passes.
+sed 's/ServerAliveInterval=30 -o ServerAliveCountMax=90/ServerAliveInterval=60 -o ServerAliveCountMax=31/g' "$WORKFLOW" > "$TMP/ka-other.yml"
+cmp -s "$WORKFLOW" "$TMP/ka-other.yml" && bad "D4 the re-budget mutation changed nothing — vacuous"
+expect_rc "D4 a different 60x31=1860s pair also passes (a floor, not a literal)" 0 "$TMP/ka-other.yml"
+
+# D5 — a workflow with no ssh at all. It passes, but it must SAY it measured
+# nothing rather than print the same sentence as a file with seven strings.
+grep_out "D5 a workflow with no ssh/scp strings says so instead of greening silently" \
+  "$TMP/fixed.yml" "ssh keepalive: no SSH=/SCP= strings"
+
+echo ""
 printf 'deploy-concurrency-check.test.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$PASS" -eq 0 ]; then
   echo "HARNESS-UNAVAILABLE: zero cases ran — a green over an empty matrix is not a verdict" >&2

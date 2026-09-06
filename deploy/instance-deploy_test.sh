@@ -216,7 +216,23 @@ exec /usr/bin/sed "$@"
 EOF
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/sleep"
   # FLOCK_FAIL=1 simulates a held deploy lock (rollback modes must exit 23).
-  printf '#!/usr/bin/env bash\n[ -n "${FLOCK_FAIL:-}" ] && exit 1\nexit 0\n' > "$dir/flock"
+  # FLOCK_BLOCK_N=<n> simulates a QUEUE instead of a refusal: `-n` fails (someone
+  # holds it) and the first n `-w` waits time out before the lock is granted, so
+  # a deploy-mode run crosses more than two heartbeat intervals and then
+  # proceeds. Nothing sleeps — the budget arithmetic is what is under test.
+  cat > "$dir/flock" <<'FLOCKEOF'
+#!/usr/bin/env bash
+[ -n "${FLOCK_FAIL:-}" ] && exit 1
+if [ -n "${FLOCK_BLOCK_N:-}" ]; then
+  case "${1:-}" in
+    -n) exit 1 ;;
+    -w) n=$(cat "$FLOCK_TRIES" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FLOCK_TRIES"
+        [ "$n" -le "$FLOCK_BLOCK_N" ] && exit 1
+        exit 0 ;;
+  esac
+fi
+exit 0
+FLOCKEOF
   # Fake go: `go build -o OUT …` writes a fake bp binary whose
   # `mcp serve --help` advertises --http only under GO_HTTP=1 (drives the
   # barkpark-mcp install guard); GO_FAIL=1 fails the build outright.
@@ -1218,6 +1234,31 @@ rc="$(BARKPARK_MEMINFO="$MEMINFO" BARKPARK_BEAM_BASE_PATH="$BEAMBIN" run_deploy 
 check "consented + broken prereq: the CONTENT deploy still succeeds (advisory)" "[ '$rc' = '0' ]"
 check "consented + broken prereq: WARNs with the typed exit"    "grep -q 'a prerequisite is unmet (typed exit 31)' '$TMP/out.log'"
 check "consented + broken prereq: the npm line is in the log"   "grep -q 'site-deploy prereq: SITE_DEPLOY_PREREQ_NPM=MISSING' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo
+echo "== Case: QUEUED behind the deploy lock — the wait is not SILENT (task-8811b4b25c529dbe) =="
+# MEASURED on main 2026-09-05..06: ten of the last fourteen failed deploy.yml
+# runs died ONLY in THIS job, with `client_loop: send disconnect: Broken pipe`
+# and exit 255, every one of them after logging the "holds the lock" line. The
+# deploy was never the problem — the ssh session carrying it sat idle for the
+# length of the lock wait and the runner NAT dropped it. A heartbeat is what
+# puts bytes on that session, and what lets a human reading the log tell a
+# queue from a hang. Rollback modes are unaffected: they still REFUSE (23)
+# rather than queue, which the FLOCK_FAIL case above pins.
+setup_case
+: > "$TMP/flock.tries"
+rc="$(FLOCK_BLOCK_N=3 FLOCK_TRIES="$TMP/flock.tries" BARKPARK_LOCK_HEARTBEAT_SECS=1 run_deploy 200 queuedsha)"
+check "queued: the deploy still completes once the lock frees" "[ '$rc' = '0' ]"
+check "queued: the queueing line is still logged"   "grep -q 'another deploy holds the lock' '$TMP/out.log'"
+check "queued: at least one HEARTBEAT while waiting (the ssh session carries bytes)" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$TMP/out.log')\" -ge 1 ]"
+check "queued: one heartbeat PER interval, not one for the whole wait" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$TMP/out.log')\" = '3' ]"
+check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget" \
+  "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$TMP/out.log'"
+check "queued: the lock was actually taken, not bypassed (the deploy flipped Caddy)" \
+  "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
 rm -rf "$TMP"
 
 echo

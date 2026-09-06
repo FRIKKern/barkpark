@@ -496,6 +496,43 @@ check "healthy: the unrelated :9100 upstream survived the flip sed, exactly once
 check "healthy: exactly one slot upstream in the file (the flip rewrote one line, not many)" \
   "[ \"\$(grep -c 'localhost:410[01]' '$CADDY')\" = '1' ]"
 
+# ---- Case 1b: QUEUED behind the deploy lock — the wait must not be SILENT
+# (task-8811b4b25c529dbe). MEASURED on main 2026-09-05..06: ten of the last
+# fourteen failed deploy.yml runs died with `client_loop: send disconnect:
+# Broken pipe` / exit 255, every one AFTER logging the "holds the lock" line.
+# The deploy was fine; the ssh session carrying it was idle for the length of
+# the lock wait and the runner NAT dropped it. A heartbeat is what puts bytes on
+# that session — and what lets a human reading the log tell a queue from a hang.
+#
+# The fake flock refuses `-n` (someone holds it) and times out THREE `-w` waits
+# before granting, so the wait crosses more than two heartbeat intervals with
+# the interval driven down to 1 s. Nothing here sleeps: the budget arithmetic is
+# what is under test, not the clock.
+setup_flip localhost:4100
+cat > "$FAKEBIN/flock" <<'FLOCKEOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -n) exit 1 ;;
+  -w) n=$(cat "$FLOCK_TRIES" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$FLOCK_TRIES"
+      [ "$n" -le "${FLOCK_BLOCK_N:-0}" ] && exit 1
+      exit 0 ;;
+esac
+exit 0
+FLOCKEOF
+chmod +x "$FAKEBIN/flock"
+: > "$FTMP/flock.tries"
+rc="$(run_flip "FLOCK_TRIES=$FTMP/flock.tries" FLOCK_BLOCK_N=3 BARKPARK_LOCK_HEARTBEAT_SECS=1)"
+check "queued: the deploy still completes once the lock frees" "[ '$rc' = '0' ]"
+check "queued: the queueing line is still logged"  "grep -q 'another deploy holds the lock' '$FTMP/out.log'"
+check "queued: at least one HEARTBEAT while waiting (the ssh session carries bytes)" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$FTMP/out.log')\" -ge 1 ]"
+check "queued: one heartbeat PER interval, not one for the whole wait" \
+  "[ \"\$(grep -c 'still queued for the deploy lock' '$FTMP/out.log')\" = '3' ]"
+check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget" \
+  "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$FTMP/out.log'"
+check "queued: the lock was actually taken, not bypassed (the flip happened)" \
+  "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
 # ---- Case 2: the PUBLIC post-flip probe fails -> flip REVERTED, old slot kept
 # ROOT CAUSE this guards: this curl was captured into $code, logged, and never
 # tested. A flip that landed on a dead public front still exited 0 — and the
@@ -984,7 +1021,7 @@ echo
 # bound, never an exact total — checks are added over time and an exact count
 # would red on every addition, which trains people to bump the number instead
 # of reading it.
-MIN_CHECKS=125
+MIN_CHECKS=131
 echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
 if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
   echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"
