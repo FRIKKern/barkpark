@@ -1633,7 +1633,7 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task = mk_task!(uniq("crit-gate-selfflip"), scope, %{"acceptance_criteria" => @unproven})
 
-      # This is the whole point of the seat (close.ex, `check_criteria_proven/4`
+      # This is the whole point of the seat (close.ex, `check_criteria_proven/6`
       # in do_close_txn's `with` chain, on the doc read under the advisory lock):
       # a payload that flips every criterion met=true is measured against the
       # PRE-merge state, so it cannot satisfy the gate it is being judged by.
@@ -1660,6 +1660,84 @@ defmodule Barkpark.Tasks.CloseTest do
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["lifecycle_status"] == "open"
       assert reloaded.content["acceptance_criteria"] == @unproven, "no partial criteria write"
+    end
+
+    # ─── BOTH DIRECTIONS OF THE FLIP (task-c652c3ba8129c607) ───────────────
+    #
+    # The test ABOVE is the false->true arm: the closer may not prove its own
+    # homework. The two below are the mirror, which sailed straight through
+    # until this row — the gate read only the BEFORE snapshot, so a criterion
+    # stamped `met: true` and LOWERED to false by the closing write left the
+    # row `done` with an unmet criterion and NO `close_override` at all.
+    # Reproduced on prod row task-8e3942fa840b8bf3 before the fix: close rc=0,
+    # lifecycle `done`, criterion `met: false`, `close_override` absent from the
+    # raw read-back, one advisory warning and nothing else.
+    #
+    # The two fixtures below are DISTINCT by construction and asserted so: the
+    # false->true fixture stores index 1 UNMET, the true->false fixture stores
+    # every criterion MET. If they were ever the same list neither test would
+    # be measuring the direction it names.
+
+    @all_met [
+      %{"criterion" => "A: built", "met" => true, "evidence" => "PR #1"},
+      %{"criterion" => "B: proven", "met" => true, "evidence" => "PR #2"}
+    ]
+
+    test "the two direction fixtures are distinct — @unproven stores an unmet row, @all_met does not",
+         %{scope: _scope} do
+      refute @unproven == @all_met
+      assert Enum.any?(@unproven, &(Map.get(&1, "met") != true)), "@unproven must store an unmet row"
+      assert Enum.all?(@all_met, &(Map.get(&1, "met") == true)), "@all_met must store no unmet row"
+    end
+
+    test "a closer that LOWERS a met criterion to false in the closing command hits the gate",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-lower"), scope, %{"acceptance_criteria" => @all_met})
+
+      # The mirror of the test above. Pre-write the row is fully proven, so the
+      # BEFORE snapshot alone says "nothing unmet, pass" — and the same write
+      # then lowers index 1. The gate must measure the union of both snapshots,
+      # so this is refused naming the index the close is about to un-prove.
+      assert {:error, {:criteria_unmet, [1]}} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => false, "criterion" => "B: proven"}]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "the close must not land"
+      assert reloaded.content["acceptance_criteria"] == @all_met, "no partial criteria write"
+      assert reloaded.rev == task.rev, "rev untouched on refusal"
+    end
+
+    test "the lowering close is APPEALABLE — criteria_override lands it and records the unmet row",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-lower-ovr"), scope, %{"acceptance_criteria" => @all_met})
+
+      # The refusal above is a refusal, not a wall. This is the whole reason the
+      # union arm gates a REFUSAL rather than forbidding the flip outright: the
+      # closer with a real reason to lower a lock and close anyway says so ON
+      # THE RECORD, and `close_override.criteria` is that record — the exact key
+      # whose absence was the defect.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => false, "criterion" => "B: proven"}],
+                 criteria_override: "review refuted the proof; closing done anyway"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      record = get_in(closed.content, ["close_override", "criteria"])
+      assert record, "closing over an unmet criterion must mint close_override.criteria"
+      assert record["reason"] == "review refuted the proof; closing done anyway"
+      assert Enum.map(record["unmet"], & &1["index"]) == [1]
+      assert Enum.at(closed.content["acceptance_criteria"], 1)["met"] == false
     end
 
     test "a fully-proven task closes with no override and no record", %{scope: scope} do
