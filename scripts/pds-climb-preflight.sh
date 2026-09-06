@@ -125,13 +125,13 @@ resolve_freeze_blob() {
   # resurrects the same class of bug this whole change removes — a freeze value
   # nothing measured. --verify suppresses the echo; the regex refuses anything
   # that is not 40 hex characters even if a future git changes its mind.
-  FREEZE_BLOB="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "origin/main:$HARNESS_REL" 2>/dev/null || true)"
+  FREEZE_BLOB="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/remotes/origin/main:$HARNESS_REL" 2>/dev/null || true)"
   case "$FREEZE_BLOB" in
     *[!0-9a-f]* | "") FREEZE_BLOB="" ;;
   esac
   [ "${#FREEZE_BLOB}" -eq 40 ] || FREEZE_BLOB=""
   if [ -n "$FREEZE_BLOB" ]; then
-    FREEZE_SOURCE="DERIVED — git rev-parse origin/main:$HARNESS_REL, read just now"
+    FREEZE_SOURCE="DERIVED — git rev-parse refs/remotes/origin/main:$HARNESS_REL, read just now"
     return 0
   fi
   FREEZE_BLOB="$FREEZE_BLOB_HISTORICAL"
@@ -571,7 +571,7 @@ run_selftest() {
   git -C "$r_noorigin" update-ref -d refs/remotes/origin/main
 
   # ── (a) DERIVED is the normal path, and it is a MEASUREMENT ────────────────
-  want="$(git -C "$r_ok" rev-parse "origin/main:$HARNESS_REL")"
+  want="$(git -C "$r_ok" rev-parse "refs/remotes/origin/main:$HARNESS_REL")"
   # FIXTURE TWINS MUST BE DISTINCT FIRST: if the derived value happened to equal
   # the historical literal, arm (a) would pass for a script that still hardcodes.
   st_ne "(a0) fixture blob is DISTINCT from the historical literal" \
