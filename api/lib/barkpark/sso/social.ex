@@ -9,6 +9,11 @@ defmodule Barkpark.Sso.Social do
        Barkpark User: an existing `(provider, external_id)` re-logs the same
        account; otherwise the email find-or-creates a User (never a duplicate of
        an existing email account) and links the social identity.
+       ADOPTING an existing email account additionally requires the provider to
+       have ASSERTED that it verified the address (`email_verified`, or github's
+       primary+verified entry in GET /user/emails); without that signal a NEW
+       account may still be created, but an existing one is refused with
+       `:email_unverified`.
 
   App-level client credentials live in `social_providers` (`client_secret`
   encrypted). The endpoints are well-known per provider. Outbound calls go
@@ -29,7 +34,9 @@ defmodule Barkpark.Sso.Social do
       userinfo: "https://openidconnect.googleapis.com/v1/userinfo",
       scope: "openid email",
       email_key: "email",
-      id_key: "sub"
+      id_key: "sub",
+      # Google's OIDC userinfo carries the claim; we require it to be true.
+      verified_key: "email_verified"
     },
     "github" => %{
       authorize: "https://github.com/login/oauth/authorize",
@@ -37,7 +44,12 @@ defmodule Barkpark.Sso.Social do
       userinfo: "https://api.github.com/user",
       scope: "user:email",
       email_key: "email",
-      id_key: "id"
+      id_key: "id",
+      # GET /user carries NO verification flag — its `email` is the public
+      # profile address. The already-requested `user:email` scope reaches
+      # GET /user/emails, whose entries carry `verified` + `primary`.
+      verified_key: nil,
+      emails: "https://api.github.com/user/emails"
     },
     "microsoft" => %{
       authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
@@ -45,7 +57,12 @@ defmodule Barkpark.Sso.Social do
       userinfo: "https://graph.microsoft.com/oidc/userinfo",
       scope: "openid email",
       email_key: "email",
-      id_key: "sub"
+      id_key: "sub",
+      # Microsoft Graph's OIDC userinfo exposes NO verification claim, and
+      # Microsoft documents `email` as unverified / user-settable on personal
+      # accounts. There is no signal to trust, so this provider may never
+      # adopt an existing Barkpark account.
+      verified_key: nil
     }
   }
 
@@ -104,7 +121,7 @@ defmodule Barkpark.Sso.Social do
     with {:ok, %{"access_token" => token}} <- exchange(cfg, p, code, redirect_uri),
          {:ok, info} <- HTTP.get_bearer(cfg.userinfo, token),
          {:ok, email, external_id} <- extract(cfg, info) do
-      {:ok, find_or_link(name, external_id, email)}
+      find_or_link(name, external_id, email, verified_email?(cfg, info, email, token))
     else
       {:ok, %{}} -> {:error, :no_access_token}
       {:error, _} = err -> err
@@ -124,6 +141,8 @@ defmodule Barkpark.Sso.Social do
     })
   end
 
+  defp extract(_cfg, info) when not is_map(info), do: {:error, :no_email}
+
   defp extract(cfg, info) do
     email = info[cfg.email_key]
     external_id = info[cfg.id_key]
@@ -133,38 +152,84 @@ defmodule Barkpark.Sso.Social do
       else: {:error, :no_email}
   end
 
-  # An existing (provider, external_id) re-logs the same account; otherwise the
-  # email find-or-creates the User (no duplicate of an existing email account),
-  # and the social identity is linked.
-  defp find_or_link(provider, external_id, email) do
-    case Repo.get_by(SocialIdentity, provider: provider, external_id: external_id) do
-      %SocialIdentity{user_id: uid} ->
-        Accounts.get_user(uid)
-
-      nil ->
-        user = find_or_create_user(email)
-
-        %SocialIdentity{}
-        |> SocialIdentity.changeset(%{
-          user_id: user.id,
-          provider: provider,
-          external_id: external_id
-        })
-        |> Repo.insert(on_conflict: :nothing)
-
-        user
+  # Did the PROVIDER assert that it verified this address? Only that signal may
+  # unlock adoption of an EXISTING Barkpark account (find_or_link/4).
+  #
+  #   * a `verified_key` in userinfo (google: "email_verified")
+  #   * an `emails` endpoint whose entry for this address is primary+verified
+  #     (github: GET /user/emails, reachable on the `user:email` scope we
+  #     already request)
+  #   * neither (microsoft) — the provider tells us nothing, so the answer is
+  #     false and this provider can never adopt an existing account.
+  defp verified_email?(cfg, info, email, token) do
+    cond do
+      is_binary(cfg[:verified_key]) -> truthy?(info[cfg[:verified_key]])
+      is_binary(cfg[:emails]) -> emails_endpoint_verified?(cfg[:emails], email, token)
+      true -> false
     end
   end
 
-  defp find_or_create_user(email) do
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(_), do: false
+
+  defp emails_endpoint_verified?(url, email, token) do
+    want = String.downcase(email)
+
+    case HTTP.get_bearer(url, token) do
+      {:ok, entries} when is_list(entries) ->
+        Enum.any?(entries, fn
+          %{"email" => e, "verified" => v, "primary" => pr} when is_binary(e) ->
+            String.downcase(e) == want and truthy?(v) and truthy?(pr)
+
+          _ ->
+            false
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  # An existing (provider, external_id) re-logs the same account — the link
+  # itself is the credential, so no email check applies. Otherwise the email
+  # find-or-creates the User and the social identity is linked; ADOPTING an
+  # existing email account requires `verified?`, because an attacker who
+  # controls a provider account bearing someone else's UNVERIFIED address
+  # would otherwise be handed that person's Barkpark session.
+  defp find_or_link(provider, external_id, email, verified?) do
+    case Repo.get_by(SocialIdentity, provider: provider, external_id: external_id) do
+      %SocialIdentity{user_id: uid} ->
+        {:ok, Accounts.get_user(uid)}
+
+      nil ->
+        case find_or_create_user(email, verified?) do
+          {:ok, user} ->
+            %SocialIdentity{}
+            |> SocialIdentity.changeset(%{
+              user_id: user.id,
+              provider: provider,
+              external_id: external_id
+            })
+            |> Repo.insert(on_conflict: :nothing)
+
+            {:ok, user}
+
+          {:error, _} = err ->
+            err
+        end
+    end
+  end
+
+  defp find_or_create_user(email, verified?) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
-        user
+        if verified?, do: {:ok, user}, else: {:error, :email_unverified}
 
       _ ->
         random = Base.encode16(:crypto.strong_rand_bytes(32))
         {:ok, user} = Accounts.register_user(%{email: email, password: random})
-        Repo.update!(User.confirm_changeset(user))
+        {:ok, Repo.update!(User.confirm_changeset(user))}
     end
   end
 end

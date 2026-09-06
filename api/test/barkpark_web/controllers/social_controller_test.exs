@@ -113,6 +113,36 @@ defmodule BarkparkWeb.SocialControllerTest do
     assert conn |> get("/v1/auth/social/github/start") |> json_response(404)
   end
 
+  # The HTTP half of the account-takeover fix: an anonymous caller who reaches
+  # the callback with an UNVERIFIED provider email that matches an existing
+  # Barkpark user gets a 401, not that user's session token.
+  test "callback REFUSES to mint a session for an existing user on an UNVERIFIED email",
+       %{conn: conn} do
+    {:ok, victim} =
+      Accounts.register_user(%{email: "victim@example.com", password: "correct-horse-battery"})
+
+    Application.put_env(:barkpark, :social_test, %{
+      "email" => "victim@example.com",
+      "sub" => "not-the-victim",
+      "id" => "not-the-victim",
+      "email_verified" => false
+    })
+
+    conn =
+      conn
+      |> init_test_session(%{social_state: "s1"})
+      |> get("/v1/auth/social/google/callback?code=abc&state=s1")
+
+    body = json_response(conn, 401)
+    refute body["token"]
+    assert body["error"]["details"]["reason"] == "email_unverified"
+
+    # Fail closed: no session for the victim, and no lingering identity link.
+    refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^victim.id)
+
+    refute Repo.exists?(from si in Barkpark.Sso.SocialIdentity, where: si.user_id == ^victim.id)
+  end
+
   test "org-require-MFA: a governed factor-less user is refused a session at the callback (era-w8)",
        %{conn: conn} do
     # A user already governed via workspace membership in a require_mfa org —
@@ -127,10 +157,13 @@ defmodule BarkparkWeb.SocialControllerTest do
     {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
     {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
 
+    # Google ASSERTS the address is verified, so adoption of the existing
+    # account is legitimate — the refusal under test here is the MFA one.
     Application.put_env(:barkpark, :social_test, %{
       "email" => "governed@example.com",
       "sub" => "g-7",
-      "id" => "g-7"
+      "id" => "g-7",
+      "email_verified" => true
     })
 
     conn =
