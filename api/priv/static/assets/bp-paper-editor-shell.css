@@ -1589,6 +1589,12 @@
 .bp-section__cell > .bp-paper-edit-wc:first-child .bp-paper-editor-body .ProseMirror > :first-child {
   margin-top: 0;
 }
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-columns-editor-frame] {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-edit-wc:first-child bp-paper-editor[data-editor-mode="table"] .bp-table {
+  margin-top: 0;
+}
 .bp-paper-card-body-editor,
 .bp-paper-card-body-editor > bp-paper-editor {
   display: contents;

@@ -97,6 +97,16 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
   margin-top: 0;
 }|
 
+    assert css =~
+             ~S|:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-columns-editor-frame] {
+  margin-top: 0;
+}|
+
+    assert css =~
+             ~S|:is(.bp-section__cell, .bp-cols__c) > .bp-paper-edit-wc:first-child bp-paper-editor[data-editor-mode="table"] .bp-table {
+  margin-top: 0;
+}|
+
     assert css =~ ".bp-paper-contextual-controls--section[open]"
     assert css =~ ".bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel"
     assert css =~ ".bp-paper-contextual-controls--columns-empty {"
