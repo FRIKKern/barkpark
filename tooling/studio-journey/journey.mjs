@@ -1376,7 +1376,9 @@ async function legB(page, ctx, ledger, run) {
 //  deployed desk, on the bare desk and again with the Papers pane open.
 //  RULING (lead-studio-9, 2026-09-06): the deployed desk should NOT render
 //  `.pane-section-header` today. Its only desk call site is the `:header ->` arm
-//  at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and
+//  at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and   (lineref-ok:
+//  the ruling is quoted VERBATIM, so its own citation cannot be paraphrased into
+//  symbol form; re-find the spot by the `:header ->` arm if the line moves) 
 //  `git grep 'type: :header' origin/main -- api/lib` returns ZERO producers — no
 //  pane builder emits a `:header` item, so the arm is unreachable and the zero
 //  count on guerrilla is correct. The harness used to assert a PASS-by-
@@ -1596,7 +1598,8 @@ function inventoryVerdict(rec) {
   //
   // RULING (lead-studio-9, 2026-09-06): the deployed desk should NOT render
   // `.pane-section-header` today. Its only desk call site is the `:header ->`
-  // arm at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and
+  // arm at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and   (lineref-ok:
+  // quoted VERBATIM from the ruling; re-find it by the `:header ->` arm) 
   // `git grep 'type: :header' origin/main -- api/lib` returns ZERO producers —
   // no pane builder emits a `:header` item, so the arm is unreachable and the
   // zero count on guerrilla is correct.
@@ -2094,7 +2097,8 @@ ${decoy}
   var DOC_ROWS = ${JSON.stringify(docRows)};   // three on /good/, one on /rot/ — see docRows
   var DOC_PANE_HTML =
     '<div class="pane-column" id="pane-papers">' +
-    // The DECOY first, exactly as components.ex:1106 renders it: same class,
+    // The DECOY first, exactly as the airdrop-open .pane-add-btn in
+    // components.ex renders it: same class,
     // same phx-value-type, NO aria-label, a different event. A driver keying
     // off .pane-add-btn[phx-value-type=paper] clicks THIS one and opens the
     // share sheet while believing it pressed "+".
@@ -2104,11 +2108,12 @@ ${decoy}
     // in, because a tooltip-only name is a finding, not a label.
     '<button type="button" class="pane-add-btn" phx-click="airdrop-open" phx-value-type="paper" title="Share access to paper" data-test-id="airdrop-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
     // The access-panel entry: a THIRD .pane-add-btn, with no phx-value-type
-    // and no aria-label either (components.ex:1116). All three are id-less,
+    // and no aria-label either (the access-open .pane-add-btn in
+    // components.ex). All three are id-less,
     // which is the fact the census inventories.
     '<button type="button" class="pane-add-btn" phx-click="access-open" title="Review scoped access grants" data-test-id="access-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
     '<button type="button" class="pane-add-btn" phx-click="new-document" phx-value-type="paper" title="New paper" aria-label="New paper">+</button>' +
-    // THE REAL DOC-ROW SHAPE (panes.ex:474-508): the .pane-doc-item is a DIV
+    // THE REAL DOC-ROW SHAPE (pane_doc_item in panes.ex): the .pane-doc-item is a DIV
     // wrapper and the control is the INNER button.bp-doc-row-body, which owns
     // phx-value-id, title, aria-label and aria-current. A census that clicks
     // the wrapper clicks nothing.
