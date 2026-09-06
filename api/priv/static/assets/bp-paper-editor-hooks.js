@@ -170,6 +170,22 @@
           buttons.find((control) => control.value === actionValue(candidate, targetId))).find(Boolean));
         const add = buttons.find((control) => control.value ===
           (prefix === "section" ? "add" : `add:${columnIndex}`));
+        if (kind === "add") {
+          const contextualEditor = form.closest(".bp-paper-contextual-editor");
+          const directWrapper = targetId && document.getElementById(`paper-ed-${targetId}`);
+          const directBody = directWrapper && contextualEditor?.contains(directWrapper)
+            ? directWrapper.querySelector('bp-paper-editor [contenteditable="true"]')
+            : null;
+          const canvas = directBody ? null : contextualEditor && [...contextualEditor.querySelectorAll(
+            "bp-paper-canvas",
+          )].find((editor) => Array.isArray(editor.blocks) &&
+            editor.blocks.some((block) => block?.id === targetId));
+          const canvasBody = canvas?.querySelector('[contenteditable="true"]');
+          const body = directBody || canvasBody;
+          body?.focus();
+          if (document.activeElement !== body) add?.focus();
+          return;
+        }
         (rowControl || add)?.focus();
       };
     }

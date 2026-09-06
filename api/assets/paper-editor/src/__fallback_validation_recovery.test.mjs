@@ -1076,7 +1076,19 @@ for (const family of ["section", "column"]) {
     {
       action: addWire,
       after: ["child:one", "child:two", "child:new:with:colons"],
-      expected: wire("up", "child:new:with:colons"),
+      mountBody: true,
+      expectedId: `${family}-new-child-body`,
+    },
+    {
+      action: addWire,
+      after: ["child:one", "child:two", "child:new:with:colons"],
+      mountCanvas: true,
+      expectedId: `${family}-new-child-canvas-body`,
+    },
+    {
+      action: addWire,
+      after: ["child:one", "child:two", "child:new:with:colons"],
+      expected: addWire,
     },
     {
       action: wire("up", "child:two"),
@@ -1090,9 +1102,12 @@ for (const family of ["section", "column"]) {
     },
   ]) {
     const env = mountedForm(`
-      <form phx-submit="paper-edit-block" data-test-id="paper-${family}-structure-editor">
-        ${render(["child:one", "child:two"])}
-      </form>
+      <div class="bp-paper-contextual-editor" data-test-id="paper-${family}-editor">
+        <div data-child-editors></div>
+        <form phx-submit="paper-edit-block" data-test-id="paper-${family}-structure-editor">
+          ${render(["child:one", "child:two"])}
+        </form>
+      </div>
       <button id="structural-focus-elsewhere" type="button">Elsewhere</button>
     `);
     const submitter = [...env.form.elements].find((control) =>
@@ -1108,6 +1123,33 @@ for (const family of ["section", "column"]) {
       env.window.document.getElementById("structural-focus-elsewhere").focus();
     }
     env.form.innerHTML = render(scenario.after);
+    if (scenario.mountBody || scenario.mountCanvas) {
+      const childEditors = env.form.closest(".bp-paper-contextual-editor")
+        .querySelector("[data-child-editors]");
+      childEditors.innerHTML = scenario.mountBody
+        ? `<div id="paper-ed-child:new:with:colons">
+             <bp-paper-editor>
+               <div id="${scenario.expectedId}" role="textbox" contenteditable="true" tabindex="0"></div>
+             </bp-paper-editor>
+           </div>`
+        : `<bp-paper-canvas>
+             <div id="${scenario.expectedId}" role="textbox" contenteditable="true" tabindex="0"></div>
+           </bp-paper-canvas>`;
+      if (scenario.mountCanvas) {
+        childEditors.querySelector("bp-paper-canvas").blocks = [
+          { id: "child:new:with:colons" },
+        ];
+      }
+      const mountedBody = env.window.document.getElementById(scenario.expectedId);
+      assert.ok(
+        mountedBody,
+        "the acknowledged child body is mounted before the save receipt settles",
+      );
+      assert.equal(
+        env.form.closest(".bp-paper-contextual-editor").contains(mountedBody),
+        true,
+      );
+    }
     env.settle({
       saved: scenario.saved !== false,
       request_id: env.calls[0].payload.request_id,
@@ -1127,11 +1169,20 @@ for (const family of ["section", "column"]) {
         `${family} acknowledgement does not steal focus moved elsewhere`,
       );
     } else {
-      assert.equal(
-        env.window.document.activeElement.value,
-        scenario.expected,
-        `${family} ${scenario.action} restores focus to the resulting child control`,
-      );
+      if (scenario.expectedId) {
+        assert.deepEqual(env.clientErrors, [], `${family} Add focus callback completes without error`);
+        assert.equal(
+          env.window.document.activeElement.id,
+          scenario.expectedId,
+          `${family} Add focuses its newly mounted rich body`,
+        );
+      } else {
+        assert.equal(
+          env.window.document.activeElement.value,
+          scenario.expected,
+          `${family} ${scenario.action} restores focus to the resulting child control`,
+        );
+      }
     }
     env.close();
   }
