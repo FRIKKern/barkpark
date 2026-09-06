@@ -399,7 +399,14 @@ defmodule Barkpark.Tasks.Stage do
       a real note is recorded on the row AND named in the `task.staged`
       payload as `staged.note_key`. Routed on EVERY stageable target,
       including `→ open`, where the reason for resolving the thought is
-      exactly the thing worth keeping.
+      exactly the thing worth keeping. REFUSED, since D-note-supersede, when
+      it would DISPLACE a different non-blank existing reason and `:supersede`
+      was not passed — see `{:error, {:note_would_supersede, existing}}`.
+    * `:supersede` — `true` to allow a `:note` to displace a different
+      non-blank `content.#{@durable_reason_key}` already on the row. Default
+      `false`, which REFUSES that write. It is deliberately opt-in per call:
+      the flag is the caller saying "I read what is there and I am replacing
+      it", which is the one thing a silent `Map.put` could never tell us.
     * `:disposition_reason` — an explicit spelling of `:note`. Same key, same
       semantics; it exists so a caller adjudicating a row can name all three
       parts of the triple by the key each lands on. `:note` wins if both are
@@ -434,6 +441,10 @@ defmodule Barkpark.Tasks.Stage do
       reopen condition, on the stage or on the row. NOTHING is written.
     * `{:error, {:unfalsifiable_rerun, code, value}}` — a rerun that cannot
       fail. NOTHING is written.
+    * `{:error, {:note_would_supersede, existing}}` — the `:note` would have
+      replaced a DIFFERENT non-blank reason already on the row and `:supersede`
+      was not passed. `existing` is that reason IN FULL, so the refusal can
+      show the caller what it just saved. NOTHING is written.
     * `{:error, :stale_claim}` — CAS lost (rare under the advisory lock).
   """
   @spec stage(binary(), String.t(), keyword()) ::
@@ -445,13 +456,15 @@ defmodule Barkpark.Tasks.Stage do
              | {:invalid_object, term()}
              | {:invalid_disposition, term()}
              | {:missing_reopen_trigger, String.t()}
-             | {:unfalsifiable_rerun, atom(), term()}}
+             | {:unfalsifiable_rerun, atom(), term()}
+             | {:note_would_supersede, String.t()}}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
     note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
     reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
     rerun = normalize_note(Keyword.get(opts, :rerun) || Keyword.get(opts, :disposition_rerun))
+    supersede = Keyword.get(opts, :supersede) == true
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -474,7 +487,8 @@ defmodule Barkpark.Tasks.Stage do
                  :ok <- check_object(to, object),
                  {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
                  :ok <- check_reopen_trigger(doc, disposition, reopen_trigger),
-                 :ok <- check_rerun(rerun) do
+                 :ok <- check_rerun(rerun),
+                 :ok <- check_note_supersession(doc, note, supersede) do
               adj = %{
                 note: note,
                 disposition: disposition,
@@ -595,6 +609,53 @@ defmodule Barkpark.Tasks.Stage do
   #
   # NO DISTINCTNESS (PDS-D391b / PDS-D336(a)): a SHARED rerun over distinct
   # rows is the honest shape. There is deliberately no cross-row check here.
+  # THE DISPLACEMENT DOOR (ruling on task-d6f3e66b1b829e6e criterion 3).
+  #
+  # `apply_durable_reason/2` is an unconditional `Map.put`: one disposition
+  # holds ONE reason, so a second annotator replaced the first's text and the
+  # row kept no trace. PR #13722 made the loss RECOVERABLE (the `task.staged`
+  # event carries `superseded_note`); it did not make it VISIBLE at the moment
+  # it happens, and roughly 19 annotations — several reading "do not execute
+  # this row as written" — were written through this field by agents who did
+  # not know the next stage would erase them. A receipt nobody reads is not a
+  # warning. So the write is now REFUSED unless the caller says, in the same
+  # call, that displacing is what they meant.
+  #
+  # THREE THINGS ARE DELIBERATELY NOT REFUSED, because none of them destroys a
+  # note:
+  #
+  #   * a stage with NO note (`note == nil`, blank included — `normalize_note`
+  #     already collapsed it) never touches the field;
+  #   * a stage over a BLANK or ABSENT existing reason overwrites nothing;
+  #   * a RE-STAGE WITH THE SAME TEXT. The refusal exists to stop text being
+  #     lost, and re-writing a string with itself loses none — refusing it
+  #     would cost a retry to preserve a byte-identical value, and would make
+  #     an idempotent retry (a timed-out request resent) fail the second time,
+  #     which is the exact shape of a guard that teaches callers to reach for
+  #     the override reflexively. Compared on the NORMALIZED text, so only
+  #     surrounding whitespace differs silently.
+  #
+  # The refusal carries the existing note IN FULL. A bare "no" would send the
+  # caller straight back with `--supersede` without ever reading what they were
+  # about to destroy, which is the failure this door exists to prevent; the
+  # controller bounds it for the wire and states the true length.
+  defp check_note_supersession(_doc, nil, _supersede), do: :ok
+  defp check_note_supersession(_doc, _note, true), do: :ok
+
+  defp check_note_supersession(%Document{content: content}, note, _supersede) do
+    existing =
+      content
+      |> content_map()
+      |> Map.get(@durable_reason_key)
+      |> normalize_note()
+
+    cond do
+      is_nil(existing) -> :ok
+      String.trim(existing) == String.trim(note) -> :ok
+      true -> {:error, {:note_would_supersede, existing}}
+    end
+  end
+
   defp check_rerun(nil), do: :ok
 
   defp check_rerun(rerun) when is_binary(rerun) do

@@ -17,6 +17,11 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
+  # How much of a displaced disposition_reason a refusal envelope inlines. The
+  # longest note measured on the live ledger is 1228 characters; a refusal that
+  # quoted one whole would bury the remedy it is trying to hand over.
+  @note_excerpt_limit 400
+
   # ─── Query filters (index / prime / lookup) ─────────────────────────────
   #
   # The content-jsonb filters (kind / lifecycle / parent / parent_id / label /
@@ -2017,6 +2022,40 @@ defmodule BarkparkWeb.TasksController.Params do
   @spec stamp_merge_gated(map()) :: boolean()
   def stamp_merge_gated(params) do
     stamp_flag?(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+  end
+
+  @doc """
+  Reads the `--supersede` override off a stage request, from the manifest flag
+  (query key `supersede`) or the JSON body key. Absent / anything but a truthy
+  scalar → `nil`, which `put_opt` drops and `Tasks.Stage` reads as `false`.
+
+  Opt-in per call, never inferred: the flag IS the caller stating they read the
+  note they are about to displace, and a default-on or sticky spelling would
+  give back exactly the silent overwrite the refusal exists to stop.
+  """
+  @spec stage_supersede(map()) :: true | nil
+  def stage_supersede(params) do
+    if stamp_flag?(Map.get(params, "supersede")), do: true, else: nil
+  end
+
+  @doc """
+  Bounds a disposition_reason for an error envelope. Returns
+  `{excerpt, truncated?}`: the note verbatim when it fits, otherwise its first
+  #{@note_excerpt_limit} graphemes with an ellipsis and `true`.
+
+  Notes of 1228 characters are on the live ledger, so a refusal that inlines
+  one whole could dwarf its own remedy; the caller is told the TRUE length
+  beside the excerpt and `bp task events --payload` keeps the full text either
+  way. Cut on graphemes, not bytes — a multibyte reason must not come back
+  mangled by the very message telling the caller to read it.
+  """
+  @spec note_excerpt(String.t()) :: {String.t(), boolean()}
+  def note_excerpt(note) when is_binary(note) do
+    if String.length(note) <= @note_excerpt_limit do
+      {note, false}
+    else
+      {String.slice(note, 0, @note_excerpt_limit) <> "…", true}
+    end
   end
 
   @doc """

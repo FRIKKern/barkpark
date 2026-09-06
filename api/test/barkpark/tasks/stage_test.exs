@@ -289,8 +289,17 @@ defmodule Barkpark.Tasks.StageTest do
       assert stage(conn, doc_id, %{state: "considering", note: "FIRST: do not execute as written"}).status ==
                200
 
-      assert stage(conn, doc_id, %{state: "researching", note: "SECOND: a different caution"}).status ==
-               200
+      # --supersede since the displacement door landed (task-d6f3e66b1b829e6e
+      # criterion 3): a --note over a DIFFERENT non-blank reason is now a 409
+      # unless the caller says the replacement is deliberate. The RECEIPT this
+      # arm is about is unchanged — the flag decides whether the write happens,
+      # not what the event carries. The refusal itself is proved in
+      # stage_note_supersede_test.exs.
+      assert stage(conn, doc_id, %{
+               state: "researching",
+               note: "SECOND: a different caution",
+               supersede: true
+             }).status == 200
 
       # The row keeps ONE reason — the newest. That is unchanged and intended.
       assert reload(task).content["disposition_reason"] == "SECOND: a different caution"

@@ -1129,6 +1129,11 @@ defmodule BarkparkWeb.TasksController do
         # the only sanctioned writer, so a route that dropped the param would
         # make the raw door's refusal unfixable. Optional by design.
         |> Params.put_opt(:rerun, params["rerun"] || params["disposition_rerun"])
+        # The displacement override (task-d6f3e66b1b829e6e criterion 3). Absent
+        # → false, so a `--note` that would replace a DIFFERENT non-blank
+        # disposition_reason is refused; the caller has to say they read what
+        # is there. `stage_supersede/1` reads both wire spellings.
+        |> Params.put_opt(:supersede, Params.stage_supersede(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stage(task.id, state, opts) do
@@ -1224,6 +1229,39 @@ defmodule BarkparkWeb.TasksController do
                 Enum.map_join(Tasks.Stage.legal_rerun_substitutes(), " · ", &"`#{&1}`") <>
                 " — or omit --rerun entirely, which is an honest \"this reason cannot be " <>
                 "checked\" and is accepted. Nothing was written."
+          })
+
+        # A NOTE THAT WOULD DESTROY A NOTE (task-d6f3e66b1b829e6e criterion 3).
+        # 409, and NOTHING was written. The refusal SHOWS the text it just
+        # saved — a bare "no" would send the caller back with the destructive
+        # flag without ever reading what they were about to erase, which is the
+        # whole failure this door exists to prevent. Notes of 1228 chars exist
+        # on the live ledger, so the wire copy is bounded and states the TRUE
+        # length; `existing_note_truncated` says whether what you are reading is
+        # the whole thing, and `bp task events --payload` has it in full either
+        # way.
+        {:error, {:note_would_supersede, existing}} ->
+          {excerpt, truncated?} = Params.note_excerpt(existing)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "note_would_supersede",
+            existing_note: excerpt,
+            existing_note_length: String.length(existing),
+            existing_note_truncated: truncated?,
+            message:
+              "refusing to replace the disposition_reason already on this row — " <>
+                "--note REPLACES, it does not append, and nothing was written. " <>
+                "THE NOTE YOU WOULD HAVE DESTROYED (#{String.length(existing)} chars" <>
+                if(truncated?, do: ", shown truncated", else: "") <>
+                "): #{inspect(excerpt)} — read it before you decide. " <>
+                "If replacing it IS what you meant, re-run the same stage with " <>
+                "--supersede; the displaced text then stays recoverable from " <>
+                "`bp task events --payload` as `payload.staged.superseded_note`. " <>
+                "If it is not, put your text somewhere that does not overwrite a " <>
+                "caution — the brief, or a comment on the row."
           })
 
         {:error, :not_found} ->
