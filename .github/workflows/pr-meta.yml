@@ -316,6 +316,54 @@ jobs:
         with:
           node-version: "20"
 
+      # ── THE BASE HALF OF THE CRITIC IS CACHEABLE; THE HEAD HALF NEVER IS ─────
+      # MEASURED on run 34054415331 (pull_request, 2026-09-06): the step below
+      # cost 390 s, split almost exactly in two — HEAD pass 194 s (worktree add
+      # 2 s + aesthetics.mjs 191 s), BASE pass 196 s (worktree add 1 s +
+      # aesthetics.mjs 195 s). The BASE pass is the same computation for every PR
+      # open against main at that moment, and it is redone on every push of every
+      # PR. The HEAD report is a function of the head sha and is never reused, so
+      # only the base half is cached here.
+      #
+      # THE KEY IS (base sha, hash of tooling/aesthetics/**) AND THERE ARE NO
+      # `restore-keys`. That is the whole safety argument:
+      #   * without `restore-keys`, actions/cache returns ONLY an exact key match
+      #     — there is no prefix fallback, so a NEAR-MISS key can never serve a
+      #     report. A hit on a different base sha is impossible by construction:
+      #     the base sha is a literal segment of the key and nothing but that key
+      #     can be restored.
+      #   * the tooling hash is the second segment for the same reason at the
+      #     other axis — a report produced by a DIFFERENT critic version can
+      #     never be served under this key. (The base report is in fact already
+      #     pinned by the base sha alone, because the base worktree runs its OWN
+      #     tooling/aesthetics/aesthetics.mjs; the hash segment is a strictly
+      #     TIGHTER key, never a looser one.)
+      #   * only what THIS run computed is saved, and only on a miss — see the
+      #     save step below, gated on the critic step's own `base_cache` output.
+      #
+      # SCOPE — read this before crediting the cache with more than it buys. A
+      # cache written by a `pull_request` run is scoped to that PR's ref, so it
+      # is NOT visible to other PRs; what this buys today is every RE-PUSH of a
+      # PR against an unchanged base, which is the common case under this fleet.
+      # Making the key shared across PRs would mean priming it from `push: main`,
+      # and main's runs deliberately SKIP the critic today (27-35 s vs 430-900 s).
+      # Widening the push arm to compute a base report is a separate, deliberate
+      # decision about main's cost and is NOT taken here — see
+      # task-049caae64a475b84.
+      #
+      # The cache is restore/save split, not `actions/cache`, precisely so the
+      # save can be conditional on a miss. `pull_request` only: on `push: main`
+      # the base is HEAD~1, which has no expression form for the key, so that arm
+      # computes exactly as it always did.
+      - name: Restore the BASE tip's filebase report (exact key only, no restore-keys)
+        id: aesthetics_base_cache
+        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' && github.event_name == 'pull_request' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/base-report-cache
+          # (base sha, tooling hash) — exact match or nothing.
+          key: aesthetics-base-report-v1-${{ github.event.pull_request.base.sha }}-${{ hashFiles('tooling/aesthetics/**') }}
+
       # bp is ABSENT in CI, so the critic's TASK signal is not reliable here; only
       # the STRUCTURAL findings are diffed (compare.mjs excludes the dead-task
       # signal entirely). Both trees are PINNED worktrees off the one clone above —
@@ -346,10 +394,36 @@ jobs:
           ( cd /tmp/head-tree && node tooling/aesthetics/aesthetics.mjs )
           cp /tmp/head-tree/tooling/aesthetics/aesthetics-report.json /tmp/head-report.json
           git worktree remove --force /tmp/head-tree
-          git worktree add --detach /tmp/base-tree "$BASE_SHA"
-          ( cd /tmp/base-tree && node tooling/aesthetics/aesthetics.mjs )
-          cp /tmp/base-tree/tooling/aesthetics/aesthetics-report.json /tmp/base-report.json
-          git worktree remove --force /tmp/base-tree
+          # THE BASE HALF, cached by (base sha, tooling hash). The compare step
+          # below still reads exactly /tmp/base-report.json and /tmp/head-report.json
+          # — a restored report and a freshly computed one are the same bytes at
+          # the same path, and compare.mjs cannot tell them apart.
+          mkdir -p /tmp/base-report-cache
+          if [ "${{ steps.aesthetics_base_cache.outputs.cache-hit }}" = "true" ] && [ -s /tmp/base-report-cache/base-report.json ]; then
+            echo "base report: CACHE HIT for $BASE_SHA — restored, not recomputed"
+            cp /tmp/base-report-cache/base-report.json /tmp/base-report.json
+            echo "base_cache=hit" >> "$GITHUB_OUTPUT"
+          else
+            echo "base report: cache MISS for $BASE_SHA — computing it"
+            git worktree add --detach /tmp/base-tree "$BASE_SHA"
+            ( cd /tmp/base-tree && node tooling/aesthetics/aesthetics.mjs )
+            cp /tmp/base-tree/tooling/aesthetics/aesthetics-report.json /tmp/base-report.json
+            git worktree remove --force /tmp/base-tree
+            # save ONLY what this run computed
+            cp /tmp/base-report.json /tmp/base-report-cache/base-report.json
+            echo "base_cache=miss" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Save ONLY on a miss, and only the report this run actually computed. Same
+      # key as the restore above, character for character — a save under any other
+      # key would poison a lookup it was never measured for.
+      - name: Save the BASE tip's filebase report (only on a miss)
+        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' && github.event_name == 'pull_request' && steps.aesthetics_reports.outputs.base_cache == 'miss' }}
+        continue-on-error: true # advisory — a cache write must never block either
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/base-report-cache
+          key: aesthetics-base-report-v1-${{ github.event.pull_request.base.sha }}-${{ hashFiles('tooling/aesthetics/**') }}
 
       - name: Filebase aesthetics gate (advisory) — compare + post summary
         id: aesthetics_compare
