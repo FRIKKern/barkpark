@@ -5083,19 +5083,36 @@
       // an unrelated toggle moving cannot prove that this press succeeded.
       _paPressedWitness(el) {
         if (!el || !el.hasAttribute("aria-pressed")) return null;
-        return {el: el, value: el.getAttribute("aria-pressed")};
+        return {
+          el: el,
+          id: el.id || null,
+          testId: el.getAttribute("data-test-id"),
+          value: el.getAttribute("aria-pressed")
+        };
       },
 
       _paPressedChanged(witness) {
-        // Fail closed if LiveView replaced the node. Matching by text or a
-        // container-wide signature could mistake an unrelated change for this
-        // action's result; the still-mounted clicked element is exact evidence.
-        return !!(
-          witness &&
-          witness.el &&
-          this.el.contains(witness.el) &&
-          witness.el.getAttribute("aria-pressed") !== witness.value
-        );
+        if (!witness || !witness.el) return false;
+        var el = this.el.contains(witness.el) ? witness.el : null;
+
+        // LiveView may replace the clicked node while applying the reply. In
+        // that case reacquire ONLY its stable exact identity — never text,
+        // group state, or a global aria-pressed signature. An absent or
+        // ambiguous identity fails closed, so an unrelated toggle cannot
+        // certify this action.
+        if (!el && (witness.id || witness.testId)) {
+          var nodes = this.el.querySelectorAll("[aria-pressed]"), match = null, i, n;
+          for (i = 0; i < nodes.length; i++) {
+            n = nodes[i];
+            if (witness.id && n.id !== witness.id) continue;
+            if (witness.testId && n.getAttribute("data-test-id") !== witness.testId) continue;
+            if (match) return false;
+            match = n;
+          }
+          el = match;
+        }
+
+        return !!el && el.getAttribute("aria-pressed") !== witness.value;
       },
 
       // Drop the pending press and every timer it owns, then say `text` (empty

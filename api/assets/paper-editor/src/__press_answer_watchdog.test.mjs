@@ -21,6 +21,7 @@ const dom = new JSDOM(`
       <button data-test-id="editor-mode-beta" phx-click="editor-set-mode" aria-pressed="false">Beta</button>
     </div>
     <button id="unrelated-toggle" aria-pressed="false">Unrelated</button>
+    <button class="unstable-toggle" aria-pressed="false">Unstable</button>
     <details id="plain-details">
       <summary id="plain-summary"><span id="plain-label">Configure tabs</span></summary>
       <button id="body-action" phx-click="save-block">Save</button>
@@ -125,7 +126,23 @@ try {
     "a fast successful Beta mode reply must settle from its aria-pressed change, not false-alarm",
   );
 
-  betaMode.remove();
+  betaMode.outerHTML =
+    '<button data-test-id="editor-mode-beta" phx-click="editor-set-mode" aria-pressed="true">Beta</button>';
+  assert.equal(
+    settleWord.call(hook, {
+      url: globalThis.location.href,
+      sig: "same-current",
+      pressed: betaPressed,
+      name: "Beta",
+    }),
+    "Selected “Beta”.",
+    "a LiveView replacement with the same stable identity must retain the exact-control witness",
+  );
+
+  document.getElementById("panes").insertAdjacentHTML(
+    "beforeend",
+    '<button data-test-id="editor-mode-beta" aria-pressed="false">Duplicate Beta identity</button>',
+  );
   assert.equal(
     settleWord.call(hook, {
       url: globalThis.location.href,
@@ -134,7 +151,26 @@ try {
       name: "Beta",
     }),
     null,
-    "a replaced clicked control must fail closed instead of matching another toggle",
+    "an ambiguous replacement identity must fail closed",
+  );
+  document.querySelectorAll('[data-test-id="editor-mode-beta"]')[1].remove();
+
+  const unstable = document.querySelector(".unstable-toggle");
+  const unstablePressed = hook._paPressedWitness(unstable);
+  unstable.remove();
+  document.getElementById("panes").insertAdjacentHTML(
+    "beforeend",
+    '<button class="unstable-toggle" aria-pressed="true">Unstable</button>',
+  );
+  assert.equal(
+    settleWord.call(hook, {
+      url: globalThis.location.href,
+      sig: "same-current",
+      pressed: unstablePressed,
+      name: "Unstable",
+    }),
+    null,
+    "a replaced control without stable identity must fail closed",
   );
 } finally {
   if (previousLocation === undefined) delete globalThis.location;
