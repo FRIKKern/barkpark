@@ -424,6 +424,14 @@ defmodule Barkpark.Content.Writer do
          # `Tasks.Dedup.check_new_task/5` below.
          :ok <-
            Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
+         # an id that already lives in a sibling dataset of this
+         # workspace+project is refused: the task doors take a bare id and no
+         # dataset, so the second copy makes the id ambiguous for every by-id
+         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
+         # rule; called from here exactly like the fence above.
+         :ok <-
+           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -934,6 +942,14 @@ defmodule Barkpark.Content.Writer do
          # `Tasks.Dedup.check_new_task/5` below.
          :ok <-
            Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
+         # an id that already lives in a sibling dataset of this
+         # workspace+project is refused: the task doors take a bare id and no
+         # dataset, so the second copy makes the id ambiguous for every by-id
+         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
+         # rule; called from here exactly like the fence above.
+         :ok <-
+           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
