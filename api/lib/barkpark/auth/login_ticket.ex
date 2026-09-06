@@ -9,9 +9,16 @@ defmodule Barkpark.Auth.LoginTicket do
   Hygiene mirrors `Barkpark.Auth.ApiToken`: the opaque ticket is stored only as
   its SHA-256 hash (`ticket_hash`), never raw. The bound `api_token` is the RAW
   bearer value — LiveAuth verifies the raw token — held encrypted-at-rest via
-  `Barkpark.EncryptedBinary` (Cloak AES-GCM) for the ticket's 60s life, then the
-  row is spent (`used_at`). Single-use is enforced by an atomic
-  `UPDATE ... WHERE used_at IS NULL` claim, not a read-then-write.
+  `Barkpark.EncryptedBinary` (Cloak AES-GCM) for the ticket's 60s life, and then
+  the winning consume DELETES the row: the bearer stops being recoverable from
+  this table at the consume, not at the next sweeper tick. Single-use is
+  enforced by an atomic `DELETE ... WHERE used_at IS NULL` claim (RETURNING
+  hands the winner the row it removed), not a read-then-write.
+
+  `used_at` therefore has no writer on the live path any more. It is retained
+  because rows stamped by the pre-#16555 consume exist in deployed databases
+  and both `Auth.consume_login_ticket/1` (which refuses them) and
+  `Barkpark.Auth.LoginTicketSweeper` (which removes them) still read it.
   """
   use Ecto.Schema
   import Ecto.Changeset

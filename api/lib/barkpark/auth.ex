@@ -147,28 +147,51 @@ defmodule Barkpark.Auth do
   @doc """
   Atomically consume a login ticket, returning the bound RAW api_token (dwb-7).
 
-  Single-use is enforced by a race-safe `UPDATE ... WHERE used_at IS NULL AND
-  not-expired` that stamps `used_at` and returns the row: under Postgres READ
-  COMMITTED two concurrent consumes serialize on the row lock and the second
-  re-evaluates the WHERE against the now-spent row, so EXACTLY ONE wins (count
-  == 1). An unknown, already-used, or expired ticket all return the SAME
-  `{:error, :invalid}` — no oracle distinguishes the failure kinds.
+  THE CONSUME IS THE RETENTION BOUNDARY. The winning statement DELETES the row
+  rather than stamping `used_at` on it, so the moment a consume wins, the bound
+  bearer is gone from `login_tickets` for every reader — a `Repo.one/1` load, a
+  dump, a replica, a backup. `Barkpark.Auth.LoginTicketSweeper` used to be that
+  boundary for spent rows and it cannot be: a sweeper is a cadence, and any
+  cadence leaves a window in which a consumed, finished handoff still holds a
+  live re-entry credential. #16543 measured that window's contents by run
+  (`Barkpark.Auth.LoginTicketSweeperTest`, "the retention question"): the
+  recovered bearer returned **201** from `POST /v1/auth/login-tickets` where a
+  garbage bearer returns 401. Deleting at consume takes that window to zero for
+  the spent arm. The sweeper keeps the EXPIRED-BUT-UNUSED arm, which has no
+  consume event to hook; its residue is stated in that module's doc.
+
+  Single-use is enforced by a race-safe `DELETE ... WHERE used_at IS NULL AND
+  not-expired` whose `select:` RETURNING hands the winner the row it removed:
+  under Postgres READ COMMITTED two concurrent consumes serialize on the row
+  lock, and after the winner commits the loser's re-check finds the row gone,
+  so EXACTLY ONE wins (count == 1) and a loser never sees the bearer. The
+  `is_nil(t.used_at)` clause is retained deliberately — rows spent by the
+  pre-#16555 stamping consume still exist in a deployed database and must stay
+  unconsumable until the sweeper takes them.
+
+  An unknown, already-used, or expired ticket all return the SAME
+  `{:error, :invalid}` — no oracle distinguishes the failure kinds, and
+  deleting the row collapses no distinction that was ever exposed.
   """
   @spec consume_login_ticket(binary()) :: {:ok, binary()} | {:error, :invalid}
   def consume_login_ticket(raw_ticket) when is_binary(raw_ticket) do
     hash = hash_ticket(raw_ticket)
     now = DateTime.utc_now()
 
-    # `select:` (NOT the `:returning` opt — update_all silently ignores it and
-    # yields `{count, nil}`) both returns the winner's payload and routes it
-    # through the schema type, so the EncryptedBinary ciphertext comes back
-    # DECRYPTED as the raw api_token.
+    # `select:` (NOT the `:returning` opt — the *_all callbacks silently ignore
+    # it and yield `{count, nil}`) both returns the winner's payload and routes
+    # it through the schema type, so the EncryptedBinary ciphertext comes back
+    # DECRYPTED as the raw api_token. DELETE ... RETURNING hands back the row
+    # as it was, which is why the bearer can be delivered by the same statement
+    # that destroys it — an `UPDATE ... SET api_token = NULL` could not:
+    # Postgres RETURNING on an UPDATE yields the NEW values, so the winner
+    # would get `nil` back.
     query =
       from t in LoginTicket,
         where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
         select: {t.api_token, t.user_email}
 
-    case Repo.update_all(query, set: [used_at: now]) do
+    case Repo.delete_all(query) do
       # user-shaped (cloud-identity handoff): the consumer mints a
       # user_session for this email instead of dropping the token in.
       {1, [{raw_api_token, user_email}]} when is_binary(user_email) ->
@@ -212,8 +235,17 @@ defmodule Barkpark.Auth do
 
   So retention here is a SECURITY concern: every un-swept row is a re-entry
   credential retained forever against a documented 60-second life. That is why
-  `Barkpark.Auth.LoginTicketSweeper` runs this every minute — the cadence is
-  the retention floor, not a housekeeping preference.
+  `Barkpark.Auth.LoginTicketSweeper` runs this every minute.
+
+  WHAT THIS SWEEP IS STILL FOR (task-62e7b342b85e88fe): the SPENT arm is no
+  longer the sweep's to hold. `consume_login_ticket/1` DELETES the row it wins,
+  so a consume produces no spent row at all and the cadence is not the
+  retention floor for one. Two things keep `used_at IS NOT NULL` in this
+  predicate: rows spent by the pre-#16555 stamping consume, which exist in any
+  already-deployed database, and defence in depth if a future consume path
+  reintroduces a stamp. The arm this sweep genuinely owns is
+  EXPIRED-BUT-UNUSED — a ticket nobody ever consumed has no consume event to
+  hook — and its accepted residue is stated in `Barkpark.Auth.LoginTicketSweeper`.
 
   Unbounded: deletes the whole eligible backlog in one statement. Production
   drives `sweep_login_tickets_batch/1` instead; this form is kept for tests and
