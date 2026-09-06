@@ -1612,10 +1612,14 @@
 .bp-paper-contextual-controls--section[open],
 .bp-paper-contextual-controls--columns[open],
 .bp-paper-contextual-controls--card[open],
+.bp-paper-contextual-controls--action[open],
 .bp-paper-contextual-controls--form[open] {
   position: relative; inset: auto; width: 100%; max-width: none;
 }
 .bp-paper-contextual-controls--columns-empty {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--action-empty {
   position: relative; inset: auto; width: 100%; max-width: none;
 }
 .bp-paper-contextual-controls--gauge-list[open] > .bp-paper-contextual-panel,
@@ -1623,6 +1627,7 @@
 .bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--columns[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--card[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--action[open] > .bp-paper-contextual-panel,
 .bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
   max-height: none; overflow: visible;
 }

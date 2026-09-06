@@ -14,6 +14,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @card_form_fields ~w(card-tone card-title card-media-src card-media-alt card-action-label card-action-href card-action-priority)
   @card_tones ["", "info", "ok", "warn", "danger"]
   @card_action_priorities ["primary", "secondary"]
+  @action_form_fields ~w(action-label action-href action-priority)
+  @action_priorities ["primary", "secondary"]
 
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
@@ -61,6 +63,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def card_form_state(_block), do: {:error, :malformed_card}
+
+  @doc false
+  def action_form_state(%{"type" => "action"} = block) do
+    with {:ok, label} <- optional_card_text(block, "label"),
+         {:ok, href} <- optional_card_text(block, "href"),
+         {:ok, priority} <- optional_card_text(block, "priority") do
+      {:ok,
+       %{
+         label: label || "",
+         href: href || "",
+         priority: priority || "secondary"
+       }}
+    else
+      _ -> {:error, :malformed_action}
+    end
+  end
+
+  def action_form_state(_block), do: {:error, :malformed_action}
 
   @doc false
   # Build the patch map for a block from the submitted form params. Only the
@@ -177,6 +197,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def build_block_patch(%{"type" => "card"} = block, params) do
     case card_chrome_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "action"} = block, params) do
+    case action_patch(block, params) do
       {:ok, patch} -> patch
       {:error, _reason} -> %{}
     end
@@ -327,6 +354,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "card"} = block, params),
     do: card_chrome_patch(block, params)
+
+  def validate_block_patch(%{"type" => "action"} = block, params),
+    do: action_patch(block, params)
 
   def validate_block_patch(%{"type" => "section"} = block, params) do
     section_structure_patch(block, params)
@@ -801,6 +831,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         |> put_card_action_slot(state, params)
 
       {:ok, if(changed?, do: Map.put(patch, "slots", slots), else: patch)}
+    end
+  end
+
+  defp action_patch(block, params) do
+    with {:ok, state} <- action_form_state(block),
+         :ok <- validate_action_form_params(params, state) do
+      {:ok,
+       %{}
+       |> put_action_field(params, "action-label", "label", state.label)
+       |> put_action_field(params, "action-href", "href", state.href)
+       |> put_action_field(params, "action-priority", "priority", state.priority)}
+    end
+  end
+
+  defp validate_action_form_params(params, state) do
+    known = MapSet.new(@action_form_fields)
+    known_present? = Enum.any?(@action_form_fields, &Map.has_key?(params, &1))
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "action-") and
+          not MapSet.member?(known, key)
+      end)
+
+    binary_values? =
+      Enum.all?(@action_form_fields, fn key ->
+        not Map.has_key?(params, key) or is_binary(params[key])
+      end)
+
+    priority_valid? =
+      not Map.has_key?(params, "action-priority") or
+        params["action-priority"] == state.priority or
+        params["action-priority"] in @action_priorities
+
+    if known_present? and not unexpected? and binary_values? and priority_valid?,
+      do: :ok,
+      else: {:error, :invalid_action_form}
+  end
+
+  defp put_action_field(patch, params, param, field, effective) do
+    case Map.fetch(params, param) do
+      {:ok, submitted} when submitted != effective -> Map.put(patch, field, submitted)
+      _ -> patch
     end
   end
 
@@ -3304,6 +3377,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   #   table    → PdTable {rows, head?}; a headed 1-body 2-col grid with empty cells.
   def default_block("action", id),
     do: %{"id" => id, "type" => "action", "href" => "", "label" => ""}
+
+  def default_block("card", id),
+    do: %{
+      "id" => id,
+      "type" => "card",
+      "slots" => %{
+        "title" => [%{"type" => "heading", "text" => "New card"}],
+        "body" => [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => ""}]
+          }
+        ]
+      }
+    }
 
   def default_block("figure", id),
     do: %{

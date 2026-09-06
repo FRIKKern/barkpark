@@ -960,7 +960,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
                  true <- current_id == doc.id,
                  {:ok, ops} <- resolve_paper_block_form(current_doc, resolver, opts),
                  {:ok, receipt, effects} <-
-                   persist_paper_block_ops(current_doc, slug, ops, dataset, opts) do
+                   persist_paper_block_ops(
+                     current_doc,
+                     slug,
+                     ops,
+                     dataset,
+                     opts,
+                     trusted_empty_block_form_op?(ops)
+                   ) do
               maybe_before_idempotency_complete(opts)
 
               case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
@@ -1038,7 +1045,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp check_paper_block_form_rev(_doc, nil), do: {:error, :precondition_failed}
   defp check_paper_block_form_rev(doc, if_rev), do: check_paper_if_rev(doc, if_rev)
 
-  defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
+  defp trusted_empty_block_form_op?([
+         %{"op" => "patch-block", "id" => id, "patch" => patch} = op
+       ])
+       when is_binary(id) and is_map(patch) and map_size(patch) == 0 do
+    map_size(op) == 3 and String.trim(id) != ""
+  end
+
+  defp trusted_empty_block_form_op?(_ops), do: false
+
+  defp persist_paper_block_ops(
+         %Document{} = doc,
+         slug,
+         ops,
+         dataset,
+         opts,
+         trusted_form_noop? \\ false
+       ) do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
@@ -1064,8 +1087,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id) do
       cond do
-        ops == [] ->
-          # Nothing to apply — report the current rev, no write, no broadcast.
+        ops == [] or (trusted_form_noop? and folded == blocks) ->
+          # Nothing changed. Trusted block forms still pass their exact empty
+          # patch through the normal revision/context/Patch fences above before
+          # sharing the empty-batch receipt: current rev, no paper write or
+          # broadcast. Canonical op callers retain their existing semantics.
           {:ok,
            %{
              slug: slug,

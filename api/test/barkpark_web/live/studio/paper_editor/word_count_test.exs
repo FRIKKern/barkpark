@@ -116,6 +116,51 @@ defmodule BarkparkWeb.Studio.PaperEditor.WordCountTest do
     assert footer_text(blocks) =~ "2 blocks"
   end
 
+  test "footer counts only a standalone Action's visible label" do
+    blocks = [
+      %{
+        "id" => "action-id-must-not-count",
+        "type" => "action",
+        "label" => "Read verified report",
+        "href" => "Destination metadata must not count",
+        "priority" => "Priority metadata must not count",
+        "unknown" => "Unknown action metadata must not count"
+      }
+    ]
+
+    assert footer_text(blocks) =~ "3 words"
+    assert footer_text(blocks) =~ "1 block"
+  end
+
+  test "footer counts a nested Action label and ignores malformed labels and metadata" do
+    blocks = [
+      %{
+        "id" => "grid",
+        "type" => "section",
+        "layout" => %{"mode" => "grid", "tracks" => 2},
+        "blocks" => [
+          %{
+            "id" => "nested-action",
+            "type" => "action",
+            "label" => "Open nested proof",
+            "href" => "Nested destination metadata must not count",
+            "priority" => "Nested priority metadata must not count",
+            "unknown" => "Nested unknown metadata must not count"
+          },
+          %{
+            "id" => "malformed-action",
+            "type" => "action",
+            "label" => %{"not" => "visible"},
+            "href" => "Malformed destination metadata must not count"
+          }
+        ]
+      }
+    ]
+
+    assert footer_text(blocks) =~ "3 words"
+    assert footer_text(blocks) =~ "1 block"
+  end
+
   test "footer counts reader-visible Card copy inside a grid and follows chrome edits" do
     card = %{
       "id" => "card-id-must-not-count",

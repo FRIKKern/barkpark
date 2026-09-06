@@ -538,6 +538,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
        ]},
       {"Visual",
        [
+         {"action", "Action"},
+         {"card", "Card"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
@@ -1140,6 +1142,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     |> Enum.map_join(" ", &beta_form_question_text/1)
   end
 
+  defp beta_node_text(%{"type" => "action", "label" => label}) when is_binary(label), do: label
+  defp beta_node_text(%{"type" => "action"}), do: ""
+
   defp beta_node_text(%{"type" => "card"} = block) do
     non_action =
       ~w(media title body)
@@ -1487,6 +1492,56 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
+      <% "action" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-action-contextual-editor">
+          <%= case Blocks.action_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
+              <details
+                id={"action-controls-" <> @id}
+                class={[
+                  "bp-paper-contextual-controls bp-paper-contextual-controls--action",
+                  action_preview_empty?(state) && "bp-paper-contextual-controls--action-empty"
+                ]}
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure action</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"action-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-action-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-label-" <> @id}>Button label</label>
+                    <input id={"action-label-" <> @id} type="text" name="action-label" class="bp-paper-edit-text" value={state.label} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-href-" <> @id}>Destination</label>
+                    <input id={"action-href-" <> @id} type="text" name="action-href" class="bp-paper-edit-text" value={state.href} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-priority-" <> @id}>Priority</label>
+                    <select id={"action-priority-" <> @id} name="action-priority" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_priority_options(state.priority)}
+                        value={value}
+                        selected={value == state.priority}
+                      ><%= label %></option>
+                    </select>
+                  </form>
+                </div>
+              </details>
+            <% {:error, :malformed_action} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
+              <p class="bp-paper-edit-readonly">
+                This Action's authored fields are malformed and cannot be edited here; original content is preserved.
+              </p>
+          <% end %>
+        </div>
       <% "card" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-card-contextual-editor">
           <%= case Blocks.card_form_state(@block) do %>
@@ -3381,6 +3436,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp card_priority_options(current) do
     preserve_card_option([{"primary", "Primary"}, {"secondary", "Secondary"}], current)
   end
+
+  defp action_preview_empty?(state),
+    do: String.trim(state.label) == "" and String.trim(state.href) == ""
 
   defp preserve_card_option(options, current) do
     if Enum.any?(options, fn {value, _label} -> value == current end) do
