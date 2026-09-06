@@ -17316,6 +17316,19 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
   assert.match(html, /deploy-fail-dot/);
 });
 
+// ── TDZ HOIST (cch-bl-tdz-ledger-two-real-crossings) ────────────────────────
+// `ME_OWNER` and `FORBIDDEN_GENERIC` used to be declared ~3 600 and ~5 100
+// lines BELOW the second depth-0 `await` on the next screen, and both are read
+// by tests registered ~14 000 lines ABOVE it. That is a real temporal-dead-zone
+// crossing: it stays latent only because that await re-imports a module the
+// first one already cached, so node never actually suspends there. Give that
+// import any real async work and both reads throw ReferenceError. Declaring
+// them here — above the suspension point — closes the window for good, and
+// empties `scripts/console-tdz-order-check.mjs`'s LATENT ledger (removed in the
+// same commit; a ledger entry that matches nothing is fatal by design).
+const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+const FORBIDDEN_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
+
 // ── cch-w28-bl · A REFUSED PUBLISH SPEAKS ───────────────────────────────────
 // `Sites.AutoDeployWorker.refuse/1` mints a TERMINAL row at status "cancelled"
 // carrying a full actionable sentence — the `bp cloud site deploy … --prebuilt`
@@ -20984,7 +20997,8 @@ async function driveMe(status, payload) {
 // same commit — otherwise the floor deletion reds cch-w41-s3 below, whose
 // ME_ADMIN is the only admin fixture in the whole harness. admin/owner mirror
 // Authz: owner is both, admin is admin-not-owner, member is neither.
-const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+// ME_OWNER is declared above the second top-level `await` (the `__preview__/scenarios.mjs`
+// re-import under "A REFUSED PUBLISH SPEAKS") — see cch-bl-tdz-ledger-two-real-crossings.
 const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" }, team_authority: { team_id: "t1", role: "member", admin: false, owner: false } };
 const MEMBER_NOTE = "Members can create read-only tokens. Ask an admin for write, deploy, or root.";
 
@@ -22451,7 +22465,8 @@ test("cch-w66-bl: the other four create refusals get console voice, and only the
 // the fence must still beat — and keeps the retired-string check beside it as a
 // cheap ratchet against a revert.
 const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
-const FORBIDDEN_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
+// FORBIDDEN_GENERIC is declared above the second top-level `await` (the `__preview__/scenarios.mjs`
+// re-import under "A REFUSED PUBLISH SPEAKS") — see cch-bl-tdz-ledger-two-real-crossings.
 const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
 const OUTRANKED_SENTENCE = "You can only act on members whose role is below your own, and this member's is not.";
 const CANNOT_GRANT_SENTENCE = "You can't grant a role above your own — that has to come from someone who already holds it on this team.";
