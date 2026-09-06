@@ -268,6 +268,17 @@ jobs:
       - name: No shimmed workflow filters its own pull_request trigger
         run: bash scripts/shim-trigger-filter-check.sh
 
+      # The PR-path CI inventory's own derivations — required/feeds-required,
+      # the venue rule, and the real-compute accounting that refuses to count a
+      # run which never executed a step. OFFLINE and ~1 s: --selftest touches
+      # no network and reads no run history, it drives the pure functions over
+      # planted fixtures. It is wired HERE, in the same job as the three
+      # selftests above, for the reason this file already gives for them: a
+      # harness nobody executes reads as coverage and is silence. It guards
+      # scripts/ci-pr-inventory.py, which produces .github/ci-pr-inventory.md.
+      - name: Prove the CI inventory's derivations can fail (--selftest)
+        run: python3 scripts/ci-pr-inventory.py --selftest
+
       # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────
       # `!cancelled()` and not `success()`: a red from either gate above must not
       # swallow this advisory. It ran as its own job before the fold and it has to

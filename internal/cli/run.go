@@ -2312,6 +2312,9 @@ func doRequestStreamCT(method, rawURL string, headers map[string]string, body io
 		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	// Record the correlation id the API stamps on every reply, so a refusal
+	// whose hand-built body omitted request_id still renders one.
+	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
@@ -2393,6 +2396,10 @@ func doRequestUsing(client *http.Client, method, rawURL string, headers map[stri
 		return 0, nil, "", nil, err
 	}
 	defer resp.Body.Close()
+	// Same recording as the streaming send: this is the ONE seam doRequest,
+	// doRequestCT and doRequestFull all funnel through, and the first two throw
+	// the headers away on the way back to their ~40 call sites.
+	noteResponseHeader(resp.Header)
 	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {

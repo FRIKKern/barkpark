@@ -1,0 +1,206 @@
+{
+  "fixture": "scripts/fixtures/studio-inflight-overlap.html",
+  "heex": "api/lib/barkpark_web/layouts/root.html.heex",
+  "playwright": "1.59.1",
+  "generated_at": "2026-09-06T17:24:40.793Z",
+  "head_sha": "21f4d428fb2b8bc697588e8f9d6d83a896d46b52",
+  "origin_main_sha": "3d238fdd818651e0bbb862f6f7a1855fcbe1bb29",
+  "runs": [
+    {
+      "ref": "origin/main",
+      "guardPresent": false,
+      "guardDeleted": false,
+      "pointerEventsNone": true,
+      "css": ".phx-click-loading, .phx-submit-loading { pointer-events: none; opacity: 0.6; }",
+      "scenarios": {
+        "A": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "delete-dataset",
+              "id": "row-under"
+            }
+          ],
+          "firstPressFrames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "dropped": [],
+          "inflightPreserved": true,
+          "pressAnswer": ""
+        },
+        "B": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "delete-dataset",
+              "id": "row-under"
+            }
+          ],
+          "dropped": [],
+          "inflightPreserved": true,
+          "pressAnswer": ""
+        },
+        "K": {
+          "notInFlightFired": true,
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "side-action",
+              "id": "row-side"
+            },
+            {
+              "type": "click",
+              "event": "row-menu",
+              "id": "row-menu"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "ref": "WORKTREE",
+      "guardPresent": true,
+      "guardDeleted": false,
+      "pointerEventsNone": false,
+      "css": ".phx-click-loading, .phx-submit-loading { opacity: 0.6; }",
+      "scenarios": {
+        "A": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "firstPressFrames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "dropped": [],
+          "inflightPreserved": true,
+          "pressAnswer": "Still working on your last press — that one was not sent."
+        },
+        "B": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "dropped": [],
+          "inflightPreserved": true,
+          "pressAnswer": "Still working on your last press — that one was not sent."
+        },
+        "K": {
+          "notInFlightFired": true,
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "side-action",
+              "id": "row-side"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "ref": "WORKTREE",
+      "guardPresent": false,
+      "guardDeleted": true,
+      "pointerEventsNone": false,
+      "css": ".phx-click-loading, .phx-submit-loading { opacity: 0.6; }",
+      "scenarios": {
+        "A": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "firstPressFrames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            }
+          ],
+          "dropped": [
+            "row-over"
+          ],
+          "inflightPreserved": true,
+          "pressAnswer": ""
+        },
+        "B": {
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "row-menu",
+              "id": "row-menu"
+            }
+          ],
+          "dropped": [],
+          "inflightPreserved": true,
+          "pressAnswer": ""
+        },
+        "K": {
+          "notInFlightFired": true,
+          "frames": [
+            {
+              "type": "click",
+              "event": "open-paper",
+              "id": "row-over"
+            },
+            {
+              "type": "click",
+              "event": "side-action",
+              "id": "row-side"
+            },
+            {
+              "type": "click",
+              "event": "row-menu",
+              "id": "row-menu"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "self_test": {
+    "failures": [],
+    "ok": true
+  }
+}

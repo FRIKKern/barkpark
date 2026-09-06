@@ -1256,12 +1256,15 @@ const censusDeliveryEnvelope = `{
             "basis": "floored: a still-waiting row contributes its lower bound"},
     "censored": {"count": 400, "as_of": "2026-08-02T00:00:00Z", "still_waiting_at_least_seconds": 76399.0},
     "unmetered": 7,
+    "cancelled": 5,
     "min_sample": 200,
     "sites": [
       {"site_id": "site-alpha", "sample": 1000, "delivered": 600, "censored": 400, "unmetered": 7,
-       "still_waiting": true, "oldest_waiting_seconds": 76399.0, "as_of": "2026-08-02T00:00:00Z"},
+       "cancelled": 3, "still_waiting": true, "oldest_waiting_seconds": 76399.0, "as_of": "2026-08-02T00:00:00Z"},
       {"site_id": "jarl-website", "sample": 23, "delivered": 23, "censored": 0, "unmetered": 0,
-       "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"}
+       "cancelled": 0, "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"},
+      {"site_id": "stopped-by-hand", "sample": 0, "delivered": 0, "censored": 0, "unmetered": 0,
+       "cancelled": 2, "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"}
     ]
   }
 }`
@@ -1296,6 +1299,12 @@ func TestCloudDeploymentsDeliveryEveryEmittedKeyIsRead(t *testing.T) {
 	if d.Sample != 1000 || d.Delivered != 600 || d.Unmetered != 7 || d.MinSample != 200 {
 		t.Fatalf("counts decoded wrong: sample=%d delivered=%d unmetered=%d min_sample=%d", d.Sample, d.Delivered, d.Unmetered, d.MinSample)
 	}
+	// dr-w11-bl-cancelled-rows-count-as-waiting. Go drops an undeclared key in
+	// SILENCE, so a cohort the control plane counts and this struct does not
+	// declare would vanish between the two halves of one product.
+	if d.Cancelled != 5 {
+		t.Fatalf("the cancelled cohort decoded wrong: %d, want 5", d.Cancelled)
+	}
 	if d.P50.Seconds == nil || *d.P50.Seconds != 80.0 || d.P50.Refused {
 		t.Fatalf("p50 decoded wrong: %+v", d.P50)
 	}
@@ -1314,10 +1323,19 @@ func TestCloudDeploymentsDeliveryEveryEmittedKeyIsRead(t *testing.T) {
 		d.Censored.StillWaitingAtLeastSeconds == nil || *d.Censored.StillWaitingAtLeastSeconds != 76399.0 {
 		t.Fatalf("censored cohort decoded wrong: %+v", d.Censored)
 	}
-	if len(d.Sites) != 2 {
+	if len(d.Sites) != 3 {
 		t.Fatalf("sites decoded wrong: %+v", d.Sites)
 	}
-	alpha, jarl := d.Sites[0], d.Sites[1]
+	alpha, jarl, stopped := d.Sites[0], d.Sites[1], d.Sites[2]
+	// A site whose every row in the window was stopped by hand: measured
+	// nothing, waiting on nothing, and STILL PRESENT with its count.
+	if stopped.SiteID != "stopped-by-hand" || stopped.Sample != 0 || stopped.Censored != 0 ||
+		stopped.Cancelled != 2 || stopped.StillWaiting {
+		t.Fatalf("a cancelled-only site must decode as cancelled, never as waiting: %+v", stopped)
+	}
+	if alpha.Cancelled != 3 {
+		t.Fatalf("a site's cancelled count decoded wrong: %+v", alpha)
+	}
 	if alpha.SiteID != "site-alpha" || alpha.Sample != 1000 || alpha.Delivered != 600 || alpha.Censored != 400 ||
 		alpha.Unmetered != 7 || !alpha.StillWaiting || alpha.OldestWaitingSeconds == nil ||
 		*alpha.OldestWaitingSeconds != 76399.0 || alpha.AsOf != "2026-08-02T00:00:00Z" {
@@ -1411,6 +1429,18 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "7 row(s) the clock could not reach") {
 		t.Fatalf("the unmetered cohort must be reported, never dropped:\n%s", stdout)
+	}
+	// dr-w11-bl-cancelled-rows-count-as-waiting. The cancelled cohort prints on
+	// the same terms as the unmetered one: counted, never dropped, and named as
+	// NOT waiting — a reader who sees "400 still waiting" must be able to see
+	// the rows that left that number, or the count is quietly flattering.
+	if !strings.Contains(stdout, "5 row(s) cancelled by hand across 2 site(s)") {
+		t.Fatalf("the cancelled cohort must be reported, never dropped:\n%s", stdout)
+	}
+	// …and it is not smuggled into the still-waiting list: the cancelled-only
+	// site is not waiting, so it is not named there.
+	if strings.Contains(stdout, "stopped-by-hand") {
+		t.Fatalf("a cancelled-only site must never appear in the still-waiting list:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "site-alpha") || !strings.Contains(stdout, "sites still waiting") {
 		t.Fatalf("the still-waiting sites must be NAMED:\n%s", stdout)

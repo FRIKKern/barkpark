@@ -1667,6 +1667,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # MetricsSpaceResidual.Bytes (the unaccounted figure, which keeps the -1
     # sentinel when the residual refuses). Both ride free on the NAME union.
     "bytes" => 5,
+    # dr-w11-bl-cancelled-rows-count-as-waiting: NEWLY DUPLICATED, 1 -> 3.
+    # `cancelled` was declared once (DeployCensusOutcomes.Cancelled). The
+    # delivery census now reports rows a human stopped as their own explicit
+    # cohort — the `unmetered` precedent, counted and never dropped — so
+    # DeployDelivery.Cancelled and DeployDeliverySite.Cancelled are two new
+    # declarations of an EXISTING name: they ride free on the NAME union
+    # (`@go_tag_pinned` does not move) and this row is born at 3.
+    "cancelled" => 3,
     "censored" => 3,
     "clock" => 3,
     "code" => 3,

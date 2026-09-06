@@ -1265,14 +1265,44 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
 // moves — that test, not this comment, is what keeps the fixture honest.
 //
-// NOT YET ROUTED INTO A SCENARIO: `smoke.mjs`'s cch-w10 census guard hard-fails
-// on any scenario with no paired EXPECTATIONS row, and smoke.mjs is outside this
-// slice's file fence. Wiring a third rail-fail scenario onto it is filed as
-// task-877bfc465162e104.
+// ROUTED BY task-877bfc465162e104 (below): `site-deploy-rail-failed-classified`
+// renders it, and smoke.mjs carries the paired EXPECTATIONS row the cch-w10
+// census guard demands. Until that slice it was exported and reachable from
+// nowhere — asserted only by `sites_deploy_stage_caption_test.exs`, rendered by
+// no preview, no smoke and no overflow leg.
 export const RAIL_FAIL_CLASSIFYING_DETAIL = railEmitDetail(
   "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog" +
   " — the site read token is invalid",
 );
+// THE STRING THE WIRE ACTUALLY DELIVERS FOR THAT CAPTURE, and the reason the
+// classifying fixture is worth a scenario at all.
+//
+// A preview fixture models the JSON the SPA RECEIVES, not the bytes the box
+// emitted. For a FAILED stage those are two different strings: the control plane
+// folds the stage detail through `Sites.Deploy.stage_caption/2`
+// (cloud/lib/barkpark_cloud/sites/deploy.ex:134), whose `failed` arm is
+// `FailureCopy.humanize/1`, at all three display boundaries a person can reach —
+// `deployment_json/1`'s console entry (router.ex:11494), `site_deployment_json/3`'s
+// stages (router.ex:13577) and the `site.deploy.stage` SSE payload
+// (deploy.ex:1181). `mountDeployRail` seeds the rail ledger from that console
+// `detail` and `deployRailHtml` prints it into `.deploy-rail-fail` verbatim, so
+// the caption a person watches is the CLASSIFIED cause.
+//
+// THE WAVE-26 PAIR CANNOT SHOW THIS. `RAIL_FAIL_CRUEL_DETAIL` and
+// `RAIL_FAIL_KIND_DETAIL` come back from `humanize/1` BYTE-IDENTICAL (asserted in
+// `sites_deploy_stage_caption_test.exs`), so committing them as rail details was
+// right AND indistinguishable from committing the raw capture. This constant is
+// the only fixture in the corpus where the fold is observable — a rail rendered
+// off the RAW capture and a rail rendered off the wire are different pixels here
+// and nowhere else.
+//
+// DERIVED, NEVER PASTED: it is `FailureCopy.humanize(RAIL_FAIL_CLASSIFYING_DETAIL)`,
+// and `sites_deploy_stage_caption_test.exs` reads BOTH constants out of this file
+// and reds if either drifts from the Elixir producer.
+export const RAIL_FAIL_CLASSIFIED_CAPTION =
+  "This site's Barkpark read token was rejected, so the build couldn't fetch its" +
+  " content. Mint a fresh read token for the site in Barkpark, save it on the" +
+  " site, then deploy the site again.";
 
 // The CRUEL rail: a deployment the control plane still calls `building` whose
 // SSE narration already carries BUILD failed. That pairing is the honest
@@ -1311,6 +1341,40 @@ const depRailFailedKind = deployment({
     { stage: "BUILD", status: "done", detail: "npm ci && npm run build (astro static)", at: tMinus(40) },
     { stage: "STAGE", status: "done", detail: "", at: tMinus(30) },
     { stage: "HEALTH", status: "failed", detail: RAIL_FAIL_KIND_DETAIL, at: tMinus(8) },
+  ],
+});
+// THE CLASSIFYING RAIL (task-877bfc465162e104): the same stage machine as the
+// CRUEL twin above, on the same site, with the one capture in this corpus whose
+// caption MOVES between the box and the browser. Its BUILD `detail` is the
+// CLASSIFIED sentence rather than the raw FATAL line because that is what the
+// control plane puts on the wire — see the ledger beside
+// `RAIL_FAIL_CLASSIFIED_CAPTION`. A fixture carrying the raw capture here would
+// model a channel that does not exist.
+//
+// IT LIVES IN ITS OWN SCENARIO, not as a third site on `site-deploy-rail-failed`:
+// that fixture's smoke row and overflow leg both read `data.sites[1]`
+// POSITIONALLY, and wave 23's cross-slice defect was exactly a new row moving a
+// positional reader out from under itself.
+//
+// NO `line` CONSOLE ENTRY IS COMMITTED. The raw capture does survive one element
+// away in the real product (`console_entry/1` folds it into `line`, and
+// `deployConsoleHtml` renders it), but the two rail fixtures above carry stage
+// entries only, and adding the 108-char capture with its 45-char URL run to THIS
+// fixture's console would put an unmeasured string on the page the W25 leg
+// asserts the page width of. The rail is what this fixture exists to render.
+const depRailFailedClassifying = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d8",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "3c8d51ae9f04b27d6e1a83c50f9b7d2e4a6c081f",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(96),
+  updated_at: tMinus(4),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094402Z-3c8d51a, blue → green", at: tMinus(96) },
+    { stage: "BUILD", status: "started", detail: "", at: tMinus(92) },
+    { stage: "BUILD", status: "failed", detail: RAIL_FAIL_CLASSIFIED_CAPTION, at: tMinus(7) },
   ],
 });
 
@@ -3620,6 +3684,36 @@ export const SCENARIOS = {
       deploymentsBySite: {
         [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
         [IDS.siteBlog]: [depRailFailedKind],
+      },
+    },
+  },
+  // task-877bfc465162e104: THE DEPLOY RAIL, FAILED WITH A CLASSIFIED CAUSE — the
+  // third rail-fail fixture, and the only one whose caption is not the box's own
+  // bytes. `RAIL_FAIL_CLASSIFYING_DETAIL` (the producer's FATAL 401 line) is the
+  // one capture in this corpus that MOVES under `FailureCopy.humanize/1`; the
+  // control plane applies that fold at every display boundary, so the string this
+  // rail renders is the classified sentence and the raw capture appears nowhere on
+  // the screen. Before this scenario the constant was exported and routed nowhere:
+  // no preview, no smoke row, no overflow cell ever rendered it, so the harness
+  // could not tell a rail that classifies from one that does not.
+  //
+  // ONE SITE ON PURPOSE. The cruel fixture's two-site shape exists so its cruel
+  // string and its KIND control share a route; this fixture's control is the CRUEL
+  // fixture itself, one scenario over on the same screen and the same widths.
+  // Driven by overflow-guard's W25-deploy-rail-fail-wrap leg as its third track.
+  "site-deploy-rail-failed-classified": {
+    label: "Deploy rail — a stage FAILED and the control plane CLASSIFIED the cause before the browser saw it",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteInFlight],
+      audit: [],
+      deployments: [depRailFailedClassifying, depCurrent, depPrior],
+      deploymentsBySite: {
+        [IDS.siteWeb]: [depRailFailedClassifying, depCurrent, depPrior],
       },
     },
   },

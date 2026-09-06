@@ -2989,13 +2989,19 @@ type DeployDeliveryCensored struct {
 
 // DeployDeliverySite is one site's slice of the delivery window: how many rows
 // were measured, how many were delivered, how many are still waiting, how many
-// the clock could not reach at all, and the oldest wait still running.
+// the clock could not reach at all, how many a human cancelled, and the oldest
+// wait still running.
+//
+// A site can appear here with Sample 0 and Cancelled > 0 — every row it filed in
+// the window was stopped by hand. That is a real, reportable state, and it is
+// NOT still waiting.
 type DeployDeliverySite struct {
 	SiteID               string   `json:"site_id"`
 	Sample               int      `json:"sample"`
 	Delivered            int      `json:"delivered"`
 	Censored             int      `json:"censored"`
 	Unmetered            int      `json:"unmetered"`
+	Cancelled            int      `json:"cancelled"`
 	StillWaiting         bool     `json:"still_waiting"`
 	OldestWaitingSeconds *float64 `json:"oldest_waiting_seconds"`
 	AsOf                 string   `json:"as_of"`
@@ -3014,6 +3020,12 @@ type DeployDeliverySite struct {
 // became_live_at). It is reported, never subtracted in silence: the whole reason
 // this node exists is that a number which improves because rows stopped being
 // counted is the vacuous green this epic refuses.
+//
+// Cancelled is the sibling cohort nobody is WAITING on — deploys a human
+// deliberately stopped. Those rows are excluded from Sample/Delivered/Censored
+// and counted here instead, for the same reason Unmetered is counted rather
+// than dropped, and so the still-waiting cohort a reader alerts on can never
+// accuse a team of waiting on a deploy it cancelled itself.
 type DeployDelivery struct {
 	Window      DeployDeliveryWindow   `json:"window"`
 	AsOf        string                 `json:"as_of"`
@@ -3026,6 +3038,7 @@ type DeployDelivery struct {
 	Max         DeployDeliveryQuantile `json:"max"`
 	Censored    DeployDeliveryCensored `json:"censored"`
 	Unmetered   int                    `json:"unmetered"`
+	Cancelled   int                    `json:"cancelled"`
 	MinSample   int                    `json:"min_sample"`
 	Sites       []DeployDeliverySite   `json:"sites"`
 }
