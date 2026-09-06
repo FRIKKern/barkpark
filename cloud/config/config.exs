@@ -297,6 +297,14 @@ config :barkpark_cloud, Oban,
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
        {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+       # warm-pool twin of the two reapers above (task-d5f8c2634f323169). Recovery
+       # of a leaked `warm_servers` claim was LAZY — `reap_stale_warm_claims/0`
+       # ran only from INSIDE the two claim transactions — and the provisioner
+       # defaults WARM_POOL_SIZE to 0, so with the pool disabled, the provisioner
+       # down or mid-deploy, nothing claimed and nothing reaped. A leaked
+       # claimed/retiring row is a real billed Hetzner box the plane no longer
+       # tracks. Same threshold as the lazy path; this adds only the clock.
+       {"* * * * *", BarkparkCloud.Workers.StaleWarmClaimReaper},
        # health-status: the per-minute silent-agent staleness sweep (the
        # ServerManagerJob analog). Rides the same :maintenance queue as the
        # reaper above — cheap index range-scans that must not stampede.
