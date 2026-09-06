@@ -437,8 +437,8 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 // papered over.
 //
 // `Tasks.Close.close_with_receipt/3` has an idempotent-replay arm
-// (api/lib/barkpark/tasks/close.ex:441, `{:already_closed, doc}`), reached when
-// the row is ALREADY terminal and `idempotent_replay?/3` (close.ex:565) says
+// (api/lib/barkpark/tasks/close.ex, the `{:already_closed, doc}` arm), reached
+// when the row is ALREADY terminal and `idempotent_replay?/3` (close.ex:idempotent_replay?/3) says
 // yes. That predicate compares exactly two things — `claim.closed_by == worker`
 // and `lifecycle_status == new_status` — and NOTHING ELSE. The reason is not in
 // it. So a second close by the same worker to the same seal with a DIFFERENT
