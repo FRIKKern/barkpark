@@ -1799,4 +1799,165 @@ defmodule BarkparkWeb.MutateControllerTest do
     defp missing?(id),
       do: match?({:error, _}, Content.get_document("drafts.#{id}", "task", "test"))
   end
+
+  # ── [bare-id-refusal] task-eeaf3a622b6c74c7 ─────────────────────────────────
+  #
+  # THE REPRODUCTION, on the RAW HTTP mutate door. Before this guard, a create
+  # carrying a top-level "id" answered 200: the response `_id` was a GENERATED
+  # `drafts.post-…`, and the chosen id read back as `content["id"]` — an
+  # ordinary field. The caller's own follow-up read of the id it picked
+  # answered not_found. Every arm below is RED without the guard (the creates
+  # answer 200, the patches answer 200 and store the key).
+  describe "bare `id` is not an address (task-eeaf3a622b6c74c7)" do
+    defp bare_mutate(conn, mutations) do
+      conn
+      |> authed()
+      |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+    end
+
+    test "create carrying a top-level `id` is 422 and names `_id`", %{conn: conn} do
+      resp =
+        bare_mutate(conn, [
+          %{"create" => %{"id" => "bare-id-chosen", "_type" => "post", "title" => "T"}}
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["unknown_fields"]
+      assert message =~ "`id` is not the document id"
+      assert message =~ "`_id`"
+
+      # Refused means REFUSED — no row at the chosen address, and none of the
+      # generated ones either (a 200 would have minted exactly one `post-…`).
+      assert {:error, _} = Content.get_document("drafts.bare-id-chosen", "post", "test")
+      assert [] = Content.list_documents("post", "test")
+    end
+
+    # The THREE verbs that reached the fold. `replace` is the fourth member of
+    # the family but never got there: it reads `attrs["_id"] || attrs["doc_id"]`
+    # FIRST and a bare `id` leaves that nil, so `get_document(nil, …)` already
+    # answered 404 — refused, if unhelpfully. Pinned below so the sibling site
+    # is not mistaken for a hole.
+    test "the create family refuses it, not just `create`", %{conn: conn} do
+      for verb <- ~w(create createOrReplace createIfNotExists) do
+        resp =
+          bare_mutate(conn, [
+            %{verb => %{"id" => "bare-fam-#{verb}", "_type" => "post", "title" => "T"}}
+          ])
+
+        assert resp.status == 422, "#{verb} answered #{resp.status}"
+        assert {:error, _} = Content.get_document("drafts.bare-fam-#{verb}", "post", "test")
+      end
+    end
+
+    test "`replace` with only a bare `id` was already refused — 404 on the nil address",
+         %{conn: conn} do
+      resp =
+        bare_mutate(conn, [
+          %{"replace" => %{"id" => "bare-fam-replace", "_type" => "post", "title" => "T"}}
+        ])
+
+      assert resp.status == 404
+      assert {:error, _} = Content.get_document("drafts.bare-fam-replace", "post", "test")
+    end
+
+    test "`_id` under a patch `set` is 422 too — it moved nothing and said nothing",
+         %{conn: conn} do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "bare-patch-a", "title" => "v1"}, "test")
+
+      resp =
+        bare_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "bare-patch-a",
+              "type" => "post",
+              "set" => %{"_id" => "somewhere-else"}
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      assert [message] = Jason.decode!(resp.resp_body)["error"]["details"]["unknown_fields"]
+      assert message =~ "`_id` is not the document id"
+    end
+
+    test "`id` under a patch `set` is 422 and stores nothing", %{conn: conn} do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "bare-patch-b", "title" => "v1"}, "test")
+
+      resp =
+        bare_mutate(conn, [
+          %{
+            "patch" => %{"id" => "bare-patch-b", "type" => "post", "set" => %{"id" => "chosen"}}
+          }
+        ])
+
+      assert resp.status == 422
+      {:ok, doc} = Content.get_document("drafts.bare-patch-b", "post", "test")
+      refute Map.has_key?(doc.content || %{}, "id")
+    end
+
+    test "`id` under a patch `setIfMissing` (the ops arm) is 422", %{conn: conn} do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "bare-patch-c", "title" => "v1"}, "test")
+
+      resp =
+        bare_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "bare-patch-c",
+              "type" => "post",
+              "setIfMissing" => %{"id" => "chosen"},
+              "unset" => []
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      {:ok, doc} = Content.get_document("drafts.bare-patch-c", "post", "test")
+      refute Map.has_key?(doc.content || %{}, "id")
+    end
+
+    # THE FENCE. The flat envelope's whole job is folding unknown keys into
+    # content; only the two id-shaped keys are refused.
+    test "an unknown NON-reserved top-level key is still folded into content", %{conn: conn} do
+      resp =
+        bare_mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "bare-id-fence",
+              "_type" => "post",
+              "title" => "T",
+              "zzz_unknown_probe_key" => "hello"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.bare-id-fence", "post", "test")
+      assert doc.content["zzz_unknown_probe_key"] == "hello"
+    end
+
+    # The escape hatch the refusal points at stays open: `unset` is not guarded,
+    # so a junk `id` an unpatched writer already stored is still removable.
+    test "`unset: [\"id\"]` still deletes a stored junk key", %{conn: conn} do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "bare-unset", "title" => "v1", "content" => %{"id" => "junk"}},
+          "test"
+        )
+
+      resp =
+        bare_mutate(conn, [
+          %{"patch" => %{"id" => "bare-unset", "type" => "post", "unset" => ["id"]}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.bare-unset", "post", "test")
+      refute Map.has_key?(doc.content || %{}, "id")
+    end
+  end
 end
