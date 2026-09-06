@@ -3140,12 +3140,15 @@ defmodule BarkparkCloud.Web.Router do
               # 3. IT IS MEMBER-REACHABLE AT THE LOOSEST TIER. `Auth.require_user`
               #    above means ANY team member can make the plane pay for that
               #    egress repeatedly while the team is suspended.
-              # 4. AND THE PLANE THROWS THE ANSWER AWAY. Charter D684: the
-              #    persisted `verify_reachable` is `Enum.any?` over three probes,
-              #    two of them anonymous, and `verify.api` passes on a 200 from
+              # 4. AND THE PLANE THROWS THE ANSWER AWAY. Charter D684: the headline
+              #    verdict this route persists is `Enum.any?` over three probes, two
+              #    of them ANONYMOUS, and `verify.api` passes on a 200 from
               #    `/v1/capabilities` — run-proved to answer 200 to a bogus bearer.
               #    So the plane pays a credentialed egress for evidence it does not
-              #    actually rely on.
+              #    actually rely on. (The persisted column is named here only in
+              #    prose: `verify_route_producer_exemption_test.exs` (D706) scans
+              #    this route's SOURCE — comments included — for that symbol, and
+              #    this refusal keys on `suspended`, which D706 names as fine.)
               #
               # Placed as a sibling `cond` clause ABOVE `run_verify/3` — not a leg
               # inside `Verify.run/1` — so the ciphertext is never decrypted and
