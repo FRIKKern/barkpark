@@ -181,7 +181,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
   # THE CRONTAB, PINNED HERE AND COMPARED BY EQUALITY. Declared by neither the
   # console nor the config: that is the only reason an ABSENT clock verdict can
-  # lose. Seventeen rows today (task-d5f8c2634f323169 added the warm-claim reaper).
+  # lose. Nineteen rows today (dr-bl-rate-notice added the deploy failure RATE notice).
   @scheduled_crontab [
     {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
     {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
@@ -204,7 +204,12 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # UNRELATED to every `:crontab_absent` verdict in this register — it registers
     # a box endpoint, it touches no promise clock — so it is pinned here in the
     # same commit that adds it, per the classification rule in `crontab_agrees/0`.
-    {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
+    {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler},
+    # dr-bl-rate-notice (18 -> 19 rows): the hourly deploy failure RATE notice.
+    # UNRELATED to every `:crontab_absent` verdict in this register — it reads the
+    # deploy ledger and mails a rate; it touches no promise clock — so it is
+    # pinned here in the same commit that adds it, per `crontab_agrees/0`.
+    {"27 * * * *", BarkparkCloud.Workers.DeployRateAlertWorker}
   ]
 
   # THE REGISTER. Each key is a promise the console makes about a future act;
@@ -1622,7 +1627,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # ABSENT while the clock had arrived.
     assert {:ok, detail} = crontab_agrees()
     # dr-w11: 17 -> 18 (ContentWebhookReconciler).
-    assert detail =~ "18 rows"
+    # dr-bl-rate-notice: 18 -> 19 (DeployRateAlertWorker).
+    assert detail =~ "19 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 

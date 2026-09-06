@@ -44,6 +44,8 @@ defmodule BarkparkCloud.Notifications do
     Channels,
     Delivery,
     DeliveryReason,
+    DeployRateAlert,
+    DeployRateAlertState,
     DigestEmail,
     DigestRun,
     EmailSettings,
@@ -657,6 +659,188 @@ defmodule BarkparkCloud.Notifications do
 
         {:ok, %{sent: sent, recipients: recipients}}
     end
+  end
+
+  @doc """
+  dr-bl-rate-notice — THE FLEET-RATE NOTICE PASS. One reading per team, one
+  email per RED EPISODE, and never one per deployment (charter D14).
+
+  Driven hourly by `Workers.DeployRateAlertWorker`. For every team that owns an
+  instance it takes the SAME reading the daily digest takes —
+  `DigestEmail.deploy_health/1`, scoped to that team's own site ids, which is
+  the one `DeployLedger.census/3` call site on this rail — grades it through
+  `DeployRateAlert.verdict/1`, advances that team's `DeployRateAlertState`, and
+  sends only on the EDGE.
+
+  ## The three gates a send must clear, in order
+
+    1. **The rate is RED** — settled-basis failure percentage at or above
+       `DeployRateAlert.alert_pct/0`. A refused node (sample below
+       `DeployLedger.min_sample/0`) is `:unmeasured` and can never reach this
+       gate, so the n≈200 floor is inherited from the census rather than
+       re-implemented here.
+    2. **It has been red for `DeployRateAlert.consecutive_ticks/0` CONSECUTIVE
+       readings.** Any non-red reading — `:clear` OR `:unmeasured` — resets the
+       counter to zero.
+    3. **No notice is latched.** `alerted_at` is stamped on the send and cleared
+       when the verdict leaves red, so an incident lasting fourteen hours is one
+       email and not fourteen.
+
+  ## Why it rides the `deployment_failed` toggle and adds no vocabulary
+
+  A new per-event column would be a new promise on the console surface, a
+  migration, and a row in the bidirectional notification census — for a switch
+  that answers the question the team already answered. This notice has the SAME
+  SUBJECT as `deployment_failed` (deploys of this team's sites are failing) at a
+  different GRAIN, so it honours that team's existing answer: `alerts_enabled`
+  off, or `deployment_failed` off, and nothing is sent. A team that muted the
+  torrent is not signed up for a summary of it.
+
+  It rides `Mailer` + `record_delivery/6` directly, exactly as
+  `deliver_fleet_digest/1` does, and NOT `dispatch_event/3`: the dispatcher fans
+  one event to a team's whole membership through the per-event vocabulary, and
+  putting a rate through it would mean adding an event atom nothing else can
+  produce. The receipt lands in `notification_deliveries` under the event
+  `"deploy_failure_rate"` with `kind: "alert"`.
+
+  Returns `%{teams: n, red: n, sent: n, latched: n}` — the accounting, so a run
+  that mailed nobody can be told apart from a run that never happened.
+  """
+  @spec deliver_deploy_rate_notices(keyword()) :: %{
+          teams: non_neg_integer(),
+          red: non_neg_integer(),
+          sent: non_neg_integer(),
+          latched: non_neg_integer()
+        }
+  def deliver_deploy_rate_notices(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    team_ids =
+      Registry.all_barkparks()
+      |> Enum.map(& &1.team_id)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    Enum.reduce(team_ids, %{teams: 0, red: 0, sent: 0, latched: 0}, fn team_id, acc ->
+      health = DigestEmail.deploy_health(now: now, site_ids: team_site_ids(team_id))
+      verdict = DeployRateAlert.verdict(health)
+      state = advance_deploy_rate_state(team_id, verdict, health, now)
+
+      acc = %{acc | teams: acc.teams + 1}
+      acc = if verdict == :red, do: %{acc | red: acc.red + 1}, else: acc
+
+      cond do
+        verdict != :red ->
+          acc
+
+        state.consecutive_red < DeployRateAlert.consecutive_ticks() ->
+          acc
+
+        # THE LATCH. `alerted_at` is non-nil for as long as this episode lasts;
+        # `advance_deploy_rate_state/4` clears it the moment the verdict leaves
+        # red, which is what re-arms the notice for the NEXT episode.
+        not is_nil(state.alerted_at) ->
+          %{acc | latched: acc.latched + 1}
+
+        true ->
+          sent = send_deploy_rate_notice(team_id, health, state.consecutive_red)
+
+          # STAMPED WHATEVER THE TRANSPORT SAID. A send that failed still
+          # happened, and re-trying it on the next tick would turn one bad relay
+          # hour into an hourly retry storm against the same inbox — the exact
+          # volume shape this slice exists to refuse. The failure is visible as
+          # a `failed` Delivery row, which is this system's documented retry
+          # seam.
+          latch_deploy_rate_state(state, now)
+
+          %{acc | sent: acc.sent + sent}
+      end
+    end)
+  end
+
+  # ONE SEND FOR ONE TEAM. Gated on the team's EXISTING answer about deployment
+  # failure mail — no new column, no new checkbox (see the moduledoc above).
+  defp send_deploy_rate_notice(team_id, health, consecutive) do
+    settings = get_or_create_settings(team_id)
+
+    if EmailSettings.event_enabled?(settings, :deployment_failed) do
+      recipients = team_id |> team_member_emails() |> Enum.uniq()
+
+      Enum.count(recipients, fn recipient ->
+        result =
+          health
+          |> DeployRateAlert.build(consecutive, recipient)
+          |> Mailer.deliver()
+
+        record_delivery(
+          team_id,
+          recipient,
+          "deploy_failure_rate",
+          "alert",
+          result,
+          @platform_carrier
+        )
+
+        match?({:ok, _}, result)
+      end)
+    else
+      0
+    end
+  end
+
+  # THE STATE MACHINE, and the whole of it is three lines of arithmetic.
+  #
+  # `consecutive_red` counts UP only on red and is reset to zero by every other
+  # reading, `:unmeasured` INCLUDED: a run of red interrupted by an hour nobody
+  # could measure is not a run of red, and treating an unmeasurable hour as a
+  # continuation would let a fleet that went quiet keep accruing toward an alert.
+  #
+  # `alerted_at` is cleared by every non-red reading. That is the re-arm: it is
+  # not a cooldown clock, so a fleet that recovers and fails again in the same
+  # hour is alerted again, while a fleet that never recovers is alerted once.
+  defp advance_deploy_rate_state(team_id, verdict, health, now) do
+    existing =
+      Repo.get_by(DeployRateAlertState, team_id: team_id) ||
+        %DeployRateAlertState{team_id: team_id, consecutive_red: 0}
+
+    node = DeployRateAlert.rate_node(health) || %{}
+
+    attrs =
+      case verdict do
+        :red ->
+          %{
+            verdict: "red",
+            consecutive_red: (existing.consecutive_red || 0) + 1,
+            alerted_at: existing.alerted_at
+          }
+
+        other ->
+          %{verdict: to_string(other), consecutive_red: 0, alerted_at: nil}
+      end
+
+    attrs =
+      Map.merge(attrs, %{
+        team_id: team_id,
+        observed_at: now,
+        last_pct: Map.get(node, :pct),
+        last_sample: Map.get(node, :sample)
+      })
+
+    {:ok, state} =
+      existing
+      |> DeployRateAlertState.changeset(attrs)
+      |> Repo.insert_or_update()
+
+    state
+  end
+
+  defp latch_deploy_rate_state(%DeployRateAlertState{} = state, now) do
+    {:ok, latched} =
+      state
+      |> DeployRateAlertState.changeset(%{team_id: state.team_id, verdict: "red", alerted_at: now})
+      |> Repo.update()
+
+    latched
   end
 
   # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is

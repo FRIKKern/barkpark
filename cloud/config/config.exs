@@ -379,7 +379,16 @@ config :barkpark_cloud, Oban,
        # (`@content_webhook_reconcile_limit`) and offset to :53 so it never
        # stampedes the :00 / :07 / :17 / :41 sweeps. Rides :maintenance, not
        # :site_deploy — it registers an endpoint, it never starts a build.
-       {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
+       {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler},
+       # dr-bl-rate-notice: the deploy failure RATE notice. It ADDS no
+       # per-deployment producer (charter D14) — it reads the same per-team
+       # `DeployLedger.census/3` the daily digest reads, grades it, and mails
+       # only on the edge into red after three consecutive readings. Its output
+       # ceiling is one email per team per red EPISODE, whatever the episode's
+       # length. Offset to :27 so it never stampedes the
+       # :00 / :07 / :17 / :41 / :53 sweeps; rides :default alongside the other
+       # notification workers, because it sends mail and starts no build.
+       {"27 * * * *", BarkparkCloud.Workers.DeployRateAlertWorker}
      ]}
   ]
 
