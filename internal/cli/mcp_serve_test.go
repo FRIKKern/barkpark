@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -58,6 +57,12 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	os.Stdout = w
 	restore := func() { os.Stdout = origStdout }
 	defer restore()
+	// Drain the pipe concurrently. A darwin pipe's buffer starts at 512 bytes
+	// (Linux gives 64 KiB), so a reader that only runs after the code under test
+	// returns turns the very failure this asserts on — a stray write to
+	// os.Stdout — into a deadlock instead of an assertion.
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
 
 	// A stand-in Barkpark API. Routes by path so one server backs every tool call.
 	// closeBody captures what the task_close handler actually POSTed, so the
@@ -411,10 +416,9 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	ss.Close()
 	w.Close()
 	restore()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	if buf.Len() != 0 {
-		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio protocol stream): %q", buf.Len(), buf.String())
+	buf := <-stdoutCh
+	if len(buf) != 0 {
+		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio protocol stream): %q", len(buf), buf)
 	}
 }
 

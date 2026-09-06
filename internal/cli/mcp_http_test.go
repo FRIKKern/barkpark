@@ -211,6 +211,12 @@ func TestMCPHTTPForwardThroughBearer(t *testing.T) {
 	os.Stdout = w
 	restore := func() { os.Stdout = origStdout }
 	defer restore()
+	// Drain the pipe concurrently. A darwin pipe's buffer starts at 512 bytes
+	// (Linux gives 64 KiB), so a reader that only runs after the code under test
+	// returns turns the very failure this asserts on — a stray write to
+	// os.Stdout — into a deadlock instead of an assertion.
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
 
 	backend, endpoint := newMCPHTTPStack(t, "tasks")
 	cs := connectMCPHTTPClient(t, endpoint, mcpHTTPGoodToken)
@@ -270,7 +276,7 @@ func TestMCPHTTPForwardThroughBearer(t *testing.T) {
 	cs.Close()
 	w.Close()
 	restore()
-	buf, _ := io.ReadAll(r)
+	buf := <-stdoutCh
 	if len(buf) != 0 {
 		t.Fatalf("bp MCP HTTP code wrote %d bytes to os.Stdout: %q", len(buf), buf)
 	}

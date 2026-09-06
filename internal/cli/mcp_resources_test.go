@@ -111,6 +111,12 @@ func TestMCPPaperResourcesLiveOverInMemory(t *testing.T) {
 	os.Stdout = w
 	restore := func() { os.Stdout = origStdout }
 	defer restore()
+	// Drain the pipe concurrently. A darwin pipe's buffer starts at 512 bytes
+	// (Linux gives 64 KiB), so a reader that only runs after the code under test
+	// returns turns the very failure this asserts on — a stray write to
+	// os.Stdout — into a deadlock instead of an assertion.
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
 
 	ts := newMCPResourceTestServer()
 	defer ts.Close()
@@ -207,10 +213,9 @@ func TestMCPPaperResourcesLiveOverInMemory(t *testing.T) {
 	}
 	w.Close()
 	restore()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	if buf.Len() != 0 {
-		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio stream): %q", buf.Len(), buf.String())
+	buf := <-stdoutCh
+	if len(buf) != 0 {
+		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout (corrupts a real stdio stream): %q", len(buf), buf)
 	}
 }
 
@@ -229,6 +234,12 @@ func TestMCPPaperResourcesUnreachableAPIDegradesTemplateOnly(t *testing.T) {
 	os.Stdout = w
 	restore := func() { os.Stdout = origStdout }
 	defer restore()
+	// Drain the pipe concurrently. A darwin pipe's buffer starts at 512 bytes
+	// (Linux gives 64 KiB), so a reader that only runs after the code under test
+	// returns turns the very failure this asserts on — a stray write to
+	// os.Stdout — into a deadlock instead of an assertion.
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
 
 	m, err := manifest.Parse([]byte(mcpResourcesManifest))
 	if err != nil {
@@ -278,10 +289,9 @@ func TestMCPPaperResourcesUnreachableAPIDegradesTemplateOnly(t *testing.T) {
 	}
 	w.Close()
 	restore()
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	if buf.Len() != 0 {
-		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout: %q", buf.Len(), buf.String())
+	buf := <-stdoutCh
+	if len(buf) != 0 {
+		t.Fatalf("bp MCP code wrote %d bytes to os.Stdout: %q", len(buf), buf)
 	}
 }
 
