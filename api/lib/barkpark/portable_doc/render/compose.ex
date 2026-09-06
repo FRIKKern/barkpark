@@ -1760,8 +1760,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         sticky = style == :article and Map.get(b, "sticky") == true
         nav_class = if sticky, do: "bp-toc bp-toc--sticky", else: "bp-toc"
 
-        ~s(<nav class="#{nav_class}"><ol class="bp-toc__list">) <>
-          Enum.join(Enum.reverse(rows)) <> ~s(</ol></nav>)
+        {list_open, list_close} = toc_list_wrapper(numbered, style)
+
+        ~s(<nav class="#{nav_class}">) <>
+          list_open <> Enum.join(Enum.reverse(rows)) <> list_close <> ~s(</nav>)
       end
 
     %{"kind" => "_raw", "html" => html}
@@ -2115,6 +2117,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp toc_depth(depth) when is_integer(depth) and depth > 0, do: depth
   defp toc_depth(_), do: 2
+
+  defp toc_list_wrapper(false, _style),
+    do: {~s(<ul class="bp-toc__list bp-toc__list--bulleted">), ~s(</ul>)}
+
+  defp toc_list_wrapper(true, :email),
+    do: {~s(<ol class="bp-toc__list" style="list-style:none;">), ~s(</ol>)}
+
+  defp toc_list_wrapper(true, _style),
+    do: {~s(<ol class="bp-toc__list">), ~s(</ol>)}
 
   # Bumps the counter at `rel` (1-indexed) and resets every deeper counter —
   # the hierarchical-numbering invariant ("1.2" never survives past its "2").

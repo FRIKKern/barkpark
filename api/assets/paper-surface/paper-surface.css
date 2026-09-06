@@ -2052,8 +2052,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 
 /* toc: the in-paper nav card; sticky variant pins in article mode. */
 .bp-paper-surface .bp-toc { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 12px 15px; }
-.bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; }
-.bp-paper-surface .bp-toc__item { margin: 3px 0; }
+.bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; list-style: none; }
+.bp-paper-surface .bp-toc__list--bulleted { list-style: disc; }
+.bp-paper-surface .bp-toc__item { margin: 3px 0; list-style: none; }
+.bp-paper-surface .bp-toc__list--bulleted > .bp-toc__item { list-style: disc; }
 .bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-toc__item[data-level="2"] { margin-left: 1.1rem; font-size: 0.92em; }
 .bp-paper-surface .bp-toc__item[data-level="3"] { margin-left: 2.2rem; font-size: 0.88em; }
