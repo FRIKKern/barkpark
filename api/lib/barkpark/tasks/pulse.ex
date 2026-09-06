@@ -73,9 +73,12 @@ defmodule Barkpark.Tasks.Pulse do
 
   No `:observed_epoch` — pulse deliberately has no epoch fence (see moduledoc).
 
-  Returns `{:ok, doc}`, or `{:error, :not_found | :not_holder | :stale_claim}`.
-  `:not_holder` covers every lost-lease shape: reaped (worker cleared),
-  released, closed (no longer `in_progress`), or held by someone else.
+  Returns `{:ok, doc}`, or
+  `{:error, :not_found | {:not_in_progress, status} | :not_holder | :stale_claim}`.
+  `{:not_in_progress, status}` is every lost-lease shape that moved the ROW —
+  reaped, released, closed, staged back to open — and it names the state it
+  found. `:not_holder` is reserved for the HOLDER fault: a live `in_progress`
+  claim owned by someone else.
   """
   def pulse(task_id, worker_id, opts \\ []) when is_binary(task_id) and is_binary(worker_id) do
     text = Keyword.fetch!(opts, :text)
@@ -123,15 +126,39 @@ defmodule Barkpark.Tasks.Pulse do
     end
   end
 
-  # A pulse needs a LIVE lease. Anything not in_progress (reaped rows flip to
-  # "open" with worker cleared; released rows likewise; closed rows are
-  # done/cancelled — close keeps `claim.worker` for the dossier, so the holder
-  # check alone would wrongly pass) is a lost lease → `:not_holder`, the ONE
-  # honest answer the charter pins for every lost-lease shape.
+  # A pulse needs a LIVE lease. Anything not in_progress is a lost lease, and
+  # the refusal NAMES the state it found: `{:error, {:not_in_progress, status}}`
+  # (wire token `not_in_progress:<status>`, the shape `stamp` has always used).
+  #
+  # WHY IT IS NO LONGER THE BARE `:not_holder` (task-b6fcc8e2f57e1cd5). Charter
+  # D7 pinned ONE token for every lost-lease shape, and that collapse is what
+  # made a keep-alive loop unreadable: `:not_holder` is ALSO what a thief gets,
+  # so the token could not tell the departed holder (whose remedy is
+  # `bp task claim`) from an intruder (whose remedy is to back off). Measured
+  # 2026-09-06: task-ee33b6f088b35bdb and task-8f9d3ea8926f387f both read
+  # `lifecycle_status: "open"` with `claim.worker` STILL SET — the shape
+  # `Tasks.Stage.do_stage/8` leaves behind, because stage writes
+  # lifecycle_status + the engagement lease + the adjudication triple and never
+  # `content.claim` (the TtlSweeper reap and `release` are the OTHER shape:
+  # both clear `claim.worker` to nil). The state is the one fact the caller
+  # cannot derive from a refusal, so the refusal carries it.
+  #
+  # The stale claim itself is NOT fixed here, deliberately. `stage` leaving
+  # `content.claim` untouched is a documented property of that verb (the
+  # false-done reopen recipe reopens a done row and KEEPS its claim on purpose),
+  # and cross-reference pds-bl-null-expiry-claims-repo-wide: 6,850 of 8,617 open
+  # rows already carry a claim object, median age 27 days. `claim.worker` is
+  # therefore a RECEIPT, not a lease, repo-wide — so the honest remedy is to
+  # stop letting the pulse's success signal imply the lease, which is what this
+  # refusal does, rather than to chase every writer that leaves the receipt.
+  #
+  # The HOLDER fault keeps `:not_holder` (see `check_holder/2` below): a live
+  # in_progress claim held by someone else is not a state problem, and the two
+  # must stay distinguishable — that is the whole point of this split.
   defp check_live(%Document{content: content}) do
     case Map.get(content || %{}, "lifecycle_status") do
       "in_progress" -> :ok
-      _ -> {:error, :not_holder}
+      status -> {:error, {:not_in_progress, status || "unknown"}}
     end
   end
 
