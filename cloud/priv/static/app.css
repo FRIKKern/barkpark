@@ -2529,16 +2529,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 auto;
 }
 .set-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
-/* `overflow-wrap: anywhere` is what makes the `text-overflow: ellipsis` beside
-   it honest rather than decorative. An email is ONE unbreakable word, so with
-   the default `white-space: normal` the ellipsis can never paint (it needs a
-   line that is forbidden to wrap) and `overflow: hidden` silently swallowed
-   whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
-   with no cue, on the row whose Remove button destroys that person's access.
-   `anywhere` also lowers this column's min-content contribution, which is what
-   lets `min-width: 0` on `.set-row-main` above actually yield. (The sibling
-   `.set-row-key` that used the same idiom went with the team env-var page,
-   ruled 2026-09-02; `.set-row-note` below is the surviving twin.) */
+/* `overflow-wrap: anywhere` is what makes this column honest, and the REASON
+   first written here was wrong. It said the ellipsis "can never paint" beside
+   the default `white-space: normal` because it "needs a line that is forbidden
+   to wrap". Charter D253 refuted that by decoding PNGs, and the probe was
+   re-run on the GATING PLATFORM (Ubuntu 24.04.4 LTS, Google Chrome
+   151.0.7922.71) for cchi-w23-bl-d253-inert-ellipsis-correction-five-sites:
+   twin 200px boxes over one unbreakable run ink to x=199 under `clip` and stop
+   at x=193 under `ellipsis`, PIXEL-IDENTICAL to the `nowrap` control. An unbreakable run wider
+   than its box overflows the LINE and IS cued, whatever `white-space` says.
+   What `overflow-wrap: anywhere` actually buys is the opposite and better
+   thing: an email is ONE unbreakable word, and `anywhere` gives it break
+   opportunities, so the text WRAPS and the 77px of "rex@acme.com" measured gone
+   at 390px is never clipped in the first place — no cue is needed because
+   nothing is hidden. (Driven on the same probe: with `anywhere` live the box
+   measures scrollWidth 200 / clientWidth 200 where the bare host measures
+   303/200.) `anywhere` also lowers this column's min-content contribution,
+   which is what lets `min-width: 0` on `.set-row-main` above actually yield.
+   The `text-overflow: ellipsis` below is kept as the FALLBACK for content
+   `anywhere` cannot break — it is not decoration, and it is not the mechanism
+   this rule relies on. (The sibling `.set-row-key` that used the same idiom
+   went with the team env-var page, ruled 2026-09-02; `.set-row-note` below is
+   the surviving twin.) */
 .set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
 /* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`.
