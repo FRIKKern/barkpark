@@ -94,8 +94,25 @@ function runCli(args) {
   }
 }
 
+// 2026-09-06: RECURSIVE, and file-typed. This used to `readdirSync(dir)` flat
+// and `readFileSync` every entry — which threw EISDIR the moment the store grew
+// its first SUBDIRECTORY (`tooling/grip/ledger/sidecars-2026-08-23/`, added
+// 2026-09-03 by 02b30bbca "docs(grip): commit the criterion sidecars eight
+// close packets promise" #15650). The store itself was byte-identical; the
+// fingerprint crashed while measuring it. Walking the subtree is STRICTER than
+// the flat read it replaces: a write anywhere under the store now moves the
+// fingerprint, not just a write at its top level.
 function storeFingerprint(dir) {
-  return readdirSync(dir).sort().map((f) => `${f}\n${readFileSync(join(dir, f), "utf8")}`).join("\n");
+  const out = [];
+  const walk = (d, prefix) => {
+    for (const ent of readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) walk(join(d, ent.name), rel);
+      else if (ent.isFile()) out.push(`${rel}\n${readFileSync(join(d, ent.name), "utf8")}`);
+    }
+  };
+  walk(dir, "");
+  return out.join("\n");
 }
 
 // ── 1. leads hand over METHOD, never a value ─────────────────────────────────
