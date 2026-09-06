@@ -1023,6 +1023,47 @@ const siteFailureFallback = "the build did not pass its health gate — nothing 
 // the deploy engine streamed for that stage), and only then the canned fallback.
 // The stage name likewise prefers the deployment's in-flight stage, then the name
 // of the stage that actually carries the failure.
+// siteRefusalHalf reads one half of the SPLIT box refusal. nil is "the control
+// plane said nothing here" — a non-refusal row, a row written before the split
+// landed, or the half the box itself did not send. An empty-after-trim string is
+// treated the same way for DISPLAY purposes only: there is no text to print. The
+// pointer is what keeps the two distinguishable in the struct, which is why the
+// fields are *string and not string.
+func siteRefusalHalf(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+// siteTypedRefusal composes the render for a refusal the control plane already
+// unfused for us: the box's typed CODE as a token, with the human MESSAGE beside
+// it. ok is false when neither half carries text — every legacy row, and every
+// failure that is not a box refusal — and the caller then prints the composite
+// `failure_reason` BYTE-UNCHANGED, which is what it has always printed.
+//
+// The em-dash join mirrors `Sites.Deploy.box_refusal/2`, the sentence these two
+// halves were cut out of, so a user who greps their scrollback for
+// "E_ABSOLUTE_PATH — entry …" finds the same shape before and after the split.
+//
+// ONE HALF IS STILL AN ANSWER. A code with no message prints the bare token (it
+// is the thing a bug report is filed against); a message with no code prints the
+// bare sentence. Neither is padded with an em-dash it has nothing to join.
+func siteTypedRefusal(d cloudclient.SiteDeployment) (string, bool) {
+	code := siteRefusalHalf(d.FailureCode)
+	msg := siteRefusalHalf(d.FailureMessage)
+	switch {
+	case code != "" && msg != "":
+		return code + " — " + msg, true
+	case code != "":
+		return code, true
+	case msg != "":
+		return msg, true
+	default:
+		return "", false
+	}
+}
+
 func siteFailure(d cloudclient.SiteDeployment) (stage, reason string) {
 	var failedName, failedDetail string
 	for _, st := range d.Stages {
@@ -1035,6 +1076,15 @@ func siteFailure(d cloudclient.SiteDeployment) (stage, reason string) {
 		break
 	}
 	stage = siteOr(d.Stage, siteOr(failedName, "build"))
+	// THE SPLIT HALVES FIRST (task-f156b5e43bfbfe91). When the control plane
+	// unfused the refusal for us, print the typed code as a token with its
+	// message — that is the same information the composite carries, minus the
+	// wrapper prose the server had to write to fuse them. Every row where the
+	// halves are nil (all legacy rows, every non-refusal failure) falls through
+	// to the composite, byte-unchanged, exactly as before.
+	if typed, ok := siteTypedRefusal(d); ok {
+		return stage, typed
+	}
 	reason = siteOr(strings.TrimSpace(d.FailureReason), siteOr(failedDetail, siteFailureFallback))
 	return stage, reason
 }
@@ -3295,6 +3345,16 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.FailureReasonRaw != "" {
 		m["failure_reason_raw"] = d.FailureReasonRaw
+	}
+	// The refusal's two halves (task-f156b5e43bfbfe91). Emitted ONLY when the
+	// control plane sent them — a nil half gets no key at all, never an empty
+	// string, so a script can tell "this row records no typed code" from "the box
+	// sent an empty one". `failure_reason` above is untouched beside them.
+	if d.FailureCode != nil {
+		m["failure_code"] = *d.FailureCode
+	}
+	if d.FailureMessage != nil {
+		m["failure_message"] = *d.FailureMessage
 	}
 	// deploy-reliability W7 (charter D99, PR #9905): the deferral chain, as
 	// NUMBERS a script can threshold on rather than a sentence it must grep. Only
