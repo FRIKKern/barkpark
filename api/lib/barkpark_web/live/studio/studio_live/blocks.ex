@@ -2428,11 +2428,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       type = effective_question_type(row)
 
       common =
-        for field <- ~w(original-id id prompt type rationale recommendation),
+        for field <- ~w(original_id id prompt type rationale recommendation)a,
             into: %{},
-            do:
-              {String.replace(field, "-", "_", global: true) |> String.to_atom(),
-               params[prefix <> field]}
+            do: {field, params[prefix <> String.replace(Atom.to_string(field), "_", "-")]}
 
       with true <- Enum.all?(Map.values(common), &is_binary/1),
            :ok <- validate_form_choice(common.type, type, @form_question_types),
@@ -2514,14 +2512,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   defp validate_question_action(action, rows, _submitted, _params) when is_binary(action) do
-    Enum.find_value(~w(remove up down), malformed_questions(), fn kind ->
-      prefix = kind <> ":"
+    Enum.find_value(~w(remove up down)a, malformed_questions(), fn kind ->
+      prefix = Atom.to_string(kind) <> ":"
 
       if String.starts_with?(action, prefix) do
         id = String.replace_prefix(action, prefix, "")
 
         if Enum.any?(rows, &(Map.get(&1, "id") == id)),
-          do: {:ok, {String.to_atom(kind), id}},
+          do: {:ok, {kind, id}},
           else: malformed_questions()
       end
     end)
@@ -2539,8 +2537,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   defp validate_option_action(action, rows) when is_binary(action) do
-    Enum.find_value(~w(remove up down), malformed_questions(), fn kind ->
-      prefix = kind <> ":"
+    Enum.find_value(~w(remove up down)a, malformed_questions(), fn kind ->
+      prefix = Atom.to_string(kind) <> ":"
 
       if String.starts_with?(action, prefix) do
         rest = String.replace_prefix(action, prefix, "")
@@ -2556,7 +2554,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
             with {:ok, option_index} <-
                    parse_nonnegative_index(String.replace_prefix(rest, id_prefix, "")),
                  true <- option_index < length(effective_form_options(row)) do
-              {:ok, {String.to_atom(kind), row_index, option_index}}
+              {:ok, {kind, row_index, option_index}}
             else
               _ -> malformed_questions()
             end
