@@ -1686,8 +1686,12 @@ defmodule Barkpark.Tasks.CloseTest do
     test "the two direction fixtures are distinct — @unproven stores an unmet row, @all_met does not",
          %{scope: _scope} do
       refute @unproven == @all_met
-      assert Enum.any?(@unproven, &(Map.get(&1, "met") != true)), "@unproven must store an unmet row"
-      assert Enum.all?(@all_met, &(Map.get(&1, "met") == true)), "@all_met must store no unmet row"
+
+      assert Enum.any?(@unproven, &(Map.get(&1, "met") != true)),
+             "@unproven must store an unmet row"
+
+      assert Enum.all?(@all_met, &(Map.get(&1, "met") == true)),
+             "@all_met must store no unmet row"
     end
 
     test "a closer that LOWERS a met criterion to false in the closing command hits the gate",
