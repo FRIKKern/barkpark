@@ -207,7 +207,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
-  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError, InvalidBundleError}
+
+  alias Barkpark.Tenancy.WorkspaceBundle.{
+    Archive,
+    BundleIoError,
+    Catalog,
+    ExportScopeError,
+    InvalidBundleError
+  }
+
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @type stats :: %{
@@ -255,7 +263,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     case export_to_file(workspace_id, opts) do
       {:ok, path} ->
         try do
-          {:ok, File.read!(path)}
+          # INSPECTED, not `File.read!` (PDS-D209): a bundle the box could not
+          # read back is a storage failure, and it must reach the edge as the
+          # typed BundleIoError the 503 `storage_unavailable` arm rescues —
+          # never as a File.Error nobody rescues.
+          case File.read(path) do
+            {:ok, bytes} ->
+              {:ok, bytes}
+
+            {:error, reason} ->
+              raise BundleIoError,
+                message: "could not read back the assembled bundle #{path}: #{inspect(reason)}"
+          end
         after
           # This function is the one that DELETES the tar, so it is the one that
           # disowns it. `pack/3` deliberately leaves the sidecar in place on
@@ -791,6 +810,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     dir = Archive.spill_dir()
 
+    # THE LAST HONEST MOMENT. Refuse here or not at all — see the derivation on
+    # require_export_free_space!/2.
+    require_export_free_space!(dir, Enum.map(specs, fn {table, _partition, _kind} -> table end))
+
     # Every spill path is computed UP FRONT so the `after` clause below can
     # clean up whatever the reduce created before it died — a reduce
     # accumulator is not in scope from `after`, and a half-finished export must
@@ -865,6 +888,92 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       # that is about to stop existing.
       Enum.each(Map.values(spills), &Janitor.disown/1)
     end
+  end
+
+  # A LIVE free-space preflight, run BEFORE the first spill byte and refusing
+  # with the same typed `BundleIoError` the IO sites raise — so it reaches the
+  # caller as the 503 `storage_unavailable` envelope. THIS IS THE ONLY PLACE AN
+  # HONEST REFUSAL CAN EXIST for the transport half: `send_file/3` at the edge
+  # puts 200 + Content-Length on the wire, and after that no 503 envelope is
+  # producible at all — a mid-send ENOSPC can only truncate the download.
+  #
+  # THE THRESHOLD IS DERIVED AT REQUEST TIME, NEVER BAKED. `mutation_events`
+  # read 241 MB -> 478 MB -> 622,978,576 B across this epic's own life, so a
+  # hardcoded floor would rot exactly as the frozen 2200 floor did.
+  #
+  # required = total + largest, over `pg_total_relation_size` of the tables
+  # THIS request will export (`specs` already has the profile/dataset deny
+  # applied, so a `profile=dev` export is not held to a full bundle's bar):
+  #
+  #   * `total` — `Archive.pack/3` deletes each spill the moment it is added to
+  #     the tar, so live bytes hover at (remaining spills + tar-so-far), which
+  #     sums to roughly the whole member set for the length of the pack. That
+  #     sum is the floor, not a multiple of it.
+  #   * `+ largest` — the one member being copied INTO the tar while its spill
+  #     still exists is on disk twice for the length of that single add. It
+  #     doubles as the margin for the manifest, the tar headers and padding.
+  #
+  # `pg_total_relation_size` is heap + TOAST + indexes, so it OVER-states the
+  # COPY text a table spills. That bias is deliberate: guerrilla carries `/`,
+  # `/tmp` AND `/opt/barkpark` on ONE filesystem, so an export that fills it
+  # takes the box down with it — erring toward an early honest refusal is the
+  # cheaper mistake. Against guerrilla's 13.27 GiB free (14,251,499,520 B) and
+  # a ~1.458 GiB realistic peak this should essentially never fire; it exists
+  # so that when it does, the answer is honest instead of a truncated tar.
+  defp require_export_free_space!(dir, tables) do
+    sizes = relation_bytes(tables)
+    required = Enum.sum(sizes) + Enum.max([0 | sizes])
+
+    case Archive.check_free_space(dir, required) do
+      {:ok, {:verified, _free}} ->
+        :ok
+
+      # A precondition that cannot be PERFORMED says so rather than printing a
+      # tick — and it does NOT refuse: `df` being unreadable is not evidence the
+      # disk is full, and failing every export on a box without `df` would be a
+      # new outage in the name of honesty. The inspected IO sites downstream
+      # still turn the real ENOSPC into the same 503.
+      {:ok, {:unverified, reason}} ->
+        Logger.warning(
+          "workspace export free-space precondition NOT performed (#{inspect(reason)}); " <>
+            "proceeding — required_bytes=#{required} dir=#{dir}"
+        )
+
+        :ok
+
+      {:error, {:insufficient_disk_space, info}} ->
+        raise BundleIoError,
+          message:
+            "refusing the export before the first spill: #{info.dir} has " <>
+              "#{info.free_bytes} bytes free and this bundle needs about " <>
+              "#{info.required_bytes} (sum of pg_total_relation_size over the " <>
+              "#{length(tables)} tables in scope, plus the largest of them)"
+    end
+  end
+
+  # `pg_total_relation_size` for the in-scope tables, in bytes.
+  #
+  # SOBELOW: the statement is passed INLINE as a literal — no identifier and no
+  # value is interpolated into it, and it is not bound to a variable first
+  # (Sobelow's SQL.Query flags any `Repo.query!` whose first argument is a
+  # variable, however literal the string). The table list rides in as a single
+  # bound parameter cast to `text[]`, so there is nothing a name could escape
+  # out of; they are catalog-derived anyway, never request input. Absent tables
+  # simply do not come back, which is the right answer: a table that does not
+  # exist occupies no disk.
+  defp relation_bytes(tables) do
+    Repo.query!(
+      """
+      SELECT pg_total_relation_size(c.oid)
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND c.relkind = 'r'
+         AND c.relname::text = ANY($1::text[])
+      """,
+      [tables]
+    ).rows
+    |> List.flatten()
   end
 
   # ── Profile + dataset scope resolution (PDS-D28/D29) ─────────────────────────
@@ -1363,8 +1472,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp run_copy_out(sql, spill_path) do
     inject_copy_fault!()
 
+    # INSPECTED, not `File.open!` (PDS-D209): the spill is where a full disk
+    # bites first, and `File.open!` raises File.Error — a class the honest
+    # envelope deliberately does NOT rescue (a File.Error rescue is wide enough
+    # to swallow a real engine bug). Typed BundleIoError instead.
     {row_count, digest} =
-      File.open!(spill_path, [:write, :binary, :raw], fn io ->
+      open_spill!(spill_path, fn io ->
         {:ok, acc} =
           Repo.transaction(
             fn ->
@@ -1385,7 +1498,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
                 # `rows: nil` is defensive; the terminal chunk carries [].
                 rows = chunk.rows || []
                 # iodata all the way down — never flattened into a binary.
-                :ok = IO.binwrite(io, rows)
+                # INSPECTED: `IO.binwrite/2` RETURNS `{:error, :enospc}` on a
+                # full disk (it does not raise), and the `:ok = …` match this
+                # replaces made that a MatchError -> bare 500.
+                case IO.binwrite(io, rows) do
+                  :ok ->
+                    :ok
+
+                  {:error, reason} ->
+                    raise BundleIoError,
+                      message: "could not write the spill #{spill_path}: #{inspect(reason)}"
+                end
+
                 {count + length(rows), :crypto.hash_update(hash, rows)}
               end)
             end,
@@ -1400,6 +1524,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   defp copy_out_timeout do
     Application.get_env(:barkpark, :export_copy_timeout, :infinity)
+  end
+
+  # `File.open/3` with a function argument answers `{:ok, fun_result}` or
+  # `{:error, posix}` — the file is closed either way, exactly as `File.open!`
+  # does; the only difference is that the failure is a value we can type.
+  #
+  # File.open targets `spill_path`, engine-built (bp-ws-spill-<table>-<int>.copy
+  # under the fetch_env! spill dir); no request input reaches it. Same basis as
+  # the run_copy_out comment above.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp open_spill!(spill_path, fun) do
+    case File.open(spill_path, [:write, :binary, :raw], fun) do
+      {:ok, result} ->
+        result
+
+      {:error, reason} ->
+        raise BundleIoError,
+          message: "could not open the spill #{spill_path} for writing: #{inspect(reason)}"
+    end
   end
 
   # Test-only fault seam for the honest-envelope proof (PDS-D43). The SQL

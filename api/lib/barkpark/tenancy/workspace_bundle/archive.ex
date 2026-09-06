@@ -17,6 +17,33 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError do
   @type t :: %__MODULE__{code: String.t(), message: String.t()}
 end
 
+defmodule Barkpark.Tenancy.WorkspaceBundle.BundleIoError do
+  @moduledoc """
+  The box could not WRITE the bundle it was asked to build (PDS-D209).
+
+  The export half of the same `=`-on-a-tuple defect `InvalidBundleError` closed
+  on the import side. `:erl_tar.open/2`, `:erl_tar.add/4` and `:erl_tar.close/1`
+  do NOT raise on a full disk — they RETURN `{:error, reason}` — and `pack/3`
+  hard-matched `:ok = :erl_tar.add(…)`, so a real ENOSPC (proven on a 2 MB HFS+
+  volume with 4 KB free) reached the HTTP edge as a `MatchError` and the caller
+  received the verbatim bare 500 `internal_error / unknown error` that the
+  export action's own docstring claims to have eliminated. The per-table spill
+  writes and the final bundle read carried the same shape via `File`'s bang
+  functions.
+
+  Raised ONLY at IO sites, never as a catch-all: a rescue wide enough to
+  swallow a real engine bug would turn every future export defect into a polite
+  "retry". The HTTP edge turns this into an honest 503 `export_transport_failed`
+  with reason `storage_unavailable` — DISTINCT from `database_unavailable`,
+  because "the DB dropped" and "the box is out of disk" are different retries.
+
+  `code` is stable and machine-branchable: `"export_io_failed"`.
+  """
+  defexception [:message, code: "export_io_failed"]
+
+  @type t :: %__MODULE__{code: String.t(), message: String.t()}
+end
+
 defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   @moduledoc """
   The bp-export-v1 container: a tar carrying a `manifest.json` plus one
@@ -55,6 +82,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   symlinks, no directories), and anything else is refused BY NAME.
   """
 
+  alias Barkpark.Tenancy.WorkspaceBundle.BundleIoError
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   # Archive ⇄ Janitor is a deliberate two-way collaboration, not a layering
   # slip: Archive asks the Janitor to MARK liveness on files it creates, and the
@@ -147,23 +175,41 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
     Janitor.own(path)
 
     try do
-      {:ok, tar} = :erl_tar.open(String.to_charlist(path), [:write])
+      # EVERY erl_tar / File result on this path is INSPECTED, never matched
+      # (PDS-D209). `:erl_tar` answers `{:error, reason}` on a full disk — it
+      # does not raise — so a `:ok = …` match turned a real ENOSPC into a
+      # MatchError and a bare 500 at the edge. See `BundleIoError`'s moduledoc.
+      tar =
+        case :erl_tar.open(String.to_charlist(path), [:write]) do
+          {:ok, tar} -> tar
+          {:error, reason} -> raise_io!("open the bundle tar #{path}", reason)
+        end
 
       try do
         # A BINARY source — erl_tar archives it as the member's content.
-        :ok =
-          :erl_tar.add(
-            tar,
-            Jason.encode!(manifest, pretty: true),
-            @manifest_name,
-            add_opts(mtime)
-          )
+        case :erl_tar.add(
+               tar,
+               Jason.encode!(manifest, pretty: true),
+               @manifest_name,
+               add_opts(mtime)
+             ) do
+          :ok -> :ok
+          {:error, reason} -> raise_io!("write #{@manifest_name} into #{path}", reason)
+        end
 
         Enum.each(table_files, fn {table, spill} ->
-          File.chmod!(spill, 0o644)
+          case File.chmod(spill, 0o644) do
+            :ok -> :ok
+            {:error, reason} -> raise_io!("chmod the spill #{spill}", reason)
+          end
+
           member = ~c"tables/" ++ String.to_charlist(table) ++ ~c".copy"
           # A CHARLIST source — erl_tar streams it from disk, 64 KiB at a time.
-          :ok = :erl_tar.add(tar, String.to_charlist(spill), member, add_opts(mtime))
+          case :erl_tar.add(tar, tar_member_source(spill), member, add_opts(mtime)) do
+            :ok -> :ok
+            {:error, reason} -> raise_io!("write tables/#{table}.copy into #{path}", reason)
+          end
+
           File.rm(spill)
           # The spill is gone, so its sidecar must go with it. The janitor
           # REJECTS `.owner` files as sweep candidates (they are collected with
@@ -172,8 +218,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
           # sweep is structurally unable to clean.
           Janitor.disown(spill)
         end)
-      after
-        :erl_tar.close(tar)
+      catch
+        # The FAILURE path closes the handle on its way out. NOT an `after`:
+        # `after` also runs on success, and `:erl_tar.close/1` on an
+        # already-closed handle CRASHES INSIDE erl_tar (`{:error, :einval}`
+        # hard-matched at erl_tar.erl:670) rather than answering an error we
+        # could ignore — a double close reddened 55 of 123 tests in this
+        # slice's own first gate run.
+        kind, reason ->
+          safe_close(tar)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+
+      # `close/1` FLUSHES, so on a filesystem that only fails at flush time
+      # this is the call that reports ENOSPC — its result is INSPECTED like
+      # every other IO result on this path. Reached only when every add
+      # succeeded, so the handle is provably still open.
+      case :erl_tar.close(tar) do
+        :ok -> :ok
+        {:error, reason} -> raise_io!("close the bundle tar #{path}", reason)
       end
 
       path
@@ -190,6 +253,42 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
 
   defp add_opts(mtime) do
     [{:mtime, mtime}, {:atime, mtime}, {:ctime, mtime}, {:uid, 0}, {:gid, 0}]
+  end
+
+  # Every IO failure on the pack path becomes the SAME typed exception, so the
+  # HTTP edge needs one narrow rescue clause rather than a class census. The
+  # reason term is `inspect`ed rather than formatted: erl_tar answers shapes as
+  # varied as `:enospc` and `{~c"/path", :enoent}`, and a wrong `format_error`
+  # call on the failure path would itself be a new failure.
+  defp raise_io!(what, reason) do
+    raise BundleIoError,
+      message: "could not #{what}: #{inspect(reason)}"
+  end
+
+  # Best-effort close for the failure path: the handle may already be gone, and
+  # a close failure must never replace the exception that is unwinding.
+  defp safe_close(tar) do
+    :erl_tar.close(tar)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  # Test-only storage fault seam, mirroring the engine's `inject_copy_fault!`
+  # (`workspace_bundle.ex`). It substitutes a path that does not exist, so
+  # `:erl_tar.add/4` RETURNS `{:error, {path, :enoent}}` — the RETURN shape a
+  # real ENOSPC produces. Raising an exception here instead would prove
+  # nothing: the entire defect is that erl_tar returns rather than raises, and
+  # a seam that raises would stay green over a restored `:ok = …` match.
+  # `nil` in every non-test env: one `Application.get_env` per table member on
+  # a path that is already about to move hundreds of MB.
+  defp tar_member_source(spill) do
+    case Application.get_env(:barkpark, :export_tar_fault) do
+      nil -> String.to_charlist(spill)
+      path when is_binary(path) -> String.to_charlist(path)
+    end
   end
 
   @doc """
