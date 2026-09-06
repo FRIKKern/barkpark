@@ -1230,6 +1230,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div id="editor-focus-mirror" phx-hook="EditorFocus" data-editor-mode={@editor_mode}
          style="display:none;"></div>
 
+    <%!-- spd-w18-bl-select-detects-dead-destination — the named state a
+          crashing destination produces. A desk row whose destination raises
+          used to answer with NOTHING: no URL change, no aria-current, no
+          message. `Scope.settle_pending_select/2` turns that raise into
+          `@nav_error`, and this is where the user reads it. It renders in the
+          LIVEVIEW's own diff (the flash lives in the layout, which a patch
+          does not re-render), so the notice actually reaches a patched page.
+          Absent an error the element is not emitted at all, so every existing
+          desk render stays byte-identical. --%>
+    <div :if={@nav_error} id="studio-nav-error" class="studio-nav-error" role="alert"
+         data-test-id="studio-nav-error">
+      {@nav_error}
+    </div>
+
     <%!-- The pane row reads ONE table: PaneBuilder.display_state/4 (spd-s4,
           charter D6/D7/D35). `:full` is today's expanded column, `:strip` the
           44px collapsed back affordance, `:hidden` skips the pane server-side
