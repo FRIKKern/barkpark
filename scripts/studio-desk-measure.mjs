@@ -338,9 +338,34 @@ OPTIONS
                       render, so the non-vacuity guard is seen to FIRE in the
                       same run. Without it, "no scrim because the desk was
                       fixed" and "the guard never ran" produce an identical zero.
+  --retries=N         Bounded retries on the NAMED retryable aborts only
+                      (default 2, so up to three attempts; 0 disables).
+                      Retryable: ${RETRYABLE_ABORTS.map((a) => a.id).join(', ')}.
+                      Every failed attempt's stderr is printed IN FULL before
+                      the next attempt starts. A terminal failure is never
+                      retried at any N.
+  --fail-on-face-substitution
+                      Exit 2 if any forced-face row measured a different face
+                      (D138 failure A). The artifact is still written and those
+                      rows' 55ch verdicts are already NULL — this only turns the
+                      finding into a non-zero exit for a caller that wants a
+                      gate. The instrument itself has no gate authority (D81).
   -h, --help          This text.
 
+BROWSER (provenance, not a detail — \`ch\` is a font measurement)
+  Policy: \`${browserPolicy().id}\` (${browserPolicy().source}) — ${browserPolicy().what}.
+${Object.entries(BROWSER_POLICIES).map(([id, p]) =>
+  `    BP_DESK_BROWSER=${id.padEnd(8)} ${p.what}\n      if missing: ${p.fix}`).join('\n')}
+  A missing browser fails by NAME with the install command above, never as a raw
+  \`browserType.launch: Executable doesn't exist\` trace — that read as an
+  instrument bug to every wave-11 verifier, and the ones who worked around it by
+  forcing system Chrome measured on a different browser than the committed
+  artifacts, with nothing in either artifact saying so. Every run now records
+  \`browser_policy\`, \`browser_channel\` and \`browser_version\`.
+
 ENVIRONMENT
+  BP_DESK_BROWSER     bundled (default) | chrome — see BROWSER above.
+  BP_DESK_RETRIES     Env form of --retries.
   BP_DESK_DOC         Env form of --doc.
                       (BP_DESK_DESTINATION_CONTROL is GONE. It pointed at a
                       control that summons the Tier-3 destination; no such
@@ -404,8 +429,71 @@ const READING_COLUMN_SELECTOR = '.bp-paper-surface';
 // moment it is needed. A `ReferenceError: Cannot access 'die'` instead of a
 // named MeasureError is the same class of defect this wave is closing.
 
-class MeasureError extends Error {}
-const die = (msg) => { throw new MeasureError(msg); };
+/**
+ * THE ONE FAILURE TYPE — now carrying a RETRY CLASS.
+ *
+ * D138's "the instrument is ~80% deterministic" was never one fault. Every
+ * zero-byte exit is an INSTRUMENT FAILURE (never a desk fact), but they split
+ * cleanly in two, and the split is what an operator actually needs:
+ *
+ *   RETRYABLE — the harness lost a race it can win on the next try, and nothing
+ *     about the run's own logic is in question: a drill abort, an unreachable
+ *     [data-user-opened] marker, a provenance bracket broken by a deploy landing
+ *     under the sweep. Re-running is the CORRECT response, not a deviation.
+ *
+ *   TERMINAL — re-running changes nothing: a banned generic-serif fallback, a
+ *     non-vacuity guard failure, a malformed --out, an unparseable in-page
+ *     source, a browser that is not installed. These want a human.
+ *
+ * The class is on the ERROR, at the throw site, because that is the only place
+ * that knows. `--retries=N` (below) then acts on it, so "bounded retries on the
+ * NAMED fail-closed aborts" is a property of the instrument rather than of
+ * operator discipline — which is exactly what the wave-9 brief left unwritten
+ * and what an operator meeting a NEW abort had no authority to do.
+ */
+export class MeasureError extends Error {
+  constructor(msg, { retryable = false, abortId = null } = {}) {
+    super(msg);
+    this.retryable = retryable;
+    this.abortId = abortId;
+  }
+}
+const die = (msg, opts) => { throw new MeasureError(msg, opts); };
+
+/**
+ * THE RETRYABLE ABORTS, ENUMERATED BY NAME.
+ *
+ * The wave-9 brief authorised bounded retries on ONE abort — the
+ * `[data-user-opened]` marker — so an operator who met any of the other four
+ * had no written authority to re-run and had to deviate to do the right thing.
+ * A list of one is not a policy. This is the list, and `dieRetryable()` is the
+ * only way onto it: an id not in this table throws at the throw site, so the
+ * table cannot silently fall behind the code (see
+ * `scripts/studio-desk-instrument-reliability.test.mjs`).
+ *
+ * Every one of these writes ZERO BYTES and exits non-zero. That is by design
+ * (D138: a partial matrix is not a matrix) and it is exactly why they must be
+ * retried rather than reported: a retryable abort is the absence of a
+ * measurement, not a measurement of an absence.
+ */
+export const RETRYABLE_ABORTS = [
+  { id: 'drill',                why: 'the drill never reached a document to measure — pane/list/row race' },
+  { id: 'user-opened-marker',   why: 'real clicks never produced [data-user-opened] on .bp-doc-sidebar' },
+  { id: 'user-opened-vanished', why: 'the [data-user-opened] marker vanished mid-sweep' },
+  { id: 'element-vanished',     why: 'a required element vanished between the settle and the measure' },
+  { id: 'provenance-bracket',   why: 'the deployment moved under the sweep — a deploy, not a desk fact' },
+];
+const RETRYABLE_ABORT_IDS = new Set(RETRYABLE_ABORTS.map((a) => a.id));
+
+/** A fail-closed abort the operator is AUTHORISED to re-run, BY NAME. */
+const dieRetryable = (id, msg) => {
+  if (!RETRYABLE_ABORT_IDS.has(id)) {
+    throw new MeasureError(
+      `internal: "${id}" is not in RETRYABLE_ABORTS. An abort earns a retry by being NAMED in that ` +
+      `table, never by being thrown from a convenient helper.`);
+  }
+  throw new MeasureError(msg, { retryable: true, abortId: id });
+};
 
 /**
  * THE WIDTH BANDS, as ONE table — mirroring the pre-paint stamp in
@@ -699,6 +787,86 @@ function withdrawVerdictsForBucketPrecondition(rec, pre) {
 }
 
 /**
+ * THE FACE-SUBSTITUTION WITHDRAWAL — D138 failure A, ruled on.
+ *
+ * WHAT FAILURE A IS. `PAGE_MEASURE` forces a face by setting
+ * `--paper-font-serif` INLINE on `.bp-paper-surface`, then reads
+ * `getComputedStyle(surface).fontFamily` back as `declared_stack`. If a
+ * LiveView patch replaces or re-attributes that node between the set and the
+ * read, the inline custom property is gone and the surface is back on the
+ * DEPLOYED stack — which is precisely what D138 recorded: `declared_stack` fell
+ * back to the native stack, `face_applied` went true -> false, and every
+ * ch-derived figure moved with it while the layout box did not move at all
+ * (`visible_content_px` and `content_px` identical to the digit). Nothing about
+ * that mechanism is width-bound: it is a race with a DOM patch, and a patch can
+ * land at any of the nine widths. See RULING 1 in this file's header for the
+ * reachability argument and the run evidence.
+ *
+ * THE RULING, IN CODE. Same shape as the bucket precondition, for the same
+ * reason: the row measured something other than what it names, so its 55ch
+ * verdicts go to NULL — never FALSE. FALSE would say "this desk fails 55ch on
+ * Georgia" when Georgia was never on screen. The measurements themselves stay:
+ * they are real observations of whatever face won. And it is NOT a `die()`: a
+ * mid-sweep abort writes zero bytes, which D138 rules an instrument failure
+ * rather than a desk fact, so killing 53 good rows to withdraw one is the wrong
+ * trade. The RUN-level gate lives in `face_override_integrity` and
+ * `--fail-on-face-substitution`.
+ */
+export function withdrawVerdictsForFaceSubstitution(rec, face) {
+  return {
+    ...rec,
+    face_applied_ok: false,
+    content_meets_55ch: null,
+    visible_meets_55ch: null,
+    verdicts_withdrawn_for_face_substitution: {
+      content_meets_55ch: rec.content_meets_55ch ?? null,
+      visible_meets_55ch: rec.visible_meets_55ch ?? null,
+      requested_primary: rec.font.requested_primary,
+      resolved_family: rec.font.resolved_family,
+      forced_to: face.override,
+      declared_stack: rec.font.declared_stack,
+      reason:
+        'FACE SUBSTITUTION. The forced face did not win: this row\'s ch is a conversion through a ' +
+        'DIFFERENT face than the one it names, so its 55ch verdicts are NULL, never FALSE (D138 ' +
+        'failure A, same rule as D171/D185 and D127 part 2). The px measurements are untouched.',
+    },
+  };
+}
+
+/** The run-level accumulator behind `--fail-on-face-substitution`. */
+export function emptyFaceIntegrity() {
+  return {
+    forced_rows_checked: 0,
+    substitutions: [],
+    clean: true,
+    ruling:
+      'A forced-face row whose face did not apply has its 55ch verdicts withdrawn to NULL and is ' +
+      'listed here. The INSTRUMENT still exits 0 (D81: it has no gate authority); a CONSUMER that ' +
+      'wants a gate passes --fail-on-face-substitution, which exits non-zero AFTER the artifact is ' +
+      'written, so the gate reds without ever producing the zero-byte run D138 forbids.',
+  };
+}
+
+export function recordFaceSubstitution(run, where, rec, face) {
+  const acc = run.face_override_integrity ??= emptyFaceIntegrity();
+  acc.forced_rows_checked += 1;
+  if (rec.font.face_applied) return rec;
+  acc.clean = false;
+  acc.substitutions.push({
+    where,
+    requested_primary: rec.font.requested_primary,
+    resolved_family: rec.font.resolved_family,
+    declared_stack: rec.font.declared_stack,
+    probe_px_per_ch: rec.ch?.probe_px_per_ch ?? null,
+  });
+  run.warnings.push(
+    `FACE SUBSTITUTION at ${where}: asked for ${rec.font.requested_primary}, resolved ` +
+    `${rec.font.resolved_family} — this row's ch is NOT the named face, so BOTH its 55ch verdicts ` +
+    `are withdrawn to NULL. The px measurements stand.`);
+  return withdrawVerdictsForFaceSubstitution(rec, face);
+}
+
+/**
  * D186 — THE OVERLAY ASSERTION, NARROWED RATHER THAN DELETED.
  *
  * D108 turned on a real desk observation: below `wide`, an explicitly-opened
@@ -836,6 +1004,85 @@ export function resolvePlaywright() {
   }
   die(`playwright could not be resolved. Tried, in order:\n  ${tried.join('\n  ')}\n` +
       `Set BP_PLAYWRIGHT_FROM=<path to a package.json that can require("playwright")>.`);
+}
+
+/**
+ * THE BROWSER IS PROVENANCE TOO.
+ *
+ * `resolvePlaywright()` is careful about which *library* it loads and then the
+ * next line used to be a bare `pw.chromium.launch()` — no channel, no preflight,
+ * nothing in the artifact saying which browser produced the numbers. Two costs,
+ * both paid:
+ *
+ *   1. A FRESH HOST FAILS AS THOUGH THE INSTRUMENT WERE BROKEN. Every wave-11
+ *      verifier hit `browserType.launch: Executable doesn't exist at
+ *      ~/Library/Caches/ms-playwright/chromium_headless_shell-1200/…`, which
+ *      reads as an instrument bug, not a missing prerequisite. They worked
+ *      around it by forcing `channel: 'chrome'` by hand — i.e. they measured on
+ *      a DIFFERENT browser than the committed artifacts did, and nothing in
+ *      either artifact says so.
+ *   2. A SUCCESSFUL RUN IS PROVENANCE-AMBIGUOUS. Bundled Chromium and system
+ *      Chrome are different builds with different font stacks; `ch` is a font
+ *      measurement. "Which browser" is not a detail here.
+ *
+ * So: an explicit POLICY, defaulting to the bundled browser (the reproducible
+ * one), overridable to system Chrome by name, recorded in the artifact either
+ * way, and a launch failure translated into the exact command that fixes it.
+ */
+export const BROWSER_POLICIES = {
+  bundled: {
+    channel: null,
+    what: "playwright's own pinned Chromium — the reproducible default",
+    fix: 'npx playwright install chromium',
+  },
+  chrome: {
+    channel: 'chrome',
+    what: 'the system Google Chrome install (what the wave-11 verifiers fell back to by hand)',
+    fix: 'install Google Chrome, or unset BP_DESK_BROWSER to use the bundled Chromium',
+  },
+};
+
+export function browserPolicy(env = process.env) {
+  const raw = (env.BP_DESK_BROWSER ?? 'bundled').trim();
+  const chosen = BROWSER_POLICIES[raw];
+  if (!chosen) {
+    die(`BP_DESK_BROWSER="${raw}" is not a browser policy. Known: ` +
+        Object.keys(BROWSER_POLICIES).join(', ') + '.');
+  }
+  return {
+    id: raw,
+    channel: chosen.channel,
+    what: chosen.what,
+    fix: chosen.fix,
+    source: env.BP_DESK_BROWSER ? 'BP_DESK_BROWSER' : 'default',
+  };
+}
+
+/** True for the ONE failure that is a missing prerequisite rather than a bug. */
+export function isMissingBrowserError(err) {
+  const m = String(err?.message ?? err ?? '');
+  return /Executable doesn't exist|playwright install|Chromium distribution|Chrome distribution|channel .* is not installed/i.test(m);
+}
+
+/** The message a fresh verifier should get instead of a raw stack. */
+export function missingBrowserMessage(err, policy) {
+  return `NO BROWSER — nothing was measured, and this says nothing about the desk.\n\n` +
+    `  Policy "${policy.id}" (${policy.source}): ${policy.what}.\n` +
+    `  Fix it with:\n\n      ${policy.fix}\n\n` +
+    `  Or choose the other policy: BP_DESK_BROWSER=` +
+    `${Object.keys(BROWSER_POLICIES).filter((k) => k !== policy.id).join('|')}. ` +
+    `Both are recorded in the artifact, so a run always says which browser measured it.\n\n` +
+    `  Playwright said:\n    ${String(err?.message ?? err).split('\n')[0]}`;
+}
+
+/** Launch under the policy, and turn the one prerequisite failure into a fix. */
+export async function launchMeasureBrowser(pw, policy, launch = (opts) => pw.chromium.launch(opts)) {
+  try {
+    return await launch(policy.channel ? { channel: policy.channel } : {});
+  } catch (err) {
+    if (isMissingBrowserError(err)) die(missingBrowserMessage(err, policy));
+    throw err;
+  }
 }
 
 // ── provenance (queried, never assumed — D71) ────────────────────────────────
@@ -1827,7 +2074,7 @@ async function waitForDeskSettled(page, { quietMs = 800, timeoutMs = 20_000 } = 
  *  evidence about the desk, which is how a non-measurement gets recorded as a
  *  measurement. */
 const drillDie = (msg, seen) =>
-  die(`INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout; ` +
+  dieRetryable('drill', `INSTRUMENT FAILURE (drill) — this says NOTHING about the desk's layout; ` +
       `the harness never reached a document to measure.\n\n  ${msg}` +
       (seen ? `\n\n  What the drill saw:\n${seen}` : '') +
       `\n\n  This is not a measurement and must not be recorded as one. Re-run, or pass ` +
@@ -2090,7 +2337,7 @@ export const OPEN_CONTROLS = [
 // only way to see the D178 fix hold. `scripts/measurements/open-leg-repro.mjs`.
 export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = true } = {}) {
   const unreachable = (reason) => {
-    if (fatal) die(reason);
+    if (fatal) dieRetryable('user-opened-marker', reason);
     return { reached: false, skip_reason: reason };
   };
 
@@ -2727,7 +2974,8 @@ async function main() {
   const provenance = readProvenance();
   const srv = readGuerrillaServer();
 
-  const browser = await pw.chromium.launch();
+  const browserPolicyChosen = browserPolicy();
+  const browser = await launchMeasureBrowser(pw, browserPolicyChosen);
   const ctx = await browser.newContext({ viewport: { width: WIDTHS[0], height: 900 } });
   const page = await ctx.newPage();
 
@@ -2737,6 +2985,13 @@ async function main() {
     contract: 'prints a matrix, or exits non-zero naming the failed selector — no gate authority',
     playwright_version: pwVersion,
     playwright_resolved_from: resolvedFrom,
+    // WHICH BROWSER MEASURED THIS. `ch` is a font measurement and bundled
+    // Chromium is not system Chrome, so a run that does not name its browser
+    // cannot be compared to one that does.
+    browser_policy: browserPolicyChosen.id,
+    browser_policy_source: browserPolicyChosen.source,
+    browser_channel: browserPolicyChosen.channel,
+    browser_version: browser.version(),
     node_version: process.version,
     platform: `${os.platform()} ${os.arch()}`,
     platform_note:
@@ -2817,6 +3072,7 @@ async function main() {
     // absent precondition and a satisfied one must never read the same.
     bucket_precondition: emptyBucketPrecondition(),
     warnings: [],
+    face_override_integrity: emptyFaceIntegrity(),
     rows: [],
   };
 
@@ -2910,7 +3166,7 @@ async function main() {
           rec = withdrawVerdictsForBucketPrecondition(rec, bucketPre);
         }
         if (rec.fatal) {
-          die(`a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
+          dieRetryable('element-vanished', `a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
               `face ${face.id}: ${JSON.stringify(rec.counts)}`);
         }
         // A no-reading-column row has no ch, no face resolution, no hit-test and
@@ -2966,11 +3222,14 @@ async function main() {
             `\`in_floor_px_per_ch\` in these rows is derived from a stale assumption. The probe ch ` +
             `(and every ch in the table above) is unaffected.`);
         }
-        if (face.override && !rec.font.face_applied) {
-          run.warnings.push(
-            `viewport ${width}px / ${stateId} / face "${face.id}": asked for ` +
-            `${rec.font.requested_primary}, resolved ${rec.font.resolved_family} — ` +
-            `this row's ch is NOT the named face.`);
+        // D138 FAILURE A, RULED ON. This used to be a bare warning and the row
+        // was published with its verdicts intact — i.e. a ch computed through a
+        // face nobody asked for could carry a 55ch FALSE into a ruling cell.
+        // Now the verdicts are withdrawn to NULL and the run carries a
+        // machine-readable integrity block. See
+        // `withdrawVerdictsForFaceSubstitution` and RULING 1 in the header.
+        if (face.override) {
+          rec = recordFaceSubstitution(run, `viewport ${width}px / ${stateId} / face "${face.id}"`, rec, face);
         }
 
         // ── THE NON-VACUITY GUARD IS FATAL (D31/D39/D112). Where the scrim
@@ -3104,7 +3363,7 @@ async function main() {
       const stillOpen = await page.evaluate(() =>
         !!document.querySelector('.bp-doc-sidebar[data-user-opened]'));
       if (!stillOpen) {
-        die(`INSTRUMENT FAILURE — the [data-user-opened] marker vanished at viewport ${width}px, ` +
+        dieRetryable('user-opened-vanished', `INSTRUMENT FAILURE — the [data-user-opened] marker vanished at viewport ${width}px, ` +
             `between rows of the user-opened sweep. Every row after this would be a DEFAULT-state ` +
             `measurement labelled "user-opened", which is the exact class of mislabelling this ` +
             `axis was added to prevent. This says nothing about the desk's layout.`);
@@ -3195,7 +3454,7 @@ async function main() {
     method: 'served SHA + active slot read over ssh immediately before the browser launched and immediately after the sweep',
   };
   if (mismatches.length) {
-    die(`PROVENANCE BRACKET FAILED — the deployment moved UNDER the sweep, so all ` +
+    dieRetryable('provenance-bracket', `PROVENANCE BRACKET FAILED — the deployment moved UNDER the sweep, so all ` +
         `${run.rows.length} records carry a provenance stamp this run cannot support. ` +
         `Discarding the matrix.\n\n` +
         mismatches.map((m) => `  - ${m}`).join('\n\n') +
@@ -3243,6 +3502,7 @@ async function main() {
   if (OUT_PATH) writeRunArtifact(run, OUT_PATH);
 
   process.stdout.write(JSON.stringify(run, null, 2) + '\n');
+  return run;
 }
 
 /** Persist the COMPLETE run — every row plus a flattened run-level provenance
@@ -3333,6 +3593,7 @@ function writeRunArtifact(run, outPath) {
     drill_rows_in_list: run.drill?.rows_in_list ?? null,
     non_vacuity_guard: summariseNonVacuity(run),
     warnings: run.warnings,
+    face_override_integrity: run.face_override_integrity,
     unsettled_rows: run.rows.filter((r) => !r.settle?.settled).length,
   };
 
@@ -3887,15 +4148,93 @@ if (INVOKED_DIRECTLY && (process.argv.includes('--help') || process.argv.include
   process.exit(0);
 }
 
+/**
+ * BOUNDED RETRIES, ON THE NAMED ABORTS ONLY (RULING 2, this file's header).
+ *
+ * `--retries=N` / `BP_DESK_RETRIES`. Default 2, so the default invocation makes
+ * at most three attempts. A TERMINAL failure is never retried, at any N: it
+ * would burn two more authenticated sweeps to reprint the same sentence.
+ *
+ * Every failed attempt's stderr is written BEFORE the next one starts. That is
+ * the whole discipline D138 lost — failure B has no diagnosis today for exactly
+ * one reason, that its operator suppressed stderr and the text is gone — and a
+ * retry loop that swallows the attempts it retried would rebuild that hole
+ * inside the instrument, where nobody would even think to look for it.
+ */
+export function parseRetries(argv = process.argv, env = process.env) {
+  const flag = argv.find((a) => typeof a === 'string' && a.startsWith('--retries='));
+  const raw = flag ? flag.slice('--retries='.length) : (env.BP_DESK_RETRIES ?? '2');
+  const n = Number(raw);
+  if (!/^\d+$/.test(String(raw).trim()) || !Number.isInteger(n) || n < 0 || n > 10) {
+    die(`--retries must be a whole number 0..10 (got ${JSON.stringify(raw)}). 0 means "one attempt, ` +
+        `no retries" — the pre-2026-09 behaviour.`);
+  }
+  return n;
+}
+
+export async function runWithRetries(attemptFn, retries, { onRetry = () => {} } = {}) {
+  const attempts = [];
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const value = await attemptFn(attempt);
+      return { value, attempts, attempt };
+    } catch (err) {
+      const retryable = err instanceof MeasureError && err.retryable === true;
+      attempts.push({ attempt, retryable, abort_id: err?.abortId ?? null, message: err?.message ?? String(err) });
+      if (!retryable || attempt > retries) {
+        err.attempts = attempts;
+        throw err;
+      }
+      onRetry({ attempt, retries, abort_id: err.abortId, message: err.message });
+    }
+  }
+}
+
 if (INVOKED_DIRECTLY) {
+  const FAIL_ON_FACE_SUBSTITUTION = process.argv.includes('--fail-on-face-substitution');
   // `resolveOutPath` runs INSIDE this chain so a malformed `--out` lands in the
   // same handler as every other MeasureError — one failure shape, by name.
   Promise.resolve()
     .then(() => { OUT_PATH = resolveOutPath(); })
-    .then(main)
+    .then(() => runWithRetries(main, parseRetries(), {
+      onRetry: ({ attempt, retries, abort_id, message }) => {
+        process.stderr.write(
+          `\nATTEMPT ${attempt} FAILED — retryable abort "${abort_id}". Its stderr, in full, ` +
+          `because a swallowed one is how D138's failure B lost its diagnosis:\n\n${message}\n\n` +
+          `  Retrying (attempt ${attempt + 1} of ${retries + 1}). ` +
+          `Pass --retries=0 to make the first abort final.\n\n`);
+      },
+    }))
+    .then(({ value: run, attempt }) => {
+      if (attempt > 1) {
+        process.stderr.write(
+          `\n  [retry] this matrix came from attempt ${attempt}. The failed attempts' stderr is above ` +
+          `and is part of this run's record.\n`);
+      }
+      const integrity = run?.face_override_integrity;
+      if (FAIL_ON_FACE_SUBSTITUTION && integrity && !integrity.clean) {
+        process.stderr.write(
+          `\nFACE SUBSTITUTION — ${integrity.substitutions.length} of ${integrity.forced_rows_checked} ` +
+          `forced-face row(s) measured a face nobody asked for, and --fail-on-face-substitution was ` +
+          `passed.\n\n` +
+          integrity.substitutions.map((x) =>
+            `  - ${x.where}: asked ${x.requested_primary}, got ${x.resolved_family}`).join('\n') +
+          `\n\n  Their 55ch verdicts are already NULL in the artifact, which HAS been written — this ` +
+          `exit is a gate signal, not a lost run. Re-run; if it recurs at the same cell it is not a ` +
+          `race.\n\n`);
+        process.exit(2);
+      }
+    })
     .catch((err) => {
       process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
       process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
+      if (err instanceof MeasureError && err.retryable) {
+        process.stderr.write(
+          `  RETRYABLE ABORT "${err.abortId}" — this is a race the harness lost, not a fact about the ` +
+          `desk, and re-running is the CORRECT response rather than a deviation ` +
+          `(${(err.attempts || []).length} attempt(s) made). The full list of retryable aborts is ` +
+          `RETRYABLE_ABORTS in this file.\n\n`);
+      }
       process.exit(1);
     });
 }
