@@ -308,6 +308,14 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:instance_global, @operator_guard, "Operator: deploys the marketing site. RULING row 1."},
     {:get, "/v1/admin/site-deploy"} =>
       {:instance_global, @operator_guard, "Operator: site-deploy status. RULING row 1."},
+    {:post, "/v1/admin/workspaces/:slug/reinstate"} =>
+      {:instance_global, @operator_guard,
+       "Operator: lifts a workspace suspension (task-7ab3d03b49606f83). It DOES take a " <>
+         ":slug selector, but the ruling is that lifting a policy suspension is an " <>
+         "instance-operator primitive and never something the suspended tenant's own admin " <>
+         "may do — a self-service loop around a TTL removes the limit rather than widening " <>
+         "a permit. So there is deliberately NO tenant re-derivation to name here: " <>
+         "confining it to the caller's own workspace would BE the defect. RULING row 1."},
 
     # ── /v1/instance — operator reads moved onto :require_admin by #14793 ──
     # (task-d7ac954aa57aa522). The census merged the same hour without them,

@@ -850,6 +850,17 @@ defmodule PDS.Census do
     # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
     # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
+    # WorkspaceReinstateController.create (task-7ab3d03b49606f83) — the operator verb
+    # that lifts a workspace suspension. `status_only_receipt` is the class prose
+    # exactly: create/2 renders the STORED row it just wrote (slug, suspended,
+    # suspended_reason, suspended_at, tier, expires_at, ttl_extended, read back off the
+    # %Workspace{} Quota.reinstate/1 and Quota.set_expires_at/2 returned) and simply does
+    # not spell the `ok: true` literal this lens greps for. It is the wave-40 sentence,
+    # not the retired wave-38 one: this route does NOT claim success by status alone —
+    # `suspended: false` in the body IS the flag the write cleared, and `ttl_extended`
+    # reports whether the second write happened. Classified by the arriving change, not
+    # judged by it.
+    {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
@@ -1052,6 +1063,7 @@ defmodule PDS.Census do
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
+    {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create} => {"BarkparkWeb.WorkspaceReinstateController.create/2", 1, "25110011"},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login} => {"BarkparkWeb.AuthController.login/2", 2, "133988271"},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create} => {"BarkparkWeb.LoginTicketController.create/2", 1, "18892729"},
