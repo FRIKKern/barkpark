@@ -25,6 +25,8 @@ import {
   SCENARIOS, SCENARIO_NAMES, route,
   IDS as SCEN_IDS,
   RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL,
+  RAIL_FAIL_CLASSIFYING_DETAIL as SCEN_RAIL_CLASSIFYING_DETAIL,
+  RAIL_FAIL_CLASSIFIED_CAPTION as SCEN_RAIL_CLASSIFIED_CAPTION,
   DEPLOY_DETAIL_CRUEL as SCEN_DEPLOY_DETAIL_CRUEL,
   DEPLOY_DETAIL_KIND as SCEN_DEPLOY_DETAIL_KIND,
   DEPLOY_DETAIL_STORE_CAP as SCEN_DEPLOY_DETAIL_STORE_CAP,
@@ -2160,6 +2162,63 @@ const EXPECTATIONS = {
       assert.ok(kindFail && kindFail.step === "HEALTH", "the control must fail at HEALTH, not BUILD");
       assert.ok(/\s/.test(kindFail.caption) && kindFail.caption.length < SCEN_RAIL_CRUEL_DETAIL.length,
         "the control must be the ORDINARY word-broken string — shorter, and breakable at spaces");
+    },
+  },
+  // task-877bfc465162e104: the deploy rail, FAILED WITH A CLASSIFIED CAUSE.
+  // `RAIL_FAIL_CLASSIFYING_DETAIL` was committed by cch-w27-s2, asserted by
+  // `sites_deploy_stage_caption_test.exs`, and routed into NO scenario — so the
+  // one capture in this corpus whose caption moves between the box and the
+  // browser had never rendered in this harness at any width. This row is the
+  // other half of wiring it: the cch-w10 census guard hard-fails a scenario with
+  // no expectation, so the fixture and this entry ship together or not at all.
+  //
+  // Same seam limit as its two siblings: the rail mounts through
+  // `scope.querySelector` into `#deploy-rail-slot`, which this vm registry does
+  // not model, so the browser half is overflow-guard's W25 leg (third track).
+  // What THIS half owns is the thing the leg cannot see — that the caption on the
+  // rail is the CLASSIFIED sentence and NOT the raw capture, and that the two are
+  // genuinely different strings. On the wave-26 pair that assertion is
+  // unwritable: `humanize/1` returns both of them unchanged.
+  "site-deploy-rail-failed-classified": {
+    what: "the deploy rail's CLASSIFIED fold — the caption is the cause the control plane named, not the bytes the box emitted",
+    check(reg, hooks) {
+      const scen = SCENARIOS["site-deploy-rail-failed-classified"];
+      const deployments = scen.data.deploymentsBySite[scen.deepLink.split("/")[1]];
+      const dep = hooks.railDeployment(deployments);
+      assert.ok(dep, "the fixture must carry an ACTIVE deployment or the rail never mounts");
+      const ledger = hooks.deployRailLedgerFromConsole(dep.console);
+      assert.equal(Object.keys(ledger).length, 2, "PLAN + BUILD must survive the fold");
+      assert.equal(ledger.BUILD.status, "failed");
+      // THE POINT OF THE FIXTURE. The control plane folds a failed stage's detail
+      // through `Sites.Deploy.stage_caption/2` at every display boundary, so the
+      // string that reaches this ledger is the CLASSIFIED sentence.
+      assert.equal(ledger.BUILD.detail, SCEN_RAIL_CLASSIFIED_CAPTION,
+        "the rail must carry the classified cause — that is what the wire delivers for a failed stage");
+      assert.notEqual(SCEN_RAIL_CLASSIFIED_CAPTION, SCEN_RAIL_CLASSIFYING_DETAIL,
+        "the classified caption collapsed onto the raw capture — this fixture no longer distinguishes a rail that classifies from one that does not, and every assertion below it is green by construction");
+      assert.ok(!ledger.BUILD.detail.includes("FATAL: 401 Unauthorized"),
+        "the raw FATAL line must NOT be the caption — a fixture carrying it models a channel the control plane does not have");
+      const rows = hooks.deployRailRows(ledger);
+      const failed = rows.filter((r) => r.role === "failed")[0];
+      assert.ok(failed, "BUILD must fold to a failed row");
+      assert.equal(failed.step, "BUILD", "the classified cause must sit on the stage that broke");
+      const html = hooks.deployRailHtml(rows, { deploymentId: dep.id, failureDetail: failed.caption });
+      assert.ok(html.includes("deploy-rail-status--failed"), "the pill must read the failed tone");
+      assert.ok(html.includes('<div class="deploy-rail-fail" role="alert">'), "the failure footer must render");
+      const foot = html.split('<div class="deploy-rail-fail" role="alert">')[1].split("</div>")[0];
+      // `esc()` turns the apostrophes in "site's" / "couldn't" into &#39;, so the
+      // footer is checked on a clause that carries none.
+      assert.ok(foot.includes("read token was rejected"),
+        "the footer holds the classified sentence the person is meant to act on");
+      assert.ok(!foot.includes("401 Unauthorized"),
+        "the raw capture must not reach the footer");
+      // The CONTROL, one scenario over: the cruel rail's caption IS its raw
+      // capture, because that string does not classify. Both fixtures are needed —
+      // one alone cannot show that the fold is a fold.
+      const cruel = SCENARIOS["site-deploy-rail-failed"];
+      const cruelDep = hooks.railDeployment(cruel.data.deploymentsBySite[cruel.deepLink.split("/")[1]]);
+      assert.equal(hooks.deployRailLedgerFromConsole(cruelDep.console).BUILD.detail, SCEN_RAIL_CRUEL_DETAIL,
+        "the cruel control must still carry its RAW capture — it is the fixture this one is different from");
     },
   },
   // cch-w29-bl: the deploy rail, LIVE — the fold behind `.deploy-rail-live`,
