@@ -88,22 +88,32 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
     refute conn.resp_body =~ "credentials_encrypted"
   end
 
-  test "PUT channels rejects a private-resolving webhook URL at save (422)" do
-    {_team, token} = owner_with_team()
+  # task-196b0b1895e2a29a: the save fence keys on the credential SHAPE, so the
+  # 422 holds for EVERY url-bearing type at the wire — slack and discord carry
+  # the same %{"url" => …} credential a webhook does, and used to sail through.
+  for type <- ~w(webhook slack discord) do
+    test "PUT channels rejects a private-resolving #{type} URL at save (422)" do
+      type = unquote(type)
+      {_team, token} = owner_with_team()
 
-    conn =
-      call(
-        :put,
-        "/v1/notifications/channels",
-        %{
-          "type" => "webhook",
-          "enabled" => true,
-          "credentials" => %{"url" => "http://169.254.169.254/latest/meta-data"}
-        },
-        token
-      )
+      conn =
+        call(
+          :put,
+          "/v1/notifications/channels",
+          %{
+            "type" => type,
+            "enabled" => true,
+            "credentials" => %{"url" => "http://169.254.169.254/latest/meta-data"}
+          },
+          token
+        )
 
-    assert conn.status == 422
+      assert conn.status == 422
+      assert %{"error" => "invalid", "details" => details} = body(conn)
+
+      assert inspect(details) =~ "unsafe #{type} url",
+             "the 422 for #{type} does not name the ssrf refusal: #{inspect(details)}"
+    end
   end
 
   test "PUT events sets a route" do
