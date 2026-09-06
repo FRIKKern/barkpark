@@ -837,7 +837,11 @@ defmodule BarkparkCloud.Notifications do
   defp latch_deploy_rate_state(%DeployRateAlertState{} = state, now) do
     {:ok, latched} =
       state
-      |> DeployRateAlertState.changeset(%{team_id: state.team_id, verdict: "red", alerted_at: now})
+      |> DeployRateAlertState.changeset(%{
+        team_id: state.team_id,
+        verdict: "red",
+        alerted_at: now
+      })
       |> Repo.update()
 
     latched

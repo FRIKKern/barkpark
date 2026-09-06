@@ -111,7 +111,12 @@ defmodule BarkparkCloud.Workers.DeployRateAlertWorkerTest do
       # And it fails again.
       site = one_site(team)
       at = DateTime.add(hours(3), -12 * 3600, :second)
-      Repo.insert_all(Deployment, bulk(site, "failed", @red_failed, at, "instance is unreachable"))
+
+      Repo.insert_all(
+        Deployment,
+        bulk(site, "failed", @red_failed, at, "instance is unreachable")
+      )
+
       for h <- 4..6, do: tick(hours(h))
 
       assert length(notices()) == 2
