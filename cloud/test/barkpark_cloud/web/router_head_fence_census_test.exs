@@ -224,8 +224,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `side_effecting_get?/1` clause is owed. It is session-gated like every other
   # `/v1/teams/:id/*` route, so `total` and `session` each rise by exactly one;
   # machine and public are untouched.
-  @baseline_total 68
-  @baseline_session 48
+  # 2026-09-06: 69 / 49 / 8 / 12. ONE ROUTE WAS ADDED — `GET
+  # /v1/account/security-audit`, the member self-read over account-security audit
+  # rows (task-ddaeea4356664b7a, the owner's ruling of 2026-08-23). RULED NOT
+  # SIDE-EFFECTING: the handler is `Auth.require_user/2` plus
+  # `Accounts.list_self_security_audit_events/2`, one `Repo.all` with a preload —
+  # a bare HEAD mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. It is session-gated like its
+  # `/v1/account/*` siblings, so `total` and `session` each rise by exactly one;
+  # machine and public are untouched.
+  @baseline_total 69
+  @baseline_session 49
   @baseline_machine 8
   @baseline_public 12
 

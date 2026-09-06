@@ -37,6 +37,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/account/two-factor user   {enabled: bool}
       DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
       POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
+      GET     /v1/account/security-audit user  the caller's OWN account-security audit rows (actor=self AND target=self)
       POST    /v1/auth/verify-email        —     {token} → confirm the account (single-use)
       POST    /v1/auth/register    —         create an account {email,password} → session
       POST    /v1/auth/request-reset       —  request a password-reset email (always 200)
@@ -1967,6 +1968,50 @@ defmodule BarkparkCloud.Web.Router do
         {:error, _cs} ->
           json(conn, 500, %{error: "ticket_mint_failed"})
       end
+    end
+  end
+
+  # GET /v1/account/security-audit?limit=&before=&before_id=&action_prefix=
+  # → 200 {events: [...]}. THE MEMBER SELF-READ over account-security audit rows
+  # — implements the owner's ruling of 2026-08-23.
+  #
+  # WHAT IT RETURNS: the rows where the caller is BOTH THE ACTOR AND THE TARGET
+  # (`twofa.enabled` / `twofa.disabled` are the ones produced today). It does NOT
+  # widen `GET /v1/audit`: that route keeps `Auth.require_current_team_admin/1`
+  # and keeps returning the whole TEAM trail. This one is strictly narrower — a
+  # member reading their own security history, in the same row shape.
+  #
+  # USER-gated (`Auth.require_user/2`), matching its three sibling self-scoped
+  # security reads: `/v1/account/sessions`, `/v1/account/two-factor` and the
+  # self-scoped deliveries under D655. Those are self-scoped BY CONSTRUCTION (a
+  # session row belongs to one user); an audit row carries actor + target + team,
+  # so "self" here is a COMPOUND predicate rather than a column. That is exactly
+  # why the whole predicate lives in ONE named context function —
+  # `Accounts.list_self_security_audit_events/2` — and not as a filter assembled
+  # out of query params at this seam, where a later `opts` edit could quietly
+  # loosen a half of it.
+  #
+  # THE MOVED-MEMBER CASE is decided at that function, not here: the shipped
+  # scope is `:across_teams` (the rows are about the HUMAN, so a member keeps
+  # sight of rows written under a former primary team). This route passes no
+  # `:team_scope`, taking that documented default deliberately, and there is no
+  # query param that can flip it — the semantics are a ruling, not a caller
+  # choice.
+  get "/v1/account/security-audit" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      opts = [
+        limit: parse_int(conn.query_params["limit"], 50),
+        before: parse_dt(conn.query_params["before"]),
+        before_id: conn.query_params["before_id"],
+        action_prefix: conn.query_params["action_prefix"]
+      ]
+
+      events = Accounts.list_self_security_audit_events(conn.assigns.current_user, opts)
+      json(conn, 200, %{events: Enum.map(events, &audit_json/1)})
     end
   end
 
