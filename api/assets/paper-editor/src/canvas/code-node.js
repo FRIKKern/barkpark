@@ -258,6 +258,14 @@ export const Code = Node.create({
       // pure predicate (contract.js) owns the decision; this just toggles display.
       let hovered = false;
       let focused = false;
+      const syncRows = () => {
+        // A textarea defaults to two rows, while the reader's <pre> is exactly
+        // one line tall for one authored line. Keep the edit island on the
+        // authored logical-line count so the Terminal body does not grow by an
+        // invisible second row. white-space:pre keeps long lines horizontal,
+        // matching the reader rather than introducing visual wrap rows.
+        area.rows = Math.max(1, area.value.split("\n").length);
+      };
       const syncChrome = () => {
         // Both reveal channels are gated on editability: a non-editable editor
         // (view mode) must not surface an empty readonly config control on
@@ -274,6 +282,7 @@ export const Code = Node.create({
         const value = (n.attrs && n.attrs.value) || "";
         const lang = (n.attrs && n.attrs.lang) || "";
         if (area.value !== value) area.value = value;
+        syncRows();
         if (langInput.value !== lang) langInput.value = lang;
         // Editability mirrors the editor's mode.
         const editable = editor.isEditable;
@@ -354,6 +363,10 @@ export const Code = Node.create({
           commitNow();
         }, DEBOUNCE_MS);
       };
+      const onAreaInput = () => {
+        syncRows();
+        scheduleWrite();
+      };
       const flushPending = () => {
         if (!writeTimer) return;
         clearTimeout(writeTimer);
@@ -361,7 +374,7 @@ export const Code = Node.create({
         commitNow();
       };
 
-      area.addEventListener("input", scheduleWrite);
+      area.addEventListener("input", onAreaInput);
       langInput.addEventListener("input", scheduleWrite);
       dom.addEventListener("bp-flush-node", flushPending);
       // Keep the resting-chrome gate in step as the user types a lang (empty→set
@@ -395,7 +408,7 @@ export const Code = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
-          area.removeEventListener("input", scheduleWrite);
+          area.removeEventListener("input", onAreaInput);
           langInput.removeEventListener("input", scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
           langInput.removeEventListener("input", syncChrome);

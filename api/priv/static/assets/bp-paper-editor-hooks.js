@@ -2401,6 +2401,8 @@
             !hasContainerColumnIndex && runIds.length === 1;
           const sectionContext = hasContainerId && hasLegacyRunMarker &&
             containerKind === "section" && !hasContainerRowId && !hasContainerColumnIndex;
+          const terminalContext = hasContainerId && hasLegacyRunMarker &&
+            containerKind === "terminal" && !hasContainerRowId && !hasContainerColumnIndex;
           const parsedColumnIndex = /^(0|[1-9][0-9]*)$/.test(containerColumnIndex ?? "")
             ? Number(containerColumnIndex)
             : null;
@@ -2408,12 +2410,12 @@
             containerKind === "columns" && !hasContainerRowId && hasContainerColumnIndex &&
             Number.isSafeInteger(parsedColumnIndex) && parsedColumnIndex >= 0;
           if (!legacyContext && !rowContext && !figureContext &&
-              !sectionContext && !columnsContext) {
+              !sectionContext && !terminalContext && !columnsContext) {
             return { wire: {}, invalid: true };
           }
           return {
             wire: Object.freeze({
-              ...(rowContext || figureContext || sectionContext || columnsContext ? {
+              ...(rowContext || figureContext || sectionContext || terminalContext || columnsContext ? {
                 container_kind: containerKind,
               } : {}),
               ...(rowContext ? {

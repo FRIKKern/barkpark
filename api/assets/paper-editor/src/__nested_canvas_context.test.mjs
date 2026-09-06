@@ -157,6 +157,16 @@ for (const { kind, attributes, expected } of [
     },
   },
   {
+    kind: "terminal",
+    attributes: 'data-paper-container-kind="terminal" data-paper-container-id="terminal-1" ' +
+      'data-paper-container-run="0"',
+    expected: {
+      container_kind: "terminal",
+      container_id: "terminal-1",
+      container_run_ids: ["nested-a", "nested-b"],
+    },
+  },
+  {
     kind: "columns",
     attributes: 'data-paper-container-kind="columns" data-paper-container-id="columns-1" ' +
       'data-paper-container-column-index="1" data-paper-container-run="0"',
@@ -192,7 +202,9 @@ for (const { kind, attributes, expected } of [
   const original = structuredClone(pending[0].payload);
   for (const [key, value] of Object.entries(expected)) assert.deepEqual(original[key], value);
   assert.equal("container_row_id" in original, false);
-  if (kind === "section") assert.equal("container_column_index" in original, false);
+  if (["section", "terminal"].includes(kind)) {
+    assert.equal("container_column_index" in original, false);
+  }
 
   wrapper.dataset.paperContainerKind = "expandable";
   wrapper.dataset.paperContainerId = "moved";
@@ -325,6 +337,9 @@ for (const [attributes, confirmedBlocks] of [
   ['data-paper-container-id="details" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
   ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "child" }]],
   ['data-paper-container-kind="steps" data-paper-container-id="steps" data-paper-container-row-id="row" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="terminal" data-paper-container-id="terminal"', [{ id: "a" }]],
+  ['data-paper-container-kind="terminal" data-paper-container-id="terminal" data-paper-container-row-id="row" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="terminal" data-paper-container-id="terminal" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending, errors } = mountCanvas(attributes);
   canvas.blocks = confirmedBlocks;
@@ -345,4 +360,4 @@ for (const [attributes, confirmedBlocks] of [
   dom.window.close();
 }
 
-console.log("nested canvas context: expandable/steps/tabs/figure/section/columns retry + top-level + strict fail-closed cases passed");
+console.log("nested canvas context: expandable/steps/tabs/figure/section/columns/terminal retry + top-level + strict fail-closed cases passed");

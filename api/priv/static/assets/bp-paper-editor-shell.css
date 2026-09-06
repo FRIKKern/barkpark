@@ -1605,6 +1605,22 @@
 :is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-test-id="paper-terminal-readonly"] > .bp-term {
   margin-top: 0;
 }
+/* Reader Terminal margins collapse in normal block flow. The edit surface is a
+   flex column whose contextual wrappers prevent that collapse, so consecutive
+   Terminals otherwise receive two 1.6rem margins. Preserve the reader's single
+   beat without changing either frame's canonical margin token. */
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-test-id="paper-terminal-readonly"] > .bp-term {
+  margin-top: 0;
+}
+/* A paragraph's 12pt leading margin also collapses into the preceding
+   Terminal's larger 1.6rem bottom margin in View. Its canvas wrapper prevents
+   that in Edit, so suppress only that first paragraph's redundant leading leg. */
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-canvas .bp-paper-editor-body .ProseMirror > p:first-child {
+  margin-top: 0;
+}
 .bp-paper-card-body-editor,
 .bp-paper-card-body-editor > bp-paper-editor {
   display: contents;

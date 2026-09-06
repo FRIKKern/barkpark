@@ -1,6 +1,11 @@
 defmodule BarkparkWeb.Studio.PaperEditor.TerminalContextualEditorTest do
   use ExUnit.Case, async: true
 
+  @editor_shell_css Path.expand(
+                      "../../../../../priv/static/assets/bp-paper-editor-shell.css",
+                      __DIR__
+                    )
+
   import Phoenix.LiveViewTest
 
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -132,6 +137,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.TerminalContextualEditorTest do
 
     assert Blocks.terminal_form_state(Map.put(terminal([]), "blocks", [])) ==
              {:error, :malformed_terminal}
+  end
+
+  test "contextual Terminal wrappers preserve reader margin collapse between blocks" do
+    css = File.read!(@editor_shell_css)
+
+    assert css =~
+             ~S|.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}|
+
+    assert css =~
+             ~S|.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-test-id="paper-terminal-readonly"] > .bp-term {
+  margin-top: 0;
+}|
+
+    assert css =~
+             ~S|.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-canvas .bp-paper-editor-body .ProseMirror > p:first-child {
+  margin-top: 0;
+}|
+
+    assert css =~
+             ~S|:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}|
   end
 
   defp input_value(tree, name),

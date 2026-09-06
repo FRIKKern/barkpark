@@ -83,7 +83,7 @@ defmodule BarkparkWeb.PaperTerminalEditingTest do
       conn: conn
     } do
       {slug, original} = create_paper()
-      {view, _path} = mount_editor(conn, unquote(host), slug)
+      {view, path} = mount_editor(conn, unquote(host), slug)
       assert has_element?(view, "select[name='block-type'] option[value='terminal']", "Terminal")
       submit(view, "paper-add-block", %{"block-type" => "terminal"})
       created = stored(slug).content["blocks"] |> List.last()
@@ -101,6 +101,34 @@ defmodule BarkparkWeb.PaperTerminalEditingTest do
 
       assert List.last(stored(slug).content["blocks"]) ==
                Map.put(created, "children", [paragraph("menu-created-child", "")])
+
+      assert has_element?(
+               view,
+               "[data-paper-container-kind='terminal'][data-paper-container-id='#{id}']"
+             )
+
+      text = [%{"type" => "text", "value" => "First child survives reload"}]
+
+      submit(view, "paper-ops", %{
+        "ops" => [
+          %{"op" => "patch-block", "id" => "menu-created-child", "patch" => %{"content" => text}}
+        ],
+        "container_kind" => "terminal",
+        "container_id" => id,
+        "container_run_ids" => ["menu-created-child"]
+      })
+
+      expected =
+        original["blocks"] ++
+          [
+            Map.put(created, "children", [
+              paragraph("menu-created-child", "First child survives reload")
+            ])
+          ]
+
+      assert stored(slug).content["blocks"] == expected
+      {:ok, _, _} = live(conn, path)
+      assert stored(slug).content["blocks"] == expected
     end
 
     test "#{host}: unsupported initial Terminal stays readonly and refuses forged forms", %{

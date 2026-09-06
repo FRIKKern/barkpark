@@ -172,6 +172,11 @@ try {
   document.body.appendChild(codeWrapper);
   await new Promise((resolve) => setTimeout(resolve, 350));
   const codeArea = codeCanvas.querySelector(".bp-canvas-code-area");
+  assert.equal(
+    codeArea.rows,
+    1,
+    "a one-line code child uses the reader's one-line geometry instead of textarea's two-row default",
+  );
   const codeEnter = new window.KeyboardEvent("keydown", {
     key: "Enter",
     code: "Enter",
@@ -183,6 +188,7 @@ try {
   assert.equal(codeEnter.defaultPrevented, false, "the code textarea retains native Enter");
   codeArea.value = "first\nsecond";
   codeArea.dispatchEvent(new window.Event("input", { bubbles: true }));
+  assert.equal(codeArea.rows, 2, "the edit island follows authored logical lines while typing");
   codeArea.dispatchEvent(new window.CustomEvent("bp-flush-node", { bubbles: true }));
   assert.equal(codeCanvas._editor.state.doc.childCount, 1);
   assert.equal(codeCanvas._editor.state.doc.firstChild.attrs.bpId, "figure-code");
