@@ -266,6 +266,151 @@ defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
     end
   end
 
+  # ── PDS-D75 — a slug two workspaces own (pds-bl-whole-workspace-shared-slug-stamp) ──
+  #
+  # THE RULE, and it is the one PR #13945 (pds-w3-shares-fidelity) settled:
+  # attribution is by workspace COLUMN, not by bare slug. A slug a sibling
+  # workspace also owns is dropped from `dataset_slugs` only because a bare
+  # `dataset = ANY(...)` predicate cannot tell two tenants apart — every
+  # workspace_id-keyed row under it travels, so the bundle DOES carry the
+  # dataset. The provenance stamp is written on the TARGET workspace's own row,
+  # so it is workspace-attributed by construction and must cover that slug.
+  #
+  # Before the fix the whole-workspace path read `dataset_slugs` alone and the
+  # shared slug landed UNSTAMPED and unmentioned — one boot from the
+  # `Plugins.Bootstrap` clobber the stamp exists to guard against.
+  describe "a dataset slug owned by TWO workspaces" do
+    setup do
+      raw_admin = "ws-prov-shared-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(
+          %{name: "Provenance Shared WS"},
+          admin_token(raw_admin)
+        )
+
+      project = Tenancy.get_project(target.slug, "default")
+
+      # THE COLLISION. `datasets.slug` is unique per project_id (charter D21), so
+      # the SAME slug can be owned by a project of another workspace — which is
+      # guerrilla's `production` (owned by `default` and `gyldendal`) in the
+      # small. The sibling must exist for `partition_dataset_slugs_for/1` to see
+      # the slug as shared; it is never touched again.
+      shared = "shared-prod-#{System.unique_integer([:positive])}"
+      sibling = TenancyFixtures.create_workspace!()
+      sibling_project = TenancyFixtures.create_project!(sibling)
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: shared, name: shared})
+      {:ok, _} = Tenancy.create_dataset(sibling_project, %{slug: shared, name: shared})
+
+      # A dataset with no rows is not the case under test: seed a document INTO
+      # the shared slug, so the bundle demonstrably carries workspace-attributed
+      # data for the dataset whose stamp went missing.
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, shared)
+
+      %{raw_admin: raw_admin, target: target, project: project, shared: shared}
+    end
+
+    test "the WHOLE-WORKSPACE path stamps it — the manifest names the dropped half",
+         %{conn: conn, raw_admin: raw_admin, target: target, shared: shared} do
+      {:ok, bundle} =
+        WorkspaceBundle.export(target.id, source_server: "https://shared.example")
+
+      # THE PREMISE, proven rather than asserted in prose: the exclusive
+      # attribution set drops the shared slug (PDS-D46, correct and unchanged),
+      # and the new additive key is what names it.
+      {manifest, _dumps} = WorkspaceBundle.Archive.unpack(bundle)
+      refute shared in manifest["dataset_slugs"]
+      assert shared in manifest["dataset_slugs_shared"]
+
+      ws_slug = target.slug
+      clean_target!(target)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      prov = Jason.decode!(resp.resp_body)["provenance"]
+
+      assert prov["stamped"] == true
+
+      assert shared in prov["datasets"],
+             "a whole-workspace pull must stamp a dataset whose slug a sibling workspace " <>
+               "also owns — it is carried by workspace-column attribution (PR #13945's rule)"
+
+      # NOT silently omitted anywhere: every dataset slot is stamped, so the
+      # explicit-refusal list is empty.
+      assert prov["unstamped"] == []
+
+      # DURABLE, not just a receipt.
+      imported = Tenancy.get_workspace_by_slug(ws_slug)
+      stored = Tenancy.pull_provenance(imported, shared)
+      assert stored["source_server"] == "https://shared.example"
+      assert stored["pulled_at"] == prov["stamp"]["pulled_at"]
+    end
+
+    test "the DATASET-NARROWED path keeps stamping it (the front door, unaffected)",
+         %{conn: conn, raw_admin: raw_admin, target: target, shared: shared} do
+      {:ok, bundle} =
+        WorkspaceBundle.export(target.id,
+          dataset: shared,
+          source_server: "https://narrow.example"
+        )
+
+      ws_slug = target.slug
+      clean_target!(target)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      prov = Jason.decode!(resp.resp_body)["provenance"]
+
+      assert prov["datasets"] == [shared]
+      assert prov["stamped"] == true
+
+      # A narrowed pull does NOT list every sibling as unstamped: siblings being
+      # unstamped is the REQUESTED narrowing, not a silent drop.
+      assert prov["unstamped"] == []
+
+      imported = Tenancy.get_workspace_by_slug(ws_slug)
+      assert Tenancy.pull_provenance(imported, shared)["source_dataset"] == shared
+    end
+
+    test "a dataset the manifest never named is REPORTED, never silently omitted",
+         %{conn: conn, raw_admin: raw_admin, target: target, project: project} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      # Created AFTER the export, so this slug is in no half of the manifest —
+      # the same shape a pre-PDS-D75 bundle presents for its shared slug.
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "after-export", name: "After"})
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+
+      assert resp.status == 200
+      prov = Jason.decode!(resp.resp_body)["provenance"]
+
+      refute "after-export" in prov["datasets"]
+
+      assert %{"dataset" => "after-export", "reason" => "not_named_by_manifest"} in prov[
+               "unstamped"
+             ]
+    end
+  end
+
   describe "PDS-D50 — a body that cannot be a bundle is 422, never 500" do
     setup do
       raw_admin = "ws-invalid-bundle-#{System.unique_integer([:positive])}"

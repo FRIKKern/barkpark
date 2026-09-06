@@ -109,6 +109,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       `dataset = ANY(...)` copy from pulling a co-tenant's rows. The workspace's
       documents, media and every other workspace_id-keyed row under that slug
       still travel — they are attributed by column, not by slug.
+    * `dataset_slugs_shared` is the half `dataset_slugs` dropped — the same
+      partition, said out loud. It is what makes "this bundle has no dataset
+      `production`" distinguishable from "this bundle carries `production`'s
+      workspace_id-keyed rows, but a sibling owns the slug too". A consumer that
+      needs "which dataset slots did this bundle land in" (the import path's
+      provenance stamp, PDS-D75) reads the UNION; a consumer that needs "which
+      slugs may a bare `dataset = ANY(...)` predicate use" reads `dataset_slugs`
+      and only that.
     * `declared_loss` is what that exclusion actually costs, counted. A table
       whose ONLY tenant key is the bare `dataset` slug
       (`Catalog.e3_dataset_unattributable/0`) genuinely cannot export its rows
@@ -795,6 +803,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     slug_partition = partition_dataset_slugs_for(ws.id)
     dataset_slugs = narrow_slugs(slug_partition.exclusive, target)
+    # NOT fed to `export_ctx/4`: the bare-slug copy predicates must keep keying on
+    # the EXCLUSIVE half only (PDS-D21/D46). This half exists to be NAMED in the
+    # manifest, so a consumer can tell "this bundle carries no such dataset" from
+    # "this bundle carries it, attributed by column, under a slug the exclusive
+    # set is required to drop" (PDS-D75).
+    shared_dataset_slugs = narrow_slugs(slug_partition.shared, target)
     ctx = export_ctx(ws, dataset_slugs, profile, target)
     declared_loss = declared_loss(slug_partition.shared, target, profile)
 
@@ -865,6 +879,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         "workspace_slug" => ws.slug,
         "exported_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
         "dataset_slugs" => dataset_slugs,
+        # PDS-D75: the OTHER half of the same partition. `dataset_slugs` is the
+        # exclusive attribution set and must stay that way; this key says which
+        # slugs it had to drop, so "absent because the bundle has no such
+        # dataset" stops looking identical to "absent because a sibling
+        # workspace owns the slug too, while every workspace_id-keyed row under
+        # it travelled". ALWAYS present (`[]` on the common path) for the same
+        # reason `declared_loss` is: a key that appears only on collision cannot
+        # be told apart from an engine too old to have one.
+        "dataset_slugs_shared" => shared_dataset_slugs,
         # PDS-D45/D74: what this bundle could NOT carry, said out loud. ALWAYS
         # present (`[]` on the overwhelmingly common no-collision path) — a key
         # that appears only on loss cannot be told apart from an engine too old
