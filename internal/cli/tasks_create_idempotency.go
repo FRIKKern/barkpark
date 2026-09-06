@@ -87,7 +87,7 @@ func newIdempotencyKey() string {
 //
 // WHY PER-LEG AND NOT ONE KEY FOR THE WHOLE INVOCATION. The plug hashes
 // (raw_key, token_id, method, request_path) and NOTHING FROM THE BODY —
-// plugs/idempotency.ex:6 and :47. Both legs of `bp task create --publish` POST
+// plugs/idempotency.ex, `Idempotency.hash_key/4` and the moduledoc's key row). Both legs of `bp task create --publish` POST
 // the SAME path (/v1/data/mutate/<dataset>); only the mutation in the body
 // differs. So one key across both legs would make the publish request REPLAY the
 // create's cached response, byte for byte, with `Idempotency-Replay: true` — the
