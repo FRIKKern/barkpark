@@ -103,6 +103,26 @@
     };
   }
 
+  // Stable collection inserts consume their client-carried id exactly once.
+  // LiveView can retain the old hidden input value while morphing an active
+  // form, so replace only the id used by an acknowledged insert. Failed and
+  // transport-ambiguous writes keep the same value for exact replay.
+  function bpPaperRotateConsumedCollectionId(form, submitter) {
+    const match = /^(panel|step)-action$/.exec(submitter?.name || "");
+    const action = /^(add|add-body)(?::.+)?$/.exec(submitter?.value || "");
+    if (!match || !action) return () => {};
+    const name = `${match[1]}-${action[1] === "add" ? "new-row-id" : "new-child-id"}`;
+    const consumed = form.elements.namedItem(name)?.value;
+    if (typeof consumed !== "string" || consumed === "") return () => {};
+    return () => {
+      if (!form.isConnected) return;
+      const input = form.elements.namedItem(name);
+      if (!input || input.value !== consumed) return;
+      const replacement = bpPaperRequestId();
+      if (replacement) input.value = `b-${replacement}`;
+    };
+  }
+
   // Validate the currently authored numeric constraints together. Mirroring
   // stored min/max attributes would reject a coherent new range, while only
   // validating on the server lets a failed patch repaint away the local draft.
@@ -1255,6 +1275,7 @@
         if (!driver) return;
         const params = Object.fromEntries(new FormData(form, event.submitter || undefined));
         const restoreCollectionFocus = bpPaperCollectionFocus(form, event.submitter);
+        const rotateConsumedCollectionId = bpPaperRotateConsumedCollectionId(form, event.submitter);
         coordinator.run(() => bpPaperMutation(
           driver,
           form,
@@ -1264,7 +1285,10 @@
             ? { target: form.getAttribute("phx-target") || form }
             : {},
         ).promise.then((saved) => {
-          if (saved) restoreCollectionFocus();
+          if (saved) {
+            rotateConsumedCollectionId();
+            restoreCollectionFocus();
+          }
           return saved;
         }));
       };

@@ -182,6 +182,95 @@ async function stableRowScenario({
   }
 }
 
+async function stableGeneratedIdScenario({
+  prefix = "panel",
+  action = "add",
+  saved = true,
+}) {
+  const dom = new JSDOM(`<main data-paper-doc-key="production:paper:focus" data-paper-rev="1">
+    <button id="toggle" data-editing="true">View</button>
+    <div id="paper-editor">
+      <form id="stable-generated-ids" phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="tabs">
+        <input type="hidden" name="${prefix}-count" value="1">
+        <input type="hidden" name="${prefix}-new-row-id" value="row:new:two">
+        <input type="hidden" name="${prefix}-new-child-id" value="body:new:one">
+        <input type="hidden" name="${prefix}-0-id" value="row:one">
+        <input name="${prefix}-0-label" value="First">
+        <button id="generated-submitter" type="submit" name="${prefix}-action" value="${action}">Act</button>
+      </form>
+    </div>
+  </main>`, { url: "http://localhost/" });
+  const { window } = dom;
+  vm.runInContext(source, vm.createContext({
+    window, document: window.document, CustomEvent: window.CustomEvent,
+    FormData: window.FormData, setTimeout, clearTimeout,
+  }));
+  const sends = [];
+  const resolvers = [];
+  const hook = {
+    ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
+    el: window.document.getElementById("toggle"),
+    pushEvent: (event, payload) => {
+      sends.push({ event, payload });
+      return new Promise(done => { resolvers.push(done); });
+    },
+  };
+  hook.mounted();
+  try {
+    const main = window.document.querySelector("main");
+    const form = window.document.getElementById("stable-generated-ids");
+    const submitter = window.document.getElementById("generated-submitter");
+    const generatedName = `${prefix}-${action === "add" ? "new-row-id" : "new-child-id"}`;
+    const consumedId = form.elements.namedItem(generatedName).value;
+
+    submitter.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter }));
+    await tick();
+    assert.equal(sends[0].payload[generatedName], consumedId);
+
+    if (saved && action === "add") {
+      const id = window.document.createElement("input");
+      id.type = "hidden";
+      id.name = `${prefix}-1-id`;
+      id.value = consumedId;
+      const label = window.document.createElement("input");
+      label.name = `${prefix}-1-label`;
+      form.append(id, label);
+      form.elements.namedItem(`${prefix}-count`).value = "2";
+    }
+    resolvers[0]({
+      saved,
+      request_id: sends[0].payload.request_id,
+      ...(saved ? { rev: 2 } : {}),
+    });
+    await tick();
+
+    if (!saved) {
+      assert.equal(form.elements.namedItem(generatedName).value, consumedId,
+        "a failed request retains the exact generated id for retry");
+      return;
+    }
+
+    const replacementId = form.elements.namedItem(generatedName).value;
+    assert.notEqual(replacementId, consumedId,
+      "an acknowledged action rotates the generated id consumed by that write");
+
+    main.dataset.paperRev = "2";
+    submitter.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter }));
+    await tick();
+    assert.equal(sends[1].payload[generatedName], replacementId);
+    assert.notEqual(sends[1].payload[generatedName], sends[0].payload[generatedName],
+      "the next action cannot replay a generated id already persisted in the tree");
+    resolvers[1]({ saved: true, request_id: sends[1].payload.request_id, rev: 3 });
+    await tick();
+  } finally {
+    hook.destroyed();
+    window.close();
+  }
+}
+
 await scenario({});
 await scenario({ action: "add" });
 await scenario({ action: "remove:1" });
@@ -201,5 +290,8 @@ for (const prefix of ["panel", "step"]) {
   await stableRowScenario({ prefix, action: "remove:row:two" });
   await stableRowScenario({ prefix, saved: false });
   await stableRowScenario({ prefix, moveFocus: true });
+  await stableGeneratedIdScenario({ prefix });
+  await stableGeneratedIdScenario({ prefix, action: "add-body:row:one" });
+  await stableGeneratedIdScenario({ prefix, saved: false });
 }
 console.log("PASS collection focus: reorder, add, remove, failure, and no focus stealing");
