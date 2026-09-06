@@ -89,7 +89,7 @@ defmodule BarkparkCloud.DeployLedgerPartitionTest do
   @r409_bare "the instance refused the deploy (HTTP 409)"
   @requeued " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
   @d_busy_bare @r409_bare <> @requeued
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                 @requeued
   # A deferral shape the ledger has never seen — lands in DEFERRED_UNCLASSIFIED.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
