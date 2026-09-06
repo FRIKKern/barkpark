@@ -1389,6 +1389,20 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|Claim it first (`bp task claim <id> <worker>`) and stamp with the epoch that returns. The | <>
         ~s|post-close --miss / --withdraw exemption applies only to a done or cancelled row.|
 
+  # THE PULSE'S STATE REFUSAL (task-b6fcc8e2f57e1cd5). A keep-alive loop's ONLY
+  # success signal is the pulse's exit code, so its FAILURE has to say which of
+  # the two lost-lease situations it hit: the row moved (re-claim), or the claim
+  # is someone else's (stand down). `not_holder` alone said neither. Name the
+  # state the row actually carries and the one verb that fixes it.
+  def criteria_hint({:not_in_progress, status}, :pulse),
+    do:
+      ~s|this row is #{status}, not in_progress — a pulse renews a LIVE claim, and this row no longer | <>
+        ~s|has one. Nothing was written: no now-line, no epoch bump, so the epoch you hold is unchanged. | <>
+        ~s|A stale `claim.worker` can OUTLIVE the lease (a `bp task stage <id> open` moves the row and | <>
+        ~s|leaves the claim map behind), which is why presence of your worker id here proves nothing. | <>
+        ~s|Re-claim it — `bp task claim <id> <worker>` — and use the epoch THAT returns for the next | <>
+        ~s|stamp/close. If your loop treated the earlier pulses as proof the claim was held, they were not.|
+
   def criteria_hint(:criterion_not_met, :stamp),
     do:
       ~s|this criterion is already met=false, so there is no stamped proof to withdraw and nothing was | <>

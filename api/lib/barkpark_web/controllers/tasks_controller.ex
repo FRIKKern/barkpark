@@ -1335,7 +1335,9 @@ defmodule BarkparkWeb.TasksController do
   #   { "worker_id": "agent-1", "now": "warm-up pinned, rerunning", "criterion": 2 }
   # `criterion` optional (non-negative integer index into acceptance_criteria).
   # NO observed_epoch — pulse is the renewal, it survives fence bumps; a lost
-  # lease (reaped/released/closed/foreign) is 409 not_holder, never a re-claim.
+  # lease is a 409, never a re-claim — `not_in_progress:<status>` when the ROW
+  # moved (reaped/released/closed/staged), `not_holder` when a LIVE claim is
+  # someone else's (task-b6fcc8e2f57e1cd5).
 
   # A now-line is a ticker cell, not a worklog: bound it so one chatty agent
   # can't bloat every board row + event payload. Bytes, honest 400 (never a
@@ -1368,9 +1370,10 @@ defmodule BarkparkWeb.TasksController do
           })
 
         {:error, reason} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          # Through `conflict/4` so a `{:not_in_progress, status}` refusal
+          # carries its remedy hint as the 409's top-level `message` (the bp
+          # CLI prints that in place of the bare token) — task-b6fcc8e2f57e1cd5.
+          conflict(conn, reason, :pulse)
       end
     else
       {:error, :missing, field} ->
