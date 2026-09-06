@@ -795,3 +795,78 @@ func TestPublishDefaultAsymmetryIsDocumentedAtBothSites(t *testing.T) {
 		}
 	}
 }
+
+// task-ee33b6f088b35bdb — THE RECEIPT MUST NOT NAME A DOCUMENT THAT DOES NOT
+// EXIST.
+//
+// Filed as "41 criteria-less orphan DRAFT rows … possibly a create-path leak".
+// The leak hypothesis is FALSE — a probe row created with `bp task create
+// --publish` against guerrilla left no draft behind (`bp doc get task
+// drafts.task-ccd184a652f95f76 --perspective raw` → not_found). What the probe
+// DID surface is one field over: the receipt for that same successful publish
+// read
+//
+//	{"draft":"drafts.task-ccd184a652f95f76","id":"task-ccd184a652f95f76",
+//	 "lifecycle_status":"open","on_board":true,"status":"published"}
+//
+// naming a `drafts.` id that had already been consumed by the publish. That is
+// the create path's signature defect (dispCannotLie, "a true line with no
+// remedy") applied to an id: the field is not merely unhelpful, it RESOLVES TO
+// NOTHING, and the reader most likely to consult it is a sweep hunting exactly
+// the orphan drafts this row is about.
+//
+// The two arms are asserted DISTINCT first — a stub that returned the same
+// shape for both would pass a same-value comparison while proving nothing.
+func TestTaskCreateJSONReceiptNamesADraftOnlyWhenOneExists(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
+	defer ts.Close()
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	// draftField runs one create and returns (draft, status) off the receipt,
+	// plus whether the `draft` key was present at all — an omitted key and an
+	// empty string are the same to a Go string field but not to a caller.
+	draftField := func(t *testing.T, tail []string) (draft string, status string, present bool) {
+		t.Helper()
+		var so, se bytes.Buffer
+		w := &writer{stdout: &so, stderr: &se, output: "json"}
+		if code := runTaskCreate(w, globals{yes: true}, ctx, tail); code != exitOK {
+			t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(so.Bytes(), &raw); err != nil {
+			t.Fatalf("receipt did not parse: %v (%q)", err, so.String())
+		}
+		v, present := raw["draft"]
+		draft, _ = v.(string)
+		status, _ = raw["status"].(string)
+		return draft, status, present
+	}
+
+	gotDraft, draftStatus, draftPresent := draftField(t, []string{"a task"})
+	gotPub, pubStatus, pubPresent := draftField(t, []string{
+		"a task", "--publish",
+		"--description", wallPassingDescription,
+		"--set", wallPassingTags,
+	})
+
+	// DISTINCT-FIRST. If the two arms produced the same status the stub is not
+	// exercising two paths and every assertion below is vacuous.
+	if draftStatus == pubStatus {
+		t.Fatalf("both arms reported status %q — the stub is not exercising the draft and published paths separately", draftStatus)
+	}
+	if draftStatus != "draft" || pubStatus != "published" {
+		t.Fatalf("arm statuses = %q / %q, want draft / published", draftStatus, pubStatus)
+	}
+
+	// The draft arm KEEPS the field: that document exists and the id is the
+	// only handle a caller has for `bp doc discard-draft` / `bp doc publish`.
+	if !draftPresent || gotDraft != "drafts.task-9" {
+		t.Errorf("no---publish receipt draft = %q (present=%v), want drafts.task-9 — the draft exists and the receipt must name it", gotDraft, draftPresent)
+	}
+
+	// The published arm must NOT: publishing consumed the draft, so any
+	// `drafts.` id here points at nothing.
+	if pubPresent {
+		t.Errorf("a SUCCESSFUL --publish receipt still carries draft = %q; publishing consumes the draft, so that id resolves to nothing (probe: bp doc get task drafts.task-ccd184a652f95f76 --perspective raw → not_found)", gotPub)
+	}
+}
