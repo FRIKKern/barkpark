@@ -1,3 +1,4 @@
+# measurement-only: a comment-only edit, to observe the impacted-set selection on a real leaf change.
 defmodule Barkpark.Tasks.Close do
   @moduledoc false
   # Task close + the blocked→open cascade. Extracted from the Barkpark.Tasks
