@@ -49,7 +49,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # Same slug shape as Team — lowercase alphanumeric + hyphens. Unique PER TEAM
   # (not globally): two Teams may both name a Barkpark "prod". The GLOBALLY-unique
   # provisioning identity is NOT the bare slug — see `provisioning_subdomain/1`.
-  @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
+  #
+  # BOTH ends must be alphanumeric, because this slug IS a DNS label on the
+  # clean-first path: `Registry.insert_with_url_reservation/4` hands an
+  # unreserved slug straight to `clean_url/1`, which interpolates it VERBATIM
+  # into `https://<slug>.<base>` and persists that url — and
+  # `subdomain_from_url/1` mints the worker's `dns_label` back out of it. The
+  # older `^[a-z0-9][a-z0-9-]*$` guarded only the LEADING hyphen, so `"acme-"`
+  # was accepted and `https://acme-.barkpark.cloud` reached Postgres: a
+  # trailing hyphen is an invalid RFC-1035 label (unlike the suffixed path,
+  # `clean_url/1` has no assembly step that could trim it). Reachability was
+  # bounded — `slugify/1` on go-live/launch already trims — but the only
+  # raw-slug writer is the worker route, and any future caller-supplied slug on
+  # go-live (the shape `POST /v1/sites` already has) would have made it
+  # immediate. Validate-on-change only: existing rows are untouched.
+  @slug_format ~r/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 
   # The public zone every managed Barkpark lives under. The off-box Go warm-pool
   # provisioner turns the claim payload's subdomain label into `<label>.<base>`
