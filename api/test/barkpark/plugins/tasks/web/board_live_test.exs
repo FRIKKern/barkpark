@@ -2685,4 +2685,69 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       updated_at: Keyword.get(opts, :updated_at, DateTime.utc_now())
     }
   end
+
+  # ── THE STUDIO CLOSE RECORDED NO CALLING TOKEN (pds-bl-close-audit-gaps) ────
+  #
+  # `run_restage/3`'s close arm called `Tasks.close/3` with `observed_epoch` and
+  # `lifecycle_status` only, while `TasksController` threads
+  # `:caller_token_id` through `caller_stamp/1` on every one of its task
+  # mutations. `worker_id` is a client-supplied string with no bearer binding
+  # (close.ex's moduledoc says so outright — "NONE OF THIS IS AUTHORIZATION"),
+  # so the token id is the ONE half of the record an actor cannot choose for
+  # itself, and the board was dropping it. The `:ops` on_mount hook already
+  # assigns the verified `%Auth.ApiToken{}` on the socket, so the id was there
+  # to be threaded the whole time.
+  #
+  # The drop under test is in_progress -> blocked by the card's own holder:
+  # `Board.restage_plan/4` maps that to `{:close, "blocked"}`, and `blocked` is
+  # exempt BY NAME from the close-artifact and criteria gates, so this exercises
+  # the close path itself rather than a gate refusal the board cannot answer.
+  describe "a Studio close is attributed to the token that authenticated it" do
+    test "dragging the holder's in_progress card to blocked stamps caller_token_id on task.closed",
+         %{conn: conn} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      {:ok, api_token} = Auth.verify_token(@admin_token)
+
+      # `fetch_live_task/2` reads through the fail-CLOSED `scope_to_workspace/3`,
+      # so the row has to live in the Default workspace the board resolves.
+      doc =
+        Repo.insert!(%Document{
+          doc_id: "studio-close-1",
+          type: "task",
+          dataset: "production",
+          status: "published",
+          title: "Held by the board's own worker",
+          rev: "rev-studio-close-1",
+          workspace_id: ws.id,
+          content: %{
+            "kind" => "task",
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "studio:admin", "epoch" => 1}
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      render_hook(view, "restage", %{"doc_id" => "studio-close-1", "to_col" => "blocked"})
+
+      assert Repo.get!(Document, doc.id).content["lifecycle_status"] == "blocked",
+             "the drop must actually close the row — a refused drop proves nothing"
+
+      assert [ev] =
+               Repo.all(
+                 from(e in MutationEvent,
+                   where: e.doc_id == "studio-close-1" and e.mutation == "task.closed",
+                   order_by: e.id
+                 )
+               )
+
+      assert ev.document["caller_token_id"] == api_token.id,
+             "a Studio close must name the token that authenticated it"
+
+      # The asserted-worker half rides the same event, so the two actors stay
+      # distinguishable on the board path exactly as they do over HTTP.
+      assert ev.document["closed_by"] == "studio:admin"
+    end
+  end
 end

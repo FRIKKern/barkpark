@@ -2024,4 +2024,95 @@ defmodule Barkpark.Tasks.CloseTest do
                closed.content["acceptance_criteria"]
     end
   end
+
+  # ── THE CLAIMLESS CLOSE RECORDED NOBODY (pds-bl-close-audit-gaps) ───────────
+  #
+  # `apply_close_update/9` stamps `closed_by` only inside its
+  # `%{"claim" => claim} when is_map(claim)` arm. A row that was NEVER claimed
+  # falls to `_ ->`, which writes `lifecycle_status` and nothing else — so the
+  # close, and the `task.closed` event it emits, named no closer at all.
+  #
+  # MEASURED on the guerrilla ledger 2026-09-06, whole population: of 8,606
+  # `type:task` rows, 6,617 are terminal and 139 of those carry no claim map at
+  # all (84 done, 53 cancelled, 2 blocked). NON-VACUITY for that count: 6,332
+  # rows DO carry `claim.closed_by` and 6,803 carry a claim map, so the probe
+  # can see the field and the 139 is a real absence. Three of the 139 were
+  # closed in the trailing 14 days — the hole is live, not historical.
+  #
+  # EVERY ONE OF THE 139 IS LEGITIMATELY CLAIMLESS. Container/root rows (13 of
+  # them carry children) and killed backlog rows nobody ever picked up are
+  # supposed to close without a lease; `cancelled` and `blocked` are exempt
+  # from the criteria gate BY NAME for exactly that reason. A LEAD sealing
+  # somebody else's row is NOT in this set — that row HAS a claim, so it takes
+  # the claim arm and `closed_by` is already stamped there.
+  #
+  # SO THE FIX RECORDS THE CLOSER WITHOUT INVENTING A HOLDER. "Never claimed"
+  # and "closed by nobody" are two different facts and the ledger has to keep
+  # telling them apart, so the identity goes where an audit actually reads
+  # it — onto the `task.closed` mutation event, beside the `caller_token_id`
+  # stamp already there — and the DOCUMENT keeps saying, truthfully, that this
+  # row was never held. Synthesising a claim map instead would also silently
+  # convert `idempotent_replay?/3` — which deliberately refuses to answer a
+  # replay on a claimless row, because an unidentifiable second caller must not
+  # be handed a success receipt — into exactly that receipt.
+  describe "close/3 — every close names its closer on the task.closed event" do
+    test "a NEVER-CLAIMED task's close names the closer on its event", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("claimless"), scope)
+      refute Map.has_key?(task.content, "claim"), "fixture must reach the `_ ->` arm"
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w-claimless",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 caller_token_id: "tok-claimless"
+               )
+
+      assert [ev] = events(task.doc_id, "task.closed")
+
+      assert ev.document["closed_by"] == "w-claimless",
+             "a claimless close must still name a closer on the event"
+
+      # The token stamp that was already there is untouched — the two actors
+      # stay distinguishable (asserted worker vs authenticated bearer).
+      assert ev.document["caller_token_id"] == "tok-claimless"
+
+      # AND THE ROW IS STILL HONESTLY CLAIMLESS. No holder was invented.
+      refute Map.has_key?(closed.content, "claim")
+      assert Repo.get!(Document, task.id).content["claim"] == nil
+    end
+
+    test "a claimless close with NO api_token names the worker and omits the token", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("claimless-anon"), scope)
+
+      assert {:ok, _} =
+               Close.close(task.id, "w-anon", observed_epoch: 0, lifecycle_status: "cancelled")
+
+      assert [ev] = events(task.doc_id, "task.closed")
+      assert ev.document["closed_by"] == "w-anon"
+      refute Map.has_key?(ev.document, "caller_token_id")
+    end
+
+    test "a CLAIMED close carries the same event stamp beside claim.closed_by", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("claimed"), scope, %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => "w-held", "epoch" => 1}
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w-held", observed_epoch: 1, lifecycle_status: "done")
+
+      assert closed.content["claim"]["closed_by"] == "w-held"
+      assert [ev] = events(task.doc_id, "task.closed")
+      assert ev.document["closed_by"] == "w-held"
+    end
+  end
 end
