@@ -757,10 +757,13 @@
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */
     .bp-canvas-table { position: relative; }
-    .bp-canvas-table__cols, .bp-canvas-table__rows { position: absolute; left: 0; z-index: 2; display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; margin: 0; }
-.bp-canvas-table__cols { bottom: 100%; }
-.bp-canvas-table__rows { top: 100%; }
-    .bp-canvas-table:hover .bp-canvas-table__cols, .bp-canvas-table:hover .bp-canvas-table__rows, .bp-canvas-table:focus-within .bp-canvas-table__cols, .bp-canvas-table:focus-within .bp-canvas-table__rows { opacity: 1; pointer-events: auto; }
+/* Idle controls add no reader spacing. When exposed, reserve their own space
+ * BELOW the table: grids have no safe gutter for floating controls. */
+.bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
+.bp-canvas-table:hover > .bp-canvas-table__controls, .bp-canvas-table:focus-within > .bp-canvas-table__controls, .bp-canvas-table__controls[open] { position: relative; opacity: 1; pointer-events: auto; }
+.bp-canvas-table__controls > summary { cursor: pointer; padding: 6px 0; width: fit-content; }
+.bp-canvas-table__controls > summary:focus-visible, .bp-canvas-table__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-table__cols, .bp-canvas-table__rows { display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 0; padding: 4px 0; }
     .bp-canvas-table__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
     .bp-canvas-table__btn:disabled { opacity: 0.4; cursor: default; }
     /* Block chrome ported VERBATIM from the paper-editor bundle

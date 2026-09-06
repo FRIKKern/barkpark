@@ -273,6 +273,8 @@ export const BpTable = Node.create({
       const colRail = document.createElement("div");
       colRail.className = "bp-canvas-table__cols";
       colRail.contentEditable = "false";
+      colRail.setAttribute("role", "group");
+      colRail.setAttribute("aria-label", "Table columns");
 
       const table = document.createElement("table");
       // The READER table element + class, byte-identical to walk.ex.
@@ -284,6 +286,14 @@ export const BpTable = Node.create({
       const rowRail = document.createElement("div");
       rowRail.className = "bp-canvas-table__rows";
       rowRail.contentEditable = "false";
+      rowRail.setAttribute("role", "group");
+      rowRail.setAttribute("aria-label", "Table rows");
+      const controls = document.createElement("details");
+      controls.className = "bp-canvas-table__controls";
+      controls.contentEditable = "false";
+      const summary = document.createElement("summary");
+      summary.textContent = "Configure table";
+      controls.append(summary, colRail, rowRail);
       const contextualHost = editor.options.element?.closest?.(
         'bp-paper-editor[data-editor-mode="table"]',
       );
@@ -337,9 +347,8 @@ export const BpTable = Node.create({
       let delColBtn = null;
       let delRowBtn = null;
 
-      dom.appendChild(colRail);
       dom.appendChild(table);
-      dom.appendChild(rowRail);
+      dom.appendChild(controls);
 
       // The chrome repaints from the live child counts: −row disabled at 1 body row,
       // −col disabled at 1 col. The contentDOM is left to PM.
@@ -418,7 +427,7 @@ export const BpTable = Node.create({
         // an event inside the contentDOM cells MUST reach PM (cell typing/selection).
         stopEvent: (event) => {
           const t = event.target;
-          return colRail.contains(t) || rowRail.contains(t);
+          return controls.contains(t) || colRail.contains(t) || rowRail.contains(t);
         },
         // Ignore mutations under the chrome rails; let PM see contentDOM (tbody)
         // mutations (the callout-node.js pattern).
