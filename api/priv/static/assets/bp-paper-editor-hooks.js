@@ -1684,14 +1684,17 @@
         const structural = PAPER_STRUCTURAL_EVENTS.has(clickEvent) ||
           (clickEvent === "inner-array-op" &&
             !target.closest?.('[phx-hook="BarkparkFieldBridge"]'));
+        const betaPanel = target.closest?.('[data-test-id="studio-doc-beta-editor"]');
+        const modeSwitch = clickEvent === "editor-set-mode" &&
+          betaPanel === main.closest?.('[data-test-id="studio-doc-beta-editor"]');
         const anchor = target.matches("a[href]");
         if (anchor) {
           const href = target.getAttribute("href");
           if (!href || href.startsWith("#") || target.hasAttribute("download") ||
               target.getAttribute("target") === "_blank") return;
         }
-        if (!anchor && !structural) return;
-        if (anchor && !coordinator.hasUnsaved()) return;
+        if (!anchor && !structural && !modeSwitch) return;
+        if ((anchor || modeSwitch) && !coordinator.hasUnsaved()) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         if (structural) {
@@ -1712,8 +1715,15 @@
           return;
         }
         coordinator.run(() => {
-          replayTargets.add(target);
-          target.click();
+          let replayTarget = target;
+          if (modeSwitch) {
+            const mode = target.getAttribute("phx-value-mode");
+            replayTarget = [...betaPanel.querySelectorAll('[phx-click="editor-set-mode"]')]
+              .find((candidate) => candidate.getAttribute("phx-value-mode") === mode);
+          }
+          if (!replayTarget?.isConnected) return;
+          replayTargets.add(replayTarget);
+          replayTarget.click();
         });
       };
       coordinator._onSubmit = (event) => {

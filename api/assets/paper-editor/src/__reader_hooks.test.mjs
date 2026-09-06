@@ -751,5 +751,177 @@ unretryableForm.querySelector('[name="text"]').dispatchEvent(
 assert.equal(footerSaveStatus.textContent, unretryableWarning,
   'fallback input cannot replace an unretryable-operations warning');
 noUuidBridge.destroyed();
+
+// Switching Beta -> Classic is an editor exit just like View/navigation: drain
+// WC rich-body drafts and every contextual form before LiveView unmounts them.
+Object.defineProperty(window, 'crypto', {configurable:true, value:{
+  randomUUID: () => `00000000-0000-4000-8000-${String(++nextRequestId).padStart(12, '0')}`,
+}});
+const modePanel = window.document.createElement('div');
+modePanel.setAttribute('data-test-id', 'studio-doc-beta-editor');
+const modeHeader = window.document.createElement('header');
+let modeClicks = 0;
+const installModeButton = () => {
+  const button = window.document.createElement('button');
+  button.setAttribute('phx-click', 'editor-set-mode');
+  button.setAttribute('phx-value-mode', 'classic');
+  button.addEventListener('click', () => { modeClicks += 1; });
+  modeHeader.replaceChildren(button);
+  return button;
+};
+let modeButton = installModeButton();
+const modeMain = window.document.createElement('main');
+modeMain.dataset.paperDocKey = 'production:document:mode';
+modeMain.dataset.documentRev = '7';
+modePanel.append(modeHeader, modeMain);
+window.document.body.append(modePanel);
+
+// Another mounted editor must not claim this panel's external mode button.
+const decoyPanel = window.document.createElement('div');
+decoyPanel.setAttribute('data-test-id', 'studio-doc-beta-editor');
+const decoyMain = window.document.createElement('main');
+decoyMain.dataset.paperDocKey = 'production:document:decoy';
+decoyMain.dataset.documentRev = '3';
+const decoyWrapper = window.document.createElement('div');
+decoyWrapper.setAttribute('phx-hook', 'BarkparkPaperEditor');
+decoyWrapper.innerHTML = '<bp-paper-editor></bp-paper-editor>';
+const decoyForm = window.document.createElement('form');
+decoyForm.className = 'bp-paper-edit-form';
+decoyForm.setAttribute('phx-change', 'paper-block-autosave');
+decoyForm.innerHTML = '<input name="block_id" value="decoy"><input name="action-label" value="Dirty">';
+decoyMain.append(decoyWrapper, decoyForm);
+decoyPanel.append(decoyMain);
+window.document.body.append(decoyPanel);
+const decoyRequests = [];
+const decoyBridge = {...hooks.BarkparkPaperEditor, el:decoyWrapper,
+  handleEvent: () => {}, pushEvent: () => Promise.resolve({}),
+  pushEventTo: (_target, name, payload) => {
+    decoyRequests.push({name, payload});
+    return Promise.resolve([]);
+  },
+};
+decoyBridge.mounted();
+decoyForm.querySelector('[name="action-label"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+
+const modeWrapper = window.document.createElement('div');
+modeWrapper.setAttribute('phx-hook', 'BarkparkPaperEditor');
+modeWrapper.innerHTML = '<bp-paper-editor data-editor-mode="card-body"></bp-paper-editor>';
+modeMain.append(modeWrapper);
+const modeWc = modeWrapper.querySelector('bp-paper-editor');
+let richBodyDirty = false;
+modeWc.hasPendingChanges = () => richBodyDirty;
+modeWc.flushPendingChanges = () => {
+  if (!richBodyDirty) return false;
+  richBodyDirty = false;
+  modeWc.dispatchEvent(new window.CustomEvent('bp-op', {bubbles:true, detail:{
+    op:'patch-card-body', id:'card-mode', content:[{type:'text', value:'Rich body'}],
+  }}));
+  return true;
+};
+const modeRequests = [];
+const modeBridge = {...hooks.BarkparkPaperEditor, el:modeWrapper,
+  handleEvent: () => {},
+  pushEvent: (name, payload) => new Promise((resolve) =>
+    modeRequests.push({kind:'direct', name, payload, resolve})),
+  pushEventTo: (_target, name, payload) => new Promise((resolve) =>
+    modeRequests.push({kind:'targeted', name, payload, resolve})),
+};
+modeBridge.mounted();
+const cardModeForm = window.document.createElement('form');
+cardModeForm.className = 'bp-paper-edit-form';
+cardModeForm.setAttribute('phx-change', 'paper-block-autosave');
+cardModeForm.setAttribute('phx-debounce', '1000');
+cardModeForm.innerHTML = '<input name="block_id" value="card-mode"><input name="card-title" value="New card"><input name="card-tone" value="">';
+const actionModeForm = window.document.createElement('form');
+actionModeForm.className = 'bp-paper-edit-form';
+actionModeForm.setAttribute('phx-change', 'paper-block-autosave');
+actionModeForm.setAttribute('phx-debounce', '1000');
+actionModeForm.innerHTML = '<input name="block_id" value="action-mode"><input name="action-label" value="Before"><input name="action-href" value=""><input name="action-priority" value="secondary">';
+modeMain.append(cardModeForm, actionModeForm);
+modeButton.dispatchEvent(new window.MouseEvent('click', {bubbles:true, cancelable:true}));
+assert.equal(modeClicks, 1, 'a clean mode switch passes through without synthetic work');
+assert.equal(modeRequests.length, 0, 'a clean mode switch does not write');
+assert.equal(decoyRequests.length, 0, 'an unrelated dirty editor cannot claim the mode switch');
+richBodyDirty = true;
+cardModeForm.querySelector('[name="card-title"]').value = 'Saved before Classic';
+cardModeForm.querySelector('[name="card-title"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+actionModeForm.querySelector('[name="action-label"]').value = 'Action before Classic';
+actionModeForm.querySelector('[name="action-label"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+modeButton.dispatchEvent(new window.MouseEvent('click', {bubbles:true, cancelable:true}));
+assert.equal(modeClicks, 1, 'Classic waits instead of unmounting dirty Beta controls');
+modeButton = installModeButton();
+assert.equal(modeRequests[0].name, 'paper-op', 'WC rich body drains first');
+const richRequest = modeRequests.shift();
+richRequest.resolve({saved:true, request_id:richRequest.payload.request_id, rev:8});
+await tick();
+assert.equal(modeRequests[0].name, 'paper-block-autosave');
+assert.equal(modeRequests[0].payload['card-title'], 'Saved before Classic');
+const cardRequest = modeRequests.shift();
+cardRequest.resolve([{status:'fulfilled', value:{reply:{
+  saved:true, request_id:cardRequest.payload.request_id, rev:9,
+}}}]);
+await tick();
+await tick();
+assert.equal(modeRequests[0].name, 'paper-block-autosave');
+assert.equal(modeRequests[0].payload['action-label'], 'Action before Classic');
+const actionRequest = modeRequests.shift();
+actionRequest.resolve([{status:'fulfilled', value:{reply:{
+  saved:true, request_id:actionRequest.payload.request_id, rev:10,
+}}}]);
+await tick();
+await tick();
+assert.equal(modeClicks, 2, 'Classic replays the current button after every dirty source is acknowledged');
+assert.equal(decoyRequests.length, 0, 'draining one editor never sends another editor draft');
+
+const invalidModeForm = window.document.createElement('form');
+invalidModeForm.className = 'bp-paper-edit-form';
+invalidModeForm.setAttribute('phx-change', 'paper-block-autosave');
+invalidModeForm.setAttribute('phx-debounce', '1000');
+invalidModeForm.innerHTML = '<input name="block_id" value="invalid-mode"><input required name="action-label" value="">';
+modeMain.append(invalidModeForm);
+invalidModeForm.querySelector('[name="action-label"]').dispatchEvent(new window.Event('input', {bubbles:true}));
+modeButton.dispatchEvent(new window.MouseEvent('click', {bubbles:true, cancelable:true}));
+await tick();
+assert.equal(modeClicks, 2, 'invalid contextual drafts refuse the mode switch');
+assert.equal(modeRequests.length, 0, 'invalid drafts never reach the server');
+modeBridge.destroyed();
+decoyBridge.destroyed();
+modePanel.remove();
+decoyPanel.remove();
+
+const conflictModePanel = window.document.createElement('div');
+conflictModePanel.setAttribute('data-test-id', 'studio-doc-beta-editor');
+const conflictModeMain = window.document.createElement('main');
+conflictModeMain.dataset.paperDocKey = 'production:document:conflict-mode';
+conflictModeMain.dataset.documentRev = '11';
+const conflictModeWrapper = window.document.createElement('div');
+conflictModeWrapper.setAttribute('phx-hook', 'BarkparkPaperCanvas');
+conflictModeWrapper.innerHTML = '<bp-paper-canvas></bp-paper-canvas>';
+conflictModeMain.append(conflictModeWrapper);
+const conflictModeBridge = {...hooks.BarkparkPaperCanvas, el:conflictModeWrapper,
+  handleEvent: () => {}, pushEvent: () => Promise.resolve({})};
+conflictModeBridge.mounted();
+const conflictModeForm = window.document.createElement('form');
+conflictModeForm.className = 'bp-paper-edit-form';
+conflictModeForm.setAttribute('phx-change', 'paper-block-autosave');
+conflictModeForm.setAttribute('phx-debounce', '1000');
+conflictModeForm.innerHTML = '<input name="block_id" value="conflict-mode"><input name="action-label" value="Before">';
+const conflictModeButton = window.document.createElement('button');
+conflictModeButton.setAttribute('phx-click', 'editor-set-mode');
+let conflictModeClicks = 0;
+conflictModeButton.addEventListener('click', () => { conflictModeClicks += 1; });
+conflictModePanel.append(conflictModeButton, conflictModeMain);
+conflictModeMain.append(conflictModeForm);
+window.document.body.append(conflictModePanel);
+const conflictModeInput = conflictModeForm.querySelector('[name="action-label"]');
+conflictModeInput.value = 'Retain during conflict';
+conflictModeInput.dispatchEvent(new window.Event('input', {bubbles:true}));
+conflictModeBridge._bpPaperExitCoordinator._setConflict(
+  {conflict:true, current_rev:11}, conflictModeForm, 'production:paper:probe');
+conflictModeButton.dispatchEvent(new window.MouseEvent('click', {bubbles:true, cancelable:true}));
+await tick();
+assert.equal(conflictModeClicks, 0, 'a conflict refuses Classic and retains Beta controls');
+conflictModeBridge.destroyed();
+conflictModePanel.remove();
 dom.window.close();
 console.log('PASS reader canvas: late paint, flush-before-view, save reply, refusal, in-flight save, teardown');
