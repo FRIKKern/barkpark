@@ -162,6 +162,19 @@ defmodule Barkpark.Content.Errors do
                          # (like every code in this set) they take no @hints entry.
                          "slug_mismatch",
                          "create_wall",
+                         # BPML working-copy rev anchor — bulldocs_source_controller.ex
+                         # (the format=bpml pull) + bulldocs_ingest_controller.ex
+                         # (the sync precondition). Both read ONE owner,
+                         # `Content.Papers.op_rev/1`: an ABSENT `content["rev"]`
+                         # is the legitimate revless shape and anchors on 0, but a
+                         # `content["rev"]` that is PRESENT and not an integer is a
+                         # failed READ, and a failed read must never be spelled as
+                         # a rev mismatch. Both routes refuse it with this 422
+                         # naming the doc and the field instead of comparing
+                         # against a value nobody could derive. PUBLIC on both
+                         # /papers/:slug/source and /v1/plugins/bulldocs, so a
+                         # spec-generated SDK must expect this variant on either.
+                         "paper_rev_unreadable",
                          # Session-handoff (tasks 3-4) — the session legs of the
                          # SAME controller. `missing_slug` (422, an upsert body
                          # with no slug), `invalid_kind` (422, an event kind
