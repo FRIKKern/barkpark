@@ -403,6 +403,15 @@ function deepClone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
+function canonicalEmptyCardBody(content) {
+  if (!Array.isArray(content) || content.length !== 1) return false;
+  const node = content[0];
+  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+  const keys = Object.keys(node).sort();
+  return keys.length === 2 && keys[0] === "type" && keys[1] === "value" &&
+    node.type === "text" && node.value === "";
+}
+
 // Strict projection for the Card contextual editor's explicit BODY mode.
 // This deliberately does not make Card an ordinary per-block prose type:
 // callers must opt into this projection and preserve the full Card separately.
@@ -430,7 +439,7 @@ export function cardBodyProjection(card) {
   if (!(rawContent == null || Array.isArray(rawContent))) {
     return { editable: false, content: [], doc: emptyDoc };
   }
-  const content = rawContent == null ? [] : rawContent;
+  const content = rawContent == null || canonicalEmptyCardBody(rawContent) ? [] : rawContent;
   let tiptapInline;
   try {
     tiptapInline = inlineArrayToTiptap(content);

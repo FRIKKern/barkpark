@@ -197,6 +197,31 @@ try {
     mounted.editor.remove();
   }
 
+  const newCard = mount({
+    id: "new-card",
+    type: "card",
+    slots: {
+      title: [{ type: "heading", text: "New card" }],
+      body: [{
+        type: "paragraph",
+        content: [{ type: "text", value: "" }],
+        metadata: { keep: true },
+      }],
+    },
+  });
+  assert.equal(newCard.editor._editor.isEditable, true, "the canonical newly-created Card body is immediately editable");
+  newCard.editor._scheduleEmit();
+  assert.equal(newCard.editor.flushPendingChanges(), false, "mounting the canonical empty body never synthesizes a write");
+  assert.equal(newCard.ops.length, 0);
+  newCard.editor._editor.view.dispatch(newCard.editor._editor.state.tr.insertText("First body", 1));
+  assert.equal(newCard.editor.flushPendingChanges(), true);
+  assert.deepEqual(newCard.ops[0], {
+    op: "patch-card-body",
+    id: "new-card",
+    content: [{ type: "text", value: "First body" }],
+  });
+  newCard.editor.remove();
+
   const guarded = mount({ id: "guarded", type: "card", slots: { body: [{ id: "only", type: "paragraph", content: [{ type: "text", value: "One" }] }] } });
   let slashEvents = 0;
   guarded.editor.addEventListener("bp-slash-insert", () => { slashEvents += 1; });

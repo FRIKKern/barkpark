@@ -99,6 +99,38 @@ defmodule Barkpark.Content.Papers.CardBodyOpTest do
     assert stored["slots"]["future"] == %{"keep" => true}
   end
 
+  test "card body op accepts the canonical new-Card empty text sentinel as its source" do
+    slots = %{
+      "title" => [%{"type" => "heading", "text" => "New card"}],
+      "body" => [
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => ""}],
+          "paragraph-meta" => %{"keep" => true}
+        }
+      ],
+      "future" => %{"keep" => true}
+    }
+
+    {slug, paper} = seed_card!(slots: slots)
+
+    assert {:ok, _receipt, :applied} =
+             apply_body(slug, paper.content["rev"], inline("First body"))
+
+    stored = Content.get_paper(slug) |> card_block()
+
+    assert stored["slots"]["body"] == [
+             %{
+               "type" => "paragraph",
+               "content" => inline("First body"),
+               "paragraph-meta" => %{"keep" => true}
+             }
+           ]
+
+    assert stored["slots"]["title"] == slots["title"]
+    assert stored["slots"]["future"] == slots["future"]
+  end
+
   test "malformed body ops and malformed current card slots fail closed" do
     {slug, paper} = seed_card!()
     before = paper.content
@@ -107,6 +139,11 @@ defmodule Barkpark.Content.Papers.CardBodyOpTest do
           %{"op" => "patch-card-body", "id" => "card", "content" => %{}},
           %{"op" => "patch-card-body", "id" => "card", "content" => [%{}]},
           %{"op" => "patch-card-body", "id" => "card", "content" => ["scalar"]},
+          %{
+            "op" => "patch-card-body",
+            "id" => "card",
+            "content" => [%{"type" => "text", "value" => ""}]
+          },
           %{
             "op" => "patch-card-body",
             "id" => "card",

@@ -13,7 +13,8 @@ defmodule Barkpark.PortableDoc.Projection do
 
     * **FREE** — any block WITHOUT a `"fieldName"` key (rich text, headings,
       images, dividers, …). Free blocks fold into a first-class
-      `content["body"] = %{"blocks" => free_blocks, "html" => rendered}`.
+      `content["body"]`, whose owned `"blocks"` and `"html"` keys are refreshed
+      while any other keys in an existing body map are preserved.
 
   ## Representation (the chosen shape)
 
@@ -37,7 +38,8 @@ defmodule Barkpark.PortableDoc.Projection do
   It walks the block list ONCE:
 
     * every bound block → `content[fieldName] = projected_value(block)`
-    * all free blocks  → `content["body"] = %{"blocks" => free, "html" => …}`
+    * all free blocks  → `content["body"]["blocks" | "html"]` are refreshed;
+      unowned keys in an existing body map survive
 
   Nothing else may write those keys — that is the no-drift guarantee. The walk
   is folded into the write path in `Content.apply_paper_block_op/3` and
@@ -114,7 +116,9 @@ defmodule Barkpark.PortableDoc.Projection do
   @doc """
   Project a freshly-written block list into `content`, the SOLE writer of
   `content[fieldName]` (one per bound block) and `content["body"]` (all free
-  blocks as `%{"blocks" => …, "html" => …}`).
+  blocks as the owned `%{"blocks" => …, "html" => …}` keys). Existing unowned
+  keys in a body map are preserved; scalar and list body representations are
+  replaced by the canonical projected map.
 
   `content` is the document's current content map (so unrelated keys —
   `blocks`, `body_html`, `rev`, provenance — survive). `blocks` is the new
@@ -148,7 +152,9 @@ defmodule Barkpark.PortableDoc.Projection do
   dropped set is unrecoverable from `content` alone.
 
   Byte-identical to the legacy behaviour whenever the bound set is unchanged
-  (`dropped == []` ⇒ `Map.drop([])` no-op). Pure: `Map.drop`/`Map.put` only.
+  and the existing body has no unowned map keys. Projection owns and replaces
+  body `"blocks"`/`"html"`; every other existing body-map key survives. Pure:
+  map operations only.
   """
   @spec project(content(), [block()], [block()], map()) :: content()
   def project(content, old_blocks, blocks, render_opts)
@@ -156,10 +162,18 @@ defmodule Barkpark.PortableDoc.Projection do
     {bound, free} = partition(blocks)
     prior = for b <- old_blocks, bound?(b), do: b["fieldName"]
 
+    projected_body = project_body(free, render_opts)
+
+    body =
+      case Map.get(content, "body") do
+        existing when is_map(existing) -> Map.merge(existing, projected_body)
+        _ -> projected_body
+      end
+
     projected =
       content
       |> project_bound_fields(prior, bound)
-      |> Map.put("body", project_body(free, render_opts))
+      |> Map.put("body", body)
 
     # Project-on-write, part two: derive content["preview"] — the OpenGraph-shaped
     # per-document card — from the SAME block walk, right beside content["body"],

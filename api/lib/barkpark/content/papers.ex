@@ -1475,33 +1475,56 @@ defmodule Barkpark.Content.Papers do
 
   @doc """
   Resolve the block list for editing a document — the stored
-  `content["blocks"]` when present, else a LAZILY SYNTHESIZED in-memory list
-  (Exp-P2, step 2.5) built from the schema's Expectation layout + the doc's
-  existing `content[fieldName]` values + body.
+  `content["blocks"]` when present, the historical nested
+  `content["body"]["blocks"]`/bare body list when top-level authority is absent,
+  else a LAZILY SYNTHESIZED in-memory list (Exp-P2, step 2.5) built from the
+  schema's Expectation layout + the doc's existing `content[fieldName]` values
+  + body.
 
   Returns `{blocks, synthesized?}`. When `synthesized?` is `true` the list was
   built in memory and the stored row is UNTOUCHED — nothing is persisted until
   the first op lands (the caller's first `apply_paper_block_op`/`upsert_paper`
-  write persists it). When `false`, `content["blocks"]` already existed and is
-  returned verbatim.
+  write persists it). When `false`, a stored block authority already existed
+  and is returned verbatim. A present but malformed authority returns a tagged
+  error instead of exposing an editable empty canvas or synthesizing through a
+  lower-precedence representation.
 
   The synthesis round-trip is byte-equal: feeding the synthesized blocks back
   through `Projection.project/3` reproduces the original `content[fieldName]`
   values exactly (see `Barkpark.PortableDoc.Synthesis`).
   """
-  @spec resolve_blocks_for_edit(map() | nil, String.t(), String.t()) :: {[map()], boolean()}
+  @spec resolve_blocks_for_edit(map() | nil, String.t(), String.t()) ::
+          {[map()], boolean()} | {:error, {:malformed_block_authority, String.t()}}
   def resolve_blocks_for_edit(nil, _type, _dataset), do: {[], false}
 
   def resolve_blocks_for_edit(%Document{} = doc, type, dataset) do
     content = doc.content || %{}
 
-    case Map.get(content, "blocks") do
-      blocks when is_list(blocks) ->
-        {blocks, false}
+    case content do
+      %{"blocks" => blocks} ->
+        block_authority(blocks, "blocks")
+
+      %{"body" => %{"blocks" => blocks}} ->
+        block_authority(blocks, "body.blocks")
+
+      %{"body" => blocks} when is_list(blocks) ->
+        block_authority(blocks, "body")
+
+      %{"body" => body} when is_map(body) ->
+        {:error, {:malformed_block_authority, "body"}}
+
+      %{"body" => body} when not is_nil(body) and not is_binary(body) ->
+        {:error, {:malformed_block_authority, "body"}}
 
       _ ->
         {synthesize_blocks(doc, type, dataset), true}
     end
+  end
+
+  defp block_authority(blocks, path) do
+    if is_list(blocks) and Enum.all?(blocks, &is_map/1),
+      do: {blocks, false},
+      else: {:error, {:malformed_block_authority, path}}
   end
 
   # Build the in-memory synthesized block list: resolve the Expectation layout

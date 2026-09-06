@@ -1048,10 +1048,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     is_draft = (editor && editor[:is_draft]) || false
     has_published = (editor && editor[:has_published]) || false
 
-    {editor_blocks, editor_blocks_synth?} =
-      Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
-
-    {editor_blocks, editor_blocks_identity_error} = Paper.project_editor_blocks(editor_blocks)
+    {editor_blocks, editor_blocks_synth?, editor_blocks_identity_error} =
+      Paper.resolve_editor_blocks(editor_doc, editor_type, socket.assigns.dataset)
 
     same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
 

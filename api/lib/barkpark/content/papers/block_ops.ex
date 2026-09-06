@@ -1741,7 +1741,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_document_if_rev(doc, if_rev),
-         {blocks, _synth?} = Papers.resolve_blocks_for_edit(doc, type, dataset),
+         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
          {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
@@ -2020,8 +2020,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
                    true <- current_id == doc.id,
                    if_rev = Keyword.get(opts, :if_rev),
                    :ok <- check_document_block_form_rev(current_doc, if_rev),
-                   {blocks, _synth?} =
-                     Papers.resolve_blocks_for_edit(current_doc, type, dataset),
+                   {:ok, blocks} <-
+                     resolve_document_blocks_for_edit(current_doc, type, dataset),
                    {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
                    {:ok, op} <- normalize_document_block_form_resolution(resolver.(blocks)) do
                 write_opts = Keyword.put(opts, :defer_after_save, true)
@@ -2097,6 +2097,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
         _opts
       ),
       do: {:error, :invalid_block_form_request}
+
+  defp resolve_document_blocks_for_edit(doc, type, dataset) do
+    case Papers.resolve_blocks_for_edit(doc, type, dataset) do
+      {:error, _reason} = error -> error
+      {blocks, _synth?} when is_list(blocks) -> {:ok, blocks}
+    end
+  end
 
   defp normalize_document_block_form_resolution({:ok, op}) when is_map(op), do: {:ok, op}
 
@@ -2530,7 +2537,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     do:
       element["type"] == "paragraph" and
         (not Map.has_key?(element, "content") or is_nil(element["content"]) or
-           valid_card_editor_inline?(element["content"]))
+           valid_card_editor_source_inline?(element["content"]))
+
+  defp valid_card_editor_source_inline?([%{"type" => "text", "value" => ""} = node]),
+    do: exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_source_inline?(nodes), do: valid_card_editor_inline?(nodes)
 
   defp strict_card_media?(element),
     do:

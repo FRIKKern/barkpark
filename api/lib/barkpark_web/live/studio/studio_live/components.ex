@@ -1756,8 +1756,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 role="alert"
                 data-test-id="studio-beta-identity-error"
               >
-                Block editing is unavailable because this document has duplicate block IDs.
-                No content was changed.
+                {beta_identity_error_message(@editor_blocks_identity_error)}
               </span>
             </:extra_actions>
             <%!-- spd-w19 — the third seam. The slot has been DECLARED and never
@@ -2028,6 +2027,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     </.pane_layout>
 
     """
+  end
+
+  defp beta_identity_error_message({:malformed_block_authority, _path}) do
+    "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
+  end
+
+  defp beta_identity_error_message(_reason) do
+    "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
   end
 
   # ── the SheetGrid capability prop ───────────────────────────────────────────
