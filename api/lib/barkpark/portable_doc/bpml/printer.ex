@@ -310,7 +310,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           "#{esc(plain_alias(i, ["text", "title"]) || "")}</entry>"
       end)
 
-    wrap("toc", attr_str(b, ["id", "depth", "numbered"]), entries, d)
+    wrap("toc", attr_str(b, ["id", "depth", "numbered", "sticky"]), entries, d)
   end
 
   # `bar-chart` — labelled bars. `value` is numeric and `values` (show the
