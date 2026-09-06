@@ -25,7 +25,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
 
     assert html =~ Render.render_block(block, %{style: :article})
     assert html =~ ~s(data-test-id="paper-links-preview")
-    assert html =~ ~s(<details class="bp-paper-contextual-controls">)
+    assert html =~ ~s(class="bp-paper-contextual-controls")
+    assert html =~ "ignore_attrs"
     assert html =~ ~s(id="paper-links-form-related")
     assert html =~ ~s(phx-submit="paper-edit-block")
     assert html =~ ~s(phx-change="paper-block-autosave")
@@ -50,7 +51,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
 
     assert html =~ Render.render_block(block, %{style: :article})
     assert html =~ ~s(data-test-id="paper-bar-chart-preview")
-    assert html =~ ~s(<details class="bp-paper-contextual-controls">)
+    assert html =~ ~s(class="bp-paper-contextual-controls")
+    assert html =~ "ignore_attrs"
     assert html =~ ~s(id="bar-chart-form-velocity")
     assert html =~ ~s(data-test-id="paper-bar-chart-row")
     assert html =~ ~s(phx-debounce="500")
@@ -80,7 +82,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
       })
 
     assert html =~ ~s(data-test-id="paper-expandable-preview")
-    assert html =~ ~s(<details class="bp-paper-contextual-controls">)
+    assert html =~ ~s(class="bp-paper-contextual-controls")
+    assert html =~ "ignore_attrs"
     assert html =~ ~s(id="expandable-form-details")
     assert html =~ ~s(phx-hook="BarkparkPaperCanvas")
     assert html =~ ~s(data-paper-container-id="details")
@@ -88,6 +91,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
     assert html =~ ~s(data-paper-rev="7")
 
     fragment = LazyHTML.from_fragment(html)
+
+    for disclosure <- LazyHTML.query(fragment, "details") do
+      assert [_id] = LazyHTML.attribute(disclosure, "id")
+      assert [command] = LazyHTML.attribute(disclosure, "phx-mounted")
+      assert [["ignore_attrs", %{"attrs" => ["open"]}]] = Jason.decode!(command)
+    end
 
     assert fragment
            |> LazyHTML.query(

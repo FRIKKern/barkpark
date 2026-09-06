@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+  alias Phoenix.LiveView.JS
 
   # t9 — the task block types whose boundary widget paints a LIVE preview
   # (mirrors TaskResolver's @snapshot_types + @detail_type). These are the fleet
@@ -1388,7 +1389,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
-          <details class="bp-paper-contextual-controls">
+          <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure related papers</summary>
             <div class="bp-paper-contextual-panel">
               <form
@@ -1477,8 +1479,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "expandable" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-expandable-editor">
           <details
+            id={"paper-expandable-disclosure-" <> @id}
             class="bp-expandable"
             open={Map.get(@block, "open") == true}
+            phx-mounted={JS.ignore_attributes("open")}
             data-test-id="paper-expandable-preview"
           >
             <summary><%= Map.get(@block, "summary", "") %></summary>
@@ -1546,7 +1550,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <% end %>
             </div>
           </details>
-          <details class="bp-paper-contextual-controls">
+          <details id={"paper-expandable-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure expandable</summary>
             <div class="bp-paper-contextual-panel">
               <form
@@ -1575,7 +1580,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview">
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
-          <details class="bp-paper-contextual-controls">
+          <details id={"paper-chart-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure bar chart</summary>
             <div class="bp-paper-contextual-panel">
               <form
