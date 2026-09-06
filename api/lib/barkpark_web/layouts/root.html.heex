@@ -3959,6 +3959,42 @@
     }
     .bp-press-answer:empty { display: none; }
 
+    /* THE SIGHTED HALF OF THE ROW-LEVEL PRESS STATE. `#bp-press-answer` above
+       answers a screen reader; this answers the eye. The hook stamps
+       `aria-busy="true"` on the pressed control and clears it in `_paRelease`,
+       so the rule is live for exactly the press-to-answer window and for every
+       phx-click element inside #studio-panes — Structure rows, doc rows, pane
+       header actions — not just the two row components.
+
+       A MOVING bar, not another static tint: the complaint the parent row
+       exists to answer is that a still grey wash reads as a dead control, and
+       motion is the thing that says "this is working" without words. It rides
+       ::after pinned to the row's bottom edge so it cannot shift layout, and it
+       is additive — `.phx-click-loading{opacity:.6}` above is untouched. */
+    #studio-panes [aria-busy="true"] {
+      position: relative;
+      border-left-color: var(--primary);
+    }
+    #studio-panes [aria-busy="true"]::after {
+      content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+      background: var(--primary); border-radius: 2px;
+      transform-origin: left center; pointer-events: none;
+      animation: bp-row-busy 1.1s ease-in-out infinite;
+    }
+    @keyframes bp-row-busy {
+      0%   { transform: scaleX(0);    opacity: 0.55; }
+      50%  { transform: scaleX(1);    opacity: 1; }
+      100% { transform: scaleX(0);    opacity: 0.55; }
+    }
+    /* Reduced motion still gets a CHANGE, just not a moving one — a full-width
+       accent rule under the pressed row. Never `animation: none` alone, which
+       would leave scaleX(0) and hide the bar outright. */
+    @media (prefers-reduced-motion: reduce) {
+      #studio-panes [aria-busy="true"]::after {
+        animation: none; transform: scaleX(1); opacity: 1;
+      }
+    }
+
     /* Selected state transition (only the highlight animates, not the layout) */
     .pane-item, .pane-doc-item { transition: background var(--dur-1), border-color var(--dur-1); }
 
@@ -5150,6 +5186,22 @@
         if (this._paProbe) { window.clearTimeout(this._paProbe); this._paProbe = 0; }
         if (this._paCeil) { window.clearTimeout(this._paCeil); this._paCeil = 0; }
         if (this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
+        // THE ROW-LEVEL CLEAR (charter D263 follow-up). `#bp-press-answer`
+        // above is PAGE-level: a screen-reader user is told what happened, a
+        // sighted user looking at the pressed row still sees only the wordless
+        // `.phx-click-loading{opacity:.6}` tint the owner read as a dead
+        // control. `aria-busy` puts the same pending state ON THE ROW — AT
+        // reports it, and `#studio-panes [aria-busy="true"]` in the sheet gives
+        // the sighted user a moving progress bar rather than a grey wash.
+        //
+        // It clears HERE and nowhere else on purpose: `_paRelease` is the one
+        // release path, so settle, ref-drop, detach, the 16ms no-ref refusal,
+        // the 8s ceiling, pagehide and destroy all clear the row through it and
+        // none of them can strand a row stuck busy. A clear placed in `_paSettle`
+        // instead would leave a REFUSED press busy forever — that is the second
+        // arm `row_press_state_guard_test.exs` mutates for.
+        var prev = this._paPending;
+        if (prev && prev.el) prev.el.removeAttribute("aria-busy");
         this._paPending = null;
         this._paSay(text || "");
         if (text) {
@@ -5243,6 +5295,10 @@
         // Newest press owns the region; the previous one's timers die with it.
         this._paRelease("");
         this._paPending = p;
+        // The pressed ROW now carries the pending state itself, not just the
+        // page-level region. Set after the release above, so the previous
+        // press's row is cleared before this one is marked.
+        p.el.setAttribute("aria-busy", "true");
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
