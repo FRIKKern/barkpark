@@ -1540,8 +1540,9 @@
 .bp-paper-editor-body li > p { margin: 0; }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
-/* Only the opening canvas run shares the reader opening-margin clamp. */
-.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child { margin-top: 0; }
+/* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
+   lifts the Chronicle navigation and title by one paragraph margin in Edit. */
+.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }
 
 /* Configuration sits over the code frame without adding a publish-time gap. */
 .bp-paper-editor-body pre.bp-canvas-code { position: relative; }
