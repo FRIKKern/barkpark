@@ -157,6 +157,45 @@ fabricate a defect, which is the failure this epic exists to stop.
    debounce, and the oracle is the API — the canvas wrapper is
    `phx-update="ignore"`, so no DOM state inside it proves anything.
 
+## The wire reading: SENT / NOT SENT / CANNOT READ
+
+A press that was **never sent** and a press that was **sent and ignored** are the
+same silence in the DOM, and they need opposite fixes. Every "this row is dead"
+verdict this harness printed before was blind to that difference, and one of them
+literally ended *"the row's phx-click never reached the server"* — a claim it had
+no instrument for.
+
+It has one now. `Page` subscribes to `Network.webSocketCreated` /
+`Network.webSocketFrameSent` (the `Network` domain was already on for the status
+line), keeps the requestIds whose URL contains `/live/websocket`, and counts
+frames whose payload carries `"type":"click"` — the field the LiveView server
+switches on, absent from every join, heartbeat, form and hook push on the same
+socket. `page.wireMark()` before a press, `page.wireVerdict(mark)` after:
+
+| verdict | meaning | where the fix belongs |
+|---|---|---|
+| `SENT` | ≥1 click frame left the browser | the **server** handler's latency |
+| `NOT SENT` | the socket was open and carried zero | the **client** affordance |
+| `CANNOT READ` | no `/live/websocket` socket was ever observed | the instrument |
+
+**`CANNOT READ` is not a zero and never prints like one.** A failed read that
+rendered as "0 frames" would manufacture a confident client-side verdict out of a
+broken tap, so it is a FAILED check and the run exits non-zero.
+
+It applies only to presses that *are* socket pushes: `plugin_link` rows navigate
+by plain `href` and report `N/A`, and inventoried rows (`add_btn`,
+`section_header`) are never pressed at all.
+
+The fixture serves a real `/live/websocket` (a 12-line 101 handshake; it never
+replies, because the tap reads the browser's *sent* side) and reproduces **both**
+of the shipped client's silent drop gates — `pushWithReply`'s
+`Promise.reject(new Error("no connection"))` before the channel joins, and
+`bindClick`'s early return on `data-phx-ref-src`. `/rot` therefore carries one row
+that is dead *client*-side (`#item-sheet`, rendered with `data-phx-ref-src`
+already stamped → `NOT SENT`) beside rows that are dead *server*-side (their press
+goes out and nothing answers → `SENT`), so both verdicts are demonstrated offline
+on every run rather than promised in a comment.
+
 ## `--self-test` is the mutation proof
 
 **The coverage guard is the part that keeps the rest honest.** The self-test used
