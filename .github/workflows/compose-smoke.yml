@@ -213,9 +213,16 @@ jobs:
       # between "glibc base image" and "retry on this host": CPU model and
       # kernel release. It is not a gate (no continue-on-error, no verdict) and
       # must never fail the job — hence the trailing `|| true`.
+      #
+      # MINSIGSTKSZ pair (task-f4cff88ca65aca30 c1, after #16476 moved the image
+      # to glibc): the kernel's minimum for THIS host (AT_MINSIGSTKSZ from the
+      # auxv) beside what libc reports (getconf). On an AMX host the auxv value
+      # exceeds musl's static 8192 — that pair IS the mechanism #16476 fixed, so
+      # a run on such a host proves the glibc base by its numbers, not by the
+      # absence of a crash. Both are Linux-only reads; `|| true` still covers them.
       - name: Runner hardware census (sigaltstack correlation)
         run: |
-          { grep -m1 'model name' /proc/cpuinfo; uname -r; nproc; } || true
+          { grep -m1 'model name' /proc/cpuinfo; uname -r; nproc; getconf MINSIGSTKSZ; LD_SHOW_AUXV=1 /bin/true | grep AT_MINSIGSTKSZ; } || true
       - name: Env census (both runtime roots)
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
