@@ -20,9 +20,10 @@ defmodule Barkpark.Tasks.TtlSweeper do
        ts_iso, an absent ts_iso means nobody owns the lock anymore.
 
     2. For each candidate, in a dedicated `Repo.transaction` guarded by
-       `pg_advisory_xact_lock(hashtext('task:' || doc_id))` (the SAME
-       key `Tasks.close/3` uses, so a sweep and a close cannot
-       interleave on the same task):
+       `pg_advisory_xact_lock(hashtext('task:' || uuid))` —
+       `Barkpark.Tasks.LockKey.task/1` on the candidate's UUID PRIMARY
+       KEY, which is the SAME key `Tasks.close/3` uses, so a sweep and a
+       close cannot interleave on the same task:
 
          a. Re-read the row inside the lock — the row's state under the
             lock is ground truth, the outer SELECT was advisory. If the
@@ -64,8 +65,11 @@ defmodule Barkpark.Tasks.TtlSweeper do
       pool resources for as long as the slowest emit-event takes —
       back-pressure on every other Tasks caller. The per-task txn
       releases its lock + connection in O(ms) per row.
-    * The advisory key `hashtext('task:' || doc_id)` is the SAME key
-      `Tasks.close/3` uses. Using SELECT FOR UPDATE on the row would
+    * The advisory key `hashtext('task:' || uuid)` (`LockKey.task/1`) is
+      the SAME key `Tasks.close/3` uses. The candidate queries select
+      `%Document{id: …}`, so the value threaded into `reap_one/3` and
+      `lapse_one/2` is the uuid PRIMARY KEY — it was once named `doc_id`
+      in those clauses, which read as the SLUG family and was wrong. Using SELECT FOR UPDATE on the row would
       mean a sweep and a close fight on the row-lock alone — fine in
       isolation, but if a future writer adds row-level operations on
       the same doc (workspace hooks, validation rules) they'd also
@@ -94,7 +98,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
   `perform/1` also runs `sweep_engagement/1`: the honesty lease for the
   THOUGHT states (`considering` / `researching`, TLV charter D1). A task
   stuck in `researching` because its cycle crashed is a lie — nothing
-  else ever moves it. Same advisory-lock family (`task:<doc_id>`), same
+  else ever moves it. Same advisory-lock family (`task:<uuid>`), same
   select-candidates → recheck-under-lock → CAS-rev `update_all` pattern,
   and deliberately NO claim-epoch machinery: thought is not contended
   work, so there is nothing to fence.
@@ -165,6 +169,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
   import Ecto.Query
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Internal
@@ -229,8 +234,8 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
     candidates = expired_candidates(cutoff, now)
 
-    Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
-      case reap_one(doc_id, cutoff, now) do
+    Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: task_uuid}, acc ->
+      case reap_one(task_uuid, cutoff, now) do
         :swept -> %{acc | swept: acc.swept + 1}
         :skipped -> %{acc | skipped: acc.skipped + 1}
       end
@@ -251,8 +256,8 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
     candidates = engagement_candidates(cutoff)
 
-    Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
-      case lapse_one(doc_id, cutoff) do
+    Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: task_uuid}, acc ->
+      case lapse_one(task_uuid, cutoff) do
         :swept -> %{acc | swept: acc.swept + 1}
         :skipped -> %{acc | skipped: acc.skipped + 1}
       end
@@ -328,16 +333,17 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
   # ─── Per-task reap (the locked, idempotent unit) ──────────────────────────
 
-  defp reap_one(doc_id, %DateTime{} = cutoff, %DateTime{} = now) do
+  defp reap_one(task_uuid, %DateTime{} = cutoff, %DateTime{} = now) do
     result =
       Repo.transaction(fn ->
         # Per-task advisory lock — same key Tasks.close/3 uses. Auto-
         # releases at COMMIT/ROLLBACK. A concurrent close on the same
         # task waits here; a concurrent sweep on the same task waits
         # here; closes on DIFFERENT tasks pass through unimpeded.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
-        case Repo.get(Document, doc_id) do
+        # global-read: in-lock by-PK re-read of a candidate row the sweeper's own cross-tenant scan selected — internal Oban worker, tenancy resolved by the candidate query, same posture as the lapse re-read below.
+        case Repo.get(Document, task_uuid) do
           nil ->
             # Row was deleted between SELECT and lock acquisition. Not
             # an error — count as skipped.
@@ -540,15 +546,15 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
   # ─── Per-task engagement lapse (tlv-s6 — the locked, idempotent unit) ─────
 
-  defp lapse_one(doc_id, %DateTime{} = cutoff) do
+  defp lapse_one(task_uuid, %DateTime{} = cutoff) do
     result =
       Repo.transaction(fn ->
         # Same advisory-lock family as the reap and Tasks.close/3 — a lapse
         # can never interleave with a close/claim/reap on the same task.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
         # global-read: in-lock by-PK re-read of a candidate row the sweeper's own cross-tenant scan selected — internal Oban worker, tenancy resolved by the candidate query, same posture as the reap re-read above.
-        case Repo.get(Document, doc_id) do
+        case Repo.get(Document, task_uuid) do
           nil ->
             :skipped
 

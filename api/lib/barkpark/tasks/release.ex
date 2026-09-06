@@ -41,6 +41,7 @@ defmodule Barkpark.Tasks.Release do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -51,7 +52,7 @@ defmodule Barkpark.Tasks.Release do
 
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         case Repo.get(Document, task_id) do
           nil ->

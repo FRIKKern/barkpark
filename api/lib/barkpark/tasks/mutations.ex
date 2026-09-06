@@ -17,6 +17,7 @@ defmodule Barkpark.Tasks.Mutations do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -35,7 +36,7 @@ defmodule Barkpark.Tasks.Mutations do
       when is_binary(task_id) and is_list(add) and is_list(remove) do
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         case Repo.get(Document, task_id) do
           nil ->
@@ -124,7 +125,7 @@ defmodule Barkpark.Tasks.Mutations do
               is_list(remove_ids) do
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         case Repo.get(Document, task_id) do
           nil ->

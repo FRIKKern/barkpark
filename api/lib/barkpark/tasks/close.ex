@@ -82,6 +82,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
@@ -250,7 +251,7 @@ defmodule Barkpark.Tasks.Close do
 
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         case Repo.get(Document, task_id) do
@@ -435,10 +436,12 @@ defmodule Barkpark.Tasks.Close do
        ) do
     result =
       Repo.transaction(fn ->
-        # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
-        #    deterministic int4 key; pg_advisory_xact_lock takes an int4 or
-        #    bigint and auto-releases at COMMIT/ROLLBACK.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        # 1. Advisory lock — per-task, on `LockKey.task/1` = 'task:' <> the
+        #    document's UUID PRIMARY KEY (`task_id` here IS the uuid; it is
+        #    NOT the doc_id slug). hashtext gives a deterministic int4 key;
+        #    pg_advisory_xact_lock takes an int4 or bigint and auto-releases
+        #    at COMMIT/ROLLBACK.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         #

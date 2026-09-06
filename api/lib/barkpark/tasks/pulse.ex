@@ -31,7 +31,10 @@ defmodule Barkpark.Tasks.Pulse do
   # `work_digest` + `work_field_digests` stay untouched so the L2 close-fence
   # still catches a brief edited under the claim.
   #
-  # Lock family (charter D6): advisory key `task:<doc_id>` STRING — the
+  # Lock family: advisory key `task:<uuid>` via `LockKey.task/1` — the
+  # converged key. It was `task:<doc_id>` STRING until
+  # task-eal-bl-lock-key-convergence, which meant a pulse and a close did NOT
+  # exclude each other. Historical note (charter D6) — the
   # renewal family (claim / ttl_sweeper / compactor) — so a pulse serializes
   # with the TTL sweeper's reap of the same row. The key is the ROW's doc_id
   # (read before locking, re-read after), matching the sweeper's key exactly.
@@ -52,6 +55,7 @@ defmodule Barkpark.Tasks.Pulse do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -87,25 +91,24 @@ defmodule Barkpark.Tasks.Pulse do
 
     result =
       Repo.transaction(fn ->
-        # Read once for the lock key, lock, then RE-read: the advisory lock
-        # (renewal family, `task:<doc_id>` string — the sweeper's exact key)
-        # must be held before the row state we gate on is read, or a reap
-        # committing between our read and our write could race the holder
-        # check. doc_id is immutable, so the pre-lock read is safe for keying.
-        # Tenancy was resolved at the controller (doc_id -> task.id); the
-        # holder check below binds the caller to this exact row (same
+        # Lock FIRST, then read. `task_id` IS the document's uuid PRIMARY KEY,
+        # so the converged `task:<uuid>` key is available with no pre-lock
+        # read at all — the read-for-the-key/re-read dance this used to do
+        # existed only because the key was built from the `doc_id` SLUG, which
+        # is a DIFFERENT lock from the one close/release/stage/sweeper take
+        # (task-eal-bl-lock-key-convergence). The row state gated on below is
+        # read under the lock, so a reap cannot commit between the read and
+        # the write. Tenancy was resolved at the controller (doc_id ->
+        # task.id); the holder check binds the caller to this exact row (same
         # accepted posture as Claim.do_renew and Close's re-read).
-        # global-read: by-PK read for the renewal-family lock key
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
+
+        # global-read: in-lock by-PK read — tenancy resolved at the controller (doc_id -> task.id), holder check below binds the caller to this row.
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
 
-          %Document{doc_id: doc_id} ->
-            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
-
-            # global-read: in-lock re-read of the same PK row (see above)
-            doc = Repo.get!(Document, task_id)
-
+          %Document{} = doc ->
             with :ok <- check_live(doc),
                  :ok <- check_holder(doc, worker_id) do
               apply_pulse(doc, worker_id, text, criterion, caller_token_id)

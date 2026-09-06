@@ -18,6 +18,7 @@ defmodule Barkpark.Tasks.Claim do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
@@ -77,15 +78,24 @@ defmodule Barkpark.Tasks.Claim do
 
     result =
       Repo.transaction(fn ->
-        # Advisory lock (per-doc_id) — serializes concurrent targeted claims for
-        # the same row; keyed off doc_id (unique within tenancy) since we don't
-        # yet know the uuid. Resource-carrying claims ALSO take a global
-        # resources lock so two concurrent claims of different tasks cannot both
-        # pass the overlap scan and land conflicting resource sets.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
+        # PRE-RESOLUTION advisory lock (per-doc_id) — serializes concurrent
+        # targeted claims for the same slug; keyed off doc_id since we don't
+        # yet know the uuid. THIS LOCK EXCLUDES CLAIMS ONLY. It hashes to a
+        # different integer than `task:<uuid>`, which is the key close,
+        # release, move, stage, stamp, the sweeper and the compactor take, so
+        # it fences NOTHING in that family. `fetch_task_by_doc_id/3` below
+        # takes the `task:<uuid>` lock as soon as it has resolved the uuid and
+        # BEFORE it takes the row lock — that is what makes a claim mutually
+        # exclusive with a close.
+        #
+        # Resource-carrying claims ALSO take a global resources lock so two
+        # concurrent claims of different tasks cannot both pass the overlap
+        # scan and land conflicting resource sets.
+        _ =
+          Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task_doc_id(doc_id)])
 
         if resources != [] do
-          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task-resources"])
+          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.resources()])
         end
 
         case fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
@@ -133,8 +143,34 @@ defmodule Barkpark.Tasks.Claim do
   # `"drafts." <> doc_id` (tasks created via mutate land as drafts.<id>). An
   # explicit `drafts.` prefix is exact — the fallback is never applied in
   # reverse. If both `t1` and `drafts.t1` exist, the exact `t1` match wins.
+  #
+  # THREE STEPS, AND THE ORDER IS THE INVARIANT (task-eal-bl-lock-key-convergence):
+  #
+  #   1. Resolve the slug to a uuid with a PLAIN read (no `FOR UPDATE`). The
+  #      caller already holds `task:<doc_id>`, so no other targeted claim for
+  #      this slug can be resolving concurrently.
+  #   2. Take `task:<uuid>` — the converged per-task advisory key every
+  #      post-resolution writer uses.
+  #   3. Only then take the `FOR UPDATE` row lock, by PK.
+  #
+  # Steps 2 and 3 may not be swapped. Every other writer takes the advisory
+  # lock BEFORE it touches the row; a claim that took the row lock first would
+  # be the one participant acquiring the pair in the opposite order, which is
+  # a textbook deadlock (claim holds row R and waits for advisory A while a
+  # close holds A and waits for R). `FOR UPDATE` is preserved — it is what
+  # makes the claim a CAS.
   defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
-    case fetch_task_exact_locked(doc_id, workspace_id, project_id) do
+    with {:ok, %Document{id: task_uuid}} <-
+           resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
+
+      # global-read: by-PK row lock inside the per-task advisory lock, on the uuid resolve_task_by_doc_id/3 just returned from a workspace/project-scoped query — the tenancy decision was made there, this re-reads the same row.
+      lock_task_row(task_uuid)
+    end
+  end
+
+  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+    case fetch_task_exact(doc_id, workspace_id, project_id) do
       {:ok, _} = hit ->
         hit
 
@@ -142,8 +178,17 @@ defmodule Barkpark.Tasks.Claim do
         if String.starts_with?(doc_id, "drafts.") do
           {:error, :not_found}
         else
-          fetch_task_exact_locked("drafts." <> doc_id, workspace_id, project_id)
+          fetch_task_exact("drafts." <> doc_id, workspace_id, project_id)
         end
+    end
+  end
+
+  defp lock_task_row(task_uuid) do
+    query = from(d in Document, where: d.id == ^task_uuid, lock: "FOR UPDATE")
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      %Document{} = doc -> {:ok, doc}
     end
   end
 
@@ -171,10 +216,11 @@ defmodule Barkpark.Tasks.Claim do
   # same call returns the same row across every pooled connection. A partial
   # order would trade a 500 for a silently alternating answer, which is worse.
   #
-  # `FOR UPDATE` is preserved: this is the targeted-claim path and the row lock
-  # is what makes the claim a CAS. A fix that dropped it would trade a 500 for
-  # a lost update.
-  defp fetch_task_exact_locked(doc_id, workspace_id, project_id) do
+  # The `FOR UPDATE` row lock this function once carried moved to
+  # `lock_task_row/1`, which runs AFTER the `task:<uuid>` advisory lock — see
+  # the ordering note on `fetch_task_by_doc_id/3`. The row lock is still taken
+  # on the targeted-claim path and is still what makes the claim a CAS.
+  defp fetch_task_exact(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task",
@@ -183,8 +229,7 @@ defmodule Barkpark.Tasks.Claim do
           asc: d.dataset,
           asc: d.id
         ],
-        limit: 1,
-        lock: "FOR UPDATE"
+        limit: 1
       )
 
     # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the

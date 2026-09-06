@@ -15,8 +15,12 @@ defmodule Barkpark.Tasks.Stage do
 
     1. **Advisory lock** — `pg_advisory_xact_lock(hashtext("task:" <> task_id))`,
        where `task_id` is the document's UUID PRIMARY KEY, not its `doc_id`
-       slug. That is the same per-task key the close/pulse/move/stamp family
-       uses, so a stage serializes with any concurrent CAS write on the same row.
+       slug — built by `Barkpark.Tasks.LockKey.task/1`. That is the same
+       per-task key the close/release/move/stamp/pulse/renew/fence/sweeper/
+       compactor family uses, so a stage serializes with any concurrent CAS
+       write on the same row. (Pulse and renew keyed on the SLUG until
+       task-eal-bl-lock-key-convergence; this sentence was true of the family
+       it named only after that landed.)
 
        THE KEY IS THE INVARIANT, and it is easy to break by reading this
        sentence rather than the code. Until this correction the line above said
@@ -216,6 +220,7 @@ defmodule Barkpark.Tasks.Stage do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Transitions
@@ -451,7 +456,7 @@ defmodule Barkpark.Tasks.Stage do
 
     result =
       Repo.transaction(fn ->
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> task_id])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: by-PK re-read inside the stage-family advisory lock — same posture as pulse.ex/stamp.ex; caller authorization is enforced at the API seam.
         case Repo.get(Document, task_id) do
