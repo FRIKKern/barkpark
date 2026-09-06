@@ -275,6 +275,36 @@ defmodule Barkpark.Tasks.Board do
   # collapse each logical id's draft/published twins to a single canonical card
   # (published wins). The board is a supervisor read — it shows one card per
   # task, not the draft shadow the github-bookkeeping stamp can leave behind.
+  #
+  # NO TENANT PREDICATE, BY RULING (task-93fb6a1a8a33c93d, adjudicated
+  # 2026-09-06 by the orchestrator; option (b) NO-CHANGE). This read narrows on
+  # `type`, the dataset label and the cap only — no `workspace_id`. That is
+  # deliberate, not an omission, and here is the reasoning so the next auditor
+  # does not re-file it:
+  #
+  #   * The ONLY consumer is `Plugins.Tasks.Web.BoardLive` mounted at
+  #     /admin/projects under `auth: :ops` (`plugins/tasks.ex`, the ops scope).
+  #     There is no bearer-token HTTP route onto this function. `:ops` IS the
+  #     instance-operator role, and an instance-wide board is what that role
+  #     exists for; scoping it to one workspace would make the operator's board
+  #     LIE about the instance, a worse defect than the one being audited.
+  #   * The guard that matters is WHO is in `:ops`: the BARKPARK_OPERATOR_EMAILS
+  #     / BARKPARK_OPERATOR_TOKEN_IDS allowlist, which fails closed once armed
+  #     (see the operator-allowlist warning `mix barkpark.openapi` prints on an
+  #     unarmed instance). A multi-occupant deployment arms it; it does not
+  #     narrow this query.
+  #   * Basis: PDF-D19 (the global-per-dataset operator read) cites THIS
+  #     function as its exemplar. `Tasks.Fleet`'s roster later SUPERSEDED D19
+  #     for ITS read because that read is reachable by a workspace credential
+  #     over HTTP — the discriminator is the door, not the query shape. This
+  #     door is operator-only, so D19's basis stands here unamended.
+  #   * Exposure, stated at its true size: an ops principal sees every
+  #     organisation's card titles, lifecycle states and blocker edges for the
+  #     dataset label. Materially smaller than the /v1/fleet/roster case and NOT
+  #     a leak — it is the operator role working as specified.
+  #
+  # If a deployment wants per-tenant admins, that is a NEW tenant-scoped board
+  # surface behind a workspace credential, not a narrowing of this one.
   defp load_task_docs(dataset) do
     from(d in Document,
       where: d.type == "task" and d.dataset == ^dataset,
