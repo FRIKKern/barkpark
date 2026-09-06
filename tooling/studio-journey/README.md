@@ -99,21 +99,45 @@ Controls that cannot be pressed without destroying the measurement are
 **inventoried with the reason instead**: the `+` creates a document and the
 airdrop/access buttons open a modal over the desk. None of those three carries an
 `id` (two have a `data-test-id`, the `+` has neither), which is recorded, because
-`#id` addressing cannot reach them at all. A `.pane-section-header` is a static
-`<div>` at its only desk call site — dead by construction. Each inventory row
-*asserts its own reason*, so the day one of them stops being true the row reds and
-says "re-decide" rather than quietly staying green.
+`#id` addressing cannot reach them at all. Each inventory row *asserts its own
+reason*, so the day one of them stops being true the row reds and says
+"re-decide" rather than quietly staying green.
 
-**`LEG_C_MAX_ROWS` is not a safety margin on a real desk, it is a blindfold.**
-Measured on deployed guerrilla, 2026-09-06: the desk opens with 7 `.pane-item`
-rows, and the first press grows the roster by ~100 `.pane-doc-item` rows. At the
-default 40 the census reported **0 inventoried** and `587 further row(s) beyond
-LEG_C_MAX_ROWS=40` — the `add_btn` and `section_header` rows the leg exists to
-inventory never entered the roster at all. The same run at `LEG_C_MAX_ROWS=900`
-took 5.4 s and inventoried 21. Raise it on a real desk.
+**`.pane-section-header` is a tripwire, not an inventory row.** Measured on
+served `c81b8e66d` (guerrilla, 2026-09-06) it renders **zero** times on the
+deployed desk, on the bare desk and again with the Papers pane open.
+**Ruling (lead-studio-9, 2026-09-06): the deployed desk should NOT render
+`.pane-section-header` today.** Its only desk call site is the `:header ->` arm
+at `api/lib/barkpark_web/live/studio/studio_live/components.ex:1434`, and
+`git grep 'type: :header' origin/main -- api/lib` returns **zero producers** — no
+pane builder emits a `:header` item, so the arm is unreachable and the zero count
+on guerrilla is correct. The harness used to publish a PASS-by-construction
+verdict for the shape against a fixture that rendered it itself, an assertion
+that could never have fired against production. So the `/good` fixture now
+renders none, the `/rot` fixture renders one — which is how the tripwire's red is
+demonstrated offline on every run — and any `.pane-section-header` on a *real*
+desk reds with *"a shape that had no producer on 2026-09-06 has appeared:
+re-decide (components.ex:1434)"*.
 
-Bounded by a hard `LEG_C_BUDGET` (default 90 s, `LEG_C_BUDGET_MS`); per-row
-`LEG_C_ROW_CAP_MS` (default 3 s) and `LEG_C_MAX_ROWS` (default 40). Anything the
+**`LEG_C_MAX_ROWS` caps each KIND, not the roster.** Measured on deployed
+guerrilla, 2026-09-06: the desk opens with 7 `.pane-item` rows and no doc rows,
+and the first press grows the roster by ~100 `.pane-doc-item` rows. Under the old
+roster-wide cap of 40 those doc rows consumed every slot and the census reported
+**0 inventoried** and `587 further row(s) beyond LEG_C_MAX_ROWS=40` — the
+`add_btn` rows the leg exists to inventory never entered the roster at all, and a
+reader could not tell that from "this desk has no inventory rows". A roster-wide
+cap makes coverage a function of DOM order: the most numerous kind decides which
+kinds get censused. Per kind, every kind the desk offers is represented no matter
+how many members another kind has, the run stays bounded (the ceiling is
+`LEG_C_MAX_ROWS × kinds`, and only the four *pressable* kinds cost time), and
+**every drop names its kind** — `add_btn ×3` in the drop line is itself the
+statement that `add_btn` rows exist and were not measured. The kinds censused
+whole are printed beside it. Raising the default instead would have bought
+coverage by removing the bound; that is a different thing.
+
+Bounded by a hard `LEG_C_BUDGET` (default 150 s, `LEG_C_BUDGET_MS`); per-row
+`LEG_C_ROW_CAP_MS` (default 3 s) and `LEG_C_MAX_ROWS` (default 40, **per row
+kind**). Anything the
 budget does not reach is reported **`UNMEASURED, which is not the same as
 working`** — never FAIL. Turning an exhausted runner budget into a dead row would
 fabricate a defect, which is the failure this epic exists to stop.
@@ -156,12 +180,26 @@ one of those rules is therefore enforced offline rather than remembered.
 
 For LEG C the fixture desk is a **row-kind roster in the real markup**: a plugin
 `<a class="pane-item">`, a collapsed strip (`button.pane-column--collapsed`), a
-`.pane-doc-item` DIV whose control is the inner `button.bp-doc-row-body`, three
-id-less `.pane-add-btn` header controls and a static `.pane-section-header`.
+`.pane-doc-item` DIV whose control is the inner `button.bp-doc-row-body`, and
+three id-less `.pane-add-btn` header controls.
 `/good/` is **honest** — every row on it answers or names its refusal — and
 `/rot/` differs on purpose: its rows are dead, and `#item-counts-decoy` moves the
 pane and row counts *without naming itself*, so "counts cannot make a row green"
-is demonstrated rather than promised. `/good/`'s unrenderable page renders the
+is demonstrated rather than promised.
+
+Two asymmetries between the sites are load-bearing. `/good/` carries **three**
+`.pane-doc-item` rows and pressing one **replaces the pane the other two live
+in** — the structural shape measured on guerrilla, where 235 of 236 doc rows
+reported *"the row was gone from the desk when its turn came"*. The census
+recovers by re-navigating to the URL the row was **enumerated** at, once per row
+and only when the row is genuinely missing; a row still absent afterwards says so
+and stays `UNMEASURED`. Unwire the recovery and those two rows go `PENDING` and
+the self-test reds — which is the offline proof that the coverage fix works.
+And `/rot/` renders the only `.pane-section-header` in the fixture, so the
+presence tripwire above has its red demonstrated on every run while `/good/`
+models the deployed desk truthfully by rendering none. `/rot/` carries one doc
+row rather than three because on `/rot/` every row is dead and each extra one
+costs a full per-row cap against the `LEG_C_BUDGET`. `/good/`'s unrenderable page renders the
 shipped shape (`main.bp-paper-shell`, **no** `.bp-paper-editor`), so reverting the
 region list re-reds LEG B offline.
 

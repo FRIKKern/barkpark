@@ -195,6 +195,25 @@ const KILL_POLL_CAP = 2000;
 // brief's own reasoning warns about; LEG_C_BUDGET_MS moves it either way.
 const LEG_C_BUDGET = Number(process.env.LEG_C_BUDGET_MS || 150000);
 const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, SOFT
+// `LEG_C_MAX_ROWS` CAPS EACH KIND, NOT THE ROSTER — and that is the whole fix
+// for spd-w19-census-maxrows-crowds-inventory. Measured on served c81b8e66d
+// (production guerrilla, 2026-09-06): the desk opens with 7 `.pane-item` rows
+// and NO doc rows, and the first press grows the roster by ~100
+// `.pane-doc-item` rows. `CENSUS_FN` enumerates `.pane-doc-item` FIRST (the
+// most specific shape has to claim its elements before a broader selector can),
+// so under a ROSTER-WIDE cap of 40 those ~100 doc rows consumed every remaining
+// slot and the `add_btn` / `section_header` rows the leg exists to INVENTORY
+// never entered the roster at all: the census reported `0 inventoried` and `587
+// further row(s) beyond LEG_C_MAX_ROWS=40`, which reads exactly like "this desk
+// has no inventory rows".
+//
+// A roster-wide cap makes coverage a function of DOM ORDER: the most numerous
+// kind decides which kinds are censused. Per-kind, every kind the desk offers
+// is represented no matter how many members another kind has, and the run stays
+// bounded — the ceiling is `LEG_C_MAX_ROWS × (number of kinds)`, and only the
+// four PRESSABLE kinds cost time at all (inventory rows are asserted, never
+// pressed). Raising the default instead would have bought coverage by removing
+// the bound; that is not the same fix.
 const LEG_C_MAX_ROWS = Number(process.env.LEG_C_MAX_ROWS || 40);
 const LEG_C_PRESS_ATTEMPTS = 2;
 
@@ -1348,11 +1367,24 @@ async function legB(page, ctx, ledger, run) {
 //  remaining rows are measured against. None of the three carries an `id` (two
 //  carry a data-test-id, the "+" carries neither — components.ex:1106/1116/1124),
 //  which is recorded, because a builder reaching for `#…` cannot address them at
-//  all. `.pane-section-header` is dead by construction at its only desk call site
-//  (components.ex:1187 passes no attrs, so `collapsible` defaults false and it
-//  renders a STATIC DIV with no phx-click — panes.ex:305). Both inventory rows
-//  carry a REAL assertion about the reason, so the day one of them stops being
-//  true the row goes red and says "re-decide" instead of quietly staying green.
+//  all. Each of those inventory rows carries a REAL assertion about its reason,
+//  so the day one of them stops being true the row goes red and says "re-decide"
+//  instead of quietly staying green.
+//
+//  `.pane-section-header` IS NOT AN INVENTORY ROW — IT IS A TRIPWIRE. Measured
+//  on served c81b8e66d (guerrilla, 2026-09-06) it renders ZERO times on the
+//  deployed desk, on the bare desk and again with the Papers pane open.
+//  RULING (lead-studio-9, 2026-09-06): the deployed desk should NOT render
+//  `.pane-section-header` today. Its only desk call site is the `:header ->` arm
+//  at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and
+//  `git grep 'type: :header' origin/main -- api/lib` returns ZERO producers — no
+//  pane builder emits a `:header` item, so the arm is unreachable and the zero
+//  count on guerrilla is correct. The harness used to assert a PASS-by-
+//  construction verdict for the shape, against a fixture that rendered it
+//  itself; that assertion could never have fired against production. Now /good
+//  renders none, /rot renders ONE so the tripwire's red is demonstrated offline,
+//  and any `.pane-section-header` on a REAL desk is a FAIL saying "a shape that
+//  had no producer on 2026-09-06 has appeared".
 
 const CENSUS_STAMP = "data-legc-row";
 
@@ -1426,6 +1458,10 @@ const CENSUS_FN = `(function(){
   return {
     rows: out,
     url: location.pathname + location.search,
+    // The ABSOLUTE url, because it is what a row's recovery navigates back to.
+    // \`ctx.base + url\` would be wrong on the fixture, whose base carries a
+    // \`/good\` or \`/rot\` path prefix that \`location.pathname\` already includes.
+    full_url: location.href,
     panes: document.querySelectorAll(".pane-column").length,
     doc_rows: document.querySelectorAll(".pane-doc-item").length,
     item_rows: document.querySelectorAll(".pane-item").length
@@ -1556,10 +1592,33 @@ function inventoryVerdict(rec) {
       ? { status: FAIL, detail: `THE RECORDED REASON IS STALE: this .pane-add-btn now carries id="${rec.id}", so it IS addressable — re-decide whether the census should press it. (${addressing})` }
       : { status: PASS, detail: `NOT PRESSED BY DESIGN — ${why}, and either would litter the dataset or destroy the desk state the remaining rows are measured against. ${addressing}` };
   }
+  // THE SECTION-HEADER TRIPWIRE — spd-w19-section-header-absent-on-desk.
+  //
+  // RULING (lead-studio-9, 2026-09-06): the deployed desk should NOT render
+  // `.pane-section-header` today. Its only desk call site is the `:header ->`
+  // arm at api/lib/barkpark_web/live/studio/studio_live/components.ex:1434 and
+  // `git grep 'type: :header' origin/main -- api/lib` returns ZERO producers —
+  // no pane builder emits a `:header` item, so the arm is unreachable and the
+  // zero count on guerrilla is correct.
+  //
+  // So this is no longer an inventory row with a "dead by construction" excuse
+  // to keep asserting. It is a PRESENCE tripwire: the census reaching this
+  // function at all means a `.pane-section-header` was on the page, and on a
+  // real desk that is a shape with no producer having appeared. It records FAIL
+  // and asks for a re-decision rather than quietly inventorying it, because the
+  // old PASS-by-construction verdict was true on a fixture that rendered the
+  // shape itself and could never have fired against production.
   if (rec.kind === "section_header") {
-    return rec.phx_click
-      ? { status: FAIL, detail: `NO LONGER DEAD BY CONSTRUCTION: this .pane-section-header carries phx-click="${rec.phx_click}" (tag=${rec.tag}) — it is a live control now and the census must press it.` }
-      : { status: PASS, detail: `DEAD BY CONSTRUCTION — tag=${rec.tag}, no phx-click. Its only desk call site passes no attrs, so \`collapsible\` defaults false and panes.ex:305 renders a static <div>. Nothing to press; nothing missing.` };
+    return {
+      status: FAIL,
+      detail:
+        `a shape that had no producer on 2026-09-06 has appeared: re-decide (components.ex:1434). ` +
+        `tag=${rec.tag} · phx-click=${rec.phx_click || "(none)"} · label="${rec.label}". ` +
+        `RULING (lead-studio-9, 2026-09-06): the deployed desk should NOT render .pane-section-header today — the ` +
+        `\`:header ->\` arm at components.ex:1434 is its only desk call site and no pane builder emits a \`:header\` item, ` +
+        `so the arm is unreachable. Something now produces one: either a builder started emitting :header, or a new ` +
+        `component grew the class. Decide which, and re-decide this row.`,
+    };
   }
   if (rec.kind === "pane_doc_item_bodyless") {
     return { status: FAIL, detail: `a .pane-doc-item (wrapper ${rec.wrapper_id || "(no id)"}) with NO inner button.bp-doc-row-body — the row has no control at all, so no keyboard and no pointer can open this document.` };
@@ -1609,8 +1668,8 @@ async function legC(page, ctx, ledger, run) {
    *  before the socket joins and the first press after that is dropped on the
    *  floor with no error anywhere — which is why the row after an anchor needed
    *  two presses. Re-arming is a predicate, never a sleep. */
-  const backToDesk = async () => {
-    await page.goto(ctx.base + DESK_PATH);
+  const backToDesk = async (absoluteUrl) => {
+    await page.goto(absoluteUrl || ctx.base + DESK_PATH);
     const rows = await poll(async () => (await page.count(".pane-item")) > 0 || null, SETTLE_CAP, "desk rows painted");
     const live = await poll(async () => {
       const s = await page.evaluate(
@@ -1626,20 +1685,54 @@ async function legC(page, ctx, ledger, run) {
 
   const roster = [];
   const byKey = new Map();
-  let overflow = 0;
+  // PER KIND, not per roster — see LEG_C_MAX_ROWS. `overflowByKind` is what makes
+  // a dropped row legible: "0 inventoried" could previously mean either "this
+  // desk has no inventory rows" or "the inventory kinds were crowded out", and
+  // the printed output could not tell the two apart. Now every drop names its
+  // kind, so the second reading is impossible to mistake for the first.
+  const takenByKind = new Map();
+  const overflowByKind = new Map();
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   const absorb = async () => {
     const c = await page.evaluate(`${CENSUS_FN}()`);
     if (!c || c.__throw || !Array.isArray(c.rows)) return null;
     for (const r of c.rows) {
       if (byKey.has(r.key)) continue;
-      if (roster.length >= LEG_C_MAX_ROWS) { overflow++; continue; }
-      const rec = { ...r, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0 };
+      if ((takenByKind.get(r.kind) || 0) >= LEG_C_MAX_ROWS) { bump(overflowByKind, r.kind); continue; }
+      bump(takenByKind, r.kind);
+      // WHERE THIS ROW WAS SEEN. A press replaces the pane its siblings live in,
+      // so by the time a sibling's turn comes its node is gone; navigating back
+      // to the URL the row was ENUMERATED at re-renders the pane that held it.
+      const rec = { ...r, enum_url: c.full_url || null, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0, recovered: false };
       byKey.set(r.key, rec);
       roster.push(rec);
     }
     return c;
   };
   const first = await absorb();
+
+  /** THE COVERAGE FIX for spd-w19-census-doc-row-coverage. Measured on served
+   *  c81b8e66d: the desk grew 236 `.pane-doc-item` rows, ONE was measured, and
+   *  the other 235 all reported "the row was gone from the desk when its turn
+   *  came" — 5.4s of a 480s budget, `truncated:false`. It was never budget: a
+   *  doc-row press replaces the pane its siblings live in, so the roster held
+   *  235 stale node references. A census that can only ever see one row of the
+   *  most numerous kind cannot be diffed against a later census for that kind.
+   *
+   *  The recovery is a RE-NAVIGATION, not a re-ordering: pressing doc rows in
+   *  some pane-aware order still loses every sibling after the first press, and
+   *  re-querying the roster only renames the problem (the node is gone, not
+   *  stale-named). Going back to the row's own enumeration URL rebuilds the pane
+   *  the row lived in, which is exactly what a person does. It is attempted ONCE
+   *  per row and only when the row is actually missing, so a present row costs
+   *  nothing, and a row that is STILL missing afterwards says so — recovery
+   *  turning a genuinely-vanished row green is the one thing it must not do. */
+  const recoverRow = async (rec) => {
+    if (!rec.enum_url || Date.now() >= deadline) return null;
+    const back = await backToDesk(rec.enum_url);
+    rec.recovered = true;
+    return `re-navigated to the URL this row was enumerated at (rows=${back.rows} socket=${back.live})`;
+  };
 
   // The roster GROWS while it is walked, and that is the point: on the real desk
   // the document rows do not exist until a Structure row has been pressed, so a
@@ -1662,7 +1755,31 @@ async function legC(page, ctx, ledger, run) {
       rec.detail = `the ${ms(LEG_C_BUDGET)} LEG_C_BUDGET ran out before this row's turn — ${UNMEASURED}`;
       continue;
     }
-    const r = await pressCensusRow(page, rec, deadline);
+    let r = await pressCensusRow(page, rec, deadline);
+    // THE RECOVERY, WIRED. `pressCensusRow` reports `missing` when the row is
+    // not on the page at all when its turn comes — the 235-of-236 shape. Only
+    // then, and only ONCE per row (`rec.recovered` is set by `recoverRow`), the
+    // desk is re-navigated to the URL this row was enumerated at and the press
+    // is retried. A row that was present costs nothing, and a row that is STILL
+    // missing after the re-navigation says so in its own detail and stays
+    // UNMEASURED — the recovery must never be able to turn a genuinely-vanished
+    // row green, and it cannot: the retry goes through the same press and the
+    // same identity witness as every other row.
+    if (r.missing && !rec.recovered) {
+      const how = await recoverRow(rec);
+      if (how) {
+        await absorb();
+        const again = await pressCensusRow(page, rec, deadline);
+        again.detail = again.missing
+          ? `${again.detail} · RECOVERY WAS ATTEMPTED AND THE ROW IS STILL MISSING — ${how} — and the row was not there afterwards either`
+          : `${again.detail} · recovered before the press: ${how}`;
+        r = again;
+      } else {
+        r.detail += rec.enum_url
+          ? ` · recovery NOT attempted: the ${ms(LEG_C_BUDGET)} LEG_C_BUDGET was already spent`
+          : ` · recovery NOT attempted: this row carries no enumeration URL to navigate back to`;
+      }
+    }
     rec.outcome = r.status;
     rec.witness = r.witness;
     rec.detail = r.detail;
@@ -1687,7 +1804,11 @@ async function legC(page, ctx, ledger, run) {
     max_rows: LEG_C_MAX_ROWS,
     wall_ms: wall,
     truncated,
-    overflowed_rows: overflow,
+    // BOTH, and the by-kind map is the load-bearing one: a total alone is what
+    // let "0 inventoried" read as "this desk has no inventory rows".
+    overflowed_rows: [...overflowByKind.values()].reduce((a, b) => a + b, 0),
+    overflowed_by_kind: Object.fromEntries(overflowByKind),
+    censused_by_kind: Object.fromEntries(takenByKind),
     armed,
     desk_at_start: first ? { url: first.url, panes: first.panes, item_rows: first.item_rows, doc_rows: first.doc_rows } : null,
     rows: roster,
@@ -1706,8 +1827,29 @@ async function legC(page, ctx, ledger, run) {
     checks.unshift(check("the desk was armed before any row was pressed", FAIL,
       `rows=${armed.rows} socket-joined=${armed.live} — with no joined socket every phx-click on this page is swallowed, so no row's verdict below means anything about the control`));
   }
-  if (overflow) {
-    checks.push(check(`${overflow} further row(s) beyond LEG_C_MAX_ROWS=${LEG_C_MAX_ROWS}`, PENDING, UNMEASURED));
+  // A DROP NAMES ITS KIND — spd-w19-census-maxrows-crowds-inventory c1. The old
+  // line said only how MANY rows were beyond the cap, so a reader of a
+  // default-configured run saw "0 inventoried · 587 further row(s) beyond
+  // LEG_C_MAX_ROWS=40" and could not tell "this desk has no inventory rows" from
+  // "the inventory kinds were crowded out of the roster by 100 document rows".
+  // Naming the dropped kinds makes the first reading impossible: `add_btn ×3`
+  // in the drop line IS the statement that add_btn rows exist and were not
+  // measured. The kinds that were censused whole are printed too, because
+  // "add_btn is not in the drop list" only means something if the reader can
+  // see the list of kinds that made it in.
+  if (overflowByKind.size) {
+    const dropped = [...overflowByKind.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const total = dropped.reduce((n, [, c]) => n + c, 0);
+    const whole = [...takenByKind.keys()].filter((k) => !overflowByKind.has(k)).sort();
+    checks.push(check(
+      `${total} further row(s) dropped for LEG_C_MAX_ROWS=${LEG_C_MAX_ROWS} PER KIND — ` +
+        `KINDS DROPPED: ${dropped.map(([k, c]) => `${k} ×${c}`).join(" · ")}`,
+      PENDING,
+      `${UNMEASURED}. The cap is per KIND, so each kind above is represented in the census by its first ` +
+        `${LEG_C_MAX_ROWS} member(s) and these are the ones beyond that — a dropped kind is never an ABSENT kind. ` +
+        `KINDS CENSUSED WHOLE (nothing dropped): ${whole.length ? whole.join(", ") : "(none)"}. ` +
+        `LEG_C_MAX_ROWS raises the per-kind ceiling.`,
+    ));
   }
   if (roster.length === 0) {
     checks.push(check("the desk offered any row to census at all", FAIL, "zero rows enumerated — a census of nothing is not a census"));
@@ -1718,7 +1860,13 @@ async function legC(page, ctx, ledger, run) {
     rollup(checks),
     `${pressed.length} pressed · ${roster.length - pressed.length} inventoried · ` +
       `${counted(PASS)} PASS ${counted(FAIL)} FAIL ${counted(PENDING)} UNMEASURED · ` +
-      `${ms(wall)} of the ${ms(LEG_C_BUDGET)} budget${truncated ? " (TRUNCATED)" : ""}`,
+      `${ms(wall)} of the ${ms(LEG_C_BUDGET)} budget${truncated ? " (TRUNCATED)" : ""}` +
+      // THE SUMMARY LINE CARRIES THE DROP TOO. The per-row check above is the
+      // full statement, but the summary is what a reader skims, and "0
+      // inventoried" with nothing beside it is exactly the sentence that misled.
+      (overflowByKind.size
+        ? ` · DROPPED FOR THE PER-KIND CAP: ${[...overflowByKind.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, c]) => `${k} ×${c}`).join(" · ")}`
+        : ""),
     checks,
     { gating: false },
   );
@@ -1735,7 +1883,10 @@ async function pressCensusRow(page, rec, deadline) {
   const locate = await page.evaluate(censusProbe(rec.key, selfId));
   if (!locate || locate.__throw || !locate.found) {
     return {
-      status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0,
+      // `missing` is what the walk loop keys the ONE recovery attempt off. It is
+      // a separate field from the status on purpose: a caller must not have to
+      // parse this sentence to know the row was absent rather than silent.
+      status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0, missing: true,
       detail: `the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — ${UNMEASURED}`,
     };
   }
@@ -1832,7 +1983,21 @@ const FIXTURE_TOKEN = "fixture-admin-token";
 // expansion, not a URL), and the real `.pane-doc-item` (a DIV wrapper whose
 // control is the INNER `button.bp-doc-row-body`) were all absent. So the fixture
 // serves one of each, in the real markup, plus the three id-less `.pane-add-btn`
-// header controls and a static `.pane-section-header`.
+// header controls.
+//
+// `/good/` RENDERS NO `.pane-section-header`, and `/rot/` RENDERS EXACTLY ONE.
+// That asymmetry is the whole of spd-w19-section-header-absent-on-desk: the
+// deployed desk renders zero (see the RULING in LEG C's header), so a /good
+// fixture that rendered two was modelling a shape production never produces and
+// buying a PASS that could not fire against it. /rot keeps one so the PRESENCE
+// TRIPWIRE that replaced that PASS has its red demonstrated offline, on every
+// run, like every other red in this file.
+//
+// `/good/` ALSO CARRIES THREE `.pane-doc-item` ROWS, and pressing one REPLACES
+// the pane the other two live in — the exact structural shape measured on
+// guerrilla, where 235 of 236 doc rows reported "the row was gone from the desk
+// when its turn came". Without more than one doc row the recovery is untestable
+// offline; with three, the self-test proves it twice.
 //
 // AND /good/ IS HONEST: every row on it either answers or names its refusal. The
 // old fixture wired ONE row (#item-paper) and left five dead IDENTICALLY on both
@@ -1840,7 +2005,11 @@ const FIXTURE_TOKEN = "fixture-admin-token";
 // /rot/. /rot/ now differs on purpose: only #item-paper answers, the strip and
 // the doc row are dead, and #item-counts-decoy MOVES THE PANE AND ROW COUNTS
 // WITHOUT NAMING ITSELF — the exact shape a snapshot diff called an answer.
-function fixtureDeskHtml(site) {
+//
+// `paneAtLoad` is the PAPER-PANE DEEP LINK: `…/studio/paper` renders the desk
+// WITH the document pane already on it, which is what the real desk does for
+// that URL and what makes a doc row's enumeration URL a recovery target at all.
+function fixtureDeskHtml(site, { paneAtLoad = false } = {}) {
   const base = `/${site}/w/default/p/default/d/production`;
   const rows = [
     { id: "item-paper", value: "paper", label: "Papers" },
@@ -1848,6 +2017,23 @@ function fixtureDeskHtml(site) {
     // not. A third identical one only costs another 16s of dead-row cap on /rot/.
     { id: "item-sheet", value: "sheet", label: "Sheets" },
   ];
+  // THE DOCUMENT ROWS. /good/ carries THREE — spd-w19-census-doc-row-coverage
+  // c2 needs more than one, because with a single row the "the row was gone from
+  // the desk when its turn came" shape cannot occur offline at all and the
+  // recovery could never be asserted. Three means the census has to recover
+  // TWICE to measure them all.
+  //
+  // /rot/ carries ONE, and that is the same arithmetic the two-Structure-row
+  // comment above makes: on /rot/ every row is dead, so each extra one costs a
+  // full 16s of dead-row cap (2 presses × the 3s LEG_C_ROW_CAP, plus probes) and
+  // buys no red that the first row does not already buy. Three of them ran /rot/
+  // to 128.5s of its 150s LEG_C_BUDGET — a fixture that truncates reds this
+  // self-test, so the margin is the point.
+  const docRows = [
+    { id: "doc-fossil-old",   value: "paper-fossil-old",   title: "An older paper", label: "An older paper, published" },
+    { id: "doc-fossil-two",   value: "paper-fossil-two",   title: "A second paper", label: "A second paper, published" },
+    { id: "doc-fossil-three", value: "paper-fossil-three", title: "A third paper",  label: "A third paper, published" },
+  ].slice(0, site === "rot" ? 1 : 3);
   const decoy =
     site === "rot"
       ? `<button type="button" class="pane-item" id="item-counts-decoy" phx-click="select" phx-value-id="counts-decoy" phx-value-pane="0"><span class="pane-item-label">Counts only</span></button>`
@@ -1866,10 +2052,15 @@ function fixtureDeskHtml(site) {
   <div class="pane-column-collapsed-label">Navigate</div>
 </button>
 <div class="pane-column" id="pane-structure">
-<div class="pane-section-header">Content</div>
+${
+  // THE TRIPWIRE'S RED, and it is here rather than on /good on purpose. The
+  // deployed desk renders ZERO .pane-section-header (RULING, LEG C header), so
+  // /good models the desk truthfully by rendering none — and /rot renders one
+  // so the presence tripwire is proven to FIRE offline on every run.
+  site === "rot" ? `<div class="pane-section-header">Content</div>` : ""
+}
 ${rows.map((r) => `<button type="button" class="pane-item" id="${r.id}" phx-click="select" phx-value-id="${r.value}" phx-value-pane="0"><span class="pane-item-label">${r.label}</span></button>`).join("\n")}
 ${decoy}
-<div class="pane-section-header">Plugins</div>
 <!-- components.ex:1192 — an <a>, not a button. It matches .pane-item, so a
      census enumerates it, and neither identity witness exists on it. -->
 <a id="plugin-link-tickets" href="${base}/plugin/tickets" class="pane-item nav-plugin-entry" data-test-id="nav-plugin-entry"><span class="pane-item-label">Tickets</span></a>
@@ -1895,6 +2086,44 @@ ${decoy}
     for (var i = 0; i < all.length; i++) all[i].removeAttribute("aria-current");
     el.setAttribute("aria-current", "true");
   }
+  // THE DOCUMENT PANE, built ONCE and used in two places: the #item-paper press
+  // grows it, and a load of the \`…/studio/paper\` deep link renders it straight
+  // away. Both matter — the second is what a doc row's RECOVERY navigates back
+  // to, and if the two disagreed the recovery would be testing a pane the press
+  // never produces.
+  var DOC_ROWS = ${JSON.stringify(docRows)};   // three on /good/, one on /rot/ — see docRows
+  var DOC_PANE_HTML =
+    '<div class="pane-column" id="pane-papers">' +
+    // The DECOY first, exactly as components.ex:1106 renders it: same class,
+    // same phx-value-type, NO aria-label, a different event. A driver keying
+    // off .pane-add-btn[phx-value-type=paper] clicks THIS one and opens the
+    // share sheet while believing it pressed "+".
+    // ICON-ONLY, like the real ones (an .icon component renders an svg):
+    // innerText is EMPTY, so the ONLY name these two carry is a title
+    // tooltip. The census prints that as title:"…" rather than folding it
+    // in, because a tooltip-only name is a finding, not a label.
+    '<button type="button" class="pane-add-btn" phx-click="airdrop-open" phx-value-type="paper" title="Share access to paper" data-test-id="airdrop-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
+    // The access-panel entry: a THIRD .pane-add-btn, with no phx-value-type
+    // and no aria-label either (components.ex:1116). All three are id-less,
+    // which is the fact the census inventories.
+    '<button type="button" class="pane-add-btn" phx-click="access-open" title="Review scoped access grants" data-test-id="access-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
+    '<button type="button" class="pane-add-btn" phx-click="new-document" phx-value-type="paper" title="New paper" aria-label="New paper">+</button>' +
+    // THE REAL DOC-ROW SHAPE (panes.ex:474-508): the .pane-doc-item is a DIV
+    // wrapper and the control is the INNER button.bp-doc-row-body, which owns
+    // phx-value-id, title, aria-label and aria-current. A census that clicks
+    // the wrapper clicks nothing.
+    DOC_ROWS.map(function (d) {
+      return '<div class="pane-doc-item" id="' + d.id + '">' +
+        '<span class="bp-doc-checkbox" phx-click="toggle-doc-checkbox" phx-value-id="' + d.value + '" data-test-id="doc-checkbox-' + d.value + '"><span class="bp-doc-checkbox-box"></span></span>' +
+        '<button type="button" class="bp-doc-row-body" title="' + d.value + '" aria-label="' + d.label + '" phx-click="select" phx-value-pane="1" phx-value-id="' + d.value + '">' +
+        '<span class="pane-doc-main"><span class="pane-doc-title"><span class="pane-doc-dot published"></span>' + d.title + '</span></span>' +
+        '</button></div>';
+    }).join("") +
+    '</div>';
+  // THE DEEP LINK. Server-rendered on the real desk; here it is the same pane
+  // the press builds, present at load, so \`…/studio/paper\` is a real recovery
+  // target rather than a URL that answers with an empty desk.
+  if (${paneAtLoad ? "true" : "false"}) document.getElementById("docs").innerHTML = DOC_PANE_HTML;
   document.getElementById("item-paper").addEventListener("click", function () {
     if (!main.classList.contains("phx-connected")) return;   // dropped on the floor
     var self = this;
@@ -1907,32 +2136,7 @@ ${decoy}
       history.pushState({}, "", BASE + "/studio/paper");
     }, 400);
     setTimeout(function () {
-      document.getElementById("docs").innerHTML =
-        '<div class="pane-column" id="pane-papers">' +
-        // The DECOY first, exactly as components.ex:1106 renders it: same class,
-        // same phx-value-type, NO aria-label, a different event. A driver keying
-        // off .pane-add-btn[phx-value-type=paper] clicks THIS one and opens the
-        // share sheet while believing it pressed "+".
-        // ICON-ONLY, like the real ones (an .icon component renders an svg):
-        // innerText is EMPTY, so the ONLY name these two carry is a title
-        // tooltip. The census prints that as title:"…" rather than folding it
-        // in, because a tooltip-only name is a finding, not a label.
-        '<button type="button" class="pane-add-btn" phx-click="airdrop-open" phx-value-type="paper" title="Share access to paper" data-test-id="airdrop-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
-        // The access-panel entry: a THIRD .pane-add-btn, with no phx-value-type
-        // and no aria-label either (components.ex:1116). All three are id-less,
-        // which is the fact the census inventories.
-        '<button type="button" class="pane-add-btn" phx-click="access-open" title="Review scoped access grants" data-test-id="access-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
-        '<button type="button" class="pane-add-btn" phx-click="new-document" phx-value-type="paper" title="New paper" aria-label="New paper">+</button>' +
-        // THE REAL DOC-ROW SHAPE (panes.ex:474-508): the .pane-doc-item is a DIV
-        // wrapper and the control is the INNER button.bp-doc-row-body, which owns
-        // phx-value-id, title, aria-label and aria-current. A census that clicks
-        // the wrapper clicks nothing.
-        '<div class="pane-doc-item" id="doc-fossil-old">' +
-        '<span class="bp-doc-checkbox" phx-click="toggle-doc-checkbox" phx-value-id="paper-fossil-old" data-test-id="doc-checkbox-paper-fossil-old"><span class="bp-doc-checkbox-box"></span></span>' +
-        '<button type="button" class="bp-doc-row-body" title="paper-fossil-old" aria-label="An older paper, published" phx-click="select" phx-value-pane="1" phx-value-id="paper-fossil-old">' +
-        '<span class="pane-doc-main"><span class="pane-doc-title"><span class="pane-doc-dot published"></span>An older paper</span></span>' +
-        '</button></div>' +
-        '</div>';
+      document.getElementById("docs").innerHTML = DOC_PANE_HTML;
     }, 900);
   });
   // Every OTHER selecting row, on /good/ only. /rot/ leaves them dead, which is
@@ -1988,8 +2192,20 @@ ${decoy}
     var b = ev.target.closest ? ev.target.closest("button.bp-doc-row-body") : null;
     if (!b || !LIVE_ROWS) return;
     setTimeout(function () {
+      var id = b.getAttribute("phx-value-id");
+      var name = b.getAttribute("aria-label");
       answer(b);
-      history.pushState({}, "", BASE + "/studio/paper/" + b.getAttribute("phx-value-id"));
+      history.pushState({}, "", BASE + "/studio/paper/" + id);
+      // THE 235-OF-236 SHAPE, REPRODUCED. Opening a document REPLACES the pane
+      // its siblings live in, so every doc row after this one holds a node that
+      // is no longer in the document by the time its turn comes. This happens in
+      // the SAME tick as the URL patch, not on a later timer, so it is
+      // DETERMINISTIC: a fixture that raced the census would prove the recovery
+      // only on a slow host. The pressed row still answers — its witness is the
+      // URL newly carrying its OWN phx-value-id, which is exactly how the one
+      // measured row on guerrilla passed while its 235 siblings vanished.
+      document.getElementById("docs").innerHTML =
+        '<div class="pane-column" id="pane-document"><div class="pane-header"><span class="pane-title">' + name + '</span></div></div>';
     }, 250);
   });
   document.addEventListener("click", function (ev) {
@@ -2264,11 +2480,26 @@ function startFixture() {
 
     // The Studio itself — admin-gated, so an anonymous or USER session gets a
     // desk with no shares button and the discriminator goes red.
-    const dm = /^\/w\/default\/p\/default\/d\/production\/studio(\/paper\/(.+))?$/.exec(rest);
+    // THREE desk URLs, not two: the bare desk (`…/studio`), a PANE DEEP LINK
+    // (`…/studio/<pane>`), and one document (`…/studio/<pane>/<id>`). The middle
+    // one is load-bearing for spd-w19-census-doc-row-coverage, not a
+    // convenience: it is what a `.pane-doc-item`'s ENUMERATION URL is, and a
+    // row's recovery navigates straight back to it. Without the route the
+    // recovery would land in a 404.
+    //
+    // ANY pane segment renders the document pane, deliberately. Which segment a
+    // doc row was enumerated under depends on how far the census had walked when
+    // the pane painted (`…/studio/paper` if the item-paper press's own absorb
+    // caught it, `…/studio/sheet` if the next row's did), and a recovery that
+    // worked for one and 404'd for the other would make this self-test a
+    // coin-flip. The fixture's one document pane stands for "the pane this deep
+    // link selects", which is what the real desk renders server-side for any of
+    // them.
+    const dm = /^\/w\/default\/p\/default\/d\/production\/studio(?:\/([^/]+)(?:\/(.+))?)?$/.exec(rest);
     if (dm) {
       if (role !== "admin") return send(200, "<!doctype html><body><form action='/login'><h1>Sign in</h1></form></body>");
       if (dm[2]) return send(200, fixtureEditorHtml(site, dm[2], docs.get(`drafts.${dm[2]}`)));
-      return send(200, fixtureDeskHtml(site));
+      return send(200, fixtureDeskHtml(site, { paneAtLoad: !!dm[1] }));
     }
     return send(404, "fixture: no route " + rest, "text/plain");
   });
@@ -2460,22 +2691,40 @@ const SELF_TEST_EXPECT = {
 //     the .pane-item count, because counts cannot name a row.
 //   · the pane_doc_item passes only when the INNER button.bp-doc-row-body is the
 //     thing that was pressed.
+//   · THREE pane_doc_item rows pass on /good/, and two of them ONLY because the
+//     census re-navigated to the URL they were enumerated at: pressing the first
+//     replaces the pane the other two live in, so without the recovery they read
+//     "the row was gone from the desk when its turn came". That is the offline
+//     assertion for spd-w19-census-doc-row-coverage — unwire `recoverRow` and
+//     these two rows go PENDING and this map reds.
+//   · NO section_header row is named on /good/, and that is not an omission: the
+//     /good fixture renders none, because the deployed desk renders none (see
+//     the RULING in LEG C's header). /rot/ renders one and it is expected FAIL —
+//     the presence tripwire firing, demonstrated on every run.
 const CENSUS_ROWS_GOOD = {
   'plugin_link#plugin-link-tickets|Tickets': PASS,
   'pane_item#item-paper|Papers': PASS,
   'pane_item#item-sheet|Sheets': PASS,
   'collapsed_strip#pane-navigate|Back to Navigate': PASS,
-  'section_header#(no id)|Content': PASS,
-  'section_header#(no id)|Plugins': PASS,
   'pane_doc_item#doc-fossil-old|An older paper, published': PASS,
+  'pane_doc_item#doc-fossil-two|A second paper, published': PASS,
+  'pane_doc_item#doc-fossil-three|A third paper, published': PASS,
   'add_btn#(no id)|title:"Share access to paper"': PASS,
   'add_btn#(no id)|title:"Review scoped access grants"': PASS,
   'add_btn#(no id)|New paper': PASS,
 };
 const SELF_TEST_CENSUS_EXPECT = {
   good: CENSUS_ROWS_GOOD,
+  // /rot/ SERVES ONE DOC ROW, not three (see `docRows`), so the other two are
+  // NOT named here: the coverage guard reds BOTH ways, and a key named for a row
+  // the fixture never renders is as much a fault as a row nobody named. Hence a
+  // literal rather than a spread of CENSUS_ROWS_GOOD.
   rot: {
-    ...CENSUS_ROWS_GOOD,
+    'plugin_link#plugin-link-tickets|Tickets': PASS,
+    'pane_item#item-paper|Papers': PASS,
+    'add_btn#(no id)|title:"Share access to paper"': PASS,
+    'add_btn#(no id)|title:"Review scoped access grants"': PASS,
+    'add_btn#(no id)|New paper': PASS,
     // /rot/'s dead rows — the reds LEG C exists to produce, each for a stated
     // reason rather than because the fixture wired nothing.
     'pane_item#item-sheet|Sheets': FAIL,
@@ -2483,6 +2732,12 @@ const SELF_TEST_CENSUS_EXPECT = {
     'pane_doc_item#doc-fossil-old|An older paper, published': FAIL,
     'pane_item#item-counts-decoy|Counts only': FAIL,
     'pane_item#item-decoy-spawn|Spawned by the counts decoy': FAIL,
+    // THE PRESENCE TRIPWIRE, fired. /rot/ renders one `.pane-section-header`;
+    // the deployed desk renders zero and should. A FAIL here is the harness
+    // saying "a shape that had no producer on 2026-09-06 has appeared" — the
+    // verdict that replaced a PASS-by-construction which could only ever have
+    // been asserted against a fixture that produced the shape itself.
+    'section_header#(no id)|Content': FAIL,
   },
 };
 
