@@ -13479,6 +13479,26 @@ defmodule BarkparkCloud.Web.Router do
       # is emitted so the FIRST poll refusal is legible the day it lands, not
       # because it distinguishes anything in the corpus we have.
       refusal_phase: DeployLedger.refusal_phase(d.failure_reason),
+      # THE REFUSAL, UNFUSED (task-f156b5e43bfbfe91). `failure_reason` above is
+      # one prose line with the box's typed code and its human sentence FUSED
+      # into it — so every reader took it apart again by substring, and app.js
+      # ran a SECOND humanize pass over the result. These two keys carry the
+      # halves the box actually sent, split once, in `FailureCopy`:
+      #
+      #   * `failure_code`    — the box's own `error.code` (`E_ABSOLUTE_PATH`,
+      #     `already_running`, `feature_not_configured`). This is what a user
+      #     greps, files a bug about, or branches on.
+      #   * `failure_message` — the sentence that tells them what to fix, with
+      #     the `[box request_id: …]` journal stamp lifted out of it.
+      #
+      # BOTH are nil whenever the row is not a box refusal, and nil individually
+      # when the box sent only one half — never coerced, for the same reason
+      # `refusal_phase` above is not coerced to "start".
+      #
+      # ADDITIVE: `failure_reason` is byte-unchanged and stays the fallback for
+      # every consumer that has not moved yet.
+      failure_code: FailureCopy.typed_refusal_code(d.failure_reason),
+      failure_message: FailureCopy.typed_refusal_message(d.failure_reason),
       # deploy-reliability W13 S3: the WAIT, as data. W12 shipped the writer
       # (`Sites.Deploy.defer/3`) and no reader at all — these three columns
       # populated into a serializer that did not mention them, so the only way

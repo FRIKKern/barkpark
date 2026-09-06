@@ -5250,6 +5250,58 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
   assert.equal(hooks.failureCopy(""), "");
 });
 
+// ── task-f156b5e43bfbfe91: a TYPED REFUSAL never reaches failureCopy ─────────
+// The server split the fused refusal into `failure_code` + `failure_message`
+// and stopped rewriting the composite in W11. The browser kept a SECOND
+// humanize pass. These pin the guard that ends it.
+//
+// MUTATION-PROVED: delete the `if (typedRefusal(reason)) return reason;` line
+// from app.js's failureCopy and the first test below reds on
+// "The build source couldn't be fetched." — the canned copy a producer-authored
+// tar entry name earns today by containing four common English words.
+
+const ABS_PATH_REFUSAL =
+  'the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused';
+
+test("failureCopy: a typed E_* refusal passes through VERBATIM, never re-humanized", () => {
+  assert.equal(hooks.failureCopy(ABS_PATH_REFUSAL), ABS_PATH_REFUSAL);
+
+  // THE COLLISION THIS GUARD EXISTS FOR. The entry name is producer-authored,
+  // so it can contain any clause token app.js matches on. Without the guard,
+  // failureCopy's "artifact_url is empty" / "unsupported artifact scheme" /
+  // "no build source" arms are all reachable from a tar path.
+  const collide =
+    'the instance refused the deploy (HTTP 400): E_BAD_NAME — entry "/no build source/index.html" is not a safe name — refused';
+  assert.equal(hooks.failureCopy(collide), collide);
+
+  const traversal =
+    'the instance refused the deploy (HTTP 400): E_PATH_TRAVERSAL — entry "../unsupported artifact scheme/x" escapes the root — refused';
+  assert.equal(hooks.failureCopy(traversal), traversal);
+});
+
+test("typedRefusal: E_* code, either box caption, and nothing else", () => {
+  assert.equal(hooks.typedRefusal(ABS_PATH_REFUSAL), true);
+  assert.equal(hooks.typedRefusal("the instance refused the deploy (HTTP 409)"), true);
+  assert.equal(hooks.typedRefusal("the instance refused the build poll (HTTP 500)"), true);
+  // A provider code that merely ENDS in E_ is not a typed refusal — `_` is a
+  // word character, so there is no boundary inside SERVER_LIMIT_EXCEEDED. Same
+  // rule as the Elixir @typed_code regex.
+  assert.equal(hooks.typedRefusal("SERVER_LIMIT_EXCEEDED at the provider"), false);
+  assert.equal(hooks.typedRefusal("npm run build exited 1"), false);
+  assert.equal(hooks.typedRefusal(""), false);
+  assert.equal(hooks.typedRefusal(null), false);
+  assert.equal(hooks.typedRefusal(42), false);
+});
+
+test("failureCopy: the github-push family still maps — the guard is not a blanket bypass", () => {
+  // A guard that swallowed everything would be indistinguishable from deleting
+  // failureCopy. The four ordinary arms must still fire.
+  assert.equal(
+    hooks.failureCopy("this site has no build source configured"),
+    "This site has no build source yet. Connect a repo or run bp deploy.",
+  );
+});
+
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
 // The CP marked a GitHub push deployment born-failed when no source build was
 // available. Source builds have since arrived (the router's
@@ -16867,6 +16919,61 @@ test("gr-p3: deployFailHtml — the v4 red-bordered panel with dot; blocked keep
   assert.equal(hooks.deployFailHtml(null), "");
   // Escaped server copy.
   assert.doesNotMatch(hooks.deployFailHtml("<img src=x>"), /<img src=x>/);
+});
+
+test("task-f156b5e43bfbfe91: deployFailHtml renders the STRUCTURED halves, not the composite", () => {
+  const typed = {
+    code: "E_ABSOLUTE_PATH",
+    message: 'entry "/quota/index.html" is an absolute path — refused',
+  };
+  const html = hooks.deployFailHtml(ABS_PATH_REFUSAL, false, typed);
+
+  // The code is a TOKEN on screen, in its own element.
+  assert.match(html, /<strong>E_ABSOLUTE_PATH<\/strong>/);
+  assert.match(html, /is an absolute path/);
+  // and the caption prose the server fused in front of it is GONE from the panel.
+  assert.doesNotMatch(html, /the instance refused the deploy/);
+
+  // Code with no message: the code alone, no dangling separator.
+  const codeOnly = hooks.deployFailHtml(
+    "the instance refused the deploy (HTTP 409): already_running",
+    true,
+    { code: "already_running", message: null },
+  );
+  assert.match(codeOnly, /<strong>already_running<\/strong>/);
+  assert.doesNotMatch(codeOnly, /—\s*<\/span>/);
+
+  // Message with no code: the sentence, unwrapped.
+  const msgOnly = hooks.deployFailHtml("x", false, { code: null, message: "the box said no" });
+  assert.match(msgOnly, /<span>the box said no<\/span>/);
+
+  // BOTH HALVES ARE ESCAPED — the message is a REMOTE CAPTURE and the code is
+  // the box's own string; neither is trusted markup.
+  const xss = hooks.deployFailHtml("x", false, {
+    code: "<img src=x>",
+    message: "<script>alert(1)</script>",
+  });
+  assert.doesNotMatch(xss, /<img src=x>/);
+  assert.doesNotMatch(xss, /<script>/);
+
+  // NO STRUCTURE → the composite path is byte-for-byte what it was.
+  assert.equal(hooks.deployFailHtml("npm run build exited 1", false, { code: null, message: null }),
+    hooks.deployFailHtml("npm run build exited 1"));
+});
+
+test("task-f156b5e43bfbfe91: deployTypedRefusal reads the two wire keys, and only those", () => {
+  // Field-by-field, not deepEqual: the object is minted inside app.js's own
+  // realm, so its prototype is not this module's Object.prototype and
+  // deepStrictEqual reds on "same structure but not reference-equal".
+  const got = hooks.deployTypedRefusal({ failure_code: "E_X", failure_message: "boom" });
+  assert.equal(got.code, "E_X");
+  assert.equal(got.message, "boom");
+  // A legacy row (the whole pre-split corpus) carries neither, and the reader
+  // must say so rather than invent a code from the prose.
+  const legacy = hooks.deployTypedRefusal({ failure_reason: ABS_PATH_REFUSAL });
+  assert.equal(legacy.code, undefined);
+  assert.equal(legacy.message, undefined);
+  assert.equal(hooks.deployTypedRefusal(null), null);
 });
 
 test("gr-p3: a cancelled row states its state through the pill, no invented copy", () => {

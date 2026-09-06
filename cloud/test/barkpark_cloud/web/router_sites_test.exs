@@ -1117,6 +1117,95 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
                "A capacity or quota limit was reached at the hosting provider"
     end
 
+    # THE SPLIT, END TO END (task-f156b5e43bfbfe91).
+    #
+    # W11 (the test above) proved the fused string is not REWRITTEN. It is still
+    # fused, and every reader downstream took it apart by substring — app.js ran
+    # a second humanize pass over it, `internal/cli` carries regexes over the
+    # English. This asserts the halves the box actually sent arrive as their own
+    # keys, off the SAME driven refusal, in the SAME response as the unchanged
+    # composite.
+    #
+    # MUTATION-PROVED: drop either `failure_code`/`failure_message` line from
+    # `deployment_json/1` and this reds on nil; change the composite and the
+    # `failure_reason` assertion reds instead — the two halves of back-compat
+    # cannot be satisfied by touching one place.
+    test "E_ABSOLUTE_PATH arrives SPLIT: failure_code + failure_message, composite unchanged" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_ABSOLUTE_PATH",
+               "message" => ~s(entry "/quota/index.html" is an absolute path — refused)
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      raw = Registry.get_deployment(d.id).failure_reason
+      dep = rendered_deployment(site, d, token)
+
+      # THE TYPED HALF — what a user greps, branches on, or files a bug about.
+      assert dep["failure_code"] == "E_ABSOLUTE_PATH"
+
+      # THE HUMAN HALF — what tells them what to fix. The producer-controlled
+      # entry name survives INSIDE it, and the caption prose is NOT in it.
+      assert dep["failure_message"] ==
+               ~s(entry "/quota/index.html" is an absolute path — refused)
+
+      refute dep["failure_message"] =~ "the instance refused"
+      refute dep["failure_message"] =~ "HTTP 400"
+
+      # BACK-COMPAT, BYTE FOR BYTE. Every consumer that has not moved yet reads
+      # exactly the string it read before the split — including the caption and
+      # both halves fused, in that order.
+      assert dep["failure_reason"] == raw
+
+      assert dep["failure_reason"] ==
+               ~s|the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused|
+
+      # And the two structured keys REASSEMBLE the detail half of the composite:
+      # this is what makes the pair a SPLIT and not a second, drifting source.
+      assert String.contains?(
+               dep["failure_reason"],
+               dep["failure_code"] <> " — " <> dep["failure_message"]
+             )
+    end
+
+    # A NON-REFUSAL ROW CARRIES NEITHER KEY — never coerced, for the same reason
+    # `refusal_phase` is not coerced to "start". A build that died in `npm run
+    # build` has no typed code, and a `failure_code` of "" or of the whole
+    # sentence would be a claim the box never made.
+    test "a build failure that is not a box refusal renders both split keys as nil" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      {:ok, _} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: "BUILD failed (exit 12): npm run build"
+        })
+
+      dep = rendered_deployment(site, d, token)
+
+      assert dep["failure_code"] == nil
+      assert dep["failure_message"] == nil
+      assert dep["failure_reason"] =~ "BUILD failed"
+    end
+
     test "a PATH TRAVERSAL is never rendered as a network timeout" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

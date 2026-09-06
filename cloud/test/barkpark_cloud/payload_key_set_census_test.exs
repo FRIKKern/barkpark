@@ -1044,6 +1044,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # THE SPLIT'S CLI HALF (task-f156b5e43bfbfe91). Criterion 2 of that row is
+    # the Go render and it is FENCED OUT of this PR (internal/ belongs to
+    # another slice), so the two keys land here EMITTED and UNREAD by
+    # construction — the same split-row shape as `slot`/`health_exit_code`
+    # above, declared rather than smuggled.
+    #
+    # WHAT THE GO HALF MUST DECLARE, so the follow-up is a lookup and not a
+    # re-derivation: `internal/cloudclient.SiteDeployment` gains
+    # `FailureCode *string json:"failure_code"` and
+    # `FailureMessage *string json:"failure_message"`. POINTERS, for the reason
+    # `health_exit_code` states one row up: both keys are null on every row that
+    # is not a box refusal AND on the half the box did not send, and a plain
+    # string decodes null to "" — which the render then cannot tell apart from
+    # "the box sent an empty code", a claim it never made.
+    {"site_deployment_json/3", :unread, "failure_code",
+     "site-spawner-w11-followup-split-the-fused-refusal (task-f156b5e43bfbfe91) — the PRODUCER half only. The box's own `error.code` (`E_ABSOLUTE_PATH`, `already_running`), split out of the fused `failure_reason` by `FailureCopy.typed_refusal_fields/1`. `internal/cloudclient.SiteDeployment` declares no FailureCode, so `bp` still reads the fused prose; the CLI render is criterion 2 of the same task row and is fenced out of this PR."},
+    {"site_deployment_json/3", :unread, "failure_message",
+     "site-spawner-w11-followup-split-the-fused-refusal (task-f156b5e43bfbfe91) — the PRODUCER half only. The human sentence the box wrote, with the `[box request_id: …]` stamp lifted out. Same split row and same fence as `failure_code` above; MUST land in Go as a `*string` for the reason `health_exit_code` gives — a plain string decodes the null on every non-refusal row to \"\", which reads as a message the box never sent."},
     # ── RULING: route ENVELOPES stay OUT of this census (dr-w14-s6 followup,
     # criterion 3, 2026-08-23). The question on the record was whether envelope
     # keys added at the ROUTE (e.g. GET /v1/sites/:id/deployments'
@@ -1424,7 +1442,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # walker counts the map key, not the node's interior. The serializer's arity
   # moved 5 -> 6 in the same change (the fifth prefetch argument), which is why
   # every `barkpark_json/5` name in this file is now `/6`.
-  @emitted_pinned 166
+  @emitted_pinned 168
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four

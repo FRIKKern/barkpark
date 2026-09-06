@@ -227,6 +227,121 @@ defmodule BarkparkCloud.FailureCopy do
 
   def typed_refusal?(_other), do: false
 
+  # ---------------------------------------------------------------------------
+  # THE SPLIT (site-spawner, task-f156b5e43bfbfe91)
+  # ---------------------------------------------------------------------------
+  #
+  # `Sites.Deploy.box_refusal/3` FUSES the box's two halves into one prose line:
+  #
+  #     the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry
+  #     "/quota/index.html" is an absolute path — refused
+  #
+  # `typed_refusal?/1` (above) stops that string from being REWRITTEN, which is
+  # the hazard W11 closed. It does not stop the next reader from taking the
+  # string apart again, and every one of them does: `app.js` ran its own
+  # `failureCopy()` over it, and `internal/cli` carries regexes over the English.
+  # Substring archaeology over prose is how a reworded clause silently zeroes a
+  # count (`refusal_phase`'s own doc says the same about `deferral_depth`).
+  #
+  # So the two halves are recovered ONCE, here, and travel as separate JSON keys
+  # (`failure_code` / `failure_message` on `deployment_json/1`). The composite
+  # `failure_reason` is unchanged, byte for byte: every existing consumer keeps
+  # reading exactly what it read before, and the structured pair is ADDITIVE.
+  #
+  # WHY A DERIVATION AND NOT A COLUMN. The honest shape is two columns written
+  # at the moment `box_refusal/3` still HAS both halves in hand. That needs a
+  # migration, and it cannot repair the 14,000+ refusal rows already written —
+  # which is the corpus every reader actually reads. This derivation covers new
+  # and old rows alike; a later column can shadow it without changing the wire.
+  #
+  # ANCHORED ON THE CAPTION, never floating (the same rule
+  # `DeployLedger.@refusal` states): a build log that happens to PRINT
+  # "the instance refused the deploy (HTTP 500)" in its own output must not be
+  # taken apart as if the control plane had written it.
+  #
+  # SCRUBBED, BY CONSTRUCTION. The split runs over `raw/1`'s output
+  # (`strip_ansi |> scrub`), never over the column. A refusal message is a remote
+  # capture and can carry a credential; a structured twin field derived from the
+  # unscrubbed column would be exactly the "eighth channel added later ships
+  # unscrubbed" leak the module doc names — and it would sit beside
+  # `failure_reason_raw`, which redacts the very same bytes.
+  @refusal_caption ~r/^(?:the build completed and staged; the deploy then failed at [A-Z]+ — )?the instance refused the (?:deploy|build poll) \((?:HTTP )?\d{3}\): (.+)$/s
+
+  # The box journal join `box_refusal/3` stamps onto the END of the detail. It is
+  # a machine handle, not part of what the box SAID, and it already travels whole
+  # in `failure_reason` — so it is lifted out of the human half rather than
+  # rendered inside a sentence. Matched anywhere, because `with_graced_note/2`
+  # can append after it.
+  @request_id_stamp ~r/ \[box request_id: [^\]]*\]/
+
+  # What can be a CODE: a bare identifier. `E_ABSOLUTE_PATH`, `already_running`,
+  # `feature_not_configured` — the box's own `error.code`. A detail with a space
+  # in it is a sentence, and a sentence is never a code.
+  @code_shape ~r/^[A-Za-z][A-Za-z0-9_]*$/
+
+  # The separator `box_refusal/3` writes BETWEEN the two halves: `"#{code} — #{message}"`.
+  # Split on the FIRST one only — nine of the extractor's messages carry their
+  # own em dash (`… is an absolute path — refused`), and those belong to the
+  # MESSAGE.
+  @half_separator " — "
+
+  @doc """
+  A box refusal SPLIT into `{code, message}` — the typed code the box chose and
+  the human sentence it wrote — out of the fused `failure_reason`.
+
+  `{nil, nil}` when the reason is not a box refusal at all, or carries no detail
+  beyond the caption (a bare `the instance refused the deploy (HTTP 409)`, which
+  43% of the 409 corpus is). `{code, nil}` when the box sent a code and no
+  message; `{nil, message}` when it sent prose that is not a code. Both halves
+  are `raw/1`-scrubbed.
+  """
+  @spec typed_refusal_fields(term()) :: {String.t() | nil, String.t() | nil}
+  def typed_refusal_fields(reason) when is_binary(reason) do
+    with [_, detail] <- Regex.run(@refusal_caption, raw(reason)),
+         trimmed = detail |> String.replace(@request_id_stamp, "") |> String.trim(),
+         true <- trimmed != "" do
+      split_halves(trimmed)
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  def typed_refusal_fields(_other), do: {nil, nil}
+
+  defp split_halves(detail) do
+    case String.split(detail, @half_separator, parts: 2) do
+      [code, message] ->
+        if Regex.match?(@code_shape, code),
+          do: {code, blank_to_nil(message)},
+          else: {nil, detail}
+
+      [only] ->
+        if Regex.match?(@code_shape, only), do: {only, nil}, else: {nil, only}
+    end
+  end
+
+  defp blank_to_nil(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  @doc """
+  The CODE half of a box refusal — `typed_refusal_fields/1`'s first element.
+
+  Its own function so `deployment_json/1` reads it the way it reads
+  `DeployLedger.refusal_phase/1`: one named call per key, off the RAW column.
+  """
+  @spec typed_refusal_code(term()) :: String.t() | nil
+  def typed_refusal_code(reason), do: reason |> typed_refusal_fields() |> elem(0)
+
+  @doc """
+  The MESSAGE half of a box refusal — `typed_refusal_fields/1`'s second element.
+  """
+  @spec typed_refusal_message(term()) :: String.t() | nil
+  def typed_refusal_message(reason), do: reason |> typed_refusal_fields() |> elem(1)
+
   @redaction "[redacted]"
 
   # STATUS PROSE in a value position — never a credential. A remote capture says
