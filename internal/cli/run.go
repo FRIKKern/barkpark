@@ -1785,6 +1785,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 				if err := checkSetKeyNesting(kv, key); err != nil {
 					return nil, nil, "", err
 				}
+				if err := checkSetIDKeyRouting(cmd, kv, key); err != nil {
+					return nil, nil, "", err
+				}
 				// `--set 'content:={…}'` on a patch double-nests to
 				// content.content. The server only WARNS (Warnings advisory,
 				// mutations.ex warn_on_nested_content/1) and still returns a
@@ -1804,6 +1807,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			}
 			key := kv[:eq]
 			if err := checkSetKeyNesting(kv, key); err != nil {
+				return nil, nil, "", err
+			}
+			if err := checkSetIDKeyRouting(cmd, kv, key); err != nil {
 				return nil, nil, "", err
 			}
 			setTarget[key] = kv[eq+1:]
@@ -1893,6 +1899,59 @@ func checkSetKeyNesting(kv, key string) error {
 	}
 	head := key[:strings.Index(key, ".")]
 	return setNestingError(kv, key, head+":={…}")
+}
+
+// ── `--set id=…` is never the document id (task-a1c40938ef1e94cc) ──────────
+//
+// `bp doc create task --set id=my-chosen-id` exited 0 and put the document at a
+// GENERATED address (`task-e9e41ef2841a0f51`). The id the caller named was not
+// applied: on the create family the server reads the address from `_id` (or
+// `doc_id`) INSIDE the payload —
+//
+//	api/lib/barkpark/content/mutations.ex apply_one/3:
+//	  id = attrs["_id"] || attrs["doc_id"]
+//
+// — and a bare `id` is not in `Writer.@reserved_in`, so `from_envelope/1` folds
+// it into `content` as an ordinary field. The write therefore reports success
+// twice over (exit 0, a rev, a content field that reads back) while the row
+// lives somewhere the caller cannot name, and the caller's own follow-up
+// `bp doc get <type> my-chosen-id` answers a misleading `not_found`.
+//
+// A patch has the same trap one door along: it addresses the document by its
+// positional `<id>` argument, and `--set` fields ride the mutate op's `set`,
+// which is shallow-merged into content — so `--set id=…` there is a content
+// field too, never the address, and `--set _id=…` is junk for the same reason.
+//
+// The escape hatch for a document type that really does own a scalar content
+// field named `id` is `--file`, which sends the body verbatim; and a junk `id`
+// key an unpatched bp already stored is removable with `--set id:=null` on a
+// patch, which routes to `unset` BEFORE this guard runs (see the call site).
+const setIDKeyMechanism = "is not the document id"
+
+// setCreateFamilyOps are the mutation ops whose payload carries its own address
+// under `_id`. Kept as a set rather than `!= "patch"` so a future op that
+// addresses differently does not inherit the create hint by default.
+var setCreateFamilyOps = map[string]bool{
+	"create": true, "createOrReplace": true, "createIfNotExists": true, "replace": true,
+}
+
+// checkSetIDKeyRouting refuses a `--set` key the write will never route to the
+// document id. Scoped to mutation commands: only they have an address to miss.
+func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
+	switch {
+	case setCreateFamilyOps[cmd.MutationOp] && key == "id":
+		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s` keys the document as `_id` inside the payload, "+
+			"and a bare `id` is merged INTO content as an ordinary field while the row gets a GENERATED id. "+
+			"Use --set '_id=…' to choose the address (or --file to send a body verbatim if you really meant a content field named %q)",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key)
+	case cmd.MutationOp == "patch" && (key == "id" || key == "_id"):
+		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s <type> <id>` addresses the document by its `<id>` argument, "+
+			"and --set fields are merged INTO content, so %q would land as an ordinary content field and move nothing. "+
+			"Drop it (or --file to send a body verbatim if you really meant a content field named %q); "+
+			"`--set %s:=null` deletes such a key if an older bp already stored one",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, key, key)
+	}
+	return nil
 }
 
 // setSupportsUnset reports whether this command's wire shape has a place to put
