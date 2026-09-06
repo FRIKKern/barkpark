@@ -415,6 +415,14 @@ defmodule Barkpark.Content.Writer do
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
+         # door's transition gate runs AT PUBLISH, so a row that never
+         # publishes never meets it — and for a never-published row the draft
+         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
+         # transition table it complements, called from here exactly like
+         # `Tasks.Dedup.check_new_task/5` below.
+         :ok <-
+           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -917,6 +925,14 @@ defmodule Barkpark.Content.Writer do
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
+         # door's transition gate runs AT PUBLISH, so a row that never
+         # publishes never meets it — and for a never-published row the draft
+         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
+         # transition table it complements, called from here exactly like
+         # `Tasks.Dedup.check_new_task/5` below.
+         :ok <-
+           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
