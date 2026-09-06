@@ -202,6 +202,20 @@ defmodule BarkparkWeb.TasksIdPrefixLookupTest do
         |> Enum.map_join("\n", &hd/1)
 
       assert plan =~ @index, "expected the prefix index in the plan, got:\n" <> plan
+
+      # The NAME alone is not the property. A partial index on the same
+      # expression in the DEFAULT opclass also carries `WHERE type = 'task'`, so
+      # the planner can take it and then FILTER — the plan names the index while
+      # reading every task row, which is precisely the seq-scan-in-disguise this
+      # migration exists to prevent (verified: recreating the index without
+      # `text_pattern_ops` still puts its name in the plan).
+      #
+      # `~>=~` / `~<~` are the text_pattern_ops comparison operators. They appear
+      # in the Index Cond ONLY when the planner rewrote `LIKE 'x%'` into a
+      # byte-order RANGE over the index — the whole point of the opclass.
+      assert plan =~ "~>=~" and plan =~ "~<~",
+             "expected LIKE to be rewritten into a text_pattern_ops range scan " <>
+               "(~>=~ / ~<~ in the Index Cond), got:\n" <> plan
     end
   end
 
