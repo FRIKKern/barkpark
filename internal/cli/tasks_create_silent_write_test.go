@@ -66,6 +66,9 @@ type silentWriteLedger struct {
 	duplicateOf string
 	creates     int
 	docID       string
+	// seenKeys is the Idempotency-Key replay cache — one entry per key the
+	// door has already served.
+	seenKeys map[string]bool
 }
 
 func (l *silentWriteLedger) rows() []string {
@@ -97,6 +100,35 @@ func (l *silentWriteLedger) serve(t *testing.T) *httptest.Server {
 		op := body.Mutations[0]
 
 		if _, ok := op["create"]; ok {
+			// IDEMPOTENCY, MODELLED. task-a520c703e4e9b931 put an
+			// Idempotency-Key on both legs of `bp task create` and a narrow
+			// resend behind it, so this fake door has to behave like the real
+			// one (plugs/idempotency.ex) or it measures a server nobody runs: a
+			// key it has already served REPLAYS that key's outcome and writes
+			// NOTHING MORE. That is what keeps the ledger below at one row
+			// while the client sends the create three times — the resend cannot
+			// multiply rows, and the retry that meets the dedup wall is the
+			// operator's SECOND invocation, under a second key, which is the
+			// event this test is about.
+			key := req.Header.Get("Idempotency-Key")
+			l.mu.Lock()
+			replay := key != "" && l.seenKeys[key]
+			if key != "" {
+				if l.seenKeys == nil {
+					l.seenKeys = map[string]bool{}
+				}
+				l.seenKeys[key] = true
+			}
+			l.mu.Unlock()
+			if replay {
+				// The recorded outcome for this key was a dropped connection;
+				// replaying it re-drops without a second write.
+				if l.dropCreate {
+					hijackAndClose(rw)
+					return
+				}
+			}
+
 			l.mu.Lock()
 			l.creates++
 			nth := l.creates
