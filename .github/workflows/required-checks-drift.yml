@@ -139,7 +139,8 @@ concurrency:
   # instead of one per merge; main-push runs were 40%->52%->67%->57% of the
   # whole Actions queue across four samples on 2026-09-06, in front of every PR
   # run. THE RESIDUAL: an intermediate sha gets no verdict from this workflow.
-  # Sound only because nothing merges on its names — for a required context, or
+  # Sound only because no job name here appears in .github/required-checks.json —
+  # for a context that spec DOES list, or
   # anything that deploys/releases/renews/watches, the marker is REFUSED by
   # scripts/main-run-concurrency-check.sh, which re-derives both facts.
   #
