@@ -276,11 +276,19 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp id_occurrences(blocks) do
     Enum.reduce(blocks, %{}, fn block, counts ->
-      counts =
-        case block_id(block) do
-          id when is_binary(id) and id != "" -> Map.update(counts, id, 1, &(&1 + 1))
-          _ -> counts
+      identities =
+        case block do
+          %{"type" => "steps", "steps" => rows} when is_list(rows) -> [block | rows]
+          _ -> [block]
         end
+
+      counts =
+        Enum.reduce(identities, counts, fn value, acc ->
+          case block_id(value) do
+            id when is_binary(id) and id != "" -> Map.update(acc, id, 1, &(&1 + 1))
+            _ -> acc
+          end
+        end)
 
       block
       |> all_child_lists()

@@ -3,6 +3,40 @@ defmodule Barkpark.Content.Papers.StepsCanvasRunContextTest do
 
   alias Barkpark.Content.Papers.CanvasRunContext
 
+  test "rejects a new child id that collides with its enclosing steps row id" do
+    row = %{"id" => "row-a", "blocks" => [paragraph("a"), paragraph("b")]}
+
+    assert {:error, :canvas_run_id_collision} =
+             CanvasRunContext.map_run([steps_block([row])], context(), fn run ->
+               {:ok, run ++ [paragraph("row-a")], :inserted}
+             end)
+  end
+
+  test "counts sibling row identities without rejecting unchanged legacy collisions" do
+    rows = [
+      %{"id" => "row-a", "blocks" => [paragraph("a"), paragraph("b")]},
+      %{"id" => "row-b", "blocks" => [], "metadata" => %{"id" => "opaque"}}
+    ]
+
+    assert {:error, :canvas_run_id_collision} =
+             CanvasRunContext.map_run([steps_block(rows)], context(), fn run ->
+               {:ok, run ++ [paragraph("row-b")], :inserted}
+             end)
+
+    assert {:ok, _updated, :inserted} =
+             CanvasRunContext.map_run([steps_block(rows)], context(), fn run ->
+               {:ok, run ++ [paragraph("opaque")], :inserted}
+             end)
+
+    assert {:ok, _updated, :changed} =
+             CanvasRunContext.map_run([steps_block(rows), paragraph("row-b")], context(), fn [
+                                                                                               a,
+                                                                                               b
+                                                                                             ] ->
+               {:ok, [Map.put(a, "text", "changed"), b], :changed}
+             end)
+  end
+
   defp paragraph(id, extra \\ %{}) do
     Map.merge(%{"id" => id, "type" => "paragraph", "text" => id}, extra)
   end
