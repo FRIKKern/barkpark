@@ -360,6 +360,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "the D34 rate constructor. WAS :internal_only (three uses inside census/3 and delivery/3, public only because the payload census pairs it with the Go `DeployRate` struct); dr-w10-s1 gives it an external caller. `Web.Router`'s `no_deploy_surface/0` builds the all-nil `deploy_rate` sentinel with `DeployLedger.rate(0, 0)` rather than hand-writing a map, so the sentinel a consumer destructures is the SAME SHAPE as a real refusing rate BY CONSTRUCTION — hand-writing it is how a sentinel and its measured twin drift apart, which is the defect `@unmetered_pressure`'s own shape test exists to catch."},
     {:box_rates, 3, :reachable,
      "THE PER-BOX DEPLOY VITAL (dr-w10-s1). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
+    {:min_sample, 0, :reachable,
+     "THE REFUSAL FLOOR, CALLED AT LAST (dr-bl-rate-notice). Its UNREACHABLE row read \"TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT\" — this is the move that closes it. `Notifications.DeployRateAlert.body/2` interpolates `DeployLedger.min_sample()` into the sentence a human reads (\"A RATE REFUSES ITSELF BELOW n = 200\"), and `deploy_rate_alert_worker_test.exs` asserts the rate node's `min_sample` EQUALS this accessor — so the floor the email quotes and the floor the census enforces are one value, and a change to `@min_sample` cannot leave a stale number in an operator's inbox."},
     {:refusal_phase, 1, :reachable,
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
 
@@ -384,9 +386,6 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "the named-class list. NINE test references, ZERO lib callers — the D245 disease verbatim: a suite keeps it warm and no operator can reach it. No route exposes the class vocabulary; filed as wave-16 follow-up rather than deleted, because the class list is the thing a CLI needs to render a legend."},
     {:deferred_classes, 0, :unreachable,
      "the deferral vocabulary. THREE test references, ZERO lib callers; `deferred?/1` answers the membership question internally, so this accessor exists for no reader. Same follow-up as classes/0."},
-    {:min_sample, 0, :unreachable,
-     "the refusal floor. TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT — which is precisely why the grep sweep scored it reachable and this census does not."},
-
     # ALLOWLISTED WITH A REASON, both of them, and the reason is the same one:
     # they exist so an ASSERTION can be keyed off the enums instead of a
     # hand-list. dr-w16-s3 deleted `not_attempted_classes/0` as the one
