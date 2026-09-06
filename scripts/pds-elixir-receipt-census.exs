@@ -592,7 +592,12 @@ defmodule PDS.Census do
   # checked against the run: ROUTE-DEPTH-IS-CLOSURE reds if @route_depth stops being the
   # depth the table closes at, so neither literal can drift into a lie.
   @evidence_depth 6
-  @route_depth 12
+  # RE-DERIVED 2026-09-06 (12 -> 10): Plugins.Github.Link.put/4 now writes the published
+  # task row through Tasks.Internal.fenced_content_write/4 instead of forking a draft
+  # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
+  # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
+  # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
+  @route_depth 10
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
