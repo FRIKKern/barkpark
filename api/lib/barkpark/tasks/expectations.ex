@@ -32,6 +32,28 @@ defmodule Barkpark.Tasks.Expectations do
   per-task hydration, inheriting reverse_referencers' fail-closed posture: a
   task the caller can't see is dropped entirely, never stubbed.
 
+  ## The drop is COUNTED, never silent (task-464b89f30e3f8e41)
+
+  The two reads are not clamped identically. `reverse_referencers/2` hydrates
+  its sources through `Content.Graph`'s keyed read (tenancy + owner + grant);
+  `entries/3` re-hydrates the SAME ids through
+  `Content.Query.get_documents_by_ids/3`, which additionally applies
+  `scope_to_dataset/3` and `restrict_to_visible_types/3`. A referencer that
+  clears the first stack and fails the second used to vanish with NO trace:
+  the caller saw a shorter `tasks` list, `truncated` said `false`, and the
+  paper looked as if the task had never cited it. MEASURED on the live corpus
+  2026-09-06: `forked-authorization-equivalence-wave-2026-08-19` holds 14
+  inbound citation edges in `content_edges` and answered 13 tasks;
+  `api-read-path-security-sweep-wave6-liveview-2026-08-18` 8 and 7;
+  `authoring-excellence-wave-2026-07-23` 5 and 4 — three real edges, two
+  tasks, invisible to every reader AND to the edge-level census that was
+  filed as a projector gap (the edges were materialised the whole time).
+
+  So `unhydrated` now rides the result: the doc_ids whose edge was read but
+  whose document did not hydrate. Fail-closed is preserved — nothing is
+  stubbed and no title leaks — but the reader can no longer report a partial
+  answer as a complete one, and a `Logger.warning` names the ids.
+
   ## Bounding
 
   One inbound hop (no traversal), capped at the graph engine's existing
@@ -39,6 +61,8 @@ defmodule Barkpark.Tasks.Expectations do
   enforces — with a `truncated` flag when the cap bites, mirroring the
   traverse contract.
   """
+
+  require Logger
 
   alias Barkpark.Content
   alias Barkpark.Content.Graph
@@ -61,15 +85,22 @@ defmodule Barkpark.Tasks.Expectations do
 
   @doc """
   Tasks that reference `paper_id` (published-coalesced), each with its
-  expectation state. Returns `%{tasks: [driven_task], truncated: boolean}`;
-  an unresolvable paper yields `%{tasks: [], truncated: false}` (nothing
-  references a non-existent doc — the `reverse_referencers/2` posture).
+  expectation state. Returns
+  `%{tasks: [driven_task], truncated: boolean, unhydrated: [doc_id]}`; an
+  unresolvable paper yields `%{tasks: [], truncated: false, unhydrated: []}`
+  (nothing references a non-existent doc — the `reverse_referencers/2`
+  posture). `unhydrated` lists citing tasks whose edge was read but whose
+  document did not survive the hydration clamp — see the moduledoc.
 
   Opts are the standard scope keywords (`:dataset`, `:workspace_id`,
   `:project_id`, …), passed through to the graph read and the task
   hydration alike.
   """
-  @spec driven_tasks(binary(), keyword()) :: %{tasks: [driven_task()], truncated: boolean()}
+  @spec driven_tasks(binary(), keyword()) :: %{
+          tasks: [driven_task()],
+          truncated: boolean(),
+          unhydrated: [String.t()]
+        }
   def driven_tasks(paper_id, opts \\ []) when is_binary(paper_id) do
     paper_id
     |> Content.published_id()
@@ -86,7 +117,7 @@ defmodule Barkpark.Tasks.Expectations do
   the per-task hydration here). Non-task referencers are ignored.
   """
   @spec driven_tasks_from_referencers([map()], keyword()) ::
-          %{tasks: [driven_task()], truncated: boolean()}
+          %{tasks: [driven_task()], truncated: boolean(), unhydrated: [String.t()]}
   def driven_tasks_from_referencers(referencers, opts \\ []) when is_list(referencers) do
     referencers = Enum.filter(referencers, &(&1.type == "task"))
 
@@ -103,12 +134,28 @@ defmodule Barkpark.Tasks.Expectations do
     budget = Graph.node_budget()
     truncated = length(doc_ids) > budget
 
-    tasks =
+    {tasks, unhydrated} =
       doc_ids
       |> Enum.take(budget)
       |> entries(kinds_by_doc, opts)
 
-    %{tasks: tasks, truncated: truncated}
+    warn_unhydrated(unhydrated)
+
+    %{tasks: tasks, truncated: truncated, unhydrated: unhydrated}
+  end
+
+  # A referencer whose edge was read but whose document did not hydrate is a
+  # CORPUS fact, not a rendering detail — the reader is answering a smaller
+  # question than the one asked. Name the ids so the next reader does not have
+  # to re-derive them from `content_edges` by hand.
+  defp warn_unhydrated([]), do: :ok
+
+  defp warn_unhydrated(ids) do
+    Logger.warning(
+      "Tasks.Expectations: #{length(ids)} citing task(s) had an inbound edge but did NOT " <>
+        "hydrate under this read's scope — they are ABSENT from the driven-task answer: " <>
+        Enum.join(ids, ", ")
+    )
   end
 
   # Hydrate the citing tasks in ONE batched, scope-identical read
@@ -119,18 +166,22 @@ defmodule Barkpark.Tasks.Expectations do
   # or that is no longer a `task` drops entirely — the batch read is TYPELESS,
   # so the type gate `get_document(_, "task", _, _)` used to apply moves to the
   # post-fetch filter here.
-  defp entries([], _kinds_by_doc, _opts), do: []
+  # Returns `{entries, unhydrated_doc_ids}` — the miss is RETURNED, not
+  # swallowed, so `driven_tasks_from_referencers/2` can report it.
+  defp entries([], _kinds_by_doc, _opts), do: {[], []}
 
   defp entries(doc_ids, kinds_by_doc, opts) do
     dataset = Keyword.get(opts, :dataset, "production")
     docs_by_id = Content.get_documents_by_ids(doc_ids, dataset, opts)
 
-    Enum.flat_map(doc_ids, fn doc_id ->
+    doc_ids
+    |> Enum.reduce({[], []}, fn doc_id, {kept, missed} ->
       case Map.get(docs_by_id, doc_id) do
-        %{type: "task"} = doc -> [entry(doc, Map.fetch!(kinds_by_doc, doc_id))]
-        _ -> []
+        %{type: "task"} = doc -> {[entry(doc, Map.fetch!(kinds_by_doc, doc_id)) | kept], missed}
+        _ -> {kept, [doc_id | missed]}
       end
     end)
+    |> then(fn {kept, missed} -> {Enum.reverse(kept), Enum.reverse(missed)} end)
   end
 
   # One hydrated task entry.
