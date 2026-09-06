@@ -701,6 +701,9 @@
             !source.matches?.(".bp-paper-edit-form[phx-change]")) return;
         coordinator.markDirty(source);
         if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
+          // Native submit validates before dispatching a submit event. Clear
+          // stale errors as the author corrects inputs, not after debounce.
+          bpPaperValidateAuthoringForm(source);
           // Own the legacy form's debounce so the actual autosave reply clears
           // the exit guard. Let target/form listeners run, but do not also let
           // LiveView's window-level phx-change binding enqueue a duplicate.

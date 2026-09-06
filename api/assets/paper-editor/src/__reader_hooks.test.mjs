@@ -387,6 +387,7 @@ assert.equal(rangeForm.querySelector('[name=max]').value, '9');
 assert.match(rangeValue.validationMessage, /at most 9/);
 rangeForm.querySelector('[name=max]').value = '15';
 rangeForm.querySelector('[name=max]').dispatchEvent(new window.Event('input', {bubbles:true}));
+assert.equal(rangeValue.validationMessage, '', 'correcting the range clears custom validity before native submit validation');
 await tick();
 assert.deepEqual(calls, ['paper-edit-block'], 'coherent newly authored range can save');
 assert.equal(replies[0].payload.value, '12');
