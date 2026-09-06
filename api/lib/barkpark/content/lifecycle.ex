@@ -388,6 +388,9 @@ defmodule Barkpark.Content.Lifecycle do
       # title). So the draft is discarded HERE, in the same operation that
       # refused it, and the caller is told where the surviving copy is.
       #
+      # ONE EXCEPTION, on the discard itself: a draft carrying a LIVE
+      # `content.claim` is KEPT — see `discard_draft_refused_as_duplicate/5`.
+      #
       # THE OTHER FOUR REFUSALS DELIBERATELY KEEP THE DRAFT:
       #
       #   * `label_spine`, `unknown_tag`, `invalid_epic_paper_quality` are
@@ -429,7 +432,89 @@ defmodule Barkpark.Content.Lifecycle do
   # vanished) does NOT become the caller's error: the publish was refused on its
   # merits and that is the answer the caller must see. The draft simply stays,
   # and the census's population is the place that shows it.
+  # ── THE REFUSAL ARM OF THE SAME CONTRACT (task-8e9005bee4d20ed5) ──────────
+  #
+  # A `type:task` draft can carry `content.claim` — the map `Tasks.Claim`
+  # writes and `Tasks.Close` CAS's on — and discarding THAT draft deletes a
+  # LIVE lease: the worker holding it has no row left to pulse, to close, or
+  # even to read, and no event anywhere says where its work went. Observed
+  # 2026-09-06 (request_id GNK2icDy2EdMC2EAACHB): a draft-only task, claimed,
+  # then published into a near-duplicate refusal; afterwards the bare id, the
+  # `drafts.` id and `bp task ls` all answered 404/empty. A REFUSAL destroyed
+  # a claimed row.
+  #
+  # Same ruling as the SUCCESS arm (`task_door_field_fence/2`,
+  # task-9b5e1a6a688d27fc): the DOCUMENT door is the one that must yield. A
+  # publish that names no task-door field carries no authorial intent about
+  # the claim, so it may neither silently rewrite it (success arm) nor destroy
+  # it (here). The pair therefore holds ONE contract: a publish never destroys
+  # or silently rewrites task-door state.
+  #
+  # REJECTED: keep the discard and RELEASE the claim ourselves, emitting a task
+  # event that names the surviving copy. That makes the document door WRITE
+  # task-door state on a path the author never asked for — the exact coupling
+  # the success arm's ruling forbids — and it still destroys the draft's own
+  # content (brief, criteria, description) that the claimed work was about.
+  #
+  # Not stamping `:refused_draft_id` is load-bearing:
+  # `Mutations.compensating_discard/4` fires ONLY on that key, so the batch
+  # door (`POST /v1/data/mutate`) leaves the claimed draft standing too — one
+  # answer at both doors, exactly as the discard path itself is arranged.
+  #
+  # The stranded-draft census this discard bounds is unaffected in kind: a
+  # CLAIMED draft is not an orphan — a named worker is holding it, and when the
+  # lease lapses `Tasks.TtlSweeper` clears the claim, after which the very next
+  # publish discards the draft normally.
   defp discard_draft_refused_as_duplicate(%Document{} = draft, payload, type, dataset, opts) do
+    case claim_holder(draft) do
+      nil ->
+        discard_refused_duplicate_draft(draft, payload, type, dataset, opts)
+
+      worker ->
+        {:error, {:duplicate_of, annotate_claimed_survivor(payload, draft, worker)}}
+    end
+  end
+
+  # The worker holding this draft's claim, or nil when the draft carries none.
+  # Keyed on `claim.worker` (the field `Tasks.Close` CAS's against together with
+  # the epoch) rather than on the claim map's mere presence: a swept or released
+  # claim can leave an empty/worker-less map behind, and that is not a lease.
+  defp claim_holder(%Document{content: content}) when is_map(content) do
+    case Map.get(content, "claim") do
+      %{"worker" => worker} when is_binary(worker) ->
+        if String.trim(worker) == "", do: nil, else: worker
+
+      _ ->
+        nil
+    end
+  end
+
+  defp claim_holder(_draft), do: nil
+
+  defp annotate_claimed_survivor(%{message: message} = payload, %Document{} = draft, worker)
+       when is_binary(message) do
+    Map.put(
+      payload,
+      :message,
+      message <>
+        " The refused draft #{draft.doc_id} was KEPT, not discarded: it carries a live " <>
+        "`content.claim` held by #{inspect(worker)}#{claim_epoch_phrase(draft)}. Discarding it " <>
+        "would destroy that lease along with the work it names, leaving nothing to pulse, " <>
+        "close or read. The TASK door owns the claim: release it with " <>
+        "`bp task release <id> <worker> <epoch>` (or let the lease lapse), then publish again " <>
+        "and the refused draft is discarded normally."
+    )
+  end
+
+  defp annotate_claimed_survivor(payload, _draft, _worker), do: payload
+
+  defp claim_epoch_phrase(%Document{content: %{"claim" => %{"epoch" => epoch}}})
+       when is_integer(epoch),
+       do: " at epoch #{epoch}"
+
+  defp claim_epoch_phrase(_draft), do: ""
+
+  defp discard_refused_duplicate_draft(%Document{} = draft, payload, type, dataset, opts) do
     payload = payload |> Map.put(:refused_draft_id, draft.doc_id) |> annotate_discard(draft)
 
     case fenced_delete(draft) do
