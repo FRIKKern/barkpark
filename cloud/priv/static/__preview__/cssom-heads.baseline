@@ -638,7 +638,7 @@
 # baseline is 1342 (-2)" with "MISSES 0", "CSSOM style rules 1340" and "flattened
 # selectors 1286 authored / 1286 CSSOM" on the same run. Both numbers are copied
 # from that printout, never from arithmetic.
-1341
+1342
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -649,3 +649,12 @@
 # not a parity defect. The tool's own number was written back verbatim and
 # `grep -cE '^[0-9]+$'` confirms exactly 1 payload line survives. The styleguide sheet
 # PASSED unchanged at 84. Bumped by the lead in the same PR as the CSS (D158).
+# task-2e7564a07337f937 2026-09-06 (console/spa-ladder-mirror-status-meaning, #16359 — the
+# SPA attention ladder becomes an ordered array mirroring ruling A, and status_meaning
+# renders beside the delivery chip): 1341 -> 1342, +1 authored rule head (`.wh-del-meaning`,
+# the new flex child in `.wh-del-row`; 15 app.css lines). NOT hand-incremented: the CI
+# cssom-parity run on head 03255dc80 (run 34020489363, job 101452336201) printed
+# "FAIL app.css — baseline mismatch with 0 misses" and told the reader to "Bump the sidecar
+# to 1342 IN THE SAME COMMIT as the CSS change" — MISSES 0 is what makes this an unrecorded
+# ADD and not a parity defect. The styleguide sheet PASSED unchanged at 84. Bumped by the
+# lead (lead-console-6) on the PR's own branch, the CSS hunk is in the same PR (D158).
