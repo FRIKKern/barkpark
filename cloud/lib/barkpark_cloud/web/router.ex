@@ -11553,6 +11553,15 @@ defmodule BarkparkCloud.Web.Router do
       channel: d.channel,
       kind: d.kind,
       status: d.status,
+      # dr-w26 — THE WORD, AND WHAT IT MEASURED, TOGETHER. `sent` is the mail
+      # transport's ACCEPTANCE, not a delivery confirmation (Barkpark has no
+      # receipt source for email, and `http_status` is NULL on every email
+      # row), and reading it as "arrived" is what made the 2026-08-08 outage
+      # alerts look audited when they were not. Derived, never stored: no
+      # historical row is rewritten, and a reader cannot take `status` off this
+      # payload without the caveat travelling beside it. See
+      # `Notifications.Delivery.status_meaning/1`.
+      status_meaning: BarkparkCloud.Notifications.Delivery.status_meaning(d.status),
       attempts: d.attempts,
       last_error: d.last_error,
       http_status: d.http_status,
