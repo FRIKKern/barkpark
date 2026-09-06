@@ -10,7 +10,8 @@
 #   .tool-versions              elixir 1.18.4-otp-27   <- the Hetzner prod box (asdf)
 #   .github/workflows elixir.yml mix-test              1.18.4
 #   .github/workflows elixir.yml mix-prod-compile      1.18.4
-#   api/Dockerfile FROM (build) elixir:1.18.4-otp-27-alpine  <- self-host image
+#   api/Dockerfile FROM (build) hexpm/elixir:1.18.4-erlang-27.3.4.13-debian-bookworm-…-slim
+#                                                      <- self-host image (glibc; task-f4cff88ca65aca30)
 #   .github/workflows elixir.yml format                1.19.5  (DELIBERATE, see below)
 #   .github/workflows elixir.yml validation-perf       1.18.1  (same 1.18 minor)
 #
@@ -93,14 +94,38 @@ read_tool_versions() {
   printf '%s' "$v"
 }
 
-# The elixir tag on the FIRST `FROM elixir:...` in the Dockerfile (the build
-# stage — the runtime stage is a bare alpine and carries no compiler).
+# The elixir tag on the FIRST `FROM [hexpm/]elixir:...` in the Dockerfile (the
+# build stage — the runtime stage is a bare OS image and carries no compiler).
+#
+# BOTH REGISTRY PATHS ARE ACCEPTED, and that is a decision, not laxity. The
+# Docker-official `elixir:<tag>` images are alpine/debian variants of one tag
+# line; `hexpm/elixir:<elixir>-erlang-<otp>-<distro>` is the Hex-published line
+# that spells the OTP and the distro out. api/Dockerfile moved to the hexpm form
+# under task-f4cff88ca65aca30 (the release must run on glibc: OTP 27's erts sizes
+# its alternate signal stack from musl's static SIGSTKSZ 8192, which is below the
+# kernel minimum on AMX-capable CPUs, so the BEAM aborts at boot there);
+# cloud/Dockerfile has been on that form all along. Matching only `elixir:` would
+# have made this gate REFUSE (exit 2) on a correct pin — the exact "sent someone
+# to fix a CORRECT pin" failure the header warns about.
+#
+# What is guarded is UNCHANGED: the MAJOR.MINOR of the Elixir version at the head
+# of the tag. Both forms put it there (`1.18.4-otp-27-alpine`,
+# `1.18.4-erlang-27.3.4.13-debian-bookworm-20260623-slim`), so `minor_of` reads
+# `1.18` from either.
 read_dockerfile() {
   [ -f "$DOCKERFILE" ] || refuse "cannot read the image pin: $DOCKERFILE does not exist"
   local v
-  v="$(sed -n 's/^[[:space:]]*FROM[[:space:]][[:space:]]*elixir:\([^[:space:]]*\).*$/\1/p' "$DOCKERFILE" | head -1)"
-  [ -n "$v" ] || refuse "no \`FROM elixir:<tag>\` line in $DOCKERFILE"
+  v="$(sed -n 's/^[[:space:]]*FROM[[:space:]][[:space:]]*\(hexpm\/\)\{0,1\}elixir:\([^[:space:]]*\).*$/\2/p' "$DOCKERFILE" | head -1)"
+  [ -n "$v" ] || refuse "no \`FROM [hexpm/]elixir:<tag>\` line in $DOCKERFILE"
   printf '%s' "$v"
+}
+
+# The same line, whole, for DISPLAY only — so a message about api/Dockerfile
+# quotes the image it actually builds FROM (`hexpm/elixir:…`) rather than a
+# hardcoded `elixir:` prefix that would misname the pin it is complaining about.
+# Never fed to minor_of; read_dockerfile stays the single parser of the version.
+read_dockerfile_ref() {
+  sed -n 's/^[[:space:]]*FROM[[:space:]][[:space:]]*\(\(hexpm\/\)\{0,1\}elixir:[^[:space:]]*\).*$/\1/p' "$DOCKERFILE" | head -1
 }
 
 # The `elixir: [...]` matrix of one job id in the workflow. Scans from the job's
@@ -146,7 +171,7 @@ run_check() {
   # told apart from a check that read nothing.
   echo "PINS READ"
   echo "  .tool-versions        elixir ${tv}            (MAJOR.MINOR ${tv_mm})  <- production box, via asdf"
-  echo "  api/Dockerfile FROM   elixir:${docker}        (MAJOR.MINOR ${docker_mm})  <- self-host image"
+  echo "  api/Dockerfile FROM   $(read_dockerfile_ref)        (MAJOR.MINOR ${docker_mm})  <- self-host image"
   echo "  elixir.yml mix-test          elixir [${test_m}]"
   echo "  elixir.yml mix-prod-compile  elixir [${prod_m}]"
   echo
@@ -170,11 +195,11 @@ run_check() {
 
   # ── RULE 1c: the self-host image, folded in when the divergence was resolved ─
   if [ "$docker_mm" = "$tv_mm" ]; then
-    echo "ok   - RULE 1c: the self-host image elixir:${docker} (${docker_mm}) is on the production minor ${tv_mm},"
+    echo "ok   - RULE 1c: the self-host image $(read_dockerfile_ref) (${docker_mm}) is on the production minor ${tv_mm},"
     echo "       which mix-test [${test_m}] covers. No recorded divergences."
   else
     echo "FAIL - RULE 1c: the self-host image is not on the suite-tested Elixir."
-    echo "       api/Dockerfile builds FROM elixir:${docker} (${docker_mm}); .tool-versions says ${tv} (${tv_mm})"
+    echo "       api/Dockerfile builds FROM $(read_dockerfile_ref) (${docker_mm}); .tool-versions says ${tv} (${tv_mm})"
     echo "       and mix-test runs [${test_m}] (${test_mm})."
     echo "       That image IS the self-host / compose distribution path, so this ships a minor"
     echo "       the unit suite never runs. Pin the Dockerfile back to ${tv_mm}, or — if the gap"
@@ -232,6 +257,23 @@ PLANT
   out="$(probe "$tmp/a")"; rc=$?
   [ $rc -eq 0 ] && ok "A agree -> exit 0" || bad "A agree -> exit $rc (want 0)"
   case "$out" in *"1.18.4"*) ok "A prints the versions it read (positive control)";; *) bad "A printed no versions";; esac
+
+  # A2 — the hexpm/ registry path is read exactly like the official one. Without
+  # this arm the `hexpm/` alternative in read_dockerfile is untested, and a future
+  # tightening of that regex would silently turn api/Dockerfile's correct pin into
+  # a REFUSAL (exit 2) with no selftest to catch it.
+  plant "$tmp/a2" "1.18.4-otp-27" "PLACEHOLDER" '"1.18.4"' '"1.18.4"'
+  printf 'FROM hexpm/elixir:1.18.4-erlang-27.3.4.13-debian-bookworm-20260623-slim AS build\nFROM debian:bookworm-slim\n' > "$tmp/a2/Dockerfile"
+  out="$(probe "$tmp/a2")"; rc=$?
+  [ $rc -eq 0 ] && ok "A2 hexpm/ build tag agree -> exit 0" || bad "A2 hexpm/ agree -> exit $rc (want 0), out: $out"
+
+  # A3 — and it still SKEWS on the hexpm form: the prefix must not swallow the
+  # version, or A2 would pass for the wrong reason (a regex that matches nothing
+  # refuses; one that matches the wrong group compares garbage).
+  plant "$tmp/a3" "1.18.4-otp-27" "PLACEHOLDER" '"1.20.0"' '"1.20.0"'
+  printf 'FROM hexpm/elixir:1.18.4-erlang-27.3.4.13-debian-bookworm-20260623-slim AS build\nFROM debian:bookworm-slim\n' > "$tmp/a3/Dockerfile"
+  out="$(probe "$tmp/a3")"; rc=$?
+  [ $rc -eq 1 ] && ok "A3 hexpm/ skew -> exit 1" || bad "A3 hexpm/ skew -> exit $rc (want 1), out: $out"
 
   # B — DISAGREE on RULE 1: the box runs 1.18, the suite runs 1.20 -> red, both named
   plant "$tmp/b" "1.18.4-otp-27" "1.18.4-otp-27-alpine" '"1.20.0"' '"1.20.0"'
