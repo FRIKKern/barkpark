@@ -1,6 +1,6 @@
 {
-  "population": 389,
-  "mapped": 372,
+  "population": 390,
+  "mapped": 373,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -1533,13 +1533,28 @@
         },
         {
           "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/registry/site.ex",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5729"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5738"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/web/router.ex",
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:5748"
+        },
+        {
+          "kind": "file",
           "p": "cloud/priv/static/app.css",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6371"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6444"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6415"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6488"
         }
       ]
     },
@@ -1606,92 +1621,97 @@
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry/site.ex",
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:659"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs",
           "evidence": "cloud/priv/static/__preview__/scenarios.mjs:675"
         },
         {
           "kind": "file",
+          "p": "cloud/lib/barkpark_cloud/registry.ex",
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:680"
+        },
+        {
+          "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-9c1f2ab.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:971"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1059"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-4e7d0c9.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:999"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1087"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1064"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1152"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1069"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1157"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1081"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1169"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1111"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1199"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1120"
-        },
-        {
-          "kind": "file",
-          "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1259"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1208"
         },
         {
           "kind": "file",
           "p": "internal/builder/console.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1267"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1355"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1270"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1358"
         },
         {
           "kind": "file",
           "p": "lib/tokens/resolve.ts",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1295"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1383"
         },
         {
           "kind": "file",
           "p": "web/releases/20260802T094118Z-9c1f2ab/.next",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1299"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1387"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/deploy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2066"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2154"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-8c00e1b.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2155"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2243"
         },
         {
           "kind": "file",
           "p": "cloud/priv/repo/migrations/20260702130000_provision_job_error_to_text.exs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2661"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2749"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2734"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2822"
         },
         {
           "kind": "file",
           "p": "internal/agent/report.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:3954"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:4042"
         }
       ]
     },
@@ -5194,62 +5214,78 @@
         {
           "kind": "file",
           "p": "scripts/check-deployyml-filters.sh",
-          "evidence": "scripts/deploy-convergence-check.sh:71"
+          "evidence": "scripts/deploy-convergence-check.sh:77"
         },
         {
           "kind": "file",
           "p": ".github/workflows/deploy.yml",
-          "evidence": "scripts/deploy-convergence-check.sh:76"
+          "evidence": "scripts/deploy-convergence-check.sh:82"
         },
         {
           "kind": "file",
           "p": "scripts/check-deploy-smoke.sh",
-          "evidence": "scripts/deploy-convergence-check.sh:78"
+          "evidence": "scripts/deploy-convergence-check.sh:84"
         },
         {
           "kind": "file",
           "p": "scripts/lib/deploy-yaml-scope.sh",
-          "evidence": "scripts/deploy-convergence-check.sh:85"
+          "evidence": "scripts/deploy-convergence-check.sh:91"
         },
         {
           "kind": "dir",
           "p": "scripts/connectors",
-          "evidence": "scripts/deploy-convergence-check.sh:149"
+          "evidence": "scripts/deploy-convergence-check.sh:155"
         },
         {
           "kind": "dir",
           "p": "api",
-          "evidence": "scripts/deploy-convergence-check.sh:545"
+          "evidence": "scripts/deploy-convergence-check.sh:684"
         },
         {
           "kind": "dir",
           "p": "cloud",
-          "evidence": "scripts/deploy-convergence-check.sh:546"
+          "evidence": "scripts/deploy-convergence-check.sh:685"
         },
         {
           "kind": "file",
           "p": "api/a.ex",
-          "evidence": "scripts/deploy-convergence-check.sh:567"
+          "evidence": "scripts/deploy-convergence-check.sh:706"
         },
         {
           "kind": "file",
           "p": "api/b.ex",
-          "evidence": "scripts/deploy-convergence-check.sh:568"
+          "evidence": "scripts/deploy-convergence-check.sh:707"
         },
         {
           "kind": "file",
           "p": "docs/c.md",
-          "evidence": "scripts/deploy-convergence-check.sh:569"
+          "evidence": "scripts/deploy-convergence-check.sh:708"
         },
         {
           "kind": "file",
           "p": "docs/d.md",
-          "evidence": "scripts/deploy-convergence-check.sh:570"
+          "evidence": "scripts/deploy-convergence-check.sh:709"
         },
         {
           "kind": "file",
           "p": "api/e.ex",
-          "evidence": "scripts/deploy-convergence-check.sh:665"
+          "evidence": "scripts/deploy-convergence-check.sh:804"
+        }
+      ]
+    },
+    {
+      "path": "scripts/deploy-convergence-check.test.sh",
+      "run": "bash scripts/deploy-convergence-check.test.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": ".github/workflows/deploy.yml",
+          "evidence": "scripts/deploy-convergence-check.test.sh:15"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/deploy-convergence-check.sh",
+          "evidence": "scripts/deploy-convergence-check.test.sh:31"
         }
       ]
     },
@@ -8619,17 +8655,17 @@
         {
           "kind": "file",
           "p": "scripts/pds-climb-preflight.sh",
-          "evidence": "scripts/pds-climb-preflight.sh:49"
+          "evidence": "scripts/pds-climb-preflight.sh:56"
         },
         {
           "kind": "file",
           "p": ".github/workflows/deploy.yml",
-          "evidence": "scripts/pds-climb-preflight.sh:92"
+          "evidence": "scripts/pds-climb-preflight.sh:153"
         },
         {
           "kind": "dir",
           "p": "cloud",
-          "evidence": "scripts/pds-climb-preflight.sh:343"
+          "evidence": "scripts/pds-climb-preflight.sh:418"
         }
       ]
     },
