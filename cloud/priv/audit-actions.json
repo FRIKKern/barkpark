@@ -25,6 +25,7 @@
     { "verb": "site.github_disconnected", "label": "disconnected a repo" },
     { "verb": "site.cloudflare_bound", "label": "bound a domain to Cloudflare" },
     { "verb": "site.rolled_back", "label": "rolled back a site" },
+    { "verb": "site.content_secret_minted", "label": "minted a site content-publish secret" },
     { "verb": "deployment.promoted", "label": "promoted a deployment to production" },
     { "verb": "webhook.created", "label": "created a webhook" },
     { "verb": "webhook.updated", "label": "updated a webhook" },
