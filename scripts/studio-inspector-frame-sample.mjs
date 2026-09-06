@@ -119,7 +119,17 @@ const MIN_FRAMES = 30;
 const VIEWPORT_W = 1024;
 const VIEWPORT_H = 900;
 
-const DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19';
+/** The Papers list is capped at 100 rows, newest first, and concurrent epic
+ *  waves publish into it continuously — so a slug pinned months ago AGES OFF and
+ *  the drill fails with "the list never showed a row", which reads like a broken
+ *  desk and is really a stale constant. (`studio-desk-measure.mjs`'s
+ *  DEFAULT_DOC, `studio-space-priority-desk-browser-2026-07-19`, is already off
+ *  the list as of 2026-09-06.) This one is a long-lived showcase document rather
+ *  than a wave artefact, AND `--doc` falls back to the first row that opens
+ *  rather than dying — which document is open does not change the inspector's
+ *  default state, and a failed drill would report a NON-measurement. The
+ *  fallback is RECORDED in the run JSON, never silent. */
+const DEFAULT_DOC = 'portabledoc-showcase';
 const SSH_HOST = 'root@157.180.90.121';
 
 function die(msg) {
@@ -394,6 +404,7 @@ async function settleAndDump(page, { minFrames = 120, quietFrames = 60, capMs = 
 }
 
 async function sampleOnce(context, url, { control = false } = {}) {
+  let controlClicks = 0;
   const page = await context.newPage();
   await page.setViewportSize({ width: VIEWPORT_W, height: VIEWPORT_H });
   const t0 = Date.now();
@@ -410,8 +421,30 @@ async function sampleOnce(context, url, { control = false } = {}) {
     await page.evaluate(() => window.__bpFrameSample && window.__bpFrameSample.setPhase('control'));
     const toggle = page.locator('[data-test-id="sidebar-toggle-panel"]').first();
     await toggle.waitFor({ state: 'visible', timeout: 15_000 });
-    await toggle.click();
-    await page.waitForTimeout(600);
+    // IT TAKES TWO CLICKS, and the reason is the whole point of the control.
+    // The default state is `.is-open` WITHOUT `[data-user-opened]` — open in the
+    // DOM, painted as the strip. `sidebar-toggle-panel` is a TOGGLE over
+    // `panel_open`, which is already true, so the first click COLLAPSES; only
+    // the second re-opens, and only that re-open stamps the server-side
+    // user-open marker. (spd-w7 recorded the same "2 real click(s)".) A control
+    // that clicked once observed the collapsed strip, counted zero visible
+    // frames, and declared the predicate blind — a false instrument failure.
+    // The loop CLICKS UNTIL THE MARKER IS THERE and gives up loudly, so it can
+    // never quietly settle for a state it did not reach.
+    let reached = false;
+    for (let attempt = 1; attempt <= 4 && !reached; attempt++) {
+      await toggle.click();
+      reached = await page
+        .waitForSelector('.bp-doc-sidebar.is-open[data-user-opened]', { timeout: 8_000 })
+        .then(() => true).catch(() => false);
+      controlClicks = attempt;
+    }
+    if (!reached) {
+      die(`the positive control clicked [data-test-id="sidebar-toggle-panel"] ${controlClicks} time(s) ` +
+          `and never reached .bp-doc-sidebar.is-open[data-user-opened]. The control never entered the ` +
+          `state it exists to observe, so it says nothing about the predicate — instrument failure.`);
+    }
+    await page.waitForTimeout(1200);
   }
 
   const frames = await settleAndDump(page);
@@ -419,7 +452,7 @@ async function sampleOnce(context, url, { control = false } = {}) {
   await page.close();
   if (!frames) die(`the frame sampler was not installed on ${url} — window.__bpFrameSample was absent. ` +
                    `An addInitScript that did not run produces the same empty result as a clean page.`);
-  return { frames, elapsed_ms, url };
+  return { frames, elapsed_ms, url, control_clicks: controlClicks };
 }
 
 function parseArgs(argv) {
@@ -493,8 +526,9 @@ async function main() {
       const srv = readGuerrillaServer();
       run.provenance.base = srv.base;
 
-      // Drill ONCE, only to learn the document's URL. Every sampled run below is
-      // a fresh full navigation to that URL — see impossibility #2.
+      // Authenticate ONCE on a boot page; the session cookie lives on the
+      // context and every sampled page below reuses it. Minted immediately
+      // before the navigation that spends it (single use, 60s TTL).
       const boot = await browser.newContext();
       const bootPage = await boot.newPage();
       await bootPage.setViewportSize({ width: VIEWPORT_W, height: VIEWPORT_H });
@@ -504,27 +538,57 @@ async function main() {
         die(`login-ticket flow landed back on ${bootPage.url()} — the session cookie was not set. ` +
             `Every frame after this would be a sample of a login page.`);
       }
-      await bootPage.goto(`${srv.base}/w/default/p/default/d/production/studio`,
-        { waitUntil: 'domcontentloaded' });
-      const row = bootPage.locator(`[phx-click="select"][phx-value-id="${args.doc}"]`).first();
-      await row.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
-        die(`the Papers list never showed a row with phx-value-id="${args.doc}". Pass --doc=<slug>. ` +
-            `This is an instrument failure, not a desk fact.`);
-      });
-      await row.click();
-      await bootPage.waitForSelector('.bp-paper-surface', { timeout: 30_000 }).catch(() => {
-        die(`clicking "${args.doc}" produced no .bp-paper-surface within 30s — instrument failure.`);
-      });
-      url = bootPage.url();
-      const slugInUrl = decodeURIComponent(url.split('/').pop());
-      if (slugInUrl !== args.doc) {
-        die(`asked for "${args.doc}" but landed on "${slugInUrl}" (${url}). Refusing to label this ` +
-            `run with a document it did not open.`);
+
+      // REACH THE DOCUMENT BY ITS URL, NOT BY THE PANE DRILL.
+      //
+      // `studio-desk-measure.mjs` drills by clicking (root desk -> Papers ->
+      // row) because a SETTLED sweep wants the state a user's clicks leave
+      // behind. A FIRST-PAINT sample cannot use that path at all: `Scope.select/2`
+      // is a push_patch, so the click creates no new document and there is no
+      // document_start to sample (impossibility #2). The drill could therefore
+      // only ever have been a way to LEARN the URL — and it is a bad one here.
+      // Measured on the deployed desk, 2026-09-06: the click drill fails
+      // NON-DETERMINISTICALLY, because the desk restores the previously-opened
+      // document, which changes both which pane column holds the list and
+      // whether a "Papers" pane-item renders at all. Three consecutive attempts
+      // died at three different points.
+      //
+      // So: build the URL, navigate, and assert the two things the drill's
+      // assertion actually bought (D97) — a `.bp-paper-surface` appeared, and
+      // the landed URL carries the slug we asked for. Neither is weakened.
+      const deskRoot = `${srv.base}/w/default/p/default/d/production/studio`;
+      const candidate = `${deskRoot}/paper/${encodeURIComponent(args.doc)}`;
+      await bootPage.goto(candidate, { waitUntil: 'domcontentloaded' });
+      const opened = await bootPage.waitForSelector('.bp-paper-surface', { timeout: 30_000 })
+        .then(() => true).catch(() => false);
+      if (!opened) {
+        die(`${candidate} rendered no .bp-paper-surface within 30s. Either the slug is wrong (pass ` +
+            `--doc=<slug>) or the desk did not open it. Instrument failure, not a desk fact.`);
       }
-      run.measured_document = args.doc;
+      const landed = new URL(bootPage.url());
+      const slugInUrl = decodeURIComponent(landed.pathname.split('/').pop());
+      if (slugInUrl !== args.doc) {
+        die(`asked for "${args.doc}" but landed on "${slugInUrl}" (${bootPage.url()}). Refusing to ` +
+            `label this run with a document it did not open.`);
+      }
+      if (/\/login(\b|\/|$)/.test(landed.pathname)) {
+        die(`landed on a login page (${bootPage.url()}) — every frame after this would be a sample ` +
+            `of the login screen, not the desk.`);
+      }
+      url = bootPage.url();
+      run.measured_document = slugInUrl;
       run.measured_url = url;
+      run.drill = {
+        method: 'direct URL + .bp-paper-surface assertion + slug-in-URL assertion',
+        requested: args.doc,
+        opened: slugInUrl,
+        why_not_click_drill:
+          'A push_patch drill produces no document_start to sample, and on the deployed desk the ' +
+          'click path failed non-deterministically (the restored document moves the Papers list ' +
+          'between pane columns and can remove the "Papers" pane-item entirely).',
+      };
       // The session cookie lives on this context; every sampled page reuses it.
-      run.provenance.cookies_from = 'the drill context (one login-ticket, reused)';
+      run.provenance.cookies_from = 'the authenticated boot context (one login-ticket, reused by every sampled page)';
       await bootPage.close();
       run.__context = boot;
     }
@@ -542,7 +606,9 @@ async function main() {
 
     if (args.control) {
       const c = await sampleOnce(context, url, { control: true });
-      run.control = { elapsed_ms: c.elapsed_ms, ...analyse(c.frames, { arm: 'control' }), frames: c.frames };
+      run.control = { elapsed_ms: c.elapsed_ms, control_clicks: c.control_clicks,
+                      control_state_reached: '.bp-doc-sidebar.is-open[data-user-opened], asserted before sampling',
+                      ...analyse(c.frames, { arm: 'control' }), frames: c.frames };
     }
 
     if (!args.fixture) {
