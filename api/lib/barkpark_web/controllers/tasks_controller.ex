@@ -1939,10 +1939,30 @@ defmodule BarkparkWeb.TasksController do
   # type list): flip a schema to private and the very next corpus read drops
   # it.
   #
-  # Phantom nodes are deliberately NOT filtered. A phantom is a referenced-but-
-  # absent id with `title == id`, and a public document's reference field already
-  # exposes that same id through the allowed `GET /v1/data/doc` route — so
-  # dropping them would cost the dangling-edge signal without closing anything.
+  # Phantom nodes are deliberately NOT filtered — and that is now a MEASUREMENT,
+  # not the shipped-as-is argument it used to be. A phantom is a referenced-but-
+  # absent id with `title == id`, so for a public-read caller it can name a
+  # private-type or an unpublished document. The question "is that a NEW leak?"
+  # is answered per field shape by
+  # `test/barkpark_web/controllers/graph_phantom_id_exposure_test.exs`
+  # (dr-bl-graph-phantom-id-exposure, measured 2026-09-06), which drives ONE
+  # public-read token at both routes and prints every response body:
+  #
+  #   shape                   | id via GET /v1/data/doc | phantom here | verdict
+  #   ------------------------|-------------------------|--------------|--------
+  #   `reference`             | YES                     | YES          | no new leak
+  #   `arrayOf` of `reference`| YES                     | YES          | no new leak
+  #   PortableDoc inline ref  | YES                     | NO           | never extracted
+  #
+  # The third row is the one the filing did not predict: `Edges.extract_field_edges/2`
+  # has exactly two clauses (`reference`, `arrayOf`-of-`reference`) plus a `[]`
+  # catch-all, so an inline PortableDoc ref produces no edge and therefore no
+  # phantom at all. Every phantom this endpoint CAN emit carries an id the same
+  # caller already reads off the referring document on the allowed doc route, so
+  # dropping or hashing them would cost the dangling-edge signal without closing
+  # anything. The test asserts the RELATIONSHIP (phantom ⇒ id already readable),
+  # so narrowing the doc route later reds it here rather than silently voiding
+  # this ruling.
   defp visible_schemas(schemas, conn) do
     Barkpark.Content.Schema.visible_schemas(
       schemas,
