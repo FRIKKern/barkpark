@@ -446,6 +446,25 @@
 #     examined at all, so it cannot be counted. The population already prints as
 #     `N+` for exactly this reason; the residual is now SAID beside it rather
 #     than left for a reader to infer from a plus sign.
+#
+# THE RUN LISTING PAGES TO THE WINDOW START (task-300fe0d74442acf3).
+#
+# Both of the above were mitigations for a truncation that was never necessary.
+# `per_page=100` with no `page=` was ONE page read as if it were the 24h window,
+# and it was short on 7 of 24 active days in the 30-day sample (2026-09-02: 246
+# runs). fetch_runs now pages — newest-first, stopping at the first short page or
+# at the first page reaching back past the WIDE cutoff, capped at RUNS_PAGE_CAP
+# pages — so the ordinary busy day is a COUNT and the two mitigations above fire
+# only when the cap or a dead page really did cut the listing short. The cost is
+# one extra request on a day with more than 100 runs.
+#
+# THE POPULATION NAMES CANCELLED RUNS IN BOTH DIRECTIONS. `run_delivers` does not
+# consult a run's own conclusion, which is correct — a run whose only failing leg
+# is the other one still put code on a box — but it left cancelled runs counted
+# ANONYMOUSLY under a parenthetical that says "a docs-only merge skips both".
+# CANCELLED_NONDELIVERING (a superseded push) and CANCELLED_DELIVERING (delivered
+# and then cancelled, so the record-delivery job died with it) are now printed by
+# name off the conclusion already on the page.
 
 set -uo pipefail
 
@@ -906,10 +925,34 @@ say_reader() {
 }
 
 # ── the runs ─────────────────────────────────────────────────────────────────
+# ONE PAGE OF 100 WAS BEING READ AS "THE WINDOW". It is not. On 7 of 24 active
+# days in the 30-day sample the deploy.yml run list on main exceeded 100 rows
+# (2026-09-02: 246), and on those days every number below — POPULATION, and the
+# BEHIND denominator that hangs off it — was a floor wearing a plus sign. The
+# listing now PAGES until it has actually reached back past the window it is
+# about, so on an ordinary day the population is a COUNT, and the floor language
+# is reserved for the one case that really is one: the page cap was hit first.
+RUNS_PAGE_CAP=12
+# 1 when the listing reached the window start (a short page, or a page whose
+# oldest run predates the wide cutoff); 0 when it stopped early and the numbers
+# below are a floor. Set by fetch_runs, read by the FLOOR test.
+RUNS_LIST_COMPLETE=1
+RUNS_PAGES_READ=0
 fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   if [ "$FIXTURE_MODE" = "1" ]; then
     [ -f "$RUNS_FIXTURE" ] || { warn "  runs fixture is unreadable: $RUNS_FIXTURE"; return 2; }
     cp "$RUNS_FIXTURE" "$WORK/runs-raw.json"
+    # A FIXTURE IS ONE FILE AND CANNOT PAGE, so it states for itself whether the
+    # listing it stands for reached the window start: `"truncated": true` means
+    # the pager gave up before it did. Without that key a fixture is the WHOLE
+    # listing, however many rows it holds — which is exactly what pagination
+    # buys, and is why a 101-row fixture is now a count and not a floor.
+    RUNS_PAGES_READ=1
+    if jq -e '.truncated == true' "$WORK/runs-raw.json" >/dev/null 2>&1; then
+      RUNS_LIST_COMPLETE=0
+    else
+      RUNS_LIST_COMPLETE=1
+    fi
     return 0
   fi
   command -v gh >/dev/null 2>&1 || { warn "CONFIG: gh is required to enumerate deploy.yml runs"; return 3; }
@@ -918,12 +961,41 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   # on the box, and `status=success` meant those bytes were never fetched at
   # all. The POPULATION is still bounded by construction: the jq that builds
   # .examined/.wide filters `.status == "completed"` itself, so a run that has not
-  # finished is never examined and never reaches a jobs lookup. The only other
-  # reader of this file is PAGE_ROWS/PAGE_OLDEST, which counts the raw page and
-  # already discloses truncation as `N+`.
-  if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100" \
-    > "$WORK/runs-raw.json" 2>"$WORK/runs-err.txt"; then
-    warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
+  # finished is never examined and never reaches a jobs lookup.
+  local page=1 rows oldest
+  : > "$WORK/runs-pages.jsonl"
+  RUNS_LIST_COMPLETE=0
+  RUNS_PAGES_READ=0
+  while [ "$page" -le "$RUNS_PAGE_CAP" ]; do
+    if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100&page=$page" \
+      > "$WORK/runs-page.json" 2>"$WORK/runs-err.txt"; then
+      # A FIRST page that does not answer is the old total failure. A LATER page
+      # that does not answer is a SHORTER listing, not a missing one — it is
+      # reported as the floor it is rather than thrown away.
+      if [ "$page" = "1" ]; then
+        warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
+        return 2
+      fi
+      warn "  page $page of the deploy.yml run list did not answer ($(head -1 "$WORK/runs-err.txt")) — the listing stops short of the window start and the population below is a FLOOR"
+      break
+    fi
+    RUNS_PAGES_READ=$((RUNS_PAGES_READ + 1))
+    rows="$(jq '.workflow_runs | length' "$WORK/runs-page.json" 2>/dev/null || echo 0)"
+    case "${rows:-}" in ''|*[!0-9]*) rows=0 ;; esac
+    jq -c '.workflow_runs[]?' "$WORK/runs-page.json" >> "$WORK/runs-pages.jsonl" 2>/dev/null
+    # A short page IS the end of the list.
+    if [ "$rows" -lt 100 ]; then RUNS_LIST_COMPLETE=1; break; fi
+    # Runs come back newest-first, so once a page reaches back past the WIDE
+    # cutoff — the widest instant any question below asks about — there is
+    # nothing older left to want.
+    oldest="$(jq -r '[.workflow_runs[] | .created_at | fromdateiso8601] | min // 0' "$WORK/runs-page.json" 2>/dev/null || echo 0)"
+    case "${oldest:-}" in ''|*[!0-9]*) oldest=0 ;; esac
+    if [ "$oldest" -le "$WIDE_EPOCH" ]; then RUNS_LIST_COMPLETE=1; break; fi
+    page=$((page + 1))
+  done
+  jq -s '{workflow_runs: .}' "$WORK/runs-pages.jsonl" > "$WORK/runs-raw.json" 2>/dev/null
+  if [ ! -s "$WORK/runs-raw.json" ]; then
+    warn "  the deploy.yml run pages did not re-assemble into a runs payload"
     return 2
   fi
   return 0
@@ -1047,7 +1119,8 @@ fi
 jq --argjson cut "$CUTOFF_EPOCH" --argjson wide "$WIDE_EPOCH" \
   '[.workflow_runs[]
     | select(.status == "completed")
-    | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601)}]
+    | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601),
+       concl: (.conclusion // "none")}]
    | {examined: [.[] | select(.at >= $cut)], wide: [.[] | select(.at >= $wide)]}' \
   "$WORK/runs-raw.json" > "$WORK/runs.json" 2>/dev/null
 if [ ! -s "$WORK/runs.json" ]; then
@@ -1058,14 +1131,17 @@ if [ ! -s "$WORK/runs.json" ]; then
 fi
 
 COMPLETED_COUNT="$(jq '.examined | length' "$WORK/runs.json")"
-# One page of 100 is the bound. The population is a FLOOR only when that page
-# BOTH filled AND failed to reach back past the cutoff — a filled page whose
-# oldest run predates the window has seen the whole window and is exact. Printed
-# as `N+`, never rounded down silently.
+# THE PAGE CAP IS THE BOUND, NOT ONE PAGE OF 100. fetch_runs now pages until the
+# listing reaches back past the window, so a busy day whose run list runs to 246
+# rows is a COUNT. The population is a FLOOR only when the pager stopped early
+# — cap hit, or a later page that did not answer — AND the rows it did get still
+# do not reach the cutoff. Row count alone is no longer evidence of truncation:
+# keying on `>= 100` printed `N+` on every busy day the pager had in fact read
+# whole. Printed as `N+`, never rounded down silently.
 PAGE_ROWS="$(jq '.workflow_runs | length' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
 PAGE_OLDEST="$(jq -r '[.workflow_runs[] | .created_at | fromdateiso8601] | min // 0' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
-if [ "${PAGE_ROWS:-0}" -ge 100 ] && [ "${PAGE_OLDEST:-0}" -gt "$CUTOFF_EPOCH" ]; then
-  warn "  note: the 100-run page filled without reaching the window start — the population below is a FLOOR, printed as N+"
+if [ "${RUNS_LIST_COMPLETE:-1}" != "1" ] && [ "${PAGE_OLDEST:-0}" -gt "$CUTOFF_EPOCH" ]; then
+  warn "  note: the run listing stopped after ${RUNS_PAGES_READ} page(s) (${PAGE_ROWS} run(s)) without reaching the window start — the population below is a FLOOR, printed as N+"
   FLOOR="+"
 else
   FLOOR=""
@@ -1090,17 +1166,32 @@ NONTERMINAL_RUNS="$(awk 'NF' "$WORK/nonterminal-runs.txt" | wc -l | tr -d ' ')"
 JOBS_UNREADABLE=0
 NONDELIVERING=0
 MIXED_LEG=0
-while IFS=' ' read -r id sha at; do
+# CANCELLED IS A CLASS, AND IT POINTS BOTH WAYS. Cancelled runs were never
+# omitted from this population — `run_delivers` does not consult the run's own
+# conclusion — but they were counted ANONYMOUSLY, and the parenthetical below
+# actively mislabelled them: it told the reader that "delivered nothing" means a
+# docs-only merge, when most of that class is a SUPERSEDED PUSH cancelled before
+# a single job started. The other direction is the dangerous one: a run whose
+# instance or control-plane leg concluded success and which was then cancelled
+# DELIVERED — it put code on a box — and its record-delivery job was cancelled
+# with it, so the crown may hold no row for a delivery that happened. That is the
+# exact shape SERVING-UNRECORDED came from. The conclusion is already on the
+# page; naming the two costs two counters in a loop that already runs.
+CANCELLED_NONDELIVERING=0
+CANCELLED_DELIVERING=0
+while IFS=' ' read -r id sha at concl; do
   [ -n "$id" ] || continue
   run_delivers_cached "$id"
   case $? in
     0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt"
-       [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1)) ;;
-    1) NONDELIVERING=$((NONDELIVERING + 1)) ;;
+       [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1))
+       [ "$concl" = "cancelled" ] && CANCELLED_DELIVERING=$((CANCELLED_DELIVERING + 1)) ;;
+    1) NONDELIVERING=$((NONDELIVERING + 1))
+       [ "$concl" = "cancelled" ] && CANCELLED_NONDELIVERING=$((CANCELLED_NONDELIVERING + 1)) ;;
     *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1))
        reason "run $id: its job list could not be read — it is NOT counted as reconciled" ;;
   esac
-done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at)"' "$WORK/runs.json")
+done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at) \(.concl)"' "$WORK/runs.json")
 
 DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 
@@ -1136,9 +1227,10 @@ awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-u
 
 say ""
 say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
+say "  CANCELLED, NAMED IN BOTH DIRECTIONS: of the ${NONDELIVERING} that delivered nothing, ${CANCELLED_NONDELIVERING} were CANCELLED_NONDELIVERING — a superseded push, not a docs-only merge, and the parenthetical above is wrong about them; and ${CANCELLED_DELIVERING} of the ${DELIVERING} that DELIVERED are CANCELLED_DELIVERING — a leg concluded success and the run was cancelled anyway, so those runs put code on a box while their record-delivery job died with the cancel, and the crown may hold no row for a delivery that happened."
 say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
 if [ "$FLOOR" = "+" ]; then
-  say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the 100-run page did not reach the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
+  say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the run listing was paged ${RUNS_PAGES_READ} time(s) and still stopped short of the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
 fi
 
 # ── BEHIND: a delivering run whose head sha the crown has no row for ─────────
