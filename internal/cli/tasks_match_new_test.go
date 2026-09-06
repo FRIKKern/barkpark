@@ -55,6 +55,16 @@ func TestTaskPrefixSuggestion_FinishesALedgerTooBigToWalkOnePageAtATime(t *testi
 
 	var inFlight, peak int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This fixture models a server WITHOUT `?id_prefix=` (the pre-filter
+		// box the walk exists for). Such a server fail-closes on the unknown
+		// param with an instant 400 — it never pages for it — so the probe
+		// costs no perPage here, exactly as it costs none in production.
+		if r.URL.Query().Get(taskIDPrefixParam) != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"invalid_filter","message":"unknown query param id_prefix on GET /v1/tasks"}}`))
+			return
+		}
 		cur := atomic.AddInt64(&inFlight, 1)
 		for {
 			old := atomic.LoadInt64(&peak)

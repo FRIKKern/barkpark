@@ -198,7 +198,11 @@ defmodule Barkpark.Tasks.Query do
       hit here and "exactly one match" means what the caller thinks it means.
 
   Tenancy is fail-CLOSED via `Scope.scope_to_workspace/3` — a nil workspace
-  yields zero rows.
+  yields zero rows. Note what that fence is holding: this lookup is an
+  INTRA-TENANT id-prefix oracle (any caller who can list the workspace's tasks
+  can enumerate its task ids one prefix at a time). That is acceptable only
+  because the caller already sees those ids on the index; do NOT widen it past
+  the workspace fence, and do not apply the LIMIT before the tenancy filter.
 
   Options: `:workspace_id`, `:project_id`, `:dataset`, `:limit`.
   """
