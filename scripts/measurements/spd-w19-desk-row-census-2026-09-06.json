@@ -1,0 +1,2746 @@
+{
+  "measurement": "spd-w19-desk-row-census",
+  "task": "spd-w19-desk-row-census-run",
+  "measured_at": "2026-09-06T17:40:21Z",
+  "host": "https://guerrilla.barkpark.cloud (PRODUCTION)",
+  "served_commit": {
+    "pre": "c81b8e66d",
+    "post": "c81b8e66d",
+    "matched": true,
+    "version": "0.2.26.2129"
+  },
+  "dependencies_proved_ancestors_of_served": [
+    {
+      "task": "spd-w19-nil-icon-policy-fork",
+      "pr": 8070,
+      "merge_commit": "0e1118fe6c96c829a50d45e74a27a61334efe158",
+      "is_ancestor_of_served": true
+    },
+    {
+      "task": "spd-w19-legc-census-instrument",
+      "pr": 8074,
+      "merge_commit": "679986e5b81dc331f9dd0b704255c98934b1d60d",
+      "is_ancestor_of_served": true
+    }
+  ],
+  "instrument": {
+    "harness": "tooling/studio-journey/journey.mjs",
+    "invocation": "LEG_C_BUDGET_MS=480000 LEG_C_MAX_ROWS=900 bash scripts/studio-journey-smoke.sh report --legs c",
+    "note": "--legs is added by this PR. The committed harness had NO leg selector: journeyOne ran legA (which CREATES a document) unconditionally, so the row-as-filed asked for a mode that did not exist. --legs c runs the census alone behind the same minted-ticket admin session.",
+    "self_test": "bash scripts/studio-journey-smoke.sh self-test -> SELF-TEST PASS, exit 0"
+  },
+  "latency_disclaimer": "NO elapsed-millisecond figure in this file is a latency floor. The measuring host carried a 1-min load of 7.09-12.14 during the run. Every ms here is a WITNESS TIMESTAMP (how long until an effect named the row), recorded only so a dead row and a slow row stay different facts. The floor is a separate, unrun slice: spd-b19-lane4-quiet-host-floor.",
+  "oracle": "A row goes green ONLY on an effect that NAMES it: aria-current landing on that element, or the URL newly carrying that row own phx-value-id as a path segment, or (plugin_link, an <a> with neither witness) the page becoming its own href. Pane and row counts decide NOTHING. The oracle matches on identity, never on frame counts.",
+  "verdict_by_kind": {
+    "pane_item": {
+      "measured": 19,
+      "pass": 19,
+      "dead": 0,
+      "note": "17 by the harness run; item-metric and item-tag re-measured by hand after the harness left them UNMEASURED (their pane was replaced before their turn)"
+    },
+    "plugin_link": {
+      "measured": 2,
+      "pass": 2,
+      "dead": 0,
+      "note": "classified as BROWSER NAVIGATIONS, not unhandled: each is an <a href> and the witness is the page becoming its own href"
+    },
+    "pane_doc_item": {
+      "measured": 1,
+      "pass": 1,
+      "dead": 0,
+      "unmeasured": 235,
+      "note": "the kind answers; 235 siblings are UNMEASURED, which is not the same as working - see the named residue"
+    },
+    "collapsed_strip": {
+      "measured": 1,
+      "pass": 1,
+      "dead": 0,
+      "note": "#pane-structure, witness = losing .pane-column--collapsed"
+    },
+    "add_btn": {
+      "measured": 0,
+      "inventoried": 21,
+      "note": "NOT PRESSED BY DESIGN - creates a document or opens a modal over the desk. None carries an id."
+    },
+    "section_header": {
+      "measured": 0,
+      "present_on_deployed_desk": 0,
+      "note": "REFUTES the filing premise in a different way than expected: the row said pane_section_header is dead by construction at its only desk call site. On the DEPLOYED desk .pane-section-header renders ZERO times, before and after the Papers pane is opened. It is not a dead row; it is not a row."
+    }
+  },
+  "dead_rows": [],
+  "item_rest_verdict": "ALIVE. The KNOWN DEAD ROW named in the filing is REFUTED on this build: #item-rest answered in 0.2s on 1 press with aria-current=true landing on THAT element and the URL patching to /studio/rest, and it expands into 12 item-rest-<type> sub-rows which ALL pass the same identity oracle. The cause was the nil-icon crash the wave already fixed (PR #8070).",
+  "named_residue": [
+    "spd-w19-census-doc-row-coverage: the census can measure at most ONE pane_doc_item per pane - pressing one replaces the pane its 235 siblings live in, and they all report the row was gone from the desk when its turn came.",
+    "spd-w19-census-maxrows-crowds-inventory: at the default LEG_C_MAX_ROWS=40 the doc rows crowd the add_btn and section_header inventory out of the roster entirely (587 overflow rows on the real desk), so the default-configured census silently reports 0 inventoried.",
+    "spd-w19-section-header-absent-on-desk: .pane-section-header is not rendered anywhere on the deployed desk."
+  ],
+  "authenticated_http_status": {
+    "method": "minted login ticket redeemed into a cookie jar, then GET",
+    "results": [
+      {
+        "path": "/w/default/p/default/d/production/studio/rest",
+        "status": 200
+      },
+      {
+        "path": "/w/default/p/default/d/production/studio/plugins",
+        "status": 200
+      },
+      {
+        "path": "/studio/rest",
+        "status": 302,
+        "redirect_to": "/w/default/p/default/d/production/studio"
+      },
+      {
+        "path": "/studio/plugins",
+        "status": 302,
+        "redirect_to": "/w/default/p/default/d/production/studio"
+      }
+    ],
+    "conclusion": "The two paths the nil-icon fork covers answer 200 for an authenticated session on the served build. The census is therefore NOT recording the nil-icon crash as a dead row. The bare /studio/... forms named in the filing are not routes; they 302 to the workspace-scoped desk."
+  },
+  "hand_measured_rows": [
+    {
+      "id": "item-metric",
+      "label": "Metric",
+      "kind": "pane_item",
+      "outcome": "PASS",
+      "witness": "aria-current landed on THIS element",
+      "url_after": "/w/default/p/default/d/production/studio/content-types/metric"
+    },
+    {
+      "id": "item-tag",
+      "label": "Tag",
+      "kind": "pane_item",
+      "outcome": "PASS",
+      "witness": "aria-current landed on THIS element",
+      "url_after": "/w/default/p/default/d/production/studio/content-types/tag"
+    },
+    {
+      "id": "pane-structure",
+      "label": "Structure",
+      "kind": "collapsed_strip",
+      "outcome": "PASS",
+      "witness": "#pane-structure lost .pane-column--collapsed"
+    },
+    {
+      "id": "doc-pds-w23-triage-round-2026-09-06",
+      "label": "The PDS triage round - 267 live rows...",
+      "kind": "pane_doc_item",
+      "outcome": "PASS",
+      "witness": "URL newly carries this row own phx-value-id"
+    }
+  ],
+  "harness_run": {
+    "instrument": "tooling/studio-journey/journey.mjs",
+    "base": "https://guerrilla.barkpark.cloud",
+    "dataset": "production",
+    "started_at": "2026-09-06T17:40:15.302Z",
+    "legs": "c",
+    "auth_probe": {
+      "url": "https://guerrilla.barkpark.cloud/w/default/p/default/d/production/studio",
+      "http_status": 200,
+      "leg_a_skipped": true
+    },
+    "census": {
+      "budget_ms": 480000,
+      "row_cap_ms": 3000,
+      "max_rows": 900,
+      "wall_ms": 5446,
+      "truncated": false,
+      "overflowed_rows": 0,
+      "armed": {
+        "rows": true,
+        "live": true
+      },
+      "desk_at_start": {
+        "url": "/w/default/p/default/d/production/studio",
+        "panes": 1,
+        "item_rows": 7,
+        "doc_rows": 0
+      },
+      "rows": [
+        {
+          "index": 0,
+          "key": "plugin_link#plugin-link-plugin-link-81565798|Projects",
+          "kind": "plugin_link",
+          "tag": "A",
+          "id": "plugin-link-plugin-link-81565798",
+          "label": "Projects",
+          "test_id": "nav-plugin-entry",
+          "phx_click": null,
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": "/admin/projects",
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: the page is now this anchor's OWN href (/admin/projects)",
+          "detail": "answered in 0.6s after 1 press(es) · counts(recorded, non-deciding): panes 1→0 · .pane-item 7→0 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /admin/projects · returned to the desk afterwards (rows=true socket=true)",
+          "presses": 1,
+          "waited_ms": 605
+        },
+        {
+          "index": 1,
+          "key": "plugin_link#plugin-link-plugin-link-40413578|Fleet",
+          "kind": "plugin_link",
+          "tag": "A",
+          "id": "plugin-link-plugin-link-40413578",
+          "label": "Fleet",
+          "test_id": "nav-plugin-entry",
+          "phx_click": null,
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": "/admin/fleet",
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: the page is now this anchor's OWN href (/admin/fleet)",
+          "detail": "answered in 0.1s after 1 press(es) · counts(recorded, non-deciding): panes 1→0 · .pane-item 7→0 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /admin/fleet · returned to the desk afterwards (rows=true socket=true)",
+          "presses": 1,
+          "waited_ms": 76
+        },
+        {
+          "index": 2,
+          "key": "pane_item#item-paper|Papers",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-paper",
+          "label": "Papers",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "paper",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: the URL newly carries this row's own phx-value-id (paper)",
+          "detail": "answered in 0.3s after 1 press(es) · counts(recorded, non-deciding): panes 1→1 · .pane-item 7→7 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /w/default/p/default/d/production/studio/paper",
+          "presses": 1,
+          "waited_ms": 315
+        },
+        {
+          "index": 3,
+          "key": "pane_item#item-sheet|Sheets",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-sheet",
+          "label": "Sheets",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "sheet",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→7 · .pane-doc-item 100→1 · url /w/default/p/default/d/production/studio/paper → /w/default/p/default/d/production/studio/sheet",
+          "presses": 1,
+          "waited_ms": 194
+        },
+        {
+          "index": 4,
+          "key": "pane_item#item-content-types|Content",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-content-types",
+          "label": "Content",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "content-types",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→9 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/sheet → /w/default/p/default/d/production/studio/content-types",
+          "presses": 1,
+          "waited_ms": 175
+        },
+        {
+          "index": 5,
+          "key": "pane_item#item-plugin-doclist-75745103|Tasks",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-plugin-doclist-75745103",
+          "label": "Tasks",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "plugin-doclist-75745103",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 9→7 · .pane-doc-item 0→100 · url /w/default/p/default/d/production/studio/content-types → /w/default/p/default/d/production/studio/plugin-doclist-75745103",
+          "presses": 1,
+          "waited_ms": 176
+        },
+        {
+          "index": 6,
+          "key": "pane_item#item-rest|…Rest",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest",
+          "label": "…Rest",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→19 · .pane-doc-item 100→0 · url /w/default/p/default/d/production/studio/plugin-doclist-75745103 → /w/default/p/default/d/production/studio/rest",
+          "presses": 1,
+          "waited_ms": 176
+        },
+        {
+          "index": 8,
+          "key": "add_btn#(no id)|Share access to sheet",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to sheet",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to sheet",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to sheet · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 9,
+          "key": "add_btn#(no id)|Review scoped access grants",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Review scoped access grants",
+          "test_id": "access-open-type",
+          "phx_click": "access-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Review scoped access grants",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the scoped-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=access-open-type · aria-label=Review scoped access grants · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 10,
+          "key": "add_btn#(no id)|New sheet",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New sheet",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New sheet",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New sheet · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 7,
+          "key": "pane_item#item-metric|Metric",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-metric",
+          "label": "Metric",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "metric",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PENDING",
+          "witness": "none",
+          "detail": "the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working",
+          "presses": 0,
+          "waited_ms": 1
+        },
+        {
+          "index": 8,
+          "key": "pane_item#item-tag|Tag",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-tag",
+          "label": "Tag",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "tag",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PENDING",
+          "witness": "none",
+          "detail": "the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working",
+          "presses": 0,
+          "waited_ms": 1
+        },
+        {
+          "index": 107,
+          "key": "add_btn#(no id)|Share access to task",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to task",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to task",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to task · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 109,
+          "key": "add_btn#(no id)|New task",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New task",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New task",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New task · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 7,
+          "key": "pane_item#item-rest-book|book (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-book",
+          "label": "book (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-book",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→1 · url /w/default/p/default/d/production/studio/rest → /w/default/p/default/d/production/studio/rest/rest-book",
+          "presses": 1,
+          "waited_ms": 160
+        },
+        {
+          "index": 8,
+          "key": "pane_item#item-rest-bossType|bossType (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-bossType",
+          "label": "bossType (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-bossType",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→1 · url /w/default/p/default/d/production/studio/rest/rest-book → /w/default/p/default/d/production/studio/rest/rest-bossType",
+          "presses": 1,
+          "waited_ms": 178
+        },
+        {
+          "index": 9,
+          "key": "pane_item#item-rest-bulldoc|bulldoc (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-bulldoc",
+          "label": "bulldoc (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-bulldoc",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/rest/rest-bossType → /w/default/p/default/d/production/studio/rest/rest-bulldoc",
+          "presses": 1,
+          "waited_ms": 163
+        },
+        {
+          "index": 10,
+          "key": "pane_item#item-rest-command|command (22)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-command",
+          "label": "command (22)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-command",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→22 · url /w/default/p/default/d/production/studio/rest/rest-bulldoc → /w/default/p/default/d/production/studio/rest/rest-command",
+          "presses": 1,
+          "waited_ms": 164
+        },
+        {
+          "index": 11,
+          "key": "pane_item#item-rest-document|document (4)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-document",
+          "label": "document (4)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-document",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 22→0 · url /w/default/p/default/d/production/studio/rest/rest-command → /w/default/p/default/d/production/studio/rest/rest-document",
+          "presses": 1,
+          "waited_ms": 165
+        },
+        {
+          "index": 12,
+          "key": "pane_item#item-rest-form_response|form_response (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-form_response",
+          "label": "form_response (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-form_response",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→1 · url /w/default/p/default/d/production/studio/rest/rest-document → /w/default/p/default/d/production/studio/rest/rest-form_response",
+          "presses": 1,
+          "waited_ms": 165
+        },
+        {
+          "index": 13,
+          "key": "pane_item#item-rest-listener|listener (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-listener",
+          "label": "listener (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-listener",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→1 · url /w/default/p/default/d/production/studio/rest/rest-form_response → /w/default/p/default/d/production/studio/rest/rest-listener",
+          "presses": 1,
+          "waited_ms": 161
+        },
+        {
+          "index": 14,
+          "key": "pane_item#item-rest-mediaAsset|mediaAsset (799)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-mediaAsset",
+          "label": "mediaAsset (799)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-mediaAsset",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→100 · url /w/default/p/default/d/production/studio/rest/rest-listener → /w/default/p/default/d/production/studio/rest/rest-mediaAsset",
+          "presses": 1,
+          "waited_ms": 166
+        },
+        {
+          "index": 15,
+          "key": "pane_item#item-rest-post|post (6)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-post",
+          "label": "post (6)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-post",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 100→0 · url /w/default/p/default/d/production/studio/rest/rest-mediaAsset → /w/default/p/default/d/production/studio/rest/rest-post",
+          "presses": 1,
+          "waited_ms": 166
+        },
+        {
+          "index": 16,
+          "key": "pane_item#item-rest-session|session (7)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-session",
+          "label": "session (7)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-session",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→7 · url /w/default/p/default/d/production/studio/rest/rest-post → /w/default/p/default/d/production/studio/rest/rest-session",
+          "presses": 1,
+          "waited_ms": 173
+        },
+        {
+          "index": 17,
+          "key": "pane_item#item-rest-ticket|ticket (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-ticket",
+          "label": "ticket (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-ticket",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 7→1 · url /w/default/p/default/d/production/studio/rest/rest-session → /w/default/p/default/d/production/studio/rest/rest-ticket",
+          "presses": 1,
+          "waited_ms": 172
+        },
+        {
+          "index": 18,
+          "key": "pane_item#item-rest-wavemeasure|wavemeasure (1)",
+          "kind": "pane_item",
+          "tag": "BUTTON",
+          "id": "item-rest-wavemeasure",
+          "label": "wavemeasure (1)",
+          "test_id": null,
+          "phx_click": "select",
+          "phx_value_id": "rest-wavemeasure",
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": null,
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "IDENTITY: aria-current=\"true\" landed on THIS element",
+          "detail": "answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/rest/rest-ticket → /w/default/p/default/d/production/studio/rest/rest-wavemeasure",
+          "presses": 1,
+          "waited_ms": 166
+        },
+        {
+          "index": 13,
+          "key": "collapsed_strip#pane-structure|Back to Structure",
+          "kind": "collapsed_strip",
+          "tag": "BUTTON",
+          "id": "pane-structure",
+          "label": "Back to Structure",
+          "test_id": null,
+          "phx_click": "expand-pane",
+          "phx_value_id": null,
+          "phx_value_idx": "0",
+          "href": null,
+          "aria_label": "Back to Structure",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PENDING",
+          "witness": "none",
+          "detail": "the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working",
+          "presses": 0,
+          "waited_ms": 2
+        },
+        {
+          "index": 14,
+          "key": "add_btn#(no id)|Share access to book",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to book",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to book",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to book · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 16,
+          "key": "add_btn#(no id)|New book",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New book",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New book",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New book · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 14,
+          "key": "add_btn#(no id)|Share access to bossType",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to bossType",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to bossType",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to bossType · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 16,
+          "key": "add_btn#(no id)|New bossType",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New bossType",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New bossType",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New bossType · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 35,
+          "key": "add_btn#(no id)|Share access to command",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to command",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to command",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to command · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 37,
+          "key": "add_btn#(no id)|New command",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New command",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New command",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New command · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 14,
+          "key": "add_btn#(no id)|Share access to form_response",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to form_response",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to form_response",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to form_response · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 16,
+          "key": "add_btn#(no id)|New form_response",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New form_response",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New form_response",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New form_response · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 14,
+          "key": "add_btn#(no id)|Share access to listener",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to listener",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to listener",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to listener · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 16,
+          "key": "add_btn#(no id)|New listener",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New listener",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New listener",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New listener · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 113,
+          "key": "add_btn#(no id)|Share access to mediaAsset",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to mediaAsset",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to mediaAsset",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to mediaAsset · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 115,
+          "key": "add_btn#(no id)|New mediaAsset",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New mediaAsset",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New mediaAsset",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New mediaAsset · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 20,
+          "key": "add_btn#(no id)|Share access to session",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to session",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to session",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to session · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 22,
+          "key": "add_btn#(no id)|New session",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New session",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New session",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New session · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 14,
+          "key": "add_btn#(no id)|Share access to ticket",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "Share access to ticket",
+          "test_id": "airdrop-open-type",
+          "phx_click": "airdrop-open",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "Share access to ticket",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to ticket · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        },
+        {
+          "index": 16,
+          "key": "add_btn#(no id)|New ticket",
+          "kind": "add_btn",
+          "tag": "BUTTON",
+          "id": null,
+          "label": "New ticket",
+          "test_id": null,
+          "phx_click": "new-document",
+          "phx_value_id": null,
+          "phx_value_idx": null,
+          "href": null,
+          "aria_label": "New ticket",
+          "aria_current": null,
+          "disabled": false,
+          "outcome": "PASS",
+          "witness": "inventory (asserted, not pressed)",
+          "detail": "NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New ticket · title-only=false",
+          "presses": 0,
+          "waited_ms": 0
+        }
+      ],
+      "rows_note": "The 235 pane_doc_item rows all carry the SAME outcome and the SAME detail, so they are collapsed to a count here rather than repeated 235 times. Every row of every OTHER kind is listed in full.",
+      "pane_doc_item_collapsed": {
+        "count": 235,
+        "outcome": "PENDING",
+        "detail": [
+          "the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+        ],
+        "ids": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "provenance": {
+      "pre": {
+        "commit": "c81b8e66d",
+        "version": "0.2.26.2129",
+        "read_at": "2026-09-06T17:40:15.462Z"
+      },
+      "post": {
+        "commit": "c81b8e66d",
+        "version": "0.2.26.2129",
+        "read_at": "2026-09-06T17:40:21.676Z"
+      },
+      "matched": true
+    },
+    "wall_ms": 6123,
+    "beats": [
+      {
+        "name": "AUTH",
+        "status": "PASS",
+        "detail": "/w/default/p/default/d/production/studio",
+        "checks": [
+          {
+            "label": "the desk painted something",
+            "status": "PASS",
+            "note": "8 anchor node(s) in 0.0s"
+          },
+          {
+            "label": "identity discriminator [phx-click=shares-open] == 1 (admin)",
+            "status": "PASS",
+            "note": "the shares_admin?-gated bar button is present — this session is the admin one"
+          }
+        ],
+        "gating": true
+      },
+      {
+        "name": "CENSUS",
+        "status": "PENDING",
+        "detail": "257 pressed · 21 inventoried · 40 PASS 0 FAIL 238 UNMEASURED · 5.4s of the 480.0s budget",
+        "checks": [
+          {
+            "label": "plugin_link  plugin-link-plugin-link-81565798 \"Projects\"",
+            "status": "PASS",
+            "note": "IDENTITY: the page is now this anchor's OWN href (/admin/projects) — answered in 0.6s after 1 press(es) · counts(recorded, non-deciding): panes 1→0 · .pane-item 7→0 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /admin/projects · returned to the desk afterwards (rows=true socket=true)"
+          },
+          {
+            "label": "plugin_link  plugin-link-plugin-link-40413578 \"Fleet\"",
+            "status": "PASS",
+            "note": "IDENTITY: the page is now this anchor's OWN href (/admin/fleet) — answered in 0.1s after 1 press(es) · counts(recorded, non-deciding): panes 1→0 · .pane-item 7→0 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /admin/fleet · returned to the desk afterwards (rows=true socket=true)"
+          },
+          {
+            "label": "pane_item    item-paper               \"Papers\"",
+            "status": "PASS",
+            "note": "IDENTITY: the URL newly carries this row's own phx-value-id (paper) — answered in 0.3s after 1 press(es) · counts(recorded, non-deciding): panes 1→1 · .pane-item 7→7 · .pane-doc-item 0→0 · url /w/default/p/default/d/production/studio → /w/default/p/default/d/production/studio/paper"
+          },
+          {
+            "label": "pane_item    item-sheet               \"Sheets\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→7 · .pane-doc-item 100→1 · url /w/default/p/default/d/production/studio/paper → /w/default/p/default/d/production/studio/sheet"
+          },
+          {
+            "label": "pane_item    item-content-types       \"Content\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→9 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/sheet → /w/default/p/default/d/production/studio/content-types"
+          },
+          {
+            "label": "pane_item    item-plugin-doclist-75745103 \"Tasks\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 9→7 · .pane-doc-item 0→100 · url /w/default/p/default/d/production/studio/content-types → /w/default/p/default/d/production/studio/plugin-doclist-75745103"
+          },
+          {
+            "label": "pane_item    item-rest                \"…Rest\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→2 · .pane-item 7→19 · .pane-doc-item 100→0 · url /w/default/p/default/d/production/studio/plugin-doclist-75745103 → /w/default/p/default/d/production/studio/rest"
+          },
+          {
+            "label": "pane_doc_item doc-sheet-798717         \"Untitled, draft, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to sheet\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to sheet · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Review scoped access grants\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the scoped-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=access-open-type · aria-label=Review scoped access grants · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New sheet\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New sheet · title-only=false"
+          },
+          {
+            "label": "pane_item    item-metric              \"Metric\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_item    item-tag                 \"Tag\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-clk-bl-idempotency-preview-token-sweeps-have-no-caller \"Idempotency.sweep and PreviewToken.sweep have ZERO production callers, published\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e4d5cc40193a3ef5 \"Auth.sweep_login_tickets/0 has ZERO production callers — spent login tickets kee\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-dee226be3107a98b \"CI must be fast and valuable: one PR push triggers 55 check runs from 46 workflo\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e376642d6d69fa3f \"CI diet: collapse main-push runs of pure harness/advisory workflows to one main \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cchi-w55-s2-app-test-blind-to-gap-copy \"INSTRUMENTS: feed the blocking unit harness the real FailureCopy sentence instea\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cch-w57-bl-deleting-a-fleet-main-orphans-its-support-box \"Deleting a fleet MAIN leaves its SUPPORT box alive, unfleeted and still billed —\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-a520c703e4e9b931 \"bp task create sends one Idempotency-Key per invocation and reuses it across its\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-w11-bl-cancelled-rows-count-as-waiting \"A cancelled deployment counts as STILL WAITING in the delivery census, published\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-877bfc465162e104 \"Wire the CLASSIFYING rail-fail fixture into a scenario — it is exported and rout\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-ssw8-bl-accepted-frameworks-no-implementation \"create 201s on --framework hugo and --scale-mode zero, capabilities the spawner \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cchi-w25-bl-label-63-pinned-by-inequality-and-the-trailing-hyphen \"Nothing pins the DNS label's UNBROKEN-run length — the only assertion is <= 63, \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-bl-rate-notice    \"Notice a failing fleet with a RATE, not a 841st email — consecutive-failure and \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-ea47f91eb42c505f \"bp tasks board: a stamp on a claimed row did not flip its criteria ladder within\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-spd-w19-click-loading-falls-through \"A press on an in-flight row falls through to whatever sits underneath it, publis\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-w22-bl-internal-cli-trips-zero-required-gates \"internal/cli/** and any new top-level directory trip zero required gates — measu\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-pds-bl-fixtures-only-pr-runs-no-go-job \"A PR that changes only internal/cli/testdata/** runs no Go job at all - committe\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e99a8e946f80f52c \"Slice 4: presence and attribution on papers: who is here, who made each op, and \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-spd-w19-desk-row-census-run \"The deployed desk-row census: every row pressed, the dead ones named by id AND l\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-w33-bl-task-create-refuses-criteria-less-rows \"bp task create REFUSES a criteria-less row on this epic — the fourth backfill is\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-measurement-baselines-are-61-commits-stale \"The committed desk measurements predate the ladder and the return grammar - reti\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-isu-backlog-cloud-update-trigger-verb \"bp cloud update <instance> trigger verb is missing though the console chip promi\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-spd-w18-bl-select-detects-dead-destination \"A desk row whose destination crashes must not look like a no-op, published, done\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cchi-bl-task-get-needs-a-server-side-prefix-lookup \"bp task get cannot suggest a truncated id on a large ledger: a client-side prefi\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-7f06080cfd584194 \"S6 — Mutation and draft semantics: say what you did, document the shapes, publis\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-f156b5e43bfbfe91 \"Split the fused refusal string into typed code + message fields (SPA + CLI), pub\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-5cc3689cb0ab6637 \"Nothing reports a box with no live agent token, which is why the revoked-fleet l\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-bf9a5199484a5a6b \"Six content-bound sites have no content-publish secret, so no reconcile can ever\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-w1-s4-followup-auto-proof-zombie-webhook \"Zombie registration: site auto-proof holds a CP content-webhook secret with no b\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-jf-backlog-anon-read-mechanism \"Explain jarl's anonymous public reads (share registry is empty yet production re\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-pds-scoped-search-intel-receipts-unpinned \"The workspace-scoped mirror of the search-intel receipts (router.ex:2191) is unp\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-bl-task-move-stdin-refusal \"bp task move refuses any inherited stdin, so a plain shell while-read loop over \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-gfr-bl-bp-auth-me-drops-saved-token \"bp auth me answers 'authentication required' with a token bp whoami just used, p\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-06bd406b5126e6c4 \"internal/manifest test TestFetchServesCachedManifestOnServerFaultAndTransportErr\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-f4cff88ca65aca30 \"compose-smoke sigaltstack boot crash is confined to Intel Xeon Platinum 8573C ru\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-6cd940f66125a079 \"main-gate-watch cannot see a MISSING verdict: a collapsed workflow whose newest-\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-bb930319aeac0266 \"go-tests never runs on the Elixir PRs that break it: the Go suite reads 8 api/ s\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-07a465f262bad05f \"bp write verbs print NOTHING on stdout when the publish wall refuses under -o js\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-dd7df7da7c7dc1f1 \"bp doc patch writes the DRAFT while bp doc get reads the PUBLISHED doc — a read-\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-98b3df6eab045a78 \"compose-smoke green arm misnames a post-healthy container death as an HTTP probe\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-62ed247e1dd0b960 \"bp renders failure_code + failure_message from the split box refusal — the CLI h\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-327276db28c99818 \"Graph root resolver + Content.Graph.resolve_doc/3 still tiebreak a task id acros\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-627ca2d7be08d22c \"Three router pipelines will wrap one plug — :api_strict_bearer and :strict_beare\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-f228c14ed9c83232 \"scripts/nil-polarity-check.sh — the fail-OPEN visibility guard prints 'PASS — 0 \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e6f713ba5100d769 \"Go gate will red on main: ambiguous_dataset and dataset_twin (409, from #16474) \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-a22b8a135fb65243 \"main-red: two listing-store-agreement tests pin the asc:dataset tiebreak the Twi\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-6a6963419c1e9e3b \"tooling/tasks/tasks.mjs: the parent_id CYCLE warning names no host and the LIMIT\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-00ccc80aed2a6d49 \"bp: a GLOBAL value flag a command declares (-d/--dataset on task.ready) is never\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-184760672ff3414b \"Github.Adopt still forks a drafts.<id> twin then collapses it — port to the fenc\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-93fb6a1a8a33c93d \"Adjudicate Tasks.Board.load_task_docs/1: the operator board's corpus read has no\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-0084e191d406de96 \"GET /v1/tasks/ready ignores ?dataset= and lists a two-dataset task doc_id twice \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-49eef068420df918 \"A task doc_id in two datasets makes bp task get and bp doc patch read different \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-61459da189728fa1 \"Validation perf bench (median-of-5, alarm >100ms) is a fixed wall-clock threshol\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-8adc3266e46e4ec4 \"validation-perf reds the required Elixir gate for a hex.pm deps.get flake and do\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-578619eaf4824adb \"Validation perf bench alarm (100 ms) is ~70x above the medians it measures (0.4-\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-8e9005bee4d20ed5 \"A publish refused by the dedup wall DISCARDS the draft - including a LIVE claim \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e175c03d3e7722db \"An unsupported ?perspective is still silently downgraded to published on /v1/dat\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-f7b4e355c8ceb074 \"Media.delete_file/2 is still unguarded — the where-used guard sits on the two do\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-ef676cfc88e71fae \"A forced media delete leaves no witness — the guard names the referrers, then th\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-29644998e128dd9f \"pds-elixir-receipt-census pins evidence by LINE, so any insertion above a citati\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cchi-w67-bl-bp-task-ls-has-no-status-filter-so-foreign-claims-cannot-be-scanned \"bp task ls has no status filter, so the foreign-claim scan every wave is told to\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-802f054c2f455956 \"398 stranded drafts have one cause: the publish wall rejects an unregistered tag\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-baf9b74a0ffc83f4 \"TtlSweeper reaps the drafts.<id> twin of a task whose published row is already c\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e25b94b9db28392a \"Operator authority is per-instance: ship a per-box check that no workspace lacks\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-9b5e1a6a688d27fc \"bp doc publish on a claimed task silently drops the claim and reopens the row; c\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-aa8f25be2c04d391 \"The GitHub mirror forks a drafts.<id> twin of every claimed task it stamps and s\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-d20d8acad232c3b1 \"Re-pin the stale attachments.ex File.rm Sobelow waiver (288 -> 292) that is redd\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens \"36 of the 55 audit verbs render as raw dotted machine tokens in the operator's s\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cch-w24-bl-nothing-pins-height-against-a-cruel-string \"Nothing pins HEIGHT against a cruel string — the 512-char provision error paints\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-9d06bca37668f76a \"Boundary edge portable_doc>papers: BPML diff aliases Content.Papers.BlockOps and\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-ssw8-persist-binding-verdict \"Persist the binding verdict — content_bound still means 'a token exists' outside\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cch-w19-bl-w13-rail-pill-pooled-zero-check \"W13's rail-pill guard is POOLED, so routes that render no rail assert nothing un\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320 \"`Q3 BELOW THE FOLD` at 320 measures the shell, not the screen — the budget is un\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-2e7564a07337f937 \"The console SPA mirrors the 14-rung site-state ladder (ruling A) and renders sta\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-c6da7e967ac9824b \"doc-gates citation guard red on main: three novel linerefs (two into the built a\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-fe32dc3fd5076ead \"Doc budgets + anchors red on main with ZERO FAIL lines: check-doc-budgets.sh die\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-bp-task-verbs-500-on-cross-dataset-duplicate-slugs \"bp task get/claim/close 500 on any doc_id that exists in two datasets, making 11\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e91cbd0cceafc44e \"bp task close writes no disposition, so every closed row keeps its pre-close adj\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-f94a1d96238b18e4 \"cron-overdue-probe is red on main by construction: it screams OVERDUE for main-g\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-037c3c1494f0d59e \"deploy-harnesses.yml has no pull_request arm: 184-check cp-deploy harness green \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-8780f3b465edea5b \"shell-harnesses.yml names its tenants by hand, so 4 of 54 scripts/*.test.sh run \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-9c8fccd9e8a77773 \"Crown BEHIND / GRACED-UNRECORDED is a real recorder gap: a sha delivered by a LA\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e25bedb929c60a91 \"deploy.yml scp's cp-deploy.sh to a SHARED /tmp path and a later run rewrites it \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-dr-w11-bl-eight-sites-never-autodeploy \"Only 5 of 13 sites have a content-publish webhook — the other eight never auto-d\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-464b89f30e3f8e41 \"Two tasks were skipped by the task-paper edge rebuild — 3 citations still materi\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-conditional-criterion-goes-live-unwatched \"A conditional acceptance criterion can go LIVE after its holder files it not-app\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-spd-b42-georgia-default-shortfall-inflow-width \"Forced Georgia fails >=55ch at three DEFAULT desktop widths — and the trim that \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-ca99c4a10eb9c5df \"Paper editing matches the reader and preserves working interactions, draft, open\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-e3bd53c0df306521 \"console-harness.yml: invoke the new attention-scenarios.test.mjs (born 2026-09-0\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-eeaf3a622b6c74c7 \"Writer.from_envelope/1 folds ANY unknown flat key - including a bare id - into c\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-99bb8ca0d64618b1 \"Shell harnesses red on main since #16423: studio-instrument-selftests.yml's conc\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-d015fb5b13973ef8 \"pr-meta red on main since #16403: crown-reconcile.sh carries 10 run-level refere\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-b57807b8ea97c926 \"scripts/unreachable-assert-message-check.sh — the Elixir gate's never-worse ratc\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-93e7188bb7e2bb56 \"bp cloud support add: a Go test that drives the REAL post-flip 403 no_team shape\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-943c1983a8483522 \"the TUI's live-turn fixture is a hand-authored guess at our own wire shape, and \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-95d79a1bc978ae83 \"Paper editing works consistently and preserves content, published, open, Updated\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-04d698cfab17e94f \"Fleet self-update health: land v0.2.26 everywhere, fix the agents that can't one\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-api-plugins-correctness-audit \"API plugin subsystems correctness audit (Felix-style, non-security), published, \"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-fa30112d238bb57a \"chat_live_test refutes \"/default\" over the whole page — the inlined paper-surfac\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-ee04beea931e5a94 \"The paper TUI blocks on network inside a synchronous render pass — and the doc c\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-task-ee410368c68d9199 \"BLOCKED: manifest-gap closure is unreachable from the Go/CLI fence, published, o\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to task\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to task · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New task\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New task · title-only=false"
+          },
+          {
+            "label": "pane_item    item-rest-book           \"book (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→1 · url /w/default/p/default/d/production/studio/rest → /w/default/p/default/d/production/studio/rest/rest-book"
+          },
+          {
+            "label": "pane_item    item-rest-bossType       \"bossType (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→1 · url /w/default/p/default/d/production/studio/rest/rest-book → /w/default/p/default/d/production/studio/rest/rest-bossType"
+          },
+          {
+            "label": "pane_item    item-rest-bulldoc        \"bulldoc (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/rest/rest-bossType → /w/default/p/default/d/production/studio/rest/rest-bulldoc"
+          },
+          {
+            "label": "pane_item    item-rest-command        \"command (22)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→22 · url /w/default/p/default/d/production/studio/rest/rest-bulldoc → /w/default/p/default/d/production/studio/rest/rest-command"
+          },
+          {
+            "label": "pane_item    item-rest-document       \"document (4)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 22→0 · url /w/default/p/default/d/production/studio/rest/rest-command → /w/default/p/default/d/production/studio/rest/rest-document"
+          },
+          {
+            "label": "pane_item    item-rest-form_response  \"form_response (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→1 · url /w/default/p/default/d/production/studio/rest/rest-document → /w/default/p/default/d/production/studio/rest/rest-form_response"
+          },
+          {
+            "label": "pane_item    item-rest-listener       \"listener (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→1 · url /w/default/p/default/d/production/studio/rest/rest-form_response → /w/default/p/default/d/production/studio/rest/rest-listener"
+          },
+          {
+            "label": "pane_item    item-rest-mediaAsset     \"mediaAsset (799)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 1→100 · url /w/default/p/default/d/production/studio/rest/rest-listener → /w/default/p/default/d/production/studio/rest/rest-mediaAsset"
+          },
+          {
+            "label": "pane_item    item-rest-post           \"post (6)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 100→0 · url /w/default/p/default/d/production/studio/rest/rest-mediaAsset → /w/default/p/default/d/production/studio/rest/rest-post"
+          },
+          {
+            "label": "pane_item    item-rest-session        \"session (7)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 2→3 · .pane-item 19→12 · .pane-doc-item 0→7 · url /w/default/p/default/d/production/studio/rest/rest-post → /w/default/p/default/d/production/studio/rest/rest-session"
+          },
+          {
+            "label": "pane_item    item-rest-ticket         \"ticket (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→3 · .pane-item 12→12 · .pane-doc-item 7→1 · url /w/default/p/default/d/production/studio/rest/rest-session → /w/default/p/default/d/production/studio/rest/rest-ticket"
+          },
+          {
+            "label": "pane_item    item-rest-wavemeasure    \"wavemeasure (1)\"",
+            "status": "PASS",
+            "note": "IDENTITY: aria-current=\"true\" landed on THIS element — answered in 0.2s after 1 press(es) · counts(recorded, non-deciding): panes 3→2 · .pane-item 12→19 · .pane-doc-item 1→0 · url /w/default/p/default/d/production/studio/rest/rest-ticket → /w/default/p/default/d/production/studio/rest/rest-wavemeasure"
+          },
+          {
+            "label": "pane_doc_item doc-book-e19344ea2a2825e9 \"Untitled, draft, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "collapsed_strip pane-structure           \"Back to Structure\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to book\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to book · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New book\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New book · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-bossType-487bba26b5c69c14 \"Untitled, draft, Updated 2mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to bossType\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to bossType · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New bossType\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New bossType · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--ensure-cli-noun--go \"Ensure a bp completion noun, published, Updated 14d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--cli-verb--read-list \"Add a bp CLI Verb, published, Updated 14d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--block-type--starter \"Add PortableDoc Block Type, published, Updated 14d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--console-hook-zones--js \"Ensure console hook zones, published, Updated 20d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--console-helper--js \"Add a Console Pure Helper, published, Updated 20d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--oban-worker--cron \"Add Oban Cron Worker, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--plugin--minimal \"Add a Barkpark Plugin, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--schema-type--minimal-template \"Add a Plugin-Declared Schema Type, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--site-template--astro \"Add a Deployable Cloud Site Template, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--block-type--tier-classify \"Classify a PortableDoc Block Type, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--canonical-marker--plant-above-head \"Plant a @canonical Marker, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--plugin-route--elixir \"Add a Plugin Route, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--plugin-bucket--elixir \"Add a Plugin Auth Bucket, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--ensure-router-zones--elixir \"Ensure router marker zones, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--ensure-root-layout-zones--heex \"Ensure root layout marker zones, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--sdk-method--ts-read \"Add a JS SDK Client Method, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--migration--alter-add-index \"Add Ecto Migration, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--error-shape--build-clause \"Add an API Error Shape, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--ensure-import--elixir \"Ensure an Elixir import, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--docs-card--remove \"Remove Docs Card, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--docs-card--add \"Add Docs Card, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-barkpark--backfill-task--dry-run-apply \"Add a Backfill Mix Task, published, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to command\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to command · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New command\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New command · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-form_response-5c4c48b3f21304e7 \"Form response — pd-feedback-demo, draft, Updated 1mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to form_response\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to form_response · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New form_response\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New form_response · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-listener-muscle-1    \"Untitled, published, idle, claude\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to listener\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to listener · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New listener\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New listener · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-asset-6c32df30-84a7-42be-8b23-90895ac26a9e \"scrubbed.jsonl, draft, Updated 6d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-b7b6b32f-1821-48bd-a8d7-c363b40116b9 \"controlled-real-place-card-unbroken-title.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-0cf8f145-f16d-4b97-9e16-21826b977cce \"live-long-title-12.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-f23bd7e0-fbae-4cc2-bc1f-e30cde7e5fe5 \"t24-current-eftir-gallery-proof.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-72c67677-8d33-44fd-85f8-c4df3790f9d9 \"controlled-real-place-card-unbroken-title.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-1a8fff6e-24f6-405a-9eac-7860350b35fe \"live-long-title-12.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-815b9ac6-6d96-49e7-872e-43b80f258c40 \"controlled-real-place-card-unbroken-title.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-0c2c7cb9-0422-47ef-acd4-a7390bdfd957 \"live-long-title-12.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-fba6be11-6847-4c41-b7e3-254aebe8a6ae \"t05-title-wrap-proof-board.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-db0c0c22-5bb4-4543-86c9-0609b85de0cd \"t14-current-geometry-proof-card.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d4114448-cd25-4733-9fc3-afb4cff91cbf \"t11-current-full-marina-module-390css.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-ecf1a973-b724-44d1-b796-c79951931696 \"t11-meeting-context-top-stripe-crop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-ca35e622-58ed-4c9a-a6b4-165b44ea6cd0 \"t02-current-outline-same-date-fixture.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-a4514fad-9cef-42d7-bcbe-0734bdb3ba52 \"t02-replay-filled-same-date-fixture.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-903af461-7a67-47ef-a9ac-de51615ea3fb \"t25-address-population-ledger.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-fee1a593-a445-45e3-ba1d-30ea9edccc0f \"t14-current-geometry-proof-card.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-07ca836c-27d6-49e9-8258-91ad211fe9ad \"t35-current-matched-cards-to-footer.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-388a4fb5-6a78-4e84-b659-136c903d2c2a \"t35-before-matched-cards-and-form.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-c7b2bde0-f9a4-43cf-80b1-ded4432ab179 \"t32-current-matched-visit-to-footer.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d69c85bf-cd2b-4841-943e-ab20ddb263af \"t32-before-matched-visit-and-repeated-cta.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-73d955b4-a09b-41a7-83c7-8a7e317e98bc \"t24-current-dougs-gallery-slot-and-body.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-e65282b7-f40c-4f4b-8661-e3701b3815e0 \"t07-current-full-event-card-desktop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-eb354b35-1563-45af-a690-e2ecfde22e00 \"t22-current-dougs-note-removed-address-current.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-68c39c07-c783-4efd-961f-0e568b56231e \"t29-current-guide-real-category.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-5ab2cdae-fb4e-4866-9a2d-d7329e6b77e3 \"t22-current-dougs-note-removed-address-current.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-58741264-8246-4e7b-a388-d5d8d245e244 \"t29-current-guide-real-category.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-7e8bf033-fb6b-4d39-9345-9ac26e6888af \"t23-before-top-alignment-1200x750.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-f656eb12-a4a7-4d2e-8c37-c0dd94a03a8a \"t23-current-top-alignment-1200x750.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d018f185-9cf9-4e0d-83e0-9c83ca049480 \"t25-current-address-480x420.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-a49f2586-2268-466e-b195-5b13b94a56db \"t25-before-address-480x420.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-b48a12a5-ba72-467f-a3f1-6a96400f9e39 \"t23-before-top-alignment-1200x750.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-95b2559a-c9c2-49de-aee0-f8b0d65a2921 \"t23-current-top-alignment-1200x750.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-59577895-032e-4547-8bed-0430e6054ca9 \"T15-mobile-before-current-pair.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-1928d3e2-37b0-45cc-b375-b3badffac35b \"t25-current-address-480x420.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-1a3fd36e-2bb6-4270-888c-83cb8601d859 \"t27-desktop-ingress-comparison.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-b7334f0b-c3bb-4577-85be-0299503715d1 \"t27-mobile-ingress-comparison.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-f5ccfc30-7d92-4712-a6da-ec0d5b91b6ee \"T15-desktop-before-current-pair.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-77b31c5a-27cd-4672-802d-a14ea566d305 \"t25-before-address-480x420.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-bc5e7f7b-e699-4737-88bd-8c667a9cd544 \"t34-controlled-outcomes-matrix.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-0d640e16-9dd1-4b8c-97f8-ab4430605152 \"t34-negative-four-desktop-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-026774fc-ec44-4655-a82c-d5be6d1a1c8d \"t34-manual-three-mobile-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d6a0dee8-b172-4fe5-889b-e89a8720ac91 \"t34-auto-five-mobile-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-223bf373-7641-42a9-8f89-65324e9a589f \"t34-auto-five-desktop-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-5bb0bdc9-95ca-4338-958e-47521ee35eb3 \"t13-current-footer-exact-390x478.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-449f5d79-4c9a-4e2c-9182-693d47f9c59a \"t13-before-footer-exact-390x478.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-de79e7f4-03c9-4af3-83e7-dff9d8e8fca9 \"t12-current-footer-exact-1440x430.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-f1273c84-2928-4af2-9c2f-d5f601041097 \"t12-before-footer-exact-1440x430.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-7f775a8f-ff8f-49aa-be9e-d9d5df255164 \"t15-current-opening-hours-atom.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-8a0d1b77-2d58-4d21-9444-4c249e35290c \"t15-before-opening-hours-atom.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4f4bab60-d11e-4d04-9026-4aada7ac5f09 \"t32-before-cta-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-ae6ce798-1827-4738-bbce-66a4248dae93 \"t32-after-cta-compact.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-efc1f592-3b3b-478e-b150-20979b526d75 \"t30-current-matched-960x350.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-fdeb6fe7-97dc-472b-b398-c61e69f56dd5 \"t30-before-matched-960x350.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4c7a5e9a-ddb4-4169-bc36-132c6921992f \"t30-before-current-matched-board-1980x500.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-12e98e90-b67b-4a2b-ad0d-24837777554f \"T11-historical-upper-seam-390x72.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-16ae1b7d-5a32-480c-9478-ae88391f59ef \"T11-current-upper-seam-390x72.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-cbf0bf78-f7ca-489b-8775-07365b86f77a \"T37-current-first-card-mobile-390x520.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4a467b9f-cc70-42f1-a764-5e09a038ecb6 \"t19-shopping-1440x1000-crop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-69df3d97-4c6f-43bb-8145-da71bae79948 \"t19-restaurant-1440x1000-crop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-44a2fab2-941a-4a64-99e9-fb7afccf38cf \"t19-opplevelse-1440x1000-crop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-a30bff82-2560-4bd6-93a9-5f55a7bc00fc \"t19-helse-velvaere-1440x1000-crop.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-49156464-c1ee-4c5b-810f-cdbc75d31b5a \"t11-current-marina-module-390.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d9f4df29-603d-4eb1-b41f-4cfa4a228bf1 \"t11-historical-marina-module-390.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4bd262b3-f741-41a8-bc93-71fedcdf8b1c \"t34-mobile-manual-three-production.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-1c12b7de-3bc0-4aa7-b3e1-b85a111fed6a \"t34-mobile-automatic-five-production.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-6ecdcba2-35c6-4b53-982a-3a92b4d4cddd \"t34-desktop-negative-four-production.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-51ca7048-4728-45e9-b28d-c99245462d6d \"t34-desktop-automatic-five-production.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-129091ce-2e32-4e87-be63-b3a89e2a3c7d \"t32-after-cta-region.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-489dc6ce-5181-41e0-bef5-314a75cc69c7 \"t32-before-cta-region.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-2d316e81-1cc5-4961-a0af-4c24daa0d627 \"T01-mobile-01-meeting-claim.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-a3834e6a-ee41-4d4e-9940-6df736ddffa4 \"t14-before-390-place-card.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-67059b89-8ccb-48c8-82ce-62241019e1a1 \"t14-after-390-place-card.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-f3abe948-c924-4297-bee4-b6eb52a9e7dd \"t32-before-390-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-3b5c3680-36a7-41e0-93c8-9b2c99cbe9e4 \"t32-after-390-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-dc6ac1be-9994-42a2-804d-f3d07dd6d553 \"T30-current-single-card-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-83ac6ef4-f3f9-4a3e-b8fe-4358ab08252d \"T30-meeting-single-card-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-d9edbb90-b437-4297-899d-92bad7c03de5 \"T29-current-single-card-tag-removed-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-978ad816-736f-473d-9d12-3b8e19602fd1 \"T29-before-single-card-tag-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-226fbc52-46da-4e52-bd2d-17b0a28126f5 \"T37-current-contact-cards-mobile-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-9ffcad40-18d3-46bd-a6de-219e6d0d67ab \"T37-current-contact-cards-desktop-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-a0e5ba03-c22d-4cb5-81da-52d5a9293d74 \"T25-current-backstube-address-1200x400.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4e1372a3-e904-40af-8342-2593e04d766a \"T25-before-backstube-address-1200x400.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-94fceee2-7ee7-4107-a528-ad7248c9e5d0 \"T25-current-backstube-content-1200x750.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-ea0ce393-870e-4c5f-ac83-0efc97b4d4ee \"T25-current-verified-address-focus-420x40.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4ee1e140-84eb-41ac-90c5-5f3936d5bca5 \"T25-before-generic-address-focus-420x40.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-46e53380-2d3c-4f89-8799-d70d737bcbcc \"T25-current-verified-address-row-1200x40.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-90349e45-367e-40c7-8195-706221bbb809 \"T25-before-generic-address-row-1200x40.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-dcc3c28e-de75-471c-b6f9-54454e5675e3 \"T25-mobile-verified-address-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-1929a5c2-ee0c-484f-b1c2-448cafed2a11 \"T21-mobile-expired-box-hidden-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-769b3cbb-4b2a-4e33-9fb6-b3fa4577ef50 \"T25-before-generic-address-precise-1200.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-9f5634e6-46c3-4f81-b69a-e101299fc3ac \"T25-desktop-verified-address-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-17c5d23d-35c8-4fa4-a889-084a8137a9a0 \"T21-desktop-expired-box-hidden-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-240d82f6-0f8f-4a61-869c-ab7c3dfdb9e7 \"T25-mobile-verified-address-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-b9ffe8fb-4696-449f-9c9a-5784fb726337 \"T21-mobile-expired-box-hidden-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-4d387e03-43ad-4318-992d-fd8570dcddb6 \"T21-desktop-expired-box-hidden-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-c1672f6a-faba-438d-88b0-2bd0dd4205aa \"T25-desktop-verified-address-precise.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-49d92754-95f2-4b96-b256-3d4a2162b6b2 \"T21-mobile-expired-box-hidden.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-826fab5c-98ad-43fe-a911-3c11f2a4c61b \"T21-desktop-expired-box-hidden.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-62556892-f53e-4b30-a9eb-f0d53e3ad32f \"T25-mobile-verified-address.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-asset-fd0eeb1a-8472-4642-ad8e-64231c74de15 \"T25-desktop-verified-address.png, draft, Updated 11d ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to mediaAsset\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to mediaAsset · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New mediaAsset\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New mediaAsset · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-08-31-enable-apply-auto-arm \"Session: enable-apply auto-arm — finish the cloud-side enqueue, published, Updat\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-30-jarl-website-programme \"Session: Jarl Website programme — epics, jarl instance, bp fixes, published, Fou\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-28-mobile-stream-rich \"Session: mobile progressive rich streaming (the D37 flip trigger), published, Us\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-26-mobile-pd-full-parity \"Session: mobile PortableDoc full-parity wave — autonomous 3h run, published, Aut\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-26-mobile-epic-round4 \"Session: mobile epic round 4 — triage, emitter, push relay, aesthetics, publishe\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-26-handoff-ship \"Session-handoff build + ship (smoke), published, Live smoke of the session lifec\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "pane_doc_item doc-session-2026-07-26-t3code-upgrade-wave \"Session: T3 Code upgrade — papers verified, plan ratified, wave 2 built and seal\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to session\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to session · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New session\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New session · title-only=false"
+          },
+          {
+            "label": "pane_doc_item doc-ticket-34751d4f62f4a8f0 \"Untitled, draft, Updated 2mo ago\"",
+            "status": "PENDING",
+            "note": "none — the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — UNMEASURED, which is not the same as working"
+          },
+          {
+            "label": "add_btn      (no id)                  \"Share access to ticket\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — it opens the share-access modal OVER the desk, and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=airdrop-open-type · aria-label=Share access to ticket · title-only=false"
+          },
+          {
+            "label": "add_btn      (no id)                  \"New ticket\"",
+            "status": "PASS",
+            "note": "inventory (asserted, not pressed) — NOT PRESSED BY DESIGN — pressing it CREATES A DOCUMENT (the \"+\"), and either would litter the dataset or destroy the desk state the remaining rows are measured against. id=(NONE — #id addressing cannot reach it) · data-test-id=(none) · aria-label=New ticket · title-only=false"
+          }
+        ],
+        "gating": false
+      }
+    ]
+  }
+}
