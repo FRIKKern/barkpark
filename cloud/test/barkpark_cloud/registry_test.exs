@@ -39,6 +39,12 @@ defmodule BarkparkCloud.RegistryTest do
     barkpark
   end
 
+  # The length of the longest hyphen-free run in a DNS label — the measurement
+  # the `<= 63` pin could not make (cchi-w25-bl).
+  defp longest_unbroken_run(label) do
+    label |> String.split("-") |> Enum.map(&String.length/1) |> Enum.max()
+  end
+
   describe "register_barkpark/2 + list_barkparks/1" do
     test "registers a Barkpark scoped to its team" do
       team = team_fixture()
@@ -157,19 +163,92 @@ defmodule BarkparkCloud.RegistryTest do
                "https://#{Barkpark.provisioning_subdomain(bp)}.barkpark.cloud"
     end
 
-    test "label is capped at 63 chars: the slug is truncated, the team short id survives" do
+    # cchi-w25-bl — the pin here USED to be `String.length(sub) <= 63`, an
+    # INEQUALITY, and nothing anywhere asserted the label's longest HYPHEN-FREE
+    # run. That pin cannot notice the arithmetic moving: shrink or grow
+    # `@team_short_id_len` and the label stays under the cap, so the test still
+    # passes while every downstream consumer's budget silently changes. These
+    # assert by EQUALITY, on both halves, for every slug long enough to saturate
+    # the budget.
+    test "label is EXACTLY 63 with an unbroken run of EXACTLY 54 (the budget, by equality)" do
       team = team_fixture()
-      long_slug = String.duplicate("a", 80)
-      # register_barkpark caps slug at 63, so build the subdomain from a raw pair
-      # to exercise the truncation path directly.
-      sub = Barkpark.provisioning_subdomain({long_slug, team.id})
       short = Barkpark.team_short_id(team.id)
 
-      assert String.length(sub) <= 63
-      # team_short_id always survives intact → global uniqueness preserved.
-      assert String.ends_with?(sub, "-" <> short)
-      # No trailing hyphen on the (truncated) slug part before the join.
-      refute String.contains?(sub, "--")
+      # The arithmetic being pinned: slug_budget = 63 - len(short) - 1 = 54.
+      # Pinned as a LITERAL, not re-derived from the module — re-deriving would
+      # make this test agree with any value @team_short_id_len ever takes.
+      assert String.length(short) == 8
+
+      for slug_len <- [54, 63, 80, 200] do
+        # register_barkpark caps slug at 63, so build the subdomain from a raw
+        # pair to exercise the truncation path directly.
+        sub = Barkpark.provisioning_subdomain({String.duplicate("a", slug_len), team.id})
+
+        assert String.length(sub) == 63,
+               "slug_len=#{slug_len}: label length is not the full 63"
+
+        # The label is 63 chars but is NEVER a 63-char unbroken token: the
+        # joining hyphen always sits at index 54, so the longest hyphen-free run
+        # is 54. A fixture citing this producer for a 63-char unbroken label
+        # asserts an UNEMITTABLE string.
+        assert longest_unbroken_run(sub) == 54,
+               "slug_len=#{slug_len}: longest hyphen-free run is not 54"
+
+        assert :binary.match(sub, "-") == {54, 1},
+               "slug_len=#{slug_len}: the joining hyphen is not at index 54"
+
+        # team_short_id always survives intact → global uniqueness preserved.
+        assert String.ends_with?(sub, "-" <> short)
+        # No trailing hyphen on the (truncated) slug part before the join.
+        refute String.contains?(sub, "--")
+      end
+    end
+
+    # The OTHER producer. `clean_url/1` spends the whole 63-char budget on the
+    # slug (no suffix, no assembly step), so it IS the 63-unbroken producer —
+    # the exact opposite of provisioning_subdomain/1 above, and the reason the
+    # two must be pinned separately.
+    test "clean_url/1 IS the 63-unbroken producer, and the DB round-trip keeps it" do
+      team = team_fixture()
+      slug63 = String.duplicate("a", 63)
+
+      assert Barkpark.clean_url(slug63) == "https://#{slug63}.barkpark.cloud"
+
+      assert {:ok, %Barkpark{} = bp} =
+               Registry.register_managed_barkpark(team, "Long", slug63)
+
+      # Read BACK from Postgres — the pin is on what persisted, not on what the
+      # in-memory struct happened to carry.
+      stored = Repo.get!(Barkpark, bp.id)
+      assert stored.url == "https://#{slug63}.barkpark.cloud"
+
+      label = Barkpark.subdomain_from_url(stored)
+      assert String.length(label) == 63
+      assert longest_unbroken_run(label) == 63
+
+      # D229's "up to 86 chars": 8 (https://) + 63 + 1 + 14 (barkpark.cloud).
+      assert String.length(stored.url) == 86
+      assert String.length(String.replace_prefix(stored.url, "https://", "")) == 78
+    end
+
+    test "a TRAILING-hyphen slug is refused, so no invalid DNS label can persist" do
+      team = team_fixture()
+
+      # `clean_url/1` interpolates the slug VERBATIM — it has no assembly step
+      # that could trim, unlike provisioning_subdomain/1. So the changeset is
+      # the only door, and it must be shut.
+      assert {:error, changeset} = Registry.register_managed_barkpark(team, "Acme", "acme-")
+      assert "must be lowercase alphanumeric with hyphens" in errors_on(changeset).slug
+
+      assert [] == Repo.all(from(b in Barkpark, where: b.team_id == ^team.id))
+
+      # The suffixed producer already trimmed both ends and could never emit one.
+      refute String.ends_with?(Barkpark.provisioning_subdomain({"acme-", team.id}), "-")
+
+      # A trailing hyphen is the ONLY thing this tightening refuses: an interior
+      # hyphen and a bare label still pass.
+      assert {:ok, _} = Registry.register_managed_barkpark(team, "Acme Two", "acme-two")
+      assert {:ok, _} = Registry.register_managed_barkpark(team, "Acme Three", "a")
     end
 
     test "team_short_id is lowercase 0-9a-f (a valid DNS label charset)" do
