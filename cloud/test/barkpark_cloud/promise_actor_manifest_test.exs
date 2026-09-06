@@ -199,7 +199,12 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
     {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
     {"10 7 * * *", BarkparkCloud.Workers.TokenExpiryWarningWorker},
-    {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
+    {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker},
+    # dr-w11 (17 -> 18 rows): the hourly content-publish webhook reconcile. It is
+    # UNRELATED to every `:crontab_absent` verdict in this register — it registers
+    # a box endpoint, it touches no promise clock — so it is pinned here in the
+    # same commit that adds it, per the classification rule in `crontab_agrees/0`.
+    {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
   ]
 
   # THE REGISTER. Each key is a promise the console makes about a future act;
