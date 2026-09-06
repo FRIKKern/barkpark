@@ -23,10 +23,10 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
         not kind_present? and not row_present? ->
           {:ok, %{container_id: container_id, container_run_ids: run_ids}}
 
-        kind == "steps" and kind_present? and row_present? and nonblank?(row_id) ->
+        kind in ["steps", "tabs"] and kind_present? and row_present? and nonblank?(row_id) ->
           {:ok,
            %{
-             container_kind: "steps",
+             container_kind: kind,
              container_id: container_id,
              container_row_id: row_id,
              container_run_ids: run_ids
@@ -43,7 +43,7 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   def normalize(_context), do: {:error, :invalid_canvas_run_context}
 
   @doc """
-  Resolves one expandable's exact baseline child segment, lets `fun` transform
+  Resolves one container's exact baseline child segment, lets `fun` transform
   only that segment, and splices the result back through the same visible alias.
 
   The helper is pure. It deliberately knows nothing about canvas eligibility or
@@ -85,6 +85,12 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
          %{container_kind: "steps", container_id: container_id, container_row_id: row_id}
        ),
        do: unique_steps_row(blocks, container_id, row_id)
+
+  defp unique_container_run(
+         blocks,
+         %{container_kind: "tabs", container_id: container_id, container_row_id: row_id}
+       ),
+       do: unique_tabs_row(blocks, container_id, row_id)
 
   defp unique_container_run(blocks, %{container_id: container_id}),
     do: unique_expandable(blocks, container_id)
@@ -142,6 +148,47 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end
   end
 
+  defp unique_tabs_row(blocks, container_id, row_id) do
+    case find_containers(blocks, "tabs", container_id, []) do
+      [%{rows: rows, path: path}] when is_list(rows) ->
+        matches =
+          rows
+          |> Enum.with_index()
+          |> Enum.filter(fn
+            {row, _index} when is_map(row) -> Map.get(row, "id") == row_id
+            {_row, _index} -> false
+          end)
+
+        case matches do
+          [{%{"blocks" => children}, index}] when is_list(children) ->
+            {:ok,
+             %{
+               path: path ++ ["tabs", {:row, index, row_id}],
+               alias: "blocks",
+               children: children
+             }}
+
+          [{_row, _index}] ->
+            {:error, :canvas_run_container_children_invalid}
+
+          [] ->
+            {:error, :canvas_run_container_row_not_found}
+
+          [_first | _rest] ->
+            {:error, :canvas_run_container_row_ambiguous}
+        end
+
+      [_one] ->
+        {:error, :canvas_run_container_children_invalid}
+
+      [] ->
+        {:error, :canvas_run_container_not_found}
+
+      [_first | _rest] ->
+        {:error, :canvas_run_container_ambiguous}
+    end
+  end
+
   defp find_containers(blocks, type, container_id, path) do
     blocks
     |> Enum.with_index()
@@ -172,6 +219,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp container_match(%{"type" => "steps"} = block, path),
     do: %{path: path, rows: Map.get(block, "steps")}
+
+  defp container_match(%{"type" => "tabs"} = block, path),
+    do: %{path: path, rows: Map.get(block, "tabs")}
 
   defp container_match(block, path) do
     {alias_key, children} = effective_children(block)
@@ -214,6 +264,18 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
           _invalid ->
             []
         end
+
+      {_row, _index} ->
+        []
+    end)
+  end
+
+  defp recursive_child_entries(%{"type" => "tabs", "tabs" => rows}) when is_list(rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {%{"blocks" => children} = row, index} when is_list(children) ->
+        [{["tabs", {:row, index, Map.get(row, "id")}, "blocks"], children}]
 
       {_row, _index} ->
         []
@@ -279,6 +341,7 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
       identities =
         case block do
           %{"type" => "steps", "steps" => rows} when is_list(rows) -> [block | rows]
+          %{"type" => "tabs", "tabs" => rows} when is_list(rows) -> [block | rows]
           _ -> [block]
         end
 
@@ -314,6 +377,13 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
       _row ->
         []
+    end)
+  end
+
+  defp all_child_lists(%{"type" => "tabs", "tabs" => rows}) when is_list(rows) do
+    Enum.flat_map(rows, fn
+      %{"blocks" => children} when is_list(children) -> [children]
+      _row -> []
     end)
   end
 

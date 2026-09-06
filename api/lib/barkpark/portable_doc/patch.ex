@@ -39,8 +39,8 @@ defmodule Barkpark.PortableDoc.Patch do
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` and `expandable`
-  children and each visible `steps` row body at any depth. `append-block` is
-  top-level only.
+  children, each visible `steps` row body, and each plain `tabs` row's canonical
+  `blocks` list at any depth. `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -141,7 +141,7 @@ defmodule Barkpark.PortableDoc.Patch do
     # never mask one.
     with {:ok, new_blocks} <- apply_to_blocks(blocks, op),
          {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
-         {:ok, new_blocks} <- check_patch_duplicate_ratchet(blocks, new_blocks, op) do
+         {:ok, new_blocks} <- check_duplicate_ratchet(blocks, new_blocks, op) do
       check_constraints(blocks, new_blocks, op, opts)
     end
   end
@@ -397,12 +397,11 @@ defmodule Barkpark.PortableDoc.Patch do
     end
   end
 
-  # A patch-block may replace a container's whole nested collection. Guard that
-  # root-level write against introducing a duplicate authored identity anywhere
-  # else in the document. Existing legacy duplicates remain editable: only an
-  # occurrence count that grows beyond both one and its pre-patch count is
-  # rejected.
-  defp check_patch_duplicate_ratchet(before_blocks, after_blocks, %{"op" => "patch-block"}) do
+  # Guard every op against introducing a duplicate authored identity anywhere
+  # in the document, including non-targetable container-row ids. Existing
+  # legacy duplicates remain editable: only an occurrence count that grows
+  # beyond both one and its pre-op count is rejected.
+  defp check_duplicate_ratchet(before_blocks, after_blocks, %{"op" => op_kind}) do
     before_counts = before_blocks |> authored_ids() |> Enum.frequencies()
     after_ids = authored_ids(after_blocks)
     after_counts = Enum.frequencies(after_ids)
@@ -411,11 +410,11 @@ defmodule Barkpark.PortableDoc.Patch do
            after_counts[id] > 1 and after_counts[id] > Map.get(before_counts, id, 0)
          end) do
       nil -> {:ok, after_blocks}
-      id -> {:error, {:duplicate_id, id, "patch-block"}}
+      id -> {:error, {:duplicate_id, id, op_kind}}
     end
   end
 
-  defp check_patch_duplicate_ratchet(_before_blocks, after_blocks, _op),
+  defp check_duplicate_ratchet(_before_blocks, after_blocks, _op),
     do: {:ok, after_blocks}
 
   defp authored_ids(blocks) when is_list(blocks),
@@ -435,6 +434,9 @@ defmodule Barkpark.PortableDoc.Patch do
         %{"type" => "steps", "steps" => rows} when is_list(rows) ->
           Enum.flat_map(rows, &authored_step_row_ids/1)
 
+        %{"type" => "tabs", "tabs" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_tab_row_ids/1)
+
         _ ->
           []
       end
@@ -448,6 +450,18 @@ defmodule Barkpark.PortableDoc.Patch do
     do: authored_id(row) ++ authored_alias_ids(row)
 
   defp authored_step_row_ids(_row), do: []
+
+  defp authored_tab_row_ids(row) when is_map(row) do
+    nested =
+      case Map.get(row, "blocks") do
+        children when is_list(children) -> authored_ids(children)
+        _opaque -> []
+      end
+
+    authored_id(row) ++ nested
+  end
+
+  defp authored_tab_row_ids(_row), do: []
 
   # Both renderer body aliases are authored block lists when present. Count the
   # shadow too: replacing a parent must not smuggle an identity collision into
@@ -557,6 +571,12 @@ defmodule Barkpark.PortableDoc.Patch do
           {next_rows, flag} -> {Map.put(block, "steps", next_rows), flag}
         end
 
+      {:tabs, rows} ->
+        case transform_tabs_rows(rows, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_rows, flag} -> {Map.put(block, "tabs", next_rows), flag}
+        end
+
       nil ->
         {nil, false}
     end
@@ -583,6 +603,22 @@ defmodule Barkpark.PortableDoc.Patch do
   defp transform_steps_rows([row | rest], id, fun, acc),
     do: transform_steps_rows(rest, id, fun, [row | acc])
 
+  defp transform_tabs_rows([], _id, _fun, _acc), do: {nil, false}
+
+  defp transform_tabs_rows([%{"blocks" => children} = row | rest], id, fun, acc)
+       when is_list(children) do
+    case transform_with_flag(children, id, fun) do
+      {nil, _flag} ->
+        transform_tabs_rows(rest, id, fun, [row | acc])
+
+      {next_children, flag} ->
+        {Enum.reverse([Map.put(row, "blocks", next_children) | acc]) ++ rest, flag}
+    end
+  end
+
+  defp transform_tabs_rows([row | rest], id, fun, acc),
+    do: transform_tabs_rows(rest, id, fun, [row | acc])
+
   defp visible_child_lists(block) do
     case visible_child_container(block) do
       {:blocks, _key, children} ->
@@ -598,6 +634,12 @@ defmodule Barkpark.PortableDoc.Patch do
 
           _row ->
             []
+        end)
+
+      {:tabs, rows} ->
+        Enum.flat_map(rows, fn
+          %{"blocks" => children} when is_list(children) -> [children]
+          _row -> []
         end)
 
       nil ->
@@ -618,6 +660,9 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp visible_child_container(%{"type" => "steps", "steps" => rows}) when is_list(rows),
     do: {:steps, rows}
+
+  defp visible_child_container(%{"type" => "tabs", "tabs" => rows}) when is_list(rows),
+    do: {:tabs, rows}
 
   defp visible_child_container(_block), do: nil
 
@@ -650,7 +695,8 @@ defmodule Barkpark.PortableDoc.Patch do
     |> Map.put("type", Map.get(target, "type"))
   end
 
-  defp block_id(block), do: Map.get(block, "id")
+  defp block_id(block) when is_map(block), do: Map.get(block, "id")
+  defp block_id(_block), do: nil
 
   # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
   # `"value"` key is touched, and only for field-boolean (string "true"/"false"
