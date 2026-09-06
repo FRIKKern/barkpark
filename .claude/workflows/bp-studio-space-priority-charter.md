@@ -3015,8 +3015,9 @@ inert.
      stays FAIL. Same at viewport 1024: the column is already 679px (pane 720 − the 41px `spd-b29` strip),
      the cap binds, and a 32px strip takes it to 688px with the surface still at 660. A 12px trim of shipped
      inspector chrome and a 9px trim of the strip for **zero reader pixels** is exactly the change D77/D93/D103
-     forbid being sold as a measure fix, and D149 refused this trim once already. **Ruling: `spd-b42` does NOT
-     ship a dock or strip trim. The 300px dock and the 41px strip stand.**
+     forbid being sold as a measure fix, and D149 refused this trim once already. **This PR therefore ships NO
+     dock or strip trim** — a change measured at zero reader pixels is not shipped as a measure fix. Whether the
+     trim is refused for good, and what replaces it, is the owner's call (recommendation below).
 
   2. **THE ONLY MECHANISM IN THE SHEET THAT BEATS THE CAP IS THE PROTECTED FLOOR, AND IT IS UNREACHABLE AT THE
      FAILING WIDTHS.** `min-inline-size: calc(55ch + 2 × var(--paper-gutter))` resolves to 687.63px under
@@ -3051,13 +3052,16 @@ inert.
   gerrymandering unless it is fixed before the table is seen); or accept the shortfall for wide serif faces at
   the widths where the editorial cap binds, on the record, the way viewport 640 is accepted.
 
-  **RULING. `spd-b42` AS FILED IS REFUTED AND ITS CRITERIA 1 AND 2 ARE NOT CLOSABLE BY ANY CHANGE INSIDE ITS
-  OWN SCOPE** — no in-flow inspector width makes viewport 1280 or 1024 reach 55ch under forced Georgia while
-  the 660px cap stands, and viewport 700 remains arithmetically foreclosed for a second, independent reason
-  (its column is 615px, under the cap, so the D126 in-flow ceiling of 0.42px is still the binder there).
-  Criterion 3's OWNED SHORTFALL is therefore GRANTED and WIDENED: **forced Georgia at 18px in the DEFAULT state
-  is an owned shortfall at viewport 1280, 1024, 800 and 700, for the reason above, on the same footing as
-  viewport 640 (D100/D106).** What the slice ships instead is this decision plus the missing tripwire:
+  **RECOMMENDATION — NOT A RULING. Lane-authored decisions are proposed here and ratified by the owner
+  (owner-queue item 41, 2026-09-06); a lane may not both propose and ratify.** What the measurement establishes
+  as FACT: no in-flow inspector width makes viewport 1280 or 1024 reach 55ch under forced Georgia while the 660px
+  cap stands, and viewport 700 remains arithmetically foreclosed for a second, independent reason (its column is
+  615px, under the cap, so the D126 in-flow ceiling of 0.42px is still the binder there). So `spd-b42`'s
+  criteria 1 and 2 are not closable by any change inside its own scope. **lead-studio recommends** that the owner
+  rule the third shape above: forced Georgia at 18px in the DEFAULT state becomes an owned shortfall at viewport
+  1280, 1024, 800 and 700, on the same footing as viewport 640 (D100/D106) — because pe-w1 already chose 580px as
+  the editorial measure, and the other two shapes either break the measure parity that `measure_parity_test.exs`
+  exists to keep or are D107's gerrymander. Until the owner rules, `spd-b42` is BLOCKED ON OWNER, its claim held. What the slice ships instead is this decision plus the missing tripwire:
   `.bp-paper-surface`'s `max-width` and `--paper-gutter` are now pinned by value in
   `wide_geometry_lock_test.exs`, mutation-proven (660 → 720 reds the lock naming the geometry, restore greens
   it), so the next cross-epic change to the wide desk's reading measure reds this epic's own lock instead of
