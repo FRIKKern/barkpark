@@ -72,8 +72,7 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
            status: 200,
            body:
              Jason.encode!(%{
-               "webhooks" =>
-                 Enum.map(names, &%{"id" => Ecto.UUID.generate(), "name" => &1})
+               "webhooks" => Enum.map(names, &%{"id" => Ecto.UUID.generate(), "name" => &1})
              })
          }}
     }
@@ -123,7 +122,10 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
 
       assert {:ok, tally} = perform_job(ContentWebhookReconciler, %{})
       assert tally == %{swept: 1, registered: 0, present: 1, skipped: 0, errored: 0}
-      assert writes(:put) == [], "the hourly sweep must never re-enable a hook a person turned off"
+
+      assert writes(:put) == [],
+             "the hourly sweep must never re-enable a hook a person turned off"
+
       assert writes(:post) == [], "and it must never duplicate a row that already exists"
     end
   end
