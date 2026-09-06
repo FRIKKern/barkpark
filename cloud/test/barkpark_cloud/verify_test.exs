@@ -476,6 +476,65 @@ defmodule BarkparkCloud.VerifyTest do
       assert json_body(conn)["error"] == "not_live"
     end
 
+    # cch-w58-bl — the RULING (wave 58 lead): verify is a plane-originated,
+    # authenticated egress that spends the CUSTODIED admin token, not a relay of
+    # a client-authored request, so D673's grant for the proxy's `:read` tier
+    # does not cover it. It refuses on a suspended box with the shipped 409
+    # `suspended` envelope.
+    #
+    # ASSERTED ON THE WIRE, BOTH DIRECTIONS. A status-only assertion cannot see a
+    # credential that was already spent before the refusal was rendered, so the
+    # suspended arm asserts the fake transport recorded ZERO requests and the
+    # unsuspended CONTROL asserts it recorded some — the control is what stops
+    # the zero-requests assertion from going vacuous (a broken fixture that never
+    # reaches the transport at all would pass the refusal arm alone).
+    test "a SUSPENDED box → 409 suspended, and ZERO requests reach the wire" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(suspended: true)
+        |> Repo.update!()
+
+      program_green()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
+
+      # THE WIRE FIRST — this is the assertion the row is about. A refusal that
+      # renders a 409 AFTER `Verify.run/1` has already spent the token would pass
+      # the status check below and fail here.
+      assert FakeHttp.requests() == []
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "suspended"
+
+      # And the plane recorded no verdict from a run it never made.
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert is_nil(reloaded.verify_reachable)
+      assert is_nil(reloaded.last_verified_at)
+    end
+
+    test "the NON-suspended control DOES reach the wire (anti-vacuity for the refusal above)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      refute bp.suspended
+
+      program_green()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
+
+      assert conn.status == 200
+      # Same fixture, same call shape, suspension flipped off → requests DO get
+      # recorded. Without this arm the `== []` above could be green for a reason
+      # that has nothing to do with the refusal.
+      assert FakeHttp.requests() != []
+
+      assert Enum.any?(FakeHttp.requests(), fn req ->
+               URI.parse(req.url).path == "/v1/capabilities"
+             end)
+    end
+
     test "a live box with no admin token → 404 no_admin_token" do
       {user, team} = user_with_team()
 

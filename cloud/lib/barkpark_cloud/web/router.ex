@@ -3098,9 +3098,11 @@ defmodule BarkparkCloud.Web.Router do
   # transport error to swallow.
   #
   # USER-authed + TEAM-SCOPED, fail-closed: a wrong-team / nonexistent /
-  # malformed id is the SAME 404 (no existence leak). 409 not_live while the box
-  # is provisioning (no url yet) or deprovisioning (being torn down); 404
-  # no_admin_token for pre-feature rows; 500 on tampered ciphertext.
+  # malformed id is the SAME 404 (no existence leak). 409 suspended while the box
+  # is under a billing suspension (cch-w58-bl — see the ruling on the refusal
+  # below); 409 not_live while the box is provisioning (no url yet) or
+  # deprovisioning (being torn down); 404 no_admin_token for pre-feature rows;
+  # 500 on tampered ciphertext.
   post "/v1/barkparks/:id/verify" do
     conn = Auth.require_user(conn, [])
 
@@ -3116,12 +3118,58 @@ defmodule BarkparkCloud.Web.Router do
 
         case resolve_team_barkpark(team, conn.path_params["id"]) do
           %Barkpark{} = bp ->
-            if instance_deprovisioning?(bp) do
+            cond do
+              # cch-w58-bl — a SUSPENDED box is not PROBED WITH THE CUSTODIED
+              # ADMIN CREDENTIAL. RULING (lead, wave 58): verify REFUSES on a
+              # suspended box with the shipped 409 `suspended` envelope. No new
+              # copy is minted. Four reasons, and the first is why this does not
+              # re-open D673:
+              #
+              # 1. VERIFY IS NOT A RELAY. D673 deliberately keeps the instance-API
+              #    proxy's `:read` tier RELAYING on a suspended box: a relay passes
+              #    through a request the CLIENT already authored. Verify is the
+              #    opposite shape — a plane-originated, authenticated egress in
+              #    which the control plane resolves the CUSTODIED admin token out
+              #    of storage and spends it against the box. That is the same act
+              #    studio-link (:~3291) and app-token (:~3474) already refuse under
+              #    suspension. So this does not re-open D673's read/mutate axis; it
+              #    says verify was never on the read side of it.
+              # 2. THE PLANE SPENDS A CREDENTIAL THE SUSPENSION HAS ALREADY
+              #    WITHDRAWN THE VALUE BEHIND. Verify sits between those two
+              #    shipped refusals and refused at neither.
+              # 3. IT IS MEMBER-REACHABLE AT THE LOOSEST TIER. `Auth.require_user`
+              #    above means ANY team member can make the plane pay for that
+              #    egress repeatedly while the team is suspended.
+              # 4. AND THE PLANE THROWS THE ANSWER AWAY. Charter D684: the headline
+              #    verdict this route persists is `Enum.any?` over three probes, two
+              #    of them ANONYMOUS, and `verify.api` passes on a 200 from
+              #    `/v1/capabilities` — run-proved to answer 200 to a bogus bearer.
+              #    So the plane pays a credentialed egress for evidence it does not
+              #    actually rely on. (The persisted column is named here only in
+              #    prose: `verify_route_producer_exemption_test.exs` (D706) scans
+              #    this route's SOURCE — comments included — for that symbol, and
+              #    this refusal keys on `suspended`, which D706 names as fine.)
+              #
+              # Placed as a sibling `cond` clause ABOVE `run_verify/3` — not a leg
+              # inside `Verify.run/1` — so the ciphertext is never decrypted and
+              # ZERO requests reach the wire on the refused path. Same 409
+              # `suspended` slug + detail shape as studio-link / app-token, which
+              # `app.js` (ERRORS.suspended) already renders.
+              bp.suspended ->
+                json(conn, 409, %{
+                  error: "suspended",
+                  detail:
+                    "This instance is suspended. It is not probed with the stored " <>
+                      "admin credential until the suspension is cleared."
+                })
+
               # Being removed — its box is on its way out; verifying it is a lie
               # in the making. Mirrors the provisioning 409 Verify.run/1 gives.
-              json(conn, 409, %{error: "not_live"})
-            else
-              run_verify(conn, team, bp)
+              instance_deprovisioning?(bp) ->
+                json(conn, 409, %{error: "not_live"})
+
+              true ->
+                run_verify(conn, team, bp)
             end
 
           nil ->
