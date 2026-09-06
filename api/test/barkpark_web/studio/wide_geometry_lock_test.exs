@@ -114,6 +114,29 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   text lock is a tripwire against silent EDITS, not a substitute for
   measurement.
 
+  ## The fourth half: THE MEASURE'S OWN CAP — added by `spd-b42` (charter D270)
+
+  This file locked the pane, the column, the rails and the inspector, and then
+  watched a 96px change to the wide reading measure land from a DIFFERENT epic
+  and pass every one of them.
+
+  `.bp-paper-surface` carries `max-width: 660px`, landed 2026-08-12 by
+  `pe-w1-reader-editorial-typography` (#11626, `3968dbc16`) as a deliberate
+  editorial measure: 580px of text, ~69 characters per line at 18px on the
+  NATIVE face. It is not a pane rule and not an inspector rule, so
+  `pane_family?/1` never saw it and the census had nothing to compare — and at
+  viewport 1280 it is now the BINDER of the reading measure. The reading column
+  there is 676px (pane 976 − a 300px dock); the cap clips the surface to 660px
+  before the column is anywhere near exhausted, so `content_px` is 580 rather
+  than the 596 charter D120 measured, at 1280, 1024, 900, 800 and 1440 alike.
+
+  That is a criterion-2 change — the wide desk's measure moved 16px at viewport
+  1280 — and this file, whose entire purpose is to red on exactly that, was
+  green through it. So the cap is pinned here, as a value, for the same reason
+  the dock was pinned in wave 11: not because this file owns the number
+  (`measure_parity_test.exs` owns the editorial half of it) but because this
+  file is what says the WIDE DESK's measure moved.
+
   ## The third half: WHICH BOX each container query resolves against
 
   Added by `spd-w5` (charter D114), because the two mechanisms above are both
@@ -498,6 +521,67 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       # basis above stops applying to it at all.
       assert value!(overlay, ".bp-doc-sidebar.is-open (overlay)", "width") == "300px",
              "the overlaid inspector's width drifted from the docked tier's 300px"
+    end
+  end
+
+  describe "the reading measure's own cap — the binder at viewport 1280 (spd-b42)" do
+    test ".bp-paper-surface caps the measure at 660px, and the wide desk feels it" do
+      # TWO rules share this selector line: the token/colour block and the
+      # geometry block. Split by the property that makes one of them geometry,
+      # rather than by source order, which a later edit reshuffles silently.
+      capped =
+        ".bp-paper-surface"
+        |> blocks!()
+        |> Enum.filter(&(&1 =~ ~r/(?:^|;)\s*max-width\s*:/))
+
+      assert length(capped) == 1,
+             """
+             #{length(capped)} rules on a bare `.bp-paper-surface` selector line
+             declare `max-width`, not 1. Two caps on one box is a source-order
+             race for the number that decides the reading measure.
+             """
+
+      [cap] = capped
+
+      # THE NUMBER, AND WHAT IT BINDS. Measured on deployed `8a05efce1` with
+      # scripts/studio-desk-measure.mjs, bracketed, 54 of 54 rows, positive
+      # control fired (charter D270): at viewport 1280 the pane is 976px and
+      # the reading column 676px, but the surface resolves to 660px and
+      # `content_px` to 580px — the cap binds, not the column, and not the
+      # 300px dock the task's arithmetic blamed. 580px is 58.00ch on the
+      # native face at 18px and 52.50ch on forced Georgia at 18px, each read
+      # by a same-face `width: 1ch` probe (11.0469 px/ch for Georgia) and
+      # never by dividing one face's box by another's advance (D83/D86).
+      #
+      # So this one declaration sets the wide desk's measure at viewport 1280,
+      # 1024, 900 and 800, and moving it moves epic criterion 2's own band —
+      # which is what this file exists to catch. It moved once already, from
+      # an effective 676px to 660px, and every pin in this file stayed green.
+      assert value!(cap, ".bp-paper-surface (the measure cap)", "max-width") == "660px",
+             """
+             The reading measure's cap moved off 660px.
+
+             This is the widest the paper surface may render, so at every
+             viewport whose reading column exceeds it — 1440, 1280, 1024, 900
+             and 800 on the deployed matrix — it, and not the pane or the
+             inspector, is what the reader's line length is. A change here is a
+             reading-measure change at the wide desk whatever epic it arrives
+             from, and epic criterion 2 is measured on exactly that band.
+
+             If this move is intended: re-measure with
+             `node scripts/studio-desk-measure.mjs --sha=<served sha>` and
+             update this pin with the new matrix, in the same diff. Do not
+             update it from arithmetic — the last three overturns in this epic
+             were arithmetic (charter D35/D36/D38/D40/D72/D75).
+             """
+
+      # The gutter token is pinned WITH the cap because the reader's measure is
+      # the difference between them (660 - 80 = 580) and the protected floor
+      # consumes the same token (`calc(55ch + 2 * var(--paper-gutter))`,
+      # charter D103). A cap that holds while the token moves is the same
+      # measure change wearing a different number.
+      assert value!(cap, ".bp-paper-surface (the measure cap)", "--paper-gutter") == "40px",
+             "the surface's gutter token moved — the measure is `max-width - 2 x this`"
     end
   end
 
