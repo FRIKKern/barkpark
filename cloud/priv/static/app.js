@@ -20014,7 +20014,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 33 of the 56 declared verbs have no entry here: they render
+    // 2 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -20030,19 +20030,50 @@
     "site.created": "created a site",
     "site.deleted": "deleted a site",
     "site.deploy_requested": "requested a deploy",
+    "site.artifact_uploaded": "uploaded a build artifact",
     "site.env_changed": "replaced a site's environment",
     "site.domain_added": "added a domain",
+    "site.domain_removed": "removed a domain",
     "site.github_connected": "connected a repo",
+    "site.github_disconnected": "disconnected a repo",
+    "site.cloudflare_bound": "bound a domain to Cloudflare",
     "site.rolled_back": "rolled back a site",
+    "deployment.promoted": "promoted a deployment to production",
+    "webhook.created": "created a webhook",
+    "webhook.updated": "updated a webhook",
+    "webhook.deleted": "deleted a webhook",
+    "webhook.rotated": "rotated a webhook signing secret",
+    "webhook.replayed": "replayed a webhook delivery",
+    "webhook.test_sent": "sent a test webhook delivery",
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
+    "barkpark.retry_requested": "requested a retry",
+    "barkpark.verify_requested": "requested a verification",
+    "barkpark.studio_link_minted": "minted a Studio sign-in link",
+    "barkpark.app_token_minted": "minted an app token on a Barkpark",
+    "barkpark.app_token_revoked": "revoked an app token on a Barkpark",
+    "barkpark.site_url_set": "set a Barkpark's site URL",
+    "barkpark.self_update_triggered": "triggered a self-update",
+    "barkpark.rollback_triggered": "triggered a rollback",
     "barkpark.autoupdate_changed": "changed autoupdate",
     "barkpark.agent_key_delivered": "delivered a model key to a support box",
+    "barkpark.domain_attached": "attached a domain to a Barkpark",
+    "barkpark.vercel_deploy_triggered": "triggered a Vercel deploy",
+    "barkpark.resurrected": "resurrected a Barkpark",
+    "barkpark.push_relay_provisioned": "provisioned a git push relay",
     // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
     "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    "provider.connected": "connected a provider credential",
+    "provider.disconnected": "disconnected a provider credential",
+    "github.installation_connected": "connected a GitHub App installation",
+    "github.installation_disconnected": "disconnected a GitHub App installation",
+    "github.repo_pushed": "pushed a repo to GitHub",
+    "notifications.settings_changed": "changed notification settings",
+    "notifications.channels_changed": "changed notification channels",
+    "notifications.events_changed": "changed which events notify",
     "twofa.enabled": "enabled two-factor authentication",
     "twofa.disabled": "disabled two-factor authentication"
     /* END GENERATED: audit action labels */

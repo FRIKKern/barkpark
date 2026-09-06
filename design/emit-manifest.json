@@ -12,7 +12,7 @@
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
     "cloud/priv/static/app.css#cloud SPA": "9d1b45919b6c70f0d0567d3de72611d4d55df397b790c4aeb75307847e4e7472",
-    "cloud/priv/static/app.js#cloud SPA audit action labels": "5cb6c78b947afa30a673e424dbec4ef5ea3407af827195b30dcfad10d941635b",
+    "cloud/priv/static/app.js#cloud SPA audit action labels": "46ee5082e4d8d529ef0f579f338ee36ca115f983a6d2ac36cbb8c0782e686b81",
     "cloud/priv/static/app.js#cloud SPA theme ids": "51bedecd9f9fe16523d18b510564d07d7ca605feedcdef0c12d8fdfc8ed4d09f",
     "cloud/priv/static/styleguide.html#living styleguide swatches": "09c39abf2838df0d33ea6e8a50e2d9d801686b315d95832c4af48e2bb2f66094",
     "internal/pdrender/tokens_gen.go#Go pdrender": "a43355a3619909d5c5a21f5a3d3e1b3f9969a3a405cabcbfad81af55d3f7f5a6",
