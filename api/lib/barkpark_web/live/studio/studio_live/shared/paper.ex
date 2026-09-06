@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
@@ -1168,6 +1169,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
           nested_canvas_echo_runs(root_slug, children)
 
+      %{"type" => "section", "id" => id, "blocks" => children} = block
+      when is_binary(id) and id != "" and is_list(children) ->
+        own_runs =
+          if SectionLayout.grid(block) do
+            []
+          else
+            run_entries(PaperCanvas.section_run_slug(root_slug, id), children)
+          end
+
+        own_runs ++ nested_canvas_echo_runs(root_slug, children)
+
+      %{"type" => "columns", "id" => id, "columns" => columns}
+      when is_binary(id) and id != "" and is_list(columns) ->
+        columns
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {children, index} when is_list(children) ->
+            run_entries(PaperCanvas.columns_run_slug(root_slug, id, index), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          {_opaque, _index} ->
+            []
+        end)
+
       _ ->
         []
     end)
@@ -1190,6 +1215,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       %{"type" => "figure", "child" => child} = block when is_map(child) ->
         [block | expandable_render_blocks([child])]
+
+      %{"type" => "section", "blocks" => children} = block when is_list(children) ->
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "columns", "columns" => columns} = block when is_list(columns) ->
+        children =
+          Enum.flat_map(columns, fn column -> if is_list(column), do: column, else: [] end)
+
+        [block | expandable_render_blocks(children)]
 
       block ->
         [block]

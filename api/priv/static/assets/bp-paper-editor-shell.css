@@ -1580,6 +1580,12 @@
   width: var(--bp-evidence-width, 100%);
   box-sizing: border-box;
 }
+.bp-paper-edit-block[data-block-type="columns"]:has([data-paper-columns-editor-frame]),
+.bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide) {
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+}
 .bp-expandable__body > .bp-paper-edit-canvas:first-child .bp-paper-editor-body .ProseMirror > :first-child {
   margin-top: 0;
 }

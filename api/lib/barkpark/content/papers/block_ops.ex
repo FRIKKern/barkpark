@@ -658,7 +658,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
-         blocks = project_revision_fenced_ids(blocks, if_rev),
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
          # locked-placement checks Patch already runs. The PAPER declaration set
@@ -1014,7 +1014,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_block_form_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         blocks = project_revision_fenced_ids(blocks, if_rev) do
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev) do
       normalize_paper_block_form_resolution(resolver.(blocks))
     end
   end
@@ -1036,7 +1036,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         blocks = project_revision_fenced_ids(blocks, if_rev),
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
@@ -1388,9 +1388,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # it renders. Resolve those IDs only after the stored revision has passed its
   # fence. Projection is pure; refusal and empty batches still write nothing.
   defp project_revision_fenced_ids(blocks, if_rev) when not is_nil(if_rev),
-    do: ensure_block_ids(blocks)
+    do: project_block_ids_safely(blocks)
 
-  defp project_revision_fenced_ids(blocks, _if_rev), do: blocks
+  defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
 
   defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into

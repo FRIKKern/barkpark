@@ -234,36 +234,44 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs([note]) == [{:run, [note]}]
     end
 
-    test "section: a section INSIDE prose keeps the run whole (was a boundary split)" do
+    test "section: a section is a contextual boundary between prose runs" do
       blocks = [para("p1"), section("sec1"), para("p2")]
 
-      # All three are canvas-eligible (prose ∪ the section container) ⇒ ONE maximal run.
-      # The section's OWN nested children ride inside the block (projected as the
-      # bpSection node's content by run-convert.js), not as separate run members.
-      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1")]},
+               {:block, section("sec1")},
+               {:run, [para("p2")]}
+             ]
     end
 
-    test "section: [heading, section, paragraph] is ONE run (the container no longer splits)" do
+    test "section: splits a heading run from the following paragraph run" do
       blocks = [heading("h1"), section("sec1"), para("p2")]
-      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [heading("h1")]},
+               {:block, section("sec1")},
+               {:run, [para("p2")]}
+             ]
     end
 
-    test "section: canvas? is true for a section, false for a still-boundary composite" do
-      assert PaperCanvas.canvas?(section("sec1"))
+    test "section: canvas? is false for contextual Section and composite boundaries" do
+      refute PaperCanvas.canvas?(section("sec1"))
       refute PaperCanvas.canvas?(boundary("b1"))
     end
 
-    test "section: a lone section is a single run, not a boundary" do
-      assert PaperCanvas.partition_runs([section("only")]) == [{:run, [section("only")]}]
+    test "section: a lone section is a contextual boundary" do
+      assert PaperCanvas.partition_runs([section("only")]) == [{:block, section("only")}]
     end
 
-    test "section: a nested-structure boundary still splits while a section rides each run" do
+    test "section: remains distinct beside another nested-structure boundary" do
       blocks = [para("p1"), section("sec1"), boundary("b1"), section("sec2"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1"), section("sec1")]},
+               {:run, [para("p1")]},
+               {:block, section("sec1")},
                {:block, boundary("b1")},
-               {:run, [section("sec2"), para("p2")]}
+               {:block, section("sec2")},
+               {:run, [para("p2")]}
              ]
     end
 
@@ -444,11 +452,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
              ]
     end
 
-    # ── S10: the `columns` CONTAINER is now CANVAS-ELIGIBLE (recursive nested-block) ──
+    # ── Contextual Columns/Section boundaries host nested canvas runs ──
 
-    test "S10: a columns block INSIDE prose keeps the run whole (was a boundary)" do
-      # `columns` is the first canvas CONTAINER — a recursive nested-block node
-      # (bpColumns > bpColumn+ > child). It rides the prose run rather than splitting.
+    test "a columns block inside prose splits into its contextual editor" do
       cols = %{
         "id" => "c1",
         "type" => "columns",
@@ -456,26 +462,26 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       }
 
       blocks = [para("p1"), cols, para("p2")]
-      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
-      assert PaperCanvas.canvas?(cols)
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1")]},
+               {:block, cols},
+               {:run, [para("p2")]}
+             ]
+
+      refute PaperCanvas.canvas?(cols)
     end
 
-    test "S10: a lone columns block is a single run, not a boundary" do
+    test "a lone columns block is a contextual boundary" do
       cols = %{"id" => "c1", "type" => "columns", "columns" => [[%{"type" => "paragraph"}]]}
-      assert PaperCanvas.partition_runs([cols]) == [{:run, [cols]}]
+      assert PaperCanvas.partition_runs([cols]) == [{:block, cols}]
     end
 
-    test "S10: section now folds into a run too (editable-section copied the recursion)" do
-      # `columns` gained the container recursion (#1228), `table` is its own canvas
-      # node tree (editable-table, #1227), and `section` now rides the SAME
-      # CANVAS_CONTAINER recursion (editable-section) — so all three fold INTO a run.
-      # Other run boundaries include contextual form/questionnaire editors and the
-      # deep nested-structure fields (composite / arrayOf / codelist / localizedText).
+    test "Section is routed to its contextual boundary" do
       sec = %{"id" => "b", "type" => "section", "title" => "S", "blocks" => [para("b-c")]}
 
       assert PaperCanvas.partition_runs([para("p1"), sec, para("p2")]) ==
-               [{:run, [para("p1"), sec, para("p2")]}],
-             "expected section to ride the run (canvas-eligible container)"
+               [{:run, [para("p1")]}, {:block, sec}, {:run, [para("p2")]}]
 
       composite = %{"id" => "cmp", "type" => "composite"}
 

@@ -25,8 +25,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   import BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor,
     only: [technical_block_editor: 1]
 
+  alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
+  alias Barkpark.PortableDoc.Render.SectionLayout
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias Phoenix.LiveView.JS
@@ -143,6 +145,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
+    case Content.project_block_ids_safely(assigns.blocks) do
+      {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
+      {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+    end
+  end
+
+  defp paper_block_editor_identity_readonly(assigns) do
+    assigns =
+      assign(assigns, :paper_doc_key, "#{assigns.dataset}:#{assigns.doc_type}:#{assigns.slug}")
+
+    ~H"""
+    <div
+      id={"paper-editor-#{@slug}"}
+      class="bp-paper-editor"
+      data-test-id="studio-paper-block-editor"
+      data-paper-doc-key={@paper_doc_key}
+      data-paper-rev={@doc_type == "paper" && @paper_rev}
+      data-document-rev={@doc_type != "paper" && @document_rev}
+    >
+      <.paper_halt_banner reason={@paper_halt} />
+      <p class="bp-paper-edit-readonly" data-test-id="paper-identity-readonly">
+        Duplicate authored identities must be repaired before editing; original content is preserved.
+      </p>
+    </div>
+    """
+  end
+
+  defp paper_block_editor_identity_safe(assigns) do
+    assigns = assign(assigns, :tree_identity_safe, true)
+
     assigns =
       if assigns.canvas_eligible and assigns.doc_type == "paper",
         do: assign(assigns, :blocks, Barkpark.Content.ensure_block_ids(assigns.blocks)),
@@ -253,6 +285,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_key={@paper_doc_key}
         canvas_enabled={@canvas_on?}
         paper_links={@paper_links}
+        tree_identity_safe={@tree_identity_safe}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -318,6 +351,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 root_slug={@slug}
                 doc_key={@paper_doc_key}
                 canvas_enabled={@canvas_on?}
+                tree_identity_safe={@tree_identity_safe}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -417,6 +451,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             doc_key={@paper_doc_key}
             canvas_enabled={@canvas_on?}
             paper_links={@paper_links}
+            tree_identity_safe={@tree_identity_safe}
           />
         </div>
       <% end %>
@@ -542,6 +577,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
        ]},
       {"Structured",
        [
+         {"columns", "Columns"},
          {"composite", "Composite"},
          {"arrayOf", "Array of"},
          {"codelist", "Code list"},
@@ -753,6 +789,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:container_id, :string, default: nil)
   attr(:container_kind, :string, default: nil)
   attr(:container_row_id, :string, default: nil)
+  attr(:container_column_index, :integer, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
@@ -777,6 +814,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-container-run={@container_id && @run_ordinal}
       data-paper-container-kind={@container_kind}
       data-paper-container-row-id={@container_row_id}
+      data-paper-container-column-index={@container_column_index}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -863,6 +901,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: true)
 
   def edit_block(assigns) do
     ~H"""
@@ -956,6 +995,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_key={@doc_key}
         canvas_enabled={@canvas_enabled}
         paper_links={@paper_links}
+        tree_identity_safe={@tree_identity_safe}
       />
     </div>
     """
@@ -1109,6 +1149,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     child_text <> " " <> beta_figure_caption_text(Map.get(block, "caption"))
   end
 
+  defp beta_node_text(%{"type" => "section", "blocks" => blocks} = block)
+       when is_list(blocks) do
+    beta_form_visible_string(Map.get(block, "title")) <> " " <> beta_node_text(blocks)
+  end
+
+  defp beta_node_text(%{"type" => "columns", "columns" => columns}) when is_list(columns) do
+    columns
+    |> Enum.filter(&is_list/1)
+    |> beta_node_text()
+  end
+
   defp beta_node_text(%{} = m) do
     ["text", "value", "children", "content", "items", "body"]
     |> Enum.map_join(" ", fn k -> beta_node_text(Map.get(m, k)) end)
@@ -1170,6 +1221,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: true)
 
   def properties_panel(assigns) do
     ~H"""
@@ -1209,6 +1261,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           doc_key={@doc_key}
           canvas_enabled={@canvas_enabled}
           paper_links={@paper_links}
+          tree_identity_safe={@tree_identity_safe}
         />
       </div>
 
@@ -1281,10 +1334,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
   attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: nil)
 
   def paper_block_fields(assigns) do
+    tree_identity_safe =
+      case assigns.tree_identity_safe do
+        value when is_boolean(value) -> value
+        _ -> match?({:ok, _projected}, Content.project_block_ids_safely([assigns.block]))
+      end
+
     assigns =
       assigns
+      |> assign(:tree_identity_safe, tree_identity_safe)
       |> assign(id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
       |> assign(
         :expandable_segments,
@@ -1428,6 +1489,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       doc_key={@doc_key}
                       canvas_enabled={@canvas_enabled}
                       paper_links={@paper_links}
+                      tree_identity_safe={@tree_identity_safe}
                     />
                 <% end %>
               </div>
@@ -1825,22 +1887,114 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </form>
         <.rich_body_editor block={@block} />
       <% "section" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <input
-            type="text"
-            name="title"
-            class="bp-paper-edit-text"
-            placeholder="Section title"
-            value={Map.get(@block, "title", "")}
-            data-test-id="paper-field-title"
-          />
-        </form>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-section-editor">
+          <%= if editable_section?(@block, @tree_identity_safe) do %>
+            <div
+              data-paper-section-editor-frame
+              style="display:flex;flex-direction:column"
+              {section_frame_attributes(@block)}
+            >
+              <%= if grid = SectionLayout.grid(@block) do %>
+                <hr class="bp-hr" />
+                <div :if={not is_nil(@block["title"])} class="bp-section__title" style="font-weight:bold"><%= @block["title"] %></div>
+                <div class="bp-section__grid" style={grid.style}>
+                  <div
+                    :for={child <- @block["blocks"]}
+                    class="bp-section__cell"
+                    style={SectionLayout.cell_style(child)}
+                  >
+                    <.paper_block_fields
+                      block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                      doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                      root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                      paper_links={@paper_links}
+                      tree_identity_safe={@tree_identity_safe}
+                    />
+                  </div>
+                </div>
+                <hr class="bp-hr" />
+              <% else %>
+                <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
+                <span :if={not is_nil(@block["title"])} style="font-weight:bold"><%= @block["title"] %></span>
+                <%= for segment <- section_segments(@block, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.section_run_slug(@root_slug, @id)} run_blocks={run_blocks}
+                        run_ordinal={ordinal} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="section"
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                      />
+                  <% end %>
+                <% end %>
+                <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
+              <% end %>
+            </div>
+            <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls" phx-mounted={JS.ignore_attributes("open")}>
+              <summary class="bp-paper-contextual-toggle">Configure section</summary>
+              <div class="bp-paper-contextual-panel">
+                <form id={"section-form-" <> @id} name="section-config" class="bp-paper-edit-form" phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500" data-test-id="paper-section-config-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel" for={"section-title-" <> @id}>Title</label>
+                  <input id={"section-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" placeholder="Section title" value={Map.get(@block, "title", "")} data-test-id="paper-field-title" />
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
+          <% end %>
+        </div>
+      <% "columns" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-columns-editor">
+          <%= if editable_columns?(@block, @tree_identity_safe) do %>
+            <div class="bp-cols" data-paper-columns-editor-frame style={"--bp-cols:#{max(length(@block["columns"]), 1)}"}>
+              <div :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-cols__c" data-column-index={column_index} data-paper-container-column-index={column_index}>
+                <%= for segment <- column_segments(column, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.columns_run_slug(@root_slug, @id, column_index)}
+                        run_blocks={run_blocks} run_ordinal={ordinal} dataset={@dataset}
+                        api_token_raw={@api_token_raw} scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="columns"
+                        container_column_index={column_index}
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                      />
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+          <% else %>
+            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
+          <% end %>
+        </div>
       <% "paper-links" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
@@ -1938,7 +2092,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview">
             <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
           </div>
-          <%= if editable_form_questions?(@block) do %>
+          <%= if @tree_identity_safe and editable_form_questions?(@block) do %>
             <details
               id={"paper-form-controls-" <> @id}
               class="bp-paper-contextual-controls bp-paper-contextual-controls--form"
@@ -2193,6 +2347,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           doc_key={@doc_key}
                           canvas_enabled={@canvas_enabled}
                           paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
                         />
                     <% end %>
                   <% end %>
@@ -2303,6 +2458,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
                         root_slug={@root_slug} doc_key={@doc_key}
                         canvas_enabled={@canvas_enabled} paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
                       />
                   <% end %>
                 <% end %>
@@ -2390,6 +2546,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           doc_key={@doc_key}
                           canvas_enabled={@canvas_enabled}
                           paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
                         />
                       </div>
                   <% end %>
@@ -2414,6 +2571,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     doc_key={@doc_key}
                     canvas_enabled={false}
                     paper_links={@paper_links}
+                    tree_identity_safe={@tree_identity_safe}
                   />
                 </div>
               <% end %>
@@ -2899,6 +3057,47 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   defp editable_steps?(block), do: Map.get(block, "steps") == nil
+
+  defp editable_section?(%{"blocks" => blocks} = block, true) when is_list(blocks) do
+    (is_nil(block["title"]) or is_binary(block["title"])) and valid_nested_blocks?(blocks)
+  end
+
+  defp editable_section?(_block, _tree_identity_safe), do: false
+
+  defp section_frame_attributes(block) do
+    case SectionLayout.frame_class(block) do
+      nil -> %{}
+      class -> %{class: class}
+    end
+  end
+
+  defp editable_columns?(%{"columns" => columns}, true) when is_list(columns) do
+    Enum.all?(columns, &(is_list(&1) and valid_nested_blocks?(&1)))
+  end
+
+  defp editable_columns?(_block, _tree_identity_safe), do: false
+
+  defp section_renderable?(%{"blocks" => blocks} = block) when is_list(blocks),
+    do: is_nil(block["title"]) or is_binary(block["title"])
+
+  defp section_renderable?(_block), do: false
+
+  defp valid_nested_blocks?(blocks) do
+    ids = Enum.map(blocks, fn child -> if is_map(child), do: child["id"] end)
+
+    Enum.all?(ids, &(is_binary(&1) and String.trim(&1) != "")) and
+      length(ids) == length(Enum.uniq(ids))
+  end
+
+  defp section_segments(%{"blocks" => blocks}, true),
+    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp section_segments(%{"blocks" => blocks}, false), do: Enum.map(blocks, &{:block, &1})
+
+  defp column_segments(blocks, true),
+    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp column_segments(blocks, false), do: Enum.map(blocks, &{:block, &1})
 
   defp empty_step_body?(%{"children" => children}) when is_list(children), do: children == []
   defp empty_step_body?(%{"children" => children}) when children not in [nil, false], do: false

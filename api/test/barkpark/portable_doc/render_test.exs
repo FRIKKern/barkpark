@@ -44,7 +44,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
                    render/cards_email.ex render/components.ex render/compose.ex
                    render/data_viz.ex render/figures.ex render/fleet_email.ex
                    render/forms.ex render/inline.ex render/math.ex render/palettes.ex
-                   render/panels_email.ex render/status_vocab.ex render/stylesheet.ex
+                   render/panels_email.ex render/section_layout.ex render/status_vocab.ex render/stylesheet.ex
                    render/tokens_gen.ex render/util.ex render/walk.ex
                  ))
 

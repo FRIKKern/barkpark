@@ -13,7 +13,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   `Render.Walk.render_body/3`. Output is byte-identical to the pre-split engine.
   """
 
-  alias Barkpark.PortableDoc.Render.{Figures, Forms, Inline, Util, Walk}
+  alias Barkpark.PortableDoc.Render.{Figures, Forms, Inline, SectionLayout, Util, Walk}
 
   import Inline, only: [compose_inline_children: 1, to_pd_node_from_inline_child: 1]
 
@@ -460,7 +460,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # floor) — it does NOT unconditionally collapse grid→stack. Breakpoints beyond
   # the built-in ≤720px 1-col collapse are DATA-carried, honored by that TUI solve.
   def compose_block(%{"type" => "section"} = b, style) do
-    case grid_layout(b) do
+    case SectionLayout.grid(b) do
       nil ->
         compose_section_stack(b, style)
 
@@ -2510,10 +2510,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # to read as a head); email/default mode keeps it unconditionally, having no
     # stylesheet to carry a head.
     children =
-      if style == :article and title == [] and opens_with_heading?(blocks) do
-        inner
-      else
+      if SectionLayout.stack_rules?(b, style) do
         [%{"kind" => "PdHr"}] ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+      else
+        inner
       end
 
     box = %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
@@ -2523,10 +2523,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # Emission is the walker's call (box_class_attr): :article only + whitelist,
     # so the email leg stays byte-identical and an unknown variant fail-softs
     # to the exact unclassed bytes above.
-    case Map.get(b, "variant") do
-      "framed" -> Map.put(box, "class", "bp-section--framed")
-      "wide" -> Map.put(box, "class", "bp-section--wide")
-      _ -> box
+    case SectionLayout.frame_class(b) do
+      nil -> box
+      class -> Map.put(box, "class", class)
     end
   end
 
@@ -2544,27 +2543,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       b
       |> Map.get("blocks", [])
       |> List.wrap()
-      |> Enum.sort_by(&cell_order/1)
+      |> Enum.sort_by(&SectionLayout.cell_order/1)
 
     Map.put(b, "blocks", ordered)
   end
-
-  defp cell_order(child) when is_map(child), do: order_int(Map.get(child, "order")) || 0
-  defp cell_order(_), do: 0
-
-  # `grid_layout/1` — the ONE predicate gating the grid path everywhere. Returns
-  # the layout object iff its `mode` is exactly "grid"; ANY other shape (absent,
-  # null, a non-map layout, or a non-"grid" mode such as an explicit
-  # {"mode":"stack"}) → nil → the stack path. Pattern-matching keeps it fail-soft:
-  # a malformed non-map `layout` value can never raise here.
-  defp grid_layout(%{"layout" => %{"mode" => "grid"} = layout}), do: layout
-  defp grid_layout(_), do: nil
-
-  # The stack's "the heading carries the boundary" test: true when the section's
-  # FIRST block is a heading of any level (the CSS device fires on h2 only, but a
-  # section opening with an h3 has no business drawing a hairline above it either).
-  defp opens_with_heading?([%{"type" => "heading"} | _]), do: true
-  defp opens_with_heading?(_), do: false
 
   # The grid section render: a `_raw` HTML node the walker passes through
   # verbatim. Shape mirrors the stack reader's chrome (leading rule, optional
@@ -2591,9 +2573,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # NOT unconditionally collapse grid→stack. Web (portable-doc.tsx) still ignores
   # section layout entirely — a filed follow-on (cd-11), not this step.
   defp section_grid_html(b, layout, style) do
-    tracks = grid_tracks(Map.get(layout, "tracks"))
-    gap = gap_token_var(Map.get(layout, "gap"))
-
     title_html =
       case Map.get(b, "title") do
         nil ->
@@ -2618,7 +2597,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     ~s(<div#{section_frame_class_attr(b, style)} style="display:flex;flex-direction:column">) <>
       hr <>
       title_html <>
-      ~s(<div class="bp-section__grid" style="--bp-tracks:#{tracks};--bp-grid-gap:#{gap}">) <>
+      ~s(<div class="bp-section__grid" style="#{layout.style}">) <>
       cells <>
       "</div>" <>
       hr <>
@@ -2632,27 +2611,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # stack above), but the explicit :article gate keeps the email suppression
   # a stated invariant rather than a positional accident. Unknown variants
   # fall to "" — byte-identical to the pre-hook wrapper.
-  defp section_frame_class_attr(%{"variant" => "framed"}, :article),
-    do: ~s( class="bp-section--framed")
-
-  defp section_frame_class_attr(%{"variant" => "wide"}, :article),
-    do: ~s( class="bp-section--wide")
-
-  defp section_frame_class_attr(_b, _style), do: ""
-
-  # tracks → a positive integer column count (structural, NOT a pixel). Default 2
-  # (matches the CSS `repeat(var(--bp-tracks,2),…)` fallback). Accepts an int or a
-  # stringy int; anything else falls to 2.
-  defp grid_tracks(n) when is_integer(n) and n > 0, do: n
-
-  defp grid_tracks(n) when is_binary(n) do
-    case Integer.parse(n) do
-      {i, ""} when i > 0 -> i
-      _ -> 2
+  defp section_frame_class_attr(b, :article) do
+    case SectionLayout.frame_class(b) do
+      nil -> ""
+      class -> ~s( class="#{class}")
     end
   end
 
-  defp grid_tracks(_), do: 2
+  defp section_frame_class_attr(_b, _style), do: ""
 
   # STEP-6 per-child placement. Emits a PRESENT-ONLY ` style="…"` attr for a grid
   # cell: `grid-column:span N` (span, positive int) and/or `order:K` (order, any
@@ -2661,71 +2627,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # deterministically `grid-column:span N;order:K`. INT-VALIDATED (span_int/order_int)
   # so a malformed value (a stringy `"2;background:url(x)"`, 0/neg span, non-int) is
   # DROPPED — no style injection, D2: only structural ints, never a px literal.
-  defp cell_layout_attr(child) when is_map(child) do
-    parts =
-      []
-      |> put_order(Map.get(child, "order"))
-      |> put_span(Map.get(child, "span"))
-
-    case parts do
-      [] -> ""
-      ps -> ~s( style="#{Enum.join(ps, ";")}")
+  defp cell_layout_attr(child) do
+    case SectionLayout.cell_style(child) do
+      nil -> ""
+      style -> ~s( style="#{style}")
     end
   end
-
-  defp cell_layout_attr(_), do: ""
-
-  # span → `grid-column:span N` (positive int only; mirrors grid_tracks's guard but
-  # DROPS instead of defaulting). Prepends so span lands FIRST in the joined style.
-  defp put_span(parts, span) do
-    case span_int(span) do
-      nil -> parts
-      n -> ["grid-column:span #{n}" | parts]
-    end
-  end
-
-  # order → `order:K` (ANY int — 0 and negatives are legal CSS `order`).
-  defp put_order(parts, order) do
-    case order_int(order) do
-      nil -> parts
-      k -> ["order:#{k}" | parts]
-    end
-  end
-
-  # A positive int, or a stringy positive int (the WHOLE string must parse — a
-  # trailing `;background:url(x)` fails Integer.parse's "" remainder guard), else nil.
-  defp span_int(n) when is_integer(n) and n > 0, do: n
-
-  defp span_int(n) when is_binary(n) do
-    case Integer.parse(n) do
-      {i, ""} when i > 0 -> i
-      _ -> nil
-    end
-  end
-
-  defp span_int(_), do: nil
-
-  # Any int (0/negative legal), or a stringy int (whole-string), else nil.
-  defp order_int(n) when is_integer(n), do: n
-
-  defp order_int(n) when is_binary(n) do
-    case Integer.parse(n) do
-      {i, ""} -> i
-      _ -> nil
-    end
-  end
-
-  defp order_int(_), do: nil
-
-  # gap TOKEN name → a CSS custom-property reference (never a px literal — D2).
-  # The token vocabulary (none|sm|md|lg) is defined ONCE here + mirrored as the
-  # CSS `--bp-space-*` var defaults (paper-surface.css) so reader and canvas
-  # resolve gaps identically. Default (absent / unknown) → md.
-  defp gap_token_var("none"), do: "var(--bp-space-none,0)"
-  defp gap_token_var("sm"), do: "var(--bp-space-sm,0.8rem)"
-  defp gap_token_var("md"), do: "var(--bp-space-md,1.6rem)"
-  defp gap_token_var("lg"), do: "var(--bp-space-lg,2.4rem)"
-  defp gap_token_var(_), do: "var(--bp-space-md,1.6rem)"
 
   defp block_to_html(child, style) when is_map(child) do
     composed = compose_block(child, style)

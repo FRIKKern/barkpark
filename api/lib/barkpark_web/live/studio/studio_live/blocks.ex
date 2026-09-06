@@ -187,7 +187,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def build_block_patch(%{"type" => "section"}, params) do
-    put_if_present(%{}, "title", params["title"])
+    put_section_title(%{}, params)
   end
 
   def build_block_patch(%{"type" => "paper-links"} = block, params) do
@@ -273,6 +273,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def validate_block_patch(%{"type" => "figure"} = block, params) do
     with :ok <- validate_text_form_fields(params, ~w(caption), "caption") do
       {:ok, build_block_patch(block, params)}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "section"} = block, params) do
+    case Map.fetch(params, "title") do
+      :error -> {:ok, build_block_patch(block, params)}
+      {:ok, title} when is_binary(title) -> {:ok, build_block_patch(block, params)}
+      {:ok, _title} -> {:error, :invalid_section_title}
     end
   end
 
@@ -1254,6 +1262,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
           _row -> nil
         end)
 
+      %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+        Enum.find_value(columns, fn
+          column when is_list(column) -> locked_visible_block_id(column)
+          _opaque -> nil
+        end)
+
       _ ->
         nil
     end
@@ -2154,6 +2168,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp optional_string(_value), do: nil
 
+  defp put_section_title(map, params) do
+    case Map.fetch(params, "title") do
+      {:ok, title} when is_binary(title) -> Map.put(map, "title", optional_string(title))
+      _ -> map
+    end
+  end
+
   defp put_optional_patch(map, params, key) do
     if Map.has_key?(params, key) do
       case params[key] do
@@ -2285,6 +2306,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
           Map.get(b, "type") == "figure" and is_map(b["child"]) ->
             find_paper_block([b["child"]], id)
 
+          Map.get(b, "type") == "columns" and is_list(b["columns"]) ->
+            Enum.find_value(b["columns"], fn
+              column when is_list(column) -> find_paper_block(column, id)
+              _opaque -> nil
+            end)
+
           true ->
             nil
         end
@@ -2309,7 +2336,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def canvas_run_context(params) when is_map(params) do
-    keys = ~w(container_kind container_id container_row_id container_run_ids)
+    keys =
+      ~w(container_kind container_id container_row_id container_column_index container_run_ids)
 
     if Enum.any?(keys, &Map.has_key?(params, &1)) do
       raw =
