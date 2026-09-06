@@ -2160,7 +2160,17 @@ type SpawnSite struct {
 	// search-template W10: the featured content type the site's build reads.
 	// Declared here or json.Unmarshal drops it silently — the tag's omitempty is
 	// decode-irrelevant (SpawnSite is never marshalled) and kept for symmetry.
-	DocType             string          `json:"doc_type,omitempty"`
+	DocType string `json:"doc_type,omitempty"`
+	// dr-w11: does a content publish on this site's dataset reach it at all?
+	// "present" | "absent" | "not_applicable", derived server-side by
+	// Registry.publish_trigger/1. Declared HERE or json.Unmarshal drops it in
+	// silence — the exact failure that let eight of guerrilla's thirteen sites
+	// carry no content-publish trigger while `bp cloud site status` printed a
+	// header indistinguishable from the five that did. NOT omitempty on the read
+	// side by intent of the render: an EMPTY string means the control plane
+	// predates the field, which the renderer treats as "say nothing", never as
+	// "absent" — a fabricated absence would be its own silent lie.
+	PublishTrigger      string          `json:"publish_trigger,omitempty"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`

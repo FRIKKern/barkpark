@@ -250,6 +250,13 @@ defmodule BarkparkCloud.Registry do
   # content or the template moves. `container` binds no dataset and is excluded.
   @content_bound_kinds ~w(static node)
 
+  # dr-w11: how many sites ONE `reconcile_content_webhooks/1` tick may touch. Each
+  # site costs a cross-host list read against its box plus, at most, one POST, so
+  # the bound is what keeps an hourly fleet sweep from turning into an unbounded
+  # fan-out the moment the fleet grows. 25 comfortably covers today's 13 sites in
+  # a single tick and still walks the whole roster within an hour at 10x that.
+  @content_webhook_reconcile_limit 25
+
   ## Barkparks
 
   @doc """
@@ -5787,9 +5794,12 @@ defmodule BarkparkCloud.Registry do
   makes registration repeatable.
 
   Re-enable tradeoff, made deliberately: the PUT overrides a human who disabled
-  the hook by hand. This runs only on site create and EXPLICIT backfill — never
-  on any schedule — so a repair run asserting "this site's auto-deploy hook is
-  live" is the operator's intent.
+  the hook by hand. It runs on site create and EXPLICIT backfill — this entry
+  point — so a repair run asserting "this site's auto-deploy hook is live" is the
+  operator's intent. The HOURLY `ContentWebhookReconciler` deliberately does NOT
+  reach that write: it calls `reconcile_content_webhooks/1`, whose `:reconcile`
+  mode POSTs a MISSING row and no-ops on a row that exists, so the schedule can
+  never silently re-enable a hook a person turned off.
 
   Returns `:ok` (registered/updated), `:noop` (nothing to register — no secret,
   no dataset, box not live) or `:error` (the box refused, or the backfill could
@@ -5807,8 +5817,153 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The population `reconcile_content_webhooks/1` sweeps: every site that SHOULD
+  carry a content-publish webhook on its box.
+
+  "Should" is read off the Site row and nothing else — the same three conditions
+  `maybe_mint_content_secret/1` used when it decided to mint the secret in the
+  first place, plus the secret itself:
+
+    * `kind` in `#{inspect(@content_bound_kinds)}` — a `container` site has no
+      content binding at all and must never be touched,
+    * a non-blank `bootstrap_dataset` — with no dataset there is no box dataset
+      to hang a webhook on,
+    * a `content_webhook_secret_encrypted` — `ensure_content_webhook/2` REVEALS
+      the secret and never MINTS one, so a content-bound site that carries none
+      is a `:noop` no matter how often it is swept. Those sites are outside this
+      sweep's reach BY CONSTRUCTION and are the reason the visibility half
+      exists: `publish_trigger/1` reports them `:absent`.
+
+  Ordered oldest-first so the sweep is stable across ticks, and `limit`-bounded so
+  one tick makes a bounded number of cross-host box calls.
+  """
+  @spec list_content_webhook_sites(pos_integer()) :: [Site.t()]
+  def list_content_webhook_sites(limit \\ @content_webhook_reconcile_limit)
+      when is_integer(limit) and limit > 0 do
+    Site
+    |> where([s], s.kind in ^@content_bound_kinds)
+    |> where([s], not is_nil(s.bootstrap_dataset) and s.bootstrap_dataset != "")
+    |> where([s], not is_nil(s.content_webhook_secret_encrypted))
+    |> order_by([s], asc: s.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  ONE bounded, idempotent reconcile pass over `list_content_webhook_sites/1`:
+  every site that should have a content-publish webhook and does not gets one.
+
+  THE HOLE THIS CLOSES (dr-w11-bl-eight-sites-never-autodeploy). Registration ran
+  on site create and on an explicit human backfill only. A site whose create-time
+  registration failed — guerrilla's `auto-proof` 422'd inside a 20-minute defect
+  window on 2026-07-14 and its `updated_at` still equals its `inserted_at` to the
+  microsecond — therefore stayed unregistered FOREVER, and every content publish
+  on its dataset reached nothing. Nothing swept, and nothing reported the absence
+  either, so the site looked healthy from every surface.
+
+  NARROWER THAN THE BACKFILL, ON PURPOSE. `:reconcile` mode POSTs a row that is
+  genuinely ABSENT and no-ops on a row that already exists — it never issues the
+  re-enabling PUT, because a schedule cannot infer an operator's intent to
+  override a human who disabled a hook by hand (see `ensure_content_webhook/2`).
+
+  NEVER RAISES, AND ONE BAD BOX DOES NOT STOP THE SWEEP. Each site is reduced
+  independently: an unreachable box, an unreadable webhook list, a non-2xx write
+  and a site whose barkpark row is gone all land in `:error`/`:skipped` and the
+  next site is still attempted. Returns a tally
+  `%{swept: n, registered: n, present: n, skipped: n, errored: n}` — `swept` is
+  the denominator (charter D3) and the four buckets partition it.
+  """
+  @spec reconcile_content_webhooks(pos_integer()) :: %{
+          swept: non_neg_integer(),
+          registered: non_neg_integer(),
+          present: non_neg_integer(),
+          skipped: non_neg_integer(),
+          errored: non_neg_integer()
+        }
+  def reconcile_content_webhooks(limit \\ @content_webhook_reconcile_limit)
+      when is_integer(limit) and limit > 0 do
+    zero = %{swept: 0, registered: 0, present: 0, skipped: 0, errored: 0}
+
+    limit
+    |> list_content_webhook_sites()
+    |> Enum.reduce(zero, fn site, acc ->
+      acc = Map.update!(acc, :swept, &(&1 + 1))
+
+      case reconcile_one_content_webhook(site) do
+        :ok -> Map.update!(acc, :registered, &(&1 + 1))
+        :noop -> Map.update!(acc, :present, &(&1 + 1))
+        :skipped -> Map.update!(acc, :skipped, &(&1 + 1))
+        :error -> Map.update!(acc, :errored, &(&1 + 1))
+      end
+    end)
+  end
+
+  # One site's pass. Every failure mode is CAUGHT here rather than allowed to
+  # abort the fold — a fleet sweep that dies on the first unreachable box would
+  # leave every later site unreconciled and would look, from the job row, exactly
+  # like a sweep that found nothing to do.
+  defp reconcile_one_content_webhook(%Site{} = site) do
+    # The box's URL is checked HERE, not left to `do_ensure_content_webhook/4`'s
+    # `else -> :noop`, so that `:noop` can only ever mean "the row already
+    # exists". Folding a box that is not live yet into `present` would report a
+    # site the sweep could not even attempt as a site with a working trigger —
+    # the same false green this whole repair exists to remove.
+    with %Barkpark{url: url} = barkpark when is_binary(url) and url != "" <-
+           get_barkpark(site.barkpark_id),
+         {:ok, secret} when is_binary(secret) <- reveal_site_content_secret(site) do
+      do_ensure_content_webhook(barkpark, site, secret, :reconcile)
+    else
+      _ -> :skipped
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "content-publish webhook reconcile for site #{site.id} raised: #{Exception.message(e)}"
+      )
+
+      :error
+  end
+
+  @doc """
+  Does a content publish on this site's dataset reach it at all?
+
+  DERIVED, NEVER STORED — there is no column for it and there must not be one:
+  the truth lives on the box, and a stamped column would go stale the moment
+  someone deleted a webhook by hand. This reads the Site row alone (no box call —
+  it is computed inside a serializer):
+
+    * `:not_applicable` — a `container` site, or a site with no bound dataset.
+      There is no content binding, so no trigger is owed and its absence is not a
+      fault.
+    * `:absent` — content-bound, but no content-publish secret was ever minted.
+      The per-site receiver 404s every delivery it could ever get (deliberately
+      indistinguishable from an unknown site), so a publish CANNOT reach this
+      site, and `reconcile_content_webhooks/1` cannot repair it either:
+      `ensure_content_webhook/2` reveals a secret, it never mints one.
+    * `:present` — the secret exists, which is what makes registration possible
+      and what the create path and the hourly reconcile both act on.
+
+  THE HONEST BOUND, stated because a status field that overclaims is worse than
+  none: `:present` says this site is CONFIGURED to receive content-publish
+  triggers, not that the row is live on the box this second. Confirming the box
+  row costs a cross-host call this serializer must not make; the hourly
+  reconciler is what keeps `:present` true.
+  """
+  @spec publish_trigger(Site.t()) :: :present | :absent | :not_applicable
+  def publish_trigger(%Site{} = site) do
+    dataset = site.bootstrap_dataset
+
+    cond do
+      site.kind not in @content_bound_kinds -> :not_applicable
+      not (is_binary(dataset) and dataset != "") -> :not_applicable
+      is_nil(site.content_webhook_secret_encrypted) -> :absent
+      true -> :present
+    end
+  end
+
   defp do_ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret, mode)
-       when is_binary(secret) and mode in [:create, :backfill] do
+       when is_binary(secret) and mode in [:create, :backfill, :reconcile] do
     with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
          dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
          url when is_binary(url) <- content_receiver_url(site) do
@@ -5860,6 +6015,18 @@ defmodule BarkparkCloud.Registry do
       base = "/v1/webhooks/#{URI.encode(dataset)}"
 
       case find_content_webhook(barkpark, dataset, name) do
+        # THE SCHEDULED MODE DOES NOT WRITE OVER A ROW THAT EXISTS. The PUT above
+        # deliberately re-enables a hook a human disabled by hand, and that
+        # tradeoff was justified in the moduledoc by "this runs only on create
+        # and EXPLICIT backfill — a repair run is the operator's intent". The
+        # per-hour `ContentWebhookReconciler` breaks that premise, so `:reconcile`
+        # is a strictly NARROWER mode: it closes ONLY the hole this row names — a
+        # site whose row was never created at all — and leaves every existing row
+        # exactly as the operator left it. `bp cloud webhook reconcile` and the
+        # explicit backfill still carry the re-assert.
+        {:ok, _id} when mode == :reconcile ->
+          :noop
+
         {:ok, id} ->
           relay_webhook_write(barkpark, site, :put, base <> "/" <> URI.encode(id), body)
 
