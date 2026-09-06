@@ -128,7 +128,16 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		}
 	}
 
-	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
+	// ONE KEY BASE PER INVOCATION, SPLIT PER LEG. Minted here — after every
+	// refusal that can be pronounced without a write, so a run that never sends
+	// never burns one. The publish follow-up derives its own key from the same
+	// base: the plug hashes (key, token, method, PATH) and NOT the body, and both
+	// legs POST the same path, so sharing one key would replay the create's
+	// response and the publish would silently never run (legKey says this at
+	// length, tasks_create_idempotency.go).
+	idemBase := newIdempotencyKey()
+
+	httpStatus, respBody, _, err := sendMutationsIdempotent(sendCreateTaskMutations, ctx, mutations, legKey(idemBase, "create"))
 	if err != nil {
 		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
 		// client timeout being the common trigger): the request may never have
@@ -220,7 +229,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// from clearing. It is NAMED instead — renderOrphanedDraftRemedy prints the
 		// `drafts.` id, the consequence, and both exits.
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
-		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		pStatus, pBody, _, pErr := sendMutationsIdempotent(sendTaskMutations, ctx, []map[string]any{pubOp}, legKey(idemBase, "publish"))
 		if pErr != nil {
 			// RESIDUE, NOT DEBRIS TO SWEEP. A transport error means the publish
 			// may have LANDED and only the response was lost, so discarding here
@@ -398,7 +407,7 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID 
 // script — and doing the discard in two places is how the two drift.
 func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID string) string {
 	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
-	status, body, err := sendTaskMutations(ctx, []map[string]any{op})
+	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
 	switch {
 	case err != nil:
 		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err)
@@ -781,9 +790,14 @@ func taskCriterionTexts(value any) []any {
 // brief). Tests override this file-local variable to simulate a transport
 // error or a 5xx without touching the shared sendTaskMutations helper, which
 // the MCP task_create tool also calls.
-var sendCreateTaskMutations = sendTaskMutations
+//
+// idempotencyKey, when non-empty, rides as the Idempotency-Key header the
+// mutate door honours (tasks_create_idempotency.go). Empty means "no key" —
+// the pre-existing behaviour for every caller that has no invocation-scoped key
+// to spend.
+var sendCreateTaskMutations keyedMutationSender = sendTaskMutations
 
-func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, []byte, error) {
+func sendTaskMutations(ctx manifest.Context, mutations []map[string]any, idempotencyKey string) (int, []byte, error) {
 	endpoint := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/data/mutate/"+ctx.Dataset)
 	body, err := json.Marshal(map[string]any{"mutations": mutations})
 	if err != nil {
@@ -792,6 +806,9 @@ func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, [
 	headers := map[string]string{"Content-Type": "application/json"}
 	if ctx.Token != "" {
 		headers["Authorization"] = "Bearer " + ctx.Token
+	}
+	if idempotencyKey != "" {
+		headers[idempotencyHeader] = idempotencyKey
 	}
 	return doRequest("POST", endpoint, headers, body)
 }
