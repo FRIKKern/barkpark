@@ -2243,6 +2243,28 @@ type SiteDeployment struct {
 	//     server-side), for when FailureReason is the humanizer's generic arm.
 	FailureClass     string `json:"failure_class,omitempty"`
 	FailureReasonRaw string `json:"failure_reason_raw,omitempty"`
+	// THE REFUSAL, UNFUSED (task-f156b5e43bfbfe91, producer PR #16511).
+	// FailureReason above is ONE prose line with the box's typed code and its
+	// human sentence fused into it, so every reader took it apart again by
+	// substring. `deployment_json/1` now emits the halves the box actually sent,
+	// split once server-side by `FailureCopy.typed_refusal_fields/1`:
+	//
+	//   * FailureCode is the box's own `error.code` (`E_ABSOLUTE_PATH`,
+	//     `already_running`, `feature_not_configured`) — what a user greps, files
+	//     a bug about, or branches on.
+	//   * FailureMessage is the sentence that tells them what to fix, with the
+	//     `[box request_id: …]` journal stamp lifted out of it.
+	//
+	// POINTERS, for the reason DeferralDepth/Bound below are pointers and
+	// `health_exit_code` is a *int: BOTH keys are null on every row that is not a
+	// box refusal, and null individually when the box sent only one half. A plain
+	// string decodes that null to "" — and the render then cannot tell "no code"
+	// from "the box sent an empty code", a claim the payload never made.
+	//
+	// ADDITIVE: FailureReason is byte-unchanged and stays the fallback for every
+	// row written before the split and every non-refusal failure.
+	FailureCode    *string `json:"failure_code"`
+	FailureMessage *string `json:"failure_message"`
 	// deploy-reliability W13: the deferral chain AS DATA, which this struct did
 	// not declare — so the only way a Go client could recover the depth of a
 	// wait was siteDeferralChainRe, a regex over the English in FailureReason.
