@@ -41,8 +41,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.CallerContext
 
   alias Barkpark.Content.Papers
+  alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
+  alias Barkpark.PortableDoc.TableEditing
   alias Barkpark.Preview
   alias Barkpark.Repo.IdempotencyStore
 
@@ -655,15 +657,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_op_revision(op, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         :ok <- preflight_table_editor_ops(blocks, [op]),
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         {:ok, applied_op} <- lower_editor_block_op(blocks, op),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
          # locked-placement checks Patch already runs. The PAPER declaration set
          # is passed by the caller (core stays generic, D10); D12's
          # only-when-before-valid guard keeps the legacy corpus untouched (D3).
          {:ok, patched} <-
-           Patch.apply_patch(blocks, op, constraints: Papers.Template.paper_declarations()),
+           Patch.apply_patch(blocks, applied_op,
+             constraints: Papers.Template.paper_declarations()
+           ),
          # Quality-gate RATCHET (p-quality-gate): an op may not hollow OUT a
          # paper that had real content — papers publish in place, so a
          # hollowed canvas edit would BE a hollow published paper. A fresh,
@@ -690,7 +698,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # encrypted field. No-op when nothing in the "paper" schema is marked;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset, doc.workspace_id),
-         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
+         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks),
+         :ok <- table_write_or_noop(doc, op, blocks, patched, affected) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
       # Carry the doc's stored article marker into the render so both the
@@ -764,6 +773,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
     else
       nil -> {:error, :not_found}
+      {:table_noop, receipt} -> {:ok, receipt}
       {:error, _reason} = err -> err
     end
   end
@@ -799,7 +809,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
-    with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
+    with :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
       run_paper_batch_effects(effects, dataset, opts)
       {:ok, receipt}
@@ -836,6 +848,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
       key_hash = paper_ops_key_hash(doc, request_id, principal_key)
       exact_scope = "paper_ops:v1:" <> paper_ops_payload_fingerprint(ops, opts)
@@ -898,11 +912,167 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
     do: {:error, :invalid_paper_ops_request}
 
-  defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
+  @doc """
+  Resolve trusted server-owned block-form source against the revision-accepted
+  paper blocks and apply the resulting non-empty op batch exactly once.
+
+  The idempotency payload is the raw form source, not the derived ops. A replay
+  therefore returns its stored receipt without invoking the resolver or
+  rechecking the now-stale revision.
+  """
+  def apply_paper_block_form_once(
+        slug,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      )
+
+  def apply_paper_block_form_once(
+        slug,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts
+      )
+      when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
+             is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
+             is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
+      key_hash = paper_ops_key_hash(doc, request_id, principal_key)
+
+      exact_scope =
+        "paper_block_form:v1:" <> block_form_payload_fingerprint(source_tag, source_params, opts)
+
+      Repo.transaction(fn ->
+        case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+          :claimed ->
+            maybe_after_idempotency_claim(opts)
+
+            with %Document{id: current_id} = current_doc <-
+                   get_block_op_paper(slug, dataset, opts),
+                 true <- current_id == doc.id,
+                 {:ok, ops} <- resolve_paper_block_form(current_doc, resolver, opts),
+                 {:ok, receipt, effects} <-
+                   persist_paper_block_ops(
+                     current_doc,
+                     slug,
+                     ops,
+                     dataset,
+                     opts,
+                     trusted_empty_block_form_op?(ops)
+                   ) do
+              maybe_before_idempotency_complete(opts)
+
+              case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                :ok -> {:applied, receipt, effects}
+                {:error, reason} -> Repo.rollback(reason)
+              end
+            else
+              false -> Repo.rollback(:not_found)
+              nil -> Repo.rollback(:not_found)
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          {:replay, stored_receipt} ->
+            case normalize_stored_paper_ops_receipt(stored_receipt) do
+              {:ok, receipt} -> {:replayed, receipt}
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          :in_progress ->
+            Repo.rollback(:idempotency_in_progress)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {:applied, receipt, effects}} ->
+          run_paper_batch_effects(effects, dataset, opts)
+          {:ok, receipt, :applied}
+
+        {:ok, {:replayed, receipt}} ->
+          {:ok, receipt, :replayed}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      true -> {:error, :paper_ops_nested_transaction_unsupported}
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_paper_block_form_once(
+        _slug,
+        _source_tag,
+        _source_params,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _resolver,
+        _opts
+      ),
+      do: {:error, :invalid_block_form_request}
+
+  defp resolve_paper_block_form(%Document{} = doc, resolver, opts) do
     with if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_block_form_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev) do
+      normalize_paper_block_form_resolution(resolver.(blocks))
+    end
+  end
+
+  defp normalize_paper_block_form_resolution({:ok, ops})
+       when is_list(ops) and ops != [] do
+    if Enum.all?(ops, &is_map/1), do: {:ok, ops}, else: {:error, :invalid_block_form_resolution}
+  end
+
+  defp normalize_paper_block_form_resolution({:error, reason}), do: {:error, reason}
+
+  defp normalize_paper_block_form_resolution(_other),
+    do: {:error, :invalid_block_form_resolution}
+
+  defp check_paper_block_form_rev(_doc, nil), do: {:error, :precondition_failed}
+  defp check_paper_block_form_rev(doc, if_rev), do: check_paper_if_rev(doc, if_rev)
+
+  defp trusted_empty_block_form_op?([
+         %{"op" => "patch-block", "id" => id, "patch" => patch} = op
+       ])
+       when is_binary(id) and is_map(patch) and map_size(patch) == 0 do
+    map_size(op) == 3 and String.trim(id) != ""
+  end
+
+  defp trusted_empty_block_form_op?(_ops), do: false
+
+  defp persist_paper_block_ops(
+         %Document{} = doc,
+         slug,
+         ops,
+         dataset,
+         opts,
+         trusted_form_noop? \\ false
+       ) do
+    with if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_ops_revision(ops, if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
-         {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
+         :ok <- preflight_table_editor_ops(blocks, ops),
+         {:ok, blocks} <- project_revision_fenced_ids(blocks, if_rev),
+         {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
          # when it would hollow out a non-hollow paper.
@@ -922,8 +1092,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # fail closed (HIGH-3) when a marked block cannot be sealed.
          {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id) do
       cond do
-        ops == [] ->
-          # Nothing to apply — report the current rev, no write, no broadcast.
+        ops == [] or
+            (folded == blocks and
+               (trusted_form_noop? or Enum.all?(ops, &table_editor_op?/1))) ->
+          # Trusted block forms and private Table intents still pass through
+          # revision/context/Patch fences before sharing the empty-batch receipt:
+          # current rev, no write or broadcast. Canonical ops keep their semantics.
           {:ok,
            %{
              slug: slug,
@@ -1021,6 +1195,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_paper_ops_principal(_), do: {:error, :missing_principal}
 
+  defp normalize_canvas_run_opts(opts) when is_list(opts) do
+    context = Keyword.get(opts, :canvas_run_context)
+
+    with {:ok, normalized} <- CanvasRunContext.normalize(context),
+         :ok <- require_canvas_run_revision(normalized, Keyword.get(opts, :if_rev)) do
+      if is_nil(normalized) do
+        {:ok, Keyword.delete(opts, :canvas_run_context)}
+      else
+        {:ok, Keyword.put(opts, :canvas_run_context, normalized)}
+      end
+    end
+  end
+
+  defp require_canvas_run_revision(nil, _if_rev), do: :ok
+  defp require_canvas_run_revision(_context, if_rev) when is_integer(if_rev), do: :ok
+  defp require_canvas_run_revision(_context, _if_rev), do: {:error, :invalid_canvas_run_context}
+
   # Internal contention seam: the unboxed two-connection regression pauses the
   # winning transaction after INSERT so the losing INSERT is forced to observe
   # a genuinely in-flight Postgres uniqueness conflict. No host passes it.
@@ -1056,7 +1247,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp paper_ops_payload_fingerprint(ops, opts) do
-    {ops, Keyword.get(opts, :if_rev)}
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> {ops, Keyword.get(opts, :if_rev)}
+      context -> {ops, Keyword.get(opts, :if_rev), context}
+    end
     |> deterministic_hash()
   end
 
@@ -1086,6 +1280,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
     |> deterministic_hash()
   end
 
+  defp block_form_payload_fingerprint(source_tag, source_params, opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> {source_tag, source_params, Keyword.get(opts, :if_rev)}
+      context -> {source_tag, source_params, Keyword.get(opts, :if_rev), context}
+    end
+    |> deterministic_hash()
+  end
+
   defp deterministic_hash(term) do
     term
     |> :erlang.term_to_binary([:deterministic])
@@ -1107,28 +1309,35 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp normalize_stored_paper_ops_receipt(_),
     do: {:error, :idempotency_receipt_invalid}
 
-  defp normalize_stored_document_op_receipt(%{
-         "block" => block,
-         "block_id" => block_id,
-         "op_kind" => op_kind,
-         "position" => position,
-         "written_doc_id" => written_doc_id,
-         "written_row_id" => written_row_id,
-         "rev" => rev
-       })
-       when is_map(block) and (is_binary(block_id) or is_nil(block_id)) and
+  defp normalize_stored_document_op_receipt(
+         %{
+           "block" => block,
+           "block_id" => block_id,
+           "op_kind" => op_kind,
+           "position" => position,
+           "written_doc_id" => written_doc_id,
+           "written_row_id" => written_row_id,
+           "rev" => rev
+         } = stored
+       )
+       when (is_map(block) or is_nil(block)) and (is_binary(block_id) or is_nil(block_id)) and
               is_binary(op_kind) and (is_integer(position) or is_nil(position)) and
               is_binary(written_doc_id) and is_binary(written_row_id) and is_binary(rev) do
-    {:ok,
-     %{
-       block: block,
-       block_id: block_id,
-       op_kind: op_kind,
-       position: position,
-       written_doc_id: written_doc_id,
-       written_row_id: written_row_id,
-       rev: rev
-     }}
+    receipt = %{
+      block: block,
+      block_id: block_id,
+      op_kind: op_kind,
+      position: position,
+      written_doc_id: written_doc_id,
+      written_row_id: written_row_id,
+      rev: rev
+    }
+
+    case Map.get(stored, "no_op", false) do
+      false -> {:ok, receipt}
+      true -> {:ok, Map.put(receipt, :no_op, true)}
+      _other -> {:error, :idempotency_receipt_invalid}
+    end
   end
 
   defp normalize_stored_document_op_receipt(_),
@@ -1142,6 +1351,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
        ) do
     Broadcast.flush_deferred_broadcasts()
     _ = Writer.finish_deferred_after_save({:ok, saved}, payload)
+    {:ok, receipt, :applied}
+  end
+
+  defp finish_document_op_transaction(
+         {:ok, {:applied, %{no_op: true} = receipt, nil}},
+         _dataset,
+         _previous_doc,
+         _opts
+       ) do
+    Broadcast.clear_deferred_broadcasts()
+    Writer.clear_deferred_after_save()
     {:ok, receipt, :applied}
   end
 
@@ -1162,17 +1382,60 @@ defmodule Barkpark.Content.Papers.BlockOps do
     {:error, reason}
   end
 
+  defp document_op_applied_result(
+         %{no_op: true, written_row_id: row_id} = receipt,
+         current_row_id
+       )
+       when row_id == current_row_id do
+    case Writer.take_deferred_after_save() do
+      nil -> {:applied, receipt, nil}
+      _unexpected -> Repo.rollback(:document_after_save_effect_unexpected)
+    end
+  end
+
+  defp document_op_applied_result(%{no_op: true}, _current_row_id),
+    do: Repo.rollback(:idempotency_target_replaced)
+
+  defp document_op_applied_result(receipt, _current_row_id) do
+    case Writer.take_deferred_after_save() do
+      {{:ok, %Document{id: row_id}}, _payload} = deferred
+      when row_id == receipt.written_row_id ->
+        {:applied, receipt, deferred}
+
+      _ ->
+        Repo.rollback(:document_after_save_effect_missing)
+    end
+  end
+
   # Atomic fold: thread the block list through each op via Patch.apply_patch/2,
   # collecting the affected block id per op against the post-op state. Halts on
   # the first failure (returning that op's tagged error) so a partial batch is
   # never persisted. Affected ids are de-duped while preserving first-seen order.
-  defp fold_paper_ops(blocks, ops) do
+  defp fold_paper_ops_in_context(blocks, ops, opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil ->
+        fold_paper_ops(blocks, ops)
+
+      context ->
+        CanvasRunContext.map_run(blocks, context, fn run_blocks ->
+          fold_paper_ops(run_blocks, ops, [])
+        end)
+    end
+  end
+
+  # The editor addresses legacy rows through the same deterministic projection
+  # it renders. Resolve those IDs only after the stored revision has passed its
+  # fence. Projection is pure; refusal and empty batches still write nothing.
+  defp project_revision_fenced_ids(blocks, if_rev) when not is_nil(if_rev),
+    do: project_block_ids_safely(blocks)
+
+  defp project_revision_fenced_ids(blocks, _if_rev), do: {:ok, blocks}
+
+  defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
     # every op of the atomic fold, so a batch op that breaks a cardinality /
     # relative-order rule halts the fold exactly like a locked-block op (the
     # paper stays UNCHANGED). Same declaration set as the single-op path.
-    constraints = Papers.Template.paper_declarations()
-
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
       # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
       # once after it. Two defects share this one root — the batch used to read
@@ -1200,9 +1463,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # id-bearing ops is byte-identical through it, and the post-fold
       # `ensure_block_ids` at the caller is then a no-op that stays as the
       # belt-and-braces chokepoint.
-      with {:ok, patched} <- Patch.apply_patch(acc, op, constraints: constraints),
+      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op, constraints: constraints),
            next = ensure_block_ids(patched),
-           {:ok, affected} <- locate_paper_affected(op, next) do
+           {:ok, affected} <- locate_paper_affected(applied_op, next) do
         new_ids =
           case affected.block_id do
             nil -> ids
@@ -1480,55 +1744,92 @@ defmodule Barkpark.Content.Papers.BlockOps do
       when is_binary(doc_id) and is_binary(type) and is_map(op) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
-         {blocks, _synth?} = Papers.resolve_blocks_for_edit(doc, type, dataset),
-         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
-         {:ok, affected} <- locate_paper_affected(op, new_blocks) do
-      content =
-        (doc.content || %{})
-        |> Map.put("blocks", new_blocks)
-        # Project-on-write — the SOLE writer of content[fieldName]/content["body"]
-        # for this document, identical to the paper path. Bound title → "title",
-        # free body blocks → content["body"]. Pre-patch `blocks` as old_blocks so
-        # a Beta-editor unbind clears the orphaned content[fieldName].
-        |> Projection.project(blocks, new_blocks, doc_project_opts(dataset, type, doc))
-
-      # Derive the row title from the bound title field if present (matches the
-      # Classic-save title precedence), else keep the document's current title.
-      new_title = blank_to_nil(Map.get(content, "title")) || doc.title
-
-      attrs = %{
-        "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
-        "title" => new_title,
-        "status" => doc.status,
-        "content" => content
-      }
-
-      case Content.upsert_document(type, attrs, dataset, opts) do
-        {:ok, saved} ->
-          {:ok,
-           %{
-             block: affected.block,
-             block_id: affected.block_id,
-             op_kind: Map.get(op, "op"),
-             position: affected.position,
-             # Session-handoff (final review, F5): the row this path actually
-             # WROTE is the `drafts.<slug>` twin (see `attrs["doc_id"]` above),
-             # NOT the published `<slug>` row a reader resolves. Naming it in
-             # the result lets an HTTP receipt be honest about which document
-             # changed instead of echoing the requested slug.
-             written_doc_id: attrs["doc_id"],
-             written_row_id: saved.id,
-             rev: saved.rev
-           }}
-
-        {:error, _} = err ->
-          err
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_op_revision(op, if_rev),
+         :ok <- check_document_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(blocks, [op]),
+         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
+         {:ok, applied_op} <- lower_editor_block_op(blocks, op),
+         {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
+         {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
+      if not is_nil(if_rev) and new_blocks == blocks do
+        {:ok, document_no_op_receipt(doc, op, affected)}
+      else
+        persist_document_block_op(
+          doc,
+          doc_id,
+          type,
+          op,
+          blocks,
+          new_blocks,
+          affected,
+          dataset,
+          opts
+        )
       end
     else
       {:error, :not_found} -> {:error, :not_found}
       {:error, _reason} = err -> err
     end
   end
+
+  defp persist_document_block_op(
+         doc,
+         doc_id,
+         type,
+         op,
+         blocks,
+         new_blocks,
+         affected,
+         dataset,
+         opts
+       ) do
+    content =
+      (doc.content || %{})
+      |> Map.put("blocks", new_blocks)
+      |> Projection.project(blocks, new_blocks, doc_project_opts(dataset, type, doc))
+
+    attrs = %{
+      "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
+      "title" => blank_to_nil(Map.get(content, "title")) || doc.title,
+      "status" => doc.status,
+      "content" => content
+    }
+
+    case Content.upsert_document(type, attrs, dataset, opts) do
+      {:ok, saved} ->
+        {:ok,
+         %{
+           block: affected.block,
+           block_id: affected.block_id,
+           op_kind: Map.get(op, "op"),
+           position: affected.position,
+           written_doc_id: attrs["doc_id"],
+           written_row_id: saved.id,
+           rev: saved.rev
+         }}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp document_no_op_receipt(doc, op, affected) do
+    %{
+      block: affected.block,
+      block_id: affected.block_id,
+      op_kind: Map.get(op, "op"),
+      position: affected.position,
+      written_doc_id: doc.doc_id,
+      written_row_id: doc.id,
+      rev: doc.rev,
+      no_op: true
+    }
+  end
+
+  defp project_document_op_ids(blocks, nil), do: {:ok, blocks}
+  defp project_document_op_ids(blocks, _if_rev), do: project_block_ids_safely(blocks)
 
   @doc """
   Apply one request-identified Beta document block operation exactly once.
@@ -1600,14 +1901,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
                       case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
                         :ok ->
-                          case Writer.take_deferred_after_save() do
-                            {{:ok, %Document{id: row_id}}, _payload} = deferred
-                            when row_id == receipt.written_row_id ->
-                              {:applied, receipt, deferred}
-
-                            _ ->
-                              Repo.rollback(:document_after_save_effect_missing)
-                          end
+                          document_op_applied_result(receipt, current_id)
 
                         {:error, reason} ->
                           Repo.rollback(reason)
@@ -1670,6 +1964,185 @@ defmodule Barkpark.Content.Papers.BlockOps do
         _opts
       ),
       do: {:error, :invalid_document_op_request}
+
+  @doc """
+  Resolve trusted server-owned block-form source against the current generic
+  document blocks and apply the derived op exactly once.
+
+  Matching replays are keyed by the raw source and return before revision or
+  resolver validation. The resolver never receives client-supplied replacement
+  blocks; it receives the authoritative list reloaded inside the claim
+  transaction.
+  """
+  def apply_document_block_form_once(
+        doc_id,
+        type,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      )
+
+  def apply_document_block_form_once(
+        doc_id,
+        type,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts
+      )
+      when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
+             source_tag != "" and is_map(source_params) and is_binary(dataset) and
+             is_function(resolver, 1) and is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         {:ok, opts} <- normalize_block_form_context_opts(opts),
+         target_doc_id = DraftId.draft_id(DraftId.published_id(doc_id)),
+         {:ok, %Document{} = doc} <-
+           get_document_op_base(target_doc_id, doc_id, type, dataset, opts) do
+      key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
+
+      exact_scope =
+        "document_block_form:v1:" <>
+          block_form_payload_fingerprint(source_tag, source_params, opts)
+
+      Broadcast.clear_deferred_broadcasts()
+      Writer.clear_deferred_after_save()
+
+      try do
+        Repo.transaction(fn ->
+          case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+            :claimed ->
+              maybe_after_idempotency_claim(opts)
+
+              with {:ok, %Document{id: current_id} = current_doc} <-
+                     lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
+                   true <- current_id == doc.id,
+                   if_rev = Keyword.get(opts, :if_rev),
+                   :ok <- check_document_block_form_rev(current_doc, if_rev),
+                   {:ok, blocks} <-
+                     resolve_document_blocks_for_edit(current_doc, type, dataset),
+                   {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
+                   {:ok, op} <- normalize_document_block_form_resolution(resolver.(blocks)) do
+                write_opts = Keyword.put(opts, :defer_after_save, true)
+
+                case apply_document_block_op(current_doc.doc_id, type, op, dataset, write_opts) do
+                  {:ok, receipt} ->
+                    maybe_before_idempotency_complete(opts)
+
+                    case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                      :ok ->
+                        document_op_applied_result(receipt, current_id)
+
+                      {:error, reason} ->
+                        Repo.rollback(reason)
+                    end
+
+                  {:error, reason} ->
+                    Repo.rollback(reason)
+                end
+              else
+                false -> Repo.rollback(:idempotency_target_replaced)
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            {:replay, stored_receipt} ->
+              with {:ok, %Document{id: current_row_id}} <-
+                     lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
+                   {:ok, %{written_row_id: written_row_id} = receipt} <-
+                     normalize_stored_document_op_receipt(stored_receipt) do
+                if written_row_id == current_row_id do
+                  {:replayed, receipt}
+                else
+                  Repo.rollback(:idempotency_target_replaced)
+                end
+              else
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            :in_progress ->
+              Repo.rollback(:idempotency_in_progress)
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
+        end)
+        |> finish_document_op_transaction(dataset, doc, opts)
+      rescue
+        exception ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+    else
+      true -> {:error, :document_op_nested_transaction_unsupported}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_document_block_form_once(
+        _doc_id,
+        _type,
+        _source_tag,
+        _source_params,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _resolver,
+        _opts
+      ),
+      do: {:error, :invalid_block_form_request}
+
+  defp resolve_document_blocks_for_edit(doc, type, dataset) do
+    case Papers.resolve_blocks_for_edit(doc, type, dataset) do
+      {:error, _reason} = error -> error
+      {blocks, _synth?} when is_list(blocks) -> {:ok, blocks}
+    end
+  end
+
+  defp normalize_document_block_form_resolution({:ok, op}) when is_map(op), do: {:ok, op}
+
+  defp normalize_document_block_form_resolution({:error, reason}), do: {:error, reason}
+
+  defp normalize_document_block_form_resolution(_other),
+    do: {:error, :invalid_block_form_resolution}
+
+  defp normalize_block_form_context_opts(opts) do
+    case CanvasRunContext.normalize(Keyword.get(opts, :canvas_run_context)) do
+      {:ok, nil} -> {:ok, Keyword.delete(opts, :canvas_run_context)}
+      {:ok, context} -> {:ok, Keyword.put(opts, :canvas_run_context, context)}
+      {:error, _reason} -> {:error, :invalid_canvas_run_context}
+    end
+  end
+
+  defp check_document_block_form_rev(%Document{rev: current}, nil),
+    do: {:error, {:rev_mismatch, %{expected: nil, actual: current}}}
+
+  defp check_document_block_form_rev(doc, if_rev), do: check_document_if_rev(doc, if_rev)
+
+  defp check_document_if_rev(_doc, nil), do: :ok
+
+  defp check_document_if_rev(%Document{rev: current}, expected)
+       when is_binary(expected) and expected != "" do
+    if expected == current,
+      do: :ok,
+      else: {:error, {:rev_mismatch, %{expected: expected, actual: current}}}
+  end
+
+  defp check_document_if_rev(%Document{rev: current}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: current}}}
 
   defp get_document_op_base(target_doc_id, requested_doc_id, type, dataset, opts) do
     case Content.get_document(target_doc_id, type, dataset, opts) do
@@ -1969,6 +2442,389 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # `apply_document_block_op/5` still does not (its ids are minted downstream in
   # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
   # nil — a known, untouched gap on a different surface, not this contract.
+  defp lower_editor_block_op(
+         blocks,
+         %{"op" => "patch-card-body", "id" => id, "content" => content} = op
+       )
+       when is_binary(id) and id != "" and is_list(content) do
+    if Map.keys(op) |> MapSet.new() |> MapSet.subset?(MapSet.new(~w(op id content))) and
+         valid_card_editor_inline?(content) do
+      case paper_blocks_with_id(blocks, id) do
+        [] ->
+          {:error, {:block_not_found, id, "patch-card-body"}}
+
+        [%{"type" => "card"} = card] ->
+          with {:ok, slots, body} <- strict_card_slots_and_body(card) do
+            body =
+              case body do
+                nil -> %{"type" => "paragraph", "content" => content}
+                paragraph -> Map.put(paragraph, "content", content)
+              end
+
+            {:ok,
+             %{
+               "op" => "patch-block",
+               "id" => id,
+               "patch" => %{"slots" => Map.put(slots, "body", [body])}
+             }}
+          else
+            :error -> {:error, {:invalid_op, op}}
+          end
+
+        [_not_card] ->
+          {:error, {:type_mismatch, id, "patch-card-body"}}
+
+        _duplicates ->
+          {:error, {:duplicate_id, id, "patch-card-body"}}
+      end
+    else
+      {:error, {:invalid_op, op}}
+    end
+  end
+
+  defp lower_editor_block_op(_blocks, %{"op" => "patch-card-body"} = op),
+    do: {:error, {:invalid_op, op}}
+
+  defp lower_editor_block_op(blocks, %{"op" => kind, "id" => id, "shape" => shape} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"] and is_binary(id) do
+    payload_key = if kind == "patch-table-cells", do: "cells", else: "action"
+
+    if exact_map_keys?(op, ["op", "id", "shape", payload_key]) do
+      case paper_blocks_with_id(blocks, id) do
+        [%{"type" => "table"} = table] ->
+          with :ok <- table_normalization_safe(blocks),
+               {:ok, updated} <- merge_table_editor_op(table, shape, kind, op[payload_key]) do
+            # Only the owned grid fields can change. Preserve head absence on
+            # cell edits; explicit removal is represented by head: [].
+            patch = Map.take(updated, ["rows", "head"])
+            {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
+          else
+            {:error, _reason} -> {:error, {:invalid_op, op}}
+          end
+
+        [] ->
+          {:error, {:block_not_found, id, kind}}
+
+        [_other_type] ->
+          {:error, {:type_mismatch, id, kind}}
+
+        _duplicates ->
+          {:error, {:duplicate_id, id, kind}}
+      end
+    else
+      {:error, {:invalid_op, op}}
+    end
+  end
+
+  defp lower_editor_block_op(_blocks, %{"op" => kind} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"],
+       do: {:error, {:invalid_op, op}}
+
+  defp lower_editor_block_op(_blocks, op), do: {:ok, op}
+
+  defp merge_table_editor_op(table, shape, "patch-table-cells", cells),
+    do: TableEditing.merge_cells(table, shape, cells)
+
+  defp merge_table_editor_op(table, shape, "patch-table-structure", action),
+    do: TableEditing.apply_action(table, shape, action)
+
+  # Private Table intents address already-authored Tables, never IDs synthesized
+  # by the general legacy editor projection. Run this on the full raw document
+  # before narrowing a canvas context or minting any IDs. A newly added Table
+  # must first settle its normal creation operation before these intents apply.
+  defp preflight_table_editor_ops(blocks, ops) do
+    table_ops = Enum.filter(ops, &table_editor_op?/1)
+
+    if table_ops == [] do
+      :ok
+    else
+      with {:ok, eligible_ids} <- table_editor_target_ids(blocks) do
+        Enum.reduce_while(table_ops, :ok, fn op, :ok ->
+          if MapSet.member?(eligible_ids, op["id"]),
+            do: {:cont, :ok},
+            else: {:halt, {:error, {:invalid_op, op}}}
+        end)
+      end
+    end
+  end
+
+  @doc false
+  # UI callers must supply raw authored blocks, before editor ID projection.
+  # This is the same gate used by persistence, not a separate HEEx grammar.
+  def table_editor_target_ids(blocks) when is_list(blocks) do
+    with {:ok, _projected} <- project_block_ids_safely(blocks),
+         :ok <- table_normalization_safe(blocks) do
+      ids =
+        blocks
+        |> table_snapshot([])
+        |> Enum.reduce(MapSet.new(), fn {_path, table}, ids ->
+          id = table["id"]
+
+          if is_binary(id) and id != "" and String.trim(id) == id and
+               paper_blocks_with_id(blocks, id) == [table] and
+               match?({:ok, _}, TableEditing.project(table)),
+             do: MapSet.put(ids, id),
+             else: ids
+        end)
+
+      {:ok, ids}
+    end
+  end
+
+  def table_editor_target_ids(_blocks), do: {:error, :invalid_blocks}
+
+  @doc false
+  # Echo every authored Table identity, including explicit nil projections when
+  # an external update makes a mounted editor unsafe. Never send raw carriers
+  # as though they were the editor's canonical inline grid.
+  def table_editor_projections(blocks) when is_list(blocks) do
+    eligible_ids =
+      case table_editor_target_ids(blocks) do
+        {:ok, ids} -> ids
+        {:error, _} -> MapSet.new()
+      end
+
+    blocks
+    |> table_snapshot([])
+    |> Enum.reduce(%{}, fn {_path, table}, projections ->
+      id = table["id"]
+
+      if is_binary(id) and id != "" and String.trim(id) == id do
+        projection =
+          with true <- MapSet.member?(eligible_ids, id),
+               [authored] <- paper_blocks_with_id(blocks, id),
+               {:ok, grid} <- TableEditing.project(authored) do
+            Map.merge(grid, %{id: id, type: "table"})
+          else
+            _ -> nil
+          end
+
+        Map.put(projections, id, projection)
+      else
+        projections
+      end
+    end)
+  end
+
+  def table_editor_projections(_blocks), do: %{}
+
+  # The write pipeline normalizes the entire document. A Table edit must not
+  # silently migrate a different, legacy Table. Compare exact Table terms at
+  # authored paths, including descendants traversed by the normalizer but not
+  # addressed by today's editor. Opaque metadata is harmless if unchanged.
+  defp table_normalization_safe(blocks) do
+    persisted_shape = blocks |> ensure_block_ids() |> normalize_render_shapes()
+
+    if table_snapshot(blocks, []) == table_snapshot(persisted_shape, []),
+      do: :ok,
+      else: {:error, :table_normalization_would_change_authored_data}
+  end
+
+  defp table_snapshot(value, path) when is_map(value) do
+    own = if value["type"] == "table", do: [{path, value}], else: []
+
+    own ++
+      (value
+       |> Enum.sort_by(&elem(&1, 0))
+       |> Enum.flat_map(fn {key, child} -> table_snapshot(child, path ++ [key]) end))
+  end
+
+  defp table_snapshot(value, path) when is_list(value) do
+    value
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {child, index} -> table_snapshot(child, path ++ [index]) end)
+  end
+
+  defp table_snapshot(_value, _path), do: []
+
+  defp table_editor_op?(%{"op" => kind}),
+    do: kind in ["patch-table-cells", "patch-table-structure"]
+
+  defp table_editor_op?(_op), do: false
+
+  defp table_write_or_noop(doc, op, before, after_blocks, affected) do
+    if table_editor_op?(op) and before == after_blocks do
+      {:table_noop,
+       %{
+         block: affected.block,
+         block_id: affected.block_id,
+         position: affected.position,
+         op_kind: op["op"],
+         fragment_html: nil,
+         rev: paper_current_rev(doc),
+         no_op: true
+       }}
+    else
+      :ok
+    end
+  end
+
+  # Authoritative Card/Table read/merge/write operations require a revision fence
+  # before payload parsing. Table coordinates cannot be safely rebased, and Card
+  # slots must not overwrite newer chrome or bypass safe identity projection.
+  defp require_editor_op_revision(%{"op" => op}, nil)
+       when op in ["patch-card-body", "patch-table-cells", "patch-table-structure"],
+       do: {:error, :precondition_failed}
+
+  defp require_editor_op_revision(_op, _if_rev), do: :ok
+
+  defp require_editor_ops_revision(ops, if_rev) when is_list(ops) do
+    Enum.reduce_while(ops, :ok, fn op, :ok ->
+      case require_editor_op_revision(op, if_rev) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp strict_card_slots_and_body(card) do
+    with true <- optional_binary_or_nil?(card, "tone"),
+         {:ok, slots} <- strict_card_slots(card),
+         {:ok, _title} <- strict_card_slot(slots, "title", &strict_card_title?/1),
+         {:ok, body} <- strict_card_slot(slots, "body", &strict_card_body?/1),
+         {:ok, _media} <- strict_card_slot(slots, "media", &strict_card_media?/1),
+         {:ok, _action} <- strict_card_slot(slots, "action", &strict_card_action?/1) do
+      {:ok, slots, body}
+    else
+      _ -> :error
+    end
+  end
+
+  defp strict_card_slots(card) do
+    case Map.fetch(card, "slots") do
+      :error -> {:ok, %{}}
+      {:ok, nil} -> {:ok, %{}}
+      {:ok, slots} when is_map(slots) -> {:ok, slots}
+      _ -> :error
+    end
+  end
+
+  defp strict_card_slot(slots, name, validator) do
+    case Map.fetch(slots, name) do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:ok, nil}
+      {:ok, []} -> {:ok, nil}
+      {:ok, [%{} = element]} -> if validator.(element), do: {:ok, element}, else: :error
+      _ -> :error
+    end
+  end
+
+  defp strict_card_title?(element),
+    do: element["type"] == "heading" and optional_binary_or_nil?(element, "text")
+
+  defp strict_card_body?(element),
+    do:
+      element["type"] == "paragraph" and
+        (not Map.has_key?(element, "content") or is_nil(element["content"]) or
+           valid_card_editor_source_inline?(element["content"]))
+
+  defp valid_card_editor_source_inline?([%{"type" => "text", "value" => ""} = node]),
+    do: exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_source_inline?(nodes), do: valid_card_editor_inline?(nodes)
+
+  defp strict_card_media?(element),
+    do:
+      element["type"] in [nil, "image"] and optional_binary_or_nil?(element, "src") and
+        optional_binary_or_nil?(element, "alt")
+
+  defp strict_card_action?(element),
+    do:
+      element["type"] == "action" and optional_binary_or_nil?(element, "label") and
+        optional_binary_or_nil?(element, "href") and optional_binary_or_nil?(element, "priority")
+
+  defp optional_binary_or_nil?(map, key),
+    do: not Map.has_key?(map, key) or is_nil(map[key]) or is_binary(map[key])
+
+  defp valid_card_editor_inline?(nodes) when is_list(nodes),
+    do: Enum.all?(nodes, &valid_card_editor_inline_node?(&1, 0))
+
+  defp valid_card_editor_inline?(_nodes), do: false
+
+  defp valid_card_editor_inline_node?(%{"type" => "text", "value" => value} = node, _rank)
+       when is_binary(value) and value != "",
+       do: exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_inline_node?(%{"type" => "code", "value" => value} = node, rank)
+       when is_binary(value) and value != "",
+       do: card_inline_rank("code") >= rank and exact_map_keys?(node, ~w(type value))
+
+  defp valid_card_editor_inline_node?(%{"type" => type, "children" => [child]} = node, rank)
+       when type in ["strong", "em", "underline", "strikethrough"] do
+    node_rank = card_inline_rank(type)
+
+    node_rank >= rank and exact_map_keys?(node, ~w(type children)) and
+      valid_card_editor_inline_node?(child, node_rank)
+  end
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "link", "href" => href, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(href),
+       do:
+         card_inline_rank("link") >= rank and exact_map_keys?(node, ~w(type href children)) and
+           valid_card_editor_inline_node?(child, card_inline_rank("link"))
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "wikilink", "target" => target, "children" => [child]} = node,
+         rank
+       )
+       when is_binary(target) do
+    allowed = ~w(type target children alias docId)
+
+    card_inline_rank("wikilink") >= rank and subset_map_keys?(node, allowed) and
+      required_map_keys?(node, ~w(type target children)) and
+      optional_non_nil?(node, "alias") and optional_non_nil?(node, "docId") and
+      valid_card_editor_inline_node?(child, card_inline_rank("wikilink"))
+  end
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "blockref", "target" => target, "anchor" => anchor} = node,
+         rank
+       )
+       when is_binary(target) and is_binary(anchor),
+       do:
+         card_inline_rank("blockref") >= rank and
+           exact_map_keys?(node, ~w(type target anchor))
+
+  defp valid_card_editor_inline_node?(%{"type" => "tag", "name" => name} = node, rank)
+       when is_binary(name),
+       do: card_inline_rank("tag") >= rank and exact_map_keys?(node, ~w(type name))
+
+  defp valid_card_editor_inline_node?(
+         %{"type" => "valueref", "target" => target, "field" => field} = node,
+         rank
+       )
+       when is_binary(target) and is_binary(field) do
+    allowed = ~w(type target field as fallback label children)
+
+    card_inline_rank("valueref") >= rank and subset_map_keys?(node, allowed) and
+      required_map_keys?(node, ~w(type target field)) and
+      Enum.all?(~w(as fallback label children), &optional_non_nil?(node, &1))
+  end
+
+  defp valid_card_editor_inline_node?(_node, _rank), do: false
+
+  defp card_inline_rank("link"), do: 0
+  defp card_inline_rank("wikilink"), do: 1
+  defp card_inline_rank("strong"), do: 2
+  defp card_inline_rank("em"), do: 3
+  defp card_inline_rank("underline"), do: 4
+  defp card_inline_rank("strikethrough"), do: 5
+  defp card_inline_rank("code"), do: 6
+  defp card_inline_rank("blockref"), do: 7
+  defp card_inline_rank("tag"), do: 8
+  defp card_inline_rank("valueref"), do: 9
+
+  defp exact_map_keys?(map, keys), do: MapSet.new(Map.keys(map)) == MapSet.new(keys)
+
+  defp subset_map_keys?(map, keys),
+    do: MapSet.subset?(MapSet.new(Map.keys(map)), MapSet.new(keys))
+
+  defp required_map_keys?(map, keys), do: Enum.all?(keys, &Map.has_key?(map, &1))
+  defp optional_non_nil?(map, key), do: not Map.has_key?(map, key) or not is_nil(map[key])
+
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
     position = length(new_blocks) - 1
     stored = Enum.at(new_blocks, position) || block
@@ -2022,28 +2878,81 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp paper_find_block(blocks, id) do
-    Enum.find_value(blocks, fn block ->
-      cond do
-        Map.get(block, "id") == id -> block
-        Map.get(block, "type") == "section" -> paper_find_block(Map.get(block, "blocks", []), id)
-        true -> nil
-      end
+    Enum.find_value(blocks, fn
+      block when is_map(block) ->
+        if Map.get(block, "id") == id,
+          do: block,
+          else: Enum.find_value(paper_child_lists(block), &paper_find_block(&1, id))
+
+      _ ->
+        nil
     end)
   end
 
-  @doc """
-  Walk a block list and fill a stable positional id for any block that lacks
-  one. DELEGATES to `Barkpark.PortableDoc.BlockIds.ensure_block_ids/1`, which
-  owns the implementation and documents the full contract (positional
-  `<prefix>-<index>` ids, section recursion, collision safety, idempotence).
+  defp paper_blocks_with_id(blocks, id) do
+    Enum.flat_map(blocks, fn
+      block when is_map(block) ->
+        own = if Map.get(block, "id") == id, do: [block], else: []
+        own ++ Enum.flat_map(paper_child_lists(block), &paper_blocks_with_id(&1, id))
 
-  The name stays here because this module is the write chokepoint every paper
-  and document write path routes through; the FUNCTION moved down into the
-  PortableDoc kernel so `PortableDoc.Bpml.Diff` could stop aliasing a feature
-  module (task-9d06bca37668f76a).
-  """
+      _ ->
+        []
+    end)
+  end
+
+  defp paper_child_lists(%{"type" => "section", "blocks" => children}) when is_list(children),
+    do: [children]
+
+  defp paper_child_lists(%{"type" => "expandable"} = block), do: visible_body_lists(block)
+
+  defp paper_child_lists(%{"type" => "steps", "steps" => rows}) when is_list(rows),
+    do: Enum.flat_map(rows, &visible_body_lists/1)
+
+  defp paper_child_lists(%{"type" => "tabs", "tabs" => rows}) when is_list(rows) do
+    Enum.flat_map(rows, fn
+      %{"blocks" => children} when is_list(children) -> [children]
+      _row -> []
+    end)
+  end
+
+  defp paper_child_lists(%{"type" => "columns", "columns" => columns})
+       when is_list(columns),
+       do: Enum.filter(columns, &is_list/1)
+
+  defp paper_child_lists(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: [[child]]
+
+  defp paper_child_lists(_), do: []
+
+  defp visible_body_lists(container) when is_map(container) do
+    case visible_body_key(container) do
+      nil -> []
+      key -> [Map.fetch!(container, key)]
+    end
+  end
+
+  defp visible_body_lists(_), do: []
+
+  @doc "Assign stable block identities through the shared PortableDoc kernel."
   @spec ensure_block_ids(list()) :: list()
   defdelegate ensure_block_ids(blocks), to: Barkpark.PortableDoc.BlockIds
+
+  @doc "Project stable ids only when authored identities are unambiguous."
+  @spec project_block_ids_safely(list()) :: {:ok, list()} | {:error, {:duplicate_id, String.t()}}
+  defdelegate project_block_ids_safely(blocks), to: Barkpark.PortableDoc.BlockIds
+
+  defp visible_body_key(container) do
+    case Map.get(container, "children") do
+      children when is_list(children) ->
+        "children"
+
+      absent when absent in [nil, false] ->
+        if is_list(Map.get(container, "blocks")), do: "blocks"
+
+      _ ->
+        nil
+    end
+  end
 
   @doc """
   Normalize legacy FLAT-STRING list items to the canonical inline-ARRAY shape

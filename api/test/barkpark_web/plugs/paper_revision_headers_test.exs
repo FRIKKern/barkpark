@@ -44,9 +44,11 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
   defp stored_content(paper), do: Repo.get!(Document, paper.id).content
 
   defp current_bucket, do: div(System.os_time(:second), @bucket_seconds)
+  defp build_digest, do: EpicFleet.canonical_digest(Barkpark.BuildInfo.info())
 
   defp weak_etag(content),
-    do: ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{current_bucket()}")
+    do:
+      ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{build_digest()}.#{current_bucket()}")
 
   defp replay(path, if_none_match) do
     scoped_conn()
@@ -140,12 +142,34 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
   describe "time bucket (D9)" do
     test "an adjacent bucket window flips the 304 back to 200", %{paper: paper} do
       digest = EpicFleet.canonical_digest(stored_content(paper))
-      stale = ~s(W/"sha256:#{digest}.#{current_bucket() - 1}")
+      stale = ~s(W/"sha256:#{digest}.#{build_digest()}.#{current_bucket() - 1}")
 
       conn = replay("/papers/conditional-paper", stale)
 
       assert conn.status == 200
       assert html_response(conn, 200) =~ "Conditional Paper"
+    end
+  end
+
+  describe "build identity" do
+    test "a validator from an older rendered shell cannot 304 after a rebuild", %{paper: paper} do
+      content_digest = EpicFleet.canonical_digest(stored_content(paper))
+      old_build_digest = String.duplicate("0", 64)
+      refute old_build_digest == build_digest()
+
+      old_build_etag =
+        ~s(W/"sha256:#{content_digest}.#{old_build_digest}.#{current_bucket()}")
+
+      legacy_content_only_etag = ~s(W/"sha256:#{content_digest}.#{current_bucket()}")
+
+      conn200 = replay("/papers/conditional-paper", old_build_etag)
+      assert conn200.status == 200
+      assert html_response(conn200, 200) =~ "Conditional Paper"
+      assert replay("/papers/conditional-paper", legacy_content_only_etag).status == 200
+
+      [current_etag] = get_resp_header(conn200, "etag")
+      refute current_etag == old_build_etag
+      assert replay("/papers/conditional-paper", current_etag).status == 304
     end
   end
 

@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # t9 — live task-block previews (block_id ⇒ preview entry), display-only rows
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
+  attr(:paper_links, :map, default: %{})
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -316,6 +317,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   scope_prefix={@scope_prefix}
                   canvas_eligible={true}
                   task_previews={@task_previews}
+                  paper_links={@paper_links}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -1556,6 +1558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
+          paper_links={@paper_link_details}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
@@ -1725,12 +1728,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     slug={Content.published_id(@editor_doc.doc_id)}
                     doc_type={@editor_doc.type}
                     blocks={@editor_blocks}
+                    table_editor_target_ids={Map.get(assigns, :editor_table_target_ids, MapSet.new())}
                     expected_fields={beta_expected_fields(@editor_schema, @editor_blocks)}
                     descriptors={beta_all_descriptors(@editor_schema, @editor_blocks)}
                     document_rev={@editor_doc.rev}
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
                     scope_prefix={Map.get(assigns, :scope_prefix, "")}
+                    paper_links={Map.get(assigns, :paper_link_details, %{})}
                   />
                 </main>
               </div>
@@ -1761,6 +1766,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           >
             <:extra_actions>
               <.editor_mode_toggle :if={beta_ok} mode={@editor_mode} beta_ok={beta_ok} />
+              <span
+                :if={Map.get(assigns, :editor_blocks_identity_error)}
+                role="alert"
+                data-test-id="studio-beta-identity-error"
+              >
+                {beta_identity_error_message(@editor_blocks_identity_error)}
+              </span>
             </:extra_actions>
             <%!-- spd-w19 — the third seam. The slot has been DECLARED and never
                   filled since D222; unfilled it fell to
@@ -2030,6 +2042,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     </.pane_layout>
 
     """
+  end
+
+  defp beta_identity_error_message({:malformed_block_authority, _path}) do
+    "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
+  end
+
+  defp beta_identity_error_message(_reason) do
+    "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
   end
 
   # ── the SheetGrid capability prop ───────────────────────────────────────────

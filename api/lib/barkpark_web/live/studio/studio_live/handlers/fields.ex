@@ -265,14 +265,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def editor_set_mode(%{"mode" => mode}, socket) do
+    # Eligibility must come from the refreshed identity-checked baseline, not
+    # the previous document state (which may now contain ambiguous block IDs).
+    socket = if mode == "beta", do: Shared.sync_editor_blocks(socket), else: socket
+
     next =
       case mode do
         "beta" -> if Shared.beta_editable?(socket), do: :beta, else: :classic
         _ -> :classic
       end
-
-    socket =
-      if next == :beta, do: Shared.sync_editor_blocks(socket), else: socket
 
     {:noreply, assign(socket, editor_mode: next)}
   end

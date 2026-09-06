@@ -69,7 +69,8 @@
    },
    {
     "path": "api/priv/static/assets/bp-paper-editor-shell.css",
-    "count": 20,
+    "count": 19,
+    "reduction": "Paper table disclosure controls remove the old opacity 0.12s transition; no replacement duration was introduced.",
     "note": "The Beta paper-editor rule run, extracted byte-for-byte from root.html.heex by edit-on-the-link slice 2 so the public paper reader can load the same editor stylesheet (gated on can_edit?). Its 20 hand-typed durations are root.html.heex's former residue, moved not minted; they carry the same tokenization debt and sweep on the same schedule."
    },
    {
@@ -84,7 +85,8 @@
    },
    {
     "path": "api/assets/paper-editor/src/styles.css",
-    "count": 10,
+    "count": 9,
+    "reduction": "Paper table disclosure controls remove the old opacity 0.12s transition, matching the shared editor shell.",
     "note": "Paper-editor bundle. It is on MOTION_SURFACES, but it gets the ladder through the de-scoping paper-surface mirror rather than from an emitter of its own \u2014 Part N asserts the bytes landed either way. Residue is the same 0.12s/120ms/0.08s chrome tier as its Studio twin, outside the mirrored region."
    },
    {

@@ -121,6 +121,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
+    |> assign(:paper_link_details, paper_link_details(socket, paper))
     |> assign(:save_status, "")
     |> assign(:last_save_ok?, true)
     |> assign(:paper_halt, nil)
@@ -198,21 +199,35 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def apply_op(socket, op), do: failed_save(socket, is_map(op) && op["request_id"])
 
   defp apply_op_once(socket, op, request_id) do
+    form_source = Map.get(op, :__server_block_form_source__)
     op = stable_request_op(op, request_id)
 
     case apply_ops(
            socket,
-           [Map.drop(op, ["if_rev", "request_id"])],
+           [Map.drop(op, ["if_rev", "request_id", :__server_block_form_source__])],
            request_id,
-           op["if_rev"]
+           op["if_rev"],
+           {:ok, nil},
+           form_source
          ) do
       {:ok, socket, receipt, outcome} ->
-        assign(socket, :last_save_result, %{
+        result = %{
           saved: true,
           request_id: request_id,
           replayed: outcome == :replayed,
           rev: receipt.rev
-        })
+        }
+
+        assign(
+          socket,
+          :last_save_result,
+          SharedPaper.table_confirmation(
+            result,
+            op,
+            blocks_of(socket.assigns[:paper_doc]),
+            socket.assigns[:paper_rev]
+          )
+        )
 
       {:error, socket} ->
         socket
@@ -275,6 +290,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Apply one request-identified canvas batch exactly once."
   def apply_ops(socket, ops, request_id, supplied_rev) do
+    apply_ops(socket, ops, request_id, supplied_rev, {:ok, nil})
+  end
+
+  def apply_ops(socket, ops, request_id, supplied_rev, context_result) do
+    apply_ops(socket, ops, request_id, supplied_rev, context_result, nil)
+  end
+
+  defp apply_ops(socket, ops, request_id, supplied_rev, context_result, form_source) do
     paper = socket.assigns[:paper_doc]
     workspace_id = doc_field(paper, :workspace_id)
     slug = socket.assigns[:slug]
@@ -290,8 +313,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       revision(supplied_rev) == :error ->
         {:error, failed_save(socket, request_id)}
 
+      not match?({:ok, _context}, context_result) ->
+        {:error, failed_save(socket, request_id)}
+
       true ->
         {:ok, if_rev} = revision(supplied_rev)
+        {:ok, context} = context_result
+
+        opts =
+          write_opts(socket) ++
+            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
 
         # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —
         # `bp-paper-editor-hooks.js` stamps a `request_id` on every mutation — so
@@ -301,14 +332,34 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         # `:revision_action`, `:actor_user_id`); dropping to the bare scope here
         # would leave every real reader edit unattributed while the tests that
         # drive the legacy seam stayed green.
-        case Content.apply_paper_block_ops_once(
-               slug,
-               ops,
-               socket.assigns[:dataset],
-               request_id,
-               replay_principal_key(assigns),
-               write_opts(socket) ++ [if_rev: if_rev]
-             ) do
+        result =
+          if is_map(form_source) do
+            resolver = fn blocks ->
+              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+            end
+
+            Content.apply_paper_block_form_once(
+              slug,
+              "block_form:v1",
+              form_source,
+              socket.assigns[:dataset],
+              request_id,
+              replay_principal_key(assigns),
+              resolver,
+              opts
+            )
+          else
+            Content.apply_paper_block_ops_once(
+              slug,
+              ops,
+              socket.assigns[:dataset],
+              request_id,
+              replay_principal_key(assigns),
+              opts
+            )
+          end
+
+        case result do
           {:ok, receipt, outcome} ->
             # One access row per ACCEPTED op, exactly as the legacy seam records
             # it in `handle_result/3`. A REPLAY changed nothing about the paper —
@@ -326,6 +377,9 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
             {:ok, socket, receipt, outcome}
 
+          {:error, {:source_validation, _reason}} ->
+            {:error, failed_save(socket, request_id, :validation)}
+
           {:error, reason} ->
             {:error, handle_result({:error, reason}, socket, request_id)}
         end
@@ -335,10 +389,24 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # ── the MVP editor events, each mapping to exactly ONE op ───────────────────
 
   @doc "Form submit / autosave on one block → a `patch-block` op."
-  def edit_block(socket, %{"block_id" => id} = params) when is_binary(id) do
-    patch = Blocks.build_block_patch(block_by_id(socket, id), params)
+  def edit_block(socket, %{"block_id" => id, "request_id" => request_id} = params)
+      when is_binary(id) and is_binary(request_id) do
+    source = Blocks.block_form_source(params)
+    op = %{"op" => "patch-block", "id" => id, :__server_block_form_source__ => source}
+    apply_op(socket, write_meta(op, params))
+  end
 
-    apply_op(socket, write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params))
+  def edit_block(socket, %{"block_id" => id} = params) when is_binary(id) do
+    case Blocks.validate_block_patch(block_by_id(socket, id), params) do
+      {:ok, patch} ->
+        apply_op(
+          socket,
+          write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+        )
+
+      {:error, _reason} ->
+        failed_save(socket, params["request_id"], :validation)
+    end
   end
 
   def edit_block(socket, params), do: failed_save(socket, is_map(params) && params["request_id"])
@@ -519,11 +587,40 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
+    |> assign(:paper_link_details, paper_link_details(socket, paper))
   end
 
   @doc "Find a block by id anywhere in the editor buffer (recurses sections)."
   def block_by_id(socket, id) do
-    Blocks.find_paper_block(socket.assigns[:edit_blocks] || [], id)
+    socket.assigns[:edit_blocks]
+    |> Kernel.||([])
+    |> Content.ensure_block_ids()
+    |> Blocks.find_paper_block(id)
+  end
+
+  defp paper_link_details(socket, paper) do
+    reader_scope = socket.assigns[:reader_scope] || []
+
+    # Flat /papers routes have no URL scope. Preserve the same tenant boundary
+    # as the reader after a save, using the freshly fetched Paper as authority.
+    workspace_id =
+      (paper && paper.workspace_id) || Keyword.get(reader_scope, :workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    scope = [
+      workspace_id: workspace_id,
+      project_id: (paper && paper.project_id) || Keyword.get(reader_scope, :project_id),
+      published_only: true
+    ]
+
+    Content.Papers.resolve_paper_link_details(
+      blocks_of(paper),
+      socket.assigns[:dataset] || Content.paper_default_dataset(),
+      scope
+    )
   end
 
   # ── internals ───────────────────────────────────────────────────────────────
@@ -564,11 +661,18 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp refuse_save(socket, request_id), do: socket |> refuse() |> failed_save(request_id)
 
-  defp failed_save(socket, request_id) do
+  defp failed_save(socket, request_id, rejection \\ nil) do
+    result = %{saved: false, request_id: request_id}
+
+    result =
+      if rejection == :validation,
+        do: Map.merge(result, %{rejected: "validation", current_rev: socket.assigns[:paper_rev]}),
+        else: result
+
     socket
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, result)
   end
 
   # Connected item-share readers retain the signed mount session in the

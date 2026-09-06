@@ -20,7 +20,12 @@ defmodule Barkpark.PortableDoc.Patch do
       %{"version" => 1, "title" => "…", "blocks" => [block, …]}
 
   and a block is `%{"id" => "…", "type" => "…", …}`. A `section` block nests
-  the tree under its own `"blocks"` key.
+  the tree under its own `"blocks"` key; an `expandable` uses `"children"`
+  (with `"blocks"` retained as a compatibility alias); each `steps` row uses
+  the same visible-body aliases. A `figure` has exactly one canonical child
+  block under its singular map-valued `"child"` key; its other keys are not
+  treated as child collections. A `columns` block stores `"columns"` as a list
+  of column block-lists; scalar rows and scalar elements are retained opaquely.
 
   ## The six ops
 
@@ -36,8 +41,13 @@ defmodule Barkpark.PortableDoc.Patch do
   | `move-block`    | `"id"`, `"after"`    | Move the block `id` to just after `after` (or to the front when `after` is `null`). |
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
-  `replace-block`, and `remove-block` recurse into `section` children at any
-  depth. `append-block` is top-level only.
+  `replace-block`, and `remove-block` recurse into `section` and `expandable`
+  children, each visible `steps` row body, each plain `tabs` row's canonical
+  `blocks` list, and a `terminal`'s canonical `children` list, plus a `figure`'s
+  canonical child and that child's visible descendants, and map children within
+  each valid `columns` list, at any depth.
+  `patch-block` and a map-valued `replace-block` may target the figure child.
+  `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -73,9 +83,12 @@ defmodule Barkpark.PortableDoc.Patch do
   effect would shift a locked block's top-level position (e.g. an insert-after
   landing inside the locked prefix).
 
-  `:constraint` is the CONSTRAINT-VOCABULARY backstop (pdd-t20) — the calm
-  SIBLING of `:locked_block`. When the caller threads a doc type's constraint
-  DECLARATIONS via `apply_patch/3`'s `opts[:constraints]`
+  `:constraint` covers intrinsic container shape as well as the optional
+  CONSTRAINT-VOCABULARY backstop (pdd-t20). A figure must retain exactly one
+  map-valued child, so direct `insert-after`, direct `remove-block`, and a
+  non-map direct `replace-block` are refused even without opts. For declared
+  constraints, when the caller threads a doc type's DECLARATIONS via
+  `apply_patch/3`'s `opts[:constraints]`
   (`Barkpark.PortableDoc.Constraints` shape), an op whose result would break a
   CARDINALITY (min/max/exactly) or RELATIVE-order (after/before/index) rule is
   rejected — a `remove-block` dropping below a min-N, an `insert-after` adding
@@ -83,11 +96,13 @@ defmodule Barkpark.PortableDoc.Patch do
   block. `message` is the first human-readable violation string. The veto fires
   ONLY when the doc was VALID before the op (D12): a legacy / already-invalid
   doc plus an unrelated op is NOT rejected, so no edit is punished for a
-  pre-existing violation. With no declarations passed the engine is
-  byte-identical to the pre-vocabulary behaviour (D3 additive).
+  pre-existing violation. With no declarations passed, non-figure behavior is
+  byte-identical to the pre-vocabulary behavior (D3 additive).
   """
 
   alias Barkpark.PortableDoc.Constraints
+
+  @figure_child_constraint "figure must contain exactly one child"
 
   @type block :: %{required(String.t()) => term()}
   @type blocks :: [block()]
@@ -137,7 +152,8 @@ defmodule Barkpark.PortableDoc.Patch do
     # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
     # never mask one.
     with {:ok, new_blocks} <- apply_to_blocks(blocks, op),
-         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op) do
+         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op),
+         {:ok, new_blocks} <- check_duplicate_ratchet(blocks, new_blocks, op) do
       check_constraints(blocks, new_blocks, op, opts)
     end
   end
@@ -190,6 +206,9 @@ defmodule Barkpark.PortableDoc.Patch do
       id_exists?(blocks, block_id(block)) ->
         {:error, {:duplicate_id, block_id(block), "insert-after"}}
 
+      direct_figure_child_id?(blocks, after_id) ->
+        {:error, {:constraint, @figure_child_constraint, "insert-after"}}
+
       true ->
         case transform_at_id(blocks, after_id, fn target -> [target, block] end) do
           nil -> {:error, {:block_not_found, after_id, "insert-after"}}
@@ -231,9 +250,18 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp apply_to_blocks(blocks, %{"op" => "replace-block", "id" => id, "block" => block}) do
-    case transform_at_id(blocks, id, fn _target -> [block] end) do
-      nil -> {:error, {:block_not_found, id, "replace-block"}}
-      new_blocks -> {:ok, new_blocks}
+    cond do
+      locked_at_id?(blocks, id) ->
+        {:error, {:locked_block, id, "replace-block"}}
+
+      direct_figure_child_id?(blocks, id) and not is_map(block) ->
+        {:error, {:constraint, @figure_child_constraint, "replace-block"}}
+
+      true ->
+        case transform_at_id(blocks, id, fn _target -> [block] end) do
+          nil -> {:error, {:block_not_found, id, "replace-block"}}
+          new_blocks -> {:ok, new_blocks}
+        end
     end
   end
 
@@ -242,22 +270,27 @@ defmodule Barkpark.PortableDoc.Patch do
     # by ANY client, canvas diff or raw API. Checked before the transform so
     # the atomic batch halts with a clear error instead of silently unmaking
     # the guarantee. Op-of-absent stays a no-op below.
-    if locked_at_id?(blocks, id) do
-      {:error, {:locked_block, id, "remove-block"}}
-    else
-      case transform_at_id(blocks, id, fn _target -> [] end) do
-        # Idempotent re-send safety for the canvas incremental-diff model: removing a
-        # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
-        # (id gone) is already true, so we return the block list unchanged and let the
-        # atomic batch continue. Without this, a stale remove-block (the canvas can
-        # re-send a batch that crosses an echo in flight, or a leading-block delete can
-        # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
-        # fold and discard the user's real edits riding the same batch. Other not-found
-        # cases (patch-block / insert-after / replace-block of a missing anchor) keep
-        # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
-        nil -> {:ok, blocks}
-        new_blocks -> {:ok, new_blocks}
-      end
+    cond do
+      locked_at_id?(blocks, id) ->
+        {:error, {:locked_block, id, "remove-block"}}
+
+      direct_figure_child_id?(blocks, id) ->
+        {:error, {:constraint, @figure_child_constraint, "remove-block"}}
+
+      true ->
+        case transform_at_id(blocks, id, fn _target -> [] end) do
+          # Idempotent re-send safety for the canvas incremental-diff model: removing a
+          # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
+          # (id gone) is already true, so we return the block list unchanged and let the
+          # atomic batch continue. Without this, a stale remove-block (the canvas can
+          # re-send a batch that crosses an echo in flight, or a leading-block delete can
+          # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
+          # fold and discard the user's real edits riding the same batch. Other not-found
+          # cases (patch-block / insert-after / replace-block of a missing anchor) keep
+          # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
+          nil -> {:ok, blocks}
+          new_blocks -> {:ok, new_blocks}
+        end
     end
   end
 
@@ -389,6 +422,99 @@ defmodule Barkpark.PortableDoc.Patch do
     end
   end
 
+  # Guard every op against introducing a duplicate authored identity anywhere
+  # in the document, including non-targetable container-row ids. Existing
+  # legacy duplicates remain editable: only an occurrence count that grows
+  # beyond both one and its pre-op count is rejected.
+  defp check_duplicate_ratchet(before_blocks, after_blocks, %{"op" => op_kind}) do
+    before_counts = before_blocks |> authored_ids() |> Enum.frequencies()
+    after_ids = authored_ids(after_blocks)
+    after_counts = Enum.frequencies(after_ids)
+
+    case Enum.find(after_ids, fn id ->
+           after_counts[id] > 1 and after_counts[id] > Map.get(before_counts, id, 0)
+         end) do
+      nil -> {:ok, after_blocks}
+      id -> {:error, {:duplicate_id, id, op_kind}}
+    end
+  end
+
+  defp check_duplicate_ratchet(_before_blocks, after_blocks, _op),
+    do: {:ok, after_blocks}
+
+  defp authored_ids(blocks) when is_list(blocks),
+    do: Enum.flat_map(blocks, &authored_block_ids/1)
+
+  defp authored_block_ids(block) when is_map(block) do
+    own = authored_id(block)
+
+    nested =
+      case block do
+        %{"type" => "section", "blocks" => children} when is_list(children) ->
+          authored_ids(children)
+
+        %{"type" => "expandable"} ->
+          authored_alias_ids(block)
+
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          Enum.flat_map(columns, fn
+            children when is_list(children) -> authored_ids(children)
+            _opaque -> []
+          end)
+
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          authored_block_ids(child)
+
+        %{"type" => "terminal"} ->
+          authored_alias_ids(block)
+
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_step_row_ids/1)
+
+        %{"type" => "tabs", "tabs" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_tab_row_ids/1)
+
+        _ ->
+          []
+      end
+
+    own ++ nested
+  end
+
+  defp authored_block_ids(_block), do: []
+
+  defp authored_step_row_ids(row) when is_map(row),
+    do: authored_id(row) ++ authored_alias_ids(row)
+
+  defp authored_step_row_ids(_row), do: []
+
+  defp authored_tab_row_ids(row) when is_map(row) do
+    nested =
+      case Map.get(row, "blocks") do
+        children when is_list(children) -> authored_ids(children)
+        _opaque -> []
+      end
+
+    authored_id(row) ++ nested
+  end
+
+  defp authored_tab_row_ids(_row), do: []
+
+  # Both renderer body aliases are authored block lists when present. Count the
+  # shadow too: replacing a parent must not smuggle an identity collision into
+  # metadata merely because the other alias currently wins renderer precedence.
+  defp authored_alias_ids(container) do
+    Enum.flat_map(["children", "blocks"], fn key ->
+      case Map.get(container, key) do
+        children when is_list(children) -> authored_ids(children)
+        _other -> []
+      end
+    end)
+  end
+
+  defp authored_id(%{"id" => id}) when is_binary(id) and id != "", do: [id]
+  defp authored_id(_value), do: []
+
   # Top-level id → index for every template-locked block.
   defp locked_index_map(blocks) do
     blocks
@@ -402,22 +528,37 @@ defmodule Barkpark.PortableDoc.Patch do
     end)
   end
 
-  # True when the TOP-LEVEL block with `id` is template-locked (locks are a
-  # top-level template concept; section children are never seeded locked).
+  # True when the block with `id` is template-locked. Templates seed locks at
+  # the top level, but raw/legacy documents can carry locked nested children;
+  # once those children are addressable they must retain the same remove /
+  # replace protection.
   defp locked_at_id?(blocks, id) do
-    Enum.any?(blocks, fn b -> block_id(b) == id and Map.get(b, "locked") == true end)
+    Enum.any?(blocks, fn block ->
+      (block_id(block) == id and block_locked?(block)) or
+        Enum.any?(visible_child_lists(block), &locked_at_id?(&1, id))
+    end)
   end
 
-  # ── id resolution & structural transform (recurses sections) ───────────────
+  # ── id resolution & structural transform (recurses containers) ─────────────
 
-  # True when `id` names any block anywhere in `blocks` (recurses sections).
+  # True when `id` names any block anywhere in `blocks` (recurses containers).
   defp id_exists?(blocks, id) do
     Enum.any?(blocks, fn block ->
-      cond do
-        block_id(block) == id -> true
-        section?(block) -> id_exists?(Map.get(block, "blocks", []), id)
-        true -> false
-      end
+      block_id(block) == id or Enum.any?(visible_child_lists(block), &id_exists?(&1, id))
+    end)
+  end
+
+  defp direct_figure_child_id?(blocks, id) do
+    Enum.any?(blocks, fn
+      %{"type" => "figure", "child" => child} = block when is_map(child) ->
+        block_id(child) == id or
+          Enum.any?(visible_child_lists(block), &direct_figure_child_id?(&1, id))
+
+      block when is_map(block) ->
+        Enum.any?(visible_child_lists(block), &direct_figure_child_id?(&1, id))
+
+      _block ->
+        false
     end)
   end
 
@@ -432,28 +573,9 @@ defmodule Barkpark.PortableDoc.Patch do
   # subtrees keep their identity; only the branch containing the target is
   # rebuilt.
   defp transform_at_id(blocks, id, fun) do
-    transform_at_id(blocks, id, fun, [])
-  end
-
-  defp transform_at_id([], _id, _fun, _acc), do: nil
-
-  defp transform_at_id([block | rest], id, fun, acc) do
-    cond do
-      block_id(block) == id ->
-        Enum.reverse(acc) ++ fun.(block) ++ rest
-
-      section?(block) ->
-        case transform_at_id(Map.get(block, "blocks", []), id, fun) do
-          nil ->
-            transform_at_id(rest, id, fun, [block | acc])
-
-          nested_blocks ->
-            next_section = Map.put(block, "blocks", nested_blocks)
-            Enum.reverse([next_section | acc]) ++ rest
-        end
-
-      true ->
-        transform_at_id(rest, id, fun, [block | acc])
+    case transform_with_flag(blocks, id, fn block -> {fun.(block), false} end) do
+      {nil, _flag} -> nil
+      {transformed, _flag} -> transformed
     end
   end
 
@@ -473,22 +595,198 @@ defmodule Barkpark.PortableDoc.Patch do
         {replacement, flag} = fun.(block)
         {Enum.reverse(acc) ++ replacement ++ rest, flag}
 
-      section?(block) ->
-        case transform_with_flag(Map.get(block, "blocks", []), id, fun) do
+      true ->
+        case transform_block_children(block, id, fun) do
           {nil, _} ->
             transform_with_flag(rest, id, fun, [block | acc])
 
-          {nested_blocks, flag} ->
-            next_section = Map.put(block, "blocks", nested_blocks)
-            {Enum.reverse([next_section | acc]) ++ rest, flag}
+          {next_block, flag} ->
+            {Enum.reverse([next_block | acc]) ++ rest, flag}
         end
-
-      true ->
-        transform_with_flag(rest, id, fun, [block | acc])
     end
   end
 
   # ── small helpers ──────────────────────────────────────────────────────────
+
+  defp transform_block_children(block, id, fun) do
+    case visible_child_container(block) do
+      {:blocks, key, children} ->
+        case transform_with_flag(children, id, fun) do
+          {nil, _flag} -> {nil, false}
+          {next_children, flag} -> {Map.put(block, key, next_children), flag}
+        end
+
+      {:steps, rows} ->
+        case transform_steps_rows(rows, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_rows, flag} -> {Map.put(block, "steps", next_rows), flag}
+        end
+
+      {:tabs, rows} ->
+        case transform_tabs_rows(rows, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_rows, flag} -> {Map.put(block, "tabs", next_rows), flag}
+        end
+
+      {:columns, columns} ->
+        case transform_columns(columns, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_columns, flag} -> {Map.put(block, "columns", next_columns), flag}
+        end
+
+      {:figure, child} ->
+        case transform_with_flag([child], id, fun) do
+          {nil, _flag} ->
+            {nil, false}
+
+          {[next_child], flag} when is_map(next_child) ->
+            {Map.put(block, "child", next_child), flag}
+
+          {_invalid_shape, _flag} ->
+            {nil, false}
+        end
+
+      nil ->
+        {nil, false}
+    end
+  end
+
+  defp transform_steps_rows([], _id, _fun, _acc), do: {nil, false}
+
+  defp transform_steps_rows([row | rest], id, fun, acc) when is_map(row) do
+    case visible_row_container(row) do
+      {key, children} ->
+        case transform_with_flag(children, id, fun) do
+          {nil, _flag} ->
+            transform_steps_rows(rest, id, fun, [row | acc])
+
+          {next_children, flag} ->
+            {Enum.reverse([Map.put(row, key, next_children) | acc]) ++ rest, flag}
+        end
+
+      nil ->
+        transform_steps_rows(rest, id, fun, [row | acc])
+    end
+  end
+
+  defp transform_steps_rows([row | rest], id, fun, acc),
+    do: transform_steps_rows(rest, id, fun, [row | acc])
+
+  defp transform_tabs_rows([], _id, _fun, _acc), do: {nil, false}
+
+  defp transform_tabs_rows([%{"blocks" => children} = row | rest], id, fun, acc)
+       when is_list(children) do
+    case transform_with_flag(children, id, fun) do
+      {nil, _flag} ->
+        transform_tabs_rows(rest, id, fun, [row | acc])
+
+      {next_children, flag} ->
+        {Enum.reverse([Map.put(row, "blocks", next_children) | acc]) ++ rest, flag}
+    end
+  end
+
+  defp transform_tabs_rows([row | rest], id, fun, acc),
+    do: transform_tabs_rows(rest, id, fun, [row | acc])
+
+  defp transform_columns([], _id, _fun, _acc), do: {nil, false}
+
+  defp transform_columns([children | rest], id, fun, acc) when is_list(children) do
+    case transform_with_flag(children, id, fun) do
+      {nil, _flag} ->
+        transform_columns(rest, id, fun, [children | acc])
+
+      {next_children, flag} ->
+        {Enum.reverse([next_children | acc]) ++ rest, flag}
+    end
+  end
+
+  defp transform_columns([opaque | rest], id, fun, acc),
+    do: transform_columns(rest, id, fun, [opaque | acc])
+
+  defp visible_child_lists(block) do
+    case visible_child_container(block) do
+      {:blocks, _key, children} ->
+        [children]
+
+      {:steps, rows} ->
+        Enum.flat_map(rows, fn
+          row when is_map(row) ->
+            case visible_row_container(row) do
+              {_key, children} -> [children]
+              nil -> []
+            end
+
+          _row ->
+            []
+        end)
+
+      {:tabs, rows} ->
+        Enum.flat_map(rows, fn
+          %{"blocks" => children} when is_list(children) -> [children]
+          _row -> []
+        end)
+
+      {:columns, columns} ->
+        Enum.filter(columns, &is_list/1)
+
+      {:figure, child} ->
+        [[child]]
+
+      nil ->
+        []
+    end
+  end
+
+  defp visible_child_container(%{"type" => "section", "blocks" => blocks})
+       when is_list(blocks),
+       do: {:blocks, "blocks", blocks}
+
+  defp visible_child_container(%{"type" => "expandable"} = block) do
+    case visible_alias(block) do
+      {key, children} -> {:blocks, key, children}
+      nil -> nil
+    end
+  end
+
+  defp visible_child_container(%{"type" => "steps", "steps" => rows}) when is_list(rows),
+    do: {:steps, rows}
+
+  defp visible_child_container(%{"type" => "tabs", "tabs" => rows}) when is_list(rows),
+    do: {:tabs, rows}
+
+  defp visible_child_container(%{"type" => "columns", "columns" => columns})
+       when is_list(columns),
+       do: {:columns, columns}
+
+  defp visible_child_container(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: {:figure, child}
+
+  defp visible_child_container(%{"type" => "terminal", "children" => children} = block)
+       when is_list(children) do
+    if Map.has_key?(block, "blocks"), do: nil, else: {:blocks, "children", children}
+  end
+
+  defp visible_child_container(%{"type" => "terminal"}), do: nil
+
+  defp visible_child_container(_block), do: nil
+
+  defp visible_row_container(row), do: visible_alias(row)
+
+  # Renderer precedence is truthy `children` before `blocks`. A malformed
+  # truthy value therefore hides the shadow alias instead of exposing content
+  # the reader does not render; nil/false retain the legacy fallback.
+  defp visible_alias(container) do
+    case Map.get(container, "children") do
+      children when children not in [nil, false] ->
+        if is_list(children), do: {"children", children}, else: nil
+
+      _absent ->
+        case Map.get(container, "blocks") do
+          blocks when is_list(blocks) -> {"blocks", blocks}
+          _other -> nil
+        end
+    end
+  end
 
   # Shallow / replace-by-key merge of `patch` over `target`, then re-pin `id`
   # and `type` so a patch can never mutate the block's identity or kind.
@@ -501,9 +799,11 @@ defmodule Barkpark.PortableDoc.Patch do
     |> Map.put("type", Map.get(target, "type"))
   end
 
-  defp section?(block), do: Map.get(block, "type") == "section"
+  defp block_id(block) when is_map(block), do: Map.get(block, "id")
+  defp block_id(_block), do: nil
 
-  defp block_id(block), do: Map.get(block, "id")
+  defp block_locked?(block) when is_map(block), do: Map.get(block, "locked") == true
+  defp block_locked?(_block), do: false
 
   # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
   # `"value"` key is touched, and only for field-boolean (string "true"/"false"

@@ -60,6 +60,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias BarkparkWeb.PaperActor
   alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
+  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandlers
   alias BarkparkWeb.Studio.StudioLive.Paths
 
@@ -728,19 +729,39 @@ defmodule BarkparkWeb.BulldocsLive do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
-      {:ok, socket, receipt, outcome} ->
-        {:reply,
-         %{
-           saved: true,
-           request_id: request_id,
-           replayed: outcome == :replayed,
-           rev: receipt.rev
-         }, socket}
+    context =
+      Blocks.canvas_run_context(
+        params,
+        BarkparkWeb.Studio.StudioLive.Shared.paper_top_level_blocks(socket)
+      )
 
-      {:error, socket} ->
-        reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
-        {:reply, Map.put_new(reply, :request_id, request_id), socket}
+    if context in [{:error, :outdated_terminal_canvas}, {:error, :outdated_stage_canvas}] do
+      widget = if context == {:error, :outdated_terminal_canvas}, do: "Terminal", else: "Stage"
+
+      {:reply,
+       %{
+         saved: false,
+         request_id: request_id,
+         rejected: Atom.to_string(elem(context, 1)),
+         current_rev: socket.assigns[:paper_rev],
+         error:
+           "Reload the Paper editor before editing this #{widget}. Your draft has not been saved."
+       }, socket}
+    else
+      case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do
+        {:ok, socket, receipt, outcome} ->
+          {:reply,
+           %{
+             saved: true,
+             request_id: request_id,
+             replayed: outcome == :replayed,
+             rev: receipt.rev
+           }, socket}
+
+        {:error, socket} ->
+          reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
+          {:reply, Map.put_new(reply, :request_id, request_id), socket}
+      end
     end
   end
 
@@ -964,21 +985,20 @@ defmodule BarkparkWeb.BulldocsLive do
     case source_blocks(reader_source) do
       blocks when is_list(blocks) ->
         resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
+        resolvers = reader_resolvers(resolved, socket.assigns[:dataset], paper)
 
         socket
         |> assign(:block_mode, true)
+        |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
         |> stream(
           :blocks,
-          to_stream_items(
-            resolved,
-            paper_article?(paper),
-            reader_resolvers(resolved, socket.assigns[:dataset], paper)
-          )
+          to_stream_items(resolved, paper_article?(paper), resolvers)
         )
 
       _ ->
         socket
         |> assign(:block_mode, false)
+        |> assign(:paper_link_details, %{})
         # Initialise an empty stream so the template can reference @streams.blocks
         # uniformly even on the HTML-only path (it just stays empty).
         |> stream(:blocks, [])
@@ -1080,54 +1100,16 @@ defmodule BarkparkWeb.BulldocsLive do
   defp any_live_task?(_), do: false
 
   defp paper_link_refs(blocks) when is_list(blocks) do
-    blocks
-    |> Enum.flat_map(fn
-      %{"type" => "paper-links", "refs" => refs} -> Enum.map(List.wrap(refs), &paper_ref_slug/1)
-      %{"children" => children} when is_list(children) -> paper_link_refs(children)
-      %{"blocks" => children} when is_list(children) -> paper_link_refs(children)
-      _ -> []
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
+    Content.Papers.paper_link_refs(blocks)
   end
 
   defp paper_link_refs(_), do: []
 
-  defp paper_ref_slug(slug) when is_binary(slug) do
-    case String.trim(slug) do
-      "" -> nil
-      value -> value
-    end
-  end
-
-  defp paper_ref_slug(%{"slug" => slug}), do: paper_ref_slug(slug)
-  defp paper_ref_slug(%{slug: slug}), do: paper_ref_slug(slug)
-  defp paper_ref_slug(_), do: nil
-
   # One tenant-scoped batch read per render, never one query per card. Only
   # published type:"paper" rows survive; unresolved refs remain authored links.
   defp resolve_paper_link_details(blocks, dataset, scope) do
-    blocks
-    |> paper_link_refs()
-    |> Content.resolve_docs_by_ids(dataset, scope)
-    |> Enum.filter(&(&1.type == "paper"))
-    |> Map.new(fn paper ->
-      content = paper.content || %{}
-
-      {paper.doc_id,
-       %{
-         title: paper.title,
-         description: Map.get(content, "description"),
-         event_type: Map.get(content, "event_type"),
-         rev: Map.get(content, "rev") || paper.rev,
-         updated_at: paper_timestamp(paper.updated_at)
-       }}
-    end)
+    Content.Papers.resolve_paper_link_details(blocks, dataset, scope)
   end
-
-  defp paper_timestamp(%DateTime{} = value), do: DateTime.to_iso8601(value)
-  defp paper_timestamp(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
-  defp paper_timestamp(_), do: nil
 
   # Each stream item needs a stable `:id` (the block id) and its rendered
   # fragment. Only top-level blocks are streamed individually; a `section`
@@ -1188,6 +1170,12 @@ defmodule BarkparkWeb.BulldocsLive do
       # A cached delta fragment cannot carry fresh metadata for `paper-links`.
       # Re-resolve the complete block list whenever this reader has one.
       socket.assigns[:paper_link_refs] != [] ->
+        {:noreply, refetch(socket)}
+
+      # An in-order external delta must refresh the ignored contextual editors,
+      # not only the reader stream. Reconcile from the same authoritative tree
+      # so a Table's shape/eligibility echo cannot lag its stored revision.
+      socket.assigns[:editing?] == true ->
         {:noreply, refetch(socket)}
 
       # First block delta to a view still in HTML-only mode: we have no stream
@@ -1336,6 +1324,7 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:article?, false)
         |> assign(:wide?, false)
         |> assign(:paper_link_refs, [])
+        |> assign(:paper_link_details, %{})
         |> assign_linked_sections(nil, socket.assigns[:dataset])
 
       paper ->
@@ -1352,16 +1341,13 @@ defmodule BarkparkWeb.BulldocsLive do
           {:blocks, blocks} ->
             resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
             refs = paper_link_refs(resolved)
+            resolvers = reader_resolvers(resolved, socket.assigns[:dataset], paper)
 
             socket
             |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
-              to_stream_items(
-                resolved,
-                article?,
-                reader_resolvers(resolved, socket.assigns[:dataset], paper)
-              ),
+              to_stream_items(resolved, article?, resolvers),
               reset: true
             )
             |> assign(:rev, paper_rev(paper))
@@ -1371,6 +1357,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:found, true)
             |> assign(:source_error, nil)
             |> assign(:paper_link_refs, refs)
+            |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
             |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:html, html} ->
@@ -1384,6 +1371,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:found, true)
             |> assign(:source_error, nil)
             |> assign(:paper_link_refs, [])
+            |> assign(:paper_link_details, %{})
             |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:error, reason} ->
@@ -1397,6 +1385,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:found, false)
             |> assign(:source_error, reason)
             |> assign(:paper_link_refs, [])
+            |> assign(:paper_link_details, %{})
             |> assign_linked_sections(paper, socket.assigns[:dataset])
         end
     end
@@ -1589,6 +1578,7 @@ defmodule BarkparkWeb.BulldocsLive do
             picker_browse={@picker_browse?}
             canvas_eligible={true}
             task_previews={@task_previews}
+            paper_links={@paper_link_details}
             save_status={@save_status}
             paper_halt={@paper_halt}
           />

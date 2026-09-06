@@ -779,6 +779,77 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Resolve live public metadata for every `paper-links` reference in a block tree.
+
+  The canonical deep walker finds references inside any container shape and the
+  lookup batches them into one query. This palette is public-reader-safe: callers
+  must supply a concrete workspace plus `published_only: true`; caller and grant
+  authority are deliberately discarded. Missing and draft targets remain absent
+  so the renderer falls back to authored copy.
+  """
+  @spec resolve_paper_link_details(term(), String.t(), keyword()) :: map()
+  def resolve_paper_link_details(blocks, dataset \\ @paper_default_dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+
+    if is_binary(workspace_id) and workspace_id != "" and
+         Keyword.get(opts, :published_only) == true do
+      scope =
+        opts
+        |> Keyword.take([:workspace_id, :project_id])
+        |> Keyword.put(:published_only, true)
+
+      blocks
+      |> paper_link_refs()
+      |> Content.resolve_docs_by_ids(dataset, scope)
+      |> Enum.filter(&(&1.type == @paper_type))
+      |> Map.new(fn paper ->
+        content = paper.content || %{}
+
+        {paper.doc_id,
+         %{
+           title: paper.title,
+           description: Map.get(content, "description"),
+           event_type: Map.get(content, "event_type"),
+           rev: Map.get(content, "rev") || paper.rev,
+           updated_at: paper_link_timestamp(paper.updated_at)
+         }}
+      end)
+    else
+      %{}
+    end
+  end
+
+  @doc "Collect unique, non-empty slugs from recursively nested `paper-links` blocks."
+  @spec paper_link_refs(term()) :: [String.t()]
+  def paper_link_refs(blocks) do
+    blocks
+    |> BodyWalk.collect(fn
+      %{"type" => "paper-links", "refs" => refs} ->
+        refs |> List.wrap() |> Enum.map(&paper_link_slug/1)
+
+      _ ->
+        []
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp paper_link_slug(slug) when is_binary(slug) do
+    case String.trim(slug) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp paper_link_slug(%{"slug" => slug}), do: paper_link_slug(slug)
+  defp paper_link_slug(%{slug: slug}), do: paper_link_slug(slug)
+  defp paper_link_slug(_), do: nil
+
+  defp paper_link_timestamp(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp paper_link_timestamp(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp paper_link_timestamp(_), do: nil
+
+  @doc """
   Pre-resolve every inline `valueref` (target, field) pair in a block list into
   the render-opts map `%{{target, field} => rendered_string}` that
   `Render.render_html/2` threads onto the palette (`walk/3`'s `valueref/2` then
@@ -1404,33 +1475,56 @@ defmodule Barkpark.Content.Papers do
 
   @doc """
   Resolve the block list for editing a document — the stored
-  `content["blocks"]` when present, else a LAZILY SYNTHESIZED in-memory list
-  (Exp-P2, step 2.5) built from the schema's Expectation layout + the doc's
-  existing `content[fieldName]` values + body.
+  `content["blocks"]` when present, the historical nested
+  `content["body"]["blocks"]`/bare body list when top-level authority is absent,
+  else a LAZILY SYNTHESIZED in-memory list (Exp-P2, step 2.5) built from the
+  schema's Expectation layout + the doc's existing `content[fieldName]` values
+  + body.
 
   Returns `{blocks, synthesized?}`. When `synthesized?` is `true` the list was
   built in memory and the stored row is UNTOUCHED — nothing is persisted until
   the first op lands (the caller's first `apply_paper_block_op`/`upsert_paper`
-  write persists it). When `false`, `content["blocks"]` already existed and is
-  returned verbatim.
+  write persists it). When `false`, a stored block authority already existed
+  and is returned verbatim. A present but malformed authority returns a tagged
+  error instead of exposing an editable empty canvas or synthesizing through a
+  lower-precedence representation.
 
   The synthesis round-trip is byte-equal: feeding the synthesized blocks back
   through `Projection.project/3` reproduces the original `content[fieldName]`
   values exactly (see `Barkpark.PortableDoc.Synthesis`).
   """
-  @spec resolve_blocks_for_edit(map() | nil, String.t(), String.t()) :: {[map()], boolean()}
+  @spec resolve_blocks_for_edit(map() | nil, String.t(), String.t()) ::
+          {[map()], boolean()} | {:error, {:malformed_block_authority, String.t()}}
   def resolve_blocks_for_edit(nil, _type, _dataset), do: {[], false}
 
   def resolve_blocks_for_edit(%Document{} = doc, type, dataset) do
     content = doc.content || %{}
 
-    case Map.get(content, "blocks") do
-      blocks when is_list(blocks) ->
-        {blocks, false}
+    case content do
+      %{"blocks" => blocks} ->
+        block_authority(blocks, "blocks")
+
+      %{"body" => %{"blocks" => blocks}} ->
+        block_authority(blocks, "body.blocks")
+
+      %{"body" => blocks} when is_list(blocks) ->
+        block_authority(blocks, "body")
+
+      %{"body" => body} when is_map(body) ->
+        {:error, {:malformed_block_authority, "body"}}
+
+      %{"body" => body} when not is_nil(body) and not is_binary(body) ->
+        {:error, {:malformed_block_authority, "body"}}
 
       _ ->
         {synthesize_blocks(doc, type, dataset), true}
     end
+  end
+
+  defp block_authority(blocks, path) do
+    if is_list(blocks) and Enum.all?(blocks, &is_map/1),
+      do: {blocks, false},
+      else: {:error, {:malformed_block_authority, path}}
   end
 
   # Build the in-memory synthesized block list: resolve the Expectation layout

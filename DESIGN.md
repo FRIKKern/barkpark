@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-08-25
+- Last refreshed: 2026-09-06
 - Primary product surfaces: Public Paper reader, Barkpark Chronicle index, Chronicle day/week/month/year editions, Studio Paper editor, email and TUI Paper views.
 - Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, the PortableDoc image/figure/asciicast renderers, the live Paper relation resolver, `docs/evidence/**`, `tooling/paper-excellence/evidence/**`, the committed Paper Excellence screenshot panel, and fresh multi-viewport Chronicle renders.
 
@@ -27,6 +27,7 @@
 - Content hierarchy: Branded edition → plain-English answer → visible period pulse → real visual overture when available → defining work themes → progress assessment → release highlights → period chapters and related Papers → collapsed complete ledger.
 
 ## Design principles
+- Edit the same document: Switching to edit mode preserves the rendered content, typography, and reading geometry. Configuration lives in contextual controls, not an always-visible replacement form. Collapsed expandable content remains a disclosure, with its nested content editable when opened.
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
 - Review, do not transcribe: Synthesize the period into a defensible point of view; counts and commit subjects are evidence, not the story.
 - Headline the change, not the mood: Every edition earns a short news headline that names the product, surface, or capability that moved and says what happened. A title must carry enough factual meaning to distinguish this edition from another one before the body is read.
@@ -69,6 +70,8 @@
 - Touch/hover differences: Actions remain fully legible without hover and meet the renderer's existing tap-target behavior.
 
 ## Interaction states
+- Editing: Public Papers and Studio use the same shared editor controls. Controls are keyboard reachable, retain visible focus, and close without discarding a draft. No-op View/Edit/View must not rewrite content or advance its revision.
+- Save validation: Invalid input remains visible and editable; leaving edit mode waits for valid, acknowledged persistence. Failure never silently replaces the draft with the last saved value.
 - Loading: Server-rendered Paper body and authored related-Paper fallbacks remain meaningful before live detail resolution.
 - Empty: Quiet editions state that no mainline changes landed and still link to adjacent periods.
 - Error: Publish failures name the exact slug and HTTP response; no partially successful batch is reported as complete.

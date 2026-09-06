@@ -273,6 +273,8 @@ export const BpTable = Node.create({
       const colRail = document.createElement("div");
       colRail.className = "bp-canvas-table__cols";
       colRail.contentEditable = "false";
+      colRail.setAttribute("role", "group");
+      colRail.setAttribute("aria-label", "Table columns");
 
       const table = document.createElement("table");
       // The READER table element + class, byte-identical to walk.ex.
@@ -284,6 +286,17 @@ export const BpTable = Node.create({
       const rowRail = document.createElement("div");
       rowRail.className = "bp-canvas-table__rows";
       rowRail.contentEditable = "false";
+      rowRail.setAttribute("role", "group");
+      rowRail.setAttribute("aria-label", "Table rows");
+      const controls = document.createElement("details");
+      controls.className = "bp-canvas-table__controls";
+      controls.contentEditable = "false";
+      const summary = document.createElement("summary");
+      summary.textContent = "Configure table";
+      controls.append(summary, colRail, rowRail);
+      const contextualHost = editor.options.element?.closest?.(
+        'bp-paper-editor[data-editor-mode="table"]',
+      );
 
       // A chrome button dispatches a PM transaction that REBUILDS the whole bpTable
       // content (keeping the grid rectangular), preserving bpId/bpType via cur.attrs.
@@ -310,45 +323,95 @@ export const BpTable = Node.create({
           .run();
       };
 
-      const mkBtn = (label, title, name) => {
+      const mkBtn = (label, title, name, disabled = false) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "bp-canvas-table__btn";
         b.textContent = label;
         b.title = title;
+        b.setAttribute("aria-label", title);
+        b.disabled = disabled;
+        b.dataset.tableAction = name;
         b.contentEditable = "false";
         // preventDefault on mousedown so the click never steals/collapses the PM
         // selection before the transform runs.
         b.addEventListener("mousedown", (e) => e.preventDefault());
         b.addEventListener("click", (e) => {
           e.preventDefault();
-          runTransform(name);
+          if (contextualHost) contextualHost.requestTableStructure?.(name);
+          else runTransform(name);
         });
         return b;
       };
 
-      const addColBtn = mkBtn("+ col", "Add column", "addCol");
-      const delColBtn = mkBtn("− col", "Remove column", "removeCol");
-      colRail.appendChild(addColBtn);
-      colRail.appendChild(delColBtn);
+      let delColBtn = null;
+      let delRowBtn = null;
 
-      const addRowBtn = mkBtn("+ row", "Add row", "addRow");
-      const delRowBtn = mkBtn("− row", "Remove row", "removeRow");
-      const hdrBtn = mkBtn("header", "Toggle header row", "toggleHeader");
-      rowRail.appendChild(addRowBtn);
-      rowRail.appendChild(delRowBtn);
-      rowRail.appendChild(hdrBtn);
-
-      dom.appendChild(colRail);
       dom.appendChild(table);
-      dom.appendChild(rowRail);
+      dom.appendChild(controls);
 
       // The chrome repaints from the live child counts: −row disabled at 1 body row,
       // −col disabled at 1 col. The contentDOM is left to PM.
       const repaint = (n) => {
         const rows = extractRows(n);
-        delRowBtn.disabled = bodyRowCount(rows) <= 1;
-        delColBtn.disabled = colCount(rows) <= 1;
+        if (!contextualHost) {
+          if (!colRail.childNodes.length) {
+            colRail.appendChild(mkBtn("+ col", "Add column", "addCol"));
+            delColBtn = mkBtn("− col", "Remove column", "removeCol");
+            colRail.appendChild(delColBtn);
+            rowRail.appendChild(mkBtn("+ row", "Add row", "addRow"));
+            delRowBtn = mkBtn("− row", "Remove row", "removeRow");
+            rowRail.appendChild(delRowBtn);
+            rowRail.appendChild(mkBtn("header", "Toggle header row", "toggleHeader"));
+          }
+          delRowBtn.disabled = bodyRowCount(rows) <= 1;
+          delColBtn.disabled = colCount(rows) <= 1;
+          return;
+        }
+
+        const active = document.activeElement;
+        const focusedRail = colRail.contains(active) ? colRail
+          : rowRail.contains(active) ? rowRail : null;
+        const focusedAction = focusedRail ? active.dataset?.tableAction : null;
+
+        colRail.replaceChildren(mkBtn("+ col", "Add column", "add-column"));
+        for (let column = 0; column < colCount(rows); column += 1) {
+          colRail.appendChild(mkBtn("←", `Move column ${column + 1} left`,
+            `left-column:${column}`, column === 0));
+          colRail.appendChild(mkBtn("→", `Move column ${column + 1} right`,
+            `right-column:${column}`, column + 1 === colCount(rows)));
+          colRail.appendChild(mkBtn("−", `Remove column ${column + 1}`,
+            `remove-column:${column}`, colCount(rows) <= 1));
+        }
+
+        const hasHeader = rows[0]?.header === true;
+        rowRail.replaceChildren(mkBtn("+ row", "Add row", "add-row"));
+        rowRail.appendChild(mkBtn(
+          hasHeader ? "− header" : "+ header",
+          hasHeader ? "Remove header" : "Add header",
+          hasHeader ? "remove-header" : "add-header",
+        ));
+        const bodyRows = rows.filter((row) => !row.header);
+        bodyRows.forEach((_row, row) => {
+          rowRail.appendChild(mkBtn("↑", `Move row ${row + 1} up`,
+            `up-row:${row}`, row === 0));
+          rowRail.appendChild(mkBtn("↓", `Move row ${row + 1} down`,
+            `down-row:${row}`, row + 1 === bodyRows.length));
+          rowRail.appendChild(mkBtn("−", `Remove row ${row + 1}`,
+            `remove-row:${row}`, bodyRows.length <= 1));
+        });
+
+        // Authoritative cell/grid echoes repaint chrome outside contentDOM.
+        // Preserve a keyboard user's place, but never focus a Table whose
+        // controls were not active. Removed/disabled actions fall back to Add
+        // in the same rail, which remains available for a one-cell Table.
+        if (focusedRail) {
+          const buttons = Array.from(focusedRail.querySelectorAll("button"));
+          const target = buttons.find((button) =>
+            button.dataset.tableAction === focusedAction && !button.disabled,
+          ) || buttons.find((button) => !button.disabled);
+          target?.focus({ preventScroll: true });
+        }
       };
       repaint(node);
 
@@ -364,7 +427,7 @@ export const BpTable = Node.create({
         // an event inside the contentDOM cells MUST reach PM (cell typing/selection).
         stopEvent: (event) => {
           const t = event.target;
-          return colRail.contains(t) || rowRail.contains(t);
+          return controls.contains(t) || colRail.contains(t) || rowRail.contains(t);
         },
         // Ignore mutations under the chrome rails; let PM see contentDOM (tbody)
         // mutations (the callout-node.js pattern).

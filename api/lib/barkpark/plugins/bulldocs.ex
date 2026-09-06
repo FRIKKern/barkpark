@@ -419,10 +419,15 @@ defmodule Barkpark.Plugins.Bulldocs do
             summary:
               "Ops payload {\"ops\":[…]} from a file or - for stdin. Each op is " <>
                 "{\"op\": <verb>, …}; the accepted verbs are append-block, insert-after, " <>
-                "patch-block, replace-block, remove-block and move-block. append-block " <>
+                "patch-block, replace-block, remove-block, move-block, patch-card-body, " <>
+                "patch-table-cells and patch-table-structure. append-block " <>
                 "takes \"block\"; insert-after takes \"afterId\" + \"block\"; patch-block " <>
                 "and replace-block take \"id\" (+ \"patch\" / \"block\"); remove-block and " <>
-                "move-block take \"id\". An unrecognised verb refuses the WHOLE batch — " <>
+                "move-block take \"id\". patch-card-body takes \"id\" + inline \"content\"; " <>
+                "patch-table-cells takes \"id\" + \"shape\" + \"cells\"; " <>
+                "patch-table-structure takes \"id\" + \"shape\" + \"action\". " <>
+                "Table shape must match the current storage projection. " <>
+                "An unrecognised verb refuses the WHOLE batch — " <>
                 "the apply is atomic, so nothing is written."
           },
           %{

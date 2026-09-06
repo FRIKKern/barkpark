@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -81,9 +82,9 @@ func (noteRenderer) Render(b Block, ctx RenderCtx) []string {
 type stageRenderer struct{}
 
 func (stageRenderer) Render(b Block, ctx RenderCtx) []string {
-	kind := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "kind")))
-	title := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "title")))
-	detail := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "detail")))
+	kind := sanitizeText(strings.TrimSpace(stageFieldText(b.Attrs, "kind")))
+	title := sanitizeText(strings.TrimSpace(stageFieldText(b.Attrs, "title")))
+	detail := sanitizeText(strings.TrimSpace(stageFieldText(b.Attrs, "detail")))
 	files := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "files")))
 
 	w := clampWidth(ctx.Width)
@@ -120,6 +121,58 @@ func (stageRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 	return out
+}
+
+// Stage text is slot-first, matching PortableDoc.Slots.stage_field_text/2.
+// A materialized empty slot suppresses the flat shadow; malformed/non-list
+// slots fall back to the legacy scalar carrier. Rendering never rewrites either.
+func stageFieldText(attrs map[string]any, field string) string {
+	if slots, ok := attrs["slots"].(map[string]any); ok {
+		if elements, ok := slots[field].([]any); ok {
+			if len(elements) > 0 {
+				if element, ok := elements[0].(map[string]any); ok {
+					return stageInlineText(element["content"])
+				}
+			}
+			return ""
+		}
+	}
+	return stageScalarText(attrs[field])
+}
+
+func stageInlineText(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return value
+	case []any:
+		var out strings.Builder
+		for _, rawNode := range value {
+			switch node := rawNode.(type) {
+			case string:
+				out.WriteString(node)
+			case map[string]any:
+				if node["type"] == "text" || node["type"] == "code" {
+					out.WriteString(stageScalarText(node["value"]))
+				} else if children, ok := node["children"].([]any); ok {
+					out.WriteString(stageInlineText(children))
+				}
+			}
+		}
+		return out.String()
+	}
+	return ""
+}
+
+func stageScalarText(value any) string {
+	switch number := value.(type) {
+	case string, int, int64:
+		return toStr(value)
+	case float64:
+		if !math.IsInf(number, 0) && number == math.Trunc(number) {
+			return toStr(number)
+		}
+	}
+	return ""
 }
 
 // ── card ─────────────────────────────────────────────────────────────────────

@@ -50,7 +50,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "node" => ~w(title kind source files),
     "stat-grid" => ~w(id),
     "blockquote" => ~w(id cite),
-    "toc" => ~w(id depth numbered),
+    "toc" => ~w(id depth numbered sticky),
     "entry" => ~w(level anchor),
     "bar-chart" => ~w(id title values),
     "bar" => ~w(label value),
@@ -58,7 +58,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "lineage-node" => ~w(title overline source),
     "chart" => ~w(id kind caption min max xlabels),
     "series" => ~w(label),
-    "step" => ~w(title),
+    "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
     "li" => [],
@@ -530,7 +530,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  # `toc` — `level` and `depth` are integers, `numbered` a boolean.
+  # `toc` — `level` and `depth` are integers; `numbered` and `sticky` are booleans.
   defp build_block("toc", attrs, sc, cur) do
     builder = fn entry_attrs, sc, cur ->
       with {:ok, body, cur} <- tag_text("entry", sc, cur) do
@@ -550,6 +550,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("id", attrs)
         |> put_int_attr("depth", attrs)
         |> put_bool_attr("numbered", attrs)
+        |> put_bool_attr("sticky", attrs)
 
       {:ok, block, cur}
     end
@@ -628,14 +629,19 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("steps", attrs, sc, cur) do
     builder = fn step_attrs, sc, cur ->
       if sc do
-        {:ok, %{"blocks" => []} |> put_attr("title", step_attrs) |> Map.put_new("blocks", []),
+        {:ok, %{"blocks" => []} |> put_attr("id", step_attrs) |> put_attr("title", step_attrs),
          cur}
       else
         {blocks, errors, cur} = block_seq(cur, "step")
 
         case expect_close("step", cur, errors) do
-          {[], cur} -> {:ok, %{"blocks" => blocks} |> put_attr("title", step_attrs), cur}
-          {errors, cur} -> {:error, errors, cur}
+          {[], cur} ->
+            {:ok,
+             %{"blocks" => blocks} |> put_attr("id", step_attrs) |> put_attr("title", step_attrs),
+             cur}
+
+          {errors, cur} ->
+            {:error, errors, cur}
         end
       end
     end

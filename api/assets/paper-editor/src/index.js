@@ -4,6 +4,9 @@
 // is edited by its OWN TipTap-vanilla instance. On edit, this Web Component
 // emits a `patch-block` DocPatchOp for that one block via a bubbling
 // CustomEvent("bp-op"). It does NOT build one giant ProseMirror document.
+// The explicit data-editor-mode="card-body" variant emits the narrower
+// `patch-card-body` intent so the server can merge authored inline content into
+// the authoritative Card without a stale whole-slots replacement.
 //
 // Engine: TipTap-vanilla (@tiptap/core, no React), bundled by esbuild into a
 // single committed IIFE artifact at priv/static/assets/bp-paper-editor.bundle.js
@@ -14,13 +17,27 @@
 // patch-block round-trip. Slash menu, floating toolbar, drag-reorder, and
 // new/delete-block are LATER units.
 
-import { Editor } from "@tiptap/core";
+import { Editor, Extension, Mark } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 
-import { blockToTiptap, buildPatchBlockOp } from "./convert.js";
+import {
+  blockToTiptap,
+  buildPatchBlockOp,
+  cardBodyProjection,
+  cardBodyTiptapDocSupported,
+  cardBodyContentMatches,
+  buildCardBodyOp,
+  tableProjection,
+  tableTiptapDocSupported,
+  buildTableCellsOp,
+  tableProjectionMatchesCells,
+  tableProjectionMatchesAction,
+} from "./convert.js";
+import { BpTable, BpTableRow, BpTableCell, BpTableHeaderCell } from "./canvas/table-node.js";
 import { SlashMenu, SLASH_ITEMS } from "./slash-menu.js";
 import { WikilinkMenu } from "./wikilink-menu.js";
 import {
@@ -37,6 +54,16 @@ import { normalizeTone } from "./tone.js";
 import { Wikilink, Blockref, Tag, Valueref } from "./marks.js";
 import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
 import "./canvas/index.js";
+
+const TableUnderline = Mark.create({
+  name: "underline",
+  parseHTML() {
+    return [{ tag: "u" }];
+  },
+  renderHTML() {
+    return ["u", 0];
+  },
+});
 
 // One-shot, id-guarded self-inject of the standalone stylesheet so a bare
 // embedder (no Studio inline rules) renders the editor STYLED. Gated by
@@ -88,6 +115,20 @@ class BpPaperEditor extends HTMLElement {
     // attribute value editable="false" disables editing — a presence-boolean
     // can't express default-true, hence the by-value convention.
     this._editable = true;
+    this._sourceBlock = null;
+    this._cardBodyEditable = true;
+    this._cardBodyDraftJSON = null;
+    this._cardBodyAwaitingContents = [];
+    this._cardBodyDirtyToken = null;
+    this._cardBodySourceError = false;
+    this._tableEditable = true;
+    this._tableDraftJSON = null;
+    this._tableDirtyToken = null;
+    this._tableAwaitingCells = [];
+    this._tablePendingAction = null;
+    this._tableStructureAwaiting = null;
+    this._tableSettlement = null;
+    this._tableSourceError = false;
   }
 
   connectedCallback() {
@@ -109,6 +150,16 @@ class BpPaperEditor extends HTMLElement {
     this._editable = this.getAttribute("editable") !== "false";
 
     const block = this._readBlock();
+    this._editorMode = this.getAttribute("data-editor-mode") || "block";
+    if (this._editorMode === "card-body") {
+      this._sourceBlock = JSON.parse(JSON.stringify(block));
+      this._cardBodyEditable = cardBodyProjection(block).editable;
+      this._editable = this._editable && this._cardBodyEditable;
+    } else if (this._editorMode === "table") {
+      this._sourceBlock = JSON.parse(JSON.stringify(block));
+      this._tableEditable = tableProjection(block).editable;
+      this._editable = this._editable && this._tableEditable;
+    }
     this._blockId = block && block.id != null ? block.id : null;
     this._blockType = (block && block.type) || "paragraph";
 
@@ -123,12 +174,37 @@ class BpPaperEditor extends HTMLElement {
       // and suppresses onUpdate-driven typing, so no bp-op/slash ever fires.
       editable: this._editable,
       extensions: [
+        ...(this._editorMode === "card-body" ? [
+          Extension.create({
+            name: "bpCardBodyVeto",
+            addProseMirrorPlugins: () => [
+              new Plugin({
+                filterTransaction: (tr) => cardBodyTiptapDocSupported(tr.doc.toJSON()),
+              }),
+            ],
+          }),
+        ] : this._editorMode === "table" ? [
+          Extension.create({
+            name: "bpContextualTableVeto",
+            addProseMirrorPlugins: () => [
+              new Plugin({
+                filterTransaction: (tr) => this._discardTableDraft === true ||
+                  tableTiptapDocSupported(tr.doc.toJSON(), this._sourceBlock),
+              }),
+            ],
+          }),
+          BpTable,
+          BpTableRow,
+          BpTableCell,
+          BpTableHeaderCell,
+        ] : []),
         StarterKit.configure({
           // Single-block editing: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
           // Marks/nodes left enabled by StarterKit: paragraph, bold, italic,
           // strike, code, bulletList, orderedList, listItem, history.
         }),
+        ...(this._editorMode === "table" ? [TableUnderline] : []),
         // Link mark — required for the format bubble's link button and so
         // existing `link` inline nodes (convert.js already round-trips them)
         // render + edit. openOnClick:false keeps clicks editing, not
@@ -161,7 +237,9 @@ class BpPaperEditor extends HTMLElement {
         Tag,
         Valueref,
       ],
-      content: blockToTiptap(block),
+      content: this._editorMode === "card-body"
+        ? cardBodyProjection(block).doc
+        : this._editorMode === "table" ? tableProjection(block).doc : blockToTiptap(block),
       editorProps: {
         // While the slash menu is open it OWNS the navigation keys (↑/↓/Enter/
         // Esc/Tab) — return true so ProseMirror does not also act on them.
@@ -170,7 +248,30 @@ class BpPaperEditor extends HTMLElement {
         handleKeyDown: (_view, event) => this._onKeyDown(event),
       },
       onUpdate: () => {
+        if (this._editorMode === "card-body") {
+          const dirty = { token: null };
+          this.dispatchEvent(new CustomEvent("bp-local-change", {
+            detail: dirty,
+            bubbles: true,
+            composed: true,
+          }));
+          this._cardBodyDirtyToken = dirty.token;
+          this._cardBodyDraftJSON = JSON.parse(JSON.stringify(this._editor.getJSON()));
+        } else if (this._editorMode === "table") {
+          const dirty = { token: null };
+          this.dispatchEvent(new CustomEvent("bp-local-change", {
+            detail: dirty,
+            bubbles: true,
+            composed: true,
+          }));
+          this._tableDirtyToken = dirty.token;
+          this._tableDraftJSON = JSON.parse(JSON.stringify(this._editor.getJSON()));
+        }
         this._scheduleEmit();
+        if (this._editorMode === "card-body" || this._editorMode === "table") {
+          if (this._bubble) this._bubble.update();
+          return;
+        }
         // Callout shorthand is mutually exclusive with the slash menu: it runs
         // FIRST and short-circuits _maybeSlash when it consumes the update, so
         // the two detectors can never both fire on one mutation. Their leading
@@ -235,8 +336,19 @@ class BpPaperEditor extends HTMLElement {
   // is authoritative at mount.
   attributeChangedCallback(name, _old, val) {
     if (name === "editable") {
-      this._editable = val !== "false";
-      if (this._editor) this._editor.setEditable(this._editable);
+      this._editable = val !== "false" &&
+        (this._editorMode !== "card-body" || this._cardBodyEditable) &&
+        (this._editorMode !== "table" ||
+          (this._tableEditable && !this._tableStructureAwaiting));
+      if (this._editor) {
+        // Card BODY editability is server-owned chrome. TipTap emits onUpdate
+        // from setEditable unless told otherwise, which would manufacture a
+        // dirty body draft from a read-only toggle.
+        this._editor.setEditable(
+          this._editable,
+          this._editorMode !== "card-body" && this._editorMode !== "table",
+        );
+      }
     }
   }
 
@@ -265,6 +377,7 @@ class BpPaperEditor extends HTMLElement {
       this._editor.destroy();
       this._editor = null;
     }
+    this._settleTableLifecycle(false);
   }
 
   // Synchronously emit the debounced patch, if one is pending. Returns true only
@@ -280,7 +393,7 @@ class BpPaperEditor extends HTMLElement {
   // Synchronous host seam for navigation / beforeunload guards. The editor is
   // dirty as soon as its debounce exists, before bp-op has been dispatched.
   hasPendingChanges() {
-    return Boolean(this._debounceTimer);
+    return Boolean(this._debounceTimer || this._tableSettlement);
   }
 
   // Explicit conflict resolution seam. The host calls this only after the user
@@ -289,7 +402,23 @@ class BpPaperEditor extends HTMLElement {
   resolveConflictWithServerBlock(block) {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
-    this.block = block;
+    this._cardBodyDraftJSON = null;
+    this._cardBodyAwaitingContents = [];
+    this._cardBodyDirtyToken = null;
+    this._tableDraftJSON = null;
+    this._tableDirtyToken = null;
+    this._tableAwaitingCells = [];
+    this._tablePendingAction = null;
+    this._tableStructureAwaiting = null;
+    this._settleTableLifecycle(false);
+    this._discardCardBodyDraft = true;
+    this._discardTableDraft = true;
+    try {
+      this.block = block;
+    } finally {
+      this._discardCardBodyDraft = false;
+      this._discardTableDraft = false;
+    }
   }
 
   // Read the initial block from the `block` JS property (object) first, then
@@ -330,7 +459,54 @@ class BpPaperEditor extends HTMLElement {
   _emitOp() {
     if (!this._editor || this._blockId == null) return false;
     const json = this._editor.getJSON();
-    const op = buildPatchBlockOp(json, this._blockId, this._blockType);
+    let op;
+    if (this._editorMode === "card-body") {
+      const draftJSON = JSON.parse(JSON.stringify(json));
+      const initial = buildCardBodyOp(
+        draftJSON,
+        this._sourceBlock,
+        this._cardBodyAwaitingContents.length > 0,
+      );
+      if (!initial) {
+        const settledToken = this._cardBodyDraftJSON ? this._cardBodyDirtyToken : null;
+        this._cardBodyDraftJSON = null;
+        if (settledToken != null) {
+          this.dispatchEvent(new CustomEvent("bp-noop", {
+            detail: { token: settledToken },
+            bubbles: true,
+            composed: true,
+          }));
+          this._cardBodyDirtyToken = null;
+        }
+        return false;
+      }
+      // This typed body-only operation is resolved against the authoritative
+      // Card at the server mutation boundary. It cannot overwrite a concurrent
+      // title/media/action/unknown-slot change with a stale whole-slots map.
+      op = initial;
+      this._cardBodyAwaitingContents.push(JSON.parse(JSON.stringify(initial.content)));
+    } else if (this._editorMode === "table") {
+      const forcedCells = this._tableAwaitingCells.flatMap((entry) => entry);
+      const initial = buildTableCellsOp(json, this._sourceBlock, forcedCells);
+      if (!initial) {
+        const settledToken = this._tableDraftJSON ? this._tableDirtyToken : null;
+        this._tableDraftJSON = null;
+        if (settledToken != null) {
+          this.dispatchEvent(new CustomEvent("bp-noop", {
+            detail: { token: settledToken },
+            bubbles: true,
+            composed: true,
+          }));
+          this._tableDirtyToken = null;
+        }
+        return false;
+      }
+      op = initial;
+      this._tableAwaitingCells.push(JSON.parse(JSON.stringify(initial.cells)));
+    } else {
+      op = buildPatchBlockOp(json, this._blockId, this._blockType);
+    }
+    if (!op) return false;
     this.dispatchEvent(
       new CustomEvent("bp-op", {
         detail: op,
@@ -339,6 +515,129 @@ class BpPaperEditor extends HTMLElement {
       }),
     );
     return true;
+  }
+
+  requestTableStructure(action) {
+    if (this._editorMode !== "table" || !this._editor || !this._editable ||
+        this._tableSourceError || this._tablePendingAction || this._tableStructureAwaiting ||
+        !this._validTableAction(action)) return false;
+    this._ensureTableSettlement();
+    this.flushPendingChanges();
+    this._tablePendingAction = action;
+    if (this._tableAwaitingCells.length === 0) this._emitTableStructure();
+    return true;
+  }
+
+  _emitTableStructure() {
+    if (!this._tablePendingAction || !this._sourceBlock) return false;
+    const action = this._tablePendingAction;
+    const projection = tableProjection(this._sourceBlock);
+    if (!projection.editable || !this._validTableAction(action)) return false;
+    const op = {
+      op: "patch-table-structure",
+      id: this._sourceBlock.id,
+      shape: JSON.parse(JSON.stringify(projection.shape)),
+      action,
+    };
+    this._tablePendingAction = null;
+    this._tableStructureAwaiting = JSON.parse(JSON.stringify(op));
+    this._tableStructureAwaiting.requestId = null;
+    this._tableStructureAwaiting.saved = false;
+    this._tableStructureAwaiting.echo = null;
+    this._editor.setEditable(false, false);
+    this.dispatchEvent(new CustomEvent("bp-op", {
+      detail: op,
+      bubbles: true,
+      composed: true,
+    }));
+    return true;
+  }
+
+  waitForTableSettlement() {
+    return this._tableSettlement?.promise || null;
+  }
+
+  trackTableMutation(op, requestId) {
+    if (op?.op !== "patch-table-structure" || !this._tableStructureAwaiting ||
+        this._tableStructureAwaiting.op !== op.op ||
+        this._tableStructureAwaiting.id !== op.id ||
+        this._tableStructureAwaiting.action !== op.action ||
+        JSON.stringify(this._tableStructureAwaiting.shape) !== JSON.stringify(op.shape) ||
+        typeof requestId !== "string" || requestId === "") return false;
+    this._tableStructureAwaiting.requestId = requestId;
+    return true;
+  }
+
+  tableMutationResult(op, saved, result) {
+    const awaiting = this._tableStructureAwaiting;
+    if (op?.op !== "patch-table-structure" || !awaiting ||
+        result?.request_id !== awaiting.requestId) return false;
+    if (saved !== true) return false;
+    awaiting.saved = true;
+    if (awaiting.echo) this._acceptTableStructureEcho();
+    return true;
+  }
+
+  applyTableProjection(value, metadata = {}) {
+    this._blockProp = value;
+    const awaiting = this._tableStructureAwaiting;
+    if (awaiting) {
+      if (metadata.requestId !== awaiting.requestId ||
+          !tableProjectionMatchesAction(this._sourceBlock, value, awaiting.action)) {
+        return false;
+      }
+      awaiting.echo = { value, metadata };
+      if (awaiting.saved) this._acceptTableStructureEcho();
+      return true;
+    }
+    return this._acceptTableProjection(value);
+  }
+
+  _acceptTableStructureEcho() {
+    const echo = this._tableStructureAwaiting?.echo;
+    if (!echo) return false;
+    this._tableStructureAwaiting = null;
+    this._acceptTableProjection(echo.value);
+    this._settleTableLifecycle(true);
+    return true;
+  }
+
+  _ensureTableSettlement() {
+    if (this._tableSettlement) return this._tableSettlement.promise;
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    this._tableSettlement = { promise, resolve };
+    return promise;
+  }
+
+  _settleTableLifecycle(result) {
+    const settlement = this._tableSettlement;
+    this._tableSettlement = null;
+    settlement?.resolve(result);
+  }
+
+  _validTableAction(action) {
+    if (typeof action !== "string") return false;
+    const projection = tableProjection(this._sourceBlock);
+    if (!projection.editable) return false;
+    const rows = projection.rows.length;
+    const columns = projection.rows[0].length;
+    if (action === "add-row" || action === "add-column") return true;
+    if (action === "add-header") return projection.head == null;
+    if (action === "remove-header") return projection.head != null;
+    const match = /^(remove|up|down)-row:(0|[1-9]\d*)$/.exec(action);
+    if (match) {
+      const index = Number(match[2]);
+      if (!Number.isSafeInteger(index) || index >= rows) return false;
+      return match[1] === "remove" ? rows > 1
+        : match[1] === "up" ? index > 0 : index + 1 < rows;
+    }
+    const columnMatch = /^(remove|left|right)-column:(0|[1-9]\d*)$/.exec(action);
+    if (!columnMatch) return false;
+    const index = Number(columnMatch[2]);
+    if (!Number.isSafeInteger(index) || index >= columns) return false;
+    return columnMatch[1] === "remove" ? columns > 1
+      : columnMatch[1] === "left" ? index > 0 : index + 1 < columns;
   }
 
   // ── slash menu ─────────────────────────────────────────────────────────
@@ -501,6 +800,8 @@ class BpPaperEditor extends HTMLElement {
           return false;
       }
     }
+
+    if (this._editorMode === "card-body" && event.key === "Enter") return true;
 
     if (!this._slash || !this._slash.isOpen()) return false;
 
@@ -812,15 +1113,113 @@ class BpPaperEditor extends HTMLElement {
   // or after mount. Re-loads content into a live editor.
   set block(value) {
     this._blockProp = value;
+    if (this._editor && this._editorMode === "table") {
+      this.applyTableProjection(value);
+      return;
+    }
     if (this._editor && value && typeof value === "object") {
       this._blockId = value.id != null ? value.id : this._blockId;
       this._blockType = value.type || this._blockType;
-      this._editor.commands.setContent(blockToTiptap(value), false);
+      if (this._editorMode === "card-body") {
+        const projection = cardBodyProjection(value);
+        this._cardBodyEditable = projection.editable;
+        // TipTap 2.27 emits an update from setEditable by default. A server
+        // projection changing only editability must never become a local body
+        // draft, so suppress that synthetic update explicitly.
+        this._editor.setEditable(
+          this.getAttribute("editable") !== "false" && projection.editable,
+          false,
+        );
+        if (!projection.editable) {
+          if (!this._cardBodySourceError) {
+            this._cardBodySourceError = true;
+            this.dispatchEvent(new CustomEvent("bp-error", {
+              detail: {
+                code: "card_body_source_unsupported",
+                error: "Card body changed to an unsupported shape. Your draft is retained; resolve the server version before continuing.",
+              },
+              bubbles: true,
+              composed: true,
+            }));
+          }
+          if (this._discardCardBodyDraft) {
+            this._sourceBlock = JSON.parse(JSON.stringify(value));
+            this._editor.commands.setContent(projection.doc, false);
+          }
+          return;
+        }
+        this._cardBodySourceError = false;
+        this._sourceBlock = JSON.parse(JSON.stringify(value));
+        // Body mutations are FIFO. Retire only the head: a concurrent chrome
+        // echo can legitimately carry content equal to a later compensating
+        // snapshot (A→B→A) and must not skip the still-unconfirmed B entry.
+        if (this._cardBodyAwaitingContents.length > 0 &&
+            cardBodyContentMatches(this._cardBodyAwaitingContents[0], value)) {
+          this._cardBodyAwaitingContents.shift();
+        }
+        const preservesDraft = projection.editable && this._cardBodyDraftJSON &&
+          (buildCardBodyOp(this._cardBodyDraftJSON, value) !== null ||
+            this._cardBodyAwaitingContents.length > 0);
+        if (!preservesDraft) {
+          this._cardBodyDraftJSON = null;
+          this._cardBodyDirtyToken = null;
+          this._editor.commands.setContent(projection.doc, false);
+        }
+      } else {
+        this._editor.commands.setContent(blockToTiptap(value), false);
+      }
     }
   }
 
   get block() {
     return this._blockProp || this._readBlock();
+  }
+
+  _acceptTableProjection(value) {
+    const projection = tableProjection(value);
+    this._tableEditable = projection.editable;
+    this._editable = this.getAttribute("editable") !== "false" && projection.editable;
+    this._editor.setEditable(this._editable, false);
+    if (!projection.editable) {
+      if (!this._tableSourceError) {
+        this._tableSourceError = true;
+        this.dispatchEvent(new CustomEvent("bp-error", {
+          detail: {
+            code: "table_source_unsupported",
+            error: "Table changed to an unsupported shape. Your draft is retained; resolve the server version before continuing.",
+          },
+          bubbles: true,
+          composed: true,
+        }));
+      }
+      if (this._discardTableDraft) {
+        this._sourceBlock = value && typeof value === "object"
+          ? JSON.parse(JSON.stringify(value)) : value;
+        this._editor.commands.setContent(projection.doc, false);
+      }
+      return false;
+    }
+    this._tableSourceError = false;
+    this._blockId = value.id;
+    this._blockType = "table";
+    this._sourceBlock = JSON.parse(JSON.stringify(value));
+    if (this._tableAwaitingCells.length > 0 &&
+        tableProjectionMatchesCells(value, this._tableAwaitingCells[0])) {
+      this._tableAwaitingCells.shift();
+    }
+    const forcedCells = this._tableAwaitingCells.flatMap((entry) => entry);
+    const preservesDraft = this._tableDraftJSON &&
+      (buildTableCellsOp(this._tableDraftJSON, value, forcedCells) !== null ||
+        this._tableAwaitingCells.length > 0);
+    if (!preservesDraft) {
+      this._tableDraftJSON = null;
+      this._tableDirtyToken = null;
+      this._editor.commands.setContent(projection.doc, false);
+    }
+    if (this._tablePendingAction && this._tableAwaitingCells.length === 0) {
+      this._emitTableStructure();
+    }
+    return true;
   }
 }
 

@@ -25,7 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       `value` attr edited by a non-PM textarea), as of S3.5 also the 7 native
       `field-*` types (CONTROL-ATOM nodes), and as of S3.6 also `sheet` + `embed`
       (READ-ONLY ATOM nodes carrying the whole block verbatim), and as of t12a also
-      the 12 non-prose FLEET kinds (`tasks`/`task-board`/`cards`/`form`/… — SERVER-
+      the 10 contextual FLEET kinds (`tasks`/`task-board`/`cards`/… — SERVER-
       PAINTED read-only atoms, the whole block verbatim on `bpFleet`), and as of S10
       also the `columns` CONTAINER (a RECURSIVE nested-block node `bpColumns >
       bpColumn+ > child` — the first canvas node whose interior is a nested BLOCK
@@ -36,8 +36,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       `CANVAS_CONTAINER_TYPES`), so
       none SPLIT a run anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
-      block that is NOT canvas-eligible (a deep nested-structure field — `composite` /
-      `arrayOf` / `codelist` / `localizedText`) is a run boundary
+      block that is NOT canvas-eligible (a contextual editor such as `form` /
+      `questionnaire`, or a deep nested-structure field — `composite` / `arrayOf` /
+      `codelist` / `localizedText`) is a run boundary
       emitted as
       `{:block, block}`. The segment order matches the input order exactly. Pure:
       no socket, no I/O.
@@ -141,7 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # and embed-node.js BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME.
   @canvas_readonly_atom_types ~w(sheet embed)
 
-  # t12a (pdd-t12 partition flip): the 12 FLEET block kinds the canvas handles as
+  # t12a (pdd-t12 partition flip): the contextual FLEET block kinds the canvas handles as
   # SERVER-PAINTED read-only atoms (run-convert.js CANVAS_FLEET_TYPES → the single
   # `bpFleet` node, the same multiplexing bpField uses for the field-* set).
   # Structurally IDENTICAL to the sheet/embed read-only atoms — the WHOLE block rides
@@ -161,10 +162,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # `diagram` is DELIBERATELY ABSENT — it rides its own EDITABLE bpDiagram attr-atom
   # (a `source` textarea; see @canvas_attr_atom_types), NOT the read-only paint.
   #
-  # MUST stay in LOCKSTEP with run-convert.js:CANVAS_FLEET_TYPES,
-  # shared/paper.ex:@fleet_render_types, and paper_editor.ex:@fleet_preview_types
-  # (all 12 kinds, diagram absent from every one).
-  @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
+  # `form` and `questionnaire` are DELIBERATELY ABSENT here: both have contextual
+  # authored-field editors, so they must be emitted as `{:block, block}` boundaries
+  # instead of opaque bpFleet atoms. The JS projection and shared renderer may retain
+  # receive-only recognition for legacy mounted canvases / server-paint compatibility;
+  # that compatibility surface does not make either kind eligible for newly partitioned
+  # canvas runs. paper_editor.ex owns their contextual boundary previews separately.
+  @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast)
 
   # Article-chrome ROLE prose (eyebrow / byline / ingress / pullquote) — chrome-free
   # STYLED prose the canvas handles as plain ProseMirror nodes (run-convert.js
@@ -177,30 +181,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_ROLE_TYPES and role-nodes.js.
   @canvas_role_types ~w(eyebrow byline ingress pullquote)
 
-  # editable-table: the `table` block the canvas handles as FOUR hand-rolled NESTED
-  # ProseMirror nodes (bpTable > bpTableRow > bpTableHeaderCell|bpTableCell;
-  # run-convert.js CANVAS_TABLE_TYPES → the bpTable node tree; table-node.js). UNLIKE
-  # the callout content node (ONE inline body) or the fleet atoms (whole block verbatim),
-  # a table is a CONTAINER of PM structure — each cell body is an inline* hole reusing
-  # the shared inline serializer, so bold/italic/links round-trip. It CAN emit a
-  # patch-block on a cell/grid edit (a COARSE whole-table rows+head patch) and no longer
-  # SPLITS a run.
-  #
-  # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
-  @canvas_table_types ~w(table)
+  # New mounts use the lossless contextual Table editor. JS retains the node,
+  # coarse save receiver and slash insertion for already-mounted legacy runs.
+  @canvas_table_types []
 
-  # editable-figure: a `figure` wraps ONE child + a caption; the canvas handles it as
-  # a SERVER-PAINTED read-only-CHILD atom (`bpFigure`; run-convert.js
-  # CANVAS_FIGURE_TYPES → figure-node.js). The child rides VERBATIM (bpChild) and
-  # paints via the SAME `bp:block-html` hook the fleet atoms use (CHILD-only HTML,
-  # keyed by the figure id); the caption is the SINGLE editable attr
-  # (patch-block{caption}). Flipping `figure` from a run boundary (the per-block
-  # "not editable yet" stub) INTO a run is what makes the bpFigure atom mount.
-  #
-  # This is a THREE-way lockstep (mirroring the @canvas_fleet_types note): keep
-  # @canvas_figure_types ⇄ run-convert.js CANVAS_FIGURE_TYPES ⇄ shared/paper.ex
-  # @figure_render_types (plus figure-node.js BP_FIGURE_NODE_NAME) aligned.
-  @canvas_figure_types ~w(figure)
+  # `figure` intentionally remains a server-rendered run boundary. Its singular
+  # child receives a nested contextual canvas. JS retains the old bpFigure atom
+  # only as a compatibility receiver for already-mounted/in-flight clients.
 
   # live-data task-list: a `task-list` carrying a `query` map is the LIVE editable
   # WIDGET (bpTaskList; run-convert.js CANVAS_TASK_LIST_NODE_NAME → task-list-node.js).
@@ -221,33 +208,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # and task-list-node.js BP_TASK_LIST_NODE_NAME.
   @canvas_task_list_types ~w(task-list)
 
-  # The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes
-  # (run-convert.js CANVAS_CONTAINER_TYPES → an editable node whose interior is a
-  # nested BLOCK tree, not inline runs). TWO members:
-  #   * `columns` (S10) → bpColumns > bpColumn+ > child; column child-block trees are
-  #     real editable PM regions (prose+divider), non-first-class children carried
-  #     verbatim/read-only (bpColumnAtom). columns-node.js.
-  #   * `section` (editable-section) → bpSection: a nested block+ body wrapped by two
-  #     rules + an editable bold title; a container FOLDS INTO a run (no longer SPLITS
-  #     one). section-node.js / BP_SECTION_NODE_NAME.
-  # UNLIKE every prior canvas kind, a container's interior is a NESTED BLOCK TREE (child
-  # blocks with their own type/content), not inline runs (callout) nor a verbatim opaque
-  # carry (sheet/embed/fleet).
-  #
-  # V1 forbids container-in-container: a container encountered as a CHILD (depth>=1) is
-  # carried as a read-only bpOpaque/bpColumnAtom/bpTerminalAtom verbatim (NOT another
-  # editable container), enforced by the content expression — a legacy nested container
-  # round-trips byte-identical and is never restructured.
-  #
-  # `terminal` (editable-terminal) is the THIRD container alongside columns + section:
-  # a bpTerminal holding prose/divider body children (+ a bpTerminalAtom verbatim
-  # carrier for any non-first-class child) wrapped in reader chrome (title bar + live
-  # badge + footer); EDITABLE, emitting a COARSE whole-body+chrome patch-block.
-  #
-  # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES, columns-node.js
-  # (bpColumns/bpColumn/bpColumnAtom), section-node.js (bpSection) and terminal-node.js
-  # (bpTerminal/bpTerminalAtom).
-  @canvas_container_types ~w(columns section terminal)
+  # Direct container nodes now render as contextual reader-shaped boundaries
+  # with scoped child runs. JS retains compatibility for already-mounted legacy
+  # coarse canvases, but new Elixir partitions mount no container directly.
+  @canvas_container_types []
 
   # STEP 4: the card WIDGET — a slots-native block (media/title/body/action slots)
   # the canvas mounts as its OWN node (bpCard) so a card FOLDS INTO a run instead of
@@ -264,7 +228,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # the identical pnode cell, so it renders == one legacy pipeline node; the legacy
   # `pipeline` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED. MUST
   # stay in lockstep with run-convert.js (isCanvasStage*) and stage-node.js.
-  @canvas_widget_types ~w(card stage)
+  @canvas_widget_types ~w(card)
 
   # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds the canvas handles as
   # SERVER-PAINTED atoms — the SAME bpFleet node + `bp:block-html` paint channel the
@@ -290,18 +254,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
-  # atoms (t12a) ∪ canvas article-chrome ROLE prose ∪ the canvas TABLE node tree
-  # (editable-table) ∪ the canvas FIGURE server-paint-child atom (editable-figure) ∪
-  # canvas CONTAINER nodes (columns, section). A run is a maximal contiguous stretch of
+  # atoms (t12a, excluding contextual `form` / `questionnaire` boundaries) ∪ canvas
+  # article-chrome ROLE prose ∪ canvas
+  # direct CONTAINER nodes (currently none). A run is a maximal contiguous stretch of
   # these; any other kind is a run boundary. Keep this aligned with run-convert.js
   # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
   # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
-  # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_FIGURE_TYPES ∪
-  # CANVAS_CONTAINER_TYPES) so the Elixir partition and the JS projection agree on what
-  # a run may contain. With the fleet, the table, the figure AND the containers folded
-  # in, the ONLY remaining run boundaries are the nested-structure fields (composite /
-  # object / arrayOf / codelist / localizedText) — a typical paper's run now spans the
-  # WHOLE doc.
+  # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_CONTAINER_TYPES),
+  # except that JS keeps receive-only legacy recognition for form/questionnaire/figure/
+  # section/columns/table while this partition intentionally routes them to contextual
+  # boundary editors. The
+  # remaining boundaries also include nested-structure fields (composite / object /
+  # arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -313,7 +277,6 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_fleet_types ++
                   @canvas_role_types ++
                   @canvas_table_types ++
-                  @canvas_figure_types ++
                   @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types ++
@@ -397,17 +360,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   canvas attr-atom (`code` / `diagram` as of S3.3/S3.4) OR a native field
   control-atom (the 7 `field-*` types as of S3.5) OR a read-only atom (`sheet` /
   `embed` as of S3.6, carrying the whole block verbatim) OR a FLEET server-paint
-  atom (the 12 `tasks`/`task-board`/`cards`/`form`/… kinds as of t12a, whole block
+  atom (the contextual `tasks`/`task-board`/`cards`/… kinds as of t12a, whole block
   verbatim on `bpFleet`, painted with the reader's own HTML) OR an article-chrome
   ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
   prose matching the reader) OR the canvas TABLE node tree (`table` as of
   editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
-  editable inline runs) OR a CONTAINER node (`columns` and `section` — a recursive
-  nested-block node whose interior is an editable block tree, container-in-container
-  FORBIDDEN in v1). Canvas-eligible blocks
+  editable inline runs). `form`, `questionnaire`, `figure`, `section`, `columns`, and
+  `terminal` are intentionally NOT canvas-eligible:
+  they remain boundary blocks so their contextual authored-field editors render.
+  Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
-  `field-reference` RIDE a run too — only the DEEP nested-structure fields composite /
-  arrayOf / codelist / localizedText stay boundaries) is a `{:block, …}`
+  `field-reference` RIDE a run too — contextual form/questionnaire/figure/section/columns
+  editors and the DEEP
+  nested-structure fields composite / arrayOf / codelist / localizedText stay
+  boundaries) is a `{:block, …}`
   boundary. This is the predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()
@@ -459,6 +425,53 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def run_id(slug, ordinal)
       when is_binary(slug) and is_integer(ordinal) and ordinal >= 0,
       do: slug <> "-run-" <> Integer.to_string(ordinal)
+
+  @doc false
+  @spec expandable_run_slug(String.t(), String.t()) :: String.t()
+  def expandable_run_slug(slug, expandable_id)
+      when is_binary(slug) and is_binary(expandable_id),
+      do: slug <> "-expandable-" <> expandable_id
+
+  @doc false
+  @spec steps_run_slug(String.t(), String.t(), String.t()) :: String.t()
+  def steps_run_slug(slug, steps_id, row_id)
+      when is_binary(slug) and is_binary(steps_id) and is_binary(row_id),
+      do:
+        slug <> "-steps-" <> Base.url_encode64(Jason.encode!([steps_id, row_id]), padding: false)
+
+  @doc false
+  @spec tabs_run_slug(String.t(), String.t(), String.t()) :: String.t()
+  def tabs_run_slug(slug, tabs_id, row_id)
+      when is_binary(slug) and is_binary(tabs_id) and is_binary(row_id),
+      do: slug <> "-tabs-" <> Base.url_encode64(Jason.encode!([tabs_id, row_id]), padding: false)
+
+  @doc false
+  @spec figure_run_slug(String.t(), String.t()) :: String.t()
+  def figure_run_slug(slug, figure_id)
+      when is_binary(slug) and is_binary(figure_id),
+      do: slug <> "-figure-" <> Base.url_encode64(Jason.encode!([figure_id]), padding: false)
+
+  @doc false
+  @spec terminal_run_slug(String.t(), String.t()) :: String.t()
+  def terminal_run_slug(slug, terminal_id)
+      when is_binary(slug) and is_binary(terminal_id),
+      do: slug <> "-terminal-" <> Base.url_encode64(Jason.encode!([terminal_id]), padding: false)
+
+  @doc false
+  @spec section_run_slug(String.t(), String.t()) :: String.t()
+  def section_run_slug(slug, section_id)
+      when is_binary(slug) and is_binary(section_id),
+      do: slug <> "-section-" <> Base.url_encode64(Jason.encode!([section_id]), padding: false)
+
+  @doc false
+  @spec columns_run_slug(String.t(), String.t(), non_neg_integer()) :: String.t()
+  def columns_run_slug(slug, columns_id, column_index)
+      when is_binary(slug) and is_binary(columns_id) and is_integer(column_index) and
+             column_index >= 0,
+      do:
+        slug <>
+          "-columns-" <>
+          Base.url_encode64(Jason.encode!([columns_id, column_index]), padding: false)
 
   @doc """
   Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL

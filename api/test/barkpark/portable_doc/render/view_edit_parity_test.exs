@@ -169,10 +169,36 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   defp edit_css, do: strip_comments(File.read!(@root_heex) <> "\n" <> File.read!(@shell_css))
   defp bundle_css, do: strip_comments(File.read!(@bundle_css))
 
+  test "empty Table cells reserve the editor caret line without visible or persisted text" do
+    for {css, prefix} <- [
+          {Stylesheet.css(), ".bp-paper-surface"},
+          {edit_css(), ".bp-paper-editor-body"},
+          {bundle_css(), ".bp-paper-editor-body"}
+        ] do
+      assert css =~
+               prefix <>
+                 ~S| .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }|
+    end
+  end
+
   # Drop `/* … */` comments so a comment's prose (which contains commas and the
   # word ".bp-paper-surface" in explanations) can't leak into the greedy
   # selector capture and defeat the exact selector match.
   defp strip_comments(css), do: String.replace(css, ~r|/\*.*?\*/|s, "")
+
+  test "numeric authoring controls share text control styling and focus feedback" do
+    css = edit_css()
+
+    for surface <- ["bp-paper-edit-form", "bp-paper-edit-field"], suffix <- ["", ":focus"] do
+      text = declarations_for(css, surface, ~s(input[type="text"]#{suffix}))
+      number = declarations_for(css, surface, ~s(input[type="number"]#{suffix}))
+
+      assert map_size(text) > 0
+
+      assert number == text,
+             "#{surface} numeric controls must retain the same theme and focus feedback as text controls"
+    end
+  end
 
   # ── 1. VIEW emits bare, single-source-styled semantic HTML ─────────────────
   # If the article renderer ever re-introduced an inline `style=` on a prose

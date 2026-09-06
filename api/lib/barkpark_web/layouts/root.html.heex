@@ -5056,6 +5056,7 @@
       // and are NOT covered by this slice.
       _PA_PROBE: 16,     // ms — is the ref stamped yet? (measured at dt≈1ms)
       _PA_POLL: 100,     // ms — has the ref dropped / the row detached?
+      _PA_WITNESS_GRACE: 750, // ms — allow a stable selection control's reply rerender
       _PA_CEILING: 8000, // ms — the named ceiling, in place of an unbounded tint
       _PA_FADE: 6000,    // ms — how long a settled answer stays readable
 
@@ -5094,6 +5095,52 @@
         return out.join("|");
       },
 
+      // Segmented controls such as Classic/Beta express their observed
+      // selection by changing aria-pressed presence/value. Capture only the CLICKED control:
+      // an unrelated toggle moving cannot prove that this press succeeded.
+      _paPressedWitness(el) {
+        if (!el) return null;
+        var id = el.id || null, testId = el.getAttribute("data-test-id");
+        if (!el.hasAttribute("aria-pressed")) {
+          // Phoenix boolean attributes render the selected mode as
+          // `aria-pressed=""` and OMIT the attribute on the inactive peer. The
+          // inactive button is still a valid witness only when it has an exact
+          // stable identity inside a real segmented group with a selected peer.
+          var group = el.closest('[role="group"]');
+          if ((!id && !testId) || !group || !group.querySelector("[aria-pressed]")) return null;
+        }
+        return {
+          el: el,
+          id: id,
+          testId: testId,
+          value: el.getAttribute("aria-pressed")
+        };
+      },
+
+      _paPressedChanged(witness) {
+        if (!witness || !witness.el) return false;
+        var el = this.el.contains(witness.el) ? witness.el : null;
+
+        // LiveView may replace the clicked node while applying the reply. In
+        // that case reacquire ONLY its stable exact identity — never text,
+        // group state, or a global aria-pressed signature. An absent or
+        // ambiguous identity fails closed, so an unrelated toggle cannot
+        // certify this action.
+        if (!el && (witness.id || witness.testId)) {
+          var nodes = this.el.querySelectorAll("[aria-pressed]"), match = null, i, n;
+          for (i = 0; i < nodes.length; i++) {
+            n = nodes[i];
+            if (witness.id && n.id !== witness.id) continue;
+            if (witness.testId && n.getAttribute("data-test-id") !== witness.testId) continue;
+            if (match) return false;
+            match = n;
+          }
+          el = match;
+        }
+
+        return !!el && el.getAttribute("aria-pressed") !== witness.value;
+      },
+
       // Drop the pending press and every timer it owns, then say `text` (empty
       // = the region disappears). This is the ONLY place a pending is released,
       // so ref-drop, detach, ceiling and unload all clear through one path and
@@ -5120,6 +5167,7 @@
       _paSettleWord(p) {
         if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
         if (this._paCurrentSig() !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paPressedChanged(p.pressed)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
         return null;
       },
 
@@ -5138,13 +5186,36 @@
         // a re-render that replaced the pressed row would otherwise hold a ref
         // forever on an orphan and only the ceiling would ever release it.
         if (document.contains(p.el) && p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
+        var word = this._paSettleWord(p);
+        if (word) { this._paRelease(word); return; }
+        // A stable aria-pressed witness gets a short reply-render grace below.
+        // Until it moves (or a ref was actually observed), absence of a ref is
+        // not yet evidence that this selection press failed.
+        if (!p.sawRef && p.pressed && (p.pressed.id || p.pressed.testId)) return;
         this._paSettle(p);
+      },
+
+      // A native <details>/<summary> disclosure changes local browser state and
+      // does not promise a server round trip. A surrounding selectable block may
+      // still carry phx-click, so target.closest("[phx-click]") alone would arm the
+      // watchdog against that ANCESTOR and announce a false lost-press failure.
+      // Exempt only the disclosure-only shape: an explicit phx-click on the summary
+      // itself or on the clicked descendant remains protected, as do real action
+      // buttons in the details body.
+      _paNativeDisclosureOnly(target, action) {
+        var summary = target.closest("summary");
+        return !!(
+          summary &&
+          summary.closest("details") &&
+          (!action || !summary.contains(action))
+        );
       },
 
       _paOnPress(ev) {
         var t = ev.target;
         if (!t || !t.closest) return;
         var el = t.closest("[phx-click]");
+        if (this._paNativeDisclosureOnly(t, el)) return;
         if (!el || !this.el.contains(el)) return;
         var spec = el.getAttribute("phx-click") || "";
         // A pure client-side JS command list never reaches the server and never
@@ -5167,6 +5238,7 @@
           name: this._paName(el),
           url: location.href,
           sig: this._paCurrentSig(),
+          pressed: this._paPressedWitness(el),
         };
         // Newest press owns the region; the previous one's timers die with it.
         this._paRelease("");
@@ -5192,6 +5264,24 @@
           // the silence it has today.
           var word = this._paSettleWord(p);
           if (word) { this._paRelease(word); return; }
+          // Classic/Beta and similar stable segmented controls can be replaced
+          // by the successful LiveView reply after this first 16ms probe. Keep
+          // watching only that exact control identity for a bounded grace; the
+          // normal poll settles immediately if its aria-pressed value flips.
+          if (p.pressed && (p.pressed.id || p.pressed.testId)) {
+            this._paProbe = window.setTimeout(() => {
+              this._paProbe = 0;
+              if (this._paPending !== p) return;
+              var settled = this._paSettleWord(p);
+              if (settled) { this._paRelease(settled); return; }
+              if (document.contains(p.el) && p.el.hasAttribute("data-phx-ref-src")) {
+                p.sawRef = true;
+                return;
+              }
+              this._paRelease("That press did not reach the server — press it again.");
+            }, this._PA_WITNESS_GRACE);
+            return;
+          }
           // ONE exception, and it is the only shape that can delay a ref: a
           // debounced or throttled binding pushes LATER. There the hook has no
           // ground for either verdict and says nothing rather than inventing one.
@@ -5821,7 +5911,11 @@
         user_name: userName,
         user_color: userColor
       },
-      hooks: Hooks
+      hooks: Hooks,
+      dom: {
+        onBeforeElUpdated: (fromEl, toEl) =>
+          window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl)
+      }
     });
     liveSocket.connect();
   </script>

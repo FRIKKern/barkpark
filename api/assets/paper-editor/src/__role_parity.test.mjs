@@ -27,6 +27,7 @@
 // Run: node src/__role_parity.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Eyebrow, Byline, Ingress, Pullquote } from "./canvas/role-nodes.js";
 
 let failures = 0;
@@ -40,6 +41,16 @@ function check(name, fn) {
     console.log(`      ${e.message}`);
   }
 }
+
+check("opening canvas preserves paragraph rhythm in both editor stylesheets", () => {
+  for (const path of ["./styles.css", "../../../priv/static/assets/bp-paper-editor-shell.css"]) {
+    const css = readFileSync(new URL(path, import.meta.url), "utf8");
+    const openingRule = css.match(/\.bp-paper-editor > \.bp-paper-edit-canvas:nth-child\(1 of[^}]+\}/)?.[0];
+    assert.ok(openingRule, `${path}: opening canvas rule must be present`);
+    assert.match(openingRule, /> :first-child:not\(p\)\s*\{\s*margin-top: 0;/,
+      `${path}: the reader retains its opening paragraph margin; only non-paragraph nodes may be clamped`);
+  }
+});
 
 // The reader ground truth, per role: element + bp-role-* class + any inline
 // author-mark style the reader (walk.ex paragraph/3) emits on the element.

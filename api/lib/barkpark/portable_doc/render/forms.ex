@@ -18,7 +18,7 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, escape_attr: 1]
 
   def form_html(b, style) do
-    kind = b |> Map.get("kind", "grill") |> to_string()
+    kind = b |> Map.get("kind", "grill") |> form_string("grill")
     kind_class = if kind == "questionnaire", do: "bp-form-questionnaire", else: "bp-form-grill"
 
     questions =
@@ -32,9 +32,9 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   end
 
   defp form_question_html(q, style) when is_map(q) do
-    id = q |> Map.get("id", "") |> to_string()
-    prompt = q |> Map.get("prompt", "") |> to_string()
-    type = q |> Map.get("type", "text") |> to_string()
+    id = q |> Map.get("id", "") |> form_string("")
+    prompt = q |> Map.get("prompt", "") |> form_string("")
+    type = q |> Map.get("type", "text") |> form_string("text")
 
     legend = ~s(<legend>#{escape_html(prompt)}</legend>)
 
@@ -66,7 +66,11 @@ defmodule Barkpark.PortableDoc.Render.Forms do
     ~s(<p style="color:#6b7280;font-size:0.9em;margin:0.3rem 0">#{escape_html(prefix)}#{escape_html(text)}</p>)
   end
 
-  defp form_muted_line(text, prefix, style), do: form_muted_line(to_string(text), prefix, style)
+  defp form_muted_line(text, prefix, style) do
+    text
+    |> form_string("")
+    |> form_muted_line(prefix, style)
+  end
 
   # Per-type control markup. All names share the question id so grouped
   # radios/checkboxes round-trip to one answer field at the interactive phase.
@@ -75,17 +79,17 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   end
 
   defp form_control_html("single", id, q, style) do
-    options = q |> Map.get("options", []) |> List.wrap() |> Enum.map(&to_string/1)
+    options = q |> Map.get("options", []) |> List.wrap() |> Enum.map(&form_string(&1, ""))
     form_radio_group(id, options, style)
   end
 
   defp form_control_html("multi", id, q, style) do
-    options = q |> Map.get("options", []) |> List.wrap() |> Enum.map(&to_string/1)
+    options = q |> Map.get("options", []) |> List.wrap() |> Enum.map(&form_string(&1, ""))
     form_choice_group(id, options, "checkbox", style)
   end
 
   defp form_control_html("scale", id, q, style) do
-    scale = Map.get(q, "scale", %{})
+    scale = if is_map(q["scale"]), do: q["scale"], else: %{}
     min = scale_bound(Map.get(scale, "min"), 1)
     max = scale_bound(Map.get(scale, "max"), 5)
     # Cap the ladder span at 101 rungs (mirrors the Go TUI maxLadder=100):
@@ -141,4 +145,8 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   end
 
   defp scale_bound(_v, default), do: default
+
+  defp form_string(value, _default) when is_binary(value), do: value
+  defp form_string(value, _default) when is_atom(value) or is_number(value), do: to_string(value)
+  defp form_string(_value, default), do: default
 end

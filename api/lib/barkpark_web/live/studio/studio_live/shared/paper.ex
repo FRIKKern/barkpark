@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
@@ -29,6 +30,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @server_minted_block :__server_minted_block__
+  @server_form_source :__server_block_form_source__
+
+  @doc false
+  def paper_form_op(socket, %{"block_id" => id} = params) do
+    op = %{
+      "op" => "patch-block",
+      "id" => id,
+      "if_rev" => params["if_rev"],
+      "request_id" => params["request_id"],
+      @server_form_source => Blocks.block_form_source(params)
+    }
+
+    paper_op(socket, op)
+  end
 
   @doc false
   def paper_op(socket, op) do
@@ -272,22 +287,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   defp paper_pane_op_once(socket, op) do
     request_id = op["request_id"]
+    form_source = Map.get(op, @server_form_source)
     op = stable_request_op(op, request_id)
 
     case paper_ops(
            socket,
-           [Map.drop(op, ["if_rev", "request_id"])],
+           [Map.drop(op, ["if_rev", "request_id", @server_form_source])],
            request_id,
-           op["if_rev"]
+           op["if_rev"],
+           {:ok, nil},
+           form_source
          ) do
       {:ok, socket, receipt, outcome} ->
+        result = %{
+          saved: true,
+          request_id: request_id,
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        }
+
         assign(socket,
-          last_paper_save_result: %{
-            saved: true,
-            request_id: request_id,
-            replayed: outcome == :replayed,
-            rev: receipt.rev
-          }
+          last_paper_save_result:
+            table_confirmation(
+              result,
+              op,
+              (doc_field(socket.assigns[:paper_doc], :content) || %{})["blocks"],
+              socket.assigns[:paper_rev]
+            )
         )
 
       {:error, socket} ->
@@ -407,7 +433,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def paper_ops(socket, ops, request_id), do: paper_ops(socket, ops, request_id, nil)
 
-  def paper_ops(socket, ops, request_id, supplied_rev) do
+  def paper_ops(socket, ops, request_id, supplied_rev),
+    do: paper_ops(socket, ops, request_id, supplied_rev, {:ok, nil})
+
+  def paper_ops(socket, ops, request_id, supplied_rev, context_result) do
+    paper_ops(socket, ops, request_id, supplied_rev, context_result, nil)
+  end
+
+  defp paper_ops(socket, ops, request_id, supplied_rev, context_result, form_source) do
     socket = failed_result(socket, %{"request_id" => request_id})
     {socket, revoked_token?} = refresh_replay_token(socket)
     paper = socket.assigns[:paper_doc]
@@ -440,17 +473,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       paper_revision(supplied_rev) == :error ->
         {:error, failed_result(socket, %{"request_id" => request_id})}
 
+      not match?({:ok, _context}, context_result) ->
+        {:error, failed_result(socket, %{"request_id" => request_id})}
+
       true ->
         {:ok, if_rev} = paper_revision(supplied_rev)
+        {:ok, context} = context_result
 
-        case Content.apply_paper_block_ops_once(
-               slug,
-               ops,
-               dataset,
-               request_id,
-               replay_principal_key(socket),
-               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
-             ) do
+        opts =
+          BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
+            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
+
+        result =
+          if is_map(form_source) do
+            resolver = fn blocks ->
+              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+            end
+
+            Content.apply_paper_block_form_once(
+              slug,
+              "block_form:v1",
+              form_source,
+              dataset,
+              request_id,
+              replay_principal_key(socket),
+              resolver,
+              opts
+            )
+          else
+            Content.apply_paper_block_ops_once(
+              slug,
+              ops,
+              dataset,
+              request_id,
+              replay_principal_key(socket),
+              opts
+            )
+          end
+
+        case result do
           {:ok, receipt, outcome} ->
             socket =
               socket
@@ -463,6 +524,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               |> assign(paper_halt: nil)
 
             {:ok, socket, receipt, outcome}
+
+          {:error, {:source_validation, _reason}} ->
+            {:error, form_validation_failed(socket, request_id)}
 
           {:error, :precondition_failed} ->
             socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
@@ -893,10 +957,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def push_block_renders(socket) do
     if PaperCanvas.paper_canvas_enabled?() do
       blocks = paper_top_level_blocks(socket)
-      previews = Map.new(task_previews(blocks, socket), &{&1["block_id"], &1})
+      render_blocks = expandable_render_blocks(blocks)
+      previews = Map.new(task_previews(render_blocks, socket), &{&1["block_id"], &1})
 
       fleet_renders =
-        blocks
+        render_blocks
         |> Enum.filter(&fleet_block?/1)
         |> Enum.map(fn block ->
           %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
@@ -906,7 +971,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
       # hole finds it with ZERO hook change). Concatenated with the fleet renders.
       figure_renders =
-        blocks
+        render_blocks
         |> Enum.filter(&figure_block?/1)
         |> Enum.map(&figure_render/1)
 
@@ -1031,6 +1096,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # cumulative-from-mount. No-op when the canvas flag is OFF (no canvas is mounted
   # to receive the event, but we also gate so the OFF path pushes nothing).
   def push_canvas_echo(socket, request_id \\ nil) do
+    paper = socket.assigns[:paper_doc]
+    content = doc_field(paper, :content) || %{}
+    socket = push_table_echo(socket, content["blocks"] || [], content["rev"], request_id)
+
     if PaperCanvas.paper_canvas_enabled?() do
       {slug, blocks} =
         case socket.assigns[:paper_doc] do
@@ -1041,17 +1110,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {nil, []}
         end
 
-      runs =
-        blocks
-        |> PaperCanvas.partition_runs()
-        |> PaperCanvas.with_run_ordinals()
-        |> Enum.flat_map(fn
-          {:run, run_blocks, ordinal} ->
-            [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
-
-          {:block, _block} ->
-            []
-        end)
+      runs = canvas_echo_runs(slug, blocks)
 
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
       push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
@@ -1059,6 +1118,188 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       socket
     end
   end
+
+  @doc false
+  def push_table_echo(socket, raw_blocks, rev, request_id \\ nil) do
+    raw_blocks
+    |> Barkpark.Content.Papers.BlockOps.table_editor_projections()
+    |> Enum.reduce(socket, fn {id, projection}, current ->
+      push_event(current, "bp:block-update", %{
+        block_id: id,
+        table_projection: projection,
+        rev: rev,
+        request_id: request_id
+      })
+    end)
+  end
+
+  @doc false
+  # A successful mutation reply confirms its current Table projection too.
+  # Push notifications remain useful for other editors, but losing one must
+  # not strand the initiating editor waiting for its structural coordinates.
+  # On ledger replay, receipt.rev can be older than this fresh projection.
+  def table_confirmation(result, %{"op" => kind, "id" => id}, blocks, rev)
+      when kind in ["patch-table-cells", "patch-table-structure"] do
+    projection = Barkpark.Content.Papers.BlockOps.table_editor_projections(blocks)[id]
+    Map.merge(result, %{table_projection: projection, table_projection_rev: rev})
+  end
+
+  def table_confirmation(result, _op, _blocks, _rev), do: result
+
+  @doc false
+  def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
+    blocks = Content.ensure_block_ids(blocks)
+    run_entries(slug, blocks) ++ nested_canvas_echo_runs(slug, blocks)
+  end
+
+  def canvas_echo_runs(_slug, _blocks), do: []
+
+  defp run_entries(slug, blocks) do
+    blocks
+    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.with_run_ordinals()
+    |> Enum.flat_map(fn
+      {:run, run_blocks, ordinal} ->
+        [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
+
+      {:block, _block} ->
+        []
+    end)
+  end
+
+  defp nested_canvas_echo_runs(root_slug, blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => "tabs", "id" => id, "tabs" => rows}
+      when is_binary(id) and is_list(rows) ->
+        Enum.flat_map(rows, fn
+          %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
+            children = tab_children(row)
+
+            run_entries(PaperCanvas.tabs_run_slug(root_slug, id, row_id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          _ ->
+            []
+        end)
+
+      %{"type" => "expandable", "id" => id} = block when is_binary(id) ->
+        children = expandable_children(block)
+
+        run_entries(PaperCanvas.expandable_run_slug(root_slug, id), children) ++
+          nested_canvas_echo_runs(root_slug, children)
+
+      %{"type" => "steps", "id" => id, "steps" => rows}
+      when is_binary(id) and is_list(rows) ->
+        Enum.flat_map(rows, fn
+          %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
+            children = expandable_children(row)
+
+            run_entries(PaperCanvas.steps_run_slug(root_slug, id, row_id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          _ ->
+            []
+        end)
+
+      %{"type" => "figure", "id" => id, "child" => child}
+      when is_binary(id) and id != "" and is_map(child) ->
+        children = [child]
+
+        run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
+          nested_canvas_echo_runs(root_slug, children)
+
+      %{"type" => "terminal", "id" => id} = block when is_binary(id) and id != "" ->
+        case terminal_children(block) do
+          {:ok, children} ->
+            run_entries(PaperCanvas.terminal_run_slug(root_slug, id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          :error ->
+            []
+        end
+
+      %{"type" => "section", "id" => id, "blocks" => children} = block
+      when is_binary(id) and id != "" and is_list(children) ->
+        own_runs =
+          if SectionLayout.grid(block) do
+            []
+          else
+            run_entries(PaperCanvas.section_run_slug(root_slug, id), children)
+          end
+
+        own_runs ++ nested_canvas_echo_runs(root_slug, children)
+
+      %{"type" => "columns", "id" => id, "columns" => columns}
+      when is_binary(id) and id != "" and is_list(columns) ->
+        columns
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {children, index} when is_list(children) ->
+            run_entries(PaperCanvas.columns_run_slug(root_slug, id, index), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          {_opaque, _index} ->
+            []
+        end)
+
+      _ ->
+        []
+    end)
+  end
+
+  @doc false
+  def expandable_render_blocks(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => "tabs", "tabs" => rows} = block when is_list(rows) ->
+        children = Enum.flat_map(rows, &tab_children/1)
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "expandable"} = block ->
+        children = expandable_children(block)
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "steps", "steps" => rows} = block when is_list(rows) ->
+        children = Enum.flat_map(rows, &expandable_children/1)
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "figure", "child" => child} = block when is_map(child) ->
+        [block | expandable_render_blocks([child])]
+
+      %{"type" => "terminal"} = block ->
+        case terminal_children(block) do
+          {:ok, children} -> [block | expandable_render_blocks(children)]
+          :error -> [block]
+        end
+
+      %{"type" => "section", "blocks" => children} = block when is_list(children) ->
+        [block | expandable_render_blocks(children)]
+
+      %{"type" => "columns", "columns" => columns} = block when is_list(columns) ->
+        children =
+          Enum.flat_map(columns, fn column -> if is_list(column), do: column, else: [] end)
+
+        [block | expandable_render_blocks(children)]
+
+      block ->
+        [block]
+    end)
+  end
+
+  def expandable_render_blocks(_blocks), do: []
+
+  defp tab_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp tab_children(_row), do: []
+
+  defp terminal_children(%{"children" => children} = block) when is_list(children) do
+    if Map.has_key?(block, "blocks"), do: :error, else: {:ok, children}
+  end
+
+  defp terminal_children(_block), do: :error
+
+  defp expandable_children(%{"children" => children}) when is_list(children), do: children
+  defp expandable_children(%{"children" => children}) when children not in [nil, false], do: []
+  defp expandable_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp expandable_children(_block), do: []
 
   @doc false
   def document_op(socket, op) do
@@ -1108,7 +1349,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
              ) do
           {:ok, _result} ->
             socket
-            |> sync_editor_blocks()
+            |> sync_editor_blocks(op["request_id"])
+            |> assign(save_status: "Auto-saved")
             |> assign(last_paper_save_ok?: true)
             |> then(fn saved ->
               assign(saved,
@@ -1143,27 +1385,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   defp document_op_once(socket, doc, type, dataset, op) do
-    case Content.apply_document_block_op_once(
-           doc.doc_id,
-           type,
-           Map.drop(op, ["if_rev", "request_id"]),
-           dataset,
-           op["request_id"],
-           replay_principal_key(socket),
-           Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
-         ) do
-      {:ok, receipt, outcome} ->
-        socket
-        |> sync_editor_blocks()
-        |> assign(last_paper_save_ok?: true)
-        |> assign(
-          last_paper_save_result: %{
-            saved: true,
-            request_id: op["request_id"],
-            replayed: outcome == :replayed,
-            rev: receipt.rev
-          }
+    source = Map.get(op, @server_form_source)
+    opts = Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
+
+    result =
+      if is_map(source) do
+        Content.apply_document_block_form_once(
+          doc.doc_id,
+          type,
+          "block_form:v1",
+          source,
+          dataset,
+          op["request_id"],
+          replay_principal_key(socket),
+          fn blocks -> Blocks.resolve_block_form(blocks, source) end,
+          opts
         )
+      else
+        Content.apply_document_block_op_once(
+          doc.doc_id,
+          type,
+          Map.drop(op, ["if_rev", "request_id"]),
+          dataset,
+          op["request_id"],
+          replay_principal_key(socket),
+          opts
+        )
+      end
+
+    case result do
+      {:ok, receipt, outcome} ->
+        socket =
+          socket
+          |> sync_editor_blocks(op["request_id"])
+          |> assign(save_status: "Auto-saved")
+          |> assign(last_paper_save_ok?: true)
+
+        result = %{
+          saved: true,
+          request_id: op["request_id"],
+          replayed: outcome == :replayed,
+          rev: receipt.rev
+        }
+
+        assign(socket,
+          last_paper_save_result: document_table_confirmation(socket, result, op)
+        )
+
+      {:error, {:source_validation, _reason}} ->
+        form_validation_failed(socket, op["request_id"])
 
       {:error, {:rev_mismatch, current_rev}} ->
         document_conflict(socket, op["request_id"], current_rev)
@@ -1176,6 +1446,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
+  defp document_table_confirmation(socket, result, %{"op" => kind} = op)
+       when kind in ["patch-table-cells", "patch-table-structure"] do
+    doc = socket.assigns[:editor_doc]
+
+    case Content.resolve_blocks_for_edit(
+           doc,
+           socket.assigns[:editor_type],
+           socket.assigns.dataset
+         ) do
+      {blocks, _synth?} when is_list(blocks) ->
+        table_confirmation(result, op, blocks, doc_field(doc, :rev))
+
+      _ ->
+        table_confirmation(result, op, [], doc_field(doc, :rev))
+    end
+  end
+
+  defp document_table_confirmation(_socket, result, _op), do: result
+
   defp document_conflict(socket, request_id, current_rev) do
     socket
     |> sync_editor_blocks()
@@ -1186,6 +1475,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         request_id: request_id,
         conflict: true,
         current_rev: current_revision(current_rev)
+      }
+    )
+  end
+
+  defp form_validation_failed(socket, request_id) do
+    beta? = socket.assigns[:editor_view] == :form and socket.assigns[:editor_mode] == :beta
+    socket = if beta?, do: sync_editor_blocks(socket), else: sync_paper_edit_doc(socket)
+
+    rev =
+      if beta?, do: doc_field(socket.assigns[:editor_doc], :rev), else: socket.assigns[:paper_rev]
+
+    socket
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: "validation",
+        current_rev: rev
       }
     )
   end
@@ -1211,7 +1519,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
-  def sync_editor_blocks(socket) do
+  def project_editor_blocks(blocks) do
+    case Content.project_block_ids_safely(blocks) do
+      {:ok, projected} -> {projected, nil}
+      {:error, reason} -> {[], reason}
+    end
+  end
+
+  @doc false
+  def resolve_editor_blocks(doc, type, dataset) do
+    case Content.resolve_blocks_for_edit(doc, type, dataset) do
+      {:error, reason} ->
+        {[], false, reason, MapSet.new()}
+
+      {blocks, synth?} when is_list(blocks) and is_boolean(synth?) ->
+        table_ids =
+          case Barkpark.Content.Papers.BlockOps.table_editor_target_ids(blocks) do
+            {:ok, ids} -> ids
+            {:error, _} -> MapSet.new()
+          end
+
+        {blocks, identity_error} = project_editor_blocks(blocks)
+        {blocks, synth?, identity_error, table_ids}
+    end
+  end
+
+  @doc false
+  def sync_editor_blocks(socket, request_id \\ nil) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
@@ -1219,16 +1553,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     with %{doc_id: doc_id} <- doc,
          target_doc_id = Content.draft_id(Content.published_id(doc_id)),
          {:ok, fresh} <- get_fresh_editor_doc(target_doc_id, doc_id, type, dataset, socket) do
-      {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
+      {blocks, synth?, identity_error, table_ids} = resolve_editor_blocks(fresh, type, dataset)
 
       assign(socket,
         editor_doc: fresh,
         editor_blocks: blocks,
+        editor_table_target_ids: table_ids,
+        editor_blocks_identity_error: identity_error,
+        editor_mode:
+          if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
         editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
       )
+      |> push_document_table_echo(request_id)
     else
       _ -> socket
+    end
+  end
+
+  @doc false
+  def push_document_table_echo(socket, request_id \\ nil) do
+    if socket.assigns[:editor_mode] == :beta do
+      doc = socket.assigns[:editor_doc]
+
+      case Content.resolve_blocks_for_edit(
+             doc,
+             socket.assigns[:editor_type],
+             socket.assigns.dataset
+           ) do
+        {raw_blocks, synth?} when is_list(raw_blocks) and is_boolean(synth?) ->
+          push_table_echo(socket, raw_blocks, doc_field(doc, :rev), request_id)
+
+        _ ->
+          socket
+      end
+    else
+      socket
     end
   end
 
@@ -1333,7 +1693,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     case slug &&
            Content.get_paper(slug, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
       %{content: content} = fresh when is_map(content) ->
-        assign(socket, paper_doc: fresh, paper_rev: Map.get(content, "rev") || 0)
+        blocks = Projection.read_blocks(content) || []
+
+        assign(socket,
+          paper_doc: fresh,
+          paper_rev: Map.get(content, "rev") || 0,
+          paper_link_details: paper_link_details(socket, fresh, blocks)
+        )
 
       _ ->
         socket
@@ -1349,10 +1715,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       true ->
         case socket.assigns[:paper_doc] do
-          %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
-          _ -> []
+          %{content: %{"blocks" => blocks}} when is_list(blocks) ->
+            Content.ensure_block_ids(blocks)
+
+          _ ->
+            []
         end
     end
+  end
+
+  defp paper_link_details(socket, paper, blocks) do
+    socket_scope = ScopeHelpers.scope_opts(socket)
+
+    scope = [
+      workspace_id: Map.get(paper, :workspace_id) || Keyword.get(socket_scope, :workspace_id),
+      project_id: Map.get(paper, :project_id) || Keyword.get(socket_scope, :project_id),
+      published_only: true
+    ]
+
+    Content.Papers.resolve_paper_link_details(blocks, socket.assigns.dataset, scope)
   end
 
   @doc false
@@ -1563,6 +1944,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: true,
         paper_edit_mode: false,
+        paper_link_details: paper_link_details(socket, paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -1601,6 +1983,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: false,
         paper_edit_mode: false,
+        paper_link_details: %{},
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -1711,6 +2094,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_block_mode: false,
         paper_edit_mode: false,
         paper_task_previews: %{},
+        paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
@@ -1719,6 +2103,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     else
       assign(socket,
         editor_view: :form,
+        paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
@@ -1886,6 +2271,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             )
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_link_details, paper_link_details(socket, paper, blocks))
             |> assign(:paper_block_mode, true)
 
           _ ->
@@ -1893,6 +2279,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> assign(:paper_doc, paper)
             |> assign(:paper_html, reader_paper_html(socket, paper))
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_link_details, %{})
             |> assign(:paper_block_mode, false)
         end
     end

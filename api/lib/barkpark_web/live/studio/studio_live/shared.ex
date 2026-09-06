@@ -50,12 +50,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         _ -> []
       end
 
+    rev = get_in((paper && Map.get(paper, :content)) || %{}, ["rev"])
+    socket = Paper.push_table_echo(socket, blocks, rev)
+
     case Enum.find(blocks, fn b -> Map.get(b, "id") == block_id end) do
       nil ->
         socket
 
+      %{"type" => "table"} ->
+        socket
+
       block ->
-        rev = get_in((paper && Map.get(paper, :content)) || %{}, ["rev"])
         push_event(socket, "bp:block-update", %{block_id: block_id, block: block, rev: rev})
     end
   end
@@ -205,6 +210,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_op(socket, op), to: Paper
+  defdelegate paper_form_op(socket, params), to: Paper
 
   @doc false
   defdelegate paper_ops(socket, ops), to: Paper
@@ -212,6 +218,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   defdelegate paper_ops(socket, ops, request_id), to: Paper
   defdelegate paper_ops(socket, ops, request_id, if_rev), to: Paper
+  defdelegate paper_ops(socket, ops, request_id, if_rev, context), to: Paper
 
   @doc false
   defdelegate push_task_previews(socket), to: Paper
@@ -1046,8 +1053,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     is_draft = (editor && editor[:is_draft]) || false
     has_published = (editor && editor[:has_published]) || false
 
-    {editor_blocks, editor_blocks_synth?} =
-      Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
+    {editor_blocks, editor_blocks_synth?, editor_blocks_identity_error, editor_table_target_ids} =
+      Paper.resolve_editor_blocks(editor_doc, editor_type, socket.assigns.dataset)
 
     same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
 
@@ -1063,7 +1070,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         else: socket |> empty_editor_state_for(panes) |> triage_not_found(socket)
 
     editor_mode =
-      if same_doc?,
+      if same_doc? and is_nil(editor_blocks_identity_error),
         do: socket.assigns[:editor_mode] || :classic,
         else: :classic
 
@@ -1078,6 +1085,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_form: new_form,
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
+        editor_table_target_ids: editor_table_target_ids,
+        editor_blocks_identity_error: editor_blocks_identity_error,
         editor_blocks_synth?: editor_blocks_synth?,
         editor_empty: editor_empty,
         save_status:
@@ -1102,6 +1111,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       )
       |> maybe_refresh_content_preview()
       |> clear_secondary_on_doc_change(same_doc?)
+      |> Paper.push_document_table_echo()
 
     case editor && editor[:view] do
       :paper ->

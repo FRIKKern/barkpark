@@ -29,28 +29,34 @@ defmodule Barkpark.PortableDoc.BlockIds do
   (`block-<index>`, sections recurse with a `<parent>.<index>` prefix) for
   any block that lacks one. A block already carrying a non-blank "id" is left
   untouched, so author/op-supplied ids — which DocPatchOps address blocks by —
-  survive byte-identical and stay resolvable. Sections recurse so a nested
-  id-less child also gets a unique id (the stream only keys on top-level ids,
-  but `apply_paper_block_op` addresses children too).
+  survive byte-identical and stay resolvable. Visible containers recurse so a
+  nested id-less child also gets a unique id (the stream only keys on top-level
+  ids, but `apply_paper_block_op` addresses children too).
 
   Coverage (the three id-less shapes a block can take):
 
     * ABSENT — no `"id"` key at all → gets `<prefix>-<index>`.
     * BLANK  — `"id" => ""` or `"id" => nil` → gets `<prefix>-<index>`.
-    * NESTED — recursion covers any block carrying a `"blocks"` list — sections
-      are the only id-addressable nested container, so they are the only thing
-      recursed. (composite / arrayOf inline children nest under `"items"` /
-      `"content"`, are inline — not id-addressable blocks — and are NOT
-      recursed.) The recursion prefix is the parent's (now-ensured) id, keeping
-      child ids unique and deterministic.
+    * NESTED — recursion covers `"blocks"` lists, expandable `"children"`, each
+      steps row's reader-visible body, each plain-tabs row's canonical
+      `"blocks"`, and a Terminal's canonical `"children"`, plus the singular
+      map-valued `"child"` of a `figure` and its visible descendants, and map
+      children inside each list row of an exact `columns.columns` list. Steps
+      and tabs rows gain stable row ids; columns do not gain synthetic row
+      identities. Scalar column rows/elements and hidden / opaque aliases remain
+      untouched. A figure with a missing, nil, scalar, or array child is opaque,
+      as are any figure, Terminal, or columns compatibility aliases. Composite /
+      arrayOf inline children under `"items"` / `"content"` are NOT recursed.
+      Child prefixes use the parent's (or row/column index's) ensured id, keeping
+      minted ids deterministic.
 
-  Collision-safe WITHIN each list (and each nested list). Before minting, the
-  set of all present non-blank ids at this level is collected. The positional
-  candidate `<prefix>-<index>` is checked against that set PLUS every id already
-  minted this pass; if taken, a deterministic suffix (`-<k>`, k incrementing
-  from 1) is appended until free. So a MIXED list — an id-bearing block whose
-  literal id collides with the positional slot of an id-less block, or two
-  id-less blocks resolving to the same slot — can never produce DUPLICATE ids.
+  Collision-safe across the authored tree. Before minting, every present
+  non-blank block, steps-row, tabs-row, canonical figure-child, Terminal child,
+  and valid column descendant id is reserved globally, including ids in hidden
+  steps and Terminal `children` / `blocks` aliases. Only reader-visible paths are
+  projected, but a minted positional id can never collide with authored identity
+  elsewhere in the document. If taken, a deterministic suffix
+  (`-<k>`, k incrementing from 1) is appended until free.
 
   Idempotent: re-running over an already-id-bearing list is a no-op (a present
   non-blank id is preserved exactly). This is the SINGLE chokepoint every write
@@ -61,72 +67,268 @@ defmodule Barkpark.PortableDoc.BlockIds do
   and the backfill Mix task all call it, so an id-less block can never reach
   storage.
 
-  Post-condition: within any block list (and each nested list), all ids are
-  UNIQUE.
+  Existing explicit duplicate ids are preserved byte-identical. Revision-fenced
+  identified document operations reject such an ambiguous target before traversal.
   """
   @spec ensure_block_ids(list()) :: list()
-  def ensure_block_ids(blocks) when is_list(blocks), do: ensure_block_ids(blocks, "block")
-
-  defp ensure_block_ids(blocks, prefix) when is_list(blocks) do
-    # Seed the working set with EVERY present non-blank id at this level, so a
-    # minted positional id can never collide with a literal id already present
-    # (the mixed-paper duplicate-id corruption). The set then grows as each
-    # id-less block is filled, so two id-less blocks at the same level can't
-    # collide either.
-    taken = present_ids(blocks)
-
-    {ensured, _taken} =
-      blocks
-      |> Enum.with_index()
-      |> Enum.map_reduce(taken, fn {block, index}, taken ->
-        ensure_block_id(block, prefix, index, taken)
-      end)
-
+  def ensure_block_ids(blocks) when is_list(blocks) do
+    {ensured, _taken} = ensure_block_ids(blocks, "block", MapSet.new(authored_tree_ids(blocks)))
     ensured
   end
 
-  # The set of all present, non-blank string ids in a block list (this level
-  # only — nested lists carry their own scope).
-  defp present_ids(blocks) do
-    Enum.reduce(blocks, MapSet.new(), fn block, acc ->
-      case is_map(block) && Map.get(block, "id") do
-        id when is_binary(id) and id != "" -> MapSet.put(acc, id)
-        _ -> acc
-      end
+  @doc """
+  Project stable ids only when every authored block, steps-row, tabs-row,
+  canonical figure-child, canonical Terminal child, and valid column-descendant
+  identity is unambiguous across the full visible tree. Hidden steps and Terminal
+  body aliases participate in the duplicate fence even when they are not
+  projected; malformed and compatibility-only aliases remain opaque.
+  """
+  @spec project_block_ids_safely(list()) ::
+          {:ok, list()} | {:error, {:duplicate_id, String.t()}}
+  def project_block_ids_safely(blocks) when is_list(blocks) do
+    ids = authored_tree_ids(blocks)
+    counts = Enum.frequencies(ids)
+
+    case Enum.find(ids, &(Map.fetch!(counts, &1) > 1)) do
+      nil -> {:ok, ensure_block_ids(blocks)}
+      id -> {:error, {:duplicate_id, id}}
+    end
+  end
+
+  defp ensure_block_ids(blocks, prefix, taken) when is_list(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn {block, index}, taken ->
+      ensure_block_id(block, prefix, index, taken)
     end)
   end
 
   # Returns `{ensured_block, taken'}` — the block with a guaranteed-unique id
-  # (recursing into a section's children), and the working id-set extended with
-  # any id this block now occupies. A present non-blank id is preserved exactly
-  # (already in `taken`); an id-less block mints a collision-free positional id.
+  # (recursing into its canonical visible descendants), and the working id-set
+  # extended with any id this block now occupies. A present non-blank id is
+  # preserved exactly (already in `taken`); an id-less block mints a
+  # collision-free positional id.
   defp ensure_block_id(block, prefix, index, taken) when is_map(block) do
-    {id, taken} =
-      case Map.get(block, "id") do
-        existing when is_binary(existing) and existing != "" ->
-          # Already present and already counted in `taken` via present_ids/1.
-          {existing, taken}
+    {block, taken} = ensure_identity(block, prefix, index, taken)
+    id = block["id"]
+
+    {block, taken} =
+      case block do
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          {rows, taken} = ensure_step_ids(rows, id <> "-step", taken)
+          {Map.put(block, "steps", rows), taken}
+
+        %{"type" => "tabs"} ->
+          case Map.get(block, "tabs") do
+            rows when is_list(rows) ->
+              {rows, taken} = ensure_tab_ids(rows, id <> "-tab", taken)
+              {Map.put(block, "tabs", rows), taken}
+
+            _opaque ->
+              {block, taken}
+          end
+
+        %{"type" => "expandable"} ->
+          ensure_visible_body_ids(block, id, taken)
+
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          {columns, taken} = ensure_column_ids(columns, id, taken)
+          {Map.put(block, "columns", columns), taken}
+
+        %{"type" => "columns"} ->
+          {block, taken}
+
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          {child, taken} = ensure_block_id(child, id <> "-child", 0, taken)
+          {Map.put(block, "child", child), taken}
+
+        %{"type" => "figure"} ->
+          {block, taken}
+
+        %{"type" => "terminal", "children" => children} when is_list(children) ->
+          if Map.has_key?(block, "blocks") do
+            {block, taken}
+          else
+            {children, taken} = ensure_block_ids(children, id, taken)
+            {Map.put(block, "children", children), taken}
+          end
+
+        %{"type" => "terminal"} ->
+          {block, taken}
+
+        %{"blocks" => children} when is_list(children) ->
+          {children, taken} = ensure_block_ids(children, id, taken)
+          {Map.put(block, "blocks", children), taken}
 
         _ ->
-          id = unique_id(prefix, index, taken)
-          {id, MapSet.put(taken, id)}
-      end
-
-    block = Map.put(block, "id", id)
-
-    block =
-      case Map.get(block, "blocks") do
-        children when is_list(children) ->
-          Map.put(block, "blocks", ensure_block_ids(children, id))
-
-        _ ->
-          block
+          {block, taken}
       end
 
     {block, taken}
   end
 
   defp ensure_block_id(block, _prefix, _index, taken), do: {block, taken}
+
+  defp ensure_identity(value, prefix, index, taken) do
+    case Map.get(value, "id") do
+      existing when is_binary(existing) and existing != "" ->
+        {value, taken}
+
+      _ ->
+        id = unique_id(prefix, index, taken)
+        {Map.put(value, "id", id), MapSet.put(taken, id)}
+    end
+  end
+
+  defp ensure_step_ids(rows, prefix, taken) do
+    rows
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn
+      {row, index}, taken when is_map(row) ->
+        {row, taken} = ensure_identity(row, prefix, index, taken)
+
+        # A row is not a block. Project its selected body only; do not let
+        # generic blocks recursion rewrite a hidden compatibility alias.
+        ensure_visible_body_ids(row, row["id"], taken)
+
+      {other, _index}, taken ->
+        {other, taken}
+    end)
+  end
+
+  defp ensure_tab_ids(rows, prefix, taken) do
+    rows
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn
+      {row, index}, taken when is_map(row) ->
+        {row, taken} = ensure_identity(row, prefix, index, taken)
+
+        case Map.get(row, "blocks") do
+          children when is_list(children) ->
+            {children, taken} = ensure_block_ids(children, row["id"], taken)
+            {Map.put(row, "blocks", children), taken}
+
+          _opaque ->
+            {row, taken}
+        end
+
+      {other, _index}, taken ->
+        {other, taken}
+    end)
+  end
+
+  defp ensure_column_ids(columns, prefix, taken) do
+    columns
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn
+      {children, index}, taken when is_list(children) ->
+        ensure_block_ids(children, prefix <> "-column-" <> Integer.to_string(index), taken)
+
+      {opaque, _index}, taken ->
+        {opaque, taken}
+    end)
+  end
+
+  defp ensure_visible_body_ids(container, prefix, taken) do
+    case visible_body_key(container) do
+      nil ->
+        {container, taken}
+
+      key ->
+        {children, taken} = ensure_block_ids(Map.fetch!(container, key), prefix, taken)
+        {Map.put(container, key, children), taken}
+    end
+  end
+
+  defp authored_tree_ids(blocks) when is_list(blocks),
+    do: Enum.flat_map(blocks, &authored_block_tree_ids/1)
+
+  defp authored_block_tree_ids(block) when is_map(block) do
+    nested =
+      case block do
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_step_tree_ids/1)
+
+        %{"type" => "tabs"} ->
+          case Map.get(block, "tabs") do
+            rows when is_list(rows) -> Enum.flat_map(rows, &authored_tab_tree_ids/1)
+            _opaque -> []
+          end
+
+        %{"type" => "expandable"} ->
+          authored_body_alias_ids(block)
+
+        %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+          Enum.flat_map(columns, fn
+            children when is_list(children) -> authored_tree_ids(children)
+            _opaque -> []
+          end)
+
+        %{"type" => "columns"} ->
+          []
+
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          authored_block_tree_ids(child)
+
+        %{"type" => "figure"} ->
+          []
+
+        %{"type" => "terminal"} ->
+          authored_body_alias_ids(block)
+
+        %{"blocks" => children} when is_list(children) ->
+          authored_tree_ids(children)
+
+        _ ->
+          []
+      end
+
+    authored_identity(block) ++ nested
+  end
+
+  defp authored_block_tree_ids(_block), do: []
+
+  defp authored_step_tree_ids(row) when is_map(row),
+    do: authored_identity(row) ++ authored_body_alias_ids(row)
+
+  defp authored_step_tree_ids(_row), do: []
+
+  defp authored_tab_tree_ids(row) when is_map(row) do
+    nested =
+      case Map.get(row, "blocks") do
+        children when is_list(children) -> authored_tree_ids(children)
+        _opaque -> []
+      end
+
+    authored_identity(row) ++ nested
+  end
+
+  defp authored_tab_tree_ids(_row), do: []
+
+  defp authored_body_alias_ids(container) do
+    Enum.flat_map(["children", "blocks"], fn key ->
+      case Map.get(container, key) do
+        children when is_list(children) -> authored_tree_ids(children)
+        _other -> []
+      end
+    end)
+  end
+
+  defp authored_identity(%{"id" => id}) when is_binary(id) and id != "", do: [id]
+  defp authored_identity(_value), do: []
+
+  defp visible_body_key(container) do
+    case Map.get(container, "children") do
+      children when is_list(children) ->
+        "children"
+
+      absent when absent in [nil, false] ->
+        if is_list(Map.get(container, "blocks")), do: "blocks"
+
+      _ ->
+        nil
+    end
+  end
 
   # The positional candidate `<prefix>-<index>`, disambiguated deterministically
   # if already taken: append `-1`, `-2`, … until free. Deterministic (no

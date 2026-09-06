@@ -179,6 +179,32 @@ defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
   end
 
   describe "ONE reader producer (mirrors parity gate §1)" do
+    test "article parts reconstruct the exact canonical reader bytes" do
+      block = %{
+        "type" => "card",
+        "tone" => "info",
+        "slots" => %{
+          "media" => [%{"src" => "/cover.png", "alt" => "Cover"}],
+          "title" => [%{"type" => "heading", "level" => 3, "text" => "Title"}],
+          "body" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body"}]}
+          ],
+          "action" => [%{"type" => "action", "href" => "/go", "label" => "Go"}]
+        }
+      }
+
+      parts = Components.card_article_parts(block)
+
+      assert ~s|<div class="#{parts.class}">#{parts.media_html}#{parts.title_html}#{parts.body_html}#{parts.action_html}</div>| ==
+               Components.card_html(block)
+
+      assert parts.class == "bp-card bp-card--info"
+      assert parts.media_html =~ ~s(<img src="/cover.png" alt="Cover")
+      assert parts.title_html == "<h3>Title</h3>"
+      assert parts.body_html == "<p>Body</p>"
+      assert parts.action_html == ~s(<a href="/go" class="bp-button">Go</a>)
+    end
+
     test "render_block(card, :article) == Components.card_html(card), non-vacuous" do
       block = card("Title", "Body", "info")
       html = Render.render_block(block, @article)

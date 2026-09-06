@@ -9,13 +9,13 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   `/d/:dataset/papers/:slug`, and scoped `/w/:ws/p/:proj/papers/:slug` — the
   plug emits
 
-      etag: W/"sha256:<canonical_digest(content)>.<bucket>"
+      etag: W/"sha256:<canonical_digest(content)>.<build_digest>.<bucket>"
 
   and answers a matching `If-None-Match` with an empty `304 Not Modified`,
   halting BEFORE the LiveView dead render. `x-barkpark-paper-revision` still
   rides along only when a released revision is pinned (rrid-gated; D9 dropped
-  that gate for the ETag itself — the validator is the content digest, not the
-  revision pointer).
+  that gate for the ETag itself — the validator keys semantic content plus the
+  compiled reader build, not the revision pointer).
 
   ## Why weak + bucketed (D9)
 
@@ -26,6 +26,14 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   the bucket edge — bounding staleness BELOW the 14-day LiveView token expiry
   that otherwise turns a valid 304 into a same-URL redirect loop (the revived
   HTML's expired LV token dead-loops the client).
+
+  The middle digest keys the rendered shell build, not only stored paper
+  content. It hashes `Barkpark.BuildInfo.info/0` (commit, version, and the
+  compile-time build timestamp), so a clean deploy changes the validator even
+  when the paper row is byte-identical. Including the timestamp is deliberate:
+  tarball/container builds may report an `"unknown"` commit, but a newly
+  compiled reader must still invalidate HTML containing the previous build's
+  inline bootstrap and asset references.
 
   ## Cache policy (second-review condition 1)
 
@@ -267,7 +275,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   # history.
   defp weak_etag(content) do
     bucket = div(System.os_time(:second), @bucket_seconds)
-    ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{bucket}")
+    build_digest = EpicFleet.canonical_digest(Barkpark.BuildInfo.info())
+    ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{build_digest}.#{bucket}")
   end
 
   # D11 lives in BarkparkWeb.Http.IfNoneMatch now — this plug was its original source.

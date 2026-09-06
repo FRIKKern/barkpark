@@ -199,9 +199,11 @@
     .bp-paper-edit-text { flex: 1 1 200px; min-width: 120px; }
     .bp-paper-edit-textarea { flex: 1 1 100%; width: 100%; }
     .bp-paper-edit-form input[type="text"],
+    .bp-paper-edit-form input[type="number"],
     .bp-paper-edit-form textarea,
     .bp-paper-edit-form select,
     .bp-paper-edit-field input[type="text"],
+    .bp-paper-edit-field input[type="number"],
     .bp-paper-edit-field textarea,
     .bp-paper-edit-field select {
       font-family: var(--paper-font-serif); color: var(--paper-ink);
@@ -210,9 +212,11 @@
       border-radius: 0; padding: 4px 2px; font-size: 18px; line-height: 1.55;
     }
     .bp-paper-edit-form input[type="text"]:focus,
+    .bp-paper-edit-form input[type="number"]:focus,
     .bp-paper-edit-form textarea:focus,
     .bp-paper-edit-form select:focus,
     .bp-paper-edit-field input[type="text"]:focus,
+    .bp-paper-edit-field input[type="number"]:focus,
     .bp-paper-edit-field textarea:focus,
     .bp-paper-edit-field select:focus {
       outline: none; border-bottom-color: var(--paper-accent);
@@ -716,6 +720,7 @@
     .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
     .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
     .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
+    .bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
     /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose
        column exactly like .bp-table (the reader's three breakout classes). Values
        byte-copied from paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart`
@@ -753,10 +758,13 @@
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */
     .bp-canvas-table { position: relative; }
-    .bp-canvas-table__cols, .bp-canvas-table__rows { position: absolute; left: 0; z-index: 2; display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; margin: 0; }
-.bp-canvas-table__cols { bottom: 100%; }
-.bp-canvas-table__rows { top: 100%; }
-    .bp-canvas-table:hover .bp-canvas-table__cols, .bp-canvas-table:hover .bp-canvas-table__rows, .bp-canvas-table:focus-within .bp-canvas-table__cols, .bp-canvas-table:focus-within .bp-canvas-table__rows { opacity: 1; pointer-events: auto; }
+/* Idle controls add no reader spacing. When exposed, reserve their own space
+ * BELOW the table: grids have no safe gutter for floating controls. */
+.bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
+.bp-canvas-table:hover > .bp-canvas-table__controls, .bp-canvas-table:focus-within > .bp-canvas-table__controls, .bp-canvas-table__controls[open] { position: relative; opacity: 1; pointer-events: auto; }
+.bp-canvas-table__controls > summary { cursor: pointer; padding: 6px 0; width: fit-content; }
+.bp-canvas-table__controls > summary:focus-visible, .bp-canvas-table__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-table__cols, .bp-canvas-table__rows { display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 0; padding: 4px 0; }
     .bp-canvas-table__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
     .bp-canvas-table__btn:disabled { opacity: 0.4; cursor: default; }
     /* Block chrome ported VERBATIM from the paper-editor bundle
@@ -1536,8 +1544,9 @@
 .bp-paper-editor-body li > p { margin: 0; }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
-/* Only the opening canvas run shares the reader opening-margin clamp. */
-.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child { margin-top: 0; }
+/* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
+   lifts the Chronicle navigation and title by one paragraph margin in Edit. */
+.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }
 
 /* Configuration sits over the code frame without adding a publish-time gap. */
 .bp-paper-editor-body pre.bp-canvas-code { position: relative; }
@@ -1558,3 +1567,153 @@
 .bp-canvas-diagram-field { display: grid; gap: 0.3rem; min-width: 0; }
 .bp-canvas-diagram-area, .bp-canvas-diagram-caption { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
 .bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+
+/* Reference-family configuration floats over the canonical reader render.
+   Closed controls therefore add no document rhythm, while the native details /
+   summary pair preserves keyboard and disclosure semantics without JS. */
+.bp-paper-edit-block:has(.bp-paper-contextual-editor) { margin-top: 0; }
+.bp-paper-contextual-editor { position: relative; }
+/* Figure is a reader-wide evidence surface. Expand the editor block itself to
+   that same band so its hover outline and floating toolbar surround the child
+   and caption instead of staying behind in the narrow prose column. The inner
+   reader-style figure then resolves its inherited pull to zero inside the
+   already-expanded block. Keep this scoped to the contextual Figure editor;
+   legacy canvas Figures and reader output retain their existing geometry. */
+.bp-paper-edit-block[data-block-type="figure"]:has(.bp-paper-figure-editor-frame) {
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+}
+.bp-paper-edit-block[data-block-type="columns"]:has([data-paper-columns-editor-frame]),
+.bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide) {
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+}
+.bp-section__cell > .bp-paper-edit-wc:first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-columns-editor-frame] {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-edit-wc:first-child bp-paper-editor[data-editor-mode="table"] .bp-table {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}
+:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-test-id="paper-terminal-readonly"] > .bp-term {
+  margin-top: 0;
+}
+/* Reader Terminal margins collapse in normal block flow. The edit surface is a
+   flex column whose contextual wrappers prevent that collapse, so consecutive
+   Terminals otherwise receive two 1.6rem margins. Preserve the reader's single
+   beat without changing either frame's canonical margin token. */
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-paper-terminal-editor-frame] {
+  margin-top: 0;
+}
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-test-id="paper-terminal-readonly"] > .bp-term {
+  margin-top: 0;
+}
+/* A paragraph's 12pt leading margin also collapses into the preceding
+   Terminal's larger 1.6rem bottom margin in View. Its canvas wrapper prevents
+   that in Edit, so suppress only that first paragraph's redundant leading leg. */
+.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-canvas .bp-paper-editor-body .ProseMirror > p:first-child {
+  margin-top: 0;
+}
+.bp-paper-card-body-editor,
+.bp-paper-card-body-editor > bp-paper-editor {
+  display: contents;
+}
+.bp-expandable__body > .bp-paper-edit-canvas:first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.bp-paper-contextual-controls {
+  position: absolute; top: 0; right: 0; z-index: 4;
+  width: min(32rem, calc(100vw - 2rem)); max-width: 100%;
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.78rem;
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-contextual-editor:hover > .bp-paper-contextual-controls,
+.bp-paper-contextual-editor:focus-within > .bp-paper-contextual-controls,
+.bp-paper-contextual-controls[open] { opacity: 1; pointer-events: auto; }
+.bp-paper-contextual-controls--gauge-list[open],
+.bp-paper-contextual-controls--tabs[open],
+.bp-paper-contextual-controls--section[open],
+.bp-paper-contextual-controls--columns[open],
+.bp-paper-contextual-controls--card[open],
+.bp-paper-contextual-controls--action[open],
+.bp-paper-contextual-controls--terminal[open],
+.bp-paper-contextual-controls--form[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--columns-empty {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--action-empty {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-contextual-controls--gauge-list[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--tabs[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--section[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--columns[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--card[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--action[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--terminal[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
+.bp-tabs--editor .bp-paper-contextual-controls[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-tabs--editor .bp-paper-contextual-controls[open] > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
+.bp-paper-contextual-toggle {
+  cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--paper-bg);
+}
+.bp-paper-contextual-panel {
+  width: 100%; max-width: 100%;
+  max-height: min(70vh, 42rem); overflow: auto; box-sizing: border-box;
+  margin-top: 0.55rem; padding: 0.75rem;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+  box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+}
+.bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
+.bp-paper-contextual-panel .bp-paper-edit-fieldlabel {
+  display: grid; gap: 0.3rem; min-width: 0; color: var(--paper-ink-soft);
+}
+.bp-paper-contextual-panel fieldset.bp-paper-edit-form {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45rem;
+  min-inline-size: 0; margin: 0; padding: 0.75rem;
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+}
+.bp-paper-contextual-panel :is(input[type="text"], input[type="number"], textarea, select) {
+  width: 100%; min-width: 0; box-sizing: border-box;
+}
+.bp-paper-contextual-panel .bp-paper-edit-actions {
+  flex-direction: row; flex-wrap: wrap; gap: 0.4rem;
+}
+.bp-paper-contextual-panel button {
+  min-height: 2rem; padding: 0.35rem 0.65rem;
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.8125rem;
+  line-height: 1.3; color: var(--paper-ink-soft); background: transparent;
+  border: 1px solid var(--paper-rule); border-radius: 4px; cursor: pointer;
+}
+.bp-paper-contextual-panel button:hover:not(:disabled) {
+  color: var(--paper-ink); background: var(--paper-accent-soft);
+}
+.bp-paper-contextual-panel button:disabled { opacity: 0.45; cursor: default; }
+.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (hover: none) {
+  .bp-paper-contextual-editor > .bp-paper-contextual-controls {
+    opacity: 1; pointer-events: auto;
+  }
+}

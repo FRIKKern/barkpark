@@ -48,31 +48,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     end
   end
 
+  def paper_edit_block(%{"block_id" => id, "request_id" => request_id} = params, socket)
+      when is_binary(id) and is_binary(request_id),
+      do: paper_reply(Shared.paper_form_op(socket, params))
+
   def paper_edit_block(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
-    patch = Blocks.build_block_patch(block, params)
 
-    paper_reply(
-      Shared.paper_op(
-        socket,
-        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
-      )
-    )
+    case Blocks.validate_block_patch(block, params) do
+      {:ok, patch} ->
+        paper_reply(
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+          )
+        )
+
+      {:error, _reason} ->
+        failed_reply(socket, params, :validation)
+    end
   end
 
   def paper_edit_block(params, socket), do: failed_reply(socket, params)
 
+  def paper_block_autosave(%{"block_id" => id, "request_id" => request_id} = params, socket)
+      when is_binary(id) and is_binary(request_id),
+      do: paper_reply(Shared.paper_form_op(socket, params))
+
   def paper_block_autosave(%{"block_id" => id} = params, socket) do
     block = Shared.paper_block_by_id(socket, id)
-    patch = Blocks.build_block_patch(block, params)
 
-    socket =
-      Shared.paper_op(
-        socket,
-        write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
-      )
+    case Blocks.validate_block_patch(block, params) do
+      {:ok, patch} ->
+        socket =
+          Shared.paper_op(
+            socket,
+            write_meta(%{"op" => "patch-block", "id" => id, "patch" => patch}, params)
+          )
 
-    paper_reply(socket)
+        paper_reply(socket)
+
+      {:error, _reason} ->
+        failed_reply(socket, params, :validation)
+    end
   end
 
   def paper_block_autosave(params, socket), do: failed_reply(socket, params)
@@ -287,19 +305,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    case Shared.paper_ops(socket, ops, request_id, is_map(params) && params["if_rev"]) do
-      {:ok, socket, receipt, outcome} ->
-        {:reply,
-         %{
-           saved: true,
-           request_id: request_id,
-           replayed: outcome == :replayed,
-           rev: receipt.rev
-         }, socket}
+    context = Blocks.canvas_run_context(params, Shared.paper_top_level_blocks(socket))
 
-      {:error, socket} ->
-        reply = socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
-        {:reply, Map.put_new(reply, :request_id, request_id), socket}
+    if context in [{:error, :outdated_terminal_canvas}, {:error, :outdated_stage_canvas}] do
+      widget = if context == {:error, :outdated_terminal_canvas}, do: "Terminal", else: "Stage"
+
+      {:reply,
+       %{
+         saved: false,
+         request_id: request_id,
+         rejected: Atom.to_string(elem(context, 1)),
+         current_rev: socket.assigns[:paper_rev],
+         error:
+           "Reload the Paper editor before editing this #{widget}. Your draft has not been saved."
+       }, socket}
+    else
+      case Shared.paper_ops(
+             socket,
+             ops,
+             request_id,
+             is_map(params) && params["if_rev"],
+             context
+           ) do
+        {:ok, socket, receipt, outcome} ->
+          {:reply,
+           %{
+             saved: true,
+             request_id: request_id,
+             replayed: outcome == :replayed,
+             rev: receipt.rev
+           }, socket}
+
+        {:error, socket} ->
+          reply =
+            socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
+
+          {:reply, Map.put_new(reply, :request_id, request_id), socket}
+      end
     end
   end
 
@@ -662,9 +704,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   defp paper_reply(socket),
     do: {:reply, socket.assigns[:last_paper_save_result] || %{saved: false}, socket}
 
-  defp failed_reply(socket, params) do
+  defp failed_reply(socket, params, rejection \\ nil) do
     request_id = if is_map(params), do: params["request_id"]
-    {:reply, %{saved: false, request_id: request_id}, socket}
+    result = %{saved: false, request_id: request_id}
+
+    result =
+      if rejection == :validation,
+        do: Map.merge(result, %{rejected: "validation", current_rev: socket.assigns[:paper_rev]}),
+        else: result
+
+    socket =
+      assign(socket,
+        save_status: "Save failed",
+        last_paper_save_ok?: false,
+        last_paper_save_result: result
+      )
+
+    {:reply, result, socket}
   end
 
   defp write_meta(op, params) do

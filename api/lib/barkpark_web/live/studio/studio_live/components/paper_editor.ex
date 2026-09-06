@@ -22,10 +22,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # the editor never authors halt copy, it mirrors the server reason verbatim).
   import BarkparkWeb.StudioComponents.Editor, only: [paper_halt_banner: 1]
 
+  import BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor,
+    only: [technical_block_editor: 1]
+
+  alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
-  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
+  alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
+  alias Barkpark.PortableDoc.Render.{Compose, SectionLayout}
+  alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+  alias Phoenix.LiveView.JS
 
   # t9 — the task block types whose boundary widget paints a LIVE preview
   # (mirrors TaskResolver's @snapshot_types + @detail_type). These are the fleet
@@ -53,7 +60,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # (not deleted): the widget + these types stay as retained infra whose contract is
   # still proven directly, and legacy retirement is a wave-4/human step, out of scope.
   @fleet_preview_types @task_preview_types ++
-                         ~w(notes cards pipeline status-legend form questionnaire asciicast)
+                         ~w(notes cards pipeline status-legend asciicast)
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -94,6 +101,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
   attr(:slug, :string, required: true)
   attr(:blocks, :list, required: true)
+  attr(:table_editor_target_ids, :any, default: nil)
   # spd-w18 — the document's REAL type. This editor is opened by every blocks-doc
   # type (paper today, session too), and the empty-body sentence below used to
   # tell a session's author "This paper has no body blocks yet". Default "paper"
@@ -129,6 +137,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
   # paint via task_block_preview/1. The flag-OFF list render never reads it.
   attr(:task_previews, :map, default: %{})
+  attr(:paper_links, :map, default: %{})
   # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
   # write). `save_status` drives the footer echo; `paper_halt` (a server reason
   # string or nil) raises the shared halt banner near the top of the editor.
@@ -138,6 +147,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :table_editor_target_ids,
+        assigns.table_editor_target_ids || table_editor_ids(assigns.blocks)
+      )
+
+    case Content.project_block_ids_safely(assigns.blocks) do
+      {:ok, _projected} -> paper_block_editor_identity_safe(assigns)
+      {:error, {:duplicate_id, _id}} -> paper_block_editor_identity_readonly(assigns)
+    end
+  end
+
+  defp paper_block_editor_identity_readonly(assigns) do
+    assigns =
+      assign(assigns, :paper_doc_key, "#{assigns.dataset}:#{assigns.doc_type}:#{assigns.slug}")
+
+    ~H"""
+    <div
+      id={"paper-editor-#{@slug}"}
+      class="bp-paper-editor"
+      data-test-id="studio-paper-block-editor"
+      data-paper-doc-key={@paper_doc_key}
+      data-paper-rev={@doc_type == "paper" && @paper_rev}
+      data-document-rev={@doc_type != "paper" && @document_rev}
+    >
+      <.paper_halt_banner reason={@paper_halt} />
+      <p class="bp-paper-edit-readonly" data-test-id="paper-identity-readonly">
+        Duplicate authored identities must be repaired before editing; original content is preserved.
+      </p>
+    </div>
+    """
+  end
+
+  defp paper_block_editor_identity_safe(assigns) do
+    assigns = assign(assigns, :tree_identity_safe, true)
+
+    assigns =
+      if assigns.canvas_eligible and assigns.doc_type == "paper",
+        do: assign(assigns, :blocks, Barkpark.Content.ensure_block_ids(assigns.blocks)),
+        else: assigns
+
     # Gate the bound/free split on having descriptors: only the Beta editor (with
     # an Expectation) shows the Properties panel. The paper pane passes
     # descriptors=[] ⇒ properties?=false ⇒ free == all blocks, panel self-hides.
@@ -239,6 +290,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_type={@doc_type}
         paper_rev={@paper_rev}
         document_rev={@document_rev}
+        root_slug={@slug}
+        doc_key={@paper_doc_key}
+        canvas_enabled={@canvas_on?}
+        paper_links={@paper_links}
+        tree_identity_safe={@tree_identity_safe}
+        table_editor_target_ids={@table_editor_target_ids}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -297,9 +354,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 scope_prefix={@scope_prefix}
                 picker_browse={@picker_browse}
                 task_previews={@task_previews}
+                paper_links={@paper_links}
                 doc_type={@doc_type}
                 paper_rev={@paper_rev}
                 document_rev={@document_rev}
+                root_slug={@slug}
+                doc_key={@paper_doc_key}
+                canvas_enabled={@canvas_on?}
+                tree_identity_safe={@tree_identity_safe}
+                table_editor_target_ids={@table_editor_target_ids}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -395,6 +458,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             doc_type={@doc_type}
             paper_rev={@paper_rev}
             document_rev={@document_rev}
+            root_slug={@slug}
+            doc_key={@paper_doc_key}
+            canvas_enabled={@canvas_on?}
+            paper_links={@paper_links}
+            tree_identity_safe={@tree_identity_safe}
+            table_editor_target_ids={@table_editor_target_ids}
           />
         </div>
       <% end %>
@@ -465,8 +534,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"list", "List"},
          {"callout", "Callout"},
          {"code", "Code"},
+         {"blockquote", "Blockquote"},
          {"divider", "Divider"},
-         {"section", "Section"}
+         {"section", "Section"},
+         {"steps", "Steps"},
+         {"tabs", "Tabs"}
        ]},
       {"Article chrome",
        [
@@ -475,7 +547,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"ingress", "Ingress"},
          {"pullquote", "Pullquote"}
        ]},
-      {"Visual", [{"diagram", "Diagram"}]},
+      {"Visual",
+       [
+         {"action", "Action"},
+         {"card", "Card"},
+         {"table", "Table"},
+         {"terminal", "Terminal"},
+         {"stage", "Stage"},
+         {"diagram", "Diagram"},
+         {"figure", "Figure"},
+         {"equation", "Equation"},
+         {"route", "Route"},
+         {"toc", "Table of contents"},
+         {"criteria-progress", "Criteria progress"},
+         {"gauge-list", "Gauge list"}
+       ]},
+      {"Technical",
+       [
+         {"diff", "Diff"},
+         {"filetree", "File tree"},
+         {"footnote", "Footnotes"},
+         {"code-tabs", "Code tabs"},
+         {"api-endpoint", "API endpoint"}
+       ]},
+      {"Interactive",
+       [
+         {"form", "Form"},
+         {"questionnaire", "Questionnaire"}
+       ]},
       {"Basic fields",
        [
          {"field-string", "String"},
@@ -484,15 +583,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"field-boolean", "Boolean"},
          {"field-select", "Select"},
          {"field-datetime", "Date & time"},
-         {"field-color", "Color"}
+         {"field-color", "Color"},
+         {"field-number", "Number"}
        ]},
       {"Media & reference",
        [
          {"field-image", "Image"},
-         {"field-reference", "Reference"}
+         {"field-reference", "Reference"},
+         {"video", "Video"}
        ]},
       {"Structured",
        [
+         {"columns", "Columns"},
          {"composite", "Composite"},
          {"arrayOf", "Array of"},
          {"codelist", "Code list"},
@@ -701,6 +803,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_key, :string, required: true)
   attr(:paper_rev, :any, default: nil)
   attr(:document_rev, :string, default: nil)
+  attr(:container_id, :string, default: nil)
+  attr(:container_kind, :string, default: nil)
+  attr(:container_row_id, :string, default: nil)
+  attr(:container_column_index, :integer, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
@@ -721,6 +827,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-doc-key={@doc_key}
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}
+      data-paper-container-id={@container_id}
+      data-paper-container-run={@container_id && @run_ordinal}
+      data-paper-container-kind={@container_kind}
+      data-paper-container-row-id={@container_row_id}
+      data-paper-container-column-index={@container_column_index}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -803,6 +914,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: true)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -892,6 +1009,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         doc_type={@doc_type}
         paper_rev={@paper_rev}
         document_rev={@document_rev}
+        root_slug={@root_slug}
+        doc_key={@doc_key}
+        canvas_enabled={@canvas_enabled}
+        paper_links={@paper_links}
+        tree_identity_safe={@tree_identity_safe}
+        table_editor_target_ids={@table_editor_target_ids}
       />
     </div>
     """
@@ -1003,9 +1126,92 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp beta_doc_stats(_), do: %{blocks: 0, words: 0}
 
   # Recursively gather plain text from a block / inline node — a string, a list,
-  # or a map carrying text/value/children/content/items/body. Unknown → "".
+  # or a map carrying text/value/children/content/items/body. Steps contribute
+  # their visible row bodies, but not row titles. Unknown → "".
   defp beta_node_text(s) when is_binary(s), do: s
   defp beta_node_text(list) when is_list(list), do: Enum.map_join(list, " ", &beta_node_text/1)
+
+  defp beta_node_text(%{"type" => "steps", "steps" => steps}) when is_list(steps) do
+    Enum.map_join(steps, " ", fn
+      row when is_map(row) ->
+        row
+        |> Map.put("type", "expandable")
+        |> Blocks.container_children()
+        |> beta_node_text()
+
+      _ ->
+        ""
+    end)
+  end
+
+  defp beta_node_text(%{"type" => "tabs", "tabs" => tabs}) when is_list(tabs) do
+    Enum.map_join(tabs, " ", fn
+      %{"blocks" => blocks} when is_list(blocks) -> beta_node_text(blocks)
+      _ -> ""
+    end)
+  end
+
+  defp beta_node_text(%{"type" => type} = block) when type in ["form", "questionnaire"] do
+    block
+    |> Map.get("questions", [])
+    |> List.wrap()
+    |> Enum.map_join(" ", &beta_form_question_text/1)
+  end
+
+  defp beta_node_text(%{"type" => "action", "label" => label}) when is_binary(label), do: label
+  defp beta_node_text(%{"type" => "action"}), do: ""
+
+  defp beta_node_text(%{"type" => "stage"} = block) do
+    fields = Enum.map(~w(kind title detail), &Slots.stage_field_text(block, &1))
+
+    provenance =
+      Enum.map(~w(files source), fn field ->
+        case Map.get(block, field) do
+          value when is_binary(value) -> value
+          value when is_integer(value) and field == "files" -> to_string(value)
+          _ -> ""
+        end
+      end)
+
+    Enum.join(fields ++ provenance, " ")
+  end
+
+  defp beta_node_text(%{"type" => "card"} = block) do
+    non_action =
+      ~w(media title body)
+      |> Enum.map_join(" ", fn slot -> block |> Slots.slot_elements(slot) |> beta_node_text() end)
+
+    action =
+      block
+      |> Slots.slot_elements("action")
+      |> Enum.map_join(" ", fn
+        %{"type" => "action", "label" => label} when is_binary(label) -> label
+        _ -> ""
+      end)
+
+    non_action <> " " <> action
+  end
+
+  defp beta_node_text(%{"type" => "figure"} = block) do
+    child_text =
+      case Map.get(block, "child") do
+        child when is_map(child) -> beta_node_text(child)
+        _malformed -> ""
+      end
+
+    child_text <> " " <> beta_figure_caption_text(Map.get(block, "caption"))
+  end
+
+  defp beta_node_text(%{"type" => "section", "blocks" => blocks} = block)
+       when is_list(blocks) do
+    beta_form_visible_string(Map.get(block, "title")) <> " " <> beta_node_text(blocks)
+  end
+
+  defp beta_node_text(%{"type" => "columns", "columns" => columns}) when is_list(columns) do
+    columns
+    |> Enum.filter(&is_list/1)
+    |> beta_node_text()
+  end
 
   defp beta_node_text(%{} = m) do
     ["text", "value", "children", "content", "items", "body"]
@@ -1013,6 +1219,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   defp beta_node_text(_), do: ""
+
+  defp beta_form_question_text(question) when is_map(question) do
+    copy =
+      ~w(prompt rationale recommendation)
+      |> Enum.map_join(" ", fn field -> beta_form_visible_string(question[field]) end)
+
+    options =
+      if beta_form_visible_string(Map.get(question, "type", "text")) in ["single", "multi"] do
+        question
+        |> Map.get("options", [])
+        |> List.wrap()
+        |> Enum.map_join(" ", &beta_form_visible_string/1)
+      else
+        ""
+      end
+
+    copy <> " " <> options
+  end
+
+  defp beta_form_question_text(_question), do: ""
+
+  defp beta_form_visible_string(value) when is_binary(value), do: value
+
+  defp beta_form_visible_string(value) when is_atom(value) or is_number(value),
+    do: to_string(value)
+
+  defp beta_form_visible_string(_value), do: ""
+
+  defp beta_figure_caption_text(nil), do: ""
+  defp beta_figure_caption_text(value) when is_binary(value), do: value
+
+  defp beta_figure_caption_text(value) when is_atom(value) or is_number(value),
+    do: to_string(value)
+
+  defp beta_figure_caption_text(_value), do: ""
 
   # ── Properties panel (Storage Model A) ──────────────────────────────────────
   # A collapsible section ABOVE the body editor. Each row is a BOUND field-block
@@ -1029,6 +1270,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: true)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def properties_panel(assigns) do
     ~H"""
@@ -1064,6 +1311,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           doc_type={@doc_type}
           paper_rev={@paper_rev}
           document_rev={@document_rev}
+          root_slug={@root_slug}
+          doc_key={@doc_key}
+          canvas_enabled={@canvas_enabled}
+          paper_links={@paper_links}
+          tree_identity_safe={@tree_identity_safe}
+          table_editor_target_ids={@table_editor_target_ids}
         />
       </div>
 
@@ -1094,6 +1347,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     Enum.find(descriptors, fn d -> d.name == name end)
   end
 
+  defp table_editor_ids(blocks) do
+    case Barkpark.Content.Papers.BlockOps.table_editor_target_ids(blocks) do
+      {:ok, ids} -> ids
+      {:error, _} -> MapSet.new()
+    end
+  end
+
+  defp table_editor_projection(block, ids) do
+    with true <- MapSet.member?(ids, block["id"]),
+         {:ok, projection} <- Barkpark.PortableDoc.TableEditing.project(block) do
+      {:ok, Map.merge(projection, %{id: block["id"], type: "table"})}
+    else
+      _ -> :readonly
+    end
+  end
+
   defp prop_label(_block, %{label: label}) when is_binary(label) and label != "", do: label
 
   defp prop_label(block, _descriptor),
@@ -1105,10 +1374,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp prop_at_cap?(%{count: count, max: max}) when is_integer(max), do: count >= max
   defp prop_at_cap?(_), do: false
 
-  # Per-block-type edit fields. Each `<form phx-submit="paper-edit-block">`
-  # carries a hidden `id` and submits its changed field(s); the handler maps
-  # the params to a patch-block op. Paragraph/callout bodies are PLAIN TEXT in
-  # the MVP (inline marks dropped on save).
+  attr(:block, :map, required: true)
+
+  defp rich_body_editor(assigns) do
+    ~H"""
+    <div
+      phx-update="ignore"
+      id={"paper-ed-" <> Map.fetch!(@block, "id")}
+      phx-hook="BarkparkPaperEditor"
+      class="bp-paper-edit-wc"
+      data-test-id="paper-block-editor-wc"
+    >
+      <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+
+  defp card_body_editor(assigns) do
+    ~H"""
+    <div
+      phx-update="ignore"
+      id={"paper-ed-" <> Map.fetch!(@block, "id")}
+      phx-hook="BarkparkPaperEditor"
+      class="bp-paper-edit-wc bp-paper-card-body-editor"
+      data-test-id="paper-card-body-editor"
+    >
+      <bp-paper-editor
+        data-editor-mode="card-body"
+        data-block={Jason.encode!(@block)}
+      ></bp-paper-editor>
+    </div>
+    """
+  end
+
+  # Per-block-type edit fields. Rich bodies use the canonical WC so its
+  # PortableDoc conversion preserves marks and links while text changes.
+  # Ordinary forms remain for scalar chrome such as callout tone/title/fold.
   attr(:block, :map, required: true)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
@@ -1117,32 +1420,74 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:document_rev, :string, default: nil)
+  attr(:root_slug, :string, default: "")
+  attr(:doc_key, :string, default: nil)
+  attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
+  attr(:tree_identity_safe, :boolean, default: nil)
+  attr(:table_editor_target_ids, :any, default: nil)
 
   def paper_block_fields(assigns) do
+    tree_identity_safe =
+      case assigns.tree_identity_safe do
+        value when is_boolean(value) -> value
+        _ -> match?({:ok, _projected}, Content.project_block_ids_safely([assigns.block]))
+      end
+
     assigns =
-      assign(assigns, id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
+      assigns
+      |> assign(:tree_identity_safe, tree_identity_safe)
+      |> assign(:table_editor_target_ids, assigns.table_editor_target_ids || MapSet.new())
+      |> assign(id: Map.get(assigns.block, "id"), type: Map.get(assigns.block, "type"))
+      |> assign(
+        :expandable_segments,
+        if(Map.get(assigns.block, "type") == "expandable" and assigns.canvas_enabled,
+          do:
+            assigns.block
+            |> Blocks.container_children()
+            |> PaperCanvas.partition_runs()
+            |> PaperCanvas.with_run_ordinals(),
+          else: []
+        )
+      )
 
     ~H"""
     <%= case @type do %>
-      <%!-- Rich-text blocks (paragraph / heading / list) are edited by the
+      <% "table" -> %>
+        <%!-- Keep the ignored boundary stable even when a later authoritative
+              echo becomes unsupported: the WC must retain a pending draft. --%>
+        <div
+          phx-update="ignore"
+          id={"paper-ed-" <> @id}
+          phx-hook="BarkparkPaperEditor"
+          class="bp-paper-edit-wc"
+          data-test-id="paper-table-contextual-editor"
+        >
+          <%= case table_editor_projection(@block, @table_editor_target_ids) do %>
+            <% {:ok, projection} -> %>
+              <bp-paper-editor data-editor-mode="table" data-block={Jason.encode!(projection)}></bp-paper-editor>
+            <% :readonly -> %>
+              <div data-test-id="paper-table-readonly">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <p class="bp-paper-edit-readonly">
+                  This Table's authored structure is not yet supported for lossless editing; original content is preserved.
+                </p>
+              </div>
+          <% end %>
+        </div>
+      <% t when t in ["diff", "filetree", "footnote", "code-tabs"] -> %>
+        <.technical_block_editor block={@block} id={@id} />
+      <%!-- Rich-text blocks are edited by the
             <bp-paper-editor> Web Component. The phx-update="ignore" wrapper
             keeps LiveView from re-diffing the WC's internal DOM (preserving
             the caret across server updates); its id is stable per block id so
             it survives re-renders. The WC reads its initial block from
             data-block and emits debounced `bp-op` events that the
             BarkparkPaperEditor hook forwards to the server's paper-op handler.
-            field-type blocks (callout/code/list-as-fields/section/divider/…)
-            keep their existing form-based editors below — out of scope here. --%>
+            Callout keeps a separate form for its scalar chrome, while its body
+            joins ingress/pullquote on this same rich seam. --%>
       <% t when t in ["paragraph", "heading", "list"] -> %>
-        <div
-          phx-update="ignore"
-          id={"paper-ed-" <> @id}
-          phx-hook="BarkparkPaperEditor"
-          class="bp-paper-edit-wc"
-          data-test-id="paper-block-editor-wc"
-        >
-          <bp-paper-editor data-block={Jason.encode!(@block)}></bp-paper-editor>
-        </div>
+        <.rich_body_editor block={@block} />
       <% "callout" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1169,13 +1514,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             placeholder="Title (optional)"
             value={Map.get(@block, "title", "")}
           />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-text"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
         </form>
+        <.rich_body_editor block={@block} />
       <% "code" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1225,9 +1565,655 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
-      <%!-- article-chrome blocks (barkpark-54kh). eyebrow + byline are a single
-            text input; ingress + pullquote are a textarea (plain-text MVP, like
-            the callout body). They mirror the callout/code form markup. --%>
+      <% "action" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-action-contextual-editor">
+          <%= case Blocks.action_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
+              <details
+                id={"action-controls-" <> @id}
+                class={[
+                  "bp-paper-contextual-controls bp-paper-contextual-controls--action",
+                  action_preview_empty?(state) && "bp-paper-contextual-controls--action-empty"
+                ]}
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure action</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"action-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-action-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-label-" <> @id}>Button label</label>
+                    <input id={"action-label-" <> @id} type="text" name="action-label" class="bp-paper-edit-text" value={state.label} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-href-" <> @id}>Destination</label>
+                    <input id={"action-href-" <> @id} type="text" name="action-href" class="bp-paper-edit-text" value={state.href} />
+                    <label class="bp-paper-edit-fieldlabel" for={"action-priority-" <> @id}>Priority</label>
+                    <select id={"action-priority-" <> @id} name="action-priority" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_priority_options(state.priority)}
+                        value={value}
+                        selected={value == state.priority}
+                      ><%= label %></option>
+                    </select>
+                  </form>
+                </div>
+              </details>
+            <% {:error, :malformed_action} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
+              <p class="bp-paper-edit-readonly">
+                This Action's authored fields are malformed and cannot be edited here; original content is preserved.
+              </p>
+          <% end %>
+        </div>
+      <% "stage" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-stage-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.stage_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"stage-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--stage"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Configure stage</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"stage-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-stage-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <%= for {field, label, value} <- [{"kind", "Kind", state.kind}, {"title", "Title", state.title}, {"detail", "Detail", state.detail}, {"files", "Files", state.files}] do %>
+                      <label class="bp-paper-edit-fieldlabel" for={"stage-#{field}-#{@id}"}><%= label %></label>
+                      <input id={"stage-#{field}-#{@id}"} type="text" name={"stage-" <> field}
+                        class="bp-paper-edit-text" value={value} />
+                    <% end %>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-mode-" <> @id}>Source</label>
+                    <select id={"stage-source-mode-" <> @id} name="stage-source-mode" class="bp-paper-edit-select">
+                      <option :for={{mode, label} <- [{"none", "None"}, {"origin", "Origin stage"}, {"provenance", "Source reference"}]}
+                        value={mode} selected={mode == state.source_mode}><%= label %></option>
+                    </select>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-text-" <> @id}>Source reference</label>
+                    <input id={"stage-source-text-" <> @id} type="text" name="stage-source-text"
+                      class="bp-paper-edit-text" value={state.source_text} />
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <p class="bp-paper-edit-readonly">This Stage's authored fields need an unambiguous shape before editing; original content is preserved.</p>
+          <% end %>
+        </div>
+      <% "terminal" -> %>
+        <% terminal_state = terminal_editor_state(@block, @tree_identity_safe) %>
+        <div
+          id={"paper-terminal-boundary-" <> @id}
+          class="bp-paper-contextual-editor"
+          data-test-id="paper-terminal-contextual-editor"
+          data-paper-terminal-boundary
+          data-paper-terminal-id={@id}
+          data-paper-terminal-document-key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+          data-paper-terminal-rev={@doc_type == "paper" && @paper_rev || @document_rev}
+          data-paper-rev={@doc_type == "paper" && @paper_rev}
+          data-document-rev={@doc_type != "paper" && @document_rev}
+          data-paper-terminal-supported={match?({:ok, _state}, terminal_state) && "true" || "false"}
+          phx-hook="BarkparkTerminalBoundary"
+        >
+          <%= case terminal_state do %>
+            <% {:ok, state} -> %>
+              <% parts = Compose.terminal_article_parts(@block) %>
+              <div class="bp-term" data-paper-terminal-editor-frame>
+                <%= raw(parts.bar_html) %>
+                <div class="bp-term__body" data-test-id="paper-terminal-body">
+                  <%= for segment <- terminal_segments(state.children, @canvas_enabled) do %>
+                    <%= case segment do %>
+                      <% {:run, run_blocks, ordinal} -> %>
+                        <.canvas_run
+                          slug={PaperCanvas.terminal_run_slug(@root_slug, @id)}
+                          run_blocks={run_blocks}
+                          run_ordinal={ordinal}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                          paper_rev={@doc_type == "paper" && @paper_rev}
+                          document_rev={@doc_type != "paper" && @document_rev}
+                          container_id={@id}
+                          container_kind="terminal"
+                        />
+                      <% {:block, child} -> %>
+                        <.paper_block_fields
+                          block={child}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_type={@doc_type}
+                          paper_rev={@paper_rev}
+                          document_rev={@document_rev}
+                          root_slug={@root_slug}
+                          doc_key={@doc_key}
+                          canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
+                        />
+                    <% end %>
+                  <% end %>
+                </div>
+                <%= raw(parts.footer_html) %>
+              </div>
+              <details
+                id={"terminal-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--terminal"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure terminal</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"terminal-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-terminal-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"terminal-title-" <> @id}>Title</label>
+                    <input id={"terminal-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" value={state.title} />
+                    <label class="bp-paper-edit-fieldlabel" for={"terminal-footer-" <> @id}>Footer</label>
+                    <input id={"terminal-footer-" <> @id} type="text" name="footer" class="bp-paper-edit-text" value={state.footer} />
+                    <label class="bp-paper-edit-check" for={"terminal-live-" <> @id}>
+                      <input type="hidden" name="live" value="false" />
+                      <input id={"terminal-live-" <> @id} type="checkbox" name="live" value="true" checked={state.live} />
+                      Live
+                    </label>
+                  </form>
+                  <form
+                    id={"terminal-structure-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    data-test-id="paper-terminal-structure-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <input type="hidden" name="terminal-child-count" value={length(state.children)} />
+                    <input
+                      :for={{child, index} <- Enum.with_index(state.children)}
+                      type="hidden"
+                      name={"terminal-child-#{index}-id"}
+                      value={child["id"]}
+                    />
+                    <input type="hidden" name="terminal-new-child-id" value={Blocks.new_block_id()} />
+                    <button
+                      :if={state.children == []}
+                      type="submit"
+                      name="terminal-action"
+                      value="add"
+                      class="btn btn-ghost btn-sm"
+                    >Add paragraph</button>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _reason} -> %>
+              <div data-test-id="paper-terminal-readonly">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <p class="bp-paper-edit-readonly">
+                  This Terminal's authored body needs a canonical shape and stable identities before editing; original content is preserved.
+                </p>
+              </div>
+          <% end %>
+        </div>
+      <% "card" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-card-contextual-editor">
+          <%= case Blocks.card_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <% parts = RenderComponents.card_article_parts(@block) %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
+                <div class={parts.class}>
+                  <%= raw(parts.media_html) %>
+                  <%= raw(parts.title_html) %>
+                  <.card_body_editor block={@block} />
+                  <%= raw(parts.action_html) %>
+                </div>
+              </div>
+              <details
+                id={"card-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--card"
+                phx-mounted={JS.ignore_attributes("open")}
+              >
+                <summary class="bp-paper-contextual-toggle">Configure card</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form
+                    id={"card-form-" <> @id}
+                    class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block"
+                    phx-change="paper-block-autosave"
+                    phx-debounce="500"
+                    data-test-id="paper-card-editor"
+                  >
+                    <input type="hidden" name="block_id" value={@id} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-tone-" <> @id}>Tone</label>
+                    <select id={"card-tone-" <> @id} name="card-tone" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_tone_options(state.tone)}
+                        value={value}
+                        selected={value == state.tone}
+                      ><%= label %></option>
+                    </select>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                    <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
+                    <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
+                    <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
+                    <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}>Action destination</label>
+                    <input id={"card-action-href-" <> @id} type="text" name="card-action-href" class="bp-paper-edit-text" value={state.action_href} />
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}>Action priority</label>
+                    <select id={"card-action-priority-" <> @id} name="card-action-priority" class="bp-paper-edit-select">
+                      <option
+                        :for={{value, label} <- card_priority_options(state.action_priority)}
+                        value={value}
+                        selected={value == state.action_priority}
+                      ><%= label %></option>
+                    </select>
+                  </form>
+                </div>
+              </details>
+            <% {:error, :malformed_card} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
+              <p class="bp-paper-edit-readonly">
+                This Card's known slots are malformed and cannot be edited here; original content is preserved.
+              </p>
+          <% end %>
+        </div>
+      <% "figure" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-figure-editor">
+          <%= if editable_figure_child?(@block) do %>
+            <figure
+              class="bp-paper-figure-editor-frame"
+              style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"
+            >
+              <div class="bp-paper-figure-editor-child" data-test-id="paper-figure-child">
+                <%= case figure_child_segment(@block, @canvas_enabled) do %>
+                  <% {:run, [child], run_ordinal} -> %>
+                    <.canvas_run
+                      slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
+                      run_blocks={[child]}
+                      run_ordinal={run_ordinal}
+                      dataset={@dataset}
+                      api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix}
+                      picker_browse={@picker_browse}
+                      doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                      paper_rev={@doc_type == "paper" && @paper_rev}
+                      document_rev={@doc_type != "paper" && @document_rev}
+                      container_id={@id}
+                      container_kind="figure"
+                    />
+                  <% {:block, child} -> %>
+                    <.paper_block_fields
+                      block={child}
+                      dataset={@dataset}
+                      api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix}
+                      picker_browse={@picker_browse}
+                      doc_type={@doc_type}
+                      paper_rev={@paper_rev}
+                      document_rev={@document_rev}
+                      root_slug={@root_slug}
+                      doc_key={@doc_key}
+                      canvas_enabled={@canvas_enabled}
+                      paper_links={@paper_links}
+                      tree_identity_safe={@tree_identity_safe}
+                      table_editor_target_ids={@table_editor_target_ids}
+                    />
+                <% end %>
+              </div>
+              <figcaption class="bp-figcaption">
+                <form
+                  id={"figure-form-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                  data-test-id="paper-figure-caption-editor"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel" for={"figure-caption-" <> @id}>
+                    Caption
+                  </label>
+                  <input
+                    id={"figure-caption-" <> @id}
+                    type="text"
+                    name="caption"
+                    class="bp-paper-edit-text"
+                    value={Blocks.form_value(Map.get(@block, "caption"))}
+                  />
+                </form>
+              </figcaption>
+            </figure>
+          <% else %>
+            <div class="bp-paper-contextual-preview" data-test-id="paper-figure-preview">
+              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            </div>
+            <p class="bp-paper-edit-readonly">
+              This Figure's singular child needs a stable identity before it can be edited; original content is preserved.
+            </p>
+          <% end %>
+        </div>
+      <% "route" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"route-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure route</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"route-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-route-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-polyline-" <> @id}>Encoded polyline</label>
+                <textarea id={"route-polyline-" <> @id} name="polyline"
+                          class="bp-paper-edit-textarea bp-paper-edit-code" rows="4"><%= Blocks.form_value(Map.get(@block, "polyline")) %></textarea>
+                <label class="bp-paper-edit-fieldlabel" for={"route-sport-" <> @id}>Sport</label>
+                <input id={"route-sport-" <> @id} type="text" name="sport"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "sport"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-distance-" <> @id}>Distance</label>
+                <input id={"route-distance-" <> @id} type="text" name="distance"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "distance"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-elevation-" <> @id}>Elevation</label>
+                <input id={"route-elevation-" <> @id} type="text" name="elevation"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "elevation"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-duration-" <> @id}>Duration</label>
+                <input id={"route-duration-" <> @id} type="text" name="duration"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "duration"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-caption-" <> @id}>Caption</label>
+                <input id={"route-caption-" <> @id} type="text" name="caption"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "caption"))} />
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "api-endpoint" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-api-endpoint-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-api-endpoint-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure API endpoint</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"api-endpoint-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-api-endpoint-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="param-count" value={length(Blocks.api_endpoint_params(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-method-" <> @id}>Method</label>
+                <input id={"api-endpoint-method-" <> @id} type="text" name="method"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "method"))}
+                       list={"api-endpoint-methods-" <> @id} />
+                <datalist id={"api-endpoint-methods-" <> @id}>
+                  <option :for={method <- ~w(GET POST PUT PATCH DELETE HEAD OPTIONS)} value={method}></option>
+                </datalist>
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-path-" <> @id}>Path</label>
+                <input id={"api-endpoint-path-" <> @id} type="text" name="path"
+                       class="bp-paper-edit-text bp-paper-edit-code"
+                       value={Blocks.form_value(Map.get(@block, "path"))} />
+
+                <fieldset
+                  :for={{param, index} <- Enum.with_index(Blocks.api_endpoint_params(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-api-endpoint-param-row"
+                  data-param-index={index}
+                >
+                  <legend>Parameter <%= index + 1 %></legend>
+                  <%= if is_map(param) do %>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Name
+                      <input type="text" name={"param-#{index}-name"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "name")} />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Location
+                      <input type="text" name={"param-#{index}-in"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "in")}
+                             list={"api-endpoint-locations-" <> @id} />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Type
+                      <input type="text" name={"param-#{index}-type"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "type")} />
+                    </label>
+                    <label class="bp-paper-edit-check">
+                      <input type="hidden" name={"param-#{index}-required"} value="false" />
+                      <input type="checkbox" name={"param-#{index}-required"} value="true"
+                             checked={Blocks.api_endpoint_param_required?(param)} />
+                      Required
+                    </label>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-api-endpoint-legacy-param">
+                      Legacy parameter retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="param-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="param-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.api_endpoint_params(@block)) - 1}>Move down</button>
+                  </div>
+                  <button type="submit" name="param-action" value={"remove:#{index}"}
+                          class="btn btn-destructive btn-sm" data-test-id="paper-api-endpoint-param-remove">
+                    Remove parameter
+                  </button>
+                </fieldset>
+
+                <datalist id={"api-endpoint-locations-" <> @id}>
+                  <option :for={location <- ~w(path query header cookie body)} value={location}></option>
+                </datalist>
+                <button type="submit" name="param-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-api-endpoint-param-add">Add parameter</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "toc" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-toc-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-toc-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"toc-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure table of contents</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"toc-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-toc-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="toc-count" value={length(Blocks.toc_items(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"toc-depth-" <> @id}>Visible depth</label>
+                <input id={"toc-depth-" <> @id} type="text" inputmode="numeric" name="depth"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "depth"))} />
+                <label class="bp-paper-edit-check" for={"toc-numbered-" <> @id}>
+                  <input type="hidden" name="numbered" value="false" />
+                  <input id={"toc-numbered-" <> @id} type="checkbox" name="numbered" value="true"
+                         checked={Blocks.strict_boolean_field?(@block, "numbered")} />
+                  Number entries
+                </label>
+                <label class="bp-paper-edit-check" for={"toc-sticky-" <> @id}>
+                  <input type="hidden" name="sticky" value="false" />
+                  <input id={"toc-sticky-" <> @id} type="checkbox" name="sticky" value="true"
+                         checked={Blocks.strict_boolean_field?(@block, "sticky")} />
+                  Sticky in article view
+                </label>
+
+                <fieldset
+                  :for={{item, index} <- Enum.with_index(Blocks.toc_items(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-toc-row"
+                  data-toc-index={index}
+                >
+                  <legend>Entry <%= index + 1 %></legend>
+                  <%= if is_map(item) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-text-#{@id}"}>Text</label>
+                    <input id={"toc-#{index}-text-#{@id}"} type="text" name={"toc-#{index}-text"}
+                           class="bp-paper-edit-text" value={Blocks.form_value(Map.get(item, "text"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-level-#{@id}"}>Level</label>
+                    <input id={"toc-#{index}-level-#{@id}"} type="text" inputmode="numeric"
+                           name={"toc-#{index}-level"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(item, "level"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-anchor-#{@id}"}>Anchor</label>
+                    <input id={"toc-#{index}-anchor-#{@id}"} type="text" name={"toc-#{index}-anchor"}
+                           class="bp-paper-edit-text bp-paper-edit-code"
+                           value={Blocks.form_value(Map.get(item, "anchor"))} />
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-toc-legacy-row">
+                      Legacy entry retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="toc-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="toc-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.toc_items(@block)) - 1}>Move down</button>
+                    <button type="submit" name="toc-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm">Remove entry</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="toc-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-toc-add">Add entry</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "criteria-progress" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-criteria-progress-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-criteria-progress-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure criteria progress</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"criteria-progress-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-criteria-progress-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="criterion-count"
+                       value={length(Blocks.criteria_progress_rows(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"criteria-progress-detail-" <> @id}>Detail</label>
+                <input id={"criteria-progress-detail-" <> @id} type="text" name="detail"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "detail"))}
+                       list={"criteria-progress-detail-options-" <> @id} />
+                <datalist id={"criteria-progress-detail-options-" <> @id}>
+                  <option value="rows"></option>
+                  <option value="total"></option>
+                </datalist>
+
+                <fieldset
+                  :for={{row, index} <- Enum.with_index(Blocks.criteria_progress_rows(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-criteria-progress-row"
+                  data-criterion-index={index}
+                >
+                  <legend>Criterion <%= index + 1 %></legend>
+                  <%= if is_map(row) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-label-#{@id}"}>Label</label>
+                    <input id={"criterion-#{index}-label-#{@id}"} type="text"
+                           name={"criterion-#{index}-label"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "label"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-met-#{@id}"}>Met</label>
+                    <input id={"criterion-#{index}-met-#{@id}"} type="text" inputmode="decimal"
+                           name={"criterion-#{index}-met"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "met"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-total-#{@id}"}>Total</label>
+                    <input id={"criterion-#{index}-total-#{@id}"} type="text" inputmode="decimal"
+                           name={"criterion-#{index}-total"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(row, "total"))} />
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-criteria-progress-legacy-row">
+                      Legacy row retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="criterion-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="criterion-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.criteria_progress_rows(@block)) - 1}>Move down</button>
+                    <button type="submit" name="criterion-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm">Remove criterion</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="criterion-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-criteria-progress-add">Add criterion</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "equation" -> %>
+        <form
+          id={"equation-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-equation-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"equation-tex-" <> @id}>TeX source</label>
+          <textarea
+            id={"equation-tex-" <> @id}
+            name="tex"
+            class="bp-paper-edit-textarea bp-paper-edit-code"
+            rows="3"
+            data-test-id="paper-field-equation-tex"
+          ><%= Blocks.form_value(Map.get(@block, "tex")) %></textarea>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="display" value="true"
+                   checked={Map.get(@block, "display") == true} />
+            Display equation
+          </label>
+        </form>
+      <%!-- Article-chrome blocks. Eyebrow + byline remain flat scalar inputs;
+            ingress + pullquote use the same rich body WC as paragraphs. --%>
       <% "eyebrow" -> %>
         <form
           class="bp-paper-edit-form"
@@ -1263,52 +2249,929 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           />
         </form>
       <% "ingress" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-ingress"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-        </form>
+        <.rich_body_editor block={@block} />
       <% "pullquote" -> %>
+        <.rich_body_editor block={@block} />
+      <% "blockquote" -> %>
         <form
+          id={"blockquote-form-" <> @id}
           class="bp-paper-edit-form"
           phx-submit="paper-edit-block"
           phx-change="paper-block-autosave"
           phx-debounce="500"
+          data-test-id="paper-blockquote-editor"
         >
           <input type="hidden" name="block_id" value={@id} />
-          <textarea
-            name="text"
-            class="bp-paper-edit-textarea"
-            rows="3"
-            data-test-id="paper-field-pullquote"
-          ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-        </form>
-      <% "section" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"blockquote-cite-" <> @id}>Attribution</label>
           <input
+            id={"blockquote-cite-" <> @id}
             type="text"
-            name="title"
+            name="cite"
             class="bp-paper-edit-text"
-            placeholder="Section title"
-            value={Map.get(@block, "title", "")}
-            data-test-id="paper-field-title"
+            value={Blocks.form_value(Blocks.blockquote_cite_value(@block))}
+            placeholder="Author or source (optional)"
+            data-test-id="paper-field-blockquote-cite"
           />
         </form>
+        <.rich_body_editor block={@block} />
+      <% "section" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-section-editor">
+          <%= if editable_section?(@block, @tree_identity_safe) do %>
+            <div
+              data-paper-section-editor-frame
+              style="display:flex;flex-direction:column"
+              {section_frame_attributes(@block)}
+            >
+              <%= if grid = SectionLayout.grid(@block) do %>
+                <hr class="bp-hr" />
+                <div :if={not is_nil(@block["title"])} class="bp-section__title" style="font-weight:bold"><%= @block["title"] %></div>
+                <div class="bp-section__grid" style={grid.style}>
+                  <div
+                    :for={child <- @block["blocks"]}
+                    class="bp-section__cell"
+                    style={SectionLayout.cell_style(child)}
+                  >
+                    <.paper_block_fields
+                      block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                      doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                      root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                      paper_links={@paper_links}
+                      tree_identity_safe={@tree_identity_safe}
+                      table_editor_target_ids={@table_editor_target_ids}
+                    />
+                  </div>
+                </div>
+                <hr class="bp-hr" />
+              <% else %>
+                <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
+                <span :if={not is_nil(@block["title"])} style="font-weight:bold"><%= @block["title"] %></span>
+                <%= for segment <- section_segments(@block, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.section_run_slug(@root_slug, @id)} run_blocks={run_blocks}
+                        run_ordinal={ordinal} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="section"
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
+                      />
+                  <% end %>
+                <% end %>
+                <%= if SectionLayout.stack_rules?(@block, :article) do %><hr class="bp-hr" style="border-top-width:1px" /><% end %>
+              <% end %>
+            </div>
+            <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--section" phx-mounted={JS.ignore_attributes("open")}>
+              <summary class="bp-paper-contextual-toggle">Configure section</summary>
+              <div class="bp-paper-contextual-panel">
+                <form id={"section-form-" <> @id} name="section-config" class="bp-paper-edit-form" phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500" data-test-id="paper-section-config-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel" for={"section-title-" <> @id}>Title</label>
+                  <input id={"section-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" placeholder="Section title" value={Map.get(@block, "title", "")} data-test-id="paper-field-title" />
+                </form>
+                <form id={"section-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-section-structure-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="section-child-count" value={length(@block["blocks"])} />
+                  <input type="hidden" name="section-new-child-id" value={Blocks.new_block_id()} />
+                  <p :if={SectionLayout.grid(@block)} class="bp-paper-edit-readonly" data-test-id="paper-section-grid-order-note">Move changes source order; existing grid placement is retained.</p>
+                  <fieldset :for={{child, index} <- Enum.with_index(@block["blocks"])} class="bp-paper-edit-form">
+                    <legend>Child <%= index + 1 %> · <%= child["type"] %></legend>
+                    <input type="hidden" name={"section-child-#{index}-id"} value={child["id"]} />
+                    <button type="submit" name="section-action" value={"up:" <> child["id"]} disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                    <button type="submit" name="section-action" value={"down:" <> child["id"]} disabled={index == length(@block["blocks"]) - 1} class="btn btn-ghost btn-sm">Move down</button>
+                    <button type="submit" name="section-action" value={"remove:" <> child["id"]} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
+                    <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                  </fieldset>
+                  <button type="submit" name="section-action" value="add" class="btn btn-ghost btn-sm">Add paragraph</button>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
+          <% end %>
+        </div>
+      <% "columns" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-columns-editor">
+          <%= if editable_columns?(@block, @tree_identity_safe) do %>
+            <div class="bp-cols" data-paper-columns-editor-frame style={"--bp-cols:#{max(length(@block["columns"]), 1)}"}>
+              <div :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-cols__c" data-column-index={column_index} data-paper-container-column-index={column_index}>
+                <%= for segment <- column_segments(column, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.columns_run_slug(@root_slug, @id, column_index)}
+                        run_blocks={run_blocks} run_ordinal={ordinal} dataset={@dataset}
+                        api_token_raw={@api_token_raw} scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="columns"
+                        container_column_index={column_index}
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key} canvas_enabled={@canvas_enabled}
+                        paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
+                      />
+                  <% end %>
+                <% end %>
+              </div>
+            </div>
+            <details
+              id={"columns-controls-" <> @id}
+              class={[
+                "bp-paper-contextual-controls bp-paper-contextual-controls--columns",
+                Enum.all?(@block["columns"], &(&1 == [])) && "bp-paper-contextual-controls--columns-empty"
+              ]}
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Configure columns</summary>
+              <div class="bp-paper-contextual-panel">
+                <form id={"columns-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-columns-structure-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="column-count" value={length(@block["columns"])} />
+                  <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
+                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form">
+                    <legend>Column <%= column_index + 1 %></legend>
+                    <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
+                    <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
+                      <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
+                      <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
+                      <button type="submit" name="column-action" value={"up:#{column_index}:#{child["id"]}"} disabled={child_index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                      <button type="submit" name="column-action" value={"down:#{column_index}:#{child["id"]}"} disabled={child_index == length(column) - 1} class="btn btn-ghost btn-sm">Move down</button>
+                      <button type="submit" name="column-action" value={"remove:#{column_index}:#{child["id"]}"} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
+                      <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                    </div>
+                    <button type="submit" name="column-action" value={"add:#{column_index}"} class="btn btn-ghost btn-sm">Add paragraph</button>
+                  </fieldset>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
+          <% end %>
+        </div>
+      <% "paper-links" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure related papers</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"paper-links-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-links-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="ref-count" value={length(Map.get(@block, "refs", []))} />
+                <label class="bp-paper-edit-fieldlabel">
+                  Title
+                  <input type="text" name="title" class="bp-paper-edit-text"
+                         value={Map.get(@block, "title", "")} />
+                </label>
+                <label class="bp-paper-edit-fieldlabel">
+                  Description
+                  <textarea name="description" class="bp-paper-edit-textarea" rows="2"><%= Map.get(@block, "description", "") %></textarea>
+                </label>
+                <label class="bp-paper-edit-fieldlabel">
+                  Layout
+                  <input type="text" name="layout" class="bp-paper-edit-text"
+                         value={Map.get(@block, "layout", "")} />
+                </label>
+
+                <fieldset
+                  :for={{ref, index} <- Enum.with_index(Map.get(@block, "refs", []))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-link-ref-row"
+                  data-ref-index={index}
+                >
+                  <legend>Reference <%= index + 1 %></legend>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Slug
+                    <input type="text" name={"ref-#{index}-slug"} class="bp-paper-edit-text"
+                           value={Blocks.paper_link_ref_value(ref, "slug") || ""} />
+                  </label>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Authored title
+                    <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
+                           value={Blocks.paper_link_ref_value(ref, "title") || ""} />
+                  </label>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Authored description
+                    <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
+                  </label>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Eyebrow
+                    <input type="text" name={"ref-#{index}-eyebrow"} class="bp-paper-edit-text"
+                           value={Blocks.paper_link_ref_value(ref, "eyebrow") || ""} />
+                  </label>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Meta
+                    <input type="text" name={"ref-#{index}-meta"} class="bp-paper-edit-text"
+                           value={Blocks.paper_link_ref_value(ref, "meta") || ""} />
+                  </label>
+                  <label class="bp-paper-edit-fieldlabel">
+                    Reason
+                    <textarea name={"ref-#{index}-reason"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "reason") || "" %></textarea>
+                  </label>
+                  <label class="bp-paper-edit-check">
+                    <input type="checkbox" name={"ref-#{index}-prefer-authored-copy"} value="true"
+                           checked={Blocks.paper_link_ref_value(ref, "prefer_authored_copy") == true} />
+                    Prefer authored copy
+                  </label>
+                  <label class="bp-paper-edit-check">
+                    <input type="hidden" name={"ref-#{index}-featured"} value="false" />
+                    <input type="checkbox" name={"ref-#{index}-featured"} value="true"
+                           checked={Blocks.paper_link_ref_value(ref, "featured") == true} />
+                    Featured reference
+                  </label>
+                  <button type="submit" name="ref-action" value={"remove:#{index}"}
+                          class="btn btn-destructive btn-sm" data-test-id="paper-link-remove-ref">
+                    Remove reference
+                  </button>
+                </fieldset>
+
+                <button type="submit" name="ref-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-link-add-ref">Add reference</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% t when t in ["form", "questionnaire"] -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-form-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= if @tree_identity_safe and editable_form_questions?(@block) do %>
+            <details
+              id={"paper-form-controls-" <> @id}
+              class="bp-paper-contextual-controls bp-paper-contextual-controls--form"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Configure questions</summary>
+              <div class="bp-paper-contextual-panel">
+                <form
+                  id={"form-editor-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                  data-test-id="paper-form-editor"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel">
+                    Presentation
+                    <select name="kind" class="bp-paper-edit-select">
+                      <option
+                        :for={kind <- form_kind_options(@block)}
+                        value={kind}
+                        selected={kind == form_kind(@block)}
+                      ><%= form_kind_label(kind) %></option>
+                    </select>
+                  </label>
+                  <input
+                    type="hidden"
+                    name="question-count"
+                    value={length(editable_form_question_rows(@block))}
+                  />
+                  <input type="hidden" name="question-new-id" value={Blocks.new_block_id()} />
+
+                  <fieldset
+                    :for={{question, index} <- Enum.with_index(editable_form_question_rows(@block))}
+                    class="bp-paper-edit-form"
+                    data-test-id="paper-form-question"
+                  >
+                    <legend>Question <%= index + 1 %></legend>
+                    <input
+                      type="hidden"
+                      name={"question-#{index}-original-id"}
+                      value={question["id"]}
+                    />
+                    <label class="bp-paper-edit-fieldlabel">
+                      Answer name
+                      <input
+                        type="text"
+                        name={"question-#{index}-id"}
+                        value={question["id"]}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Prompt
+                      <input
+                        type="text"
+                        name={"question-#{index}-prompt"}
+                        value={form_question_text(question, "prompt")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Answer type
+                      <select name={"question-#{index}-type"} class="bp-paper-edit-select">
+                        <option
+                          :for={type <- form_question_type_options(question)}
+                          value={type}
+                          selected={type == form_question_type(question)}
+                        ><%= form_question_type_label(type) %></option>
+                      </select>
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Rationale
+                      <input
+                        type="text"
+                        name={"question-#{index}-rationale"}
+                        value={form_question_text(question, "rationale")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Recommendation
+                      <input
+                        type="text"
+                        name={"question-#{index}-recommendation"}
+                        value={form_question_text(question, "recommendation")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+
+                    <%= if form_question_type(question) in ["single", "multi"] do %>
+                      <input
+                        type="hidden"
+                        name={"question-#{index}-option-count"}
+                        value={length(form_question_options(question))}
+                      />
+                      <fieldset
+                        :for={{option, option_index} <- Enum.with_index(form_question_options(question))}
+                        class="bp-paper-edit-form"
+                        data-test-id="paper-form-option"
+                      >
+                        <legend>Option <%= option_index + 1 %></legend>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Label
+                          <input
+                            type="text"
+                            name={"question-#{index}-option-#{option_index}"}
+                            value={option}
+                            class="bp-paper-edit-text"
+                          />
+                        </label>
+                        <div class="bp-paper-edit-actions">
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"up:#{question["id"]}:#{option_index}"}
+                            disabled={option_index == 0}
+                            class="btn btn-ghost btn-sm"
+                          >Move up</button>
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"down:#{question["id"]}:#{option_index}"}
+                            disabled={option_index == length(form_question_options(question)) - 1}
+                            class="btn btn-ghost btn-sm"
+                          >Move down</button>
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"remove:#{question["id"]}:#{option_index}"}
+                            class="btn btn-destructive btn-sm"
+                          >Remove option</button>
+                        </div>
+                      </fieldset>
+                      <button
+                        type="submit"
+                        name="option-action"
+                        value={"add:" <> question["id"]}
+                        class="btn btn-ghost btn-sm"
+                      >Add option</button>
+                    <% end %>
+
+                    <%= if form_question_type(question) == "scale" do %>
+                      <div class="bp-paper-edit-actions" data-test-id="paper-form-scale">
+                        <label class="bp-paper-edit-fieldlabel">
+                          Minimum
+                          <input
+                            type="text"
+                            inputmode="numeric"
+                            pattern="([+]|-)?[0-9]+"
+                            name={"question-#{index}-scale-min"}
+                            value={form_scale_bound(question, "min")}
+                            class="bp-paper-edit-number"
+                          />
+                        </label>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Maximum
+                          <input
+                            type="text"
+                            inputmode="numeric"
+                            pattern="([+]|-)?[0-9]+"
+                            name={"question-#{index}-scale-max"}
+                            value={form_scale_bound(question, "max")}
+                            class="bp-paper-edit-number"
+                          />
+                        </label>
+                      </div>
+                    <% end %>
+
+                    <div class="bp-paper-edit-actions">
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"up:" <> question["id"]}
+                        disabled={index == 0}
+                        class="btn btn-ghost btn-sm"
+                      >Move up</button>
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"down:" <> question["id"]}
+                        disabled={index == length(editable_form_question_rows(@block)) - 1}
+                        class="btn btn-ghost btn-sm"
+                      >Move down</button>
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"remove:" <> question["id"]}
+                        class="btn btn-destructive btn-sm"
+                      >Remove question</button>
+                    </div>
+                  </fieldset>
+                  <button
+                    type="submit"
+                    name="question-action"
+                    value="add"
+                    class="btn btn-ghost btn-sm"
+                  >Add question</button>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <p class="bp-paper-edit-readonly">
+              Question identities or active answer data need repair before editing; original content is preserved.
+            </p>
+          <% end %>
+        </div>
+      <% "tabs" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-tabs-editor">
+          <%= if editable_tabs?(@block) do %>
+            <div class="bp-tabs bp-tabs--editor" data-test-id="paper-tabs-preview">
+              <section
+                :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
+                class="bp-tabs__section"
+                data-tab-row-id={row["id"]}
+                aria-label={tab_label(row, index)}
+              >
+                <p class="bp-tabs__label">
+                  <%= tab_label(row, index) %>
+                </p>
+                <div class="bp-tabs__panel">
+                  <%= for segment <- tab_body_segments(row, @canvas_enabled) do %>
+                    <%= case segment do %>
+                      <% {:run, run_blocks, ordinal} -> %>
+                        <.canvas_run
+                          slug={PaperCanvas.tabs_run_slug(@root_slug, @id, row["id"])}
+                          run_blocks={run_blocks}
+                          run_ordinal={ordinal}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                          paper_rev={@doc_type == "paper" && @paper_rev}
+                          document_rev={@doc_type != "paper" && @document_rev}
+                          container_id={@id}
+                          container_kind="tabs"
+                          container_row_id={row["id"]}
+                        />
+                      <% {:block, child} -> %>
+                        <.paper_block_fields
+                          block={child}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_type={@doc_type}
+                          paper_rev={@paper_rev}
+                          document_rev={@document_rev}
+                          root_slug={@root_slug}
+                          doc_key={@doc_key}
+                          canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
+                        />
+                    <% end %>
+                  <% end %>
+                </div>
+              </section>
+            </div>
+            <details
+              id={"paper-tabs-controls-" <> @id}
+              class="bp-paper-contextual-controls bp-paper-contextual-controls--tabs"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Configure tabs</summary>
+              <div class="bp-paper-contextual-panel">
+                <form
+                  id={"tabs-form-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="panel-count" value={length(editable_tab_rows(@block))} />
+                  <input type="hidden" name="panel-new-row-id" value={Blocks.new_block_id()} />
+                  <input type="hidden" name="panel-new-child-id" value={Blocks.new_block_id()} />
+                  <fieldset :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
+                            class="bp-paper-edit-form">
+                    <legend>Panel <%= index + 1 %></legend>
+                    <input type="hidden" name={"panel-#{index}-id"} value={row["id"]} />
+                    <label class="bp-paper-edit-fieldlabel">
+                      Label
+                      <input
+                        type="text"
+                        name={"panel-#{index}-label"}
+                        value={row["label"] || ""}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"up:" <> row["id"]}
+                      disabled={index == 0}
+                      class="btn btn-ghost btn-sm"
+                    >Move up</button>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"down:" <> row["id"]}
+                      disabled={index == length(editable_tab_rows(@block)) - 1}
+                      class="btn btn-ghost btn-sm"
+                    >Move down</button>
+                    <button
+                      type="submit"
+                      name="panel-action"
+                      value={"remove:" <> row["id"]}
+                      class="btn btn-destructive btn-sm"
+                    >Remove panel</button>
+                    <button
+                      :if={empty_tab_body?(row)}
+                      type="submit"
+                      name="panel-action"
+                      value={"add-body:" <> row["id"]}
+                      class="btn btn-ghost btn-sm"
+                    >Add paragraph</button>
+                  </fieldset>
+                  <button type="submit" name="panel-action" value="add" class="btn btn-ghost btn-sm">
+                    Add panel
+                  </button>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <div class="bp-paper-contextual-preview" data-test-id="paper-tabs-preview">
+              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            </div>
+            <p class="bp-paper-edit-readonly">
+              Panel identities or body data need repair before editing; original content is preserved.
+            </p>
+          <% end %>
+        </div>
+      <% "steps" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-steps-editor">
+          <%= if not editable_steps?(@block) do %>
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <p class="bp-paper-edit-readonly">Step identities need repair before editing; original content is preserved.</p>
+          <% else %>
+          <ol class="bp-steps">
+            <li :for={row <- editable_step_rows(@block)} class="bp-steps__step" data-step-row-id={row["id"]}>
+              <div :if={is_binary(row["title"]) and row["title"] != ""} class="bp-steps__title"><%= row["title"] %></div>
+              <div class="bp-steps__body">
+                <%= for segment <- step_body_segments(row, @canvas_enabled) do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.steps_run_slug(@root_slug, @id, row["id"])}
+                        run_blocks={run_blocks} run_ordinal={ordinal}
+                        dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id} container_kind="steps" container_row_id={row["id"]}
+                      />
+                    <% {:block, child} -> %>
+                      <.paper_block_fields
+                        block={child} dataset={@dataset} api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix} picker_browse={@picker_browse}
+                        doc_type={@doc_type} paper_rev={@paper_rev} document_rev={@document_rev}
+                        root_slug={@root_slug} doc_key={@doc_key}
+                        canvas_enabled={@canvas_enabled} paper_links={@paper_links}
+                        tree_identity_safe={@tree_identity_safe}
+                        table_editor_target_ids={@table_editor_target_ids}
+                      />
+                  <% end %>
+                <% end %>
+              </div>
+            </li>
+          </ol>
+          <details id={"paper-steps-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure steps</summary>
+            <div class="bp-paper-contextual-panel">
+              <form id={"steps-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500">
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="step-count" value={length(editable_step_rows(@block))} />
+                <input type="hidden" name="step-new-row-id" value={Blocks.new_block_id()} />
+                <input type="hidden" name="step-new-child-id" value={Blocks.new_block_id()} />
+                <fieldset :for={{row, index} <- Enum.with_index(editable_step_rows(@block))}>
+                  <legend>Step <%= index + 1 %></legend>
+                  <input type="hidden" name={"step-#{index}-id"} value={row["id"]} />
+                  <label>Title
+                    <input type="text" name={"step-#{index}-title"} value={row["title"] || ""}
+                           class="bp-paper-edit-text" />
+                  </label>
+                  <button type="submit" name="step-action" value={"up:" <> row["id"]}
+                          disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                  <button type="submit" name="step-action" value={"down:" <> row["id"]}
+                          disabled={index == length(editable_step_rows(@block)) - 1}
+                          class="btn btn-ghost btn-sm">Move down</button>
+                  <button type="submit" name="step-action" value={"remove:" <> row["id"]}
+                          class="btn btn-destructive btn-sm">Remove step</button>
+                  <button :if={empty_step_body?(row)}
+                          type="submit" name="step-action" value={"add-body:" <> row["id"]}
+                          class="btn btn-ghost btn-sm">Add paragraph</button>
+                </fieldset>
+                <button type="submit" name="step-action" value="add" class="btn btn-ghost btn-sm">Add step</button>
+              </form>
+            </div>
+          </details>
+          <% end %>
+        </div>
+      <% "expandable" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-expandable-editor">
+          <details
+            id={"paper-expandable-disclosure-" <> @id}
+            class="bp-expandable"
+            open={Map.get(@block, "open") == true}
+            phx-mounted={JS.ignore_attributes("open")}
+            data-test-id="paper-expandable-preview"
+          >
+            <summary><%= Map.get(@block, "summary", "") %></summary>
+            <div class="bp-expandable__body" data-test-id="paper-expandable-children">
+              <%= if @canvas_enabled do %>
+                <%= for segment <- @expandable_segments do %>
+                  <%= case segment do %>
+                    <% {:run, run_blocks, ordinal} -> %>
+                      <.canvas_run
+                        slug={PaperCanvas.expandable_run_slug(@root_slug, @id)}
+                        run_blocks={run_blocks}
+                        run_ordinal={ordinal}
+                        dataset={@dataset}
+                        api_token_raw={@api_token_raw}
+                        scope_prefix={@scope_prefix}
+                        picker_browse={@picker_browse}
+                        doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                        paper_rev={@doc_type == "paper" && @paper_rev}
+                        document_rev={@doc_type != "paper" && @document_rev}
+                        container_id={@id}
+                      />
+                    <% {:block, child} -> %>
+                      <div
+                        data-nested-block-id={Map.get(child, "id")}
+                        data-block-type={Map.get(child, "type")}
+                      >
+                        <span class="bp-paper-edit-kind"><%= Map.get(child, "type") %></span>
+                        <.paper_block_fields
+                          block={child}
+                          dataset={@dataset}
+                          api_token_raw={@api_token_raw}
+                          scope_prefix={@scope_prefix}
+                          picker_browse={@picker_browse}
+                          doc_type={@doc_type}
+                          paper_rev={@paper_rev}
+                          document_rev={@document_rev}
+                          root_slug={@root_slug}
+                          doc_key={@doc_key}
+                          canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
+                          tree_identity_safe={@tree_identity_safe}
+                          table_editor_target_ids={@table_editor_target_ids}
+                        />
+                      </div>
+                  <% end %>
+                <% end %>
+              <% else %>
+                <div
+                  :for={child <- Blocks.container_children(@block)}
+                  data-nested-block-id={Map.get(child, "id")}
+                  data-block-type={Map.get(child, "type")}
+                >
+                  <span class="bp-paper-edit-kind"><%= Map.get(child, "type") %></span>
+                  <.paper_block_fields
+                    block={child}
+                    dataset={@dataset}
+                    api_token_raw={@api_token_raw}
+                    scope_prefix={@scope_prefix}
+                    picker_browse={@picker_browse}
+                    doc_type={@doc_type}
+                    paper_rev={@paper_rev}
+                    document_rev={@document_rev}
+                    root_slug={@root_slug}
+                    doc_key={@doc_key}
+                    canvas_enabled={false}
+                    paper_links={@paper_links}
+                    tree_identity_safe={@tree_identity_safe}
+                    table_editor_target_ids={@table_editor_target_ids}
+                  />
+                </div>
+              <% end %>
+            </div>
+          </details>
+          <details id={"paper-expandable-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure expandable</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"expandable-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <label class="bp-paper-edit-fieldlabel">
+                  Summary
+                  <input type="text" name="summary" class="bp-paper-edit-text"
+                         value={Map.get(@block, "summary", "")} />
+                </label>
+                <label class="bp-paper-edit-check">
+                  <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
+                  Open by default
+                </label>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "gauge-list" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-gauge-list-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"gauge-list-controls-" <> @id}
+                   class="bp-paper-contextual-controls bp-paper-contextual-controls--gauge-list"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure gauge list</summary>
+            <div class="bp-paper-contextual-panel">
+              <form id={"gauge-list-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-gauge-list-editor">
+                <input type="hidden" name="block_id" value={@id} />
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-title-" <> @id}>Title</label>
+                <input id={"gauge-title-" <> @id} type="text" name="title"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "title"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-mode-" <> @id}>Mode</label>
+                <select id={"gauge-mode-" <> @id} name="mode" class="bp-paper-edit-text">
+                  <option value="share" selected={Blocks.gauge_list_mode(@block) == "share"}>Shares</option>
+                  <option value="count" selected={Blocks.gauge_list_mode(@block) == "count"}>Counts from snapshot</option>
+                </select>
+                <%= if Blocks.gauge_list_mode(@block) == "share" do %>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-max-" <> @id}>Maximum</label>
+                  <input id={"gauge-max-" <> @id} type="text" inputmode="decimal" name="max"
+                         class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "max"))}
+                         placeholder="Automatic: sum of values" />
+                  <%= if is_nil(Map.get(@block, "rows")) or
+                         (is_list(Map.get(@block, "rows")) and Enum.all?(@block["rows"], &is_map/1)) do %>
+                  <input type="hidden" name="gauge-count" value={length(Blocks.gauge_list_rows(@block))} />
+                  <fieldset :for={{row, index} <- Enum.with_index(Blocks.gauge_list_rows(@block))}
+                            class="bp-paper-edit-form" data-test-id="paper-gauge-list-row">
+                    <legend>Gauge <%= index + 1 %></legend>
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-label-#{@id}"}>Label</label>
+                      <input id={"gauge-#{index}-label-#{@id}"} type="text" name={"gauge-#{index}-label"}
+                             class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "label"))} />
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-value-#{@id}"}>Value</label>
+                      <input id={"gauge-#{index}-value-#{@id}"} type="text" inputmode="decimal"
+                             name={"gauge-#{index}-value"} class="bp-paper-edit-text"
+                             value={Blocks.form_value(Map.get(row, "value"))} />
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-note-#{@id}"}>Note</label>
+                      <input id={"gauge-#{index}-note-#{@id}"} type="text" name={"gauge-#{index}-note"}
+                             class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "note"))} />
+                    <div class="bp-paper-edit-actions">
+                      <button type="submit" name="gauge-action" value={"up:#{index}"}
+                              class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                      <button type="submit" name="gauge-action" value={"down:#{index}"}
+                              class="btn btn-ghost btn-sm"
+                              disabled={index == length(Blocks.gauge_list_rows(@block)) - 1}>Move down</button>
+                      <button type="submit" name="gauge-action" value={"remove:#{index}"}
+                              class="btn btn-destructive btn-sm">Remove gauge</button>
+                    </div>
+                  </fieldset>
+                  <button type="submit" name="gauge-action" value="add" class="btn btn-ghost btn-sm">Add gauge</button>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly">
+                      Row data has a legacy shape; title, mode and maximum remain editable.
+                      Original rows are preserved.
+                    </p>
+                  <% end %>
+                <% else %>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-group-" <> @id}>Group by</label>
+                  <input id={"gauge-group-" <> @id} type="text" name="groupBy"
+                         class="bp-paper-edit-text" list={"gauge-groups-" <> @id}
+                         value={Blocks.gauge_list_group_by(@block)} />
+                  <datalist id={"gauge-groups-" <> @id}>
+                    <option :for={group <- ["worker", "phase", "status", "priority", "epic"]} value={group}></option>
+                  </datalist>
+                  <p class="bp-paper-edit-readonly">Snapshot data is preserved; grouping changes how it is displayed.</p>
+                <% end %>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "bar-chart" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-bar-chart-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"paper-chart-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure bar chart</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"bar-chart-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-bar-chart-editor"
+              >
+          <input type="hidden" name="block_id" value={@id} />
+          <input type="hidden" name="bar-count" value={length(Map.get(@block, "bars", []))} />
+          <label class="bp-paper-edit-fieldlabel">
+            Title
+            <input type="text" name="title" class="bp-paper-edit-text"
+                   value={Map.get(@block, "title", "")} />
+          </label>
+          <label class="bp-paper-edit-fieldlabel">
+            Maximum
+            <input type="number" name="max" class="bp-paper-edit-text" step="any"
+                   value={Map.get(@block, "max", "")} />
+          </label>
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="values" value="true" checked={Map.get(@block, "values") == true} />
+            Show values
+          </label>
+          <div :for={{bar, index} <- Enum.with_index(Map.get(@block, "bars", []))}
+               class="bp-paper-edit-form" data-test-id="paper-bar-chart-row" data-bar-index={index}>
+            <label class="bp-paper-edit-fieldlabel">
+              Label
+              <input type="text" name={"bar-#{index}-label"} class="bp-paper-edit-text"
+                     value={Map.get(bar, "label", "")} />
+            </label>
+            <label class="bp-paper-edit-fieldlabel">
+              Value
+              <input type="number" name={"bar-#{index}-value"} class="bp-paper-edit-text" step="any"
+                     value={Map.get(bar, "value", 0)} />
+            </label>
+            <button type="submit" name="bar-action" value={"remove:#{index}"}
+                    class="btn btn-destructive btn-sm" data-test-id="paper-bar-chart-remove">
+              Remove bar
+            </button>
+          </div>
+                <button type="submit" name="bar-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-bar-chart-add">Add bar</button>
+              </form>
+            </div>
+          </details>
+        </div>
       <% "divider" -> %>
         <p class="bp-paper-edit-readonly">— divider —</p>
 
@@ -1373,6 +3236,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                  style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
         </div>
 
+      <% "field-number" -> %>
+        <form
+          id={"field-number-form-" <> @id}
+          class="bp-paper-edit-form bp-paper-edit-field"
+          phx-update="ignore"
+          phx-change="paper-edit-block"
+          phx-submit="paper-edit-block"
+          data-test-id="paper-field-number-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-label-" <> @id}>Label</label>
+          <input id={"field-number-label-" <> @id} type="text" name="label"
+                 class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "label"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-value-" <> @id}>Value</label>
+          <input
+            id={"field-number-value-" <> @id}
+            type="number"
+            name="value"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "value"))}
+            step="any"
+            aria-describedby={"field-number-hint-" <> @id}
+            data-test-id="paper-field-field-number"
+          />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-min-" <> @id}>Minimum</label>
+          <input id={"field-number-min-" <> @id} type="number" name="min"
+                 class="bp-paper-edit-text" step="any"
+                 value={Blocks.form_value(Map.get(@block, "min"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-max-" <> @id}>Maximum</label>
+          <input id={"field-number-max-" <> @id} type="number" name="max"
+                 class="bp-paper-edit-text" step="any"
+                 value={Blocks.form_value(Map.get(@block, "max"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-step-" <> @id}>Step</label>
+          <input id={"field-number-step-" <> @id} type="number" name="step"
+                 class="bp-paper-edit-text" min="0" step="any"
+                 value={Blocks.form_value(Map.get(@block, "step"))} />
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-unit-" <> @id}>Unit</label>
+          <input id={"field-number-unit-" <> @id} type="text" name="unit"
+                 class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "unit"))} />
+          <small id={"field-number-hint-" <> @id} class="bp-paper-edit-kind">
+            Enter a valid number<%= case Blocks.form_value(Map.get(@block, "unit")) do
+              "" -> ""
+              unit -> " in #{unit}"
+            end %>.
+          </small>
+          <button type="submit" class="btn btn-primary btn-sm">Save number field</button>
+        </form>
+
       <%!-- field-reference / field-image PICKER blocks (P2.2). The Edit control
             is an existing picker Web Component (bp-reference-picker /
             bp-media-picker) rather than a native control. Each WC owns its own
@@ -1422,6 +3333,94 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </output>
           <% end %>
         </div>
+
+      <% "video" -> %>
+        <form
+          id={"video-form-" <> @id}
+          class="bp-paper-edit-form"
+          phx-submit="paper-edit-block"
+          phx-change="paper-block-autosave"
+          phx-debounce="500"
+          data-test-id="paper-video-editor"
+        >
+          <input type="hidden" name="block_id" value={@id} />
+          <input type="hidden" name="caption-count" value={length(Blocks.video_captions(@block))} />
+          <label class="bp-paper-edit-fieldlabel" for={"video-src-" <> @id}>Video source</label>
+          <input
+            id={"video-src-" <> @id}
+            type="text"
+            name="src"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "src"))}
+            placeholder="/media/video.mp4 or https://…"
+            data-test-id="paper-field-video-src"
+          />
+          <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}>Poster image</label>
+          <input
+            id={"video-poster-" <> @id}
+            type="text"
+            name="poster"
+            class="bp-paper-edit-text"
+            value={Blocks.form_value(Map.get(@block, "poster"))}
+            placeholder="Optional poster URL"
+            data-test-id="paper-field-video-poster"
+          />
+          <label class="bp-paper-edit-check">
+            <input type="checkbox" name="loop" value="true" checked={Map.get(@block, "loop") == true} />
+            Loop playback
+          </label>
+
+          <fieldset
+            :for={{caption, index} <- Enum.with_index(Blocks.video_captions(@block))}
+            class="bp-paper-edit-form"
+            data-test-id="paper-video-caption-row"
+            data-caption-index={index}
+          >
+            <legend>Caption track <%= index + 1 %></legend>
+            <div :if={is_map(caption)} class="bp-paper-edit-form">
+              <label class="bp-paper-edit-fieldlabel" for={"video-caption-lang-#{@id}-#{index}"}>
+                Language
+              </label>
+              <input
+                id={"video-caption-lang-#{@id}-#{index}"}
+                type="text"
+                name={"caption-#{index}-lang"}
+                class="bp-paper-edit-text"
+                value={Blocks.form_value(Blocks.video_caption_value(caption, "lang"))}
+                placeholder="en"
+              />
+              <label class="bp-paper-edit-fieldlabel" for={"video-caption-src-#{@id}-#{index}"}>
+                Caption file
+              </label>
+              <input
+                id={"video-caption-src-#{@id}-#{index}"}
+                type="text"
+                name={"caption-#{index}-src"}
+                class="bp-paper-edit-text"
+                value={Blocks.form_value(Blocks.video_caption_value(caption, "src"))}
+                placeholder="/captions/en.vtt"
+              />
+            </div>
+            <p :if={!is_map(caption)} class="bp-paper-edit-readonly">
+              This legacy caption entry is retained until removed.
+            </p>
+            <button
+              type="submit"
+              name="caption-action"
+              value={"remove:#{index}"}
+              class="btn btn-destructive btn-sm"
+              data-test-id="paper-video-caption-remove"
+            >Remove caption track</button>
+          </fieldset>
+
+          <button
+            type="submit"
+            name="caption-action"
+            value="add"
+            class="btn btn-ghost btn-sm"
+            data-test-id="paper-video-caption-add"
+          >Add caption track</button>
+        </form>
 
       <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
             `role: "featured"` image (Content.Papers.Template) is a `type:"image"`
@@ -1483,6 +3482,276 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     <% end %>
     """
   end
+
+  defp editable_step_rows(%{"steps" => rows}) when is_list(rows),
+    do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and &1["id"] != ""))
+
+  defp editable_step_rows(_block), do: []
+
+  defp editable_steps?(%{"steps" => rows} = block) when is_list(rows) do
+    editable = editable_step_rows(block)
+    ids = Enum.map(editable, & &1["id"])
+
+    length(editable) == length(rows) and length(Enum.uniq(ids)) == length(ids) and
+      Enum.all?(editable, &(is_nil(&1["title"]) or is_binary(&1["title"])))
+  end
+
+  defp editable_steps?(block), do: Map.get(block, "steps") == nil
+
+  defp editable_section?(%{"blocks" => blocks} = block, true) when is_list(blocks) do
+    (is_nil(block["title"]) or is_binary(block["title"])) and valid_nested_blocks?(blocks)
+  end
+
+  defp editable_section?(_block, _tree_identity_safe), do: false
+
+  defp terminal_editor_state(block, true) do
+    with {:ok, %{children: children} = state} <- Blocks.terminal_form_state(block),
+         true <- valid_nested_blocks?(children) do
+      {:ok, state}
+    else
+      _ -> {:error, :unsafe_terminal}
+    end
+  end
+
+  defp terminal_editor_state(_block, _tree_identity_safe), do: {:error, :unsafe_terminal}
+
+  defp terminal_segments(children, true),
+    do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp terminal_segments(children, false), do: Enum.map(children, &{:block, &1})
+
+  defp section_frame_attributes(block) do
+    case SectionLayout.frame_class(block) do
+      nil -> %{}
+      class -> %{class: class}
+    end
+  end
+
+  defp editable_columns?(%{"columns" => columns}, true) when is_list(columns) do
+    Enum.all?(columns, &(is_list(&1) and valid_nested_blocks?(&1)))
+  end
+
+  defp editable_columns?(_block, _tree_identity_safe), do: false
+
+  defp section_renderable?(%{"blocks" => blocks} = block) when is_list(blocks),
+    do: is_nil(block["title"]) or is_binary(block["title"])
+
+  defp section_renderable?(_block), do: false
+
+  defp valid_nested_blocks?(blocks) do
+    ids = Enum.map(blocks, fn child -> if is_map(child), do: child["id"] end)
+
+    Enum.all?(ids, &(is_binary(&1) and String.trim(&1) != "")) and
+      length(ids) == length(Enum.uniq(ids))
+  end
+
+  defp section_segments(%{"blocks" => blocks}, true),
+    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp section_segments(%{"blocks" => blocks}, false), do: Enum.map(blocks, &{:block, &1})
+
+  defp column_segments(blocks, true),
+    do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()
+
+  defp column_segments(blocks, false), do: Enum.map(blocks, &{:block, &1})
+
+  defp empty_step_body?(%{"children" => children}) when is_list(children), do: children == []
+  defp empty_step_body?(%{"children" => children}) when children not in [nil, false], do: false
+  defp empty_step_body?(row), do: Map.get(row, "blocks") in [nil, []]
+
+  defp step_body_segments(row, canvas_enabled) do
+    children = Blocks.container_children(Map.put(row, "type", "expandable"))
+
+    if canvas_enabled,
+      do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
+      else: Enum.map(Enum.filter(children, &is_map/1), &{:block, &1})
+  end
+
+  defp editable_tab_rows(%{"tabs" => rows}) when is_list(rows),
+    do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and String.trim(&1["id"]) != ""))
+
+  defp editable_tab_rows(_block), do: []
+
+  defp editable_tabs?(%{"tabs" => rows} = block) when is_list(rows) do
+    editable = editable_tab_rows(block)
+    ids = Enum.map(editable, & &1["id"])
+
+    length(editable) == length(rows) and length(Enum.uniq(ids)) == length(ids) and
+      Enum.all?(editable, fn row ->
+        (is_nil(row["label"]) or is_binary(row["label"])) and
+          (not Map.has_key?(row, "blocks") or is_nil(row["blocks"]) or
+             (is_list(row["blocks"]) and Enum.all?(row["blocks"], &is_map/1)))
+      end)
+  end
+
+  defp editable_tabs?(block), do: Map.get(block, "tabs") == nil
+
+  defp tab_label(%{"label" => label}, index) when is_binary(label) do
+    if String.trim(label) == "", do: "Tab #{index + 1}", else: label
+  end
+
+  defp tab_label(_row, index), do: "Tab #{index + 1}"
+
+  defp empty_tab_body?(row), do: Map.get(row, "blocks") in [nil, []]
+
+  defp tab_body_segments(row, canvas_enabled) do
+    blocks = if is_list(row["blocks"]), do: row["blocks"], else: []
+
+    if canvas_enabled,
+      do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
+      else: Enum.map(Enum.filter(blocks, &is_map/1), &{:block, &1})
+  end
+
+  defp editable_form_question_rows(%{"questions" => questions}) when is_list(questions),
+    do: Enum.filter(questions, &is_map/1)
+
+  defp editable_form_question_rows(_block), do: []
+
+  defp editable_form_questions?(block) do
+    kind = Map.get(block, "kind")
+    questions = Map.get(block, "questions")
+
+    (is_nil(kind) or is_binary(kind)) and
+      (is_nil(questions) or
+         (is_list(questions) and editable_form_question_list?(questions)))
+  end
+
+  defp editable_form_question_list?(questions) do
+    ids = Enum.map(questions, fn question -> if is_map(question), do: question["id"] end)
+
+    Enum.all?(questions, &editable_form_question?/1) and
+      length(ids) == length(Enum.uniq(ids))
+  end
+
+  defp editable_form_question?(%{"id" => id} = question)
+       when is_binary(id) do
+    String.trim(id) != "" and
+      Enum.all?(~w(prompt type rationale recommendation), fn key ->
+        not Map.has_key?(question, key) or is_nil(question[key]) or is_binary(question[key])
+      end) and editable_form_question_active_data?(question)
+  end
+
+  defp editable_form_question?(_question), do: false
+
+  defp editable_form_question_active_data?(question) do
+    case form_question_type(question) do
+      type when type in ["single", "multi"] ->
+        options = Map.get(question, "options")
+        is_nil(options) or (is_list(options) and Enum.all?(options, &is_binary/1))
+
+      "scale" ->
+        case Map.fetch(question, "scale") do
+          :error ->
+            true
+
+          {:ok, scale} when is_map(scale) ->
+            Enum.all?(~w(min max), &valid_form_scale_bound?(scale, &1))
+
+          {:ok, _malformed} ->
+            false
+        end
+
+      _ ->
+        true
+    end
+  end
+
+  defp valid_form_scale_bound?(scale, key) do
+    case Map.get(scale, key) do
+      nil -> true
+      value when is_integer(value) -> true
+      value when is_binary(value) -> Regex.match?(~r/^[+-]?\d+$/, value)
+      _ -> false
+    end
+  end
+
+  defp form_kind(%{"kind" => kind}) when is_binary(kind), do: kind
+  defp form_kind(%{"kind" => nil}), do: "grill"
+  defp form_kind(%{"type" => "questionnaire"}), do: "questionnaire"
+  defp form_kind(_block), do: "grill"
+
+  defp form_kind_options(block),
+    do: Enum.uniq([form_kind(block), "grill", "questionnaire"])
+
+  defp card_tone_options(current) do
+    preserve_card_option(
+      [
+        {"", "Default"},
+        {"info", "Info"},
+        {"ok", "OK"},
+        {"warn", "Warning"},
+        {"danger", "Danger"}
+      ],
+      current
+    )
+  end
+
+  defp card_priority_options(current) do
+    preserve_card_option([{"primary", "Primary"}, {"secondary", "Secondary"}], current)
+  end
+
+  defp action_preview_empty?(state),
+    do: String.trim(state.label) == "" and String.trim(state.href) == ""
+
+  defp preserve_card_option(options, current) do
+    if Enum.any?(options, fn {value, _label} -> value == current end) do
+      options
+    else
+      [{current, current <> " (current)"} | options]
+    end
+  end
+
+  defp form_kind_label("grill"), do: "Form"
+  defp form_kind_label("questionnaire"), do: "Questionnaire"
+  defp form_kind_label(kind), do: kind
+
+  defp form_question_type(%{"type" => type}) when is_binary(type), do: type
+  defp form_question_type(_question), do: "text"
+
+  defp form_question_type_options(question),
+    do: Enum.uniq([form_question_type(question) | ~w(text yesno single multi scale)])
+
+  defp form_question_type_label("text"), do: "Text"
+  defp form_question_type_label("yesno"), do: "Yes / no"
+  defp form_question_type_label("single"), do: "Single choice"
+  defp form_question_type_label("multi"), do: "Multiple choice"
+  defp form_question_type_label("scale"), do: "Scale"
+  defp form_question_type_label(type), do: type
+
+  defp form_question_text(question, key) do
+    case Map.get(question, key) do
+      value when is_binary(value) -> value
+      _ -> ""
+    end
+  end
+
+  defp form_question_options(question) do
+    case Map.get(question, "options") do
+      options when is_list(options) -> options
+      _ -> []
+    end
+  end
+
+  defp form_scale_bound(question, key) do
+    case get_in(question, ["scale", key]) do
+      value when is_integer(value) or is_binary(value) -> value
+      _ -> if(key == "min", do: 1, else: 5)
+    end
+  end
+
+  defp editable_figure_child?(%{"child" => %{"id" => id}}) when is_binary(id),
+    do: String.trim(id) != ""
+
+  defp editable_figure_child?(_block), do: false
+
+  defp figure_child_segment(%{"child" => child}, true) do
+    [child]
+    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.with_run_ordinals()
+    |> List.first()
+  end
+
+  defp figure_child_segment(%{"child" => child}, false), do: {:block, child}
 
   # Tolerant readers for the image block's `src` / `role` (t13). A raw-API
   # paper can carry a non-string in either key; the reader side degrades

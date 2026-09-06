@@ -7,14 +7,12 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
 
   This pins the two halves of that contract:
 
-    * GATING — every tag is `:if={assigns[:can_edit?]}`, so an ANONYMOUS page
-      load (the overwhelming majority) fetches nothing new. `can_edit?` is
-      `BulldocsLive.mount`'s fail-closed verdict; absent (a dead controller
-      render) reads the same as `false`.
-    * REGISTRATION ORDER — the hooks asset is non-defer and sits ABOVE the
-      inline boot script, which folds `window.BarkparkPaperEditorHooks` into
-      PaperHooks BEFORE `new LiveSocket(...)`. Registering after the connect
-      would leave every `phx-hook` on the editor inert.
+    * GATING — the bootstrap inspects the server-authorized Edit-toggle hook in
+      the static LiveView HTML. Anonymous/read-only pages create no editor asset
+      elements and retain the zero-editor-fetch path.
+    * REGISTRATION ORDER — an editable page awaits CSS, custom elements and the
+      hooks asset before folding `window.BarkparkPaperEditorHooks` into
+      PaperHooks and constructing the one public LiveSocket.
 
   Rendered through the layout function directly, so the assertions are about the
   layout and cannot be moved by anything the LiveView does.
@@ -23,15 +21,13 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
 
   import Phoenix.LiveViewTest
 
-  # The tags the reader gains ONLY for a viewer who may edit.
-  @editor_assets [
+  @eager_editor_tags [
     ~s(href="/assets/bp-paper-editor-shell.css"),
     ~s(src="/assets/bp-paper-editor.bundle.js"),
     ~s(src="/assets/bp-media-picker.js"),
     ~s(src="/assets/bp-reference-picker.js"),
     ~s(src="/assets/bp-rich-text-editor.js"),
-    ~s(src="/assets/bp-paper-editor-hooks.js"),
-    "window.BP_PAPER_EDITOR_NO_INJECT = true"
+    ~s(src="/assets/bp-paper-editor-hooks.js")
   ]
 
   defp render_layout(extra) do
@@ -49,41 +45,42 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
     render_component(&BarkparkWeb.Layouts.bulldocs/1, assigns)
   end
 
-  test "an anonymous render (no :can_edit? assign) carries no editor asset" do
+  test "the root layout never emits eager editor asset tags" do
     html = render_layout(%{})
 
-    for tag <- @editor_assets do
-      refute html =~ tag, "an anonymous reader page must not load #{tag}"
+    for tag <- @eager_editor_tags do
+      refute html =~ tag, "the runtime authorization gate must own #{tag}"
     end
 
-    # The reader's own assets are untouched by the gate.
     assert html =~ ~s(src="/assets/phoenix.js")
     assert html =~ ~s(src="/assets/bp-paper-mermaid.js")
   end
 
-  test "a read-only viewer (can_edit? false) carries no editor asset" do
-    html = render_layout(%{can_edit?: false})
+  test "the loader uses the server-authorized edit hook as its runtime gate" do
+    html = render_layout(%{})
 
-    for tag <- @editor_assets do
-      refute html =~ tag, "a read-only reader page must not load #{tag}"
+    assert html =~ ~s(data-bp-paper-editor-loader)
+    assert html =~ "document.querySelector('[phx-hook=\"BarkparkPaperEditToggle\"]')"
+    assert html =~ "window.BP_PAPER_EDITOR_NO_INJECT = true"
+
+    for asset <- [
+          "/assets/bp-paper-editor-shell.css",
+          "/assets/bp-paper-editor.bundle.js",
+          "/assets/bp-media-picker.js",
+          "/assets/bp-reference-picker.js",
+          "/assets/bp-rich-text-editor.js",
+          "/assets/bp-paper-editor-hooks.js"
+        ] do
+      assert html =~ asset
     end
   end
 
-  test "a writable viewer (can_edit? true) carries every editor asset" do
-    html = render_layout(%{can_edit?: true})
+  test "editor assets finish before hook registration and LiveSocket construction" do
+    html = render_layout(%{})
 
-    for tag <- @editor_assets do
-      assert html =~ tag, "a writable reader page must load #{tag}"
-    end
-  end
-
-  test "the hooks asset loads before the boot script that registers it" do
-    html = render_layout(%{can_edit?: true})
-
-    [asset, merge, connect] =
+    [load, connect] =
       for needle <- [
-            ~s(src="/assets/bp-paper-editor-hooks.js"),
-            "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks",
+            "await ensurePaperEditorAssets();",
             "new LiveView.LiveSocket("
           ] do
         idx = :binary.match(html, needle)
@@ -91,12 +88,29 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
         elem(idx, 0)
       end
 
-    assert asset < merge, "the hooks asset must load before the merge reads its global"
-    assert merge < connect, "hooks must be registered before the LiveSocket connects"
+    assert load < connect, "static editor assets must finish before the LiveSocket connects"
+
+    assert html =~
+             "paperEditorAssetsReady = loadPaperEditorAssets().then(installPaperEditorDefinitions);"
+
+    assert html =~ "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks);"
+    assert html =~ "script.async = false;"
+
+    assert length(:binary.matches(html, "new LiveView.LiveSocket(")) == 1,
+           "the asset loader must not create a second public LiveSocket"
+  end
+
+  test "an editor dependency failure disables Edit and gives a visible recovery instruction" do
+    html = render_layout(%{})
+
+    assert html =~ "connectPublicLiveView().catch(showPaperEditorLoadError);"
+    assert html =~ ~s(toggle.disabled = true;)
+    assert html =~ "message.setAttribute(\"role\", \"alert\")"
+    assert html =~ "Your paper is still readable; reload to try editing again."
   end
 
   test "the merge is guarded, so a missing asset cannot break the reader's hooks" do
-    assert render_layout(%{can_edit?: true}) =~
+    assert render_layout(%{}) =~
              "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks || {});"
   end
 end

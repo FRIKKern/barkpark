@@ -579,6 +579,7 @@
 .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
 .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
 .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
+.bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
 /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose column
  * exactly like .bp-table (the reader's three breakout classes). Values byte-copied from
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
@@ -604,10 +605,13 @@
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
 .bp-canvas-table { position: relative; }
-.bp-canvas-table__cols, .bp-canvas-table__rows { position: absolute; left: 0; z-index: 2; display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; margin: 0; }
-.bp-canvas-table__cols { bottom: 100%; }
-.bp-canvas-table__rows { top: 100%; }
-.bp-canvas-table:hover .bp-canvas-table__cols, .bp-canvas-table:hover .bp-canvas-table__rows, .bp-canvas-table:focus-within .bp-canvas-table__cols, .bp-canvas-table:focus-within .bp-canvas-table__rows { opacity: 1; pointer-events: auto; }
+/* Idle controls add no reader spacing. When exposed, reserve their own space
+ * BELOW the table: grids have no safe gutter for floating controls. */
+.bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
+.bp-canvas-table:hover > .bp-canvas-table__controls, .bp-canvas-table:focus-within > .bp-canvas-table__controls, .bp-canvas-table__controls[open] { position: relative; opacity: 1; pointer-events: auto; }
+.bp-canvas-table__controls > summary { cursor: pointer; padding: 6px 0; width: fit-content; }
+.bp-canvas-table__controls > summary:focus-visible, .bp-canvas-table__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-table__cols, .bp-canvas-table__rows { display: flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 0; padding: 4px 0; }
 .bp-canvas-table__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
 .bp-canvas-table__btn:disabled { opacity: 0.4; cursor: default; }
 /* S10: columns CONTAINER grid — the hand-copied mirror of the single-source
@@ -1268,8 +1272,9 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body li > p { margin: 0; }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
-/* Only the opening canvas run shares the reader opening-margin clamp. */
-.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child { margin-top: 0; }
+/* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
+   lifts the Chronicle navigation and title by one paragraph margin in Edit. */
+.bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }
 
 /* Configuration sits over the code frame without adding a publish-time gap. */
 .bp-paper-editor-body pre.bp-canvas-code { position: relative; }
