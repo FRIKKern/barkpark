@@ -522,6 +522,7 @@ defmodule Barkpark.Tasks.Close do
                        check_criteria_proven(
                          doc,
                          new_status,
+                         criteria,
                          landed,
                          overrides.criteria,
                          overrides.acknowledgement
@@ -719,8 +720,55 @@ defmodule Barkpark.Tasks.Close do
   # a closer asserting its own proof; the marker + the merge artifact ARE the
   # proof, and counting them would refuse every lead seal close and re-break the
   # exact ritual D288 protects.
-  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason, ack_override) do
-    case unmet_after_autostamp(doc, landed, ack_override) do
+  #
+  # BOTH DIRECTIONS, NOT ONE (task-c652c3ba8129c607). "Measured on the doc AS
+  # READ" was written to defeat ONE direction of the flip — a closer raising an
+  # unmet criterion to `met: true` in the closing write and grading its own
+  # homework. It does defeat that. But a predicate that reads only the BEFORE
+  # snapshot is blind to the write it is gating, so the MIRROR sailed through:
+  # stamp a criterion `met: true`, then close `done` with
+  # `--set criteria:=[{"index":0,"met":false}]`. The gate reads the pre-write
+  # row (nothing unmet), passes, and the SAME rev-CAS write lowers the lock.
+  # REPRODUCED VERBATIM on prod row task-8e3942fa840b8bf3 (2026-09-06):
+  # close rc=0, `lifecycle_status: "done"`, criterion stored `met: false`, and
+  # NO `close_override` key on the raw read-back at all. The server's only
+  # answer was the post-write advisory `acceptance_criteria: 0/1 met`. That is
+  # not a false-done in the usual direction — the row reads honestly unmet —
+  # it is an ATTRIBUTION hole: `close_override.criteria` exists precisely to
+  # record WHO closed over an unmet criterion and WHY, and this path produces
+  # the same outcome with none of it.
+  #
+  # So the unmet set is the UNION of the two snapshots: unmet BEFORE the write
+  # (the original defence — a criterion this close is about to raise still
+  # counts, because the closer may not prove its own homework) and unmet AFTER
+  # the close's own `criteria` payload is merged in (the new arm — a criterion
+  # this close is about to LOWER counts too, because the row ENDS unmet). Union,
+  # never replacement: measuring only the post-merge state would hand the
+  # false->true closer exactly the pass D289 was built to deny.
+  #
+  # WHY THE UNION AND NOT THE TWO NARROWER FIXES. Refusing a `true -> false`
+  # flip inside `merge_criteria` would be the exact mirror of the existing
+  # `flips_met_true?/1` rule, but it gates on the SHAPE of the write (a flip)
+  # rather than on the OUTCOME (a `done` row carrying an unmet criterion), and
+  # it offers no override — the closer with a real reason to lower a lock and
+  # close anyway would have no way to say so ON THE RECORD, which is the very
+  # thing missing here. Promoting the post-write `0/1 met` advisory to the 409
+  # its own text describes is smaller still, but that advisory is computed from
+  # the STORED row after the write has already committed, and it cannot see
+  # `criteria_override` — promoting it verbatim would refuse the overridden
+  # closes D289 deliberately permits. This arm widens a predicate that gates a
+  # REFUSAL, and that refusal is appealable by `criteria_override` — the one
+  # key whose absence IS the defect. A wide predicate gating a refusal is cheap
+  # and appealable; a wide predicate gating a permit fabricates.
+  defp check_criteria_proven(
+         %Document{} = doc,
+         "done",
+         criteria,
+         landed,
+         override_reason,
+         ack_override
+       ) do
+    case unmet_across_close(doc, criteria, landed, ack_override) do
       [] ->
         {:ok, nil}
 
@@ -733,9 +781,38 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # Exempt BY NAME — not by falling through a catch-all.
-  defp check_criteria_proven(%Document{}, status, _landed, _override, _ack_override)
+  defp check_criteria_proven(%Document{}, status, _criteria, _landed, _override, _ack_override)
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
+
+  # The union of the pre-write and post-merge unmet sets, keyed by index and
+  # returned in index order (the `criteria_unmet` refusal prints these, and a
+  # refusal whose indices arrive in write order rather than row order reads as
+  # a different bug).
+  #
+  # The post-merge snapshot runs the SAME `unmet_after_autostamp/3` against a
+  # doc whose content has the close's payload merged in, so both arms inherit
+  # the merge-gate and acknowledgement deductions identically — a criterion the
+  # autostamp is about to prove must not be counted by either arm.
+  #
+  # A merge error here yields the PRE-write set alone rather than crashing:
+  # `check_criteria_payload/2` runs AHEAD of this gate in the same `with` chain
+  # and already dry-ran the identical merge, so a malformed payload has aborted
+  # the close with its own named error before this line is ever reached. This
+  # clause exists so the union is total, not because the error is reachable.
+  defp unmet_across_close(%Document{content: content} = doc, criteria, landed, ack_override) do
+    before = unmet_after_autostamp(doc, landed, ack_override)
+
+    after_merge =
+      case merge_criteria(content || %{}, criteria) do
+        {:ok, merged} -> unmet_after_autostamp(%{doc | content: merged}, landed, ack_override)
+        {:error, _reason} -> []
+      end
+
+    (before ++ after_merge)
+    |> Enum.uniq_by(&Map.get(&1, "index"))
+    |> Enum.sort_by(&Map.get(&1, "index"))
+  end
 
   # ACKNOWLEDGEMENT GATE — the reporter loop.
   #
@@ -1200,7 +1277,7 @@ defmodule Barkpark.Tasks.Close do
 
   # THE TRACE (cch-w66-s2). An autostamped criterion used to be indistinguishable
   # from a hand-proven one: `unmet_after_autostamp/2` deducts the gate from the
-  # D289 unmet set, so `check_criteria_proven/4` returns `{:ok, nil}` and NO
+  # D289 unmet set, so `check_criteria_proven/6` returns `{:ok, nil}` and NO
   # `close_override` is minted — the deduction erased itself. This key is that
   # deduction's receipt, in `close_override`'s shape and by its precedent: ONE
   # content key a re-read answers "was this criterion PROVEN, or merely asserted?"
