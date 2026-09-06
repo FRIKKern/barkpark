@@ -658,6 +658,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         blocks = project_revision_fenced_ids(blocks, if_rev),
          # Doctrine backstop (pdd-t20): the OP layer enforces the paper
          # constraint VOCABULARY (cardinality + relative order) alongside the
          # locked-placement checks Patch already runs. The PAPER declaration set
@@ -905,6 +906,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
          {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
+         blocks = project_revision_fenced_ids(blocks, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops_in_context(blocks, ops, opts),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
@@ -1200,6 +1202,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
         end)
     end
   end
+
+  # The editor addresses legacy rows through the same deterministic projection
+  # it renders. Resolve those IDs only after the stored revision has passed its
+  # fence. Projection is pure; refusal and empty batches still write nothing.
+  defp project_revision_fenced_ids(blocks, if_rev) when not is_nil(if_rev),
+    do: ensure_block_ids(blocks)
+
+  defp project_revision_fenced_ids(blocks, _if_rev), do: blocks
 
   defp fold_paper_ops(blocks, ops, constraints \\ Papers.Template.paper_declarations()) do
     # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
@@ -2055,14 +2065,35 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp paper_find_block(blocks, id) do
-    Enum.find_value(blocks, fn block ->
-      cond do
-        Map.get(block, "id") == id -> block
-        Map.get(block, "type") == "section" -> paper_find_block(Map.get(block, "blocks", []), id)
-        true -> nil
-      end
+    Enum.find_value(blocks, fn
+      block when is_map(block) ->
+        if Map.get(block, "id") == id,
+          do: block,
+          else: Enum.find_value(paper_child_lists(block), &paper_find_block(&1, id))
+
+      _ ->
+        nil
     end)
   end
+
+  defp paper_child_lists(%{"type" => "section", "blocks" => children}) when is_list(children),
+    do: [children]
+
+  defp paper_child_lists(%{"type" => "expandable"} = block), do: visible_body_lists(block)
+
+  defp paper_child_lists(%{"type" => "steps", "steps" => rows}) when is_list(rows),
+    do: Enum.flat_map(rows, &visible_body_lists/1)
+
+  defp paper_child_lists(_), do: []
+
+  defp visible_body_lists(container) when is_map(container) do
+    case visible_body_key(container) do
+      nil -> []
+      key -> [Map.fetch!(container, key)]
+    end
+  end
+
+  defp visible_body_lists(_), do: []
 
   @doc """
   R2 fix (Option A). Walk a block list and fill a stable positional id
@@ -2194,19 +2225,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp ensure_visible_body_ids(container, prefix) do
-    key =
-      case Map.get(container, "children") do
-        children when is_list(children) ->
-          "children"
-
-        absent when absent in [nil, false] ->
-          if is_list(Map.get(container, "blocks")), do: "blocks"
-
-        _ ->
-          nil
-      end
-
+    key = visible_body_key(container)
     if key, do: Map.update!(container, key, &ensure_block_ids(&1, prefix)), else: container
+  end
+
+  defp visible_body_key(container) do
+    case Map.get(container, "children") do
+      children when is_list(children) ->
+        "children"
+
+      absent when absent in [nil, false] ->
+        if is_list(Map.get(container, "blocks")), do: "blocks"
+
+      _ ->
+        nil
+    end
   end
 
   @doc """

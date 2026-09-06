@@ -1,23 +1,42 @@
 defmodule Barkpark.Content.Papers.CanvasRunContext do
   @moduledoc false
 
-  @type context :: %{
-          container_id: String.t(),
-          container_run_ids: [String.t()]
-        }
+  @type context ::
+          %{container_id: String.t(), container_run_ids: [String.t()]}
+          | %{
+              container_kind: String.t(),
+              container_id: String.t(),
+              container_row_id: String.t(),
+              container_run_ids: [String.t()]
+            }
 
   @spec normalize(nil | map()) :: {:ok, nil | context()} | {:error, atom()}
   def normalize(nil), do: {:ok, nil}
 
   def normalize(context) when is_map(context) do
-    container_id = Map.get(context, :container_id) || Map.get(context, "container_id")
-    run_ids = Map.get(context, :container_run_ids) || Map.get(context, "container_run_ids")
+    with {:ok, container_id, _id_present?} <- context_field(context, :container_id),
+         {:ok, run_ids, _run_present?} <- context_field(context, :container_run_ids),
+         {:ok, kind, kind_present?} <- context_field(context, :container_kind),
+         {:ok, row_id, row_present?} <- context_field(context, :container_row_id),
+         true <- valid_base?(container_id, run_ids) do
+      cond do
+        not kind_present? and not row_present? ->
+          {:ok, %{container_id: container_id, container_run_ids: run_ids}}
 
-    if nonblank?(container_id) and is_list(run_ids) and run_ids != [] and
-         Enum.all?(run_ids, &nonblank?/1) and Enum.uniq(run_ids) == run_ids do
-      {:ok, %{container_id: container_id, container_run_ids: run_ids}}
+        kind == "steps" and kind_present? and row_present? and nonblank?(row_id) ->
+          {:ok,
+           %{
+             container_kind: "steps",
+             container_id: container_id,
+             container_row_id: row_id,
+             container_run_ids: run_ids
+           }}
+
+        true ->
+          {:error, :invalid_canvas_run_context}
+      end
     else
-      {:error, :invalid_canvas_run_context}
+      _invalid -> {:error, :invalid_canvas_run_context}
     end
   end
 
@@ -32,11 +51,19 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   """
   @spec map_run([map()], context(), ([map()] -> {:ok, [map()], term()} | {:error, term()})) ::
           {:ok, [map()], term()} | {:error, term()}
-  def map_run(blocks, %{container_id: container_id, container_run_ids: run_ids}, fun)
-      when is_list(blocks) and is_function(fun, 1) do
+  def map_run(blocks, context, fun) when is_list(blocks) and is_function(fun, 1) do
+    with {:ok, normalized} <- normalize(context),
+         true <- is_map(normalized) || {:error, :invalid_canvas_run_context} do
+      map_normalized_run(blocks, normalized, fun)
+    end
+  end
+
+  def map_run(_blocks, _context, _fun), do: {:error, :invalid_canvas_run_context}
+
+  defp map_normalized_run(blocks, %{container_run_ids: run_ids} = context, fun) do
     before_counts = id_occurrences(blocks)
 
-    with {:ok, match} <- unique_expandable(blocks, container_id),
+    with {:ok, match} <- unique_container_run(blocks, context),
          {:ok, start} <- unique_contiguous_start(match.children, run_ids),
          run = Enum.slice(match.children, start, length(run_ids)),
          {:ok, next_run, result} <- fun.(run),
@@ -53,10 +80,17 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end
   end
 
-  def map_run(_blocks, _context, _fun), do: {:error, :invalid_canvas_run_context}
+  defp unique_container_run(
+         blocks,
+         %{container_kind: "steps", container_id: container_id, container_row_id: row_id}
+       ),
+       do: unique_steps_row(blocks, container_id, row_id)
+
+  defp unique_container_run(blocks, %{container_id: container_id}),
+    do: unique_expandable(blocks, container_id)
 
   defp unique_expandable(blocks, container_id) do
-    case find_expandables(blocks, container_id, []) do
+    case find_containers(blocks, "expandable", container_id, []) do
       [%{alias: alias} = match] when alias in ["children", "blocks"] -> {:ok, match}
       [_one] -> {:error, :canvas_run_container_children_invalid}
       [] -> {:error, :canvas_run_container_not_found}
@@ -64,7 +98,51 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end
   end
 
-  defp find_expandables(blocks, container_id, path) do
+  defp unique_steps_row(blocks, container_id, row_id) do
+    case find_containers(blocks, "steps", container_id, []) do
+      [%{rows: rows, path: path}] when is_list(rows) ->
+        matches =
+          rows
+          |> Enum.with_index()
+          |> Enum.filter(fn
+            {row, _index} when is_map(row) -> Map.get(row, "id") == row_id
+            {_row, _index} -> false
+          end)
+
+        case matches do
+          [{row, index}] ->
+            {alias_key, children} = effective_children(row)
+
+            if alias_key in ["children", "blocks"] do
+              {:ok,
+               %{
+                 path: path ++ ["steps", {:row, index, row_id}],
+                 alias: alias_key,
+                 children: children
+               }}
+            else
+              {:error, :canvas_run_container_children_invalid}
+            end
+
+          [] ->
+            {:error, :canvas_run_container_row_not_found}
+
+          [_first | _rest] ->
+            {:error, :canvas_run_container_row_ambiguous}
+        end
+
+      [_one] ->
+        {:error, :canvas_run_container_children_invalid}
+
+      [] ->
+        {:error, :canvas_run_container_not_found}
+
+      [_first | _rest] ->
+        {:error, :canvas_run_container_ambiguous}
+    end
+  end
+
+  defp find_containers(blocks, type, container_id, path) do
     blocks
     |> Enum.with_index()
     |> Enum.flat_map(fn
@@ -72,18 +150,18 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
         current_path = path ++ [index]
 
         own =
-          if Map.get(block, "type") == "expandable" and Map.get(block, "id") == container_id do
-            {alias_key, children} = effective_children(block)
-            [%{path: current_path, alias: alias_key, children: children}]
+          if Map.get(block, "type") == type and Map.get(block, "id") == container_id do
+            [container_match(block, current_path)]
           else
             []
           end
 
         nested =
-          case recursive_children(block) do
-            {key, children} -> find_expandables(children, container_id, current_path ++ [key])
-            nil -> []
-          end
+          block
+          |> recursive_child_entries()
+          |> Enum.flat_map(fn {suffix, children} ->
+            find_containers(children, type, container_id, current_path ++ suffix)
+          end)
 
         own ++ nested
 
@@ -92,23 +170,84 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end)
   end
 
-  defp effective_children(%{"children" => children}) when is_list(children),
-    do: {"children", children}
+  defp container_match(%{"type" => "steps"} = block, path),
+    do: %{path: path, rows: Map.get(block, "steps")}
 
-  defp effective_children(%{"blocks" => blocks}) when is_list(blocks), do: {"blocks", blocks}
-  defp effective_children(_block), do: {nil, []}
+  defp container_match(block, path) do
+    {alias_key, children} = effective_children(block)
+    %{path: path, alias: alias_key, children: children}
+  end
 
-  defp recursive_children(%{"type" => "expandable"} = block), do: child_entry(block)
+  defp effective_children(container) do
+    case Map.get(container, "children") do
+      children when children not in [nil, false] ->
+        if is_list(children), do: {"children", children}, else: {nil, []}
 
-  defp recursive_children(%{"type" => "section", "blocks" => blocks}) when is_list(blocks),
-    do: {"blocks", blocks}
+      _absent ->
+        case Map.get(container, "blocks") do
+          blocks when is_list(blocks) -> {"blocks", blocks}
+          _other -> {nil, []}
+        end
+    end
+  end
 
-  defp recursive_children(_block), do: nil
-
-  defp child_entry(block) do
+  defp recursive_child_entries(%{"type" => "expandable"} = block) do
     case effective_children(block) do
-      {key, children} when key in ["children", "blocks"] -> {key, children}
-      _ -> nil
+      {key, children} when key in ["children", "blocks"] -> [{[key], children}]
+      _invalid -> []
+    end
+  end
+
+  defp recursive_child_entries(%{"type" => "section", "blocks" => blocks})
+       when is_list(blocks),
+       do: [{["blocks"], blocks}]
+
+  defp recursive_child_entries(%{"type" => "steps", "steps" => rows}) when is_list(rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {row, index} when is_map(row) ->
+        case effective_children(row) do
+          {key, children} when key in ["children", "blocks"] ->
+            [{["steps", {:row, index, Map.get(row, "id")}, key], children}]
+
+          _invalid ->
+            []
+        end
+
+      {_row, _index} ->
+        []
+    end)
+  end
+
+  defp recursive_child_entries(_block), do: []
+
+  defp put_children(blocks, path, alias_key, children) do
+    put_path(blocks, path ++ [alias_key], children)
+  end
+
+  defp put_path(_current, [], replacement), do: replacement
+
+  defp put_path(current, [index | rest], replacement)
+       when is_list(current) and is_integer(index) do
+    List.update_at(current, index, &put_path(&1, rest, replacement))
+  end
+
+  defp put_path(current, [{:row, index, row_id} | rest], replacement)
+       when is_list(current) do
+    List.update_at(current, index, fn row ->
+      if is_map(row) and Map.get(row, "id") == row_id do
+        put_path(row, rest, replacement)
+      else
+        row
+      end
+    end)
+  end
+
+  defp put_path(current, [key | rest], replacement) when is_map(current) and is_binary(key) do
+    case Map.fetch(current, key) do
+      {:ok, child} -> Map.put(current, key, put_path(child, rest, replacement))
+      :error -> current
     end
   end
 
@@ -135,16 +274,6 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end
   end
 
-  defp put_children(blocks, [index], alias_key, children) do
-    List.update_at(blocks, index, &Map.put(&1, alias_key, children))
-  end
-
-  defp put_children(blocks, [index, key | rest], alias_key, children) do
-    List.update_at(blocks, index, fn block ->
-      Map.update!(block, key, &put_children(&1, rest, alias_key, children))
-    end)
-  end
-
   defp id_occurrences(blocks) do
     Enum.reduce(blocks, %{}, fn block, counts ->
       counts =
@@ -169,6 +298,17 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp all_child_lists(%{"type" => "section", "blocks" => blocks}) when is_list(blocks),
     do: [blocks]
 
+  defp all_child_lists(%{"type" => "steps", "steps" => rows}) when is_list(rows) do
+    Enum.flat_map(rows, fn
+      row when is_map(row) ->
+        [Map.get(row, "children"), Map.get(row, "blocks")]
+        |> Enum.filter(&is_list/1)
+
+      _row ->
+        []
+    end)
+  end
+
   defp all_child_lists(_block), do: []
 
   defp reject_increased_duplicate_ids(before_counts, after_counts) do
@@ -183,6 +323,24 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp block_id(block) when is_map(block), do: Map.get(block, "id")
   defp block_id(_block), do: nil
+
+  defp valid_base?(container_id, run_ids) do
+    nonblank?(container_id) and is_list(run_ids) and run_ids != [] and
+      Enum.all?(run_ids, &nonblank?/1) and Enum.uniq(run_ids) == run_ids
+  end
+
+  defp context_field(context, key) do
+    atom_value = Map.fetch(context, key)
+    string_value = Map.fetch(context, Atom.to_string(key))
+
+    case {atom_value, string_value} do
+      {:error, :error} -> {:ok, nil, false}
+      {{:ok, value}, :error} -> {:ok, value, true}
+      {:error, {:ok, value}} -> {:ok, value, true}
+      {{:ok, value}, {:ok, value}} -> {:ok, value, true}
+      {{:ok, _atom}, {:ok, _string}} -> {:error, :ambiguous}
+    end
+  end
 
   defp nonblank?(value), do: is_binary(value) and String.trim(value) != ""
 end
