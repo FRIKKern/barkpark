@@ -145,6 +145,83 @@ for (const kind of ["steps", "tabs"]) {
   dom.window.close();
 }
 
+for (const { kind, attributes, expected } of [
+  {
+    kind: "section",
+    attributes: 'data-paper-container-kind="section" data-paper-container-id="section-1" ' +
+      'data-paper-container-run="0"',
+    expected: {
+      container_kind: "section",
+      container_id: "section-1",
+      container_run_ids: ["nested-a", "nested-b"],
+    },
+  },
+  {
+    kind: "columns",
+    attributes: 'data-paper-container-kind="columns" data-paper-container-id="columns-1" ' +
+      'data-paper-container-column-index="1" data-paper-container-run="0"',
+    expected: {
+      container_kind: "columns",
+      container_id: "columns-1",
+      container_column_index: 1,
+      container_run_ids: ["nested-a", "nested-b"],
+    },
+  },
+  {
+    kind: "columns",
+    attributes: 'data-paper-container-kind="columns" data-paper-container-id="columns-max" ' +
+      'data-paper-container-column-index="9007199254740991" data-paper-container-run="0"',
+    expected: {
+      container_kind: "columns",
+      container_id: "columns-max",
+      container_column_index: Number.MAX_SAFE_INTEGER,
+      container_run_ids: ["nested-a", "nested-b"],
+    },
+  },
+]) {
+  const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(attributes);
+  canvas.blocks = [{ id: "nested-a" }, { id: "nested-b" }];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: { ops: [{ op: "patch-block", id: "nested-a" }], seq: 12 },
+    }),
+  );
+
+  assert.equal(pending.length, 1);
+  const original = structuredClone(pending[0].payload);
+  for (const [key, value] of Object.entries(expected)) assert.deepEqual(original[key], value);
+  assert.equal("container_row_id" in original, false);
+  if (kind === "section") assert.equal("container_column_index" in original, false);
+
+  wrapper.dataset.paperContainerKind = "expandable";
+  wrapper.dataset.paperContainerId = "moved";
+  wrapper.dataset.paperContainerRowId = "row";
+  wrapper.dataset.paperContainerColumnIndex = "2";
+  canvas.blocks = [{ id: "different-current-run" }];
+  pending.shift().reject(new Error(`${kind} reply lost`));
+  await tick();
+
+  const barriers = [];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-flush-pending", {
+      bubbles: true,
+      detail: { waitUntil: (promise) => barriers.push(promise) },
+    }),
+  );
+  assert.equal(pending.length, 1);
+  assert.deepEqual(
+    structuredClone(pending[0].payload),
+    original,
+    `retry freezes the original ${kind} kind, parent, run, revision and request ID`,
+  );
+
+  pending[0].resolve({ saved: true, request_id: original.request_id, rev: 8 });
+  await Promise.all(barriers);
+  bridge.destroyed();
+  dom.window.close();
+}
+
 {
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
     'data-paper-container-kind="figure" data-paper-container-id="figure-1" ' +
@@ -232,6 +309,22 @@ for (const [attributes, confirmedBlocks] of [
   ['data-paper-container-kind="figure" data-paper-container-id="figure"', [{ id: "child" }]],
   ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-row-id="row" data-paper-container-run="1"', [{ id: "child" }]],
   ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-run="1"', [{ id: "a" }, { id: "b" }]],
+  ['data-paper-container-kind="section" data-paper-container-id="section"', [{ id: "a" }]],
+  ['data-paper-container-kind="section" data-paper-container-id="section" data-paper-container-row-id="row" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="section" data-paper-container-id="section" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-row-id="row" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="-1" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="01" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="+1" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="1.0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="1e0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index=" 1" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="columns" data-paper-container-id="columns" data-paper-container-column-index="9007199254740992" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-id="details" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "child" }]],
+  ['data-paper-container-kind="steps" data-paper-container-id="steps" data-paper-container-row-id="row" data-paper-container-column-index="0" data-paper-container-run="1"', [{ id: "a" }]],
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending, errors } = mountCanvas(attributes);
   canvas.blocks = confirmedBlocks;
@@ -252,4 +345,4 @@ for (const [attributes, confirmedBlocks] of [
   dom.window.close();
 }
 
-console.log("nested canvas context: expandable/steps/tabs/figure retry + top-level + 16 fail-closed cases passed");
+console.log("nested canvas context: expandable/steps/tabs/figure/section/columns retry + top-level + strict fail-closed cases passed");

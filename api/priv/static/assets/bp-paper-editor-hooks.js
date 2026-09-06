@@ -795,8 +795,8 @@
             apply?.(rev === confirmedRevision ? "own" : "own-stale");
             return true;
           }
-          if (rev === confirmedRevision && !coordinator.hasUnsaved()) {
-            apply?.("current");
+          if (rev === confirmedRevision) {
+            if (!coordinator.hasUnsaved()) apply?.("current");
             return true;
           }
           if (mutationQueue.length || coordinator.hasUnsaved()) {
@@ -1015,6 +1015,7 @@
         };
         mutationPaused = true;
         coordinator._renderConflict();
+        renderSaveStatus();
       };
       coordinator._renderConflict = () => {
         let banner = main.querySelector("[data-bp-paper-conflict]");
@@ -1879,12 +1880,14 @@
           const containerId = this.el.dataset.paperContainerId;
           const containerKind = this.el.dataset.paperContainerKind;
           const containerRowId = this.el.dataset.paperContainerRowId;
+          const containerColumnIndex = this.el.dataset.paperContainerColumnIndex;
           const hasLegacyRunMarker = this.el.dataset.paperContainerRun != null;
           const hasContainerId = containerId != null;
           const hasContainerKind = containerKind != null;
           const hasContainerRowId = containerRowId != null;
+          const hasContainerColumnIndex = containerColumnIndex != null;
           if (!hasContainerId && !hasLegacyRunMarker &&
-              !hasContainerKind && !hasContainerRowId) {
+              !hasContainerKind && !hasContainerRowId && !hasContainerColumnIndex) {
             return { wire: {}, invalid: false };
           }
           const confirmedBlocks = this.el.querySelector("bp-paper-canvas")?.blocks;
@@ -1898,22 +1901,35 @@
             return { wire: {}, invalid: true };
           }
           const legacyContext = hasContainerId && hasLegacyRunMarker &&
-            !hasContainerKind && !hasContainerRowId;
+            !hasContainerKind && !hasContainerRowId && !hasContainerColumnIndex;
           const rowContext = hasContainerId && hasLegacyRunMarker &&
             hasContainerKind && ["steps", "tabs"].includes(containerKind) &&
-            hasContainerRowId && containerRowId.trim() !== "";
+            hasContainerRowId && !hasContainerColumnIndex && containerRowId.trim() !== "";
           const figureContext = hasContainerId && hasLegacyRunMarker &&
-            containerKind === "figure" && !hasContainerRowId && runIds.length === 1;
-          if (!legacyContext && !rowContext && !figureContext) {
+            containerKind === "figure" && !hasContainerRowId &&
+            !hasContainerColumnIndex && runIds.length === 1;
+          const sectionContext = hasContainerId && hasLegacyRunMarker &&
+            containerKind === "section" && !hasContainerRowId && !hasContainerColumnIndex;
+          const parsedColumnIndex = /^(0|[1-9][0-9]*)$/.test(containerColumnIndex ?? "")
+            ? Number(containerColumnIndex)
+            : null;
+          const columnsContext = hasContainerId && hasLegacyRunMarker &&
+            containerKind === "columns" && !hasContainerRowId && hasContainerColumnIndex &&
+            Number.isSafeInteger(parsedColumnIndex) && parsedColumnIndex >= 0;
+          if (!legacyContext && !rowContext && !figureContext &&
+              !sectionContext && !columnsContext) {
             return { wire: {}, invalid: true };
           }
           return {
             wire: Object.freeze({
-              ...(rowContext || figureContext ? {
+              ...(rowContext || figureContext || sectionContext || columnsContext ? {
                 container_kind: containerKind,
               } : {}),
               ...(rowContext ? {
                 container_row_id: containerRowId,
+              } : {}),
+              ...(columnsContext ? {
+                container_column_index: parsedColumnIndex,
               } : {}),
               container_id: containerId,
               container_run_ids: Object.freeze([...runIds]),

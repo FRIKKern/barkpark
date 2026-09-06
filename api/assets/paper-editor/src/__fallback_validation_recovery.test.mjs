@@ -18,6 +18,7 @@ function mountedForm(formHtml) {
     <main data-paper-doc-key="production:paper:validation" data-paper-rev="7">
       <button id="toggle" data-editing="true">View</button>
       <div class="bp-paper-editor">${formHtml}</div>
+      <footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer>
     </main>
   `, { url: "http://localhost/", virtualConsole });
   const { window } = dom;
@@ -250,6 +251,80 @@ const tocMarkup = `
   await tick();
   assert.equal(env.toggleCalls.length, 1, "View resumes after the retained caption is durable");
   assert.equal(env.toggleCalls[0].event, "paper-toggle-edit");
+  bridge.destroyed();
+  env.close();
+}
+
+// LiveView can paint the Figure child acknowledgement (including the new
+// document revision) before the coordinator consumes the matching push reply.
+// A caption authored in that window belongs after the child write and must
+// advance onto its acknowledged base instead of becoming an external conflict.
+{
+  const env = mountedForm(`
+    <div id="figure-echo-carrier" data-paper-doc-key="production:paper:validation" data-paper-rev="7">
+      <div id="paper-canvas-figure-echo-run" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+           data-paper-container-kind="figure" data-paper-container-id="figure-echo"
+           data-paper-container-run="0" data-canvas-blocks="[]">
+        <bp-paper-canvas></bp-paper-canvas>
+      </div>
+      <form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="10">
+        <input type="hidden" name="block_id" value="figure-echo">
+        <input name="caption" value="Old caption">
+      </form>
+    </div>
+  `);
+  const wrapper = env.window.document.querySelector("#paper-canvas-figure-echo-run");
+  const canvas = wrapper.querySelector("bp-paper-canvas");
+  canvas.acknowledgeOps = () => {};
+  canvas.applyServerBlocks = () => {};
+  const canvasCalls = [];
+  const canvasReplies = [];
+  const handlers = new Map();
+  const bridge = {
+    ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+    el: wrapper,
+    handleEvent: (name, handler) => handlers.set(name, handler),
+    pushEvent: (_event, payload) => {
+      canvasCalls.push(payload);
+      return new Promise((resolve) => canvasReplies.push(resolve));
+    },
+  };
+  bridge.mounted();
+  canvas.blocks = [{ id: "figure-echo-child" }];
+  wrapper.dispatchEvent(new env.window.CustomEvent("bp-canvas-ops", {
+    bubbles: true,
+    detail: {
+      ops: [{ op: "patch-block", id: "figure-echo-child", patch: { text: "New body" } }],
+      seq: 1,
+    },
+  }));
+
+  const requestId = canvasCalls[0].request_id;
+  env.window.document.querySelector("#figure-echo-carrier").dataset.paperRev = "8";
+  wrapper.dataset.paperRev = "8";
+  handlers.get("bp:canvas-update")({
+    rev: 8,
+    request_id: requestId,
+    runs: [{ run_id: "figure-echo-run", blocks: [{ id: "figure-echo-child", text: "New body" }] }],
+  });
+  const caption = env.form.elements.namedItem("caption");
+  caption.value = "Caption authored after own paint";
+  caption.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  canvasReplies.shift()({ saved: true, request_id: requestId, rev: 8 });
+  await tick();
+  handlers.get("bp:canvas-update")({
+    rev: 8,
+    runs: [{ run_id: "figure-echo-run", blocks: [{ id: "figure-echo-child", text: "New body" }] }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.equal(env.window.document.querySelector("[data-bp-paper-conflict]"), null);
+  assert.equal(env.calls.length, 1, "caption authored after the own paint advances and saves");
+  assert.equal(env.calls[0].payload.caption, "Caption authored after own paint");
+  assert.equal(env.calls[0].payload.if_rev, 8);
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 9 });
+  await tick();
   bridge.destroyed();
   env.close();
 }
@@ -730,6 +805,11 @@ const tocMarkup = `
   });
   let banner = env.window.document.querySelector("[data-bp-paper-conflict]");
   assert.ok(banner, "an echo source without a local draft still enters explicit review");
+  assert.equal(
+    env.window.document.querySelector('[data-test-id="bp-paper-footer-save"]').textContent,
+    "Save paused — review required.",
+    "an externally introduced conflict replaces the stale Saving status",
+  );
   assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
   banner.querySelector('[data-action="review"]').click();
   assert.match(
