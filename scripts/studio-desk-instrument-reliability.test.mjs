@@ -410,7 +410,7 @@ test('the run records which browser measured it', () => {
 });
 
 test('--help states the browser policy and the install command', () => {
-  // ANCHOR REPAIR (#16355). This slice used to end at `const DEFAULT_DOC`, which
+  // ANCHOR REPAIR (task-7f44670cf2d7bd53). This slice used to end at `const DEFAULT_DOC`, which
   // no longer exists — the committed default slug was deleted because it aged off
   // the Papers window. `indexOf` would have returned -1, `slice(start, -1)` would
   // have handed this test the WHOLE REST OF THE FILE, and every assertion below

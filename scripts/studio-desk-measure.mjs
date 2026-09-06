@@ -308,7 +308,7 @@
 //  - "~80% deterministic." 19 of 22 raw, 19 of 19 outside a deploy window, with
 //    every completed run reproducing at tolerance zero.
 //
-// CLOSED SINCE (#16355), and it was this file's to fix after all: the committed
+// CLOSED SINCE (task-7f44670cf2d7bd53), and it was this file's to fix after all: the committed
 // DEFAULT_DOC had aged off the Papers pane's newest-100 window, so the no-flag
 // invocation aborted 1 of 1 with a correctly-worded drill error naming a slug the
 // reader had no way to replace. Every run above therefore passed --doc
@@ -436,7 +436,7 @@ OPTIONS
                       resolved at run time from the list the drill just opened
                       — never from a committed slug, which ages off the
                       newest-100 window and turns a bare run into an abort
-                      (#16355). The run records measured_doc and
+                      (task-7f44670cf2d7bd53). The run records measured_doc and
                       measured_doc_source; an EMPTY pane REFUSES by name
                       rather than falling back to the root pane.
   --doc=any           Drill the first Papers row that opens a paper surface.
@@ -515,7 +515,7 @@ const ANY_DOC = 'any';
 const NEWEST_DOC = 'newest';
 
 /**
- * THERE IS NO COMMITTED DEFAULT SLUG, AND ITS ABSENCE IS THIS BLOCK (#16355).
+ * THERE IS NO COMMITTED DEFAULT SLUG, AND ITS ABSENCE IS THIS BLOCK (task-7f44670cf2d7bd53).
  *
  * WHAT WAS HERE. `DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19'`
  * — one of this epic's own sealed wave Papers, chosen under D97 because a NAMED
@@ -2530,7 +2530,7 @@ async function drillToDocument(page, base, requestedTarget) {
   const rowCount = await rows.count();
 
   // THE DEFAULT RESOLVES HERE, INSIDE THE PANE THE DRILL PROVED IT ENTERED, and
-  // never from a committed slug (#16355 — see resolveDocTarget). It runs BEFORE
+  // never from a committed slug (task-7f44670cf2d7bd53 — see resolveDocTarget). It runs BEFORE
   // the generic empty-list check because `resolveNewestPaperSlug` owns that case
   // for this mode and says the one thing the generic message cannot: that the
   // refusal is a refusal to fall back to the root pane.
@@ -2602,7 +2602,7 @@ async function drillToDocument(page, base, requestedTarget) {
           `\n    document TYPES (paper / sheet / rest / ...) means this is the ROOT pane and the ` +
           `\n    drill never entered the list at all.` +
           `\n    If the target has simply aged off the 100-row window, pass --doc=<slug> with one of ` +
-          `\n    these — or --doc=newest (the DEFAULT since #16355), which resolves the newest row of ` +
+          `\n    these — or --doc=newest (the DEFAULT since task-7f44670cf2d7bd53), which resolves the newest row of ` +
           `\n    this same list and so cannot age off it.`);
       }
       const landed = await tryOpenRow(page, named);
@@ -3453,7 +3453,7 @@ async function main() {
       'The drill targets a NAMED document (D97). It used to click the first row of a Papers list ' +
       'that concurrent waves rewrite live, which made a failed run indistinguishable from a desk ' +
       'fact. There is no longer a COMMITTED default slug: one aged off the newest-100 window and ' +
-      'made the bare invocation abort 1 of 1 (#16355), and any replacement literal would age off ' +
+      'made the bare invocation abort 1 of 1 (task-7f44670cf2d7bd53), and any replacement literal would age off ' +
       'on the same clock. The default `newest` resolves the newest row of the Papers pane the ' +
       'drill just opened, then proceeds as a named target — same click, same assertion that the ' +
       'landed URL carries the slug — and an EMPTY pane refuses by name rather than falling back ' +

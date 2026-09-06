@@ -2,7 +2,7 @@
 //
 // studio-desk-default-doc.test.mjs — the red tests for the DEFAULT DRILL TARGET.
 //
-// THE DEFECT THIS PINS (#16355). The instrument used to carry a committed
+// THE DEFECT THIS PINS (task-7f44670cf2d7bd53). The instrument used to carry a committed
 // default slug, `DEFAULT_DOC = 'studio-space-priority-desk-browser-2026-07-19'`.
 // The Papers pane is a newest-first window of ~100 rows that this epic's own
 // waves publish into continuously, so that slug aged out of it — and a bare
@@ -95,7 +95,7 @@ test('the comment stripper leaves live code standing (non-vacuity)', () => {
 
 test('no DEFAULT_DOC binding survives in live code', () => {
   assert.doesNotMatch(liveCode(SRC), /(?:^|\s)(?:const|let|var)\s+DEFAULT_DOC\b/,
-    'a committed default slug is the defect (#16355) whatever value it holds: the Papers pane is a ' +
+    'a committed default slug is the defect (task-7f44670cf2d7bd53) whatever value it holds: the Papers pane is a ' +
     'newest-first ~100-row window, so any fixed slug ages out of it and the bare invocation starts ' +
     'aborting 1 of 1. The default must RESOLVE at run time.');
 });
