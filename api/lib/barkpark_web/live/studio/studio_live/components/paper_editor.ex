@@ -505,7 +505,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"equation", "Equation"},
          {"route", "Route"},
          {"toc", "Table of contents"},
-         {"criteria-progress", "Criteria progress"}
+         {"criteria-progress", "Criteria progress"},
+         {"gauge-list", "Gauge list"}
        ]},
       {"Technical",
        [
@@ -1960,6 +1961,79 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
                   Open by default
                 </label>
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "gauge-list" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-gauge-list-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"gauge-list-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure gauge list</summary>
+            <div class="bp-paper-contextual-panel">
+              <form id={"gauge-list-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-gauge-list-editor">
+                <input type="hidden" name="block_id" value={@id} />
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-title-" <> @id}>Title</label>
+                <input id={"gauge-title-" <> @id} type="text" name="title"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "title"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-mode-" <> @id}>Mode</label>
+                <select id={"gauge-mode-" <> @id} name="mode" class="bp-paper-edit-text">
+                  <option value="share" selected={Blocks.gauge_list_mode(@block) == "share"}>Shares</option>
+                  <option value="count" selected={Blocks.gauge_list_mode(@block) == "count"}>Counts from snapshot</option>
+                </select>
+                <%= if Blocks.gauge_list_mode(@block) == "share" do %>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-max-" <> @id}>Maximum</label>
+                  <input id={"gauge-max-" <> @id} type="text" inputmode="decimal" name="max"
+                         class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "max"))}
+                         placeholder="Automatic: sum of values" />
+                  <%= if is_nil(Map.get(@block, "rows")) or
+                         (is_list(Map.get(@block, "rows")) and Enum.all?(@block["rows"], &is_map/1)) do %>
+                  <input type="hidden" name="gauge-count" value={length(Blocks.gauge_list_rows(@block))} />
+                  <fieldset :for={{row, index} <- Enum.with_index(Blocks.gauge_list_rows(@block))}
+                            class="bp-paper-edit-form" data-test-id="paper-gauge-list-row">
+                    <legend>Gauge <%= index + 1 %></legend>
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-label-#{@id}"}>Label</label>
+                      <input id={"gauge-#{index}-label-#{@id}"} type="text" name={"gauge-#{index}-label"}
+                             class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "label"))} />
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-value-#{@id}"}>Value</label>
+                      <input id={"gauge-#{index}-value-#{@id}"} type="text" inputmode="decimal"
+                             name={"gauge-#{index}-value"} class="bp-paper-edit-text"
+                             value={Blocks.form_value(Map.get(row, "value"))} />
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-note-#{@id}"}>Note</label>
+                      <input id={"gauge-#{index}-note-#{@id}"} type="text" name={"gauge-#{index}-note"}
+                             class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "note"))} />
+                    <div class="bp-paper-edit-actions">
+                      <button type="submit" name="gauge-action" value={"up:#{index}"}
+                              class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                      <button type="submit" name="gauge-action" value={"down:#{index}"}
+                              class="btn btn-ghost btn-sm"
+                              disabled={index == length(Blocks.gauge_list_rows(@block)) - 1}>Move down</button>
+                      <button type="submit" name="gauge-action" value={"remove:#{index}"}
+                              class="btn btn-destructive btn-sm">Remove gauge</button>
+                    </div>
+                  </fieldset>
+                  <button type="submit" name="gauge-action" value="add" class="btn btn-ghost btn-sm">Add gauge</button>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly">
+                      Row data has a legacy shape; title, mode and maximum remain editable.
+                      Original rows are preserved.
+                    </p>
+                  <% end %>
+                <% else %>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-group-" <> @id}>Group by</label>
+                  <input id={"gauge-group-" <> @id} type="text" name="groupBy"
+                         class="bp-paper-edit-text" list={"gauge-groups-" <> @id}
+                         value={Blocks.gauge_list_group_by(@block)} />
+                  <datalist id={"gauge-groups-" <> @id}>
+                    <option :for={group <- ["worker", "phase", "status", "priority", "epic"]} value={group}></option>
+                  </datalist>
+                  <p class="bp-paper-edit-readonly">Snapshot data is preserved; grouping changes how it is displayed.</p>
+                <% end %>
               </form>
             </div>
           </details>

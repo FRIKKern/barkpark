@@ -103,6 +103,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_criteria_progress_rows(block, params)
   end
 
+  def build_block_patch(%{"type" => "gauge-list"} = block, params) do
+    case gauge_list_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
   def build_block_patch(%{"type" => "steps"} = block, params) do
     case validate_steps_form(block, params) do
       {:ok, rows, submitted, action} -> build_steps_patch(block, rows, submitted, action, params)
@@ -261,6 +268,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       {:ok, build_block_patch(block, params)}
     end
   end
+
+  def validate_block_patch(%{"type" => "gauge-list"} = block, params),
+    do: gauge_list_patch(block, params)
 
   def validate_block_patch(%{"type" => "steps"} = block, params) do
     case validate_steps_form(block, params) do
@@ -462,6 +472,199 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       &update_criteria_progress_row/3,
       %{"label" => "", "met" => 0, "total" => 1}
     )
+  end
+
+  defp gauge_list_patch(block, params) do
+    mode = gauge_list_mode(block)
+
+    with :ok <- validate_text_form_fields(params, ~w(title), "title"),
+         :ok <- validate_effective_option(params, "mode", mode, ~w(share count)),
+         :ok <- validate_gauge_mode_fields(block, params, mode) do
+      patch =
+        %{}
+        |> put_form_param_preserving_shape(block, params, "title", "title")
+        |> put_effective_option(params, "mode", mode)
+
+      {:ok, put_gauge_mode_fields(patch, block, params, mode)}
+    end
+  end
+
+  defp validate_gauge_mode_fields(block, params, "share") do
+    with false <- Map.has_key?(params, "groupBy"),
+         :ok <- validate_optional_positive_number(block, params, "max"),
+         :ok <- validate_gauge_rows(block, params) do
+      :ok
+    else
+      true -> {:error, {:invalid_option, "groupBy"}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_gauge_mode_fields(block, params, "count") do
+    if gauge_collection_params?(params) or Map.has_key?(params, "max") do
+      {:error, {:malformed_collection, "rows"}}
+    else
+      validate_effective_option(
+        params,
+        "groupBy",
+        gauge_list_group_by(block),
+        ~w(worker phase status priority epic)
+      )
+    end
+  end
+
+  defp put_gauge_mode_fields(patch, block, params, "share") do
+    patch
+    |> put_optional_positive_number(block, params, "max")
+    |> put_gauge_rows(block, params)
+  end
+
+  defp put_gauge_mode_fields(patch, block, params, "count") do
+    put_effective_option(patch, params, "groupBy", gauge_list_group_by(block))
+  end
+
+  defp put_gauge_rows(patch, block, params) do
+    put_editor_collection(
+      patch,
+      block,
+      params,
+      "rows",
+      "gauge",
+      &update_gauge_row/3,
+      %{"label" => "", "value" => 0, "note" => ""}
+    )
+  end
+
+  defp update_gauge_row(row, params, index) do
+    prefix = "gauge-#{index}-"
+
+    row
+    |> put_form_param_preserving_shape(params, prefix <> "label", "label")
+    |> put_number_form_field(row, params, prefix <> "value", "value")
+    |> put_form_param_preserving_shape(params, prefix <> "note", "note")
+  end
+
+  defp validate_gauge_rows(block, params) do
+    if gauge_collection_params?(params) do
+      with {:ok, rows} <- stored_gauge_rows(block),
+           true <- Enum.all?(rows, &is_map/1),
+           true <- exact_submitted_count?(params["gauge-count"], length(rows)),
+           :ok <- validate_gauge_param_names(params, length(rows)),
+           :ok <- validate_gauge_action(params["gauge-action"], length(rows)),
+           :ok <- validate_collection_text_fields(params, "gauge", ~w(label note), "rows"),
+           :ok <- validate_collection_numbers(block, params, "rows", "gauge", ["value"], false) do
+        :ok
+      else
+        {:error, _reason} = error -> error
+        _ -> {:error, {:malformed_collection, "rows"}}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp stored_gauge_rows(block) do
+    case Map.fetch(block, "rows") do
+      :error -> {:ok, []}
+      {:ok, nil} -> {:ok, []}
+      {:ok, rows} when is_list(rows) -> {:ok, rows}
+      _other -> {:error, {:malformed_collection, "rows"}}
+    end
+  end
+
+  defp gauge_collection_params?(params) do
+    Enum.any?(Map.keys(params), &(is_binary(&1) and String.starts_with?(&1, "gauge-")))
+  end
+
+  defp validate_gauge_param_names(params, count) do
+    allowed =
+      MapSet.new(~w(gauge-count gauge-action))
+      |> then(fn allowed ->
+        if count == 0 do
+          allowed
+        else
+          Enum.reduce(0..(count - 1), allowed, fn index, acc ->
+            Enum.reduce(~w(label value note), acc, fn field, fields ->
+              MapSet.put(fields, "gauge-#{index}-#{field}")
+            end)
+          end)
+        end
+      end)
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "gauge-") and
+          not MapSet.member?(allowed, key)
+      end)
+
+    if unexpected?, do: {:error, {:malformed_collection, "rows"}}, else: :ok
+  end
+
+  defp validate_gauge_action(nil, _count), do: :ok
+  defp validate_gauge_action("", _count), do: :ok
+  defp validate_gauge_action("add", _count), do: :ok
+
+  defp validate_gauge_action(action, count) when is_binary(action) do
+    case String.split(action, ":", parts: 2) do
+      [kind, index] when kind in ~w(remove up down) ->
+        case Integer.parse(index) do
+          {index, ""} when index >= 0 and index < count -> :ok
+          _ -> {:error, {:malformed_collection, "rows"}}
+        end
+
+      _ ->
+        {:error, {:malformed_collection, "rows"}}
+    end
+  end
+
+  defp validate_gauge_action(_action, _count), do: {:error, {:malformed_collection, "rows"}}
+
+  defp validate_optional_positive_number(block, params, field) do
+    if not Map.has_key?(params, field) or form_wire_value(Map.get(block, field)) == params[field] or
+         params[field] == "" or valid_positive_number?(params[field]) do
+      :ok
+    else
+      {:error, {:invalid_number, field}}
+    end
+  end
+
+  defp valid_positive_number?(value) do
+    case parse_submitted_number(value) do
+      {:ok, number} when is_number(number) and number > 0 -> true
+      _ -> false
+    end
+  end
+
+  defp put_optional_positive_number(patch, block, params, field) do
+    cond do
+      not Map.has_key?(params, field) ->
+        patch
+
+      form_wire_value(Map.get(block, field)) == params[field] ->
+        patch
+
+      params[field] == "" ->
+        Map.put(patch, field, nil)
+
+      true ->
+        {:ok, number} = parse_submitted_number(params[field])
+        Map.put(patch, field, number)
+    end
+  end
+
+  defp validate_effective_option(params, field, effective, allowed) do
+    case Map.fetch(params, field) do
+      :error -> :ok
+      {:ok, ^effective} -> :ok
+      {:ok, value} -> if(value in allowed, do: :ok, else: {:error, {:invalid_option, field}})
+    end
+  end
+
+  defp put_effective_option(patch, params, field, effective) do
+    case Map.fetch(params, field) do
+      {:ok, value} when value != effective -> Map.put(patch, field, value)
+      _ -> patch
+    end
   end
 
   defp update_criteria_progress_row(item, params, index) do
@@ -1305,6 +1508,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def criteria_progress_rows(block) when is_map(block), do: collection_form_items(block, "rows")
 
   @doc false
+  def gauge_list_mode(block) when is_map(block) do
+    case effective_trimmed_string(Map.get(block, "mode")) |> String.downcase() do
+      mode when mode in ~w(share count) ->
+        mode
+
+      _other ->
+        if Map.has_key?(block, "rows") and not Map.has_key?(block, "snapshot"),
+          do: "share",
+          else: "count"
+    end
+  end
+
+  def gauge_list_mode(_block), do: "count"
+
+  @doc false
+  def gauge_list_rows(block) when is_map(block), do: collection_form_items(block, "rows")
+  def gauge_list_rows(_block), do: []
+
+  @doc false
   def strict_boolean_field?(block, field) when is_map(block), do: strict_true?(block, field)
 
   defp collection_form_items(block, field) do
@@ -1325,6 +1547,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     do: String.downcase(String.trim(value)) == "true"
 
   defp truthy_string?(_value), do: false
+
+  @doc false
+  def gauge_list_group_by(block) when is_map(block) do
+    case effective_trimmed_string(Map.get(block, "groupBy")) do
+      "" -> "status"
+      group_by -> group_by
+    end
+  end
+
+  def gauge_list_group_by(_block), do: "status"
+
+  defp effective_trimmed_string(value) when is_binary(value), do: String.trim(value)
+  defp effective_trimmed_string(value) when is_integer(value), do: Integer.to_string(value)
+  defp effective_trimmed_string(value) when is_float(value), do: Float.to_string(value)
+  defp effective_trimmed_string(_value), do: ""
 
   defp put_fetched_form_fields(map, block, params, fields) do
     Enum.reduce(fields, map, fn field, acc ->
@@ -1482,6 +1719,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       "type" => "criteria-progress",
       "rows" => [],
       "detail" => "rows"
+    }
+
+  def default_block("gauge-list", id),
+    do: %{
+      "id" => id,
+      "type" => "gauge-list",
+      "title" => "",
+      "mode" => "share",
+      "rows" => [%{"label" => "", "value" => 0, "note" => ""}]
     }
 
   def default_block("steps", id) do
