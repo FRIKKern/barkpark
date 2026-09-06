@@ -195,6 +195,24 @@ defmodule Barkpark.Plugins.Capabilities do
   invented here is a client-side authorization decision drifting away from the
   server-side one. Keep this a one-liner.
 
+  A VISIBILITY RANK, NOT AN AUTHORIZATION DECISION. What this value decides is
+  which commands appear in `GET /v1/capabilities` — nothing else. It takes NO
+  workspace argument, by design, and every command it lists RE-AUTHORIZES at
+  execution on the real pipeline (`RequireAdmin` / `RequireWritePermission` /
+  `RequireToken`+`PublicRead`+`RequireWriteForMutation`, plus
+  `RequireWorkspaceRole` for the `scoped_admin` tier), so a command being
+  VISIBLE is never a claim that this caller may run it HERE. Two real edges
+  follow from that and are accepted:
+
+    * A global-`admin` token that is a member of NO workspace still sees the
+      full admin manifest — a discovery-surface exposure, not an access one:
+      every one of those verbs is refused at execution by the workspace-scoped
+      gate the route actually runs.
+    * A `%User{}` or `%CallerContext{}` principal ranks `"none"` here, via
+      `permits?/2`'s catch-all. Fail-closed and correct for a rank whose rungs
+      are defined over an api_token's `permissions[]`; those principals are
+      authorized on their own path, not through this ladder.
+
   Pinned by `BarkparkWeb.Contract.CapabilitiesTierParityTest`.
   """
   @spec tier_for_token(struct() | nil) :: tier()
