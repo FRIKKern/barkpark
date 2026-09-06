@@ -141,6 +141,35 @@ defmodule BarkparkWeb.AccessControllerTest do
                "capabilities you do not hold"
     end
 
+    # MEMBERSHIP is the OTHER arm of the same refusal, and it used to be
+    # reported as the capability arm. `Tenancy.Auth.authorize/3` returns `:ok`
+    # only when `member?(token, workspace_id) and permits?(token, action)`; the
+    # grantor below HOLDS `read` (and `write`), so `permits?` cannot be what
+    # failed — it is simply not a member of the workspace named in the BODY.
+    # Telling that operator "capabilities you do not hold" sends them to the
+    # wrong remedy. Both arms stay 403; only the sentence differs.
+    test "a non-member grantor holding the capability is refused as a MEMBERSHIP failure",
+         %{conn: conn} do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      {grantor_raw, _} = token_principal(ws_a, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "grantee@example.com",
+          "workspace_id" => ws_b.id,
+          "capabilities" => ["read"]
+        })
+
+      message = json_response(conn, 403)["error"]["message"]
+
+      assert message =~ "not a member of that workspace"
+      refute message =~ "capabilities you do not hold"
+      assert Access.list_grants_for_workspace(ws_b.id) == []
+    end
+
     # ── the RULING: grants confer read/write only ────────────────────────────
     #
     # `admin` is a third spelling of tenant-control authority beside the
