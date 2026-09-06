@@ -15,6 +15,45 @@
 # Consequence: migrations must be backward-compatible (expand/contract) for
 # the seconds both slots overlap. Go is NOT installed on barkpark-cp, so the
 # provisioner is cross-built by the runner and passed in.
+# ---- PRIVATE COPY: a run must only ever execute ITS OWN bytes --------------
+# The CD workflow scps this script to a SHARED path on the box (/tmp/<name>.sh)
+# and runs `bash /tmp/<name>.sh`. bash reads a script INCREMENTALLY, by byte
+# offset, from an fd it keeps open WHILE executing it — so when a later run's
+# scp rewrites that path under a still-running bash (routine here: every queued
+# run queues on the box while newer merges keep arriving), the
+# running shell reads shifted bytes of a DIFFERENT file and dies mid-deploy on
+# a parse error. Observed on barkpark-cp: "line 329: return: can only `return'
+# from a function or sourced script" then "line 334: what: unbound variable"
+# (run 34021843141), and "line 383: syntax error near unexpected token `)'"
+# (run 34025907184) — function bodies executed as top-level code, the signature
+# of a script rewritten under a running bash.
+#
+# So: before anything else, re-exec from a private copy whose name no other run
+# knows; the shared path may then be rewritten freely. The copy lives OUTSIDE
+# any checkout on purpose — these deploy scripts run git reset --hard /
+# checkout in the app dir, which would eat a copy kept there — and it unlinks
+# itself the moment it
+# starts, so nothing accumulates in /tmp even if the run is killed (bash holds
+# the fd open and keeps reading through it after the unlink).
+# The guard carries the copy's PATH, not a bare 1, so an inherited
+# BARKPARK_DEPLOY_PRIVATE_COPY can never make a non-copy invocation delete the
+# real script. Copy failure is a WARNING, never a refusal: the shared path is
+# what we have today, and a deploy that refuses to run is worse than one that
+# runs with the old exposure.
+if [ "${BARKPARK_DEPLOY_PRIVATE_COPY:-}" = "$0" ]; then
+  rm -f "$0" 2>/dev/null || true
+  unset BARKPARK_DEPLOY_PRIVATE_COPY
+elif [ -f "$0" ] && [ -r "$0" ]; then
+  __bp_self="$(mktemp "${TMPDIR:-/tmp}/bp-deploy-self.XXXXXX" 2>/dev/null)" || __bp_self=""
+  if [ -n "$__bp_self" ] && cat "$0" > "$__bp_self" 2>/dev/null; then
+    export BARKPARK_DEPLOY_PRIVATE_COPY="$__bp_self"
+    exec bash "$__bp_self" "$@"
+  fi
+  [ -n "$__bp_self" ] && rm -f "$__bp_self" 2>/dev/null
+  echo "[private-copy] WARNING: could not copy $0 aside; running from the shared path, where a concurrent rewrite can corrupt this run" >&2
+fi
+# ---- end PRIVATE COPY ------------------------------------------------------
+
 set -uo pipefail
 
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
