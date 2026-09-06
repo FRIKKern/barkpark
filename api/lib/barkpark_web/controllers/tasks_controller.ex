@@ -483,10 +483,50 @@ defmodule BarkparkWeb.TasksController do
     # page — a false confirmation, not a missing feature.
     with :ok <- Params.reject_unknown_flat_params(params, :index),
          {:ok, filters} <- Params.parse_index_filters(params) do
-      do_index(conn, params, filters)
+      # cchi-bl-task-get-needs-a-server-side-prefix-lookup: `id_prefix` is the
+      # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
+      # so it branches here rather than composing as another where-clause below.
+      case params["id_prefix"] || filters["id_prefix"] do
+        p when is_binary(p) and p != "" -> id_prefix_lookup(conn, p)
+        _ -> do_index(conn, params, filters)
+      end
     else
       {:error, reason} -> invalid_filter(conn, reason)
     end
+  end
+
+  # ─── GET /v1/tasks?id_prefix=… ──────────────────────────────────────────
+  # The server-side "did you mean" behind `bp task get <truncated-id>`.
+  #
+  # WHY IT IS A SEPARATE BODY AND NOT A FILTER ON THE PAGE ABOVE. The caller is
+  # a 404's remedy line, so it wants ONE round trip and two fields. Before this
+  # the CLI had to WALK this route to ask the same question: nine pages at the
+  # 1000-row clamp on the live ledger, four requests in flight, ~3-4s — and a
+  # cost that grows with the ledger, on the one path a caller expects to be
+  # instant. The narrowing itself lives in `Tasks.Query.id_prefix_lookup/2`
+  # (one indexed query, `documents_task_doc_id_prefix_idx`); this function is
+  # scope plumbing and the wire shape.
+  #
+  # `truncated` is stated rather than implied: the lookup caps its hits, and a
+  # caller that says "exactly one match" must be able to tell a real count of 1
+  # from the first row of a capped list.
+  defp id_prefix_lookup(conn, prefix) do
+    scope = scope_opts(conn)
+
+    matches =
+      Tasks.Query.id_prefix_lookup(prefix,
+        workspace_id: Keyword.get(scope, :workspace_id),
+        project_id: Keyword.get(scope, :project_id),
+        dataset: request_dataset(conn)
+      )
+
+    json(conn, %{
+      ok: true,
+      id_prefix: prefix,
+      matches: matches,
+      count: length(matches),
+      truncated: length(matches) >= Tasks.Query.id_prefix_limit()
+    })
   end
 
   defp do_index(conn, params, filters) do

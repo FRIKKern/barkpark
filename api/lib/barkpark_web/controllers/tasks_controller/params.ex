@@ -949,7 +949,14 @@ defmodule BarkparkWeb.TasksController.Params do
   # (plus `parent_id`, the generic spelling of `parent`); each maps to the
   # SAME `Barkpark.Tasks.Query` fragment as its flat twin, so there is no
   # second filter semantic to drift.
-  @index_filter_keys ~w(kind label lifecycle_status parent parent_id phase_id type)
+  #
+  # `id_prefix` (cchi-bl-task-get-needs-a-server-side-prefix-lookup) is the one
+  # key that is NOT a where-clause on the normal page: it selects a different,
+  # LEAN response (doc_id + title only, indexed, one query) because its caller
+  # is `bp task get`'s not_found path, which needs a "did you mean" and nothing
+  # else. It is listed here and in the flat allowlist so the fail-closed doors
+  # let it through; `index/2` branches on it.
+  @index_filter_keys ~w(id_prefix kind label lifecycle_status parent parent_id phase_id type)
 
   # ─── The sibling read routes (task-e1b74c19174cb2c1) ─────────────────────
   #
@@ -1013,7 +1020,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # `parent_id` is therefore listed as an ACCEPTED ALIAS of `parent` rather than
   # refused: refusing the spelling the schema itself teaches would trade a wrong
   # answer for a wrong lesson.
-  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label)
+  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix)
   @ready_flat_keys ~w(view limit offset phase_id order worker)
   @prime_flat_keys ~w(view limit offset worker order)
   @events_flat_keys ~w(since limit)
