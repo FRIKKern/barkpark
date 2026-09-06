@@ -88,12 +88,17 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
         "without reaching the predicate. This site was `authorize/3` until the membership/capability arms " <>
         "were reported apart (task-abc2992adeb04fac); authorize/3 is now a collapse of this function and " <>
         "calls no predicate itself, so the site MOVED without the provenance moving.",
-    {"lib/barkpark_web/studio/caps.ex", "derive"} =>
-      "Caps.derive/1 passes the row it just loaded: `load_memberships(principals, ws_id)` -> " <>
+    {"lib/barkpark_web/studio/caps.ex", "derive_from_assigns"} =>
+      "Caps.derive_from_assigns/1 passes the row it just loaded: `load_memberships(principals, ws_id)` -> " <>
         "Tenancy.Auth.membership/2 per principal, and the SAME ws_id is the third argument, so the " <>
         "clause heads' `%Membership{workspace_id: workspace_id}` binding holds by construction. A nil " <>
         "membership (non-member) takes the all-false catch-all. ws_id is " <>
-        "`socket.assigns[:current_workspace].id` — a loaded struct, never a raw param.",
+        "`assigns[:current_workspace].id` — a loaded struct, never a raw param. " <>
+        "This site was `derive/1` until pds-w42 (#16585) split the body out so a caller holding ASSIGNS " <>
+        "and no socket could ask the same oracle; `derive/1` is now a one-line delegate and calls no " <>
+        "predicate itself, so the site MOVED without the provenance moving — the same shape as " <>
+        "`authorize_with_reason` above. The load, the ws_id and the pairing are byte-identical; only the " <>
+        "enclosing function name changed.",
     {"lib/barkpark_web/studio/caps.ex", "token_admin_seat?"} =>
       "Caps.admin?/1's token arm: `Tenancy.Auth.membership(token, ws_id)` is loaded INLINE at the call " <>
         "and handed straight in with the same ws_id. It is reached only after " <>
