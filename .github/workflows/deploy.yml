@@ -1523,12 +1523,38 @@ jobs:
     # the instance job holds), so when that leg did not run this job says
     # UNCHECKED out loud rather than counting silence as green.
     #
-    # IT EXITS 0 NO MATTER WHAT — same law as record-delivery, and for the same
-    # reason: the `changes` job anchors its diff base to the last SUCCESSFUL run
-    # of this workflow, so a red here would freeze that anchor and make every
-    # later merge union a wider path set until both hosts redeploy on every
-    # merge. That is this epic's known outage mechanism. The scream lives in
-    # report-convergence-failure below.
+    # IT CAN FAIL, AND THAT IS THE POINT (task-103b5cc5ec4a8ccd). Until
+    # 2026-09-06 this job printed `converged=false` and exited 0 unconditionally,
+    # reporting its verdict through a step OUTPUT instead of its status. On
+    # 2026-09-02 the control plane sat 49 commits behind from ~15:22Z and this
+    # job — the one instrument built to notice exactly that — was green for seven
+    # hours. A human reading deploy logs found it. An instrument that cannot fail
+    # cannot inform.
+    #
+    # THE BOUNDARY THAT KEEPS IT FROM BEING WAIVED, decided in
+    # `deploy-convergence-check.sh adjudicate` (read the block above that mode;
+    # the harness beside it drives every arm):
+    #
+    #   not stranded                    -> 0
+    #   stranded AND a deploy in flight -> 0, "NOT CONVERGED **YET**"
+    #   stranded AND nothing in flight  -> 1, the run goes red
+    #
+    # The middle row is the whole design. A gate that reds on every ordinary
+    # in-flight deploy is waived inside a day, and a waived tripwire has stopped
+    # discriminating — so an in-flight deploy DELAYS the red, and can never
+    # cancel it: `converged=false` is still emitted on that run, so
+    # report-convergence-failure still files, and the next run re-asks with the
+    # deploy finished.
+    #
+    # ON THE FROZEN DIFF ANCHOR, which is why this job used to exit 0 and why
+    # that reasoning does not survive the boundary above. `changes` bases its
+    # path diff on the last SUCCESSFUL run of this workflow, so a red here does
+    # freeze that anchor and widen every later merge's path union until both
+    # hosts redeploy. That was a real objection to a NOISY red. Against a red
+    # that fires only for "stranded with nothing coming", the widening is the
+    # remediation, not the outage: it is what drags the missing commit onto the
+    # box. It is self-limiting too — the first run that converges the box is
+    # green again and the anchor moves forward with it.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
     if: >-
@@ -1637,12 +1663,58 @@ jobs:
           fi
           echo "::endgroup::"
 
+          # ── IS ANOTHER DEPLOY STILL COMING? ──────────────────────────────
+          # STATUS, never conclusion: the question is "has some run not had its
+          # turn yet", which is answered by queued/in_progress and by nothing a
+          # finished run concluded. This run is excluded by id — it is itself
+          # in_progress, and counting it would suppress every red forever.
+          # A lookup that fails is reported as `unknown`, which WITHHOLDS the
+          # exit code without withholding the finding: converged=false still
+          # goes to the output above, so the issue still files.
+          IN_FLIGHT_SOURCE=ok
+          flight_file="$RUNNER_TEMP/deploy-runs-in-flight"
+          : > "$flight_file"
+          for st in queued in_progress; do
+            page="$(gh run list --workflow=deploy.yml --branch=main --status="$st" \
+                      --limit=50 --json databaseId,headSha,status \
+                      --jq '.[] | "\(.databaseId) \(.headSha) \(.status)"')" || {
+              IN_FLIGHT_SOURCE=unknown
+              echo "::warning::could not list ${st} deploy runs — the exit code will be withheld"
+              continue
+            }
+            printf '%s\n' "$page" >> "$flight_file"
+          done
+          grep -v -e '^$' -e "^${GITHUB_RUN_ID} " "$flight_file" > "${flight_file}.other" || true
+          echo "deploy runs still queued or running (this run excluded):"
+          cat "${flight_file}.other"
+
+          # ── THE CONCLUSION ───────────────────────────────────────────────
+          # rc CAPTURED ON THE SAME LINE. `run:` is `bash -e`, and the
+          # `set +e` above is undone by nothing — but this idiom is the one that
+          # survives someone restoring -e, and it is the house form (PR #16314).
+          unchecked=false
+          case "$detail" in *UNCHECKED*) unchecked=true ;; esac
+          verdict_rc=0
+          bash scripts/deploy-convergence-check.sh adjudicate \
+            --label "production" --stranded "$([ "$converged" = "false" ] && echo true || echo false)" \
+            --unchecked "$unchecked" --in-flight-source "$IN_FLIGHT_SOURCE" \
+            < "${flight_file}.other" || verdict_rc=$?
+
           echo "converged=${converged}" >> "$GITHUB_OUTPUT"
           echo "detail=${detail}" >> "$GITHUB_OUTPUT"
           echo "VERDICT: converged=${converged} — ${detail}"
-          # ALWAYS 0. The scream is report-convergence-failure's job, never this
-          # run's conclusion — see the job comment on the frozen diff anchor.
-          exit 0
+          # rc 2 is HARNESS-UNAVAILABLE — "I could not adjudicate" is not "it is
+          # fine", so it reds too, and names itself as a refusal rather than a
+          # finding. The scream still lives in report-convergence-failure; what
+          # is new is that this job's own status can no longer lie.
+          if [ "$verdict_rc" -eq 2 ]; then
+            echo "::error::the convergence verdict could not be adjudicated — refusing to conclude green"
+            exit 2
+          fi
+          if [ "$verdict_rc" -ne 0 ]; then
+            echo "::error::production is STRANDED and no deploy is in flight to carry the missing commit — ${detail}"
+          fi
+          exit "$verdict_rc"
 
   report-convergence-failure:
     # ── THE RED FOR A DEPLOY THAT SUCCEEDED AND DID NOT ARRIVE ───────────────
@@ -1687,11 +1759,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: deploy-convergence
           CI_FAILURE_DETAIL: |
-            **A deploy-relevant commit is on `main` and is NOT on the box.** Every
-            job in this run concluded successfully. Nothing is red. Production is
-            serving code that predates a merged change, and no further
-            path-triggered run is queued to carry it — a docs-only stretch after
-            the strand correctly triggers nothing, so this does NOT self-heal.
+            **A deploy-relevant commit is on `main` and is NOT on the box.**
+            Production is serving code that predates a merged change, and no
+            further path-triggered run is queued to carry it — a docs-only
+            stretch after the strand correctly triggers nothing, so this does NOT
+            self-heal.
+
+            The `convergence` job now CONCLUDES on this: it exits non-zero when a
+            strand has no deploy in flight to explain it, and stays green (while
+            still filing this issue) when one is still running. So a red
+            `convergence` and this issue are the same finding seen twice — and a
+            GREEN run carrying this issue means the strand is real but a deploy
+            was still in flight when the check ran. Either way the gap is real.
 
             Verdict: ${{ needs.convergence.outputs.detail }}
 
