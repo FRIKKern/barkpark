@@ -104,8 +104,8 @@
   }
 
   // Stable collection inserts consume their client-carried id exactly once.
-  // LiveView can retain the old hidden input value while morphing an active
-  // form, so replace only the id used by an acknowledged insert. Failed and
+  // LiveView can repaint an older hidden input value while morphing an active
+  // form, so mint afresh after every acknowledged insert. Failed and
   // transport-ambiguous writes keep the same value for exact replay.
   function bpPaperRotateConsumedCollectionId(form, submitter) {
     const match = /^(panel|step)-action$/.exec(submitter?.name || "");
@@ -117,9 +117,12 @@
     return () => {
       if (!form.isConnected) return;
       const input = form.elements.namedItem(name);
-      if (!input || input.value !== consumed) return;
+      if (!input) return;
       const replacement = bpPaperRequestId();
-      if (replacement) input.value = `b-${replacement}`;
+      if (replacement) {
+        input.value = `b-${replacement}`;
+        input.defaultValue = input.value;
+      }
     };
   }
 

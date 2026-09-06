@@ -263,7 +263,34 @@ async function stableGeneratedIdScenario({
     assert.equal(sends[1].payload[generatedName], replacementId);
     assert.notEqual(sends[1].payload[generatedName], sends[0].payload[generatedName],
       "the next action cannot replay a generated id already persisted in the tree");
+    if (action === "add") {
+      const id = window.document.createElement("input");
+      id.type = "hidden";
+      id.name = `${prefix}-2-id`;
+      id.value = replacementId;
+      const label = window.document.createElement("input");
+      label.name = `${prefix}-2-label`;
+      form.append(id, label);
+      form.elements.namedItem(`${prefix}-count`).value = "3";
+    }
+    // The next LiveView patch can repaint the server-rendered original token,
+    // which is different from this request's token but already exists in the tree.
+    form.elements.namedItem(generatedName).value = consumedId;
     resolvers[1]({ saved: true, request_id: sends[1].payload.request_id, rev: 3 });
+    await tick();
+
+    const secondReplacementId = form.elements.namedItem(generatedName).value;
+    assert.notEqual(secondReplacementId, consumedId,
+      "acknowledgement cannot retain an older generated id already consumed by the tree");
+    assert.notEqual(secondReplacementId, replacementId);
+
+    main.dataset.paperRev = "3";
+    submitter.focus();
+    form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter }));
+    await tick();
+    assert.equal(sends[2].payload[generatedName], secondReplacementId,
+      "a third insert uses a fresh token after the server repaints an older one");
+    resolvers[2]({ saved: true, request_id: sends[2].payload.request_id, rev: 4 });
     await tick();
   } finally {
     hook.destroyed();
