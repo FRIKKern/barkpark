@@ -710,6 +710,202 @@ FIX
     fail=$((fail+1)); echo "  FAIL p5 runs=$p_bad, expected 2 — an unreadable date is being treated as proof of age"
   fi
 
+  # ── t1..t3 THE 300-RUN CAP, AND THE NOTICE THAT MAKES IT QUOTABLE ────────
+  # EVERY assertion below greps a FILE, never `printf … | grep -q`. Under
+  # `set -o pipefail` grep -q exits on the first match, printf takes SIGPIPE,
+  # and the pipeline returns 141 — an arm that reads "no match" precisely when
+  # the match arrives early. Measured on this file 2026-09-06: t1 failed while
+  # its own output, printed by hand, contained every string it was looking for.
+  _has()   { grep -qF -- "$1" "$2"; }
+  _hasre() { grep -qE -- "$1" "$2"; }
+
+  # The collector used to page exactly three times at per_page=100 and say
+  # nothing when the third page came back full. Thirteen rows of the published
+  # table were cut off at 300 and read as though they shared a 30-day window
+  # with rows that really did cover 30 days.
+
+  # t1 — A TRUNCATED ROW ANNOUNCES ITSELF, LOUDLY, BEFORE THE TABLE.
+  cat > "$tmp/trunc.jsonl" <<'FIX'
+{"__truncated__":true,"wf":"doc-gates.yml","cap":1000,"since":"2026-08-07"}
+{"wf":"doc-gates.yml","sha":"aaa111","concl":"failure","created":"2026-09-05T00:00:00Z","pr":7,"id":901,"attempt":1,"status":"completed"}
+{"wf":"doc-gates.yml","sha":"bbb222","concl":"failure","created":"2026-09-05T18:00:00Z","pr":8,"id":902,"attempt":1,"status":"completed"}
+FIX
+  CI_MEASURE_FIXTURE="$tmp/trunc.jsonl" bash "$0" --value-audit --since 2026-08-07 > "$tmp/t1.out" 2>/dev/null
+  if _has 'TRUNCATED' "$tmp/t1.out" \
+     && _has 'DO NOT SHARE A DENOMINATOR' "$tmp/t1.out" \
+     && _has 'cap 1000 runs reached' "$tmp/t1.out" \
+     && _has 'doc-gates.yml' "$tmp/t1.out"; then
+    pass=$((pass+1)); echo "  ok   t1 a capped workflow prints a loud truncation notice naming the workflow, the cap and the real span — a reader cannot reach the table without walking past it"
+  else
+    fail=$((fail+1)); echo "  FAIL t1 no truncation notice in the report — a 0.5-day row would sit beside a 30-day row with nothing saying so, and every ratio taken across them is a coincidence"
+  fi
+
+  # t2 — AND IT DISCRIMINATES. Identical data with no cap marker must print NO
+  # truncation block: a notice that always fires teaches nothing and would be
+  # ignored by the third table.
+  cat > "$tmp/untrunc.jsonl" <<'FIX'
+{"wf":"doc-gates.yml","sha":"aaa111","concl":"failure","created":"2026-09-05T00:00:00Z","pr":7,"id":901,"attempt":1,"status":"completed"}
+{"wf":"doc-gates.yml","sha":"bbb222","concl":"failure","created":"2026-09-05T18:00:00Z","pr":8,"id":902,"attempt":1,"status":"completed"}
+FIX
+  CI_MEASURE_FIXTURE="$tmp/untrunc.jsonl" bash "$0" --value-audit --since 2026-08-07 > "$tmp/t2.out" 2>/dev/null
+  if _has 'DO NOT SHARE A DENOMINATOR' "$tmp/t2.out"; then
+    fail=$((fail+1)); echo "  FAIL t2 an UNTRUNCATED run printed the truncation notice — a warning on every table is a warning on none"
+  else
+    pass=$((pass+1)); echo "  ok   t2 an uncapped workflow prints no truncation block — the notice is driven by the marker, not by the template"
+  fi
+
+  # t3 — THE COLLECTOR PAGES TO THE WINDOW AND ONLY THEN CRIES CAP. Driven with
+  # `gh` stubbed, because this is the loop that was wrong: a SHORT page ends the
+  # walk (and a quiet workflow costs ONE call, not three), a FULL page at the
+  # ceiling emits the marker.
+  _stub_rows() {   # $1 = how many rows
+    local i=1
+    while [ "$i" -le "$1" ]; do
+      printf '{"wf":"fake.yml","sha":"s%s","concl":"success","created":"2026-09-0%sT00:00:00Z","pr":1,"id":%s,"attempt":1,"status":"completed"}\n' \
+        "$i" "$(( (i % 5) + 1 ))" "$i"
+      i=$((i+1))
+    done
+  }
+  # bash 3.2 mis-parses a `case` inside $( ), so the stubbed runs go to files —
+  # which is also what keeps these assertions off `printf | grep -q` (see _has).
+  (
+    gh() {
+      case "$2" in
+        *"actions/workflows?per_page"*) printf '111\t.github/workflows/fake.yml\n' ;;
+        *"page=1"*|*"page=2"*) _stub_rows 100 ;;
+        *) : ;;
+      esac
+    }
+    SINCE=2026-08-07 VALUE_AUDIT_MAX_PAGES=2 value_audit 2>/dev/null
+  ) > "$tmp/t_cap.out" 2>/dev/null
+  (
+    gh() {
+      case "$2" in
+        *"actions/workflows?per_page"*) printf '111\t.github/workflows/fake.yml\n' ;;
+        *"page=1"*) _stub_rows 40 ;;
+        *"page=2"*) echo "STUB-SECOND-PAGE-SHOULD-NOT-BE-FETCHED" >&2; _stub_rows 100 ;;
+        *) : ;;
+      esac
+    }
+    SINCE=2026-08-07 VALUE_AUDIT_MAX_PAGES=2 value_audit 2>/dev/null
+  ) > "$tmp/t_short.out" 2>/dev/null
+  if _has 'cap 200 runs reached' "$tmp/t_cap.out" \
+     && ! _has 'DO NOT SHARE A DENOMINATOR' "$tmp/t_short.out" \
+     && _hasre '^fake\.yml +40 ' "$tmp/t_short.out"; then
+    pass=$((pass+1)); echo "  ok   t3 the collector walks until a SHORT page (40 rows, one call) and emits the cap marker only when the ceiling page comes back FULL"
+  else
+    fail=$((fail+1)); echo "  FAIL t3 pagination/cap detection wrong — see $tmp/t_cap.out and $tmp/t_short.out; a fixed page count silently truncates the busy half of the roster and a full ceiling page must announce itself"
+  fi
+  unset -f _stub_rows
+
+  # ── v7 THE VERDICT THIS DOCUMENT WITHDREW AND THE INSTRUMENT KEPT PRINTING ─
+  # docs/ops/ci-value-audit.md retracted FLAKE-DOMINANT for pr-task-gate on
+  # 2026-09-03: its inputs are the PR body and the ledger, so a same-sha
+  # red->green is an author fixing the input, not a flake. The prose was fixed;
+  # the classifier was not, and went on printing the retracted verdict.
+
+  cat > "$tmp/extinputs.jsonl" <<'FIX'
+{"__wfmeta__":true,"wf":"pr-task-gate.yml","ext_inputs":"github.event.pull_request.body"}
+{"wf":"pr-task-gate.yml","sha":"aaa111","concl":"failure","created":"2026-09-01T10:00:00Z","pr":7,"id":1,"attempt":1,"status":"completed"}
+{"wf":"pr-task-gate.yml","sha":"aaa111","concl":"success","created":"2026-09-01T11:00:00Z","pr":7,"id":2,"attempt":1,"status":"completed"}
+FIX
+  local v_ext
+  CI_MEASURE_FIXTURE="$tmp/extinputs.jsonl" bash "$0" --value-audit --since 2026-09-01 > "$tmp/v7.out" 2>/dev/null
+  v_ext=$(CI_MEASURE_FIXTURE="$tmp/extinputs.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null \
+           | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["verdict"])' 2>/dev/null)
+  if [ "$v_ext" = "INPUTS-OUTSIDE-SHA" ] && _has 'NOT FLAKE EVIDENCE' "$tmp/v7.out"; then
+    pass=$((pass+1)); echo "  ok   v7 a workflow whose inputs are NOT in the sha is verdicted INPUTS-OUTSIDE-SHA, and its same-sha greens print as NOT FLAKE EVIDENCE"
+  else
+    fail=$((fail+1)); echo "  FAIL v7 got '$v_ext' — the classifier is printing the verdict its own document withdrew, and anyone re-deriving the table gets the retracted answer with no warning"
+  fi
+
+  # v7b — AND IT IS A DISCRIMINATION, NOT A BLANKET SUPPRESSION. The same run
+  # rows WITHOUT the metadata line must still read FLAKE-DOMINANT, or the fix
+  # would have deleted the flake verdict for the whole roster.
+  local v_noext
+  v_noext=$(grep -v '__wfmeta__' "$tmp/extinputs.jsonl" > "$tmp/noext.jsonl"; \
+            CI_MEASURE_FIXTURE="$tmp/noext.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["verdict"])' 2>/dev/null)
+  if [ "$v_noext" = "FLAKE-DOMINANT" ]; then
+    pass=$((pass+1)); echo "  ok   v7b identical rows with no external-input metadata still read FLAKE-DOMINANT — v7 measures the discrimination, not a suppressed verdict"
+  else
+    fail=$((fail+1)); echo "  FAIL v7b got '$v_noext', expected FLAKE-DOMINANT — v7 is vacuous: FLAKE-DOMINANT may have been removed for every workflow"
+  fi
+
+  # v7c — THE PROPERTY IS DERIVED FROM THE WORKFLOW FILE, NOT TYPED INTO A LIST.
+  # A list would go stale the day a fourth PR-metadata gate lands; the grep would
+  # not. It must also stay NARROW: a workflow that merely mentions pull_request
+  # is not one whose verdict rule changes.
+  mkdir -p "$tmp/extwf"
+  cat > "$tmp/extwf/reads-body.yml" <<'FIX'
+on: pull_request
+jobs:
+  gate:
+    steps:
+      - env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash scripts/gate.sh
+FIX
+  cat > "$tmp/extwf/reads-code.yml" <<'FIX'
+on: pull_request
+jobs:
+  test:
+    steps:
+      - run: mix test
+FIX
+  local e_yes e_no
+  e_yes=$(wf_external_inputs "$tmp/extwf/reads-body.yml")
+  e_no=$(wf_external_inputs "$tmp/extwf/reads-code.yml")
+  if [ -n "$e_yes" ] && [ -z "$e_no" ]; then
+    pass=$((pass+1)); echo "  ok   v7c the external-input property is DERIVED from the workflow file ('$e_yes'), and a workflow that only reads the code yields nothing"
+  else
+    fail=$((fail+1)); echo "  FAIL v7c body='$e_yes' code='$e_no' — the detector fires on everything or on nothing, and either way the verdict stops depending on what the check reads"
+  fi
+
+  # ── d1..d3 THE FOUR-DAY CENSUS THAT MANUFACTURED FIVE DORMANT VERDICTS ────
+  # docs/ops/ci-workflow-verdicts.md called five workflows DORMANT off a 4-day
+  # window. Over 30 days all five fired and two had REFUSED — hundesteder 4 reds
+  # / 14 runs and vendored-assets 2 / 6. Retiring on that label would have
+  # deleted two working gates.
+
+  # d1 — THE REFUSAL, on the exact case that was got wrong.
+  local d_ref
+  dormancy_verdict hundesteder.yml 4 0 90 14 > "$tmp/d1.out"
+  d_ref=$(cat "$tmp/d1.out")
+  if _has 'WINDOW-TOO-SHORT' "$tmp/d1.out" \
+     && ! _has 'DORMANT' "$tmp/d1.out" \
+     && _has '14 time' "$tmp/d1.out" \
+     && _has 'needs at least' "$tmp/d1.out"; then
+    pass=$((pass+1)); echo "  ok   d1 a 4-day window over a workflow that fires every ~6 days REFUSES the dormancy verdict and says what window it would need"
+  else
+    fail=$((fail+1)); echo "  FAIL d1 got '$d_ref' — a short window is minting a DORMANT label, which is the label that nearly deleted hundesteder and vendored-assets"
+  fi
+
+  # d2 — AND IT STILL ANSWERS. A workflow with zero runs over the whole lookback
+  # IS dormant, and the verdict carries both windows so it cannot be quoted bare.
+  local d_yes
+  dormancy_verdict truly-dead.yml 30 0 90 0 > "$tmp/d2.out"
+  d_yes=$(cat "$tmp/d2.out")
+  if _has 'DORMANT' "$tmp/d2.out" \
+     && _has '30 d window' "$tmp/d2.out" \
+     && _has '90 d lookback' "$tmp/d2.out"; then
+    pass=$((pass+1)); echo "  ok   d2 a workflow with zero runs across the whole lookback IS called dormant, and the verdict names both windows inline"
+  else
+    fail=$((fail+1)); echo "  FAIL d2 got '$d_yes' — the guard refuses even a supportable verdict, which makes the mode unable to find a genuinely dead workflow"
+  fi
+
+  # d3 — THE SUFFICIENT-WINDOW CASE, so d1 is not passing because the guard says
+  # no to everything. A workflow that fired daily for 90 days and then went
+  # silent for 4 clears 3x its own period, and the window is still on the line.
+  local d_ok
+  dormancy_verdict busy-then-silent.yml 4 0 90 90 > "$tmp/d3.out"
+  d_ok=$(cat "$tmp/d3.out")
+  if _has 'DORMANT' "$tmp/d3.out" && _has '4 d window' "$tmp/d3.out"; then
+    pass=$((pass+1)); echo "  ok   d3 a window that DOES clear 3x the observed firing period yields DORMANT — the guard is keyed on the ratio, not on a blanket refusal"
+  else
+    fail=$((fail+1)); echo "  FAIL d3 got '$d_ok' — d1's refusal is vacuous: the guard refuses regardless of the window"
+  fi
+
   # ── b1..b7 THE MAIN-RED BREAKER MEASUREMENT ──────────────────────────────
   # EVERY fixture below is a RAW line: workflow YAML as committed, a job-log
   # excerpt as the logs endpoint returns it, and jobs-endpoint rows. None of
@@ -856,9 +1052,14 @@ FIX
           CI_MEASURE_BREAKER_AFTER_FIXTURE="$tmp/after-e2e.jsonl" \
           CI_MEASURE_BREAKER_BEFORE_FIXTURE="$tmp/before-inherited.jsonl" \
           SINCE=2026-09-03 UNTIL=2026-09-03 breaker_mode 2>/dev/null)
-  b_ids=$(printf '%s\n' "$b_e2e" | grep -c '31000099\|31999' || true)
-  b_logs=$(printf '%s\n' "$b_e2e" | grep -c '1 job logs read' || true)
-  if printf '%s\n' "$b_e2e" | grep -q '^TOTAL' \
+  # THE ASSERTION GREPS A FILE. `printf … | grep -q` returns 141 whenever grep
+  # matches early enough to SIGPIPE the printf, and under `set -o pipefail` that
+  # reads as "no match": b7 failed on roughly one run in three on origin/main
+  # while its own FAIL message printed the exact values it was asserting.
+  printf '%s\n' "$b_e2e" > "$tmp/b7.out"
+  b_ids=$(grep -c '31000099\|31999' "$tmp/b7.out"); b_ids=${b_ids:-0}
+  b_logs=$(grep -c '1 job logs read' "$tmp/b7.out"); b_logs=${b_logs:-0}
+  if grep -q '^TOTAL' "$tmp/b7.out" \
      && [ "$(printf '%s\n' "$b_e2e" | awk '/^TOTAL/{print $2, $3}')" = "1 1" ] \
      && [ "$b_ids" -ge 2 ] && [ "$b_logs" = "1" ]; then
     pass=$((pass+1)); echo "  ok   b7 the table reports BEFORE 1 / AFTER 1, names both run ids, and discloses '1 job logs read'"
@@ -879,7 +1080,8 @@ FIX
     '{"__logs__":true,"read":0,"budget":160}' \
     | breaker_report 2026-09-03 2026-09-03 2026-09-02 2026-09-02 2>&1)
   b_guard_rc=$?
-  if [ "$b_guard_rc" != "0" ] && printf '%s' "$b_guard_out" | grep -q 'REFUSES'; then
+  printf '%s\n' "$b_guard_out" > "$tmp/b8.out"
+  if [ "$b_guard_rc" != "0" ] && grep -q 'REFUSES' "$tmp/b8.out"; then
     pass=$((pass+1)); echo "  ok   b8 642 sampled PR runs with ZERO jobs examined REFUSES (exit $b_guard_rc) instead of printing a tidy 0/0"
   else
     fail=$((fail+1)); echo "  FAIL b8 exit=$b_guard_rc — a broken collector prints as 'the breaker neutralises nothing', which is the exact false answer this mode exists to avoid"
@@ -912,6 +1114,65 @@ FIX
 # and not scaled — which is exactly why it is reported separately from the
 # compute table rather than mixed into it.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# dormancy_verdict — THE ONLY PLACE A "DORMANT" LABEL MAY BE MINTED, and it
+# refuses to mint one it cannot support.
+#
+# WHAT WENT WRONG. docs/ops/ci-workflow-verdicts.md marked five workflows
+# DORMANT — "declared PR-triggered, fired 0 times — stale declaration" — off an
+# exact census over 2026-08-30..09-02, FOUR DAYS. Counted over 30 days all five
+# had fired, and two had genuinely REFUSED: hundesteder 4 reds / 14 runs, and
+# vendored-assets 2 / 6 — the family whose blind spot shipped a stale vendored
+# tarball at #16174. Acting on the label would have deleted two working gates.
+# The census was not wrong about its four days. It was quoted as a statement
+# about the workflow.
+#
+# THE RULE: zero runs in a window is only evidence of dormancy if the window is
+# long enough that a LIVE workflow would have been near-certain to fire in it.
+# Take the workflow's observed firing period P from a longer lookback, and
+# demand window >= DORMANCY_MULTIPLE x P. Below that the tool REFUSES the
+# verdict and says what window it would need — a refusal that teaches beats a
+# silent adjustment.
+#
+# AND NO VERDICT IS EVER PRINTED BARE. Every line carries its window, so a
+# DORMANT that IS supported still cannot be quoted without the number that
+# supports it.
+#
+#   dormancy_verdict <wf> <window_days> <pr_in_window> <lookback_days> <pr_in_lookback>
+DORMANCY_MULTIPLE="${CI_MEASURE_DORMANCY_MULTIPLE:-3}"
+
+dormancy_verdict() {
+  M="$DORMANCY_MULTIPLE" python3 - "$@" <<'DPY'
+import os, sys
+
+wf, w_days, w_runs, l_days, l_runs = sys.argv[1:6]
+w_days, l_days = float(w_days), float(l_days)
+w_runs, l_runs = int(w_runs), int(l_runs)
+mult = float(os.environ.get("M", "3"))
+
+if w_runs > 0:
+    print(f"{wf:<30} LIVE — {w_runs} pull_request run(s) in the {w_days:g} d window")
+    sys.exit(0)
+
+if l_runs == 0:
+    print(f"{wf:<30} DORMANT — 0 pull_request runs in the {w_days:g} d window "
+          f"AND 0 in the {l_days:g} d lookback")
+    sys.exit(0)
+
+period = l_days / l_runs
+need = mult * period
+if w_days >= need:
+    print(f"{wf:<30} DORMANT — 0 runs in the {w_days:g} d window; observed firing period "
+          f"{period:.1f} d over {l_days:g} d, so the window is >= {mult:g}x it")
+    sys.exit(0)
+
+print(f"{wf:<30} WINDOW-TOO-SHORT — REFUSING to call this dormant. It fired {l_runs} time(s) "
+      f"in the {l_days:g} d lookback (about one run per {period:.1f} d); a dormancy verdict "
+      f"needs at least {need:.1f} d of window and this one is {w_days:g} d. "
+      f"A zero here is a short window, not a dead workflow.")
+DPY
+}
+
 census() {
   local wfs day ev
   wfs=$(gh api "repos/$REPO/actions/workflows?per_page=100" --jq '.workflows[] | "\(.id)\t\(.name)\t\(.path)"' 2>/dev/null)
@@ -921,15 +1182,28 @@ census() {
   echo
   printf '%-34s%10s%10s%10s%10s\n' "workflow" "total" "pull_req" "push" "schedule"
   local g_total=0 g_pr=0 g_push=0 g_sched=0
+  # THE ZERO ROWS ARE NOT DROPPED ANY MORE. `continue` used to make a workflow
+  # with no runs in the window VANISH from the table, and a reader who noticed
+  # the absence wrote DORMANT next to it. They are collected and adjudicated
+  # below, where the window is part of the verdict.
+  local dormant_candidates=""
   while IFS=$'\t' read -r id name path; do
     [ -z "$id" ] && continue
     local t pr pu sc
     t=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&per_page=1" --jq '.total_count' 2>/dev/null); t=${t:-0}
-    [ "$t" -eq 0 ] && continue
+    if [ "$t" -eq 0 ]; then
+      dormant_candidates="${dormant_candidates}$(basename "$path")"$'\t'"$id"$'\n'
+      continue
+    fi
     pr=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=pull_request&per_page=1" --jq '.total_count' 2>/dev/null); pr=${pr:-0}
     pu=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=push&per_page=1" --jq '.total_count' 2>/dev/null); pu=${pu:-0}
     sc=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=schedule&per_page=1" --jq '.total_count' 2>/dev/null); sc=${sc:-0}
     printf '%-34s%10s%10s%10s%10s\n' "$(basename "$path")" "$t" "$pr" "$pu" "$sc"
+    # A workflow that ran on push but NOT on pull_request in this window is
+    # exactly the shape the five refuted DORMANT rows had. It is adjudicated
+    # too, on its pull_request count, not waved through because `total` is
+    # non-zero.
+    [ "$pr" -eq 0 ] && dormant_candidates="${dormant_candidates}$(basename "$path")"$'\t'"$id"$'\n'
     g_total=$((g_total+t)); g_pr=$((g_pr+pr)); g_push=$((g_push+pu)); g_sched=$((g_sched+sc))
   done <<< "$wfs"
   printf '%-34s%10s%10s%10s%10s\n' "TOTAL" "$g_total" "$g_pr" "$g_push" "$g_sched"
@@ -957,6 +1231,32 @@ census() {
   n_all=$(printf '%s\n' "$queued_rows" | grep -c . || true)
   kept_rows=$(printf '%s\n' "$queued_rows" | drop_phantom_queued 2>/dev/null)
   n_keep=$(printf '%s\n' "$kept_rows" | grep -c . || true)
+  # -------------------------------------------------------------------------
+  # DORMANCY ADJUDICATION — see dormancy_verdict above. A zero in this window is
+  # adjudicated against a LONGER lookback, and the verdict is refused outright
+  # when the window is too short to carry it.
+  # -------------------------------------------------------------------------
+  local w_days lookback_since l_days
+  w_days=$(python3 -c "import datetime,sys;a=datetime.date.fromisoformat(sys.argv[1]);b=datetime.date.fromisoformat(sys.argv[2]);print((b-a).days+1)" "$SINCE" "$UNTIL" 2>/dev/null)
+  w_days=${w_days:-0}
+  l_days="${CI_MEASURE_DORMANCY_LOOKBACK_DAYS:-90}"
+  lookback_since=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])-datetime.timedelta(days=int(sys.argv[2]))).isoformat())" "$UNTIL" "$l_days" 2>/dev/null)
+  echo
+  echo "DORMANCY ADJUDICATION — window $SINCE..$UNTIL (${w_days} d), lookback ${lookback_since}..${UNTIL} (${l_days} d)"
+  echo "  A workflow with zero runs in the window is NOT called dormant unless the window is at"
+  echo "  least ${DORMANCY_MULTIPLE}x its observed firing period. Every verdict below carries its own window;"
+  echo "  none of them is quotable bare."
+  if [ -z "$(printf '%s' "$dormant_candidates" | tr -d '[:space:]')" ]; then
+    echo "  (every workflow fired at least once in the window — nothing to adjudicate)"
+  else
+    while IFS=$'\t' read -r wname wid; do
+      [ -z "$wid" ] && continue
+      local lpr
+      lpr=$(gh api "repos/$REPO/actions/workflows/$wid/runs?created=$lookback_since..$UNTIL&event=pull_request&per_page=1" --jq '.total_count' 2>/dev/null); lpr=${lpr:-0}
+      echo "  $(dormancy_verdict "$wname" "$w_days" 0 "$l_days" "$lpr")"
+    done <<< "$dormant_candidates"
+  fi
+
   echo
   echo "queued RIGHT NOW (not inside the window — the queue has no history endpoint):"
   echo "  rows returned: $n_all   PHANTOM (>${PHANTOM_QUEUE_HOURS}h, uncancellable): $((n_all - n_keep))   DEPTH: $n_keep"
@@ -989,6 +1289,54 @@ census() {
 # exactly backwards, because a flaky check reruns green often and would score
 # HIGHEST. The two must never be summed.
 # ---------------------------------------------------------------------------
+# THE 300-RUN CAP THAT MADE EVERY RATIO IN THE PUBLISHED TABLE UNSUPPORTED.
+# This loop used to read `while [ "$page" -le 3 ]` at per_page=100 — a hard 300
+# runs per workflow, newest first, with NO notice when the third page came back
+# full. Run frequency in this repo spans three orders of magnitude, so the same
+# "300 runs" covered 0.51 d for task-lease-renew and the whole 30 d for
+# windows-smoke. The direction of the ranking survived that; every row-to-row
+# RATIO in the table did not, by up to a factor of 40 (measured
+# 2026-09-06, /papers/ci-value-audit-2026-09-06).
+#
+# TWO CHANGES, and the second is the one that keeps working when the first runs
+# out of road:
+#   1. Page until the API returns a SHORT page — the requested window, not a
+#      fixed three pages. A quiet workflow now costs ONE call, not three.
+#   2. When the page ceiling IS reached with a full last page, say so LOUDLY,
+#      naming the workflow, the cap, and the calendar span the rows really
+#      cover. GitHub's list endpoint stops paginating at 1000 items, so a cap
+#      cannot be removed, only disclosed. A cap with no warning turns a
+#      denominator into a coincidence.
+VALUE_AUDIT_MAX_PAGES="${CI_MEASURE_MAX_PAGES:-10}"   # 10 x 100 = GitHub's own 1000-item list ceiling
+
+# wf_external_inputs — does this workflow READ SOMETHING THAT IS NOT IN THE SHA?
+#
+# The rerun-green rule ("a later green on the same head sha is a flake, never a
+# catch") carries an unstated assumption: THAT THE CHECK'S INPUT IS THE CODE.
+# docs/ops/ci-value-audit.md withdrew the FLAKE-DOMINANT verdict for
+# pr-task-gate on exactly that ground — its inputs are the PR description and
+# the ledger, so an author who fixes a missing `Task:` trailer and re-runs makes
+# the rerun BE the fix, on an unchanged sha. That correction reached the prose
+# and NOT this classifier, which went on printing the retracted verdict for
+# three days (measured 2026-09-06).
+#
+# So the classifier now reads the assumption instead of assuming it. This is a
+# PROPERTY DERIVED FROM THE WORKFLOW FILE, not an allowlist: any workflow that
+# gates on PR metadata is caught by the same grep, including ones written after
+# this line. On main 2026-09-06 it fires for pr-task-gate.yml, reland-check.yml
+# and task-lease-renew.yml, and for nothing else.
+#
+# THE MARKERS ARE DELIBERATELY NARROW: PR body/title/labels are mutable WITHOUT
+# a new commit and are what a human edits to turn the red green. A gate reading
+# the task ledger is the same class and is NOT yet detected here — the honest
+# limit is stated in docs/ops/ci-value-audit.md rather than papered over with a
+# looser grep that would sweep in `gh pr view` used only to find a PR number.
+wf_external_inputs() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  grep -ohE 'github\.event\.pull_request\.(body|title|labels)' "$f" 2>/dev/null | sort -u | paste -sd, -
+}
+
 value_audit() {
   local wfs plog rc
   # stderr here carries the JSON payload, so the filter's disclosure is routed
@@ -1006,10 +1354,24 @@ value_audit() {
   {
     while IFS=$'\t' read -r id path; do
       [ -z "$id" ] && continue
-      local page=1
-      while [ "$page" -le 3 ]; do
-        gh api "repos/$REPO/actions/workflows/$id/runs?event=pull_request&created=>=$SINCE&per_page=100&page=$page" \
-          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt, status: .status, prior: .previous_attempt_url}" 2>/dev/null
+      local base ext page=1 rows n
+      base="$(basename "$path")"
+      ext="$(wf_external_inputs "$SCRIPT_DIR/../$path")"
+      [ -n "$ext" ] && printf '{"__wfmeta__":true,"wf":"%s","ext_inputs":"%s"}\n' "$base" "$ext"
+      while [ "$page" -le "$VALUE_AUDIT_MAX_PAGES" ]; do
+        rows=$(gh api "repos/$REPO/actions/workflows/$id/runs?event=pull_request&created=>=$SINCE&per_page=100&page=$page" \
+          --jq ".workflow_runs[] | {wf: \"$base\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt, status: .status, prior: .previous_attempt_url}" 2>/dev/null)
+        # grep -c PRINTS 0 and EXITS 1 on no match; capture the count, never
+        # `|| echo 0` (that fires too and makes the capture "0\n0").
+        n=$(printf '%s' "$rows" | grep -c . ); n=${n:-0}
+        [ "$n" -gt 0 ] && printf '%s\n' "$rows"
+        # A SHORT page is the end of the window. A FULL last page at the ceiling
+        # is a truncation, and it gets a marker the report cannot swallow.
+        [ "$n" -lt 100 ] && break
+        if [ "$page" -eq "$VALUE_AUDIT_MAX_PAGES" ]; then
+          printf '{"__truncated__":true,"wf":"%s","cap":%d,"since":"%s"}\n' \
+            "$base" $(( VALUE_AUDIT_MAX_PAGES * 100 )) "$SINCE"
+        fi
         page=$((page + 1))
       done
     done <<< "$wfs"
@@ -1047,15 +1409,26 @@ enrich_prior() {
 classify_runs() {
   local pyf; pyf="$(mktemp)"
   cat > "$pyf" <<'VPY'
-import json, sys, collections
+import json, sys, collections, datetime
 
 runs = collections.defaultdict(list)
 prior_conclusions = {}
+# Two out-of-band marker kinds ride the same stream as the run rows, so a
+# FIXTURE exercises exactly the code the live path runs (selftest arms v7/v8).
+external_inputs = {}   # wf -> the PR-metadata expression(s) it reads
+truncated = {}         # wf -> the run cap it hit
 for line in sys.stdin:
     line = line.strip()
     if not line: continue
     try: o = json.loads(line)
     except json.JSONDecodeError: continue
+    if o.get("__wfmeta__"):
+        if o.get("ext_inputs"): external_inputs[o.get("wf")] = o["ext_inputs"]
+        continue
+    if o.get("__truncated__"):
+        truncated[o.get("wf")] = o.get("cap", 0)
+        continue
+    if "wf" not in o: continue
     runs[o["wf"]].append(o)
     if o.get("prior_concl"): prior_conclusions[o.get("id")] = o["prior_concl"]
 
@@ -1119,8 +1492,27 @@ for wf, rs in runs.items():
 
     total = len(rs)
     nred = len(reds)
+    created = sorted(r.get("created") or "" for r in rs if r.get("created"))
+    span_days = None
+    if len(created) >= 2:
+        try:
+            lo = datetime.datetime.fromisoformat(created[0].replace("Z", "+00:00"))
+            hi = datetime.datetime.fromisoformat(created[-1].replace("Z", "+00:00"))
+            span_days = round((hi - lo).total_seconds() / 86400.0, 2)
+        except ValueError:
+            span_days = None
+    ext = external_inputs.get(wf)
     if nred == 0:
         verdict = "NEVER-RED"
+    elif rerun_green > fixed_later and ext:
+        # THE VERDICT THIS DOCUMENT WITHDREW, AND THE INSTRUMENT KEPT PRINTING.
+        # The rerun-green rule assumes the check's input is the code at the sha.
+        # This workflow reads PR metadata, which a human edits WITHOUT a commit,
+        # so a same-sha red->green is an author fixing the input — the rerun IS
+        # the fix. Calling that a flake is not a near-miss, it is the opposite
+        # answer. Selftest arm v7 reds if this branch is removed; v7b proves the
+        # branch discriminates rather than blanket-suppressing FLAKE-DOMINANT.
+        verdict = "INPUTS-OUTSIDE-SHA"
     elif rerun_green > fixed_later:
         verdict = "FLAKE-DOMINANT"
     elif fixed_later > 0:
@@ -1132,23 +1524,59 @@ for wf, rs in runs.items():
         "rerun_green": rerun_green, "rerun_after_cancel": rerun_after_cancel,
         "catch_candidate": fixed_later,
         "unresolved": unresolved, "verdict": verdict,
+        "span_days": span_days,
+        "truncated_at": truncated.get(wf),
+        "external_inputs": ext,
         "evidence": {k: v[:3] for k, v in evidence.items()},
     })
 
 rows.sort(key=lambda r: (-r["reds"], -r["runs"]))
 print("CI VALUE AUDIT — did the red mean anything?")
-print("RULE: a later GREEN on the SAME head sha is a RERUN-GREEN and is NEVER a catch.")
+print("RULE: a later GREEN on the SAME head sha is a RERUN-GREEN and is NEVER a catch —")
+print("      BUT ONLY where the check's input IS the code at that sha. A workflow that")
+print("      reads PR metadata is verdicted INPUTS-OUTSIDE-SHA, never FLAKE-DOMINANT.")
 print("      a later green on a LATER head is a CATCH-CANDIDATE, not a proven catch:")
 print("      proving it needs a per-workflow diff test this mode does not do.")
 print()
-print(f"{'workflow':<34}{'runs':>6}{'reds':>6}{'rerun':>7}{'cand':>6}{'unres':>7}  verdict")
+
+# THE TRUNCATION NOTICE GOES BEFORE THE TABLE, NOT AFTER IT. A reader who quotes
+# a ratio off this table has to walk past the sentence saying the rows do not
+# share a denominator. `span` is printed for EVERY row, truncated or not, so the
+# differing windows are visible even where nothing hit the cap.
+trunc = [r for r in rows if r.get("truncated_at")]
+if trunc:
+    print("!" * 78)
+    print(f"!!! TRUNCATED — {len(trunc)} of {len(rows)} workflows hit the per-workflow run cap.")
+    print("!!! THE ROWS BELOW DO NOT SHARE A DENOMINATOR. Any row-to-row RATIO taken from")
+    print("!!! this table is UNSUPPORTED: a capped row describes its newest N runs, which")
+    print("!!! for a busy workflow is a fraction of a day while a quiet one covers the")
+    print("!!! whole requested window. Compare per-day rates, or re-run with a shorter")
+    print("!!! --since so no row is capped.")
+    for r in trunc:
+        span = r.get("span_days")
+        span_txt = f"{span} d" if span is not None else "unknown span"
+        print(f"!!!   {r['workflow']:<30} cap {r['truncated_at']} runs reached; "
+              f"these {r['runs']} rows cover {span_txt}")
+    print("!" * 78)
+    print()
+
+print(f"{'workflow':<34}{'runs':>6}{'reds':>6}{'rerun':>7}{'cand':>6}{'unres':>7}{'span_d':>8}  verdict")
 for r in rows:
+    span = r.get("span_days")
+    span_txt = "?" if span is None else f"{span:g}"
+    flag = "  [TRUNCATED]" if r.get("truncated_at") else ""
     print(f"{r['workflow']:<34}{r['runs']:>6}{r['reds']:>6}{r['rerun_green']:>7}"
-          f"{r['catch_candidate']:>6}{r['unresolved']:>7}  {r['verdict']}")
+          f"{r['catch_candidate']:>6}{r['unresolved']:>7}{span_txt:>8}  {r['verdict']}{flag}")
 print()
 for r in rows:
-    if r["evidence"].get("rerun-green"):
-        pairs = "; ".join(f"red {a} -> green {b} (same sha)" for a, b in r["evidence"]["rerun-green"])
+    if not r["evidence"].get("rerun-green"): continue
+    pairs = "; ".join(f"red {a} -> green {b} (same sha)" for a, b in r["evidence"]["rerun-green"])
+    if r.get("external_inputs"):
+        # NOT flake evidence, and it must not be quotable as such. The same-sha
+        # green is the author fixing an input that is not in the sha.
+        print(f"NOT FLAKE EVIDENCE {r['workflow']}: reads {r['external_inputs']} — a same-sha "
+              f"red->green here is the AUTHOR FIXING THE INPUT, not a flake: {pairs}")
+    else:
         print(f"FLAKE EVIDENCE {r['workflow']}: {pairs}")
 print()
 print(json.dumps({"rows": rows}, indent=2), file=sys.stderr)
