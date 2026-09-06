@@ -654,19 +654,22 @@ jobs:
       #     has-an-importer.
       #
       # NOT members, checked rather than assumed: serve.mjs, scenarios.mjs,
+      # attention-scenarios.mjs (imported by overflow-guard.mjs, #16372),
       # font-pin.mjs, bringup-retry.mjs, defect-selection.mjs,
       # exit-vocabulary.mjs, ready-host-paint.mjs, seal-predicate.mjs and
       # mock.js carry no `run:` line of their own but are IMPORTED by
       # instruments that do, so their bytes execute on every console run.
       # (smoke.mjs, member-authority-sweep.mjs, breakpoint-sweep.mjs,
       # cssom-parity.mjs, overflow-guard.mjs, fixtures/ready-host-paint/proof.mjs
-      # and four `.test.mjs` suites are invoked outright, above — they were never
+      # and five `.test.mjs` suites — seal-predicate, breakpoint-sweep,
+      # bringup-retry, ready-host-paint and, since task-e3bd53c0df306521,
+      # attention-scenarios — are invoked outright, above; they were never
       # candidates.) Together with the members named here that is every
       # executable file in this directory, accounted for one by one; the class
       # is enumerated, not sampled.
       #
-      # RE-DERIVE, never inherit — this list is dated (2026-09-05, origin/main
-      # 6c6e88821) and the honest predicate is per-file, not a grep over prose:
+      # RE-DERIVE, never inherit — this list is dated (2026-09-06, origin/main
+      # 1083fec5a; previously 2026-09-05 / 6c6e88821) and the honest predicate is per-file, not a grep over prose:
       #
       #   git grep -nE '(^|[^#[:alnum:]_-])(node|bash|sh)[[:space:]]+[^|;&]*__preview__/' \
       #     -- .github/ scripts/ Makefile package.json
@@ -725,6 +728,28 @@ jobs:
             exit 1
           fi
           echo "responsive sweep unit tests: ${tally} tests, floor 69 — the pin re-earned"
+
+      # THE ATTENTION-SCENARIO AXIS'S OWN TESTS (#16372, wired by task-e3bd53c0df306521).
+      # attention-scenarios.mjs derives the scenario axis at run time from app.js's
+      # own filterFleet through a vm sandbox (19 scenarios / 304 cells, replacing a
+      # hardcoded 3 / 48) with an empty-read refusal, a positive control and a
+      # both-exit-code proof; overflow-guard.mjs imports it. Its suite was born on
+      # 2026-09-06 and no `run:` step reached it — the "written, not wired" shape
+      # that produced 14 of 66 orphaned scripts/ self-tests. Same tally floor as the
+      # steps above: 7 tests on origin/main 1083fec5a, 2026-09-06 (re-derive with
+      # `node --test cloud/priv/static/__preview__/attention-scenarios.test.mjs`).
+      - name: Attention-scenario axis unit tests (7-test tally)
+        run: |
+          set -euo pipefail
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 7 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 7 — this floor can no longer lose"; exit 1; }
+          node --test cloud/priv/static/__preview__/attention-scenarios.test.mjs 2>&1 | tee /tmp/attention-scenarios-tests.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/attention-scenarios-tests.txt)
+          if [ "${tally:-0}" -lt 7 ]; then
+            echo "::error::attention-scenario axis unit tests: ran ${tally:-0} test(s), the committed floor is 7 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "attention-scenario axis unit tests: ${tally} tests, floor 7 — the pin re-earned"
 
       # THE BRING-UP RETRY'S OWN TESTS (deploy-reliability wave 8).
       #
