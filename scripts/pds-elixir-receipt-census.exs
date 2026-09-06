@@ -1175,7 +1175,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{501, 501}],
+      basis_spans: [{512, 512}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1185,7 +1185,10 @@ defmodule PDS.Census do
           "the PAT workspace-binding code above this def, pushing every line below down by 44 — " <>
           "the span slid, the comment did not move relative to the def. RE-ANCHORED again off " <>
           ":483 on the PAT admin-mint cap lane (PR #14933): the workspace-binding resolver above " <>
-          "this def grew by 18 lines — +18, the comment still sits on the def's first body line.",
+          "this def grew by 18 lines — +18, the comment still sits on the def's first body line. " <>
+          "RE-ANCHORED again off :501 on pds-w37-api-logout-unread-revoke: logout/2, above this " <>
+          "def, grew by 11 lines when it started carrying its revoke count — +11, the comment " <>
+          "still sits on the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1194,7 +1197,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{516, 521}],
+      basis_spans: [{527, 532}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1206,7 +1209,9 @@ defmodule PDS.Census do
           "span slid, the sentence did not move relative to the def. RE-ANCHORED again off :454-459 " <>
           "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span. " <>
           "RE-ANCHORED again off :498-503 on the PAT admin-mint cap lane (PR #14933): +18 lines " <>
-          "inserted above (the token `anti-enumeration` now on :519).",
+          "inserted above (the token `anti-enumeration` now on :519). RE-ANCHORED again off " <>
+          ":516-521 on pds-w37-api-logout-unread-revoke: +11 lines inserted above by logout/2 " <>
+          "carrying its revoke count (the token `anti-enumeration` now on :530).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1603,14 +1608,34 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
         {"api/test/barkpark_web/controllers/auth_controller_test.exs",
          ~S|test "revoking ANOTHER session kills it, keeps mine, and audits", %{token_a: a, token_b: b} do|}},
-    # barkpark_web/controllers/auth_controller.ex:351
+    # barkpark_web/controllers/auth_controller.ex:351 — the SAML/SLO arm of the
+    # receipt: %{ok: true, revoked: revoked, slo_url: slo_url}. RE-KEYED at
+    # pds-w37-api-logout-unread-revoke (expr_fp 101485070 -> 52682767), which is
+    # the repair, not a drift: logout/2 now binds `{:ok, n} =` out of
+    # Accounts.revoke_user_session_token/1 (PDS-D523) and carries n as `revoked`
+    # on BOTH arms — the count is computed ONCE, before the slo_url fork, so
+    # this arm publishes the identical binding the arm below is proven on.
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
-            "BarkparkWeb.AuthController.logout/2", "893943", "17468236"},
-      verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/auth_controller.ex:351
+            "BarkparkWeb.AuthController.logout/2", "893943", "52682767"},
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/pds_w37_logout_receipt_test.exs",
+         ~S|test "the receipt's `revoked` EQUALS the rows the revoke stamped", %{user: user, token: token} do|},
+      attestation:
+        "mutation: hardcode `revoked: 1` on BOTH arms of logout/2's body map — `CC=/usr/bin/clang mix test test/barkpark_web/controllers/pds_w37_logout_receipt_test.exs` from api/ — 4 tests, 1 failure: `the session dies between the auth read and the revoke → the receipt says 0, never 1` reds `assert body[\"revoked\"] == 0` with left: 1. Restored: 4 tests, 0 failures. The two zero cases a reader expects — no bearer, and a second logout on a dead token — are UNREACHABLE: the route sits behind `[:user_auth, :require_user]` (router.ex `scope \"/v1/auth\"`, `delete(\"/logout\", AuthController, :logout)`), so both 401 before the controller runs. The race IS the reachable zero.",
+      note:
+        "WHAT THIS ROW DOES NOT CLAIM: the cited test drives a NON-SAML session, so no committed test produces this arm's slo_url TOGETHER with a stored-row read of the count. The slo_url shape itself is certified next door — saml_controller_test.exs `logout of a SAML session on an SLO-less connection stays local (no slo_url)` and its SLO sibling assert ok/slo_url and that the token is dead — and the `revoked` value is not a second computation this arm could get wrong: both map literals interpolate the same `revoked` variable bound above the fork."},
+    # barkpark_web/controllers/auth_controller.ex:351 — the ordinary arm:
+    # %{ok: true, revoked: revoked}. RE-KEYED at pds-w37-api-logout-unread-revoke
+    # (expr_fp 17468236 -> 91978071). The old key was the bare `%{ok: true}` this
+    # site shared with nine unrelated receipts, which is exactly the shape the
+    # row was UNJUDGED for: success asserted over a count the caller discarded.
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
-            "BarkparkWeb.AuthController.logout/2", "893943", "101485070"},
-      verdict: "UNJUDGED", basis: :unexamined},
+            "BarkparkWeb.AuthController.logout/2", "893943", "91978071"},
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/pds_w37_logout_receipt_test.exs",
+         ~S|test "the receipt's `revoked` EQUALS the rows the revoke stamped", %{user: user, token: token} do|},
+      attestation:
+        "mutation: hardcode `revoked: 1` on BOTH arms of logout/2's body map — `CC=/usr/bin/clang mix test test/barkpark_web/controllers/pds_w37_logout_receipt_test.exs` from api/ — 4 tests, 1 failure: `the session dies between the auth read and the revoke → the receipt says 0, never 1` reds `assert body[\"revoked\"] == 0` with left: 1. Restored: 4 tests, 0 failures. The two zero cases a reader expects — no bearer, and a second logout on a dead token — are UNREACHABLE: the route sits behind `[:user_auth, :require_user]` (router.ex `scope \"/v1/auth\"`, `delete(\"/logout\", AuthController, :logout)`), so both 401 before the controller runs. The race IS the reachable zero."},
     # barkpark_web/controllers/auth_controller.ex:379
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.verify_email/2", "13273957", "17468236"},
