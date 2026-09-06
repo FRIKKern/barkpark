@@ -60,12 +60,21 @@ func stubDeployScript(t *testing.T, path, content string) {
 	t.Cleanup(func() { readDeployScript = prev })
 }
 
-// stubResolveStagingHost swaps resolveStagingHost for a fixed answer.
+// stubResolveStagingHost swaps resolveStagingHost for a fixed self-hosted answer
+// (mode "" — an unknown mode is self-hosted, so every pre-existing caller keeps
+// asserting the ssh path).
 func stubResolveStagingHost(t *testing.T, host, url string, found bool, err error) {
 	t.Helper()
+	stubResolveStagingRow(t, deployFleetRow{Host: host, URL: url}, found, err)
+}
+
+// stubResolveStagingRow swaps resolveStagingHost for a whole fixed fleet row, so
+// a test can name the ID and MODE the managed fork keys on.
+func stubResolveStagingRow(t *testing.T, row deployFleetRow, found bool, err error) {
+	t.Helper()
 	prev := resolveStagingHost
-	resolveStagingHost = func(cfg *Config, target string) (string, string, bool, error) {
-		return host, url, found, err
+	resolveStagingHost = func(cfg *Config, target string) (deployFleetRow, bool, error) {
+		return row, found, err
 	}
 	t.Cleanup(func() { resolveStagingHost = prev })
 }
