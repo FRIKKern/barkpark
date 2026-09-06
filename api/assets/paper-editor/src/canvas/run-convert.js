@@ -1071,7 +1071,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
         : null;
     }
     return codeNodeChanged(prevChild, nextChild)
-      ? codeNodeToPatch(nextChild)
+      ? codeNodeToPatch(nextChild, prevChild)
       : null;
   }
   if (cls.isField) {
@@ -2069,12 +2069,15 @@ function codeNodeToBlock(node, id) {
 // then STORES lang:"", which is render-equivalent to a lang-less block
 // (compose/walk treat ""/absent the same) and round-trips (stableCodeKey below
 // normalizes ""/null equal → zero spurious ops). Omitting lang would instead leave
-// the STALE old lang. So: value always; lang as the string ("" when cleared).
-function codeNodeToPatch(node) {
+// the STALE old lang. A body-only edit must not create or normalize an untouched
+// absent/null/empty language carrier, so emit the empty string only on clearing.
+function codeNodeToPatch(node, prevNode) {
   const attrs = (node && node.attrs) || {};
+  const lang = attrs.lang == null ? "" : attrs.lang;
+  const previousLang = prevNode?.attrs?.lang ?? "";
   return {
     value: attrs.value || "",
-    lang: attrs.lang == null ? "" : attrs.lang,
+    ...(lang !== "" || previousLang !== "" ? { lang } : {}),
   };
 }
 
@@ -3626,7 +3629,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: codeNodeToPatch(entry.node),
+          patch: codeNodeToPatch(entry.node, prevNode),
         });
       }
       continue;

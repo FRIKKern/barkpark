@@ -83,6 +83,24 @@ try {
   canvas.flushPendingChanges();
   assert.equal(batches.length, 2, "unchanged source exit does not repeat the edit");
 
+  for (const carrier of [{}, { lang: null }, { lang: "" }]) {
+    const languageCanvas = document.createElement("bp-paper-canvas");
+    languageCanvas.blocks = [{ id: "code-carrier", type: "code", value: "before", ...carrier,
+      language: "sh", qa_meta: "preserve" }];
+    const languageBatches = [];
+    languageCanvas.addEventListener("bp-canvas-ops", e => languageBatches.push(e.detail.ops));
+    document.body.appendChild(languageCanvas);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const area = languageCanvas.querySelector(".bp-canvas-code-area");
+    area.value = "after";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }));
+    languageCanvas.flushPendingChanges();
+    assert.deepEqual(languageBatches, [[{
+      op: "patch-block", id: "code-carrier", patch: { value: "after" },
+    }]], "body-only edits preserve absent, null, and empty language carriers exactly");
+    languageCanvas.remove();
+  }
+
   console.log("mounted node-view pending flush regression passed");
 } finally {
   canvas.remove();

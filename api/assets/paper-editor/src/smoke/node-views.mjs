@@ -655,9 +655,8 @@ check("S3.3 runToOps: editing the code VALUE → one patch-block with the new va
   assert.equal(patches.length, 1, "exactly one patch-block, for the code");
   assert.equal(patches[0].id, "k-1");
   assert.equal(patches[0].patch.value, "new code line\nsecond line");
-  // lang explicit as "" (removal-safe: a lang-less code patches lang:"" which
-  // put_if_present drops on persist).
-  assert.equal(patches[0].patch.lang, "", "lang explicit '' (removal-safe)");
+  assert.equal("lang" in patches[0].patch, false,
+    "a body-only edit must not create an absent language field");
 
   // FOLD GATE: the code carries its new value; the prose is untouched.
   const folded = assertFolds(blocks, doc, ops, "S3.3-c code value edit");
