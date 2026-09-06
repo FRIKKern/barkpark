@@ -7959,6 +7959,14 @@ defmodule BarkparkCloud.Web.Router do
              # A static site IS its content binding — refuse an unbound one AT THE
              # DOOR rather than writing a row the deploy path can never build.
              :ok <- require_content_binding(kind, attrs),
+             # ssw8-bl-accepted-frameworks-no-implementation: a framework with no
+             # shipped builder (hugo/nuxt/sveltekit) or a scale_mode with no
+             # runtime (zero) is refused HERE, with the shipped menu for this
+             # kind. `Site.changeset/2` refuses it too — that is the backstop for
+             # every non-route caller — but only AFTER this route has allocated a
+             # node port and minted a read token on the instance for a site that
+             # will never exist. A door check belongs with the other door checks.
+             :ok <- require_shipped_capability(attrs),
              # site-spawner W7 (charter D68): a node site owns a per-site blue/green
              # port pair — allocate the lowest-free EVEN base ONCE, here at create.
              # A container/static site allocates nothing (attrs pass through). A box
@@ -8070,6 +8078,11 @@ defmodule BarkparkCloud.Web.Router do
           # honour for two owners.
           {:error, :domain_taken} ->
             json(conn, 409, %{error: "domain_taken"})
+
+          # Same envelope and status the changeset error below produces — the
+          # only difference is that nothing was minted first.
+          {:error, {:unshipped, details}} ->
+            json(conn, 422, %{error: "invalid", details: details})
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -14533,6 +14546,24 @@ defmodule BarkparkCloud.Web.Router do
   # fetches from workspace/project/dataset and has literally nothing to render
   # without all three, so the honest answer is a 422 at the door naming the flag.
   # The reaper's static pass stays as the safety net for rows that predate this.
+  # ssw8-bl-accepted-frameworks-no-implementation: run the create changeset DRY
+  # and surface only its framework/scale_mode verdicts. Deriving the refusal from
+  # the same changeset the insert will run is what keeps the door and the
+  # backstop from ever disagreeing — and why the message text lives in `Site`,
+  # not here. Other errors on the dry changeset (a missing required field, a
+  # taken slug) are NOT this door's business; the insert reports them with its
+  # full context.
+  defp require_shipped_capability(attrs) do
+    %Registry.Site{}
+    |> Registry.Site.changeset(attrs)
+    |> errors()
+    |> Map.take([:framework, :scale_mode])
+    |> case do
+      empty when empty == %{} -> :ok
+      details -> {:error, {:unshipped, details}}
+    end
+  end
+
   defp require_content_binding("static", attrs), do: require_content_triple(attrs)
 
   # site-spawner W7 (charter D62): a NODE site is content-bound EXACTLY like a

@@ -53,6 +53,31 @@ defmodule BarkparkCloud.Registry.Site do
   @frameworks @container_frameworks ++ @static_frameworks
   @scale_modes ~w(always_on zero)
 
+  # ssw8-bl-accepted-frameworks-no-implementation: the SHIPPED half of the
+  # enums above. `@frameworks`/`@scale_modes` are the kind-legality VOCABULARY
+  # (charter D2) and the HISTORY — rows written before this door exist, and must
+  # keep loading, serializing and listing. These two lists are the narrower,
+  # harder truth: what the spawner can actually BUILD and RUN today. Only the
+  # create/update DOOR consults them.
+  #
+  # @shipped_starters is keyed to the starter tree the deploy relay provisions
+  # (`templates/<slug>`) and is the single source `Sites.Deploy.site_template/1`
+  # reads, so the two can never drift; `site_shipped_frameworks_test.exs` reads
+  # `templates/` off disk and asserts every slug here exists and that no
+  # UNSHIPPED framework has grown a starter tree behind this list's back.
+  @shipped_starters %{"astro" => "astro-starter", "nextjs" => "next-starter"}
+
+  # Frameworks that ship with NO starter tree because they need no build step:
+  # "static" is a folder of files the box serves as-is.
+  @starterless_frameworks ~w(static)
+
+  @shipped_frameworks Map.keys(@shipped_starters) ++ @starterless_frameworks
+
+  # Only `always_on` is implemented. `zero` names an idle-stop agent and a
+  # wakeup handler that do not exist: `grep -rn scale_mode cloud/lib` finds the
+  # value cast, stored and echoed on the wire — and read by NOTHING.
+  @shipped_scale_modes ~w(always_on)
+
   # site-spawner W6 (charter D51): the CF-in-front edge-binding enums.
   #
   #   * @serving_modes — how the box is fronted. "direct" is the standalone
@@ -208,6 +233,38 @@ defmodule BarkparkCloud.Registry.Site do
   def frameworks, do: @frameworks
   def kinds, do: @kinds
   def scale_modes, do: @scale_modes
+
+  @doc """
+  The framework → shipped-starter-slug map (`templates/<slug>`). The deploy
+  relay reads this to pick the tree it provisions; a framework absent from it
+  either needs no starter (`@starterless_frameworks`) or is not shipped at all.
+  """
+  def shipped_starters, do: @shipped_starters
+
+  @doc """
+  The frameworks the spawner can actually build today, across all kinds — the
+  subset of `frameworks/0` the create door accepts. See `shipped_frameworks_for_kind/1`
+  for the per-kind menu a refusal names.
+  """
+  def shipped_frameworks, do: @shipped_frameworks
+
+  @doc """
+  The scale modes the runtime can actually honour today. `scale_modes/0` stays
+  the stored vocabulary (existing rows may carry `zero`); this is what a create
+  accepts.
+  """
+  def shipped_scale_modes, do: @shipped_scale_modes
+
+  @doc """
+  The frameworks a NEW site of this `kind` can be created with: kind-legal
+  (charter D2) AND shipped. This is the list a 422 names, so it is derived from
+  `frameworks_for_kind/1` rather than written out a second time — adding a
+  framework to a kind cannot silently skip the refusal copy.
+  """
+  def shipped_frameworks_for_kind(kind) do
+    kind |> frameworks_for_kind() |> Enum.filter(&(&1 in @shipped_frameworks))
+  end
+
   def serving_modes, do: @serving_modes
   def tls_modes, do: @tls_modes
   def binding_verdicts, do: @binding_verdicts
@@ -272,9 +329,11 @@ defmodule BarkparkCloud.Registry.Site do
     )
     |> validate_inclusion(:kind, @kinds)
     |> validate_framework_for_kind()
+    |> validate_framework_is_shipped()
     |> validate_template()
     |> validate_theme()
     |> validate_inclusion(:scale_mode, @scale_modes)
+    |> validate_scale_mode_is_shipped()
     # A verdict outside the enum is a validation error, never a silent bad row:
     # `content_bound` is DERIVED from this string, so an unknown value would be
     # a wire answer nothing downstream could read.
@@ -321,6 +380,78 @@ defmodule BarkparkCloud.Registry.Site do
           validation: :inclusion,
           enum: frameworks_for_kind(kind)
         )
+    end
+  end
+
+  # ssw8-bl-accepted-frameworks-no-implementation: the SHIPPED gate, and the
+  # reason it reads `get_change` rather than `get_field`.
+  #
+  # A site row carrying `hugo` (or `nuxt`/`sveltekit`) may ALREADY EXIST — the
+  # enum accepted it for months. `Site.changeset/2` is not only the create path:
+  # setting env, attaching a domain and `set_site_github/4` all run it on a
+  # LOADED row. Keying on `get_field` would resolve the stored `hugo` and refuse
+  # every one of those, retroactively bricking rows this task is not about.
+  # `get_change` fires only when the caller is NAMING the value — i.e. at the
+  # door — which is exactly the ruling: refuse the create, never the row.
+  #
+  # Skipped when the kind-gate already rejected the pair, so the caller sees the
+  # real cause (`is not valid for a container site`) instead of two errors.
+  defp validate_framework_is_shipped(changeset) do
+    kind = get_field(changeset, :kind)
+
+    case get_change(changeset, :framework) do
+      nil ->
+        changeset
+
+      framework ->
+        cond do
+          kind not in @kinds -> changeset
+          framework not in frameworks_for_kind(kind) -> changeset
+          framework in @shipped_frameworks -> changeset
+          true -> add_unshipped_framework_error(changeset, kind)
+        end
+    end
+  end
+
+  defp add_unshipped_framework_error(changeset, kind) do
+    shipped = shipped_frameworks_for_kind(kind)
+
+    add_error(
+      changeset,
+      :framework,
+      "has no shipped builder yet — a #{kind} site can be created with: " <>
+        Enum.join(shipped, ", "),
+      validation: :inclusion,
+      enum: shipped
+    )
+  end
+
+  # Same shape, same reason (see above): only a caller NAMING `zero` is refused;
+  # a stored `zero` row still saves its env and its domains. Skipped when the
+  # value is outside the stored vocabulary entirely — `validate_inclusion/3` has
+  # already said so.
+  defp validate_scale_mode_is_shipped(changeset) do
+    case get_change(changeset, :scale_mode) do
+      nil ->
+        changeset
+
+      mode ->
+        cond do
+          mode not in @scale_modes ->
+            changeset
+
+          mode in @shipped_scale_modes ->
+            changeset
+
+          true ->
+            add_error(
+              changeset,
+              :scale_mode,
+              "has no runtime yet — supported: " <> Enum.join(@shipped_scale_modes, ", "),
+              validation: :inclusion,
+              enum: @shipped_scale_modes
+            )
+        end
     end
   end
 
