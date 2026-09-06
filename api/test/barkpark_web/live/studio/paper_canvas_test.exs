@@ -34,9 +34,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* types (field-image /
   # field-reference) are now canvas-eligible too (their WCs are client-side — no
   # LiveView dependency — so they mount inside the canvas as control-atoms). `section`
-  # is now canvas-eligible too (its own bpSection CONTAINER node). The ONLY remaining
-  # run boundaries are the NESTED-STRUCTURE fields (composite / arrayOf / codelist /
-  # localizedText), a separate increment. `boundary/1` therefore
+  # is now canvas-eligible too (its own bpSection CONTAINER node). Remaining run
+  # boundaries include contextual form/questionnaire editors and NESTED-STRUCTURE
+  # fields (composite / arrayOf / codelist / localizedText). `boundary/1` therefore
   # produces a `composite` (a still-splitting boundary); `boundary2/1` produces an
   # `arrayOf` (a SECOND distinct boundary, used where two adjacent boundaries are
   # needed). `picker/1` and `picker_ref/1` produce the now-canvas-eligible picker fields
@@ -98,7 +98,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp task_list(id),
     do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
 
-  # t12a: representative FLEET kinds — all 12 are now canvas-eligible (server-painted
+  # t12a: representative FLEET kinds are canvas-eligible (server-painted
   # read-only atoms). A static fleet block carries its own data; a query fleet block
   # carries a `query`. Both ride a run verbatim.
   defp task_board(id), do: %{"id" => id, "type" => "task-board", "snapshot" => []}
@@ -318,14 +318,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    # ── t12a: the 12 FLEET kinds are now CANVAS-ELIGIBLE — they no longer split ──
+    # ── t12a: contextual FLEET kinds are CANVAS-ELIGIBLE — they no longer split ──
 
     test "t12a: every fleet kind INSIDE prose keeps the run whole (was a boundary widget)" do
-      # All 12 fleet types are canvas-eligible (server-painted read-only atoms), so
-      # each rides the prose run rather than splitting it. `diagram` is NOT here — it
-      # rides its own editable attr-atom, already covered above.
+      # These fleet types are canvas-eligible (server-painted read-only atoms), so each
+      # rides the prose run rather than splitting it. Form and questionnaire are tested
+      # below as contextual boundaries. `diagram` rides its own editable attr-atom.
       for type <-
-            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire) do
+            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast) do
         blk = fleet("x1", type)
         blocks = [para("p1"), blk, para("p2")]
 
@@ -370,6 +370,30 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "t12a: a lone fleet block is a single run, not a boundary" do
       assert PaperCanvas.partition_runs([task_board("b1")]) == [{:run, [task_board("b1")]}]
+    end
+
+    test "contextual authoring: form and questionnaire are boundaries, not canvas fleet atoms" do
+      refute PaperCanvas.canvas?(fleet("form-1", "form"))
+      refute PaperCanvas.canvas?(fleet("questionnaire-1", "questionnaire"))
+    end
+
+    test "contextual authoring: alternating prose and form/questionnaire boundaries stay distinct" do
+      form = fleet("form-1", "form")
+      questionnaire = fleet("questionnaire-1", "questionnaire")
+
+      assert PaperCanvas.partition_runs([
+               para("p1"),
+               form,
+               para("p2"),
+               questionnaire,
+               para("p3")
+             ]) == [
+               {:run, [para("p1")]},
+               {:block, form},
+               {:run, [para("p2")]},
+               {:block, questionnaire},
+               {:run, [para("p3")]}
+             ]
     end
 
     # ── pd-ee-dataviz-editors: the 5 DATA-VIZ kinds are CANVAS-ELIGIBLE (D3) ──
@@ -445,8 +469,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # `columns` gained the container recursion (#1228), `table` is its own canvas
       # node tree (editable-table, #1227), and `section` now rides the SAME
       # CANVAS_CONTAINER recursion (editable-section) — so all three fold INTO a run.
-      # The ONLY remaining run boundaries are the deep nested-structure fields
-      # (composite / arrayOf / codelist / localizedText).
+      # Other run boundaries include contextual form/questionnaire editors and the
+      # deep nested-structure fields (composite / arrayOf / codelist / localizedText).
       sec = %{"id" => "b", "type" => "section", "title" => "S", "blocks" => [para("b-c")]}
 
       assert PaperCanvas.partition_runs([para("p1"), sec, para("p2")]) ==
@@ -746,15 +770,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.canvas?(picker("f"))
       assert PaperCanvas.canvas?(picker_ref("fr"))
 
-      # t12a: each of the 12 FLEET kinds is canvas-eligible (server-painted read-only
+      # t12a: each contextual fleet kind is canvas-eligible (server-painted read-only
       # atoms carrying the whole block verbatim on bpFleet). `diagram` is NOT a fleet
-      # type — it stays an attr-atom (asserted canvas above via its own clause).
+      # type — it stays an attr-atom (asserted canvas above via its own clause). Form
+      # and questionnaire deliberately remain contextual boundary editors.
       for type <-
-            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire) do
+            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast) do
         assert PaperCanvas.canvas?(fleet("f", type)), "expected #{type} to be canvas-eligible"
       end
 
-      # Still boundaries — only the NESTED-STRUCTURE fields stay run boundaries.
+      refute PaperCanvas.canvas?(fleet("form", "form"))
+      refute PaperCanvas.canvas?(fleet("questionnaire", "questionnaire"))
+
+      # The NESTED-STRUCTURE fields stay run boundaries too.
       refute PaperCanvas.canvas?(boundary("cmp"))
       refute PaperCanvas.canvas?(boundary2("arr"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
@@ -1843,16 +1871,30 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       }
     end
 
-    test "an unknown slot kind replies unsaved without changing the socket" do
+    test "an unknown slot kind replies unsaved without changing the document" do
       s0 = materialize_socket([%{"id" => "t", "role" => "title", "locked" => true}])
 
-      assert {:reply, %{saved: false, request_id: nil}, ^s0} =
+      assert {:reply, %{saved: false, request_id: nil} = receipt, socket} =
                P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
+
+      assert socket.assigns.paper_doc == s0.assigns.paper_doc
+      assert socket.assigns.paper_rev == s0.assigns.paper_rev
+      assert socket.assigns.save_status == "Save failed"
+      assert socket.assigns.last_paper_save_result == receipt
+      refute socket.assigns.last_paper_save_ok?
     end
 
     test "a malformed payload is a safe no-op" do
       s0 = materialize_socket([])
-      assert {:reply, %{saved: false, request_id: nil}, ^s0} = P.paper_materialize_slot(%{}, s0)
+
+      assert {:reply, %{saved: false, request_id: nil} = receipt, socket} =
+               P.paper_materialize_slot(%{}, s0)
+
+      assert socket.assigns.paper_doc == s0.assigns.paper_doc
+      assert socket.assigns.paper_rev == s0.assigns.paper_rev
+      assert socket.assigns.save_status == "Save failed"
+      assert socket.assigns.last_paper_save_result == receipt
+      refute socket.assigns.last_paper_save_ok?
     end
   end
 

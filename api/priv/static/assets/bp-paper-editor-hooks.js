@@ -31,7 +31,9 @@
     "paper-edit-block",
   ]);
   const PAPER_POSITIONAL_COLLECTION_PARAM =
-    /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-(?:count|action|\d+-)/;
+    /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-(?:count|action|\d+-)/;
+  const PAPER_POSITIONAL_COLLECTION_ACTION_PARAM =
+    /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-action|option-action)$/;
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -45,11 +47,11 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
-    const match = /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-action$/.exec(submitter?.name || "");
+    const match = /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-action$/.exec(submitter?.name || "");
     if (!match || document.activeElement !== submitter) return () => {};
     const prefix = match[1];
     const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
-    const stableRows = prefix === "panel" || prefix === "step";
+    const stableRows = ["panel", "step", "question"].includes(prefix);
     const action = stableRows
       ? /^(add|up|down|remove)(?::(.+))?$/.exec(submitter.value || "")
       : /^(add|up|down|remove)(?::(\d+))?$/.exec(submitter.value || "");
@@ -57,14 +59,17 @@
     const kind = action[1];
     const beforeIds = stableRows
       ? Array.from({ length: count }, (_unused, index) =>
-          form.elements.namedItem(`${prefix}-${index}-id`)?.value)
+          form.elements.namedItem(`${prefix}-${index}-${prefix === "question" ? "original-id" : "id"}`)?.value)
       : [];
+    const actionIndex = stableRows ? beforeIds.indexOf(action[2]) : Number(action[2]);
     const rowId = stableRows
       ? (kind === "add"
-          ? form.elements.namedItem(`${prefix}-new-row-id`)?.value
-          : action[2])
+          ? form.elements.namedItem(`${prefix}-${prefix === "question" ? "new-id" : "new-row-id"}`)?.value
+          : prefix === "question"
+            ? form.elements.namedItem(`${prefix}-${actionIndex}-id`)?.value
+            : action[2])
       : null;
-    const index = stableRows ? beforeIds.indexOf(action[2]) : Number(action[2]);
+    const index = actionIndex;
     if (stableRows &&
         (beforeIds.some(id => typeof id !== "string" || id === "") ||
           new Set(beforeIds).size !== beforeIds.length ||
@@ -103,15 +108,62 @@
     };
   }
 
+  function bpPaperOptionFocus(form, submitter) {
+    if (submitter?.name !== "option-action" || document.activeElement !== submitter) {
+      return () => {};
+    }
+    const add = /^add:(.+)$/.exec(submitter.value || "");
+    const positional = /^(up|down|remove):(.+):(\d+)$/.exec(submitter.value || "");
+    const kind = add ? "add" : positional?.[1];
+    const originalId = add?.[1] || positional?.[2];
+    const index = add ? null : Number(positional?.[3]);
+    const questionCount = Number(form.elements.namedItem("question-count")?.value);
+    if (!kind || !originalId || !Number.isSafeInteger(questionCount) || questionCount < 0) {
+      return () => {};
+    }
+    const originalIds = Array.from({ length: questionCount }, (_unused, rowIndex) =>
+      form.elements.namedItem(`question-${rowIndex}-original-id`)?.value);
+    const questionIndex = originalIds.indexOf(originalId);
+    if (questionIndex < 0 || originalIds.lastIndexOf(originalId) !== questionIndex) return () => {};
+    const answerId = form.elements.namedItem(`question-${questionIndex}-id`)?.value;
+    const count = Number(form.elements.namedItem(`question-${questionIndex}-option-count`)?.value);
+    if (typeof answerId !== "string" || answerId === "" ||
+        !Number.isSafeInteger(count) || count < 0 ||
+        (kind !== "add" && (!Number.isSafeInteger(index) || index < 0 || index >= count)) ||
+        (kind === "up" && index === 0) || (kind === "down" && index === count - 1)) {
+      return () => {};
+    }
+    const nextCount = count + (kind === "add" ? 1 : kind === "remove" ? -1 : 0);
+    const nextIndex = kind === "add" ? count : kind === "up" ? index - 1
+      : kind === "down" ? index + 1 : Math.min(index, nextCount - 1);
+    return () => {
+      if (!form.isConnected ||
+          (document.activeElement !== submitter &&
+            !(document.activeElement === document.body && !submitter.isConnected))) return;
+      const nextQuestionCount = Number(form.elements.namedItem("question-count")?.value);
+      const nextQuestionIndex = Array.from(
+        { length: Number.isSafeInteger(nextQuestionCount) ? nextQuestionCount : 0 },
+        (_unused, rowIndex) => form.elements.namedItem(`question-${rowIndex}-id`)?.value,
+      ).indexOf(answerId);
+      if (nextQuestionCount !== questionCount || nextQuestionIndex < 0 ||
+          Number(form.elements.namedItem(`question-${nextQuestionIndex}-option-count`)?.value) !== nextCount) return;
+      const option = nextCount > 0
+        ? form.elements.namedItem(`question-${nextQuestionIndex}-option-${nextIndex}`)
+        : form.elements.namedItem(`question-${nextQuestionIndex}-id`);
+      if (option && !option.disabled) option.focus();
+    };
+  }
+
   // Stable collection inserts consume their client-carried id exactly once.
   // LiveView can repaint an older hidden input value while morphing an active
   // form, so mint afresh after every acknowledged insert. Failed and
   // transport-ambiguous writes keep the same value for exact replay.
   function bpPaperRotateConsumedCollectionId(form, submitter) {
-    const match = /^(panel|step)-action$/.exec(submitter?.name || "");
+    const match = /^(panel|step|question)-action$/.exec(submitter?.name || "");
     const action = /^(add|add-body)(?::.+)?$/.exec(submitter?.value || "");
     if (!match || !action) return () => {};
-    const name = `${match[1]}-${action[1] === "add" ? "new-row-id" : "new-child-id"}`;
+    const name = match[1] === "question" ? "question-new-id"
+      : `${match[1]}-${action[1] === "add" ? "new-row-id" : "new-child-id"}`;
     const consumed = form.elements.namedItem(name)?.value;
     if (typeof consumed !== "string" || consumed === "") return () => {};
     return () => {
@@ -331,12 +383,14 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-count$/.test(control.name));
-    const stableRowIds = ["panel", "step"].flatMap((prefix) => {
+      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-count$/.test(control.name));
+    const stableRowIds = ["panel", "step", "question"].flatMap((prefix) => {
       const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
       if (!Number.isSafeInteger(count) || count < 0) return [];
       return [[prefix, Array.from({ length: count }, (_unused, index) =>
-        form.elements.namedItem(`${prefix}-${index}-id`)?.value ?? null)]];
+        form.elements.namedItem(
+          `${prefix}-${index}-${prefix === "question" ? "original-id" : "id"}`,
+        )?.value ?? null)]];
     });
     const blockId = controls.find((control) => control.name === "block_id")?.value ?? null;
     return {
@@ -372,13 +426,15 @@
     const signature = controls.map((control) =>
       `${control.tagName}:${control.type}:${control.name}`).join("\n");
     const counts = controls.filter((control) =>
-      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step)-count$/.test(control.name));
+      /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-count$/.test(control.name));
     const countValues = counts.map((control) => [control.name, control.value]);
-    const stableRowIds = ["panel", "step"].flatMap((prefix) => {
+    const stableRowIds = ["panel", "step", "question"].flatMap((prefix) => {
       const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
       if (!Number.isSafeInteger(count) || count < 0) return [];
       return [[prefix, Array.from({ length: count }, (_unused, index) =>
-        form.elements.namedItem(`${prefix}-${index}-id`)?.value ?? null)]];
+        form.elements.namedItem(
+          `${prefix}-${index}-${prefix === "question" ? "original-id" : "id"}`,
+        )?.value ?? null)]];
     });
     if (snapshot.blockId !== blockId || snapshot.signature !== signature ||
         JSON.stringify(snapshot.countValues) !== JSON.stringify(countValues) ||
@@ -405,6 +461,11 @@
   function bpPaperPositionalCollectionEntry(entry) {
     return Object.keys(entry?.payload || {}).some((key) =>
       PAPER_POSITIONAL_COLLECTION_PARAM.test(key));
+  }
+
+  function bpPaperPositionalCollectionActionEntry(entry) {
+    return Object.entries(entry?.payload || {}).some(([key, value]) =>
+      PAPER_POSITIONAL_COLLECTION_ACTION_PARAM.test(key) && value !== "");
   }
 
   function bpPaperConflictDraft(entry, snapshot) {
@@ -516,6 +577,8 @@
             pending: null,
             authoredRev: undefined,
             mutationEntry: null,
+            fallbackDeferred: false,
+            fallbackUnsafe: false,
             documentKey: identity.key,
             documentRevision: identity.rev,
           };
@@ -647,6 +710,13 @@
           if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
           let entry = mutationById.get(requestId);
           if (!entry) {
+            for (const [fallbackSource, fallbackRecord] of sources) {
+              if (fallbackSource === source || !fallbackRecord.dirty ||
+                  !fallbackSource.matches?.(".bp-paper-edit-form[phx-change]")) continue;
+              clearTimeout(fallbackRecord.timer);
+              fallbackRecord.timer = null;
+              fallbackRecord.fallbackDeferred = true;
+            }
             const record = recordFor(source);
             if (record.authoredRev === undefined) {
               record.authoredRev = record.documentKey === documentKey
@@ -723,6 +793,84 @@
         const waiters = entry.waiters.splice(0);
         waiters.forEach((resolve) => resolve(saved));
       };
+      coordinator._pauseFallbackForReview = (source, record, entry = null) => {
+        clearTimeout(record.timer);
+        record.timer = null;
+        record.fallbackDeferred = true;
+        record.fallbackUnsafe = true;
+        if (!conflict) coordinator._setConflict(
+          { current_rev: confirmedRevision, fallback_unsafe: true },
+          source,
+          record.documentKey,
+          entry,
+        );
+      };
+      coordinator._resumeFallbackDrafts = () => {
+        const deferred = [...sources].filter(([source, record]) =>
+          record.fallbackDeferred && record.dirty && record.active === 0 &&
+          !record.mutationEntry && source.isConnected &&
+          source.matches?.(".bp-paper-edit-form[phx-change]") &&
+          record.documentKey === documentKey);
+        const unsafe = deferred.find(([_source, record]) =>
+          record.fallbackUnsafe || record.authoredRev !== confirmedRevision);
+        if (unsafe) {
+          coordinator._pauseFallbackForReview(unsafe[0], unsafe[1]);
+          return false;
+        }
+        if (conflict || mutationQueue.length) return false;
+        deferred.forEach(([source, record]) => {
+          record.fallbackDeferred = false;
+          coordinator._scheduleFallback(source);
+        });
+        return true;
+      };
+      coordinator._advanceFallbackDrafts = (entry) => {
+        let unsafe = null;
+        for (const [source, record] of sources) {
+          if (!record.fallbackDeferred || !record.dirty || record.active > 0 ||
+              record.mutationEntry ||
+              !source.matches?.(".bp-paper-edit-form[phx-change]") ||
+              record.documentKey !== entry.documentKey) continue;
+          if (source === entry.source && bpPaperPositionalCollectionActionEntry(entry)) {
+            coordinator._pauseFallbackForReview(source, record, entry);
+            unsafe ||= [source, record, entry];
+            continue;
+          }
+          const snapshot = record.formSnapshot;
+          const currentIdentity = identityFor(source);
+          const carrierRevisionIsOwn = currentIdentity.rev === snapshot?.documentRevision ||
+            currentIdentity.rev === confirmedRevision;
+          const externalRevisionPending = quarantinedEchoes.some((echo) =>
+            (!echo.documentKey || echo.documentKey === entry.documentKey) &&
+            echo.rev !== confirmedRevision);
+          if (!snapshot || record.authoredRev !== entry.ifRev ||
+              currentIdentity.key !== snapshot.documentKey || !carrierRevisionIsOwn ||
+              externalRevisionPending) {
+            coordinator._pauseFallbackForReview(source, record);
+            unsafe ||= [source, record, null];
+            continue;
+          }
+          const advancedSnapshot = {
+            ...snapshot,
+            documentRevision: currentIdentity.rev,
+          };
+          if (!bpPaperRestoreFallbackForm(
+            advancedSnapshot,
+            source,
+            currentIdentity,
+            main,
+          )) {
+            coordinator._pauseFallbackForReview(source, record);
+            unsafe ||= [source, record, null];
+            continue;
+          }
+          record.formSnapshot = advancedSnapshot;
+          record.authoredRev = confirmedRevision;
+          record.documentRevision = currentIdentity.rev;
+          record.fallbackUnsafe = false;
+        }
+        if (!unsafe) coordinator._resumeFallbackDrafts();
+      };
       coordinator._hasUnsavedForDocument = (key) => {
         for (const record of sources.values()) {
           if (record.documentKey === key && (record.dirty || record.active > 0)) return true;
@@ -785,12 +933,20 @@
           composed: true,
         }));
       };
-      coordinator._setConflict = (reply, source, sourceDocumentKey) => {
+      coordinator._setConflict = (reply, source, sourceDocumentKey, conflictEntry = null) => {
+        const conflictSource = source || mutationQueue[0]?.source;
+        const entry = conflictEntry ||
+          mutationQueue.find((queued) => queued.source === conflictSource) ||
+          mutationQueue[0] || null;
         conflict = {
           currentRev: reply?.current_rev,
           reply,
-          source: source || mutationQueue[0]?.source,
+          source: conflictSource,
           documentKey: sourceDocumentKey || mutationQueue[0]?.documentKey || documentKey,
+          entry,
+          snapshot: sources.get(conflictSource)?.formSnapshot,
+          latestSnapshot: null,
+          positional: reply?.fallback_unsafe === true || bpPaperPositionalCollectionEntry(entry),
         };
         mutationPaused = true;
         coordinator._renderConflict();
@@ -812,15 +968,21 @@
             const action = event.target.closest?.("[data-action]")?.dataset.action;
             if (action === "review") {
               const detail = banner.querySelector("[data-conflict-detail]");
-              const head = mutationQueue[0];
-              const positional = bpPaperPositionalCollectionEntry(head);
+              const head = conflict.entry;
+              const positional = conflict.positional;
               detail.hidden = false;
               detail.querySelector("[data-conflict-message]").textContent = positional
                 ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
                 : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
-              const snapshot = sources.get(head?.source)?.formSnapshot;
+              const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
+              const reviewDraft = conflict.latestSnapshot
+                ? {
+                    retainedDraftBeforeAcknowledgement: retainedDraft,
+                    currentDraftDuringReview: bpPaperConflictDraft(head, conflict.latestSnapshot),
+                  }
+                : retainedDraft;
               detail.querySelector("[data-conflict-draft]").textContent =
-                JSON.stringify(bpPaperConflictDraft(head, snapshot), null, 2);
+                JSON.stringify(reviewDraft, null, 2);
               main.dispatchEvent(new CustomEvent("bp-paper-conflict-review", {
                 detail: { documentKey, conflict: conflict.reply }, bubbles: true,
               }));
@@ -831,7 +993,7 @@
             }
           });
         }
-        const positional = bpPaperPositionalCollectionEntry(mutationQueue[0]);
+        const positional = conflict.positional;
         const keep = banner.querySelector('[data-action="keep"]');
         keep.disabled = positional;
         keep.setAttribute("aria-disabled", String(positional));
@@ -894,6 +1056,11 @@
         if (requiresReload) reloadWhenClean = true;
         coordinator._renderConflict();
         coordinator._maybeAdoptPendingIdentity();
+        coordinator._resumeFallbackDrafts();
+        if (conflict) {
+          coordinator._reloadIfClean();
+          return;
+        }
         coordinator._pumpMutations();
         coordinator._reloadIfClean();
       };
@@ -933,18 +1100,11 @@
           coordinator.finishSave(token, saved);
           if (saved) {
             confirmedRevision = reply.rev ?? confirmedRevision;
-            const newerForm = sources.get(entry.source);
-            if (newerForm?.dirty && newerForm.documentKey === entry.documentKey &&
-                entry.source.matches?.(".bp-paper-edit-form[phx-change]")) {
-              // A later form snapshot continues this acknowledged local save,
-              // not the stale revision from before it. External revisions still
-              // remain fenced; only this exact request's receipt advances it.
-              newerForm.authoredRev = confirmedRevision;
-            }
             ownRevisions.set(entry.requestId, confirmedRevision);
             mutationQueue.shift();
             mutationById.delete(entry.requestId);
             entry.onResult?.(true, reply);
+            coordinator._advanceFallbackDrafts(entry);
             coordinator._resolveWaiters(entry, true);
             for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
               const echo = quarantinedEchoes[i];
@@ -1023,10 +1183,13 @@
             !source.matches?.(".bp-paper-edit-form[phx-change]")) return;
         coordinator.markDirty(source);
         if (source.matches?.(".bp-paper-edit-form[phx-change]")) {
-          recordFor(source).formSnapshot = bpPaperFallbackFormSnapshot(
+          const record = recordFor(source);
+          record.formSnapshot = bpPaperFallbackFormSnapshot(
             source,
             identityFor(source),
           );
+          const sourceConflict = conflict?.source === source;
+          if (!sourceConflict) record.fallbackUnsafe = false;
           // Native submit validates before dispatching a submit event. Clear
           // stale errors as the author corrects inputs, not after debounce.
           bpPaperValidateAuthoringForm(source);
@@ -1035,15 +1198,40 @@
           // the exit guard. Let target/form listeners run, but do not also let
           // LiveView's window-level phx-change binding enqueue a duplicate.
           event.stopPropagation();
-          if (!(sources.get(source)?.active > 0)) coordinator._scheduleFallback(source);
+          if (conflict) {
+            clearTimeout(record.timer);
+            record.timer = null;
+            record.fallbackDeferred = true;
+            if (sourceConflict) conflict.latestSnapshot = record.formSnapshot;
+          } else if (record.active > 0 || mutationActive || mutationQueue.length) {
+            clearTimeout(record.timer);
+            record.timer = null;
+            record.fallbackDeferred = true;
+          } else {
+            coordinator._scheduleFallback(source);
+          }
         }
       };
       coordinator._sendFallback = (source, driver = null) => {
         const record = recordFor(source);
         if (!record.dirty) return Promise.resolve(true);
+        if (conflict) return Promise.resolve(false);
+        if (record.fallbackUnsafe) {
+          coordinator._pauseFallbackForReview(source, record);
+          return Promise.resolve(false);
+        }
         if (record.active > 0) return record.pending || Promise.resolve(false);
         driver ||= [...members].find((member) => typeof member.pushEventTo === "function");
         if (!driver || !source.isConnected) return Promise.resolve(false);
+        if (record.formSnapshot && !bpPaperRestoreFallbackForm(
+          record.formSnapshot,
+          source,
+          identityFor(source),
+          main,
+        )) {
+          coordinator._pauseFallbackForReview(source, record);
+          return Promise.resolve(false);
+        }
         bpPaperValidateAuthoringForm(source);
         if (source.checkValidity?.() === false) {
           source.reportValidity?.();
@@ -1083,6 +1271,7 @@
       coordinator._scheduleFallback = (source) => {
         const record = recordFor(source);
         clearTimeout(record.timer);
+        record.fallbackDeferred = false;
         const rawDelay = source.getAttribute("phx-debounce");
         const delay = /^\d+$/.test(rawDelay || "") ? Number(rawDelay) : 500;
         record.timer = setTimeout(() => {
@@ -1278,6 +1467,7 @@
         if (!driver) return;
         const params = Object.fromEntries(new FormData(form, event.submitter || undefined));
         const restoreCollectionFocus = bpPaperCollectionFocus(form, event.submitter);
+        const restoreOptionFocus = bpPaperOptionFocus(form, event.submitter);
         const rotateConsumedCollectionId = bpPaperRotateConsumedCollectionId(form, event.submitter);
         coordinator.run(() => bpPaperMutation(
           driver,
@@ -1291,6 +1481,7 @@
           if (saved) {
             rotateConsumedCollectionId();
             restoreCollectionFocus();
+            restoreOptionFocus();
           }
           return saved;
         }));

@@ -25,7 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       `value` attr edited by a non-PM textarea), as of S3.5 also the 7 native
       `field-*` types (CONTROL-ATOM nodes), and as of S3.6 also `sheet` + `embed`
       (READ-ONLY ATOM nodes carrying the whole block verbatim), and as of t12a also
-      the 12 non-prose FLEET kinds (`tasks`/`task-board`/`cards`/`form`/… — SERVER-
+      the 10 contextual FLEET kinds (`tasks`/`task-board`/`cards`/… — SERVER-
       PAINTED read-only atoms, the whole block verbatim on `bpFleet`), and as of S10
       also the `columns` CONTAINER (a RECURSIVE nested-block node `bpColumns >
       bpColumn+ > child` — the first canvas node whose interior is a nested BLOCK
@@ -36,8 +36,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       `CANVAS_CONTAINER_TYPES`), so
       none SPLIT a run anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
-      block that is NOT canvas-eligible (a deep nested-structure field — `composite` /
-      `arrayOf` / `codelist` / `localizedText`) is a run boundary
+      block that is NOT canvas-eligible (a contextual editor such as `form` /
+      `questionnaire`, or a deep nested-structure field — `composite` / `arrayOf` /
+      `codelist` / `localizedText`) is a run boundary
       emitted as
       `{:block, block}`. The segment order matches the input order exactly. Pure:
       no socket, no I/O.
@@ -141,7 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # and embed-node.js BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME.
   @canvas_readonly_atom_types ~w(sheet embed)
 
-  # t12a (pdd-t12 partition flip): the 12 FLEET block kinds the canvas handles as
+  # t12a (pdd-t12 partition flip): the contextual FLEET block kinds the canvas handles as
   # SERVER-PAINTED read-only atoms (run-convert.js CANVAS_FLEET_TYPES → the single
   # `bpFleet` node, the same multiplexing bpField uses for the field-* set).
   # Structurally IDENTICAL to the sheet/embed read-only atoms — the WHOLE block rides
@@ -161,10 +162,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # `diagram` is DELIBERATELY ABSENT — it rides its own EDITABLE bpDiagram attr-atom
   # (a `source` textarea; see @canvas_attr_atom_types), NOT the read-only paint.
   #
-  # MUST stay in LOCKSTEP with run-convert.js:CANVAS_FLEET_TYPES,
-  # shared/paper.ex:@fleet_render_types, and paper_editor.ex:@fleet_preview_types
-  # (all 12 kinds, diagram absent from every one).
-  @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
+  # `form` and `questionnaire` are DELIBERATELY ABSENT here: both have contextual
+  # authored-field editors, so they must be emitted as `{:block, block}` boundaries
+  # instead of opaque bpFleet atoms. The JS projection and shared renderer may retain
+  # receive-only recognition for legacy mounted canvases / server-paint compatibility;
+  # that compatibility surface does not make either kind eligible for newly partitioned
+  # canvas runs. paper_editor.ex owns their contextual boundary previews separately.
+  @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast)
 
   # Article-chrome ROLE prose (eyebrow / byline / ingress / pullquote) — chrome-free
   # STYLED prose the canvas handles as plain ProseMirror nodes (run-convert.js
@@ -290,18 +294,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
-  # atoms (t12a) ∪ canvas article-chrome ROLE prose ∪ the canvas TABLE node tree
+  # atoms (t12a, excluding contextual `form` / `questionnaire` boundaries) ∪ canvas
+  # article-chrome ROLE prose ∪ the canvas TABLE node tree
   # (editable-table) ∪ the canvas FIGURE server-paint-child atom (editable-figure) ∪
   # canvas CONTAINER nodes (columns, section). A run is a maximal contiguous stretch of
   # these; any other kind is a run boundary. Keep this aligned with run-convert.js
   # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
   # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
   # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_FIGURE_TYPES ∪
-  # CANVAS_CONTAINER_TYPES) so the Elixir partition and the JS projection agree on what
-  # a run may contain. With the fleet, the table, the figure AND the containers folded
-  # in, the ONLY remaining run boundaries are the nested-structure fields (composite /
-  # object / arrayOf / codelist / localizedText) — a typical paper's run now spans the
-  # WHOLE doc.
+  # CANVAS_CONTAINER_TYPES), except that JS keeps receive-only legacy recognition for
+  # form/questionnaire while this partition intentionally routes them to contextual
+  # boundary editors. The remaining boundaries also include nested-structure fields
+  # (composite / object / arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -397,17 +401,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   canvas attr-atom (`code` / `diagram` as of S3.3/S3.4) OR a native field
   control-atom (the 7 `field-*` types as of S3.5) OR a read-only atom (`sheet` /
   `embed` as of S3.6, carrying the whole block verbatim) OR a FLEET server-paint
-  atom (the 12 `tasks`/`task-board`/`cards`/`form`/… kinds as of t12a, whole block
+  atom (the contextual `tasks`/`task-board`/`cards`/… kinds as of t12a, whole block
   verbatim on `bpFleet`, painted with the reader's own HTML) OR an article-chrome
   ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
   prose matching the reader) OR the canvas TABLE node tree (`table` as of
   editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
   editable inline runs) OR a CONTAINER node (`columns` and `section` — a recursive
   nested-block node whose interior is an editable block tree, container-in-container
-  FORBIDDEN in v1). Canvas-eligible blocks
+  FORBIDDEN in v1). `form` and `questionnaire` are intentionally NOT canvas-eligible:
+  they remain boundary blocks so their contextual authored-field editors render.
+  Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
-  `field-reference` RIDE a run too — only the DEEP nested-structure fields composite /
-  arrayOf / codelist / localizedText stay boundaries) is a `{:block, …}`
+  `field-reference` RIDE a run too — contextual form/questionnaire editors and the DEEP
+  nested-structure fields composite / arrayOf / codelist / localizedText stay
+  boundaries) is a `{:block, …}`
   boundary. This is the predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()

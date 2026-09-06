@@ -24,12 +24,12 @@ assert.match(actions?.[1] ?? "", /flex-direction:\s*row/, "row actions remain a 
 const buttons = shell.match(/\.bp-paper-contextual-panel button\s*\{([^}]*)\}/);
 assert.match(buttons?.[1] ?? "", /min-height:\s*2rem/, "public controls have explicit usable button sizing");
 
-const gaugeOpen = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\],\s*\.bp-paper-contextual-controls--tabs\[open\]\s*\{([^}]*)\}/);
+const gaugeOpen = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\],\s*\.bp-paper-contextual-controls--tabs\[open\],\s*\.bp-paper-contextual-controls--form\[open\]\s*\{([^}]*)\}/);
 assert.ok(gaugeOpen, "an open gauge disclosure has a bounded gauge-only layout override");
 assert.match(gaugeOpen[1], /position:\s*relative/, "open gauge controls participate in document flow");
 assert.match(gaugeOpen[1], /width:\s*100%/, "open gauge controls use the available editor width");
 assert.match(gaugeOpen[1], /max-width:\s*none/, "open gauge controls are not capped to the floating-panel width");
-const gaugePanel = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\]\s*>\s*\.bp-paper-contextual-panel,\s*\.bp-paper-contextual-controls--tabs\[open\]\s*>\s*\.bp-paper-contextual-panel\s*\{([^}]*)\}/);
+const gaugePanel = shell.match(/\.bp-paper-contextual-controls--gauge-list\[open\]\s*>\s*\.bp-paper-contextual-panel,\s*\.bp-paper-contextual-controls--tabs\[open\]\s*>\s*\.bp-paper-contextual-panel,\s*\.bp-paper-contextual-controls--form\[open\]\s*>\s*\.bp-paper-contextual-panel\s*\{([^}]*)\}/);
 assert.ok(gaugePanel, "the gauge-only open panel overrides overlay scrolling");
 assert.match(gaugePanel[1], /max-height:\s*none/, "open gauge rows are not clipped to an overlay viewport");
 assert.match(gaugePanel[1], /overflow:\s*visible/, "open gauge rows do not create a nested scroll region");

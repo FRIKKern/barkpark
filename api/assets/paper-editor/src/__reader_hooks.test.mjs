@@ -475,6 +475,7 @@ assert.deepEqual(calls, ['paper-block-autosave'], 'the second form queues behind
 footerSaveStatus.textContent = '✓ Auto-saved';
 settleNext([{status:'fulfilled', value:{reply:{saved:true}}}]);
 await tick();
+await tick(); // deferred form starts its debounce only after the prior acknowledgement
 assert.deepEqual(calls, ['paper-block-autosave', 'paper-block-autosave']);
 assert.match(footerSaveStatus.textContent, /saving/i,
   'the first receipt cannot claim all forms are saved while a second save is active');

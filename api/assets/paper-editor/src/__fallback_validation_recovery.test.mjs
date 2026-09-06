@@ -79,6 +79,340 @@ const tocMarkup = `
   </form>
 `;
 
+// A canvas acknowledgement can repaint a sibling fallback form between its
+// input event and debounce. The autosave must use the captured newer draft,
+// after the acknowledged revision is adopted, rather than the repainted DOM.
+{
+  const env = mountedForm(`
+    <form id="tabs-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="25" data-test-id="paper-tabs-editor">
+      <input type="hidden" name="block_id" value="tabs">
+      <input type="hidden" name="panel-count" value="1">
+      <input type="hidden" name="panel-0-id" value="row:one">
+      <input name="panel-0-label" value="Compatibility checks">
+    </form>
+  `);
+  const canvas = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(canvas);
+  let canvasPayload;
+  let settleCanvas;
+  const canvasSave = env.hook._exitCoordinator.mutate(canvas, {
+    payload: { ops: [{ op: "patch-block", id: "body", patch: { content: [] } }] },
+    send: (payload) => {
+      canvasPayload = payload;
+      return new Promise((resolve) => { settleCanvas = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const label = env.form.elements.namedItem("panel-0-label");
+  label.value = "Public and Studio";
+  label.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  assert.equal(env.calls.length, 0, "the fallback draft waits for the prior canvas write");
+  label.value = "Compatibility checks";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleCanvas({ saved: true, request_id: canvasPayload.request_id, rev: 8 });
+  assert.equal(await canvasSave, true);
+
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  assert.equal(env.calls.length, 1, "the newer fallback draft saves after the canvas ack settles");
+  assert.equal(env.calls[0].payload.if_rev, 8, "the deferred draft advances onto the own ack base");
+  assert.equal(env.calls[0].payload["panel-0-label"], "Public and Studio",
+    "the canvas repaint cannot replace the captured fallback draft");
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 9 });
+  await tick();
+  env.close();
+}
+
+// An ambiguous canvas failure keeps its immutable request at the queue head.
+// A sibling form draft must neither overtake it nor be discarded; after an
+// exact successful retry, that draft advances and autosaves once.
+{
+  const env = mountedForm(`
+    <form id="retry-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0">
+      <input type="hidden" name="block_id" value="paragraph">
+      <input name="text" value="Before">
+    </form>
+  `);
+  const canvas = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(canvas);
+  const canvasCalls = [];
+  const canvasReplies = [];
+  const mutation = env.hook._exitCoordinator.mutate(canvas, {
+    payload: { ops: [{ op: "patch-block", id: "body", patch: { content: [] } }] },
+    send: (payload) => {
+      canvasCalls.push(JSON.parse(JSON.stringify(payload)));
+      return new Promise((resolve) => canvasReplies.push(resolve));
+    },
+  });
+  await tick();
+
+  const text = env.form.elements.namedItem("text");
+  text.value = "Newest draft";
+  text.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  canvasReplies.shift()({ saved: false, request_id: canvasCalls[0].request_id });
+  assert.equal(await mutation.promise, false);
+  await tick();
+  assert.equal(env.calls.length, 0, "a sibling draft never overtakes the failed canvas write");
+
+  const retry = env.hook._exitCoordinator.retryMutation(mutation.entry);
+  await tick();
+  assert.deepEqual(canvasCalls[1], canvasCalls[0], "the canvas failure retries its exact wire payload");
+  text.value = "Before";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  canvasReplies.shift()({ saved: true, request_id: canvasCalls[1].request_id, rev: 8 });
+  assert.equal(await retry, true);
+  await tick();
+  assert.equal(env.calls.length, 1, "the deferred form resumes only after the prior retry succeeds");
+  assert.equal(env.calls[0].payload.text, "Newest draft");
+  assert.equal(env.calls[0].payload.if_rev, 8);
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 9 });
+  await tick();
+  env.close();
+}
+
+// Never restore a positional draft when an acknowledgement remounts or
+// reorders its row identities. The dirty guard remains, but no stale payload
+// is synthesized or sent from the repainted form.
+{
+  const env = mountedForm(`
+    <form id="changed-rows" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-tabs-editor">
+      <input type="hidden" name="block_id" value="tabs">
+      <input type="hidden" name="panel-count" value="2">
+      <input type="hidden" name="panel-0-id" value="row:one">
+      <input name="panel-0-label" value="First">
+      <input type="hidden" name="panel-1-id" value="row:two">
+      <input name="panel-1-label" value="Second">
+    </form>
+  `);
+  const canvas = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(canvas);
+  let canvasPayload;
+  let settleCanvas;
+  const canvasSave = env.hook._exitCoordinator.mutate(canvas, {
+    payload: { ops: [{ op: "move-block", id: "body", to: 0 }] },
+    send: (payload) => {
+      canvasPayload = payload;
+      return new Promise((resolve) => { settleCanvas = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const first = env.form.elements.namedItem("panel-0-label");
+  first.value = "Draft for first";
+  first.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  env.form.elements.namedItem("panel-0-id").value = "row:two";
+  first.value = "Second";
+  env.form.elements.namedItem("panel-1-id").value = "row:one";
+  env.form.elements.namedItem("panel-1-label").value = "First";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleCanvas({ saved: true, request_id: canvasPayload.request_id, rev: 8 });
+  assert.equal(await canvasSave, true);
+  await tick();
+  env.clickView();
+  await tick();
+  assert.equal(env.calls.length, 0, "changed row identities fail closed without an autosave");
+  assert.equal(first.value, "Second", "the old positional snapshot is not restored onto the moved row");
+  env.close();
+}
+
+// Option rows have no stable identity. A same-length option move can leave the
+// question identity/count fences unchanged, so a newer same-form draft must
+// enter review instead of restoring old positional option values over the ack.
+{
+  const env = mountedForm(`
+    <form id="question-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-questionnaire-editor">
+      <input type="hidden" name="block_id" value="questions">
+      <input type="hidden" name="question-count" value="1">
+      <input type="hidden" name="question-0-original-id" value="answer:one">
+      <input name="question-0-id" value="answer:one">
+      <input name="question-0-prompt" value="Original prompt">
+      <input type="hidden" name="question-0-option-count" value="2">
+      <input name="question-0-option-0" value="First">
+      <input name="question-0-option-1" value="Second">
+    </form>
+  `);
+  let actionPayload;
+  let settleAction;
+  const action = env.hook._exitCoordinator.mutate(env.form, {
+    payload: { block_id: "questions", "option-action": "up:answer:one:1" },
+    send: (payload) => {
+      actionPayload = payload;
+      return new Promise((resolve) => { settleAction = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const prompt = env.form.elements.namedItem("question-0-prompt");
+  prompt.value = "Newest prompt";
+  prompt.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  env.form.elements.namedItem("question-0-option-0").value = "Second";
+  env.form.elements.namedItem("question-0-option-1").value = "First";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleAction({ saved: true, request_id: actionPayload.request_id, rev: 8 });
+  assert.equal(await action, true);
+  await tick();
+
+  assert.equal(env.calls.length, 0, "the old option order is never autosaved over its acknowledgement");
+  assert.equal(env.form.elements.namedItem("question-0-option-0").value, "Second");
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "the preserved newer draft enters explicit review");
+  assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
+  prompt.value = "Edited during review";
+  prompt.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  await tick();
+  assert.equal(env.calls.length, 0, "editing the retained draft cannot bypass conflict review");
+  banner.querySelector('[data-action="review"]').click();
+  const review = JSON.parse(banner.querySelector("[data-conflict-draft]").textContent);
+  const values = (draft) => Object.fromEntries(
+    draft.values.map((field) => [field.name, field.value]),
+  );
+  assert.equal(
+    values(review.retainedDraftBeforeAcknowledgement)["question-0-prompt"],
+    "Newest prompt",
+    "Review preserves the prompt captured before the acknowledgement",
+  );
+  assert.deepEqual(
+    [
+      values(review.retainedDraftBeforeAcknowledgement)["question-0-option-0"],
+      values(review.retainedDraftBeforeAcknowledgement)["question-0-option-1"],
+    ],
+    ["First", "Second"],
+    "Review preserves the pre-ack positional option order without remapping",
+  );
+  assert.equal(
+    values(review.currentDraftDuringReview)["question-0-prompt"],
+    "Edited during review",
+    "Review also exposes input authored after the conflict was shown",
+  );
+  assert.deepEqual(
+    [
+      values(review.currentDraftDuringReview)["question-0-option-0"],
+      values(review.currentDraftDuringReview)["question-0-option-1"],
+    ],
+    ["Second", "First"],
+    "the current review draft records the acknowledged server row order separately",
+  );
+  env.close();
+}
+
+// The same fail-closed rule covers positional collection actions without row
+// identities. A gauge move must not let a newer title draft replay old rows.
+{
+  const env = mountedForm(`
+    <form id="gauge-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-gauge-list-editor">
+      <input type="hidden" name="block_id" value="gauges">
+      <input name="title" value="Original title">
+      <input type="hidden" name="gauge-count" value="2">
+      <input name="gauge-0-label" value="First">
+      <input name="gauge-0-value" value="1">
+      <input name="gauge-1-label" value="Second">
+      <input name="gauge-1-value" value="2">
+    </form>
+  `);
+  let actionPayload;
+  let settleAction;
+  const action = env.hook._exitCoordinator.mutate(env.form, {
+    payload: { block_id: "gauges", "gauge-action": "up:1" },
+    send: (payload) => {
+      actionPayload = payload;
+      return new Promise((resolve) => { settleAction = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const title = env.form.elements.namedItem("title");
+  title.value = "Newest title";
+  title.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  env.form.elements.namedItem("gauge-0-label").value = "Second";
+  env.form.elements.namedItem("gauge-0-value").value = "2";
+  env.form.elements.namedItem("gauge-1-label").value = "First";
+  env.form.elements.namedItem("gauge-1-value").value = "1";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleAction({ saved: true, request_id: actionPayload.request_id, rev: 8 });
+  assert.equal(await action, true);
+  await tick();
+
+  assert.equal(env.calls.length, 0, "the old gauge positions are never autosaved over the move");
+  assert.equal(env.form.elements.namedItem("gauge-0-label").value, "Second");
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "the newer title draft remains available for explicit review");
+  assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(banner.querySelector("[data-conflict-draft]").textContent, /Newest title/);
+  env.close();
+}
+
+// Discarding one conflicted source must surface a deferred sibling draft for
+// its own explicit review/discard choice instead of leaving it timerless.
+{
+  const env = mountedForm(`
+    <form id="sibling-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0">
+      <input type="hidden" name="block_id" value="paragraph">
+      <input name="text" value="Before">
+    </form>
+  `);
+  const canvas = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(canvas);
+  let canvasPayload;
+  let settleCanvas;
+  const canvasSave = env.hook._exitCoordinator.mutate(canvas, {
+    payload: { ops: [{ op: "patch-block", id: "body", patch: { content: [] } }] },
+    send: (payload) => {
+      canvasPayload = payload;
+      return new Promise((resolve) => { settleCanvas = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const text = env.form.elements.namedItem("text");
+  text.value = "Local draft";
+  text.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  env.hook._exitCoordinator.observeRevision({
+    rev: 8,
+    observedDocumentKey: "production:paper:validation",
+    source: env.form,
+    apply() {
+      env.window.document.querySelector("main").dataset.paperRev = "8";
+      text.value = "Server latest";
+    },
+  });
+  settleCanvas({
+    saved: false,
+    request_id: canvasPayload.request_id,
+    conflict: true,
+    current_rev: 8,
+  });
+  assert.equal(await canvasSave, false);
+  await tick();
+
+  let banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "the primary mutation conflict is actionable");
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "the deferred sibling receives its own explicit conflict action");
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(
+    banner.querySelector("[data-conflict-draft]").textContent,
+    /Local draft/,
+    "the deferred sibling snapshot remains reviewable",
+  );
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  assert.equal(env.window.document.querySelector("[data-bp-paper-conflict]"), null);
+  assert.equal(text.value, "Server latest", "discard keeps the authoritative server paint");
+  assert.equal(env.calls.length, 0, "discard never autosaves the old-base sibling draft");
+  env.close();
+}
+
 for (const [name, value, valid] of [
   ["max", "0", false], ["max", "-1", false], ["max", "invalid", false],
   ["max", "", true], ["max", "120", true],

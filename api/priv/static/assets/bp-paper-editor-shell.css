@@ -1584,11 +1584,13 @@
 .bp-paper-contextual-editor:focus-within > .bp-paper-contextual-controls,
 .bp-paper-contextual-controls[open] { opacity: 1; pointer-events: auto; }
 .bp-paper-contextual-controls--gauge-list[open],
-.bp-paper-contextual-controls--tabs[open] {
+.bp-paper-contextual-controls--tabs[open],
+.bp-paper-contextual-controls--form[open] {
   position: relative; inset: auto; width: 100%; max-width: none;
 }
 .bp-paper-contextual-controls--gauge-list[open] > .bp-paper-contextual-panel,
-.bp-paper-contextual-controls--tabs[open] > .bp-paper-contextual-panel {
+.bp-paper-contextual-controls--tabs[open] > .bp-paper-contextual-panel,
+.bp-paper-contextual-controls--form[open] > .bp-paper-contextual-panel {
   max-height: none; overflow: visible;
 }
 .bp-tabs--editor .bp-paper-contextual-controls[open] {

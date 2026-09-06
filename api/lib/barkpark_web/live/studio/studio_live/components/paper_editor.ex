@@ -57,7 +57,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # (not deleted): the widget + these types stay as retained infra whose contract is
   # still proven directly, and legacy retirement is a wave-4/human step, out of scope.
   @fleet_preview_types @task_preview_types ++
-                         ~w(notes cards pipeline status-legend form questionnaire asciicast)
+                         ~w(notes cards pipeline status-legend asciicast)
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -516,6 +516,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"footnote", "Footnotes"},
          {"code-tabs", "Code tabs"},
          {"api-endpoint", "API endpoint"}
+       ]},
+      {"Interactive",
+       [
+         {"form", "Form"},
+         {"questionnaire", "Questionnaire"}
        ]},
       {"Basic fields",
        [
@@ -1802,6 +1807,220 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </div>
           </details>
         </div>
+      <% t when t in ["form", "questionnaire"] -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-form-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= if editable_form_questions?(@block) do %>
+            <details
+              id={"paper-form-controls-" <> @id}
+              class="bp-paper-contextual-controls bp-paper-contextual-controls--form"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Configure questions</summary>
+              <div class="bp-paper-contextual-panel">
+                <form
+                  id={"form-editor-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                  data-test-id="paper-form-editor"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel">
+                    Presentation
+                    <select name="kind" class="bp-paper-edit-select">
+                      <option
+                        :for={kind <- form_kind_options(@block)}
+                        value={kind}
+                        selected={kind == form_kind(@block)}
+                      ><%= form_kind_label(kind) %></option>
+                    </select>
+                  </label>
+                  <input
+                    type="hidden"
+                    name="question-count"
+                    value={length(editable_form_question_rows(@block))}
+                  />
+                  <input type="hidden" name="question-new-id" value={Blocks.new_block_id()} />
+
+                  <fieldset
+                    :for={{question, index} <- Enum.with_index(editable_form_question_rows(@block))}
+                    class="bp-paper-edit-form"
+                    data-test-id="paper-form-question"
+                  >
+                    <legend>Question <%= index + 1 %></legend>
+                    <input
+                      type="hidden"
+                      name={"question-#{index}-original-id"}
+                      value={question["id"]}
+                    />
+                    <label class="bp-paper-edit-fieldlabel">
+                      Answer name
+                      <input
+                        type="text"
+                        name={"question-#{index}-id"}
+                        value={question["id"]}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Prompt
+                      <input
+                        type="text"
+                        name={"question-#{index}-prompt"}
+                        value={form_question_text(question, "prompt")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Answer type
+                      <select name={"question-#{index}-type"} class="bp-paper-edit-select">
+                        <option
+                          :for={type <- form_question_type_options(question)}
+                          value={type}
+                          selected={type == form_question_type(question)}
+                        ><%= form_question_type_label(type) %></option>
+                      </select>
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Rationale
+                      <input
+                        type="text"
+                        name={"question-#{index}-rationale"}
+                        value={form_question_text(question, "rationale")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Recommendation
+                      <input
+                        type="text"
+                        name={"question-#{index}-recommendation"}
+                        value={form_question_text(question, "recommendation")}
+                        class="bp-paper-edit-text"
+                      />
+                    </label>
+
+                    <%= if form_question_type(question) in ["single", "multi"] do %>
+                      <input
+                        type="hidden"
+                        name={"question-#{index}-option-count"}
+                        value={length(form_question_options(question))}
+                      />
+                      <fieldset
+                        :for={{option, option_index} <- Enum.with_index(form_question_options(question))}
+                        class="bp-paper-edit-form"
+                        data-test-id="paper-form-option"
+                      >
+                        <legend>Option <%= option_index + 1 %></legend>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Label
+                          <input
+                            type="text"
+                            name={"question-#{index}-option-#{option_index}"}
+                            value={option}
+                            class="bp-paper-edit-text"
+                          />
+                        </label>
+                        <div class="bp-paper-edit-actions">
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"up:#{question["id"]}:#{option_index}"}
+                            disabled={option_index == 0}
+                            class="btn btn-ghost btn-sm"
+                          >Move up</button>
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"down:#{question["id"]}:#{option_index}"}
+                            disabled={option_index == length(form_question_options(question)) - 1}
+                            class="btn btn-ghost btn-sm"
+                          >Move down</button>
+                          <button
+                            type="submit"
+                            name="option-action"
+                            value={"remove:#{question["id"]}:#{option_index}"}
+                            class="btn btn-destructive btn-sm"
+                          >Remove option</button>
+                        </div>
+                      </fieldset>
+                      <button
+                        type="submit"
+                        name="option-action"
+                        value={"add:" <> question["id"]}
+                        class="btn btn-ghost btn-sm"
+                      >Add option</button>
+                    <% end %>
+
+                    <%= if form_question_type(question) == "scale" do %>
+                      <div class="bp-paper-edit-actions" data-test-id="paper-form-scale">
+                        <label class="bp-paper-edit-fieldlabel">
+                          Minimum
+                          <input
+                            type="text"
+                            inputmode="numeric"
+                            pattern="[+-]?[0-9]+"
+                            name={"question-#{index}-scale-min"}
+                            value={form_scale_bound(question, "min")}
+                            class="bp-paper-edit-number"
+                          />
+                        </label>
+                        <label class="bp-paper-edit-fieldlabel">
+                          Maximum
+                          <input
+                            type="text"
+                            inputmode="numeric"
+                            pattern="[+-]?[0-9]+"
+                            name={"question-#{index}-scale-max"}
+                            value={form_scale_bound(question, "max")}
+                            class="bp-paper-edit-number"
+                          />
+                        </label>
+                      </div>
+                    <% end %>
+
+                    <div class="bp-paper-edit-actions">
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"up:" <> question["id"]}
+                        disabled={index == 0}
+                        class="btn btn-ghost btn-sm"
+                      >Move up</button>
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"down:" <> question["id"]}
+                        disabled={index == length(editable_form_question_rows(@block)) - 1}
+                        class="btn btn-ghost btn-sm"
+                      >Move down</button>
+                      <button
+                        type="submit"
+                        name="question-action"
+                        value={"remove:" <> question["id"]}
+                        class="btn btn-destructive btn-sm"
+                      >Remove question</button>
+                    </div>
+                  </fieldset>
+                  <button
+                    type="submit"
+                    name="question-action"
+                    value="add"
+                    class="btn btn-ghost btn-sm"
+                  >Add question</button>
+                </form>
+              </div>
+            </details>
+          <% else %>
+            <p class="bp-paper-edit-readonly">
+              Question identities or active answer data need repair before editing; original content is preserved.
+            </p>
+          <% end %>
+        </div>
       <% "tabs" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-tabs-editor">
           <%= if editable_tabs?(@block) do %>
@@ -2600,6 +2819,115 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     if canvas_enabled,
       do: blocks |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals(),
       else: Enum.map(Enum.filter(blocks, &is_map/1), &{:block, &1})
+  end
+
+  defp editable_form_question_rows(%{"questions" => questions}) when is_list(questions),
+    do: Enum.filter(questions, &is_map/1)
+
+  defp editable_form_question_rows(_block), do: []
+
+  defp editable_form_questions?(block) do
+    kind = Map.get(block, "kind")
+    questions = Map.get(block, "questions")
+
+    (is_nil(kind) or is_binary(kind)) and
+      (is_nil(questions) or
+         (is_list(questions) and editable_form_question_list?(questions)))
+  end
+
+  defp editable_form_question_list?(questions) do
+    ids = Enum.map(questions, fn question -> if is_map(question), do: question["id"] end)
+
+    Enum.all?(questions, &editable_form_question?/1) and
+      length(ids) == length(Enum.uniq(ids))
+  end
+
+  defp editable_form_question?(%{"id" => id} = question)
+       when is_binary(id) do
+    String.trim(id) != "" and
+      Enum.all?(~w(prompt type rationale recommendation), fn key ->
+        not Map.has_key?(question, key) or is_nil(question[key]) or is_binary(question[key])
+      end) and editable_form_question_active_data?(question)
+  end
+
+  defp editable_form_question?(_question), do: false
+
+  defp editable_form_question_active_data?(question) do
+    case form_question_type(question) do
+      type when type in ["single", "multi"] ->
+        options = Map.get(question, "options")
+        is_nil(options) or (is_list(options) and Enum.all?(options, &is_binary/1))
+
+      "scale" ->
+        case Map.fetch(question, "scale") do
+          :error ->
+            true
+
+          {:ok, scale} when is_map(scale) ->
+            Enum.all?(~w(min max), &valid_form_scale_bound?(scale, &1))
+
+          {:ok, _malformed} ->
+            false
+        end
+
+      _ ->
+        true
+    end
+  end
+
+  defp valid_form_scale_bound?(scale, key) do
+    case Map.get(scale, key) do
+      nil -> true
+      value when is_integer(value) -> true
+      value when is_binary(value) -> Regex.match?(~r/^[+-]?\d+$/, value)
+      _ -> false
+    end
+  end
+
+  defp form_kind(%{"kind" => kind}) when is_binary(kind), do: kind
+  defp form_kind(%{"kind" => nil}), do: "grill"
+  defp form_kind(%{"type" => "questionnaire"}), do: "questionnaire"
+  defp form_kind(_block), do: "grill"
+
+  defp form_kind_options(block),
+    do: Enum.uniq([form_kind(block), "grill", "questionnaire"])
+
+  defp form_kind_label("grill"), do: "Form"
+  defp form_kind_label("questionnaire"), do: "Questionnaire"
+  defp form_kind_label(kind), do: kind
+
+  defp form_question_type(%{"type" => type}) when is_binary(type), do: type
+  defp form_question_type(_question), do: "text"
+
+  defp form_question_type_options(question),
+    do: Enum.uniq([form_question_type(question) | ~w(text yesno single multi scale)])
+
+  defp form_question_type_label("text"), do: "Text"
+  defp form_question_type_label("yesno"), do: "Yes / no"
+  defp form_question_type_label("single"), do: "Single choice"
+  defp form_question_type_label("multi"), do: "Multiple choice"
+  defp form_question_type_label("scale"), do: "Scale"
+  defp form_question_type_label(type), do: type
+
+  defp form_question_text(question, key) do
+    case Map.get(question, key) do
+      value when is_binary(value) -> value
+      _ -> ""
+    end
+  end
+
+  defp form_question_options(question) do
+    case Map.get(question, "options") do
+      options when is_list(options) -> options
+      _ -> []
+    end
+  end
+
+  defp form_scale_bound(question, key) do
+    case get_in(question, ["scale", key]) do
+      value when is_integer(value) or is_binary(value) -> value
+      _ -> if(key == "min", do: 1, else: 5)
+    end
   end
 
   # Tolerant readers for the image block's `src` / `role` (t13). A raw-API
