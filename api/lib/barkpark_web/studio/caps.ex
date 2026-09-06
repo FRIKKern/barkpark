@@ -9,10 +9,13 @@ defmodule BarkparkWeb.Studio.Caps do
   desk scope, from TWO arms unioned:
 
     * **membership** — `Tenancy.Auth`'s own decision for each principal the
-      socket carries (`api_token` and/or `current_user`), read off ONE
-      membership row loaded per principal and reused for `:read`/`:write`/
-      `:admin` (pds-w43 — three byte-identical `Repo.one`s collapsed to one);
-      nil-safe (no principal ⇒ that arm is false).
+      socket carries (`api_token` and/or `current_user`), MADE by
+      `Tenancy.Auth.seat_capabilities/3` off ONE membership row loaded per
+      principal and reused for `:read`/`:write`/`:admin` (pds-w43 — three
+      byte-identical `Repo.one`s collapsed to one); nil-safe (no principal ⇒
+      that arm is false). This module composes no authorization decision of its
+      own: it unions the chokepoint's answer with the grant arm, nothing more
+      (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth).
     * **grants** — each ACTIVE access-grant admitting the desk via
       `Access.admits_desk?(grant, action, desk)`. Grants are RELOADED FRESH
       (`Access.list_active_grants_for_grantee/1`, active-filtered in-query) on
@@ -46,7 +49,9 @@ defmodule BarkparkWeb.Studio.Caps do
   a nil `workspace_id` COLUMN, not a nil argument.
 
   The predicate is NEITHER canonical verbatim, and that is the ruling, not an
-  accident. `Tenancy.Auth.authorize/3`'s token arm is `member? AND permits?`,
+  accident — and since the collapse it is spelled ONCE, inside
+  `Tenancy.Auth.seat_capabilities/3`, rather than twice here.
+  `Tenancy.Auth.authorize/3`'s token arm is `member? AND permits?`,
   which leaves the barkpark-23yi cell ADMITTING. `Tenancy.Auth.workspace_admin?/2`
   is a literal `~w(owner admin)` NAME list, which DENIES a legitimate custom role
   carrying `action: "admin"`. The declared, enforced divergences from each are
@@ -189,7 +194,7 @@ defmodule BarkparkWeb.Studio.Caps do
   Compute `%{read, write, admin}` for the socket's mounted desk. Grants are
   reloaded fresh (expiry-truth). Safe when the workspace/desk is unresolved.
 
-  ## ONE membership load, three actions (pds-w43, PDS-D634)
+  ## ONE membership load, ONE role resolution, three actions (pds-w43, PDS-D634)
 
   This function used to ask `Tenancy.Auth.authorize/3` three times per
   principal — `:read`, `:write`, and `admin?/1`'s `:admin` — and each of those
@@ -197,19 +202,26 @@ defmodule BarkparkWeb.Studio.Caps do
   autosave path `derive/1` runs TWICE per event (the socket gate, then
   `Shared.Paper.write_denied?/1`), so a debounced keystroke cost 8 round-trips.
   The membership row is now loaded ONCE per principal and the three decisions
-  are read off it.
+  are read off it — by `Tenancy.Auth.seat_capabilities/3`, which is the module
+  that OWNS the decision (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth;
+  this function used to recompose it here from `permits?/2` and
+  `role_permits?/3`).
 
   BUILT-IN ROLE ONLY (relabelled arpss-w10). The collapse figures are true for
   owner/admin/member and for nothing else: a USER-principal derive is 2 queries
   (was 4), an API-TOKEN one is 1 (was 2), and the EVENT path 4. On a CUSTOM
-  role the same USER derive costs 5 — 1 membership `Repo.one` + 3 `db_actions`
-  `Repo.all` + 1 grant `Repo.all` — and the EVENT path 10, not 4. The reason is
-  that pds-w43 collapsed the MEMBERSHIP load and never touched the ROLE
-  resolution, which `derive/1` still performs THREE times per user principal
-  (`:read`, `:write`, and `admin_from` → `account_admin_from`):
-  `Tenancy.Auth.role_permits?/3` costs ZERO queries for a built-in name
-  (`granted_actions/2` answers from the compiled-in `@builtin_role_actions` map
-  before `db_actions/2` runs) and ONE `Repo.all` for a custom one.
+  role the same USER derive costs 3 — 1 membership `Repo.one` + 1 `db_actions`
+  `Repo.all` + 1 grant `Repo.all` — and the EVENT path 6, not 4. Those two
+  custom-role figures were 5 and 10 until the collapse: pds-w43 collapsed the
+  MEMBERSHIP load and never touched the ROLE resolution, which `derive/1` then
+  performed THREE times per user principal (`:read`, `:write`, and `admin_from`
+  → `account_admin_from`), each one a separate `role_permits?/3`. The role
+  action set is now resolved ONCE per user principal inside
+  `seat_capabilities/3` and all three columns are read off it.
+  `Tenancy.Auth.role_permits?/3`'s resolver costs ZERO queries for a built-in
+  name (`granted_actions/2` answers from the compiled-in `@builtin_role_actions`
+  map before `db_actions/2` runs) and ONE `Repo.all` for a custom one — so the
+  built-in rows are unmoved and only the custom rows fall.
 
   Every number above is ASSERTED row-by-row in
   `test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs`, and that
@@ -219,8 +231,9 @@ defmodule BarkparkWeb.Studio.Caps do
   What did NOT change: the grant `Repo.all` (`active_grants/1`) is still
   UNCONDITIONAL and still per-`derive/1` — it is the load that buys mid-session
   expiry truth, and there is deliberately NO TTL memo across ops. The decision
-  logic is `Tenancy.Auth`'s own (`permits?/2` for tokens, `role_permits?/3` for
-  users), read off the same row `authorize/3` would have loaded.
+  logic is `Tenancy.Auth`'s own — and since the collapse it is not merely
+  BORROWED from that module but MADE there, by `seat_capabilities/3`, off the
+  same row `authorize/3` would have loaded.
 
   ## WHAT PDS-D634 ACTUALLY AUTHORISED (corrected 2026-08-19, arpss-w10)
 
@@ -231,8 +244,8 @@ defmodule BarkparkWeb.Studio.Caps do
   arpss-w10 nothing verified it — a phantom warrant on an authorization path.
 
   The `:read` and `:write` columns ARE equivalent to `authorize/3`, by shared
-  code (`permits?/2`, `role_permits?/3`) over the same row. The `:admin` column
-  is NOT, deliberately (see the module doc's seat-authority section). Both
+  code (`permits?/2` and the one role resolver) over the same row. The `:admin`
+  column is NOT, deliberately (see the module doc's seat-authority section). Both
   statements are now ENFORCED cell-by-cell, with a DECLARED verdict per cell, by
   `test/barkpark_web/live/studio/caps_authorization_parity_test.exs` — not
   asserted in prose.
@@ -276,13 +289,32 @@ defmodule BarkparkWeb.Studio.Caps do
     desk = desk_scope(assigns)
     grants = if is_map(desk), do: active_grants(assigns), else: []
 
-    memberships = load_memberships(principals, ws_id)
+    # ONE load per principal, ONE decision per principal, made by the chokepoint
+    # that owns it. `seat_capabilities/3` reads :read/:write/:admin off the row
+    # this module already holds — no recomposition here, and no second query.
+    #
+    # THIS IS THE PAIRING THAT MUST NOT SLIP, and it is why
+    # `seat_capabilities/3` binds `principal_type`/`principal_id` in its clause
+    # heads. `principals` is a LIST — a token AND a user on a dual-principal
+    # socket — and `load_memberships/2` returns `{principal, membership}` already
+    # zipped. Nothing here can currently hand it a crossed pair, and that is the
+    # point: if a future edit to this loop (a `Enum.zip/2` over two separately
+    # built lists, a reorder, a filter applied to one side only) ever paired MY
+    # row with YOUR principal, the function would answer off the WRONG SEAT —
+    # silently. No raise, no red, no log, because both halves are individually
+    # well-formed. The binding in the callee turns that slip into an all-false
+    # catch-all instead of an escalation.
+    #
+    # So the guard on the other end is deliberate and is NOT dead code, even
+    # though nothing reaches it today (`grep -rn seat_capabilities api/lib` on
+    # the pre-#16586 tree: zero callers; this loop is the first). Deleting it
+    # because "nothing produces a crossed pair" removes the only thing that
+    # makes that still true. Added on lead-studio-10's review.
+    seats =
+      for {principal, membership} <- load_memberships(principals, ws_id),
+          do: Tenancy.Auth.seat_capabilities(principal, membership, ws_id)
 
-    member = fn action ->
-      Enum.any?(memberships, fn {principal, membership} ->
-        membership_authorizes?(principal, membership, ws_id, action)
-      end)
-    end
+    member = fn action -> Enum.any?(seats, & &1[action]) end
 
     granted = fn action ->
       is_map(desk) and Enum.any?(grants, &(Access.admits_desk?(&1, action, desk) == true))
@@ -291,7 +323,9 @@ defmodule BarkparkWeb.Studio.Caps do
     %{
       read: member.(:read) or granted.(:read),
       write: member.(:write) or granted.(:write),
-      admin: admin_from(memberships, ws_id)
+      # NEVER unioned with `granted` — a grant confers working access, not
+      # tenant control (see the module doc's seat-authority section).
+      admin: member.(:admin)
     }
   end
 
@@ -305,10 +339,10 @@ defmodule BarkparkWeb.Studio.Caps do
   def write_capable_now?(assigns) when is_map(assigns),
     do: write_capable?(assigns, derive_from_assigns(assigns))
 
-  # ONE `Repo.one` per principal, reused for the MEMBERSHIP half of the
-  # :read/:write/:admin decision (the ROLE resolution behind `role_permits?/3`
-  # is NOT collapsed and still runs three times per user principal — see
-  # `derive/1`'s @doc). Returns `[{principal, membership_or_nil}]`.
+  # ONE `Repo.one` per principal, handed to `Tenancy.Auth.seat_capabilities/3`
+  # for the whole :read/:write/:admin decision. (The ROLE resolution behind it
+  # used to run three times per user principal; it now runs once, inside that
+  # arity — see `derive/1`'s @doc.) Returns `[{principal, membership_or_nil}]`.
   #
   # WHAT THE GUARD ON THIS CLAUSE ACTUALLY IS: `is_binary(ws_id)`, a SHAPE
   # guard. This comment used to read "Mirrors `authorize/3`'s own totality",
@@ -326,7 +360,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # uuid-guarded-fetch canonical) and answers `nil` on a cast failure, so no
   # malformed id is ever bound to a `:binary_id` column and no
   # `Ecto.Query.CastError` is ever raised on this path. A nil membership then
-  # denies at `membership_authorizes?/4`'s first clause. If that chokepoint
+  # denies at `Tenancy.Auth.seat_capabilities/3`'s catch-all. If that chokepoint
   # guard is ever removed, THIS clause offers no second line of defence.
   # Pinned end-to-end by
   # `test/barkpark_web/live/studio/caps_non_uuid_workspace_denies_test.exs`.
@@ -342,21 +376,6 @@ defmodule BarkparkWeb.Studio.Caps do
   defp loadable_principal?(%Barkpark.Accounts.User{id: id}) when is_binary(id), do: true
   defp loadable_principal?(_other), do: false
 
-  # The decision `Tenancy.Auth.authorize/3` makes, read off an ALREADY-LOADED
-  # membership row instead of re-loading it. Token: member AND its permissions
-  # array satisfies the action. User: the membership ROLE is the grant. A nil
-  # membership is a non-member ⇒ denied, exactly as `authorize/3` denies it.
-  defp membership_authorizes?(_principal, nil, _ws_id, _action), do: false
-
-  defp membership_authorizes?(%Barkpark.Auth.ApiToken{} = token, %_{}, _ws_id, action),
-    do: Tenancy.Auth.permits?(token, action)
-
-  defp membership_authorizes?(%Barkpark.Accounts.User{}, %{role: role}, ws_id, action)
-       when is_binary(role),
-       do: Tenancy.Auth.role_permits?(role, ws_id, action)
-
-  defp membership_authorizes?(_principal, _membership, _ws_id, _action), do: false
-
   @doc """
   Fresh admin predicate — WORKSPACE-SCOPED SEAT AUTHORITY on the mounted
   workspace, for both principal kinds (see the module doc, arpss-w10 / D22):
@@ -364,83 +383,58 @@ defmodule BarkparkWeb.Studio.Caps do
   OR an account whose membership role confers `:admin`. Grants never confer
   admin. The shares/item-share handlers re-check with this — note that is a
   second call to THIS oracle, not an independent one, so this function and
-  `derive/1`'s `admin` key are a FORKED PAIR and must move together.
+  `derive/1`'s `admin` key are a FORKED PAIR and must move together. Since the
+  collapse they can only move together: both spell the seat through the SAME
+  `Tenancy.Auth.seat_capabilities/3`, and the only difference left is WHERE the
+  membership row comes from — `derive/1` already holds one, this function loads
+  one. The `forked_pair` axis of the parity table still asserts they agree,
+  cell by cell; it is now a shared-code agreement rather than a coincidence.
 
   COST: the token arm holds no pre-loaded row, so it loads one — 0 → 1 query on
   an `admin`-permissioned token socket with a BUILT-IN role, 0 → 2 with a CUSTOM
-  role (`role_permits?/3` reads `role_permissions` for a non-built-in name). A
-  read-only token stays at 0.0: `token_admin?/1` is the FIRST conjunct and
-  short-circuits before any load. `derive/1` is unaffected — it reads the seat
-  off rows it already holds and stays at 1.0 q/op (pds-w43 cost instrument).
+  role (the resolver reads `role_permissions` for a non-built-in name). A
+  read-only token stays at 0.0: `Tenancy.Auth.permits?(token, :admin)` is the
+  FIRST conjunct and short-circuits before any load. `derive/1` is unaffected —
+  it reads the seat off rows it already holds and stays at 1.0 q/op (pds-w43
+  cost instrument).
   """
   @spec admin?(Phoenix.LiveView.Socket.t()) :: boolean
   def admin?(socket) do
     ws = socket.assigns[:current_workspace]
+    ws_id = ws && Map.get(ws, :id)
 
-    token_admin_seat?(socket.assigns[:api_token], ws && Map.get(ws, :id)) or
-      account_admin?(socket.assigns[:current_user], ws)
+    token_admin_seat?(socket.assigns[:api_token], ws_id) or
+      account_admin_seat?(socket.assigns[:current_user], ws_id)
   end
 
-  # The token arm of `admin?/1`. Unlike `admin_from/3` this one holds no loaded
-  # row, so it must ask for one — but only AFTER `token_admin?/1` has said the
-  # token could possibly be admin, so a read-only token costs nothing. A token
-  # with a non-binary id, or an unresolved workspace, denies WITHOUT touching
-  # the Repo (`Tenancy.Auth.membership/2` has no clause for either and would
-  # raise `FunctionClauseError`).
+  # The token arm of `admin?/1`. Unlike `derive/1` this one holds no loaded row,
+  # so it must ask for one — but only AFTER `permits?(token, :admin)` has said
+  # the token could possibly be admin, so a read-only token still costs ZERO
+  # queries. That pre-filter is not a second decision: it is the SAME conjunct
+  # `seat_capabilities/3` evaluates first, asked early so the load can be
+  # skipped, and it can only ever DENY more. A token with a non-binary id, or an
+  # unresolved workspace, denies WITHOUT touching the Repo.
   defp token_admin_seat?(%Barkpark.Auth.ApiToken{id: id} = token, ws_id)
        when is_binary(id) and is_binary(ws_id) do
-    token_admin?(token) and
-      role_admits_admin?(Tenancy.Auth.membership_role(token, ws_id), ws_id)
+    Tenancy.Auth.permits?(token, :admin) and
+      Tenancy.Auth.seat_capabilities(token, Tenancy.Auth.membership(token, ws_id), ws_id).admin
   end
 
   defp token_admin_seat?(_token, _ws_id), do: false
 
-  # `admin?/1`'s answer, read off the memberships `derive/1` already loaded.
-  #
-  # arpss-w10 / D22 OVERTURNS the former "the token arm is deliberately
-  # membership-FREE (an `admin`-permissioned api_token is admin wherever it
-  # is)". It is not admin wherever it is: that is the barkpark-23yi/fsko
-  # cross-tenant shape, and this gate is where the Studio inherited it. The
-  # token arm now reads the SEAT — the membership ROLE — exactly as the user arm
-  # always has. It reads it off the ALREADY-LOADED rows, never via
-  # `Tenancy.Auth.member?/2` or a second `membership/2`: that spelling was
-  # measured at +1 query (derive 1.0 → 2.0 q/op) and would trade PDS-D634's
-  # one-load property away. The loaded-row spelling is free (1.0 → 1.0).
-  defp admin_from(memberships, ws_id) do
-    Enum.any?(memberships, fn {principal, membership} ->
-      token_admin_from(principal, membership, ws_id) or
-        account_admin_from(principal, membership, ws_id)
-    end)
+  # The account arm. Was `Tenancy.Auth.authorize(user, ws_id, :admin) == :ok`,
+  # which is the SAME answer by shared code (a user's grant IS the membership
+  # role) at the SAME cost of one `Repo.one`; it is spelled through
+  # `seat_capabilities/3` so that both admin answers in this module, and both
+  # arms of this one, read the seat through ONE arity. A nil / non-binary id or
+  # an unresolved workspace denies without touching the Repo.
+  defp account_admin_seat?(%Barkpark.Accounts.User{id: id} = user, ws_id)
+       when is_binary(id) and is_binary(ws_id) do
+    membership = Tenancy.Auth.membership(user, ws_id)
+    Tenancy.Auth.seat_capabilities(user, membership, ws_id).admin
   end
 
-  # Perms FIRST, deliberately: a non-admin token short-circuits before any role
-  # work happens.
-  defp token_admin_from(%Barkpark.Auth.ApiToken{} = token, %{role: role}, ws_id),
-    do: token_admin?(token) and role_admits_admin?(role, ws_id)
-
-  defp token_admin_from(_principal, _membership, _ws_id), do: false
-
-  defp account_admin_from(%Barkpark.Accounts.User{}, %{role: role}, ws_id)
-       when is_binary(role) and is_binary(ws_id),
-       do: Tenancy.Auth.role_permits?(role, ws_id, :admin)
-
-  defp account_admin_from(_principal, _membership, _ws_id), do: false
-
-  # THE SEAT RULE, one spelling, both admin answers. `Tenancy.Auth`'s own
-  # data-driven role resolver — a built-in name resolves from the compiled-in
-  # map, a custom name from `role_permissions`.
-  defp role_admits_admin?(role, ws_id) when is_binary(role) and is_binary(ws_id),
-    do: Tenancy.Auth.role_permits?(role, ws_id, :admin)
-
-  defp role_admits_admin?(_role, _ws_id), do: false
-
-  defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
-  defp token_admin?(_), do: false
-
-  defp account_admin?(%Barkpark.Accounts.User{} = user, %{id: ws_id}) when is_binary(ws_id),
-    do: Tenancy.Auth.authorize(user, ws_id, :admin) == :ok
-
-  defp account_admin?(_user, _ws), do: false
+  defp account_admin_seat?(_user, _ws_id), do: false
 
   # Grants are bound to a grantee USER; only a current_user can hold any. Fresh,
   # active-filtered load — the source of mid-session expiry truth.

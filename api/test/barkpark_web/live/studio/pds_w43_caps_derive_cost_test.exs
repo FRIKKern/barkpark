@@ -33,24 +33,30 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   built-in role, and so is `Caps.derive/1`'s own docstring ("a USER-principal
   derive is 2 queries (was 4)"). `Tenancy.Auth.granted_actions/2` resolves
   owner/admin/member from the compiled-in `@builtin_role_actions` map BEFORE
-  `db_actions/2` ever runs, so `role_permits?/3` costs ZERO queries for a
-  built-in role and ONE `Repo.all` for any CUSTOM role — and `derive/1` reaches
-  `role_permits?/3` THREE times per user principal (`:read`, `:write`, and
-  `admin_from` → `account_admin_from`). Measured here, and ASSERTED below:
+  `db_actions/2` ever runs, so the role resolver costs ZERO queries for a
+  built-in role and ONE `Repo.all` for any CUSTOM role. Measured here, and
+  ASSERTED below:
 
                                         built-in role      custom role
-      Caps.derive/1, USER principal          2.0 q/op          5.0 q/op
-      EVENT path (two derives)               4.0 q/op         10.0 q/op
+      Caps.derive/1, USER principal          2.0 q/op          3.0 q/op
+      EVENT path (two derives)               4.0 q/op          6.0 q/op
       Tenancy.Auth.role_permits?/3           0.0 q/op          1.0 q/op
       Caps.admin?/1, user socket             1.0 q/op          2.0 q/op
 
-  WHAT pds-w43 ACTUALLY COLLAPSED was the MEMBERSHIP row — three byte-identical
-  `Repo.one`s became one. The ROLE resolution was NEVER collapsed and is still
-  resolved THREE TIMES per derive; on a built-in role that is free and therefore
-  invisible, on a custom role it is three extra round-trips. A debounced
-  keystroke on a custom-role socket costs TEN queries, not four. No existing
-  assertion is raised or weakened by this: those rows are correct for what they
-  measure, the custom-role rows are added BESIDE them.
+  THE CUSTOM-ROLE ROWS MOVED, 5 -> 3 AND 10 -> 6
+  (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth). What pds-w43
+  collapsed was the MEMBERSHIP row — three byte-identical `Repo.one`s became
+  one. The ROLE resolution was NOT collapsed then: `derive/1` reached
+  `role_permits?/3` THREE times per user principal (`:read`, `:write`, and
+  `admin_from` → `account_admin_from`), which on a built-in role is free and
+  therefore invisible and on a custom role was three extra round-trips — a
+  debounced keystroke on a custom-role socket cost TEN queries, not four. The
+  collapse routed all three columns through ONE
+  `Tenancy.Auth.seat_capabilities/3` call per principal, which resolves the
+  role's action set ONCE, so the custom-role derive is 1 membership + 1
+  `db_actions` + 1 grant = 3. The BUILT-IN rows are unmoved (the resolver was
+  already free there) and no assertion below is weakened: the ratchet is
+  strictly tighter than it was.
 
   DELIBERATELY NOT METERED: `Caps.admin?/1` on an API-TOKEN socket. It reads 0
   today, and the sibling slice (arpss-w10-caps-admin-parity-table) is what
@@ -100,8 +106,8 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   @builtin_user_q 2
   @builtin_token_q 1
   @builtin_event_q 4
-  @custom_user_q 5
-  @custom_event_q 10
+  @custom_user_q 3
+  @custom_event_q 6
 
   # PDS-D633, verbatim. Printed with every row AND carried in the @moduledoc
   # above; `the blind-spot sentence is in BOTH places` pins that they agree.
@@ -336,7 +342,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
     # ── the same derive, on a CUSTOM role: 2.5x, and nothing said so ──────────
 
-    test "CUSTOM-ROLE user principal: 5 queries per derive — the 2.000 above is BUILT-IN ONLY",
+    test "CUSTOM-ROLE user principal: 3 queries per derive — the 2.000 above is BUILT-IN ONLY",
          %{ws: ws, proj: proj} do
       {user, role} = custom_user_principal(ws, ["read", "write"])
       sock = socket(ws, proj, %{current_user: user})
@@ -348,20 +354,21 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       queries =
         meter(
           "CUSTOM-ROLE (#{role}) user principal — Caps.derive/1\n" <>
-            "  decomposition      : 1 membership Repo.one + 3 db_actions Repo.all" <>
-            " + 1 grant Repo.all = 5",
+            "  decomposition      : 1 membership Repo.one + 1 db_actions Repo.all" <>
+            " + 1 grant Repo.all = 3   (was 5: three role resolutions)",
           @ops,
           fn -> Caps.derive(sock) end
         )
 
-      # 1 membership Repo.one (the load pds-w43 collapsed) + THREE `db_actions`
-      # `Repo.all`s (`role_permits?/3` for :read, for :write, and for
-      # `admin_from` → `account_admin_from` — the resolution pds-w43 did NOT
-      # collapse) + 1 unconditional grant `Repo.all`.
+      # 1 membership Repo.one (the load pds-w43 collapsed) + ONE `db_actions`
+      # `Repo.all` (`Tenancy.Auth.seat_capabilities/3` resolves the role's
+      # action set once and reads all three columns off it — this was THREE
+      # resolutions, one per action, before the caps fork was collapsed) + 1
+      # unconditional grant `Repo.all`.
       assert queries == @custom_user_q * @ops
     end
 
-    test "EVENT path on a CUSTOM role: 10 queries — a debounced keystroke, not 4",
+    test "EVENT path on a CUSTOM role: 6 queries — a debounced keystroke, not 4",
          %{ws: ws, proj: proj} do
       {user, role} = custom_user_principal(ws, ["read", "write"])
       sock = socket(ws, proj, %{current_user: user})
@@ -374,7 +381,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       queries =
         meter(
           "EVENT path, CUSTOM ROLE (#{role}) — Caps.gate/3 + Shared.Paper.write_denied?/1\n" <>
-            "  decomposition      : 2 x 5 = 10   (the built-in row above reads 4)",
+            "  decomposition      : 2 x 3 = 6   (the built-in row above reads 4)",
           @ops,
           event_path
         )
@@ -385,7 +392,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
   # ── the decomposition: WHERE the extra three queries come from ──────────────
   #
-  # These two rows are what make the 5.0 above an EXPLANATION rather than a bare
+  # These two rows are what make the 3.0 above an EXPLANATION rather than a bare
   # total: a future regression that moves them localises to the
   # `@builtin_role_actions` short-circuit in `Tenancy.Auth.granted_actions/2`,
   # not to "derive got slower".
@@ -404,7 +411,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       assert queries == 0
     end
 
-    test "CUSTOM role: 1 query — db_actions/2's Repo.all, paid THREE times per derive", %{ws: ws} do
+    test "CUSTOM role: 1 query — db_actions/2's Repo.all, paid ONCE per derive", %{ws: ws} do
       role = custom_role_name(ws, ["read", "write"])
 
       assert Tenancy.Auth.role_permits?(role, ws.id, :read) == true
@@ -417,8 +424,11 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
           fn -> Tenancy.Auth.role_permits?(role, ws.id, :read) end
         )
 
-      # 1 `Repo.all` over role_permissions ⨝ roles. `derive/1` reaches this
-      # THREE times per user principal — which is exactly 5.0 - 2.0 = 3.
+      # 1 `Repo.all` over role_permissions ⨝ roles. `derive/1` used to reach
+      # this THREE times per user principal (5.0 - 2.0 = 3); it now resolves the
+      # action set ONCE inside `Tenancy.Auth.seat_capabilities/3`, which is
+      # exactly 3.0 - 2.0 = 1. `role_permits?/3` itself is unchanged and still
+      # costs this, which is why the row stays.
       assert queries == 1 * @ops
     end
   end
@@ -427,8 +437,10 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   #
   # `admin?/1` is the shares / item-share handlers' defense-in-depth re-check,
   # and this instrument never priced it at all. It does NOT reuse `derive/1`'s
-  # loaded membership: its user arm calls `Tenancy.Auth.authorize/3`, which
-  # loads the row itself.
+  # loaded membership: it loads its own row and hands it to the SAME
+  # `Tenancy.Auth.seat_capabilities/3` (its user arm called
+  # `Tenancy.Auth.authorize/3` before the collapse — same answer, same one
+  # `Repo.one`, so these two rows are unmoved).
   #
   # NO api_token row here, deliberately. `admin?/1` on a token socket reads 0
   # today and the sibling slice (arpss-w10-caps-admin-parity-table) is what
@@ -531,9 +543,16 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
     assert flat =~ "On a CUSTOM role the same USER derive costs #{@custom_user_q}"
     assert flat =~ "the EVENT path #{@custom_event_q}, not #{@builtin_event_q}"
 
-    # (d) the REASON, without which the numbers are trivia: the role resolution
-    # was never collapsed.
+    # (d) the REASON, without which the numbers are trivia. This USED to assert
+    # "THREE times per user principal" — the un-collapsed role resolution that
+    # made the custom rows 5 and 10. The collapse
+    # (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth) made that sentence
+    # FALSE, so the assertion moves with the fact rather than being deleted: the
+    # @doc must now state both the OLD reason (as history) and the ONE
+    # resolution that replaced it.
     assert flat =~ "THREE times per user principal"
+
+    assert flat =~ "resolved ONCE per user principal inside `seat_capabilities/3`"
   end
 
   defp collapse(text), do: text |> String.split() |> Enum.join(" ")
