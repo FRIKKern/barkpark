@@ -7944,6 +7944,12 @@ defmodule BarkparkCloud.Web.Router do
              # minutes later inside the build as a bare
              # `BarkparkNotFoundError: document not found`.
              {:ok, binding} <- verify_content_binding(bp, attrs),
+             # ssw8-persist-binding-verdict (charter D73): the verdict the read just
+             # produced goes ON THE ROW. Until now it lived only in the 201 body,
+             # so every later surface fell back to `content_bound`, which was
+             # `not is_nil(read_token_encrypted)` — a name-level truth that could
+             # not tell a PROVEN binding from an unchecked one.
+             attrs <- put_binding_verdict(attrs, binding),
              # activity-audit-log: the create + a `site.created` audit event share
              # ONE transaction (the target_id is resolved from the created site).
              # target_fun supplies the id only knowable after the insert.
@@ -13321,7 +13327,13 @@ defmodule BarkparkCloud.Web.Router do
       dataset: s.bootstrap_dataset,
       url: bp && Sites.Deploy.site_url(s, bp),
       instance: bp && bp.slug,
-      content_bound: not is_nil(s.read_token_encrypted),
+      # ssw8-persist-binding-verdict (charter D73): DERIVED from the persisted
+      # verdict, not from token presence. `nil` (JSON null) is the honest answer
+      # for a site nobody checked — the console already reads a non-boolean as
+      # "unknown", and an unchecked site must never read `true`.
+      content_bound: content_bound_from_verdict(s.content_binding_verdict),
+      content_binding_verdict: s.content_binding_verdict,
+      content_binding_checked_at: s.content_binding_checked_at,
       # dr-w11: DOES A CONTENT PUBLISH REACH THIS SITE AT ALL? "present" |
       # "absent" | "not_applicable", derived from the row by
       # `Registry.publish_trigger/1` and never stored — the truth lives on the
@@ -14956,6 +14968,37 @@ defmodule BarkparkCloud.Web.Router do
     do: %{content_binding: %{status: "unverified", detail: why}}
 
   defp binding_note(:not_applicable), do: %{}
+
+  ## ssw8-persist-binding-verdict (charter D73) — THE SAME VERDICT, PERSISTED.
+  ##
+  ## `binding_note/1` above says what the 201 said; these two say what the ROW
+  ## remembers. A create's verdict used to survive exactly one HTTP response.
+
+  # `checked_at` is stamped only when something was actually READ (or an attempt
+  # was made and failed): a container site checked nothing, so a timestamp there
+  # would be a fabricated observation.
+  defp put_binding_verdict(attrs, {:bound, _type, _total}),
+    do: stamp_binding_verdict(attrs, "bound", DateTime.utc_now())
+
+  defp put_binding_verdict(attrs, {:unverified, _why}),
+    do: stamp_binding_verdict(attrs, "unverified", DateTime.utc_now())
+
+  defp put_binding_verdict(attrs, :not_applicable),
+    do: stamp_binding_verdict(attrs, "not_applicable", nil)
+
+  defp stamp_binding_verdict(attrs, verdict, checked_at) do
+    attrs
+    |> Map.put(:content_binding_verdict, verdict)
+    |> Map.put(:content_binding_checked_at, checked_at)
+  end
+
+  # THE DERIVATION. Only a verdict the control plane OBSERVED may answer `true`;
+  # `not_applicable` (a container site has no binding) is a definite `false`; and
+  # both "nobody looked" and "we could not tell" answer `nil` — an honest
+  # unknown, which the console renders as unknown rather than as a promise.
+  defp content_bound_from_verdict("bound"), do: true
+  defp content_bound_from_verdict("not_applicable"), do: false
+  defp content_bound_from_verdict(_verdict), do: nil
 
   defp maybe_put_menu(body, {:ok, [_ | _] = menu}) do
     Map.put(body, :readable_types, Enum.map(menu, &menu_row/1))

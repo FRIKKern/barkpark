@@ -5852,6 +5852,38 @@ async function main() {
           // person is meant to READ AT A GLANCE is a short phrase, and a
           // 64-character one is already past that.
           kindMax: 64,
+          // ── THE HEIGHT AXIS (cch-w24-bl-nothing-pins-height-against-a-
+          //    cruel-string). Every assertion above this line is a WIDTH
+          //    assertion, and the w24-s2 remedy that ended the sideways drag
+          //    paid for it in VERTICAL ink: `.bp-tl-fail` went from 60px tall
+          //    to 399px at 320, and the header pill to 348px with its detail
+          //    at 342px over 19 line boxes. Nothing hid and nothing lied — and
+          //    NO instrument in this epic would have noticed if 19 became 220.
+          //
+          //    NOT A CLAMP AND NOT A PIXEL PIN (lane ruling 2026-09-06, D240 /
+          //    D206). A person reaches this screen while something is already
+          //    broken, so the whole error stays visible — no `Show more`, no
+          //    smaller type. And a number like `399` pins a property of the
+          //    FIXTURE STRING, which D206 already refused once on the overview
+          //    pill: change the fixture and the guard reds without a defect.
+          //    What is asserted instead is a TIGHT FIT — the box may be exactly
+          //    as tall as the line boxes its own text painted, plus its own
+          //    padding and border, and no taller:
+          //        height <= lines x line-height + padding-y + border-y
+          //    Both sides are MEASURED in the same cell (line boxes off a Range
+          //    walk over the host's text nodes, the D253 instrument; the
+          //    line-height and box metrics off getComputedStyle on the host),
+          //    so a longer cruel string moves both together and stays green
+          //    while VERTICAL WASTE — a stray min-height, a per-line margin, a
+          //    second copy of the box — moves only the left side and reds.
+          //
+          //    THREE HOSTS, not the two in `sel`, because the pill's height is
+          //    authored on the pill and spent by its detail: `.detail-title-row
+          //    .status-pill` carries `min-height: 24px` and `padding: 2px 0`
+          //    (app.css, the `.instance-card-head` comma head) while the text
+          //    lives in `.status-pill-detail`. A bound on the detail alone
+          //    would score clean on a capsule that stacked 24px of its own.
+          heights: [".bp-tl-fail", ".detail-title-row .status-pill", ".detail-title-row .status-pill-detail"],
           predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
         },
         // ── cch-w23-bl-site-domains-cruel-family: THE SITE LIST'S TWO CAPS ───
@@ -5983,11 +6015,16 @@ async function main() {
       // header with it instead of leaving it lying about what was measured.
       const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => cruelCells(r).map((c) => c.scen)))];
       const cellCount = CRUEL_ROUTES.reduce((n, r) => n + cruelCells(r).length, 0) * CRUEL_WIDTHS.length * 2;
+      const HEIGHT_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.heights || []))];
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
+        ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth` +
+        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""})\n`,
       );
+      // A PIXEL, and the comment above the assertion says why it is a pixel.
+      const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
+      let heightsSeen = 0, tooTall = 0;
       for (const route of CRUEL_ROUTES) {
         for (const cell of cruelCells(route)) {
           const scen = cell.scen;
@@ -6005,13 +6042,14 @@ async function main() {
               `document.querySelector('${route.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${route.view}';})()`,
             );
             const row = [];
+            const hRow = {};
             for (const width of CRUEL_WIDTHS) {
               await setViewport(width);
               const m = await evalJs(
                 `(function(){` +
                 `var v=document.querySelector('section.view:not([hidden])');` +
                 `var d=document.documentElement;` +
-                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0};` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[]};` +
                 `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
                 // A node with no text can never clip and must not be counted as
                 // a measured assertion (the vacuous-green vector W20-S3 named on
@@ -6032,6 +6070,47 @@ async function main() {
                 `  var scope=(sc&&sc.classList.length)?('.'+sc.classList[0]):(sc?sc.tagName.toLowerCase():'<outside every declared scope>');` +
                 `  var cs=getComputedStyle(e);` +
                 `  if(e.scrollWidth>e.clientWidth) out.bad.push({i:i,len:t.length,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,28),scope:scope,ow:cs.overflowWrap,ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow});` +
+                `});` +
+                // ── THE TIGHT-FIT HEIGHT WALK ────────────────────────────────
+                // `lines` is the number of LINE BOXES this host's own text
+                // actually painted at this width, taken as the set of distinct
+                // client-rect tops of a Range over every non-blank text node
+                // under it (the D253 instrument). The set is shared across text
+                // nodes ON PURPOSE: `<b>Setup failed.</b>` and the machine
+                // string that follows it sit on the SAME first line box, and
+                // counting per-node would credit the box a line it never
+                // painted — an allowance a real regression could hide in.
+                // Rects are keyed at quarter-pixel resolution because a
+                // fractional line-height puts successive tops at .25 steps.
+                `[].slice.call(${JSON.stringify(route.heights || [])}).forEach(function(hsel){` +
+                `  [].slice.call(document.querySelectorAll(hsel)).forEach(function(e,i){` +
+                `    var t=(e.textContent||'').trim(); if(!t) return;` +
+                `    var hs=getComputedStyle(e);` +
+                // `line-height: normal` computes to the literal string, which
+                // parseFloat reads as NaN. Chrome's normal is font-dependent,
+                // so it is MEASURED off the tallest painted line box rather
+                // than guessed at a 1.2 ratio that no engine promises.
+                `    var lh=parseFloat(hs.lineHeight); var lhSrc=isFinite(lh)?'computed':'measured';` +
+                `    var pad=parseFloat(hs.paddingTop)+parseFloat(hs.paddingBottom);` +
+                `    var bor=parseFloat(hs.borderTopWidth)+parseFloat(hs.borderBottomWidth);` +
+                `    var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);` +
+                `    var tops={},lines=0,tallest=0,n;` +
+                `    while((n=w.nextNode())){` +
+                `      if(!(n.nodeValue||'').trim()) continue;` +
+                `      var rg=document.createRange(); rg.selectNodeContents(n);` +
+                `      var rs=rg.getClientRects();` +
+                `      for(var k=0;k<rs.length;k++){` +
+                `        if(rs[k].width<=0&&rs[k].height<=0) continue;` +
+                `        if(rs[k].height>tallest) tallest=rs[k].height;` +
+                `        var key=Math.round(rs[k].top*4);` +
+                `        if(!tops[key]){tops[key]=1;lines++;}` +
+                `      }` +
+                `    }` +
+                `    if(!isFinite(lh)) lh=tallest;` +
+                `    var h=e.getBoundingClientRect().height;` +
+                `    var r2=function(x){return Math.round(x*100)/100;};` +
+                `    out.hb.push({sel:hsel,i:i,len:t.length,h:r2(h),lines:lines,lh:r2(lh),lhSrc:lhSrc,pad:r2(pad),bor:r2(bor),need:r2(lines*lh+pad+bor),mh:hs.minHeight});` +
+                `  });` +
                 `});` +
                 `return out;})()`,
               );
@@ -6071,8 +6150,45 @@ async function main() {
                 fail(D, `${scen}/${theme}@${width}${cell.hash} el${b.i} in \`${b.scope}\` (matched \`${route.sel}\`): scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered. Computed ON THE MEASURED ELEMENT: overflow-wrap "${b.ow}", white-space "${b.ws}", text-overflow "${b.te}", overflow "${b.ov}". The scope named here is the wrapper a remedy has to be authored against — not the row's selector`);
               }
               row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
+              // ── THE HEIGHT ASSERTION, one line per host per width ─────────
+              if ((route.heights || []).length) {
+                // ANTI-VACUITY: a route that DECLARES height hosts and paints
+                // none of them measured nothing. The kind control's detail
+                // screen renders no `.bp-tl-fail` (the live instance did not
+                // fail), so the refusal is against the UNION of the row's
+                // hosts, never against each one — the per-host zero is the
+                // honest answer on a screen where that host does not belong.
+                if (m.hb.length === 0) {
+                  fail(D, `${scen}/${theme}@${width}${cell.hash}: the row declares height hosts (${route.heights.join(", ")}) and NONE of them rendered with text — the tight-fit bound measured nothing here, which is a refusal, not a pass`);
+                }
+                for (const b of m.hb) {
+                  heightsSeen++;
+                  (hRow[b.sel] = hRow[b.sel] || {})[width] = `${b.h}/${b.need}(${b.lines}L)`;
+                  if (b.lines === 0) {
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: ${b.len} characters of text painted ZERO line boxes — the Range walk found no rects, so \`need\` is a floor of ${b.need}px that nothing derived and the bound below cannot lose`);
+                    continue;
+                  }
+                  // HEIGHT_SLACK is subpixel only: a line box top can land on a
+                  // fraction Chrome rounds when it stacks the box, so a bound at
+                  // exactly `need` can red by a rounding tick on a clean tree.
+                  // It is a PIXEL of tolerance, not room for a regression — the
+                  // cheapest real waste on these hosts is `min-height: 24px`.
+                  if (b.h > b.need + HEIGHT_SLACK) {
+                    tooTall++;
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: measured height ${b.h}px against a tight fit of ${b.need}px (${b.lines} line boxes x ${b.lh}px ${b.lhSrc} line-height + ${b.pad}px padding + ${b.bor}px border) — ${Math.round((b.h - b.need) * 100) / 100}px of VERTICAL WASTE this host's own ${b.len}-character text does not account for. min-height computes "${b.mh}". A longer error would move BOTH numbers; only layout moves this one`);
+                  }
+                }
+              }
             }
             process.stdout.write(`   ${cell.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
+            // BOTH NUMBERS PRINTED, per host per width (`height/tight-fit`), so
+            // a reviewer reads the fit itself and not merely the verdict — and
+            // so a bound that started passing because the text stopped painting
+            // is readable as a `need` that collapsed.
+            for (const hsel of route.heights || []) {
+              const cells2 = CRUEL_WIDTHS.map((w) => `${w}:${(hRow[hsel] || {})[w] || "-"}`).join(" ");
+              process.stdout.write(`      H ${hsel}  ${cells2}\n`);
+            }
           }
         }
       }
@@ -6096,6 +6212,17 @@ async function main() {
           `row's kind ceiling (${CRUEL_ROUTES.map((r) => r.kindMax).join("/")}) — ${wentKind} cruel fixtures had gone kind, ${wentCruel} kind ` +
           `controls had gone cruel. Before this, both halves of the axis were a REGEX OVER THE SCENARIO NAME, and a ` +
           `control driven cruel scored a clean sweep under a header still calling it the kind corpus`,
+        );
+        okLine(
+          `HEIGHT is bounded too, and as a TIGHT FIT rather than a pixel: ${heightsSeen} host measurements across ` +
+          `${HEIGHT_HOSTS.join(" / ")} each satisfied \`height <= lines x line-height + padding-y + border-y\` within ` +
+          `${HEIGHT_SLACK}px, ${tooTall} carrying vertical waste. Both numbers are printed per host per width on the H ` +
+          `lines above (\`height/tight-fit(NL)\`), so the fit is readable and a \`need\` that COLLAPSED — the text stopped ` +
+          `painting — is readable with it. This is the axis nothing in this epic asserted: the w24-s2 remedy ended a ` +
+          `3.7k-pixel sideways drag by spending it vertically (\`.bp-tl-fail\` 60px to 399px at 320) and no instrument ` +
+          `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
+          `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
+          `of the box — moves the measured side alone`,
         );
         okLine(
           `each finding names the WRAPPER SCOPE it measured (${CRUEL_ROUTES.map((r) => r.scopes).join(" | ")}) rather than the ` +

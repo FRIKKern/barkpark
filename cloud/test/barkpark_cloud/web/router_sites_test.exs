@@ -1319,8 +1319,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert site_json["dataset"] == "production"
       assert site_json["url"] == "#{@instance_url}/sites/blog/"
 
-      # A 201 MEANS content-bound: the token was minted and encrypted at rest.
-      assert site_json["content_bound"] == true
+      # A 201 MEANS the token was minted and encrypted at rest. ssw8: it does NOT
+      # mean `content_bound` — this create's binding read is unprogrammed, so the
+      # box answers a shape the control plane cannot interpret and the verdict is
+      # `unverified`. `content_bound` is now DERIVED from that verdict, so it is
+      # an honest unknown here rather than the old "a token exists" true.
+      assert site_json["content_bound"] == nil
+      assert site_json["content_binding_verdict"] == "unverified"
       site = Registry.get_site(site_json["id"])
       assert is_binary(site.read_token_encrypted)
       assert {:ok, "bpt_public_read_minted"} = Registry.reveal_site_read_token(site)
@@ -1891,6 +1896,174 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       [site] = Registry.list_sites_for_team(team)
       assert {:ok, "bpt_caller_supplied"} = Registry.reveal_site_read_token(site)
       refute conn.resp_body =~ "bpt_caller_supplied"
+    end
+
+    ## ssw8-persist-binding-verdict (charter D73) — THE VERDICT SURVIVES THE 201.
+    ##
+    ## The read above already happens; its verdict used to live in the create
+    ## RESPONSE and nowhere else. Every later surface — list, detail, console,
+    ## `bp` — read `content_bound`, which was literally
+    ## `not is_nil(read_token_encrypted)`: "a token was minted", which every
+    ## content-bound site has. So a PROVEN site and a pre-W8 site were byte
+    ## identical on the wire, and the field discriminated nothing.
+
+    test "a PROVEN binding persists verdict=bound + checked_at, and content_bound reads TRUE from that" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        "/w/acme/p/blog/v1/data/query/production/paper" =>
+          {:ok,
+           %{status: 200, body: ~s({"result":{"count":1,"total":100,"documents":[{"_id":"p1"}]}})}}
+      })
+
+      before = DateTime.utc_now()
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            doc_type: "paper"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+
+      # The ROW remembers what the read saw — not just the response body.
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "bound"
+      assert %DateTime{} = site.content_binding_checked_at
+      assert DateTime.compare(site.content_binding_checked_at, before) in [:gt, :eq]
+
+      # …and the wire says so on the CREATE response…
+      assert body["site"]["content_bound"] == true
+      assert body["site"]["content_binding_verdict"] == "bound"
+      assert body["site"]["content_binding_checked_at"]
+
+      # …and on every LATER read, which is the whole point: the 201 is not the
+      # only surface that can tell a proven binding from an unchecked one.
+      later = json_body(call(:get, "/v1/sites/#{site.id}", nil, token))["site"]
+      assert later["content_bound"] == true
+      assert later["content_binding_verdict"] == "bound"
+    end
+
+    test "a token exists but the verdict is never_checked → content_bound is UNKNOWN, never true" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      # A pre-W8 row: fully bound, token at rest, and nobody ever read it back.
+      # This is the exact shape the old derivation reported as `content_bound:
+      # true`, and it is the shape the criterion forbids from reading true.
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "Legacy",
+          slug: "legacy",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: "bpt_legacy_at_rest"
+        })
+
+      # The premise of the mutation: the token IS there. The old derivation had
+      # everything it needed to answer `true`.
+      assert is_binary(site.read_token_encrypted)
+      assert site.content_binding_verdict == "never_checked"
+      assert site.content_binding_checked_at == nil
+
+      json = json_body(call(:get, "/v1/sites/#{site.id}", nil, token))["site"]
+
+      # An HONEST UNKNOWN — JSON null, which the console reads as "unknown"
+      # (app.js only renders a promise for a literal boolean). Never `true`,
+      # and deliberately not `false` either: nobody looked.
+      assert json["content_bound"] == nil
+      assert json["content_binding_verdict"] == "never_checked"
+      assert json["content_binding_checked_at"] == nil
+    end
+
+    test "an UNVERIFIED read persists unverified — content_bound stays unknown, not a promise" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        # A 200 the control plane cannot interpret is a control-plane blind spot,
+        # not a verdict on the user's content (charter D75) — so the site is
+        # created, and the row says the read could not be confirmed.
+        "/w/acme/p/blog/v1/data/query/production/post" =>
+          {:ok, %{status: 200, body: ~s({"shape":"we do not know"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["content_binding"]["status"] == "unverified"
+
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "unverified"
+      # The attempt HAPPENED, so it is stamped — "we tried at T and could not
+      # tell" is a different fact from "nobody ever looked".
+      assert %DateTime{} = site.content_binding_checked_at
+
+      # A token was minted, so the OLD derivation answered `true` here. It must
+      # not: an unverified binding is unknown.
+      assert is_binary(site.read_token_encrypted)
+      assert body["site"]["content_bound"] == nil
+      assert body["site"]["content_binding_verdict"] == "unverified"
+    end
+
+    test "a CONTAINER site persists not_applicable — content_bound is a definite FALSE, unstamped" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(:post, "/v1/sites", %{barkpark_id: bp.id, name: "api", kind: "container"}, token)
+
+      assert conn.status == 201
+      body = json_body(conn)
+
+      site = Registry.get_site(body["site"]["id"])
+      assert site.content_binding_verdict == "not_applicable"
+      # Nothing was READ, so nothing is stamped — a timestamp here would be a
+      # fabricated observation.
+      assert site.content_binding_checked_at == nil
+
+      # A container site HAS no content binding, and that is knowable without
+      # reading anything — so this one is a definite false, not an unknown.
+      assert body["site"]["content_bound"] == false
+      assert body["site"]["content_binding_verdict"] == "not_applicable"
     end
 
     # A container site has no binding, so the 201 must invent no verdict about one.
