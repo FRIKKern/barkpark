@@ -1,0 +1,63 @@
+# Studio desk-instrument self-tests — the pure `node --test` suites beside
+# scripts/studio-desk-measure.mjs and scripts/measurements/check-prediction.mjs.
+#
+# Why this file exists (task-b7ed25dac17d6229, 2026-09-06): every one of these
+# suites was hand-run only — `grep -rn studio-desk .github/workflows` returned
+# nothing — so 60+ passing tests read as coverage while no job ever executed
+# them. The campaign rule since 10:08Z the same day: a new test file is wired
+# in the SAME PR that adds it, and the runner's glob is proven to reach it.
+#
+# Dep-free by construction: no npm install, no browser, no ssh, no token. The
+# instrument resolves Playwright lazily (BP_PLAYWRIGHT_FROM), so importing it
+# for its pure exports costs nothing. Every suite here is a pure-function or
+# spawn test; the browser-coupled __studio-wide-deletion-diff.test.mjs is
+# deliberately NOT in the glob (it is an owner-run check, dated in its header).
+#
+# ADVISORY, not required: this workflow is paths-filtered, and a paths-filtered
+# workflow emits no check run on a non-matching PR, so it can never be made
+# required without deadlocking every unrelated PR (docs/ops/merge-gates.md).
+name: Studio instrument selftests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/studio-desk-*.mjs"
+      - "scripts/measurements/**"
+      - "scripts/node-test-floor.mjs"
+      - ".github/workflows/studio-instrument-selftests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/studio-desk-*.mjs"
+      - "scripts/measurements/**"
+      - "scripts/node-test-floor.mjs"
+      - ".github/workflows/studio-instrument-selftests.yml"
+
+concurrency:
+  group: studio-instrument-selftests-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  selftests:
+    name: Studio instrument selftests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22, not 20: scripts/node-test-floor.mjs imports globSync from node:fs.
+          node-version: "22"
+
+      # Through node-test-floor.mjs, never bare `node --test`: a bare run exits 0
+      # on a zero-match glob, a silently dropped path, or a file that registers
+      # no tests. The floor is a FILE count committed here on purpose so it
+      # cannot shrink with the tree — raise it in the PR that adds a suite,
+      # lower it only deliberately in the PR that removes one.
+      - name: Run the suites through the floor
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs --floor 7 \
+            'scripts/studio-desk-*.test.mjs' \
+            'scripts/measurements/*.test.mjs'
