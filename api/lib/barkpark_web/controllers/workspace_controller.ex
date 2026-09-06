@@ -811,13 +811,13 @@ defmodule BarkparkWeb.WorkspaceController do
 
     case Tenancy.get_workspace_by_slug(workspace_slug) do
       %Tenancy.Workspace{} = workspace when slugs != [] ->
-        stamped =
-          Enum.filter(slugs, fn slug ->
+        {stamped, write_failures} =
+          Enum.reduce(slugs, {[], []}, fn slug, {ok, failed} ->
             # Re-read per slug: each write returns the updated workspace and the
             # next stamp must merge into it, not into a stale settings map.
             case Tenancy.set_pull_provenance(workspace.id, slug, stamp) do
               {:ok, _ws} ->
-                true
+                {[slug | ok], failed}
 
               {:error, reason} ->
                 Logger.warning(
@@ -825,14 +825,31 @@ defmodule BarkparkWeb.WorkspaceController do
                     "#{inspect(workspace_slug)}/#{inspect(slug)}: #{inspect(reason)}"
                 )
 
-                false
+                {ok, [%{dataset: slug, reason: "stamp_write_failed"} | failed]}
             end
           end)
+
+        stamped = Enum.reverse(stamped)
+
+        unstamped =
+          Enum.reverse(write_failures) ++ datasets_not_named_by(manifest, workspace, slugs)
+
+        Enum.each(unstamped, fn entry ->
+          Logger.warning(
+            "WorkspaceController.import: dataset #{inspect(entry.dataset)} of " <>
+              "#{inspect(workspace_slug)} was NOT provenance-stamped (#{entry.reason})"
+          )
+        end)
 
         %{
           workspace: workspace_slug,
           datasets: stamped,
           stamped: stamped != [],
+          # PDS-D75. Every dataset slot this import touched is accounted for:
+          # stamped, or named here with a reason. An empty list is a claim, not
+          # a shrug — the failure mode being closed is a dataset that silently
+          # appears in NEITHER list and then meets the Bootstrap clobber.
+          unstamped: unstamped,
           stamp: stamp
         }
 
@@ -850,31 +867,81 @@ defmodule BarkparkWeb.WorkspaceController do
         "NOT provenance-stamped (#{reason})"
     )
 
-    %{workspace: workspace_slug, datasets: [], stamped: false, reason: reason, stamp: stamp}
+    %{
+      workspace: workspace_slug,
+      datasets: [],
+      stamped: false,
+      unstamped: [],
+      reason: reason,
+      stamp: stamp
+    }
   end
 
   # Which dataset slots this bundle covers: the narrowed one when the export was
-  # dataset-scoped, else every dataset the manifest carries.
+  # dataset-scoped, else the UNION of the manifest's two slug halves.
   #
-  # KNOWN GAP, stated rather than hidden (PDS-D45/D46). `dataset_slugs` is the
-  # workspace-EXCLUSIVE attribution set, NOT "the datasets in this bundle": a
-  # slug also owned by a sibling workspace is dropped by `dataset_slugs_for/1`
-  # under the D21 exclusivity rule. So a WHOLE-WORKSPACE pull whose source slug
-  # is shared cross-tenant (guerrilla's `production` is owned by two workspaces)
-  # can land with that dataset UNSTAMPED — and an unstamped dataset is one boot
-  # away from the Bootstrap clobber this stamp exists to guard. A
-  # dataset-narrowed pull (`?dataset=<slug>`, the PDS front door) is unaffected:
-  # it reads `manifest["dataset"]`, which is always the slug that was asked for.
-  # Tracked as `pds-bl-whole-workspace-shared-slug-stamp`.
+  # THE RULE, and it is the SAME ONE `pds-w3-shares-fidelity` settled for
+  # bare-slug E3 attribution (PR #13945, PDS-D74): **attribution is by workspace
+  # column, not by bare slug.** A shared slug is dropped from `dataset_slugs`
+  # only because a bare `dataset = ANY(...)` predicate cannot tell two tenants
+  # apart; every workspace_id-keyed row under that slug travels regardless, so
+  # the bundle DOES carry the dataset. #13945 applied that rule by exporting
+  # `shares` on its own `workspace_slug` column and DECLARING the rows that have
+  # no column to be keyed by (`declared_loss`). This is the same rule on the
+  # import side: the pull provenance stamp is written on the TARGET workspace's
+  # own row (`workspaces.settings`), so it is workspace-attributed by
+  # construction and carries none of the cross-tenant ambiguity that forced the
+  # exclusive set — which means the shared half must be stamped, not dropped.
+  #
+  # This is what the KNOWN GAP comment that stood here described: reading only
+  # `dataset_slugs` left a whole-workspace pull of a cross-tenant slug
+  # (guerrilla's `production`, owned by two workspaces) UNSTAMPED and silent,
+  # one boot from the Bootstrap clobber the stamp exists to guard against. The
+  # exporter now names the dropped half in `dataset_slugs_shared` (PDS-D75) —
+  # `dataset_slugs` keeps its exclusive meaning untouched, exactly as D46
+  # requires; the union is assembled HERE, by the consumer that needs "which
+  # slots did this bundle land in".
+  #
+  # A pre-D75 bundle has no `dataset_slugs_shared` key and cannot be
+  # retro-diagnosed. It is not swallowed either: `datasets_not_named_by/3`
+  # reports every local dataset the manifest never named, so the shared slug of
+  # an old bundle lands in the receipt's `unstamped` list with a reason.
+  #
+  # A dataset-narrowed pull (`?dataset=<slug>`, the PDS front door) was never
+  # affected and is unchanged: it reads `manifest["dataset"]`, always the slug
+  # that was asked for.
   defp provenance_slugs(manifest) do
-    case manifest["dataset"] || manifest["source_dataset"] do
+    case narrowed_slug(manifest) do
       slug when is_binary(slug) ->
         [slug]
 
       _ ->
-        manifest["dataset_slugs"]
-        |> List.wrap()
+        (List.wrap(manifest["dataset_slugs"]) ++ List.wrap(manifest["dataset_slugs_shared"]))
         |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+    end
+  end
+
+  defp narrowed_slug(manifest), do: manifest["dataset"] || manifest["source_dataset"]
+
+  # The honesty half of the rule above. For a WHOLE-WORKSPACE bundle, any dataset
+  # the target workspace owns that the manifest never named is reported with a
+  # reason instead of vanishing — which is precisely how the shared slug used to
+  # disappear. Skipped for a dataset-narrowed bundle: there, every sibling being
+  # unstamped is the REQUESTED behaviour, already asserted by the narrowed test,
+  # and listing them would drown the signal.
+  defp datasets_not_named_by(manifest, %Tenancy.Workspace{} = workspace, stamped_slugs) do
+    if is_binary(narrowed_slug(manifest)) do
+      []
+    else
+      workspace
+      |> Tenancy.list_projects()
+      |> Enum.flat_map(&Tenancy.list_datasets/1)
+      |> Enum.map(& &1.slug)
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in stamped_slugs))
+      |> Enum.sort()
+      |> Enum.map(&%{dataset: &1, reason: "not_named_by_manifest"})
     end
   end
 
