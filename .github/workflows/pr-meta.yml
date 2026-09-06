@@ -181,6 +181,45 @@ jobs:
           fi
           echo "tooling/lib: ${tally} tests, floor 9 — pin re-earned"
 
+      # ── gate-map staleness, PRE-MERGE (task-ad66cdcf1fcc452a) ────────────────
+      # THE VENUE ARGUMENT. `--verify` already runs in shell-harnesses.yml, but
+      # that workflow's twin `paths:` lists name only tooling/gate-map/* — while
+      # the snapshot's POPULATION_GLOBS are repo-wide (`*.test.sh`, `*.test.mjs`,
+      # `scripts/*.sh`, `scripts/*.mjs`, `cloud/priv/static/**.mjs`,
+      # `tooling/**/check*.mjs`). So a PR that ADDS an instrument never triggered
+      # the verify: 17 paper-editor/scripts instruments landed with no pre-merge
+      # datapoint, the refusal appeared on main, and every later PR inherited a
+      # red it did not cause. A tripwire that only ever fires on someone else's
+      # diff points at the wrong person.
+      #
+      # The other repair was `**/*.test.mjs` + `**/*.test.sh` on shell-harnesses'
+      # twin paths arms. That fans that ENTIRE workflow — twenty-odd harness jobs
+      # behind one dispatcher — out to every PR that touches any test file, to buy
+      # one ~2 s node call. The venue rule is per JOB: a cheap check whose input is
+      # the PR's own tree belongs in a job that already boots on every PR. This job
+      # is exactly that, and it holds three other checks here for the same reason.
+      #
+      # THE FILTER THIS DEPENDS ON IS THIS FILE'S OWN. `on.pull_request` here
+      # carries no `paths:`, which is what makes the coverage total; adding one
+      # later would blind this step silently, so the step asserts its own venue
+      # before it measures.
+      # spec-authority: advisory-ok — this step reports on the PR; pr-meta is not
+      # in .github/required-checks.json, so a red here informs the author and
+      # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
+      - name: "gate-map: the committed snapshot still describes the tree"
+        run: |
+          set -euo pipefail
+          # The venue assertion: read this workflow's `on:` block (top-level key
+          # to the next top-level key) and refuse if a `paths:`/`paths-ignore:`
+          # predicate ever appears in it.
+          if awk '/^on:/{inblock=1;next} /^[^[:space:]#]/{inblock=0} inblock' \
+               .github/workflows/pr-meta.yml | grep -qE '^[[:space:]]*paths(-ignore)?:'; then
+            echo "::error::pr-meta.yml grew a paths: predicate on its trigger — the gate-map verify below then stops covering POPULATION_GLOBS and this step becomes green-because-it-never-ran. Remove the filter or move this step to another unfiltered pull_request venue."
+            exit 1
+          fi
+          echo "venue ok: pr-meta.yml's pull_request trigger is unfiltered, so every POPULATION_GLOBS path reaches this step"
+          node --check tooling/gate-map/gate-map.mjs
+          node tooling/gate-map/gate-map.mjs --verify
       - name: No symlink is committed to this repo
         run: bash scripts/committed-symlink-check.sh
 
