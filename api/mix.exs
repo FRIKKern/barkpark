@@ -217,21 +217,25 @@ defmodule Barkpark.MixProject do
 
   defp path_arguments([], acc), do: Enum.reverse(acc)
 
-  defp path_arguments([flag, _value | rest], acc) when is_binary(flag) do
+  # A value-taking flag swallows the token after it (`--only boot_test`), so
+  # that token is never a candidate path. Every other token is examined and
+  # ONLY that token is consumed — matching two elements here and recursing on
+  # `rest` would drop every second argument.
+  defp path_arguments([flag, value | rest], acc) do
     if flag in @value_flags do
       path_arguments(rest, acc)
     else
-      path_arguments_one(flag, rest, acc)
+      path_arguments([value | rest], collect(flag, acc))
     end
   end
 
-  defp path_arguments([token | rest], acc), do: path_arguments_one(token, rest, acc)
+  defp path_arguments([token | rest], acc), do: path_arguments(rest, collect(token, acc))
 
-  defp path_arguments_one(token, rest, acc) do
+  defp collect(token, acc) do
     cond do
-      String.starts_with?(token, "-") -> path_arguments(rest, acc)
-      path_like?(token) -> path_arguments(rest, [strip_line_suffix(token) | acc])
-      true -> path_arguments(rest, acc)
+      String.starts_with?(token, "-") -> acc
+      path_like?(token) -> [strip_line_suffix(token) | acc]
+      true -> acc
     end
   end
 
