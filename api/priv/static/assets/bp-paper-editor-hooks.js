@@ -32,6 +32,37 @@
   ]);
   const paperExitCoordinators = new WeakMap();
 
+  // Collection forms use positional field names. After a reorder LiveView can
+  // retain the focused button at its old index, now belonging to another row.
+  // Restore the operated row only after acknowledgement, without stealing focus
+  // from a user who has moved elsewhere while the request was in flight.
+  function bpPaperCollectionFocus(form, submitter) {
+    const match = /^(note|tab|param|ref|bar)-action$/.exec(submitter?.name || "");
+    if (!match || document.activeElement !== submitter) return () => {};
+    const prefix = match[1];
+    const count = Number(form.elements.namedItem(`${prefix}-count`)?.value);
+    const action = /^(add|up|down|remove)(?::(\d+))?$/.exec(submitter.value || "");
+    if (!Number.isSafeInteger(count) || count < 0 || !action) return () => {};
+    const kind = action[1], index = Number(action[2]);
+    if (kind !== "add" && (!Number.isSafeInteger(index) || index < 0 || index >= count)) return () => {};
+    const nextCount = count + (kind === "add" ? 1 : kind === "remove" ? -1 : 0);
+    const nextIndex = kind === "add" ? count : kind === "up" ? index - 1
+      : kind === "down" ? index + 1 : Math.min(index, nextCount - 1);
+    return () => {
+      if (!form.isConnected ||
+          (document.activeElement !== submitter &&
+            !(document.activeElement === document.body && !submitter.isConnected)) ||
+          Number(form.elements.namedItem(`${prefix}-count`)?.value) !== nextCount) return;
+      const controls = [...form.elements];
+      const field = controls.find(control =>
+        control.name?.startsWith(`${prefix}-${nextIndex}-`) &&
+        !control.disabled && control.type !== "hidden");
+      const fallback = controls.find(control => control.name === `${prefix}-action` &&
+        control.value === (nextCount ? `remove:${nextIndex}` : "add") && !control.disabled);
+      (field || fallback)?.focus();
+    };
+  }
+
   // Validate the currently authored numeric constraints together. Mirroring
   // stored min/max attributes would reject a coherent new range, while only
   // validating on the server lets a failed patch repaint away the local draft.
@@ -949,6 +980,7 @@
         );
         if (!driver) return;
         const params = Object.fromEntries(new FormData(form, event.submitter || undefined));
+        const restoreCollectionFocus = bpPaperCollectionFocus(form, event.submitter);
         coordinator.run(() => bpPaperMutation(
           driver,
           form,
@@ -957,7 +989,10 @@
           typeof driver.pushEventTo === "function"
             ? { target: form.getAttribute("phx-target") || form }
             : {},
-        ).promise);
+        ).promise.then((saved) => {
+          if (saved) restoreCollectionFocus();
+          return saved;
+        }));
       };
       document.addEventListener("input", coordinator._onInput);
       document.addEventListener("change", coordinator._onInput);
