@@ -18,9 +18,19 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
   data paths, and these are the SSO/plugin paths that were outside it.
 
   Scope note (task-bb83570ba0f6f9f2 C3): the five sites below are the #13642 set
-  and nothing else. The separate ~90-site census of hand-built code-keyed error
-  maps still in `api/lib` belongs to task-8737e2d7ff1884e0 and is NOT proven by
-  this file.
+  and nothing else. The separate census of hand-built code-keyed error maps still
+  in `api/lib` belongs to task-8737e2d7ff1884e0 and is NOT proven by this file.
+
+  The two sets are DISJOINT, and mechanically so — 8737's census is keyed on the
+  spelling `error: %{code:`, which by construction cannot match what #13642 fixed
+  (bare strings `error: "..."` and `type`-keyed maps `error: %{type:`). Re-run it:
+
+      grep -rn 'error: %{code:' lib --include='*.ex' | grep -v error_response.ex
+
+  83 hits across 22 files, and ZERO of them are in social_controller.ex,
+  oidc_controller.ex, saml_controller.ex, sso_routing_controller.ex or
+  onixedit/web/export_controller.ex. So this file closes nothing of 8737's, and
+  8737's eventual fix will close nothing of this row's.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -98,7 +108,8 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
     @dataset "test"
 
     setup do
-      {:ok, _} = Auth.create_token(@admin_token, "parity-admin", "test", ["read", "write", "admin"])
+      {:ok, _} =
+        Auth.create_token(@admin_token, "parity-admin", "test", ["read", "write", "admin"])
 
       {:ok, _} =
         Content.upsert_schema(
