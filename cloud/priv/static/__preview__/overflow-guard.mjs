@@ -184,6 +184,7 @@ import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
+import { attentionScenarios } from "./attention-scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -301,7 +302,27 @@ const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 // `min-height: 24px` are the declarations that carry it, and a horizontal-only
 // guard certifies both wrong fixes.
 const ATT_WIDTHS = [320, 360, 375, 390, 430, 620, 769, 800];
-const ATT_SCENS = ["mixed-fleet", "overview-attention", "overview-past-due"];
+// THE SCENARIO AXIS IS NO LONGER TYPED HERE (cch-w66). It used to read
+// `const ATT_SCENS = ["mixed-fleet", "overview-attention", "overview-past-due"]`
+// — three names against a corpus that renders `.attention-row` in NINETEEN
+// scenarios carrying 25 rows. Sixteen scenarios and 22 of the 25 rows were
+// outside the guard, `fleet-v4` (4 rows) and `fleet-usage` (2 rows) among them,
+// and nothing in the file could ever say so: a literal cannot notice a name it
+// does not contain. The filed row's own census said FOUR, undercounting by ~5x,
+// which is the point — a hand-maintained roster is wrong on the day it is
+// written and silent about it forever after.
+//
+// The set is now DERIVED from the SHIPPED classifier — app.js's own
+// `filterFleet(list, "attention")`, the single expression `#overview` builds its
+// queue with — read off scenarios.mjs at leg time. See attention-scenarios.mjs
+// for the derivation, the unauthed exclusion, and the two refusals it owes
+// (empty set, lost positive control). The three old names survive ONLY as that
+// positive control, never as the axis.
+//
+// The route stays pinned to `#overview` below and the landed view id is still
+// asserted per cell: the widening is on the SCENARIO axis alone, so a scenario
+// whose own deepLink points at `#fleet` or `#instance/...` (most of the sixteen
+// newcomers do) is still measured where the attention queue actually lives.
 
 // W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
 // Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
@@ -1289,10 +1310,23 @@ async function main() {
       // BUTTONS land; they say nothing about whether the row still tells the
       // operator WHY the box needs attention. This half does, on both axes.
       const D109 = "GR109-attention-row-dead-rule";
+      // DERIVED, not typed — see the note by ATT_WIDTHS. attentionScenarios()
+      // THROWS on an empty read and on a lost positive control, so a derivation
+      // that silently narrows to nothing cannot reach the sweep below and be
+      // printed as "0 / 0 cells clean". die() carries that to the environment
+      // exit code, which is where a broken instrument belongs.
+      let ATT_SCENS;
+      try {
+        const { SCENARIOS } = await import("./scenarios.mjs");
+        ATT_SCENS = attentionScenarios(SCENARIOS);
+      } catch (e) {
+        return die(`${D109}: ${e && e.message ? e.message : e}`);
+      }
       const attCellCount = ATT_SCENS.length * ATT_WIDTHS.length * 2;
       process.stdout.write(
         `   attention-row pill — ${ATT_SCENS.length} scenarios x ${ATT_WIDTHS.length} widths x 2 themes` +
-        ` (${attCellCount} cells; EVERY .attention-row iterated — .status-pill-detail width, .status-pill height, detail bottom edge)\n`,
+        ` (${attCellCount} cells; EVERY .attention-row iterated — .status-pill-detail width, .status-pill height, detail bottom edge)\n` +
+        `   scenario axis DERIVED from app.js filterFleet(list,"attention") over scenarios.mjs — ${ATT_SCENS.length} scenario(s): ${ATT_SCENS.join(", ")}\n`,
       );
       let attCells = 0, attPills = 0, attClipped = 0, attTall = 0, attOutside = 0, attPageOver = 0;
       for (const scen of ATT_SCENS) {
@@ -1371,7 +1405,7 @@ async function main() {
       } else if (!failures.some((f) => f.defect === D109)) {
         okLine(
           `${attCells} / ${attCells} attention-row cells clean (${attPills} pills measured on BOTH axes, every row iterated) across ` +
-          `${ATT_WIDTHS.join("/")} on ${ATT_SCENS.join(" + ")}, both themes, route pinned #overview; ` +
+          `${ATT_WIDTHS.join("/")} on the ${ATT_SCENS.length} DERIVED attention scenarios (${ATT_SCENS.join(" + ")}), both themes, route pinned #overview; ` +
           `${attClipped} truncated reasons, ${attTall} chips shorter than their own text, ` +
           `${attOutside} details painting below their pill, ${attPageOver} pages scrolling sideways. ` +
           `Per-cell clientWidth/scrollWidth pairs are printed above; no pixel literal is pinned here — ` +
