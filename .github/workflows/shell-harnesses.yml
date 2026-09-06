@@ -176,7 +176,6 @@ on:
       - "scripts/audit-paper-readers-test.sh"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
-      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY (epic-cycle distribution w1-s6). The two scripts are
@@ -396,7 +395,6 @@ on:
       - "scripts/audit-paper-readers-test.sh"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
-      - "tooling/gate-map/gate-map.json"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
       # WORKFLOW PORTABILITY — mirrors the pull_request list above, glob included.
@@ -683,7 +681,6 @@ jobs:
           tooling-harnesses scripts/audit-paper-readers-test.sh
           tooling-harnesses tooling/gate-map/gate-map.mjs
           tooling-harnesses tooling/gate-map/gate-map.test.mjs
-          tooling-harnesses tooling/gate-map/gate-map.json
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
@@ -1339,10 +1336,20 @@ jobs:
         run: bash -n scripts/audit-paper-readers.sh
       - name: "gate-map: the composed slice gate still finds __css_check over breakpoint-sweep.mjs"
         # The wave-16 red this composer exists for. Its selftest is built to
-        # LOSE — a planted map entry, a removed instrument, and a narrowed scan
-        # set each red it — so a green here is evidence, not a tally. --verify
-        # runs first: a snapshot that stopped describing the tree is a REFUSAL
-        # (exit 3), because a composed gate off a stale map is a guess.
+        # LOSE — a planted map entry, a removed instrument, a narrowed scan set,
+        # an empty population glob and a collapsed population each red it — so a
+        # green here is evidence, not a tally.
+        #
+        # THERE IS NO COMMITTED SNAPSHOT (task-294d79c9345d59dd). There was, and
+        # it was a treadmill: any merge adding a file under POPULATION_GLOBS
+        # staled tooling/gate-map/gate-map.json, so two PRs each green apart —
+        # one adding an instrument, one holding a fresh snapshot — reded MAIN
+        # together and every open PR inherited the refusal. Measured three times
+        # in 24 h. The map is now derived on every run (~1 s), and `--verify`
+        # checks the DERIVATION instead: every population glob still matches,
+        # the population clears a floor, nothing is dropped, and the wave-16
+        # edge still resolves. Each of those can only be broken by a diff that
+        # REMOVES something — i.e. always by the PR that is red.
         run: |
           node --check tooling/gate-map/gate-map.mjs
           node tooling/gate-map/gate-map.mjs --verify

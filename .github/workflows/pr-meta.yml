@@ -181,10 +181,21 @@ jobs:
           fi
           echo "tooling/lib: ${tally} tests, floor 9 — pin re-earned"
 
-      # ── gate-map staleness, PRE-MERGE (task-ad66cdcf1fcc452a) ────────────────
+      # ── gate-map derivation floor (task-ad66cdcf1fcc452a, task-294d79c9345d59dd)
+      # WHAT THIS USED TO BE, AND WHY IT ISN'T. Until task-294d79c9345d59dd this
+      # step verified a COMMITTED snapshot (tooling/gate-map/gate-map.json)
+      # against the tree. That snapshot was a treadmill: any merge adding a file
+      # under POPULATION_GLOBS staled it, so two PRs that were each green apart
+      # reded MAIN together and every open PR inherited the refusal — measured
+      # three times in 24 h. The snapshot is gone; the map is derived every run.
+      # `--verify` now checks the DERIVATION (no glob went empty, the population
+      # clears a floor, nothing was dropped, the wave-16 edge still resolves) —
+      # properties only a diff that REMOVES something can break, so this step can
+      # only ever red on the diff that caused it.
+      #
       # THE VENUE ARGUMENT. `--verify` already runs in shell-harnesses.yml, but
       # that workflow's twin `paths:` lists name only tooling/gate-map/* — while
-      # the snapshot's POPULATION_GLOBS are repo-wide (`*.test.sh`, `*.test.mjs`,
+      # POPULATION_GLOBS are repo-wide (`*.test.sh`, `*.test.mjs`,
       # `scripts/*.sh`, `scripts/*.mjs`, `cloud/priv/static/**.mjs`,
       # `tooling/**/check*.mjs`). So a PR that ADDS an instrument never triggered
       # the verify: 17 paper-editor/scripts instruments landed with no pre-merge
@@ -206,7 +217,7 @@ jobs:
       # spec-authority: advisory-ok — this step reports on the PR; pr-meta is not
       # in .github/required-checks.json, so a red here informs the author and
       # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
-      - name: "gate-map: the committed snapshot still describes the tree"
+      - name: "gate-map: the derivation is live and non-vacuous (no committed snapshot)"
         run: |
           set -euo pipefail
           # The venue assertion: read this workflow's `on:` block (top-level key
