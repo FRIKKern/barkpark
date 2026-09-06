@@ -1131,6 +1131,11 @@ defmodule Barkpark.Content.Graph do
   Distinct from `Barkpark.Content.Edges.resolve_doc_pk/3`, which ALSO matches a
   raw UUID and scopes datasets via `WriteScope` for edge-endpoint resolution — a
   deliberately richer variant, not a duplicate of this one.
+
+  RAISES `Barkpark.Tasks.AmbiguousTwinError` (409 `ambiguous_dataset`) when the
+  id is a `type: "task"` whose winning-tier rows span more than one dataset in
+  scope and no `dataset` was named — `Barkpark.Tasks.TwinResolver` rule 3, the
+  same refusal `GET /v1/tasks/:doc_id` gives. Non-task types never raise.
   """
   @spec resolve_doc(String.t() | nil, String.t() | nil, keyword()) :: Document.t() | nil
   # @canonical capability:slug-resolve aka:resolve_doc,resolve_pk,slug_to_pk,resolve_doc_pk
@@ -1165,7 +1170,31 @@ defmodule Barkpark.Content.Graph do
     # outside the grant ladder instead of leaking its referencers.
     query = Scope.maybe_scope_to_grants(query, opts)
 
-    query |> limit(1) |> Repo.one()
+    rows = Repo.all(query)
+
+    # THE ONE RULE (`Barkpark.Tasks.TwinResolver` — read that moduledoc; this
+    # resolver writes no second rule). This is the canonical slug resolver for
+    # EVERY type, so the refusal is TASK-SCOPED: a `type == "task"` id whose
+    # winning-tier rows span more than one dataset of the caller's
+    # workspace/project, with no `dataset` named, RAISES
+    # `Barkpark.Tasks.AmbiguousTwinError` (409 `ambiguous_dataset`, naming both)
+    # instead of letting `List.first` pick a dataset the caller never named.
+    # Every other type is untouched — a second copy of a non-task document in
+    # another dataset is content replication working as designed.
+    #
+    # Why RAISE and not `nil`: all three callers (`resolve_pk/2`,
+    # `Content.Related`, the Studio `PaneBuilder`) collapse `nil` into "not
+    # found"/empty, so a nil would recreate the silent-wrong-answer family one
+    # level up — an empty backlinks pane reading as truth. The raise reaches
+    # every door identically and already renders as the task doors' own 409.
+    #
+    # `limit(1) |> Repo.one()` became `Repo.all` + `List.first` for the same
+    # reason `choose/3` takes rows: the rule cannot decide from a row the query
+    # already dropped. The `where` is an exact doc_id match on two spellings, so
+    # the read stays bounded by (types x datasets) for one id.
+    Barkpark.Tasks.TwinResolver.refuse_ambiguous_task!(rows, pub_id, dataset)
+
+    List.first(rows)
   end
 
   defp resolve_pk(id, opts) when is_binary(id) do
