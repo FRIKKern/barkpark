@@ -310,11 +310,62 @@ jobs:
       # whose regexes stopped matching reports "0 uncovered reads" and exits 0.
       # The selftest drives one synthetic read per authoring form and prints its
       # own assertion count.
+      #
+      # THE HEAD-CHECKOUT ASYMMETRY (task-1ea38e8e7fe44e09). This job runs the
+      # workflow FILE from the merge ref and the SCRIPT from the PR HEAD, and
+      # the two disagree for every PR based before the ratchet landed. Measured
+      # 2026-09-06: 5 of the last 100 pull_request runs died here with
+      # "Process completed with exit code 127" — bash could not find
+      # scripts/go-path-escape-check.sh in a head that predates #16520. The step
+      # reddened, `Compute the changed-path set` was SKIPPED, and those five PRs
+      # got NO Go path verdict at all. The dispatcher that exists so the job
+      # behind it always has a defined answer had no answer.
+      #
+      # So absence is now GUARDED AND NAMED, not fatal. It is deliberately NOT
+      # a silent `exit 0`: every absent run prints a ::warning AND writes the
+      # job summary, naming the head and base shas and saying in words that the
+      # head's on.push.paths declaration went UNVERIFIED. A reader can tell
+      # "the ratchet passed" from "the ratchet was not there" without opening a
+      # log.
+      #
+      # WHY GUARD-AND-NAME RATHER THAN FETCH THE MERGE REF'S COPY. Both of the
+      # ratchet's inputs come from the head: the tree it scans, and the
+      # on.push.paths list it scans that tree against (the script parses the
+      # workflow from disk, GO_PATH_ESCAPE_WORKFLOW unset). Running a NEWER
+      # scanner against an OLDER head's declaration compares a rule to a tree
+      # that was never authored under it, so its escapes are not this PR's
+      # debt — and a red from that comparison would skip `Compute the
+      # changed-path set` for exactly the stale heads this change exists to
+      # rescue, reinstating the defect one level up. Demote it to advisory and
+      # it prints a warning: the same output this guard prints, bought with a
+      # network fetch inside the step whose whole job is to survive a missing
+      # input. The ratchet binds where it can bind — on any head that carries
+      # it, which after this lands is every head that rebases — and where it
+      # cannot, it says so.
+      #
+      # A head that DOES carry the script is unchanged: selftest, then check,
+      # both fatal.
       - name: Go cross-tree read ratchet (selftest, then check)
+        env:
+          RATCHET: scripts/go-path-escape-check.sh
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          bash scripts/go-path-escape-check.sh --selftest
-          bash scripts/go-path-escape-check.sh --check
+
+          if [ ! -f "$RATCHET" ]; then
+            msg="go-tests dispatcher: the cross-tree read ratchet ($RATCHET) is NOT in this checkout. This job checks out the PR HEAD on purpose (D34 above) and this head predates the ratchet (#16520), so there is nothing to run. This is NOT a pass: the head's on.push.paths declaration is UNVERIFIED for this run, and a read that escaped it would go unnamed. The path verdict below still runs, so the Go suite is still dispatched. head=${HEAD_SHA:-<unknown>} base=${BASE_SHA:-<none, not a pull_request>}. Rebase the branch onto its base branch to have the ratchet judge this head."
+            echo "::warning title=Go cross-tree read ratchet ABSENT on this head::${msg}"
+            {
+              echo "### Go cross-tree read ratchet: ABSENT on this head"
+              echo
+              echo "${msg}"
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
+          fi
+
+          bash "$RATCHET" --selftest
+          bash "$RATCHET" --check
 
       - id: sets
         name: Compute the changed-path set
