@@ -125,7 +125,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @d_busy_bare @r409_bare <> @requeued
   # The concurrent-build CAP's refusal: a box that is not busy with THIS site at
   # all, refusing a slot so it stops swapping itself to death.
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                 @requeued
   # A deferral shape the ledger has never seen — not a box refusal at all.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
@@ -153,7 +153,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
                     @rid <> @requeued
   # …and the stamped shape that already worked, because the message pushed the
   # stamp past the ` — ` boundary. Pinned so the strip does not regress it.
-  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                             @rid <> @requeued
 
   # A CODELESS envelope — `%{"error" => %{"message" => "…"}}` with no `code` key
@@ -188,7 +188,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @a_capacity "the instance refused the deploy (HTTP 409): box_at_capacity" <> @abandon_cap
   @a_capacity_stamped "the instance refused the deploy (HTTP 409): box_at_capacity" <>
                         @rid <> @abandon_cap
-  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                     @abandon_cap
   # 2026-08-05 22:57:53Z — the one 6-cap abandonment, the busy slug.
   @a_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
@@ -4068,11 +4068,22 @@ defmodule BarkparkCloud.DeployLedgerTest do
       cancelled_row = Enum.find(d.sites, &(&1.site_id == cancelled_site.id))
       assert cancelled_row.cancelled == 2
       refute cancelled_row.still_waiting
+
+      # THE BUCKET IS ON THE WIRE EVEN WHEN IT IS EMPTY. A `cancelled` key that
+      # only appeared on rows that had one would be indistinguishable from a
+      # bucket never wired; the genuine waiter's row must carry a literal 0.
+      waiting_row = Enum.find(d.sites, &(&1.site_id == waiting_site.id))
+      assert waiting_row.cancelled == 0
     end
 
     test "the emitted key set is PINNED — the Go reader decodes every key", %{site: site} do
       delivery_40pct!(site)
       d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      # No row in this fixture is cancelled, and the bucket still reads 0 at
+      # both levels — present, never absent (dr-w11-bl-cancelled-rows-count-as-waiting).
+      assert d.cancelled == 0
+      assert Enum.all?(d.sites, &(&1.cancelled == 0))
 
       assert Enum.sort(Map.keys(d)) == [
                :as_of,
