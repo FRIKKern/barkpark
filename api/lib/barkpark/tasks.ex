@@ -224,8 +224,11 @@ defmodule Barkpark.Tasks do
   claim epoch in the same transaction (the mutating agent is never rejected —
   the holder is fenced instead). The `{:ok, %Edge{}}` contract is unchanged.
   See `Barkpark.Tasks.Fence.add_dep/3` (which calls `Edges.add_dep/3`).
+
+  Endpoints are `%Document{}` structs or bare uuids; only structs are
+  twin-canonicalised (see `Barkpark.Tasks.Edges.add_dep/3`).
   """
-  @spec add_dep(binary(), binary(), atom() | String.t(), binary() | nil) ::
+  @spec add_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
   def add_dep(child_id, parent_id, kind \\ :blocks, caller_token_id \\ nil),
     do: Fence.add_dep(child_id, parent_id, kind, caller_token_id)
