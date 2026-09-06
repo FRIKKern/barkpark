@@ -246,11 +246,13 @@ if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e5.out")" = "doctor-matrix" ]; then
   ok "E5 scripts/doctor.sh: doctor-matrix only"
 else bad "E5 scripts/doctor.sh: rc=$rc true={$(true_set "$TMP/e5.out")}"; fi
 
-# E6 a new workflow file → the three corpus readers via the *.yml glob
+# E6 a new workflow file → the FOUR corpus readers via the *.yml glob (selftest-wiring-census
+#    joined in task-8780f3b465edea5b: it resolves execution FROM the workflow corpus, so a new
+#    workflow can change which self-tests count as run)
 make_case newwf .github/workflows/brand-new.yml "a"
 rc=$(run_dispatcher pull_request "$BASE_A" "$TMP/e6.out")
-if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e6.out")" = "deploy-concurrency workflow-portability workflow-trigger-coverage" ]; then
-  ok "E6 new workflow file: exactly the three .github/workflows/*.yml readers"
+if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e6.out")" = "deploy-concurrency selftest-wiring-census workflow-portability workflow-trigger-coverage" ]; then
+  ok "E6 new workflow file: exactly the four .github/workflows/*.yml readers"
 else bad "E6 new workflow file: rc=$rc true={$(true_set "$TMP/e6.out")}"; fi
 
 # E7 this workflow file itself → all true
