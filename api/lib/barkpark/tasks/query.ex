@@ -153,6 +153,94 @@ defmodule Barkpark.Tasks.Query do
     )
   end
 
+  # ── the id-prefix lookup (cchi-bl-task-get-needs-a-server-side-prefix-lookup) ──
+
+  @id_prefix_limit 25
+
+  @doc "How many id-prefix matches `id_prefix_lookup/2` will return before truncating."
+  def id_prefix_limit, do: @id_prefix_limit
+
+  @doc """
+  The doc_id + title of the tasks whose id starts with `prefix` — ONE indexed
+  query, in place of the CLI's nine-page client-side scan.
+
+  ## Why this exists
+
+  `bp task get <truncated-id>` answers not_found and wants to say "did you mean
+  `<id>`?". Before this, the only way to ask was to WALK `GET /v1/tasks`: on the
+  live ledger that is nine pages at the route's 1000-row clamp, ~3-4s with four
+  requests in flight, and it is a scan whose cost grows with the ledger. The
+  route could not be asked the question directly — its filter whitelist held
+  `kind|label|lifecycle_status|parent|parent_id|phase_id|type` and nothing that
+  reaches `doc_id`.
+
+  ## The shape, and why each part
+
+    * The predicate is `regexp_replace(doc_id, '^drafts\\.', '') LIKE prefix || '%'`
+      — the SAME drafts-stripped expression `maybe_filter_parent_id/2`,
+      `collapse_twins/1` and `documents_task_ready_dep_idx` already use, so a
+      caller who typed the published id also finds an unpaired `drafts.` shadow
+      of it. That is the id they would have to claim, so hiding it would be a
+      lie of omission.
+    * It is served by `documents_task_doc_id_prefix_idx`, a partial btree on
+      that expression with `text_pattern_ops` (migration 20260906120000).
+      `text_pattern_ops` is load-bearing: a DEFAULT-collation btree cannot serve
+      `LIKE 'x%'` at all outside the C locale, so without the opclass this is a
+      seq scan over every task row and the whole point is lost.
+    * `prefix` is LIKE-escaped before it is interpolated, so a `%` or `_` a
+      caller typed is a literal character and not a wildcard that would widen
+      the match to rows the id cannot name.
+    * The projection is `doc_id` + `title` ONLY. The caller renders one line per
+      hit; selecting `content` would detoast the ~10 KB task jsonb per row for
+      nothing (a full-view page of this route measures 10.2 MB against ~340 KB
+      for the brief view).
+    * Twins collapse exactly as they do on the index, so a twinned task is ONE
+      hit here and "exactly one match" means what the caller thinks it means.
+
+  Tenancy is fail-CLOSED via `Scope.scope_to_workspace/3` — a nil workspace
+  yields zero rows. Note what that fence is holding: this lookup is an
+  INTRA-TENANT id-prefix oracle (any caller who can list the workspace's tasks
+  can enumerate its task ids one prefix at a time). That is acceptable only
+  because the caller already sees those ids on the index; do NOT widen it past
+  the workspace fence, and do not apply the LIMIT before the tenancy filter.
+
+  Options: `:workspace_id`, `:project_id`, `:dataset`, `:limit`.
+  """
+  def id_prefix_lookup(prefix, opts \\ [])
+
+  def id_prefix_lookup(prefix, opts) when is_binary(prefix) and prefix != "" do
+    limit = opts |> Keyword.get(:limit, @id_prefix_limit) |> clamp_prefix_limit()
+    pattern = escape_like(prefix) <> "%"
+
+    from(d in Document,
+      where: d.type == "task",
+      where:
+        fragment(
+          "regexp_replace(?, '^drafts\\.', '') LIKE ? ESCAPE '\\'",
+          d.doc_id,
+          ^pattern
+        ),
+      order_by: [asc: d.doc_id],
+      limit: ^limit,
+      select: %{doc_id: d.doc_id, title: d.title}
+    )
+    |> collapse_twins()
+    |> Scope.scope_to_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
+    |> maybe_filter_dataset(Keyword.get(opts, :dataset))
+    |> Repo.all()
+  end
+
+  def id_prefix_lookup(_prefix, _opts), do: []
+
+  defp clamp_prefix_limit(n) when is_integer(n) and n > 0, do: min(n, @id_prefix_limit)
+  defp clamp_prefix_limit(_), do: @id_prefix_limit
+
+  # `\\`, `%` and `_` are the three characters LIKE reads as syntax. Escaping
+  # them (with `ESCAPE '\\'` on the fragment) keeps "prefix" meaning prefix: an
+  # unescaped `%` in a typed id would match rows the caller never named, and the
+  # CLI's "exactly one match" claim would be made over the wrong set.
+  defp escape_like(s), do: String.replace(s, ["\\", "%", "_"], fn c -> "\\" <> c end)
+
   def maybe_filter_claim_worker(query, nil), do: query
 
   def maybe_filter_claim_worker(query, worker) when is_binary(worker),

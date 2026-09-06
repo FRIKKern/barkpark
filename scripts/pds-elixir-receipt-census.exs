@@ -471,12 +471,30 @@ defmodule PDS.Census do
   # bulldocs receipts still reach the same write; only this census's depth budget stopped
   # seeing it, and PDS-D480 already ruled that @evidence_depth is a compliance dial and
   # not a claim about the code.
+  # RE-DERIVED BY RUN 2026-09-06 (cchi-bl-task-get-needs-a-server-side-prefix-lookup,
+  # PR #16541 — `GET /v1/tasks?id_prefix=`, the one indexed query behind `bp task get
+  # <truncated-id>`): textual 109 -> 110, ast 100 -> 101, emitted 96 -> 97, read-routed
+  # 25 -> 26. ONE new emitted receipt site — `TasksController.id_prefix_lookup/2`'s
+  # `ok: true` body, registered above as UNJUDGED / payload_is_the_postcondition — and it
+  # lands in the READ class because its whole payload is one `Repo.all` in
+  # `Tasks.Query.id_prefix_lookup/2`: it reaches a read verb at depth 2 and no write verb
+  # at any depth in the budget. `phantom` (9), `consumer` (4), `write` (59) and `unrouted`
+  # (12) did NOT move, which is the signature of an ARRIVAL rather than a
+  # reclassification — a row that did not move is evidence too, and a reclassification
+  # moves a pair in opposite directions (task-a0ce4e18f6776400's shape above).
+  #
+  # DERIVED BY THE INSTRUMENT, NEVER RE-TYPED: these four numbers are the `derived` half
+  # of this census's own D448-DRIFT-REFUSES line, run from the repo root on this change's
+  # own tree, amended in the SAME commit as the change that moved them (PDS-D448a).
+  # Lens: build-free AST, substring counts, route depth 6, `transaction` NOT a write verb.
+  # Engine printed live by that run:
+  #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
   @rederived %{
-    textual: 109,
-    ast: 100,
+    textual: 110,
+    ast: 101,
     phantom: 9,
     consumer: 4,
-    emitted: 96,
+    emitted: 97,
     # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -525,7 +543,7 @@ defmodule PDS.Census do
     # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
     # three adopt files alone returns all eight rows to == (proven in the PR).
     write: 59,
-    read: 25,
+    read: 26,
     unrouted: 12
   }
 
@@ -2063,6 +2081,31 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "claim (claim.ex do_claim)", %{scope: scope} do|}},
+    # barkpark_web/controllers/tasks_controller.ex:524 — the id-prefix "did you
+    # mean" receipt (cchi-bl-task-get-needs-a-server-side-prefix-lookup), the
+    # READ-ROUTED arrival that moved four population rows this wave. AUTHORED,
+    # not inherited: GET /v1/tasks?id_prefix= is a new door, and this row is what
+    # disposes it — a judged site needs no @routed_excluded entry.
+    #
+    # WHY payload_is_the_postcondition AND NOT end_to_end. The site claims nothing
+    # beyond what it hands back: `matches` IS one `Repo.all` in
+    # `Barkpark.Tasks.Query.id_prefix_lookup/2`, and `count`/`truncated` are
+    # `length(matches)` against that query's own cap. There is no stored side
+    # effect for a second hop to certify, so `end_to_end` — whose falsifier is a
+    # @repo_tokens hit in the cited block — would be a claim about a postcondition
+    # this route does not have. Same token as its read-routed siblings above
+    # (show/2 :371) and below, for the same reason.
+    #
+    # THE CITED BLOCK IS A REAL DIFFERENTIAL, and worth naming even though this
+    # basis does not red on it: it drives the route with a live bearer, pins the
+    # one hit's doc_id and title against a row it created through the store, and
+    # asserts the projection is doc_id + title ONLY — the decoy row it also
+    # creates is what makes "the unfiltered page" a distinguishable wrong answer.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.id_prefix_lookup/2", "120586089", "109819328"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition, evidence:
+        {"api/test/barkpark_web/controllers/tasks_id_prefix_lookup_test.exs",
+         ~S|test "a ONE-HIT prefix names the id and carries doc_id + title and nothing else",|}},
     # barkpark_web/controllers/tasks_controller.ex:558
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
