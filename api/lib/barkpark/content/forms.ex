@@ -36,12 +36,13 @@ defmodule Barkpark.Content.Forms do
 
   def doc_to_form(doc, schema) do
     base = %{"title" => doc.title || "", "status" => doc.status || "draft"}
+    content = doc.content || %{}
 
     if schema do
       Enum.reduce(schema.fields, base, fn field, acc ->
         key = field["name"]
 
-        raw = get_in(doc.content || %{}, [key])
+        raw = Map.get(content, key)
 
         val =
           cond do
@@ -60,7 +61,7 @@ defmodule Barkpark.Content.Forms do
               Jason.encode!(raw)
 
             true ->
-              classic_form_value(raw)
+              classic_form_value(raw, field, content, key)
           end
 
         Map.put(acc, key, val)
@@ -78,9 +79,60 @@ defmodule Barkpark.Content.Forms do
   # the ONE projected content, each presenting it in its own shape — no
   # conversion of the underlying block list. Non-map (scalar) values pass through
   # unchanged; nil becomes "".
-  defp classic_form_value(%{"html" => html}) when is_binary(html), do: html
-  defp classic_form_value(nil), do: ""
-  defp classic_form_value(value), do: value
+  defp classic_form_value(
+         %{"blocks" => blocks} = body,
+         %{"type" => "richText"},
+         content,
+         "body"
+       )
+       when is_list(blocks) do
+    if historical_nested_blocks?(content) do
+      render_classic_body(blocks)
+    else
+      case body do
+        %{"html" => html} when is_binary(html) -> html
+        _ -> ""
+      end
+    end
+  end
+
+  defp classic_form_value(
+         %{"blocks" => _malformed} = body,
+         %{"type" => "richText"},
+         _content,
+         "body"
+       ) do
+    case body do
+      %{"html" => html} when is_binary(html) -> html
+      _ -> ""
+    end
+  end
+
+  defp classic_form_value(blocks, %{"type" => "richText"}, content, "body")
+       when is_list(blocks) do
+    if historical_nested_blocks?(content) do
+      render_classic_body(blocks)
+    else
+      ""
+    end
+  end
+
+  defp classic_form_value(%{"html" => html}, _field, _content, _key) when is_binary(html),
+    do: html
+
+  defp classic_form_value(nil, _field, _content, _key), do: ""
+  defp classic_form_value(value, _field, _content, _key), do: value
+
+  defp historical_nested_blocks?(content) do
+    not Map.has_key?(content, "blocks") and block_maps?(Projection.read_blocks(content))
+  end
+
+  defp block_maps?(blocks), do: is_list(blocks) and Enum.all?(blocks, &is_map/1)
+
+  defp render_classic_body(blocks) do
+    {_bound, free} = Projection.partition(blocks)
+    Projection.project_body(free, %{style: :article})["html"]
+  end
 
   @doc """
   Build a `content` map from a form params map by reducing schema
@@ -177,50 +229,75 @@ defmodule Barkpark.Content.Forms do
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
-        values = classic_field_values(params, schema)
-        new_blocks = Synthesis.patch_bound_values(blocks, values)
-
-        # A submitted field with NO bound block must still persist (e.g. an
-        # image field on a doc whose block list never bound it) — patching
-        # bound blocks alone silently dropped it while the editor reported
-        # "Saved". Merge those onto content as plain keys with the same
-        # semantics as the non-blocks branch (empty string clears the key).
-        # Projection only rewrites bound fieldNames + "body", so these
-        # survive the project pass.
-        bound_names =
-          blocks
-          |> Enum.map(& &1["fieldName"])
-          |> Enum.filter(&(is_binary(&1) and &1 != ""))
-
-        unbound_params = Map.drop(params, bound_names)
-
-        base_content
-        |> Map.drop(Map.keys(unbound_params))
-        |> Map.drop(["title", "status"])
-        |> Map.merge(build_content(unbound_params, schema))
-        |> Map.put("blocks", new_blocks)
-        # task-c46967eb3dc49e77: the re-projection NAMES `:article`, the same
-        # surface `Content.Writer.doc_render_opts/3` names since #15973,
-        # instead of leaving these opts style-less and letting
-        # `Render.render_block/2`'s `Map.get(opts, :style, :email)` default
-        # pick one.
-        #
-        # This is defence in depth, NOT a live-defect fix — and the row's
-        # filing is wrong that it was one. `Content.upsert_document/4` runs
-        # `Writer.maybe_project_document_content/2` on the SAME write, which
-        # re-projects `content["body"]` + every bound field from
-        # `content["blocks"]` through the already-`:article` `doc_render_opts/3`,
-        # so whatever this line produces is overwritten before anything is
-        # persisted. Proved both ways in PR #16047: reverting this line alone
-        # leaves `classic_form_render_surface_test.exs` GREEN, while reverting
-        # writer.ex's `:article` instead REDS it. The value of naming the
-        # surface here is a future write path that skips that re-projection.
-        |> Projection.project(
-          new_blocks,
-          Map.put(Labels.render_opts(dataset), :style, :article)
-        )
+        if block_maps?(blocks) do
+          classic_save_top_level_blocks(base_content, blocks, params, schema, dataset)
+        else
+          classic_save_preserving_ambiguous_body(base_content, params, schema)
+        end
 
       _ ->
+        classic_save_without_top_level_blocks(base_content, params, schema, dataset)
+    end
+  end
+
+  defp classic_save_top_level_blocks(base_content, blocks, params, schema, dataset) do
+    values = classic_field_values(params, schema)
+    new_blocks = Synthesis.patch_bound_values(blocks, values)
+
+    # A submitted field with NO bound block must still persist (e.g. an image
+    # field on a doc whose block list never bound it). Merge those onto content
+    # with the same semantics as the non-blocks branch.
+    bound_names =
+      blocks
+      |> Enum.map(& &1["fieldName"])
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+
+    unbound_params = Map.drop(params, bound_names)
+
+    base_content
+    |> Map.drop(Map.keys(unbound_params))
+    |> Map.drop(["title", "status"])
+    |> Map.merge(build_content(unbound_params, schema))
+    |> Map.put("blocks", new_blocks)
+    # Name the screen surface here as defence in depth. Writer re-projects this
+    # same write with its scoped article render options before persistence.
+    |> Projection.project(
+      new_blocks,
+      Map.put(Labels.render_opts(dataset), :style, :article)
+    )
+  end
+
+  # Historical Portable Docs may retain their authoritative block list only in
+  # `content["body"]["blocks"]` (or the older bare body-list form). Keep that
+  # representation nested: promoting it to top-level `content["blocks"]` would
+  # make Writer re-project the document and replace the complete body envelope,
+  # dropping metadata it does not own. We still apply bound-field values and
+  # refresh the derived article HTML, while preserving the exact authored block
+  # tree and every unknown body key.
+  defp classic_save_without_top_level_blocks(base_content, params, schema, dataset) do
+    case historical_body_blocks(base_content) do
+      {:ok, blocks, body_source} ->
+        classic_save_historical_blocks(
+          base_content,
+          blocks,
+          body_source,
+          params,
+          schema,
+          dataset
+        )
+
+      :malformed_top_level_blocks ->
+        # A present top-level key is authoritative even when malformed. Never
+        # fall through to a second block list and mutate the wrong document.
+        classic_save_preserving_ambiguous_body(base_content, params, schema)
+
+      :malformed_historical_body ->
+        # A body envelope that declares a malformed block authority is not a
+        # legacy scalar field. Preserve it byte-for-byte instead of replacing
+        # it with the submitted rich-text string.
+        classic_save_preserving_ambiguous_body(base_content, params, schema)
+
+      :none ->
         # Merge over the existing content instead of replacing it: a key
         # PRESENT in the submitted params is form-managed — its new value
         # (or its removal, via build_content/2's empty-string drop) wins.
@@ -235,6 +312,94 @@ defmodule Barkpark.Content.Forms do
         |> Map.drop(["title", "status"])
         |> Map.merge(build_content(params, schema))
     end
+  end
+
+  defp classic_save_historical_blocks(
+         base_content,
+         blocks,
+         body_source,
+         params,
+         schema,
+         dataset
+       ) do
+    bound_names =
+      blocks
+      |> Enum.map(& &1["fieldName"])
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+
+    if Enum.any?(bound_names, &(&1 in ["body", "blocks"])) do
+      reserved = bound_names |> Enum.filter(&(&1 in ["body", "blocks"])) |> Enum.uniq()
+      {:error, {:ambiguous_historical_block_bindings, reserved}}
+    else
+      values = classic_field_values(params, schema)
+      new_blocks = Synthesis.patch_bound_values(blocks, values)
+
+      # `body` is backed by the authoritative nested block list, not by the
+      # submitted scalar rich-text value. Other unbound Classic fields retain
+      # the established merge/clear semantics.
+      unbound_params = params |> Map.drop(bound_names) |> Map.drop(["body", "blocks"])
+
+      projected =
+        base_content
+        |> Map.drop(Map.keys(unbound_params))
+        |> Map.drop(["title", "status"])
+        |> Map.merge(build_content(unbound_params, schema))
+        |> Projection.project(
+          blocks,
+          new_blocks,
+          Map.put(Labels.render_opts(dataset), :style, :article)
+        )
+
+      projected_body = Map.fetch!(projected, "body")
+
+      preserved_body = historical_body_value(body_source, new_blocks, projected_body["html"])
+
+      Map.put(projected, "body", preserved_body)
+    end
+  end
+
+  defp historical_body_blocks(%{"blocks" => blocks}) when not is_list(blocks),
+    do: :malformed_top_level_blocks
+
+  defp historical_body_blocks(%{"blocks" => _blocks}), do: :none
+
+  defp historical_body_blocks(%{"body" => %{"blocks" => blocks} = body} = content)
+       when is_list(blocks) do
+    if block_maps?(blocks) do
+      {:ok, Projection.read_blocks(content), {:map, body}}
+    else
+      :malformed_historical_body
+    end
+  end
+
+  defp historical_body_blocks(%{"body" => %{"blocks" => _blocks}}),
+    do: :malformed_historical_body
+
+  defp historical_body_blocks(%{"body" => blocks} = content) when is_list(blocks) do
+    if block_maps?(blocks) do
+      {:ok, Projection.read_blocks(content), :list}
+    else
+      :malformed_historical_body
+    end
+  end
+
+  defp historical_body_blocks(_content), do: :none
+
+  defp historical_body_value({:map, body}, blocks, html) do
+    body
+    |> Map.put("blocks", blocks)
+    |> Map.put("html", html)
+  end
+
+  defp historical_body_value(:list, blocks, _html), do: blocks
+
+  defp classic_save_preserving_ambiguous_body(base_content, params, schema, bound_names \\ []) do
+    safe_params = Map.drop(params, ["body", "blocks" | bound_names])
+
+    base_content
+    |> Map.drop(Map.keys(safe_params))
+    |> Map.drop(["title", "status"])
+    |> Map.merge(build_content(safe_params, schema))
   end
 
   # The field => submitted-value map a Classic save patches onto bound blocks.
@@ -283,25 +448,29 @@ defmodule Barkpark.Content.Forms do
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
   def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
-    content = classic_save_content(base_doc, params, schema, dataset)
-    new_title = Map.get(params, "title", base_doc.title)
+    with content when is_map(content) <-
+           classic_save_content(base_doc, params, schema, dataset) do
+      new_title = Map.get(params, "title", base_doc.title)
 
-    attrs = %{
-      "doc_id" => DraftId.draft_id(DraftId.published_id(base_doc.doc_id)),
-      "title" => new_title,
-      "status" => Map.get(params, "status", base_doc.status),
-      "content" => content
-    }
+      attrs = %{
+        "doc_id" => DraftId.draft_id(DraftId.published_id(base_doc.doc_id)),
+        "title" => new_title,
+        "status" => Map.get(params, "status", base_doc.status),
+        "content" => content
+      }
 
-    validation_errors =
-      case Content.validate_document(type, new_title, content, dataset) do
-        {:error, errs} -> errs
-        _ -> %{}
+      validation_errors =
+        case Content.validate_document(type, new_title, content, dataset) do
+          {:error, errs} -> errs
+          _ -> %{}
+        end
+
+      case Content.upsert_document(type, attrs, dataset, opts) do
+        {:ok, doc} -> {:ok, doc, validation_errors}
+        {:error, _} = err -> err
       end
-
-    case Content.upsert_document(type, attrs, dataset, opts) do
-      {:ok, doc} -> {:ok, doc, validation_errors}
-      {:error, _} = err -> err
+    else
+      {:error, _reason} = error -> error
     end
   end
 end
