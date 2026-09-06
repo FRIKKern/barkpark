@@ -1024,14 +1024,29 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   overlaying the prose. The rule is the `"narrow"`-with-editor rule reused
   verbatim: every pane `:hidden` except the LAST, which survives as a 44px
   `:strip` back affordance. Measured at viewport 1024, this takes
-  `panes.visible_pane_widths_px` from `[44, 260]` to `[44]`
-  (`scripts/measurements/spd-visible-table-2026-07-20.json`), so panel goes
-  720 -> 980px, surface border-box 680, gutter 80, content 600. Divided by
-  each face's OWN probe-derived advance at 18px: 60.00ch resolved Iowan Old
-  Style (10.0000 px/ch), 54.31ch forced Georgia (11.0469 px/ch), 65.42ch
-  forced Source Serif 4 (9.1719 px/ch). The cell that ships today is
-  378.958px = 37.90 / 34.30 / 41.32ch on those same three faces, so the
-  honest headline is +220px against today's user-opened cell.
+  `panes.visible_pane_widths_px` from `[44, 260]` to `[44]`, so panel goes
+  720 -> 980px, surface border-box 680, gutter 80, content 600.
+
+  BOTH halves are measured, on DIFFERENT builds. The citation says which,
+  because for a long time it did not:
+
+    * 720 (with `[44, 260]`, a painted scrim at alpha 0.55 and a dimmed box
+      of 378.958px) is MEASURED PRE-LADDER in
+      `scripts/measurements/spd-visible-table-2026-07-20.json` and its
+      `-verify` twin, at deployed served_sha `65541e2d4`. That build does
+      NOT contain this ladder, so those two files are the BEFORE picture and
+      never a comparand — `scripts/measurements/README-visible-table-2026-07-20.md`.
+    * 980 (with `[44]`, surface border-box 680, content 600, dimmed box 0)
+      is MEASURED POST-LADDER in
+      `scripts/measurements/spd-bracketed-deployed-bracket-2026-07-22.json`
+      and its two raw runs, at deployed served_sha `bdd7dac40`, which HAS
+      this ladder as an ancestor. That artefact is the comparand baseline.
+
+  The 600px divided by each face's OWN probe-derived advance at 18px: 60.00ch
+  resolved Iowan Old Style (10.0000 px/ch), 54.31ch forced Georgia (11.0469
+  px/ch), 65.42ch forced Source Serif 4 (9.1719 px/ch). The cell this ladder
+  replaced is 378.958px = 37.90 / 34.30 / 41.32ch on those same three faces,
+  so the honest headline is +220px against the old user-opened cell.
 
   Forced Georgia's 54.31ch is an INHERITED shortfall — the default (not
   user-opened) cell is already 54.22ch and this ladder adds 0.09ch. It is

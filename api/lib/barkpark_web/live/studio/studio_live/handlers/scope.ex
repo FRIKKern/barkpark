@@ -6,6 +6,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
+  require Logger
+
   alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -43,16 +45,90 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
         #                     (document_header/1), which announces the title.
         # One-shot like focus_pane_idx: expand_pane and a width-bucket flip
         # spend it, so it never re-fires on an unrelated re-render.
+        # spd-w18-bl-select-detects-dead-destination — THE NAVIGATION RECEIPT.
+        #
+        # `push_patch/2` is fire-and-forget: it hands the destination to
+        # `handle_params/3` and returns. If that transition RAISES, the
+        # LiveView process dies before anything is flushed, so the browser
+        # keeps the old URL, the row never wears `aria-current`, and the
+        # console stays silent — a crashing destination is byte-identical to
+        # a dead button (measured: 8s of nothing clicking the …Rest row while
+        # `/studio/rest` 500'd, spd-w18-nil-icon-500).
+        #
+        # So select/2 does not merely fire. It writes a RECEIPT naming the row
+        # it just asked for, and the destination's own `handle_params/3` is
+        # the only thing that can settle it (`settle_pending_select/2` below,
+        # called from `StudioLive.handle_params/3`):
+        #
+        #   * transition returns  -> the receipt is TORN UP. Nothing else
+        #                            changes; this is every navigation today.
+        #   * transition RAISES   -> the receipt is still open, so we know
+        #                            WHICH row the user clicked, and the raise
+        #                            is converted into a named flash instead
+        #                            of a dead process. The receipt is the
+        #                            answer to "how does select learn": the
+        #                            rescue is licensed by, and names, the
+        #                            intent select recorded.
+        #
+        # The receipt is one-shot and scoped: a `handle_params` with NO open
+        # receipt (mount, back/forward, a scope switch) is NOT rescued — a
+        # crash there must still crash, because swallowing it would leave the
+        # socket un-built and the next render would die anyway, further from
+        # the cause.
         {:noreply,
          socket
          |> assign(
            focus_pane_idx: nil,
-           focus_doc_on_open: socket.assigns[:width_bucket] in ["narrow", "phone"]
+           focus_doc_on_open: socket.assigns[:width_bucket] in ["narrow", "phone"],
+           pending_select: %{id: id, path: new_path},
+           nav_error: nil
          )
          |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       _ ->
         {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Settle the receipt `select/2` wrote, by running the destination transition.
+
+  This is the OTHER half of the navigation receipt (see `select/2`). It wraps
+  the whole `handle_params` transition so the ONE navigation the user cannot
+  see the result of — a drill into a destination they have never rendered —
+  can never come back as silence.
+
+  With no open receipt the transition runs bare: this is deliberately NOT a
+  blanket rescue over `handle_params/3`.
+  """
+  def settle_pending_select(socket, transition) when is_function(transition, 1) do
+    case socket.assigns[:pending_select] do
+      nil ->
+        transition.(socket)
+
+      %{id: id} ->
+        try do
+          {:noreply, socket} = transition.(socket)
+          {:noreply, assign(socket, pending_select: nil)}
+        rescue
+          error ->
+            Logger.error(
+              "studio select: destination #{inspect(id)} raised — " <>
+                Exception.format(:error, error, __STACKTRACE__)
+            )
+
+            message = "Couldn't open \"#{id}\" — that view failed to load. Nothing was changed."
+
+            # BOTH surfaces on purpose. The flash is the human notice; the
+            # `nav_error` assign is the DOM binary the desk itself renders
+            # (`studio-nav-error`, role="alert"), so the named state is part
+            # of the LiveView's own diff — the flash lives in the layout and
+            # a patch does not re-render it.
+            {:noreply,
+             socket
+             |> assign(pending_select: nil, nav_error: message)
+             |> put_flash(:error, message)}
+        end
     end
   end
 
