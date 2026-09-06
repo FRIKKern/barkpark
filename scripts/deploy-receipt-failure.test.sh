@@ -141,7 +141,7 @@ fi
 echo "== stub mix: $* OK"
 exit 0'
 
-# flock: deploy-rebuild.sh:51 is the util-linux `flock 8` FD form, so a
+# flock: deploy-rebuild.sh uses the util-linux `flock 8` FD form, so a
 # `shift 2; exec "$@"` stub would die rc 127. Plain success is correct here.
 mk flock '#!/bin/sh
 exit 0'
