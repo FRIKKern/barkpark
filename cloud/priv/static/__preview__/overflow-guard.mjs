@@ -5682,6 +5682,79 @@ async function main() {
           kindMax: 64,
           predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
         },
+        // ── cch-w23-bl-site-domains-cruel-family: THE SITE LIST'S TWO CAPS ───
+        //    The first families added to this table since the s4 shape landed,
+        //    and they are added HERE rather than as a fourth instrument because
+        //    the shape is what they needed: a cap citation, a class from the
+        //    vocabulary, a cruelMin/kindMax axis and a person-facing predicate.
+        //
+        //    THE CORPUS HAD TO MOVE FIRST, and that is the row's clause 4:
+        //    `fleet-cruel-content` — the cruel side of every row above — shipped
+        //    `sites: []`, so BOTH caps were unreachable from this leg no matter
+        //    what was written here. `cruelFleetSites` in scenarios.mjs is that
+        //    repair; without it these two rows would fail their own "zero
+        //    NON-EMPTY selector" refusal rather than measure anything.
+        //
+        //    THE KIND CONTROL IS `mixed-fleet` AT `#sites`, the same control the
+        //    three rows above use, driven at ITS OWN hash: the scenario's
+        //    deepLink is `#fleet`, and its two ordinary sites (`acme-web` /
+        //    `acme-blog`, hosts `acme.com` / `blog.acme.com`) are what a person's
+        //    site list normally looks like — 8-13 characters against caps of 255
+        //    and 253. kindMax stays 64, the ceiling every row in this table uses.
+        {
+          hash: "#sites", view: "view-sites", sel: ".site-host", ready: "#sites-body .site-row",
+          scopes: ".site-main, .site-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#sites" },
+            { scen: "mixed-fleet", hash: "#sites" },
+          ],
+          // NOT a validate_length — which is the whole point of the row.
+          cap: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
+          // FORMAT-LEGAL, not plain CRUEL: the cruel value on this family is
+          // constrained by a REGEX as well as a length, so the admissible
+          // maximum is a CONSTRUCTION (63.63.63.61) rather than a repeat count.
+          // A length-only generator (`String.duplicate("q", 253)`, or any single
+          // 212-char label) is refused 422 by the same clause, and a builder who
+          // measured only that would file a FALSE NONE-POSSIBLE on this family
+          // (charter D269). The construction, its 422 twin at 254, and the
+          // 212-char trap are proven against the SERVER by
+          // cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs.
+          class: "FORMAT-LEGAL",
+          cruelMin: 253,
+          kindMax: 64,
+          // MEMBER-REACHABLE, re-derived by symbol on this tree rather than
+          // inherited from the filing: `post "/v1/sites/:id/domains"` calls the
+          // 2-ARITY `with_team_site(conn, fun)`, which delegates to
+          // `with_team_site(conn, :session, fun)`, whose `:session` branch is a
+          // bare `Auth.require_user(conn, [])` — NO `{:ability, "write"}`, no
+          // role gate, against sibling site routes that pass one. Re-derive:
+          // grep -n 'defp with_team_site' cloud/lib/barkpark_cloud/web/router.ex
+          // APPEND-ORDER, and it is why the fixture row is domainless at rest:
+          // `add_site_domain/2` writes `Enum.uniq(existing ++ [norm])`, both row
+          // builders paint `domains[0]`, so the cruel value is list-visible only
+          // on a site whose array was empty. Recorded beside the fixture.
+          predicate: "a person reading their site list can see WHICH HOSTNAME each site answers on — a domain any team member can attach through POST /v1/sites/:id/domains with no role gate, at a length the server itself accepts",
+        },
+        {
+          hash: "#sites", view: "view-sites", sel: ".site-name", ready: "#sites-body .site-row",
+          scopes: ".site-main, .site-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#sites" },
+            { scen: "mixed-fleet", hash: "#sites" },
+          ],
+          cap: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
+          // CRUEL, not INADMISSIBLE like `.instance-card-name` above: the site
+          // name and the site SLUG are separate cast fields (`validate_length(:slug,
+          // max: 63)` is its own clause), so a 255-char name does NOT have to
+          // survive a 63-char slug derivation the way an instance name does.
+          // Nothing truncates it, and no role gate stands in front of the create
+          // route — so this row IS a reachability claim, where the row above it
+          // in this table deliberately is not.
+          class: "CRUEL",
+          cruelMin: 255,
+          kindMax: 64,
+          predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
+        },
       ];
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
       // scenario name (the hash is the row's) or `{ scen, hash }` (its own).

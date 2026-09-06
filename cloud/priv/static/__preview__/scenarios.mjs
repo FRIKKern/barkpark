@@ -648,6 +648,44 @@ const CRUEL_SITE_NAME = atLength("site name",
 const CRUEL_SITE_SLUG = atLength("site slug",
   "acmecorporateplatformproductioncontentdeliveryedgegatewaynode01", 63);
 // 253 = validate_domains/1's cap, as 63 + 63 + 63 + 61 unbroken labels.
+//
+// cch-w23-bl-site-domains-cruel-family — THE CONSTRUCTION IS THE FIXTURE, AND
+// A LENGTH-ONLY GENERATOR FILES A FALSE REFUSAL ON IT (charter D269).
+//
+//   THE CAP IS NOT A `validate_length`. `validate_domains/1` is a
+//   `validate_change(changeset, :domains, …)` that rejects any entry failing
+//   `String.length(d) <= 253 and Regex.match?(@domain_format, d)`
+//   (registry/site.ex — re-derive by symbol:
+//   `grep -n 'defp validate_domains\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex`).
+//   A census that greps `validate_length` over site.ex sees the 255-char NAME
+//   and NOTHING here — the census blindness D252 names, on this epic's best
+//   member-reachable family.
+//
+//   WHY THE FOUR LABELS, AND NOT `String.duplicate("q", 253)`. A cruel string
+//   on this family must be a LEGAL HOSTNAME. `@domain_format` is
+//   `^label(\.label)+$` with `label = [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` — so
+//   at least one dot is MANDATORY and no label may exceed 63 octets. A
+//   212-character SINGLE label (the shape a length-only generator emits: one
+//   token sized to bite the widest driven viewport) is refused 422 by the very
+//   same clause, and a builder who measured only that would record a FALSE
+//   NONE-POSSIBLE on the family. The ADMISSIBLE MAXIMUM is
+//   `63 + "." + 63 + "." + 63 + "." + 61 = 253` -> 200, persisting as `[253]`;
+//   254 (the same shape with a 62-char tail) -> 422. Both halves are PROVEN
+//   against the server, not assumed, by
+//   cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs,
+//   which reads THESE BYTES for its labels so a retune here reds there.
+//
+//   THE APPEND-ORDER REFUSAL, AND WHY EVERY CRUEL SITE BELOW IS DOMAINLESS
+//   AT REST. `Registry.add_site_domain/2` writes `Enum.uniq(existing ++ [norm])`
+//   (registry.ex — `grep -n 'def add_site_domain' cloud/lib/barkpark_cloud/registry.ex`;
+//   the filing cited :4818, it is :6584/:6602 on this tree), so a member's
+//   cruel domain lands at `domains[N]`, LAST. Both row builders paint
+//   `(s.domains && s.domains[0])` and nothing else (app.js `globalSiteRow` /
+//   `siteRow`), so on a site that already answers on `acme.com` the cruel value
+//   is INVISIBLE to the list. The family is cruel-REACHABLE in a list view only
+//   on a site whose `domains` was `[]` when the member pushed — so every cruel
+//   site fixture here carries the cruel domain ALONE, at index 0, which is the
+//   post-state of exactly that site.
 const CRUEL_SITE_DOMAIN = atLength("site domain", [
   CRUEL_SITE_SLUG,
   "northerneuropeanregionalstaticassetoriginforacmecommerceeu0231x",
@@ -920,6 +958,56 @@ const sitesListRows = [
     github_webhook_configured: true,
     current_deployment_id: depOf(9),
     last_deployment: lastDeploy("live", "manual", 1200),
+  }),
+];
+
+// ── cch-w23-bl-site-domains-cruel-family: THE SITE HALF OF `fleet-cruel-content`
+//
+// CLAUSE 4, VERBATIM, AND THIS LIST IS THE REPAIR. Before this diff the cruelty
+// ledger's only cruel-NAMED corpus (`fleet-cruel-content`, the fixture every
+// CRUEL_ROUTES row uses as its cruel side) shipped `sites: []`. So the two site
+// caps — `domains[]` at 253 and `name` at 255 — COULD NOT BE MADE CRUEL by any
+// route row at all: `#sites` on that scenario rendered an empty list, and the
+// leg's own "zero NON-EMPTY selector" refusal is the only thing that would have
+// fired. Across the other 100+ scenarios the longest domain is 15 characters
+// (`guides.acme.com`) and the longest site name 13 (`acme-previews`).
+//
+// TWO ROWS, AND THE SECOND ONE IS THE REASON THE FIRST PROVES ANYTHING. The
+// cruel row carries the 255-char name and the 253-char FORMAT-LEGAL domain; the
+// kind neighbour sits in the SAME DOM with an 8-char name and a 12-char host, so
+// a bound that fixes the cruel row by shredding ordinary content is visible in
+// the same cell rather than in a different fixture's run — the standing doctrine
+// of this scenario (see its header) applied to the site list.
+//
+// DOMAINLESS AT REST, ON PURPOSE (the append-order refusal recorded above
+// CRUEL_SITE_DOMAIN): `add_site_domain/2` appends, and both row builders paint
+// `domains[0]` only, so a cruel domain is list-visible ONLY on a site that had
+// none. `domains` here is the cruel value ALONE — the post-state of a member
+// pushing it at a site whose array was `[]`.
+//
+// `barkpark_id` DEFAULTS TO `IDS.liveInstance` (see `site()`), which is
+// deliberate and load-bearing: the CRUEL_ROUTES detail row drives THIS scenario
+// at `#instance/<…c2>` (the FAILED box), whose Sites card filters by instance —
+// so these rows paint on `#sites` and on the LIVE box's workspace, and never on
+// the screen that row measures.
+const cruelFleetSites = [
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cb",
+    name: CRUEL_SITE_NAME,
+    slug: CRUEL_SITE_SLUG,
+    domains: [CRUEL_SITE_DOMAIN],
+    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(9),
+    last_deployment: lastDeploy("live", "manual", 1200),
+  }),
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cc",
+    name: "acme-docs", slug: "acme-docs", domains: ["docs.acme.com"],
+    framework: "astro", github_repo: "acme/docs", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(3),
+    last_deployment: lastDeploy("live", "content-auto", 600),
   }),
 ];
 
@@ -4099,15 +4187,21 @@ export const SCENARIOS = {
   // above) into `.status-pill-detail`, a host the two typed strings above never
   // reach. Its name and slug are deliberately KIND so the error is the only
   // variable, and `liveInstance` stays the kind control for both axes.
+  //
+  // cch-w23-bl-site-domains-cruel-family adds the SITE half (`cruelFleetSites`,
+  // derived above): this fixture is the cruel side of EVERY CRUEL_ROUTES row,
+  // and it shipped `sites: []` — so the two site caps could not be made cruel by
+  // any route row. `#sites` on this scenario now paints the 255-char site NAME
+  // and the 253-char FORMAT-LEGAL domain beside an ordinary neighbour.
   "fleet-cruel-content": {
-    label: "Cruel content — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all server-legal",
+    label: "Cruel content — a 253-char custom domain, a 255-char name, a 512-char single-token provision error and the site list's own 255/253 pair, all server-legal",
     authed: true,
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
-      sites: [],
+      sites: cruelFleetSites,
       audit: [],
     },
   },
