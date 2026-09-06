@@ -1351,6 +1351,19 @@ func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit 
 	if d.Unmetered > 0 {
 		out.outf("  %d row(s) the clock could not reach (live, with no became_live_at) — counted here, never dropped from the denominator", d.Unmetered)
 	}
+	// CANCELLED prints on the same terms as UNMETERED: counted, never dropped,
+	// and explicitly NOT part of the still-waiting cohort above. A reader who
+	// sees a small still-waiting number must be able to see the rows that left
+	// it, or the count is quietly flattering.
+	if d.Cancelled > 0 {
+		cancelledSites := 0
+		for _, s := range d.Sites {
+			if s.Cancelled > 0 {
+				cancelledSites++
+			}
+		}
+		out.outf("  %d row(s) cancelled by hand across %d site(s) — counted here, never waiting: nobody is waiting on a deploy a human stopped", d.Cancelled, cancelledSites)
+	}
 
 	waiting := make([]cloudclient.DeployDeliverySite, 0, len(d.Sites))
 	for _, s := range d.Sites {

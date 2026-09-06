@@ -3956,12 +3956,127 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert d.p50.reason =~ "at least 100.0s"
     end
 
+    # ── dr-w11-bl-cancelled-rows-count-as-waiting ─────────────────────────
+    #
+    # Before this cohort existed, EVERY non-live row was a candidate wait, so a
+    # deploy a human deliberately stopped read as "still waiting" — and
+    # `dr-w11-s5-waiting-alert` is specified to read exactly this cohort.
+
+    test "a site whose ONLY non-live row is CANCELLED appears, and is NOT still waiting",
+         %{site: site} do
+      # The whole window for this site is one deploy a human stopped. No live
+      # row, no live mark, nothing in flight.
+      deployments!(site, [
+        %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 100, :second)}
+      ])
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      # THE SITE STILL APPEARS, BY NAME. `cancelled` is the `unmetered`
+      # precedent — counted, never dropped — so the row is visible in the
+      # census; it is simply not an observation.
+      site_row = Enum.find(d.sites, &(&1.site_id == site.id))
+      assert site_row, "a cancelled-only site must still appear in sites[]"
+
+      refute site_row.still_waiting
+      assert site_row.censored == 0
+      assert site_row.cancelled == 1
+      assert site_row.sample == 0
+      assert site_row.delivered == 0
+      assert site_row.oldest_waiting_seconds == nil
+
+      # …and the fleet numbers say the same thing: the row is OUT of the
+      # measured population and IN its own bucket.
+      assert d.sample == 0
+      assert d.censored.count == 0
+      assert d.censored.still_waiting_at_least_seconds == nil
+      assert d.cancelled == 1
+    end
+
+    test "a cancelled row is NOT delivered by a later live mark on the same site",
+         %{site: site} do
+      # The site DOES reach the web later. That publish files its own row and
+      # earns its own delivered observation; the cancelled row is not credited
+      # with it, because nobody was waiting on content that stopped shipping.
+      deployments!(site, [
+        %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 100, :second)},
+        %{
+          status: "live",
+          inserted_at: DateTime.add(@dw_from, 200, :second),
+          became_live_at: DateTime.add(@dw_from, 260, :second)
+        }
+      ])
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+      site_row = Enum.find(d.sites, &(&1.site_id == site.id))
+
+      # ONE observation — the live row — not two.
+      assert d.sample == 1
+      assert site_row.sample == 1
+      assert site_row.delivered == 1
+      assert site_row.censored == 0
+      assert site_row.cancelled == 1
+      refute site_row.still_waiting
+
+      # The population is ONE observation, so every quantile refuses on the
+      # SAMPLE — and the number it names is 1, not 2. A cancelled row that had
+      # been credited to the later live mark would have made this read 2.
+      assert d.max.refused
+      assert d.max.sample == 1
+      assert d.max.reason == "sample 1 below min_sample 200"
+      assert d.censored.count == 0
+    end
+
+    test "the still-waiting cohort delivery/3 PUBLISHES cannot contain a cancelled-caused row",
+         %{site: waiting_site} do
+      # C2's fixture. `dr-w11-s5-waiting-alert` is NOT BUILT YET, so this cannot
+      # drive an alert end to end; the honest proof available today is over the
+      # cohort S5's own C0 obliges the alert to read — the `censored` node and
+      # the `still_waiting` sites of THIS envelope. Nothing else is claimed: if
+      # S5 ever computes its own cohort instead of reading this one, that is a
+      # new hole and this fixture will not see it.
+      {_user, team} = user_team()
+      cancelled_site = site_fixture(team)
+
+      # A GENUINE waiter: in flight, no live mark. The alert SHOULD see this.
+      deployments!(waiting_site, [
+        %{status: "in_flight", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
+      ])
+
+      # A site whose every row was stopped by hand. The alert must NEVER see it.
+      deployments!(cancelled_site, [
+        %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 10, :second)},
+        %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 20, :second)}
+      ])
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      # The cohort is EXACTLY the genuine waiter — named, not counted.
+      cohort = for s <- d.sites, s.still_waiting, do: s.site_id
+      assert cohort == [waiting_site.id]
+      refute cancelled_site.id in cohort
+
+      # And the fleet-level cohort agrees: one row waiting, and its lower bound
+      # is the in-flight row's, never the cancelled rows' older, larger one.
+      assert d.censored.count == 1
+      assert d.censored.still_waiting_at_least_seconds == 85_400.0
+
+      # NOT DROPPED. The two cancelled rows are still on the envelope, in the
+      # bucket that says what they are, so the census cannot read rosier than
+      # the fleet is.
+      assert d.cancelled == 2
+      cancelled_row = Enum.find(d.sites, &(&1.site_id == cancelled_site.id))
+      assert cancelled_row.cancelled == 2
+      refute cancelled_row.still_waiting
+    end
+
     test "the emitted key set is PINNED — the Go reader decodes every key", %{site: site} do
       delivery_40pct!(site)
       d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
 
       assert Enum.sort(Map.keys(d)) == [
                :as_of,
+               :cancelled,
                :censored,
                :clock,
                :delivered,
@@ -3998,6 +4113,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       assert Enum.sort(Map.keys(hd(d.sites))) == [
                :as_of,
+               :cancelled,
                :censored,
                :delivered,
                :oldest_waiting_seconds,

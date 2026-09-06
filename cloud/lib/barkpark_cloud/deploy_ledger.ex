@@ -2127,6 +2127,13 @@ defmodule BarkparkCloud.DeployLedger do
   live deliveries and ZERO non-null `content_rev`, so a naive key filter would
   silently omit an entire customer site.
 
+  Rows nobody is WAITING on — `status == "cancelled"`, a deploy a human
+  deliberately stopped — are reported the same way: an explicit `cancelled`
+  count at both census and per-site level. They are not observations, so they
+  are neither delivered nor censored, and the still-waiting cohort this
+  envelope publishes cannot contain one by construction
+  (`dr-w11-bl-cancelled-rows-count-as-waiting`).
+
   Every percentile is an INSEPARABLE node — the value cannot travel without its
   window width, its sample and its censored count:
 
@@ -2252,6 +2259,9 @@ defmodule BarkparkCloud.DeployLedger do
           censored |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end)
       },
       unmetered: Enum.reduce(site_nodes, 0, &(&1.unmetered + &2)),
+      # COUNTED, NEVER DROPPED — the `unmetered` precedent, applied to rows a
+      # human stopped. See `site_delivery/3`.
+      cancelled: Enum.reduce(site_nodes, 0, &(&1.cancelled + &2)),
       min_sample: @min_sample,
       sites: Enum.take(ranked, site_limit),
       # THE SAME TRUNCATION MARKER the census node carries. `site_limit` has
@@ -2277,8 +2287,29 @@ defmodule BarkparkCloud.DeployLedger do
     # UNMETERED, not filtered: a `live` row with no `became_live_at` reached the
     # web at a time this ledger cannot name. It is counted and reported; it is
     # never quietly deleted from the denominator.
-    {unmetered, keyed} =
+    {unmetered, metered} =
       Enum.split_with(rows, &(&1.status == "live" and is_nil(&1.became_live_at)))
+
+    # CANCELLED IS ITS OWN BUCKET (dr-w11-bl-cancelled-rows-count-as-waiting),
+    # handled exactly the way `unmetered` is handled one clause up: counted,
+    # never dropped, and never an observation.
+    #
+    # Before this split every non-live row was a candidate WAIT — delivered by
+    # the site's next live mark, CENSORED ("still waiting", lower bound
+    # `as_of - inserted_at`) when there was none. A deploy a human deliberately
+    # stopped therefore read as still waiting, and `dr-w11-s5-waiting-alert`
+    # reads exactly that cohort: it would have emailed a team "STILL WAITING >=
+    # 3d" about a deploy the team itself cancelled. Nobody is waiting on a
+    # deploy a human stopped. The excluded rows are COUNTED here, so the
+    # denominator still names them and the census cannot read rosier than the
+    # fleet is.
+    #
+    # A cancelled row whose site HAS a later live mark is still just
+    # `cancelled` — deliberately NOT delivered. That later mark belongs to some
+    # OTHER publish, which files its own row and earns its own delivered
+    # observation; crediting the cancelled row with it would count one delivery
+    # twice and would put a duration on content that stopped trying to ship.
+    {cancelled, keyed} = Enum.split_with(metered, &(&1.status == "cancelled"))
 
     observations = Enum.map(keyed, &observe(&1, live_marks, as_of))
     still_waiting = Enum.filter(observations, & &1.censored)
@@ -2289,6 +2320,7 @@ defmodule BarkparkCloud.DeployLedger do
       delivered: length(observations) - length(still_waiting),
       censored: length(still_waiting),
       unmetered: length(unmetered),
+      cancelled: length(cancelled),
       still_waiting: still_waiting != [],
       oldest_waiting_seconds: still_waiting |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end),
       as_of: as_of,
