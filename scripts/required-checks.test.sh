@@ -2172,7 +2172,96 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
         --expect-unrendered "Sobelow baseline rows still hash to their own fingerprint (blocking)"
         --expect-unrendered "Test (Elixir 1.18.1 / OTP 27.0)"
-        --expect-unrendered "Validation perf bench (median-of-5, alarm >100ms) (27.0, 1.18.1)")
+        --expect-unrendered "Validation perf bench (median-of-5, alarm >100ms) (27.0, 1.18.1)"
+        # ── THE CENSUS PASS, 2026-09-06 (task-dda2cf022ee57420) ──────────────
+        # 68 exclusion rows landed in one commit, giving a written status to every
+        # check-run name rendered on the last 10 merged PR heads. NONE of them can
+        # be reproduced from this frozen pair, and the causes are the three the
+        # block above already enumerates: jobs whose workflow is paths-filtered or
+        # pull_request-only (shell-harnesses.yml, architecture.yml, reland-check.yml,
+        # go-format.yml, the studio/sheet-grid/paper-editor trio), jobs that did not
+        # exist at either frozen head (compose-smoke.yml, 2026-08-09), and the
+        # SKIPPED-SHAPE twins — a matrixed job that its job-level `if:` skips
+        # publishes its BARE `name:` with no matrix suffix, a second rendered name
+        # per matrixed job that no sample of settled main heads reliably produces.
+        # Listed one at a time, as the block above requires: a row that stops being
+        # unrenderable reds this file rather than widening a blanket waiver.
+        --expect-unrendered "Cloud control-plane (compile + format)"
+        --expect-unrendered "Cloud control-plane (test)"
+        --expect-unrendered "Validation perf bench (median-of-5, alarm >100ms)"
+        --expect-unrendered "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
+        --expect-unrendered "Dependency CVE audit (mix_audit over mix.lock, non-blocking)"
+        --expect-unrendered "Format (mix format --check-formatted, diff-scoped) (27.0, 1.19.5)"
+        --expect-unrendered "Format (mix format --check-formatted, diff-scoped)"
+        --expect-unrendered "Test (Elixir 1.18.4 / OTP 27.0)"
+        # single-quoted: the name carries a literal `${{ … }}` — in double quotes
+        # bash reads it as a parameter expansion and dies with `bad substitution`.
+        --expect-unrendered 'Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})'
+        --expect-unrendered "Prod compile gate (Elixir 1.18.4 / OTP 27.0)"
+        # single-quoted: the name carries a literal `${{ … }}` — in double quotes
+        # bash reads it as a parameter expansion and dies with `bad substitution`.
+        --expect-unrendered 'Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})'
+        --expect-unrendered "Billing tier floor (rendered)"
+        --expect-unrendered "Overflow guard (rendered)"
+        --expect-unrendered "Modal CSSOM oracle (rendered)"
+        --expect-unrendered "Go gate"
+        --expect-unrendered "go vet + test"
+        --expect-unrendered "Dispatch (Go paths)"
+        --expect-unrendered "Compose smoke"
+        --expect-unrendered "Smoke arms (census, green boot, refusal boot — one image build)"
+        --expect-unrendered "Dispatch (required-checks inputs)"
+        --expect-unrendered "Every workflow job has runs-on+steps or uses"
+        --expect-unrendered "Head does not silently revert main (stale tree)"
+        --expect-unrendered "PR meta gates"
+        --expect-unrendered "Keep the claim alive while this PR is open"
+        --expect-unrendered "Renew every open PR's claim (20-min sweep)"
+        --expect-unrendered "Report main-push failure to a human"
+        --expect-unrendered "gofmt -l (advisory)"
+        --expect-unrendered "Re-land advisory (already-landed overlap)"
+        --expect-unrendered "Boundary gate"
+        --expect-unrendered "Dispatch (shell-harness paths)"
+        --expect-unrendered ".claude/workflows engines load on a machine that is not this one"
+        --expect-unrendered "a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)"
+        --expect-unrendered "already-fixed / branch-owner / pr-overlap harnesses"
+        --expect-unrendered "bin/barkpark up/stop differential selftest"
+        --expect-unrendered "cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)"
+        --expect-unrendered "compose-smoke dispatcher covers the census roots"
+        --expect-unrendered "console-path-escape-check.sh classification matrix"
+        --expect-unrendered "deploy-convergence-check.sh ancestry + strand matrix"
+        --expect-unrendered "deploy-reliability-exit-run.sh mutation matrix"
+        --expect-unrendered "doc-gates.yml push.paths == pull_request.paths"
+        --expect-unrendered "doctor-matrix"
+        --expect-unrendered "merge-gate-bridge"
+        --expect-unrendered "merge-verb-table"
+        --expect-unrendered "epic-zero-criteria-census.sh self-test"
+        --expect-unrendered "every workflow path filter matches something"
+        --expect-unrendered "file-ci-failure-issue.sh behaviour matrix"
+        --expect-unrendered "install-cli / fetch-prebuilt / site-runtime-install harnesses"
+        --expect-unrendered "landed-mark.sh selftest + idempotency mutation"
+        --expect-unrendered "node-test-floor.mjs mutation matrix"
+        --expect-unrendered "orphan harnesses (local-update · pdf-efficiency-proof · refute-on-absence)"
+        --expect-unrendered "PDS census / parity / scratch-target harnesses"
+        --expect-unrendered "pds-live-hetzner-placement-group.sh --selftest-offline"
+        --expect-unrendered "registration-sample.sh mutation matrix"
+        --expect-unrendered "reland-check / fleet-run-verdict / paper-reader-audit harnesses"
+        --expect-unrendered "release-scan.sh CI-verdict derivation"
+        --expect-unrendered "seal-run.sh probe matrix"
+        --expect-unrendered "selftest wiring census"
+        --expect-unrendered "shell-harnesses dispatcher partition + fixture matrix"
+        --expect-unrendered "task-lease-renew response classification"
+        --expect-unrendered "webhook-fanout-watch.sh mutation matrix"
+        --expect-unrendered "weekly-changelog-backfill.test.sh drift check"
+        --expect-unrendered "Round-trip smoke + bundle freshness"
+        --expect-unrendered "Sheet-grid hook unit harness"
+        --expect-unrendered "Studio instrument selftests"
+        --expect-unrendered "Studio journey — self-test (fixtures, no network)"
+        --expect-unrendered "Studio journey — deployed (report mode, gates nothing)"
+        --expect-unrendered "Dependency CVE audit (mix_audit over mix.lock, blocking)"
+        --expect-unrendered "Dependency CVE audit (mix_audit over mix.lock, non-blocking) (27.0, 1.18.1)"
+        # Landed between this PR's first sample and its rebase; the census clause
+        # caught them, which is the whole point of the clause.
+        --expect-unrendered "Crown reconcile"
+        --expect-unrendered "Crown reconcile harness")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

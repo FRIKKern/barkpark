@@ -57,7 +57,7 @@
     },
     {
       "context": "Dependency CVE audit (mix_audit over mix.lock, blocking) (27.0, 1.18.1)",
-      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: an upstream `needs` of `Security gate`, which is excluded — promoting the leaves of a disqualified aggregator re-implements it at leaf granularity and pins its internals as a contract. CORRECTED IN REVIEW 2026-07-31: at generation time (e34031104) this row read 'S5 RED ON MAIN', which was true of that window and is no longer true of main — 95ace3150 landed the req bump and this job is green. The row is not deleted, it is RE-GROUNDED: it is held out today as a leaf, not as a red."
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: an upstream `needs` of `Security gate`, which is excluded — promoting the leaves of a disqualified aggregator re-implements it at leaf granularity and pins its internals as a contract. CORRECTED IN REVIEW 2026-07-31: at generation time (e34031104) this row read 'S5 RED ON MAIN', which was true of that window and is no longer true of main — 95ace3150 landed the req bump and this job is green. The row is not deleted, it is RE-GROUNDED: it is held out today as a leaf, not as a red. RETIRED NAME as of this commit: the job's `name:` in security.yml now reads `non-blocking` instead of `blocking`, because the word claimed a merge authority the check did not have. This row is KEPT, not rewritten: every head merged before the rename still renders the old string, and a census that keys on the string would red on those heads if the row went away. Delete it once no sampled head can render it."
     },
     {
       "context": "Doc budgets + anchors",
@@ -81,7 +81,7 @@
     },
     {
       "context": "Security gate",
-      "reason": "S7 EXCLUDED BY DECISION. CORRECTED IN REVIEW 2026-07-31 — this row was generated as 'S5 RED ON MAIN' from a window (e34031104) where that was true, and the ground EVAPORATED under the wave: 95ace3150 landed the req bump from outside this epic and `Security gate` is green on main head 6e53d2782. Re-running this generator against the post-bump window PROMOTES the name into required protection — measured, not feared — so the hold was moved into the generator's hand-maintained S7 list. The ground is now forward-looking rather than historical: its sole blocking upstream is `mix-audit`, which runs mix_audit against a LIVE advisory database, so a CVE published tomorrow reds it on every open PR with no change to this repo — a permanently correct red that no PR can clear, which is exactly what branch protection must never pin. Registering it needs its own wave: a documented policy for who clears a fleet-wide advisory red, plus a fresh deadlock sweep. Its leaves go down WITH it via S6."
+      "reason": "S7 EXCLUDED BY DECISION: CORRECTED IN REVIEW 2026-07-31 — this row was generated as 'S5 RED ON MAIN' from a window (e34031104) where that was true, and the ground EVAPORATED under the wave: 95ace3150 landed the req bump from outside this epic and `Security gate` is green on main head 6e53d2782. Re-running this generator against the post-bump window PROMOTES the name into required protection — measured, not feared — so the hold was moved into the generator's hand-maintained S7 list. The ground is now forward-looking rather than historical: its sole blocking upstream is `mix-audit`, which runs mix_audit against a LIVE advisory database, so a CVE published tomorrow reds it on every open PR with no change to this repo — a permanently correct red that no PR can clear, which is exactly what branch protection must never pin. Registering it needs its own wave: a documented policy for who clears a fleet-wide advisory red, plus a fresh deadlock sweep. Its leaves go down WITH it via S6."
     },
     {
       "context": "Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)",
@@ -161,7 +161,287 @@
     },
     {
       "context": "PR task gate self-test",
-      "reason": "S7 EXCLUDED BY DECISION, and it must NEVER be promoted: pr-task-gate.yml job `pr-task-gate-selftest` is the hermetic harness for `PR references an active task` — the only required context any guard script in this repo publishes — and the workflow's own comment records why the harness is deliberately NOT a `needs:` of that gate: GitHub counts a `skipped` conclusion as SATISFYING a required context (D19), so wiring the harness upstream would let a RED harness turn the gate itself into a green required check. Requiring the harness NAME does not answer that hazard either; it only adds a second red-capable name to branch protection with no authority over what the gate decides. So the safe direction is to CLASSIFY the name here, never to promote it. WHY IT WAS UNCLASSIFIED RATHER THAN OVERLOOKED, and this is a defect in the generator's census, not in anyone's reading: pr-task-gate.yml is `on: pull_request:` with no push arm, while both `generated_from_shas` are main PUSH heads — so neither this name NOR `PR references an active task` renders on the sampled window, and the census is structurally blind to EVERY pull_request-only check name. The required context itself survives only via this file's MERGE-not-overwrite rule. THIS ROW DOES NOT CLOSE THAT GAP and must not be read as closing it: an S8 PULL-REQUEST-ONLY stage, or sampling a PR head instead of only push shas, is tracked as cgsi-bl-pr-task-gate-selftest-unclassified, whose SECOND criterion stays open. This row answers only its first — that the name carries an explicit ledger entry naming why it is not required. It also restores one of the four names the gofmt row above records as having SILENTLY LEFT this array on a regeneration; the other three (Re-land advisory, Filebase aesthetics gate, Boundary gate) are still unledgered and are NOT claimed by this row. ADDED BY HAND 2026-09-01 (cgsiw-bl-compose-smoke-dispatch-no-ledger-row): no stage can re-derive it from push heads, so the next run REFUSES BY NAME until it is acknowledged with `--expect-unrendered 'PR task gate self-test'`."
+      "reason": "S7 EXCLUDED BY DECISION: and it must NEVER be promoted: pr-task-gate.yml job `pr-task-gate-selftest` is the hermetic harness for `PR references an active task` — the only required context any guard script in this repo publishes — and the workflow's own comment records why the harness is deliberately NOT a `needs:` of that gate: GitHub counts a `skipped` conclusion as SATISFYING a required context (D19), so wiring the harness upstream would let a RED harness turn the gate itself into a green required check. Requiring the harness NAME does not answer that hazard either; it only adds a second red-capable name to branch protection with no authority over what the gate decides. So the safe direction is to CLASSIFY the name here, never to promote it. WHY IT WAS UNCLASSIFIED RATHER THAN OVERLOOKED, and this is a defect in the generator's census, not in anyone's reading: pr-task-gate.yml is `on: pull_request:` with no push arm, while both `generated_from_shas` are main PUSH heads — so neither this name NOR `PR references an active task` renders on the sampled window, and the census is structurally blind to EVERY pull_request-only check name. The required context itself survives only via this file's MERGE-not-overwrite rule. THIS ROW DOES NOT CLOSE THAT GAP and must not be read as closing it: an S8 PULL-REQUEST-ONLY stage, or sampling a PR head instead of only push shas, is tracked as cgsi-bl-pr-task-gate-selftest-unclassified, whose SECOND criterion stays open. This row answers only its first — that the name carries an explicit ledger entry naming why it is not required. It also restores one of the four names the gofmt row above records as having SILENTLY LEFT this array on a regeneration; the other three (Re-land advisory, Filebase aesthetics gate, Boundary gate) are still unledgered and are NOT claimed by this row. ADDED BY HAND 2026-09-01 (cgsiw-bl-compose-smoke-dispatch-no-ledger-row): no stage can re-derive it from push heads, so the next run REFUSES BY NAME until it is acknowledged with `--expect-unrendered 'PR task gate self-test'`."
+    },
+    {
+      "context": "Cloud control-plane (compile + format)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. cloud.yml job `compile`, a `needs:` of `Cloud gate` (required). SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Cloud control-plane (test)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. cloud.yml job `test`, a `needs:` of `Cloud gate` (required). SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Validation perf bench (median-of-5, alarm >100ms)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `validation-perf`, a `needs:` of `Elixir gate` (required). SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Sobelow static analysis (regression gate, baseline .sobelow-skips)",
+      "reason": "S2 ADVISORY: security.yml job 'sobelow' carries continue-on-error:true — needs.<job>.result reads success even when it failed, and `Security gate` deliberately does NOT list it in `needs` so an advisory red is never laundered into the aggregator. SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Dependency CVE audit (mix_audit over mix.lock, non-blocking)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: security.yml job `mix-audit` is an upstream `needs` of `Security gate`, which is excluded — promoting the leaves of a disqualified aggregator re-implements it at leaf granularity. RENAMED IN THIS COMMIT from '… , blocking)': the job has no continue-on-error, so a red DOES fail `Security gate` — but `Security gate` is not a required context, so no merge is stopped anywhere. A name that advertises merge authority it does not have is worse than a silent one: a reader scanning the checks list saw the word and reasonably concluded CVEs were gated. The POLICY question (should a CVE audit gate a merge?) is owner-queue item 47 / cch-w12-bl-cve-gate-is-oracle-blind and is untouched here; if it lands 'yes', the honest fix is to register `Security gate`, and this name goes back to saying so. SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Format (mix format --check-formatted, diff-scoped) (27.0, 1.19.5)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `format` is TODAY a `needs:` of `Elixir gate` and carries NO continue-on-error. RE-GROUNDED, not duplicated: the committed row for 'Format (mix format --check-formatted, advisory) (27.0, 1.18.1)' describes a job that no longer exists under that name — it was S2 ADVISORY when it was continue-on-error and rendered on the 1.18.1 matrix. The old row is left standing as the historical record of what was excluded and why; THIS row is the live status of the name that renders today."
+    },
+    {
+      "context": "Format (mix format --check-formatted, diff-scoped)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `format`. SKIPPED-SHAPE NAME, measured on the 10 merged heads this PR sampled: a matrixed job that its job-level `if:` SKIPS publishes a check run under its BARE `name:` with NO matrix suffix, while the same job publishes `<name> (<otp>, <elixir>)` when it runs. Every matrixed job therefore renders TWO distinct context names across a PR population, and this ledger only ever carried the run-shape one. Both shapes get a row because branch protection and any census key on the STRING."
+    },
+    {
+      "context": "Test (Elixir 1.18.4 / OTP 27.0)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-test`, a `needs:` of `Elixir gate` (required). The committed row for 'Test (Elixir 1.18.1 / OTP 27.0)' names the matrix pin that USED to render; the matrix reads 1.18.4 today, so that row no longer matches any rendered name. Both are kept: the string is what protection keys on."
+    },
+    {
+      "context": "Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. This is the UNINTERPOLATED name elixir.yml's `mix-test` publishes when its job-level `if:` skips it: a `name:` template that REFERENCES `matrix.` is emitted verbatim rather than suffixed. The file's own `_readme` already names this shape as the reason an aggregator, never a leaf, is the only safe thing to require; it had no ledger row until now."
+    },
+    {
+      "context": "Prod compile gate (Elixir 1.18.4 / OTP 27.0)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-prod-compile`, a `needs:` of `Elixir gate` (required). Same matrix drift as `mix-test`: the committed 'Prod compile gate (Elixir 1.18.1 / OTP 27.0)' row names a pin that no longer renders."
+    },
+    {
+      "context": "Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. The uninterpolated skipped-shape name of elixir.yml's `mix-prod-compile`; see the `mix-test` twin above."
+    },
+    {
+      "context": "Billing tier floor (rendered)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `tier-floor-render`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
+    },
+    {
+      "context": "Overflow guard (rendered)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `overflow-guard`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
+    },
+    {
+      "context": "Modal CSSOM oracle (rendered)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `modal-oracle`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
+    },
+    {
+      "context": "Go gate",
+      "reason": "S7 EXCLUDED BY DECISION: go-tests.yml's aggregator (`go-gate`, `if: always()` over `needs: [changes, test]`). It is the RIGHT shape to require — a decide-over-needs aggregator on a workflow with no `pull_request: paths:` filter, so it renders on every head — and it is held out here only because registering a context is a merge-path change that needs its own deadlock sweep, not because a green here means nothing. Written down so the next reader sees a decision instead of a gap; promoting it is a separate, reversible commit."
+    },
+    {
+      "context": "go vet + test",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: go-tests.yml job `test`, an upstream `needs` of `Go gate`, which this file excludes — promoting the leaves of a disqualified aggregator re-implements it at leaf granularity and pins its internals as a contract."
+    },
+    {
+      "context": "Dispatch (Go paths)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: go-tests.yml job `changes`, the always-running path dispatcher upstream of `Go gate`, which this file excludes. It also carries the hazard the `Dispatch (compose-smoke paths)` row spells out: a dispatcher's green certifies only that a changed-path verdict was computed, never that anything ran."
+    },
+    {
+      "context": "Compose smoke",
+      "reason": "S7 EXCLUDED BY DECISION: compose-smoke.yml's aggregator (`compose-gate`). Registering it is an explicit human gate already tracked as shb-bl-register-compose-smoke, which the workflow that created the name deliberately did not take. This row does NOT take it either — it records that the hold is a decision. NOTE for whoever lands that task: the committed `Dispatch (compose-smoke paths)` row is S7 precisely because `Compose smoke` was in neither list; with this row present that leaf is now S6, and its own text already predicts the re-grounding."
+    },
+    {
+      "context": "Smoke arms (census, green boot, refusal boot — one image build)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: compose-smoke.yml job `green-arm`, an upstream `needs` of `Compose smoke`, which this file excludes. It is the job that actually builds the image and boots it; it is enforced through the aggregator the day the aggregator is registered."
+    },
+    {
+      "context": "Dispatch (required-checks inputs)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: required-checks-drift.yml job `changes`, the path dispatcher upstream of `Required-check spec gate` and `Required-check spec drift (advisory)`, both of which this file already excludes."
+    },
+    {
+      "context": "Every workflow job has runs-on+steps or uses",
+      "reason": "S7 EXCLUDED BY DECISION: required-checks-drift.yml job `workflow-job-shape` — a standalone shape guard (no aggregator above it) that refuses a workflow job missing `runs-on`+`steps` or `uses`, the shape GitHub renders as a 0-second 'workflow file issue' with ZERO jobs. Genuinely load-bearing and genuinely unregistered: it is held out for the same reason as its siblings in this workflow, that this file's own gate (`Required-check spec gate`) is itself excluded, and registering one job of an unregistered workflow is the leaf-granularity trap S6 names."
+    },
+    {
+      "context": "Head does not silently revert main (stale tree)",
+      "reason": "S7 EXCLUDED BY DECISION: required-checks-drift.yml job `stale-tree` — it reds when a PR head would revert commits already on main (a branch cut from a stale tree). Same standing as the shape guard above: unregistered by decision, not by oversight, and its workflow's own gate is excluded."
+    },
+    {
+      "context": "PR meta gates",
+      "reason": "S7 EXCLUDED BY DECISION: pr-meta.yml job `pr-meta`, a fold of several small PR-shape predicates into one unfiltered job (the file's header explains the fold as the alternative to eleven more paths-filtered workflows). It renders on every PR and is structurally requireable; held out here as a decision, pending its own deadlock sweep, rather than left with no status."
+    },
+    {
+      "context": "Keep the claim alive while this PR is open",
+      "reason": "S7 EXCLUDED BY DECISION: task-lease-renew.yml job `task-lease-renew` — it PULSES the bp claim on the task a PR cites so the lease does not lapse mid-review. It is a side effect, not a verdict about the diff: its red means the ledger was unreachable, which no PR author can fix and which says nothing about the change. Requiring it would put the availability of an external service on the merge path."
+    },
+    {
+      "context": "Renew every open PR's claim (20-min sweep)",
+      "reason": "S7 EXCLUDED BY DECISION: task-lease-renew.yml job `task-lease-sweep` — the scheduled fleet-wide sweep of the same mechanism. It is about OTHER PRs, so its verdict on this head carries no information about this head at all; requiring it would be a category error."
+    },
+    {
+      "context": "Report main-push failure to a human",
+      "reason": "S7 EXCLUDED BY DECISION: an AFTER-THE-FACT reporter, and the one name in this ledger published by FIVE different jobs — cloud.yml, console-harness.yml, deploy-harnesses.yml, search-template-gates.yml and twoslash.yml each define a `report-main-failure` job under this identical `name:`. Branch protection keys on the STRING, so requiring it would pin whichever of the five happened to render, and the two paths-filtered ones would make it absent on most PRs anyway. It exists to open an issue when a push-to-main run reds; it certifies nothing about a PR. Its collision is itself worth knowing: a green under this name does not tell you WHICH workflow reported."
+    },
+    {
+      "context": "gofmt -l (advisory)",
+      "reason": "S2 ADVISORY: go-format.yml job 'gofmt' carries continue-on-error:true — needs.<job>.result reads success even when it failed. It is ALSO S4: go-format.yml carries a workflow-level `on: pull_request: paths:` filter (**.go, the workflow itself, scripts/go-format-drift-ceiling.sh, .go-format-drift-ceiling), so on a PR touching none of them the name is absent. Either disqualification alone is sufficient."
+    },
+    {
+      "context": "Re-land advisory (already-landed overlap)",
+      "reason": "S2 ADVISORY: reland-check.yml job 'reland-check' carries continue-on-error:true — it reports that a PR's diff overlaps work already landed on main, which is information for a reviewer and not a verdict on the diff. This is one of the four names the `gofmt drift ceiling (blocking)` row records as having SILENTLY LEFT this array on a regeneration; it is restored here with a written ground rather than as a re-derivation."
+    },
+    {
+      "context": "Boundary gate",
+      "reason": "S4 PATHS-FILTERED: architecture.yml carries a workflow-level `on: pull_request: paths:` filter (api/**, internal/**, js/**, apps/**, tooling/concept-map/**, tooling/symbol-graph/**, the workflow itself) and has NO `push:` arm at all, so on a PR touching none of those paths this name is ABSENT — and a required absent context reports 'expected' forever (D18). THE REASON THIS ROW EXISTS AT ALL is not the topology, it is a CONVENTION that until now lived in exactly one script and nowhere else: main's merge sweep REFUSES to merge on it, on the reasoning \"advisory on the PR arm, blocking on main's; main's merge sweep refuses on it\" — its refusal set is `Sobelow|Boundary gate`. So one tool treats this name as blocking, branch protection has never heard of it, and it carried no status here: a convention masquerading as a rule. THIS ROW is where that convention is now written down, and it is the REVERSIBLE half of the choice — the alternative, promoting `Boundary gate` into the required set, is blocked today by the paths filter above (a required context on a paths-filtered workflow deadlocks every PR that misses the paths) and would need the shim treatment elixir.yml/cloud.yml/console-harness.yml already carry. That promotion is main's call and is asked separately; nothing here forecloses it. This is also one of the four names the `gofmt drift ceiling (blocking)` row records as having SILENTLY LEFT this array on a regeneration."
+    },
+    {
+      "context": "Dispatch (shell-harness paths)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `changes`. The always-running dispatcher that computes which harness partitions a PR's changed files touch. Its green certifies that a verdict was computed, never that a harness ran — the same hazard the `Dispatch (compose-smoke paths)` row spells out at length."
+    },
+    {
+      "context": ".claude/workflows engines load on a machine that is not this one",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `workflow-portability`. Harness for scripts/workflow-portability-check.sh + workflow-module-exec-smoke.sh: proves the .claude workflow engines load off this developer's box."
+    },
+    {
+      "context": "a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `deploy-concurrency`. Harness for scripts/deploy-concurrency-check.sh + main-run-concurrency-check.sh: proves a queued deploy or main gate run is not cancelled by a newer one."
+    },
+    {
+      "context": "already-fixed / branch-owner / pr-overlap harnesses",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `fleet-coordination-harnesses`. Harness for scripts/already-fixed.sh, branch-owner.sh and pr-overlap.sh — the fleet-coordination trio."
+    },
+    {
+      "context": "bin/barkpark up/stop differential selftest",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `launcher-boot-selftest`. Harness for bin/barkpark + scripts/barkpark-boot-selftest.sh: the local launcher's up/stop differential."
+    },
+    {
+      "context": "cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `cloud-static-gz`. Harness for scripts/cloud-static-gz-guard.sh: catches a .gz asset committed without its uncompressed sibling."
+    },
+    {
+      "context": "compose-smoke dispatcher covers the census roots",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `compose-smoke-dispatcher`. Harness for scripts/compose-smoke-dispatch.test.sh against compose-smoke.yml: the dispatcher's path set must cover the env-census roots."
+    },
+    {
+      "context": "console-path-escape-check.sh classification matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `console-path-ratchet`. Harness for scripts/console-path-escape-check.sh — the classification matrix behind the `Console path-escape ratchet` job that IS subsumed by the required `Console gate`. The ratchet gates; this proves the ratchet can fail."
+    },
+    {
+      "context": "deploy-convergence-check.sh ancestry + strand matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `deploy-convergence`. Harness for scripts/deploy-convergence-check.sh: ancestry and stranded-commit classification."
+    },
+    {
+      "context": "deploy-reliability-exit-run.sh mutation matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `exit-runner-guard`. Mutation harness for scripts/deploy-reliability-exit-run.sh — a can-lose arm by construction: it plants defects and requires the instrument to red on each."
+    },
+    {
+      "context": "doc-gates.yml push.paths == pull_request.paths",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `doc-gates-paths-parity`. Harness for scripts/doc-gates-paths-parity-check.sh: the two path lists in doc-gates.yml must not drift apart."
+    },
+    {
+      "context": "doctor-matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `doctor-matrix`. Harness for scripts/doctor.sh. The job publishes NO `name:`, so GitHub renders the job ID verbatim — which is why this name reads like an internal identifier and why a grep for a human-readable title never found it."
+    },
+    {
+      "context": "merge-gate-bridge",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `merge-gate-bridge`. Harness for scripts/github-webhook-subscription-parity.sh and merge-gate-autostamp-liveness.sh — the webhook bridge that auto-stamps merge-gated criteria. Also a bare job ID rendered as the check name."
+    },
+    {
+      "context": "merge-verb-table",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `merge-verb-table`. Harness for scripts/bp-merge.sh, required-checks-verify.sh and scripts/lib/check-runs.sh — the merge verb's refusal table. Also a bare job ID rendered as the check name. It is the harness for the very script this row lives under, so requiring it would put this file's own guard on the merge path of every PR that edits it."
+    },
+    {
+      "context": "epic-zero-criteria-census.sh self-test",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `zero-criteria-census`. Harness for scripts/epic-zero-criteria-census.sh."
+    },
+    {
+      "context": "every workflow path filter matches something",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `workflow-trigger-coverage`. Harness for scripts/workflow-trigger-coverage.sh: a `paths:` entry matching no tracked file is a filter that can never fire."
+    },
+    {
+      "context": "file-ci-failure-issue.sh behaviour matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `ci-failure-issue-filer`. Harness for scripts/file-ci-failure-issue.sh — the CI-failure issue filer's behaviour matrix."
+    },
+    {
+      "context": "install-cli / fetch-prebuilt / site-runtime-install harnesses",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `distribution-harnesses`. Harness for scripts/install-cli.sh, fetch-prebuilt.sh and deploy-rebuild.sh — the distribution surface."
+    },
+    {
+      "context": "landed-mark.sh selftest + idempotency mutation",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `landed-mark`. Harness for scripts/landed-mark.sh including its idempotency mutation arm."
+    },
+    {
+      "context": "node-test-floor.mjs mutation matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `node-test-floor`. Mutation harness for scripts/node-test-floor.mjs — the floor that stops `node --test` exiting 0 on zero tests. A can-lose arm: it plants vacuity and requires the floor to red."
+    },
+    {
+      "context": "orphan harnesses (local-update · pdf-efficiency-proof · refute-on-absence)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `orphan-harnesses`. Harness for scripts/local-update.sh, pdf-efficiency-proof.sh and refute-on-absence-capture-log-check.sh — the scripts with no other CI home."
+    },
+    {
+      "context": "PDS census / parity / scratch-target harnesses",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `pds-harnesses`. Harness for scripts/pds-ledger-census.sh, pds-record-parity.sh and pds-scratch-target.sh."
+    },
+    {
+      "context": "pds-live-hetzner-placement-group.sh --selftest-offline",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `pds-hetzner-offline`. The OFFLINE self-test arm of scripts/pds-live-hetzner-placement-group.sh — it deliberately does not reach Hetzner, so a green here says the classifier is sane, never that the live placement group is."
+    },
+    {
+      "context": "registration-sample.sh mutation matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `registration-sample-bar`. Mutation harness for scripts/registration-sample.sh — the sampler this very file's `_readme` cites as the instrument that proved shape coverage at flip time."
+    },
+    {
+      "context": "reland-check / fleet-run-verdict / paper-reader-audit harnesses",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `tooling-harnesses`. Harness for tooling/task-obsession/reland_check.py, tooling/fleet/fleet-run.sh, scripts/audit-paper-readers.sh, tooling/gate-map and scripts/main-red-breaker.sh."
+    },
+    {
+      "context": "release-scan.sh CI-verdict derivation",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `release-scan-verdict`. Harness for scripts/release-scan.sh — how a release scan derives a CI verdict from check runs."
+    },
+    {
+      "context": "seal-run.sh probe matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `seal-run-guard`. Probe matrix for scripts/seal-run.sh — the seal predicate's arms."
+    },
+    {
+      "context": "selftest wiring census",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `selftest-wiring-census`. Harness for scripts/selftest-wiring-census.sh: every `*.test.sh` / `*.test.mjs` in the repo must actually be WIRED into a workflow. A harness nobody runs is not a ratchet."
+    },
+    {
+      "context": "shell-harnesses dispatcher partition + fixture matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `dispatch-selftest`. Harness for scripts/shell-harnesses-dispatch.test.sh: the partitioning of this workflow's own dispatcher."
+    },
+    {
+      "context": "task-lease-renew response classification",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `task-lease-renew`. Harness for scripts/task-lease-renew.sh and task-lease-sweep.sh — how the lease renewer classifies a server response. Shares a job ID with task-lease-renew.yml's job of the same name but is a different check."
+    },
+    {
+      "context": "webhook-fanout-watch.sh mutation matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `webhook-fanout-guard`. Mutation harness for scripts/webhook-fanout-watch.sh."
+    },
+    {
+      "context": "weekly-changelog-backfill.test.sh drift check",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `weekly-changelog-backfill-guard`. Harness for scripts/weekly-changelog-backfill.test.sh against weekly-changelog.yml."
+    },
+    {
+      "context": "Round-trip smoke + bundle freshness",
+      "reason": "S4 PATHS-FILTERED: paper-editor.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). paper-editor.yml job `smoke-and-bundle` — it proves the paper-editor bundle in api/priv/static is FRESH against its sources in api/assets, and round-trips a document through the editor. Load-bearing on the PRs it renders on, absent on every other."
+    },
+    {
+      "context": "Sheet-grid hook unit harness",
+      "reason": "S4 PATHS-FILTERED: sheet-grid-js.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). sheet-grid-js.yml job `hook-unit` — the unit harness for the bp-sheet-grid / bp-sheet-formula LiveView hooks."
+    },
+    {
+      "context": "Studio instrument selftests",
+      "reason": "S4 PATHS-FILTERED: studio-instrument-selftests.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). studio-instrument-selftests.yml job `selftests` — the dep-free self-tests for the studio-desk measurement instruments (no npm install, no browser, no token). A self-test arm: it grades the instruments, not the product."
+    },
+    {
+      "context": "Studio journey — self-test (fixtures, no network)",
+      "reason": "S4 PATHS-FILTERED: studio-journey-smoke.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). studio-journey-smoke.yml job `harness-self-test` — the fixture-driven, no-network arm of the studio journey smoke. It proves the harness can fail; it reaches nothing deployed."
+    },
+    {
+      "context": "Studio journey — deployed (report mode, gates nothing)",
+      "reason": "S4 PATHS-FILTERED: studio-journey-smoke.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). studio-journey-smoke.yml job `live-journey` — and its own `name:` already says the rest: REPORT MODE, GATES NOTHING. It drives a deployed environment and publishes what it saw. Requiring it would put a live deployment on the merge path of a code review."
+    },
+    {
+      "context": "Dependency CVE audit (mix_audit over mix.lock, blocking)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: the SKIPPED-SHAPE name of security.yml's `mix-audit` job under its PRE-RENAME title.RETIRED NAME as of this commit: the job's `name:` in security.yml now reads `non-blocking` instead of `blocking`, because the word claimed a merge authority the check did not have. This row is KEPT, not rewritten: every head merged before the rename still renders the old string, and a census that keys on the string would red on those heads if the row went away. Delete it once no sampled head can render it."
+    },
+    {
+      "context": "Dependency CVE audit (mix_audit over mix.lock, non-blocking) (27.0, 1.18.1)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: security.yml job `mix-audit` (run shape, matrix OTP 27.0 / Elixir 1.18.1), an upstream `needs` of `Security gate`, which is excluded. RENAMED IN THIS COMMIT from '… , blocking) (27.0, 1.18.1)' — see that row, kept for the heads that still render it, and the bare skipped-shape twin. The job has no continue-on-error, so a red genuinely fails `Security gate`; `Security gate` is not required, so no merge is stopped. The policy question is owner-queue item 47 / cch-w12-bl-cve-gate-is-oracle-blind and is untouched here."
+    },
+    {
+      "context": "Crown reconcile",
+      "reason": "S4 PATHS-FILTERED: crown-reconcile.yml carries a workflow-level `on: pull_request: paths:` filter (scripts/crown-reconcile.sh, its two harnesses, the workflow itself, .github/required-checks.json and shell-harnesses.yml), so on a PR touching none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). crown-reconcile.yml job `crown-reconcile` — it reconciles the platform's `platform_deliveries` record against what production is actually serving. The workflow's own header says it MUST NEVER become a required context, and gives the ground: it is a LEVEL check over the live population, not a verdict about one PR head, so all four required contexts (PR-head gates over an ephemeral CI database) structurally cannot express it. That prose is now matched by a row. ADDED 2026-09-06 BY THE CENSUS CLAUSE ITSELF: this name and its harness twin landed between this PR's first sample and its rebase, the clause reddened on them, and the fix was two rows — which is the loop the clause exists to close."
+    },
+    {
+      "context": "Crown reconcile harness",
+      "reason": "S4 PATHS-FILTERED: crown-reconcile.yml carries a workflow-level `on: pull_request: paths:` filter (scripts/crown-reconcile.sh, its two harnesses, the workflow itself, .github/required-checks.json and shell-harnesses.yml), so on a PR touching none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). crown-reconcile.yml job `crown-reconcile-harness` — the self-test for scripts/crown-reconcile.sh and crown-waiver.test.sh. A can-lose arm: it grades the instrument, never the population."
     }
   ]
 }

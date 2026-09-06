@@ -100,6 +100,18 @@ defmodule Barkpark.Tenancy.Auth do
       `:require_admin`, and `OptionalToken` halts 403 via
       `RequireToken.share_token_off_surface?/2`.
 
+  ## Three entry points, not two — and the third does not merge the other two
+
+  `seat_capabilities/3` (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth)
+  answers the SEAT decision off a membership row the CALLER already loaded. It
+  exists because the Studio capability gate had recomposed that decision out of
+  `permits?/2` and `role_permits?/3` in `BarkparkWeb.Studio.Caps`, to keep the
+  PDS-D634 one-load property — a second authorization author, with the
+  `@canonical` marker pointing at a function its busiest consumer bypassed. The
+  recomposition is gone; the one-load property is not. It is a THIRD entry
+  point, NOT a unification: `authorize/3` and `workspace_admin?/2` are
+  byte-unchanged by it, and charter D9's ban on merging them stands.
+
   ## A BARE principal id is ambiguous — say which kind it is
 
   Every predicate here also accepts a raw id binary, and a raw id carries NO
@@ -604,6 +616,146 @@ defmodule Barkpark.Tenancy.Auth do
     do: Enum.any?(@admin_perms, &(&1 in perms))
 
   def permits?(_token, _action), do: false
+
+  @no_seat %{read: false, write: false, admin: false}
+
+  @doc """
+  THE SEAT DECISION for one principal, read off an **already-loaded**
+  `%Membership{}` row: `%{read:, write:, admin:}` for `workspace_id`.
+
+  This is the arity the Studio calls (`BarkparkWeb.Studio.Caps`). It exists so
+  that a caller which has ALREADY paid for the membership row does not have to
+  recompose the decision out of `permits?/2` + `role_permits?/3` on its own —
+  which is exactly what `caps.ex` used to do, and what
+  `arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth` deleted. One decision,
+  one owner, zero extra queries: the caller keeps the PDS-D634 one-load
+  property, the module keeps the decision.
+
+  ## The contract, column by column
+
+    * `:read` / `:write` — **the same decision `authorize/3` makes**, by shared
+      code over the same row: `permits?/2` for a token, the role's action set
+      for a user. A `nil` membership is a non-member and denies, exactly as
+      `authorize/3` denies it.
+    * `:admin` — **WORKSPACE-SCOPED SEAT AUTHORITY** (charter D22), which is
+      deliberately NOT `authorize/3`'s answer and NOT `workspace_admin?/2`'s
+      answer:
+      - for a USER it is the membership role's `admin` action, which IS
+        `authorize/3`'s user arm;
+      - for an API TOKEN it is `permits?(token, :admin)` **AND** the membership
+        role's `admin` action. `authorize/3`'s token arm is `member? AND
+        permits?`, which admits a global-admin token holding a plain `member`
+        row in a foreign workspace — the barkpark-23yi/fsko shape. This arity
+        refuses it.
+
+  ## What this does NOT do — charter D9 stands
+
+  It does not unify `authorize/3` and `workspace_admin?/2`, and it does not
+  change either of them. They remain two predicates with two different, RULED
+  reaches, and this is a THIRD entry point that composes neither: it reads the
+  seat off a row the caller supplies. In particular a SHARE-EDIT token, which
+  holds no membership row at all, reaches the `nil` catch-all and gets nothing —
+  its read/write access comes from the grant arm at the call site, never from
+  here.
+
+  ## The row must belong to THIS workspace AND TO THIS PRINCIPAL
+
+  An arity that ACCEPTS a preloaded row owes its callers TWO guarantees, and
+  each is a pattern binding rather than a sentence:
+
+    * the `%Membership{workspace_id: workspace_id}` pattern binds the row's own
+      workspace to the `workspace_id` argument, so a row loaded for workspace A
+      can never answer a question about workspace B;
+    * the `principal_type` / `principal_id` pattern binds the row to the
+      PRINCIPAL in the first argument — the same `{id, type}` pairing
+      `membership/2` uses to LOAD a row (`%ApiToken{}` -> `"api_token"`,
+      `%User{}` -> `"user"`), so a row that belongs to somebody else cannot
+      answer for you.
+
+  The second one is why a crossed pair denies instead of answering. This
+  function's whole contract is "I trust the row you hand me", and its own
+  introducing caller (`Caps.derive_from_assigns/1`) holds a LIST of two
+  principals' rows: a transposition there would otherwise return the WRONG
+  SEAT — silently, with no raise, no red and no log. Both live call sites zip
+  correctly today (`load_memberships/2` pairs each row with its principal, and
+  `admin?/1` loads per principal), so this closes a hazard with no reachable
+  instance rather than a live defect — added on lead-studio-10's review of
+  pds-w42/#16586, on the reasoning that a newly PUBLIC function on the
+  authorization chokepoint should not rely on every future caller zipping
+  correctly.
+
+  Both bindings together make the workspace-blind built-in role resolution (see
+  `role_permits?/3`) unreachable from a hand-built struct: a fabricated
+  `%Membership{role: "admin"}` with no matching `workspace_id` — or with no
+  matching principal — answers all-false.
+
+  ## Cost
+
+  ZERO queries on a built-in role. ONE `Repo.all` on a custom role — resolved
+  ONCE for all three actions, where three separate `role_permits?/3` calls paid
+  for it three times. That is the cost half of this collapse, pinned in
+  `test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs`.
+  """
+  @spec seat_capabilities(principal(), Membership.t() | nil, binary()) ::
+          %{read: boolean(), write: boolean(), admin: boolean()}
+  def seat_capabilities(
+        %ApiToken{id: principal_id} = token,
+        %Membership{
+          role: role,
+          workspace_id: workspace_id,
+          principal_type: "api_token",
+          principal_id: principal_id
+        },
+        workspace_id
+      )
+      when is_binary(principal_id) and is_binary(workspace_id) do
+    %{
+      read: permits?(token, :read),
+      write: permits?(token, :write),
+      # PERMS FIRST, deliberately: a token without the `admin` permission
+      # short-circuits before any role resolution, so a read-only token pays
+      # nothing for the seat half.
+      admin: permits?(token, :admin) and role_confers_admin?(role, workspace_id)
+    }
+  end
+
+  def seat_capabilities(
+        %User{id: principal_id},
+        %Membership{
+          role: role,
+          workspace_id: workspace_id,
+          principal_type: "user",
+          principal_id: principal_id
+        },
+        workspace_id
+      )
+      when is_binary(principal_id) and is_binary(role) and is_binary(workspace_id) do
+    # ONE resolution, three answers. `role_permits?/3` is `action in
+    # granted_actions(role, ws)`; asking it three times asks the resolver three
+    # times, which on a CUSTOM role is three `Repo.all`s for one row.
+    actions = granted_actions(role, workspace_id)
+
+    %{
+      read: "read" in actions,
+      write: "write" in actions,
+      admin: "admin" in actions
+    }
+  end
+
+  # Non-member (nil row), a row from another WORKSPACE, a row belonging to
+  # another PRINCIPAL, an unrecognised principal shape, a non-binary workspace
+  # id or principal id: nothing. Fails closed, never raises.
+  def seat_capabilities(_principal, _membership, _workspace_id), do: @no_seat
+
+  # The seat half of a TOKEN's `:admin` conjunct. Same resolver, same
+  # `:inherit_global` reach as `role_permits?(role, ws, :admin)` — this is the
+  # spelling charter D22 ruled for the Studio column, NOT `workspace_admin?/2`'s
+  # `:workspace_only` name-list-or-custom-row rule.
+  defp role_confers_admin?(role, workspace_id)
+       when is_binary(role) and is_binary(workspace_id),
+       do: "admin" in granted_actions(role, workspace_id)
+
+  defp role_confers_admin?(_role, _workspace_id), do: false
 
   @doc """
   The caller's GLOBAL auth tier, as one of the closed strings the

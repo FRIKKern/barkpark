@@ -55,6 +55,43 @@ defmodule Barkpark.Content.Papers do
   @doc "The document type discriminator for papers."
   def paper_type, do: @paper_type
 
+  @doc """
+  The paper's OP-ANCHOR rev: the monotonic integer at `content["rev"]` that the
+  block-ops precondition (`opts[:if_rev]`) actually enforces.
+
+  ONE owner, read by BOTH sides of the BPML working-copy handshake — the pull
+  route stamps it into `x-paper-rev`, the push route compares `baseRev` against
+  it. They used to derive it separately and disagree three ways for a paper with
+  no integer `content["rev"]`: pull fell back to the row's opaque `rev` HASH,
+  push coerced the absence to `""` with `to_string(nil)`, and the enforcement
+  layer read it as `0`. A revless paper therefore pulled a hash, was told "paper
+  is at rev , your copy anchored on <hash>" (a 412 naming an EMPTY comparand),
+  and could not have applied ops at that hash anyway.
+
+  A revless paper is a LEGITIMATE shape, so absence resolves to `0` — the same
+  value the enforcement layer uses. It is not a failed read.
+
+  Returns `{:error, {:unreadable_rev, "content.rev"}}` when the field is
+  PRESENT but not an integer (a string, map, list, …). That is a failed READ,
+  and a failed read must never be spelled as a mismatch: callers refuse
+  distinctly instead of comparing against a value they could not derive.
+  """
+  @spec op_rev(term()) :: {:ok, non_neg_integer()} | {:error, {:unreadable_rev, String.t()}}
+  def op_rev(%{content: content}), do: op_rev_from_content(content)
+  def op_rev(_other), do: {:error, {:unreadable_rev, "content.rev"}}
+
+  defp op_rev_from_content(nil), do: {:ok, 0}
+
+  defp op_rev_from_content(content) when is_map(content) do
+    case Map.get(content, "rev") do
+      nil -> {:ok, 0}
+      rev when is_integer(rev) -> {:ok, rev}
+      _unreadable -> {:error, {:unreadable_rev, "content.rev"}}
+    end
+  end
+
+  defp op_rev_from_content(_other), do: {:error, {:unreadable_rev, "content.rev"}}
+
   # The closed blocks-type whitelist (session-handoff Task 2): every document
   # type whose write path rides the generalized `upsert_blocks_doc/3` /
   # `BlockOps.upsert_blocks_doc/3` machinery (blocks body + metadata fields).

@@ -1445,6 +1445,22 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|somebody's proof, and replacing it with a merge notice would erase the proof and leave the notice. | <>
         ~s|Nothing was written. The landing sentence itself still lands: re-run without --criterion.|
 
+  # THE PERMIT'S SECOND REFUSAL (task-48ff3f84e68aecbb). The first one says the
+  # row is not merge-SHAPED. This one says it IS, and a merge still cannot
+  # discharge it — so the fix is NOT "mark it merge_gate: true", which is what
+  # the sibling hint above tells people and what would be actively wrong here.
+  # Name the other key, and name the honest alternative first.
+  def criteria_hint(:criterion_demands_demonstration, :landed),
+    do:
+      ~s|that criterion IS merge-shaped, but its own wording asks for something a merge cannot produce — | <>
+        ~s|a demo, a live run, a screenshot, an operator action. `merge_gate: true` means "the LEAD closes this | <>
+        ~s|row, not the builder"; it never meant "a merge closes it", and a landing notice flipping this one | <>
+        ~s|would stamp your --note as proof of a run nobody made. Nothing was written (the flip and the landing | <>
+        ~s|sentence ride one CAS). Whoever DID the demo stamps it: `bp task stamp <id> <worker> <epoch> | <>
+        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If a merge really does discharge this row, | <>
+        ~s|say so on the criterion — "merge_discharges": true — and the landing mark will seal it from then on. | <>
+        ~s|Re-run without --criterion to record the landing sentence alone.|
+
   def criteria_hint(:criteria_mismatch, _surface),
     do:
       ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>

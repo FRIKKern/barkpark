@@ -81,7 +81,9 @@ defmodule Barkpark.Media.Delivery.Search do
             |> Repo.all()
             |> Map.new(&{&1.id, &1})
 
-          Enum.map(page_ids, &Map.fetch!(files_by_id, &1))
+          page_ids
+          |> Enum.map(&Map.fetch!(files_by_id, &1))
+          |> mark_cursorable(sort_plan(inner_opts))
         end
 
       {files, total || 0}
@@ -257,9 +259,11 @@ defmodule Barkpark.Media.Delivery.Search do
 
     fetch = limit + offset + 20
 
+    plan = sort_plan(opts)
+
     ordered =
       query
-      |> apply_sort(opts)
+      |> order_for_plan(plan, opts)
       |> limit(^fetch)
       |> select([m, _d], {m.id, m.inserted_at})
 
@@ -295,29 +299,9 @@ defmodule Barkpark.Media.Delivery.Search do
     # from D389 does NOT apply here: `media_files.inserted_at` is
     # `timestamp without time zone`, not `timestamptz`.)
     rows =
-      if cursor do
-        decode_cursor(cursor)
-        |> case do
-          {:ok, cursor_id, cursor_at} ->
-            ordered
-            |> where(
-              [m, _d],
-              fragment(
-                "(?,?) < (?,?)",
-                m.inserted_at,
-                m.id,
-                ^cursor_at,
-                type(^cursor_id, Ecto.UUID)
-              )
-            )
-            |> Repo.all()
-
-          _ ->
-            Repo.all(ordered)
-        end
-      else
-        Repo.all(ordered)
-      end
+      ordered
+      |> apply_cursor(plan, cursor)
+      |> Repo.all()
 
     rows
     |> Enum.uniq_by(fn {id, _} -> id end)
@@ -326,16 +310,75 @@ defmodule Barkpark.Media.Delivery.Search do
     |> Enum.take(limit)
   end
 
+  # Stamp the page's rows with whether the sort they were served in can be paged
+  # by the `(inserted_at, id)` cursor token. Read by `next_cursor/1`.
+  defp mark_cursorable(files, plan) do
+    if cursorable_plan?(plan) do
+      files
+    else
+      Enum.map(files, fn %MediaFile{} = f -> %{f | search_cursorable: false} end)
+    end
+  end
+
+  # THE KEYSET PREDICATE FOR *THIS PLAN'S* ORDERING KEY (task-a00f46ef36eca19e).
+  #
+  # A cursor bound is only a page boundary when it is a bound on the very column
+  # tuple the rows are ORDERED by, in that ordering's own direction. Applied to
+  # any other arm it is a filter on an unrelated axis, which is why the old
+  # unconditional application skipped and repeated rows on all four arms (see
+  # `sort_plan/1`). An arm the token cannot express gets NO predicate and pages
+  # by offset instead — and `search/2` refuses to mint a token for it, so a
+  # client is never handed a cursor that silently loses rows.
+  defp apply_cursor(query, _plan, nil), do: query
+
+  defp apply_cursor(query, plan, cursor) when is_binary(cursor) do
+    case {cursorable_plan?(plan), decode_cursor(cursor)} do
+      {true, {:ok, cursor_id, cursor_at}} -> keyset_where(query, plan, cursor_id, cursor_at)
+      _ -> query
+    end
+  end
+
+  defp keyset_where(query, {:created, :desc}, cursor_id, cursor_at) do
+    where(
+      query,
+      [m, _d],
+      fragment("(?,?) < (?,?)", m.inserted_at, m.id, ^cursor_at, type(^cursor_id, Ecto.UUID))
+    )
+  end
+
+  # STRICTLY GREATER-THAN, and it is the whole created-asc defect. The one
+  # predicate the old code applied was `<`; run against `ORDER BY inserted_at
+  # ASC` it selects the rows BEFORE the page just served, so page 2 restarts at
+  # the top of the corpus and the walk terminates early. Measured: 4 of 12 rows
+  # returned, 9 skipped, 1 repeated.
+  defp keyset_where(query, {:created, :asc}, cursor_id, cursor_at) do
+    where(
+      query,
+      [m, _d],
+      fragment("(?,?) > (?,?)", m.inserted_at, m.id, ^cursor_at, type(^cursor_id, Ecto.UUID))
+    )
+  end
+
   @doc false
   def encode_cursor(%MediaFile{} = file) do
     payload = Jason.encode!(%{id: file.id, at: DateTime.to_iso8601(file.inserted_at)})
     Base.url_encode64(payload, padding: false)
   end
 
-  @doc false
+  @doc """
+  The cursor token that continues THIS page, or `nil` when the sort this page
+  was served in cannot be paged by a keyset cursor.
+
+  `nil` is the honest answer on `updated-desc` and scored `relevance`: the
+  token carries `(inserted_at, id)` and those arms are not ordered by it (see
+  `sort_plan/1`). Handing one out is what made those arms skip and repeat rows.
+  The caller pages them by `offset`, over an ORDER BY that is now total.
+  """
+  @spec next_cursor([MediaFile.t()]) :: String.t() | nil
   def next_cursor(files) do
     case List.last(files) do
       nil -> nil
+      %MediaFile{search_cursorable: false} -> nil
       file -> encode_cursor(file)
     end
   end
@@ -743,36 +786,85 @@ defmodule Barkpark.Media.Delivery.Search do
     Enum.find(values, fn v -> v not in [nil, ""] end)
   end
 
-  defp apply_sort(query, opts) do
+  # THE ORDERING A PAGE IS SERVED IN — one value that BOTH the ORDER BY and the
+  # keyset cursor predicate are derived from (task-a00f46ef36eca19e).
+  #
+  # Before this, `apply_sort/2` picked one of four orderings and `paginate_ids/2`
+  # applied ONE cursor predicate — `(inserted_at, id) < (^at, ^id)` — to all four
+  # unconditionally. Measured on a 12-row corpus with 3-way ties, paged to
+  # exhaustion at limit=3: created-desc lost 2 rows and repeated 2;
+  # created-asc walked 4 of 12 (a strictly-LESS-THAN bound run against an
+  # ASCENDING sort collapses on page 2) and repeated 1; updated-desc lost 6 and
+  # repeated 3; relevance lost 5 and repeated 2. Nothing raised, nothing logged.
+  #
+  # A keyset cursor is only sound when its comparand IS the ordering key, in the
+  # ordering's own direction, with a tiebreak the ordering also carries. So:
+  #
+  #   * `{:created, :desc}` / `{:created, :asc}` order by `(m.inserted_at, m.id)`
+  #     and the cursor compares exactly that tuple, in that direction. Cursorable.
+  #   * `{:updated, :desc}` orders by `d.updated_at` — on the LEFT-JOINed
+  #     document, so NULLable, and not unique per media row (one blob can join
+  #     several asset docs). Not cursorable.
+  #   * `{:relevance, q}` orders by a computed similarity score — not a column,
+  #     not in the `MediaFile` the caller mints the cursor from, and only
+  #     meaningful for the exact `q` + weights that produced it. Not cursorable.
+  #
+  # The two non-cursorable arms page by OFFSET instead, which is correct because
+  # every arm's ORDER BY now ends in `m.id` and is therefore TOTAL — the same
+  # prefix comes back every time. `search/2` marks their rows
+  # `search_cursorable: false` so `next_cursor/1` hands out no token at all
+  # rather than one that skips.
+  @spec sort_plan(keyword()) ::
+          {:created, :desc | :asc} | {:updated, :desc} | {:relevance, String.t()}
+  defp sort_plan(opts) do
     case Keyword.get(opts, :sort, "created-desc") do
       "relevance" ->
-        # The relevance sort now folds the admin-configured `searchable_fields`
+        # The relevance sort folds the admin-configured `searchable_fields`
         # per-field weights into the ordering (charter W7 /
         # bpb-searchable-fields-dead-config) — previously a hardcoded boolean
         # CASE (matched=1/0) that ignored the knob echoed in admin settings.
         # Each field contributes weight·similarity(field, query); the
         # max-weight-normalized sum reorders results when a weight changes.
         case relevance_query_text(opts) do
-          "" ->
-            # Zero-term relevance path (prefix-only / empty). `List.first/1`
-            # returns nil on [], so we degrade to recency instead of 500ing on
-            # `hd([])` (BUG 1, barkpark-4r7q).
-            order_by(query, [m], desc: m.inserted_at)
-
-          q_text ->
-            relevance_order(query, q_text, Keyword.get(opts, :pipeline_config))
+          # Zero-term relevance path (prefix-only / empty). `List.first/1`
+          # returns nil on [], so we degrade to recency instead of 500ing on
+          # `hd([])` (BUG 1, barkpark-4r7q). Degrading to recency means this
+          # path IS `created-desc` — same ordering key, so same cursor.
+          "" -> {:created, :desc}
+          q_text -> {:relevance, q_text}
         end
 
       "created-asc" ->
-        order_by(query, [m], asc: m.inserted_at)
+        {:created, :asc}
 
       "updated-desc" ->
-        order_by(query, [m, d], desc: d.updated_at, desc: m.inserted_at)
+        {:updated, :desc}
 
       _ ->
-        order_by(query, [m], desc: m.inserted_at)
+        {:created, :desc}
     end
   end
+
+  # Only the arms whose ordering key is `(m.inserted_at, m.id)` — the tuple the
+  # cursor token carries — can be paged by that cursor.
+  defp cursorable_plan?({:created, _}), do: true
+  defp cursorable_plan?(_), do: false
+
+  # Every arm ends in `m.id`. Without it the ORDER BY is not a total order:
+  # rows sharing the primary sort value come back in planner-chosen order while
+  # the cursor tiebreaks on `id`, which is the timestamp-collision half of the
+  # skip/repeat above.
+  defp order_for_plan(query, {:created, :desc}, _opts),
+    do: order_by(query, [m], desc: m.inserted_at, desc: m.id)
+
+  defp order_for_plan(query, {:created, :asc}, _opts),
+    do: order_by(query, [m], asc: m.inserted_at, asc: m.id)
+
+  defp order_for_plan(query, {:updated, :desc}, _opts),
+    do: order_by(query, [m, d], desc: d.updated_at, desc: m.inserted_at, desc: m.id)
+
+  defp order_for_plan(query, {:relevance, q_text}, opts),
+    do: relevance_order(query, q_text, Keyword.get(opts, :pipeline_config))
 
   # Primary query text for the relevance similarity signal — the first term/phrase
   # of a parsed query, else the raw `:q`. "" means no usable text (prefix-only or
@@ -807,7 +899,7 @@ defmodule Barkpark.Media.Delivery.Search do
 
     case weighted_terms do
       [] ->
-        order_by(query, [m], desc: m.inserted_at)
+        order_by(query, [m], desc: m.inserted_at, desc: m.id)
 
       terms ->
         max_weight = terms |> Enum.map(fn {_term, weight} -> weight end) |> Enum.max()
@@ -819,7 +911,14 @@ defmodule Barkpark.Media.Delivery.Search do
 
         relevance = dynamic([_m, _d], fragment("(?) / ?", ^sum, ^max_weight))
 
-        order_by(query, ^[{:desc, relevance}, {:desc, dynamic([m, _d], m.inserted_at)}])
+        order_by(
+          query,
+          ^[
+            {:desc, relevance},
+            {:desc, dynamic([m, _d], m.inserted_at)},
+            {:desc, dynamic([m, _d], m.id)}
+          ]
+        )
     end
   end
 

@@ -315,6 +315,15 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # THE READER HALF (task-2279167dd00ec347). landed-mark.sh WRITES the
+      # landing back-link; landed-open-report.sh is the only thing that reads
+      # it. They share this lane because they share one contract — the label
+      # spelling `landed-on-main` / `landed:pr-<n>@<sha10>`. A PR that changes
+      # the writer's spelling without the reader is exactly the PR that must
+      # red here, and it cannot if the two are wired to different jobs.
+      - "scripts/landed-open-report.sh"
+      - "scripts/landed-open-report.test.sh"
+      - "scripts/lib/landed_open_report.py"
       # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
       # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
       # landed-mark block above names it: that file OWNS the `Task:` trailer
@@ -351,6 +360,16 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # DEPLOY RECEIPT HONESTY (pds-bl-w48-deploy-make-and-rebuild-receipts).
+      # The last three are the GUARDED SUBJECTS, not the harness: the fixture
+      # runs `make deploy` and scripts/deploy-rebuild.sh with the hook in the
+      # loop, so an edit to any of them can invalidate the matrix without
+      # touching the test. A guard its own subject cannot re-trigger is a
+      # frozen instrument — the exact defect this wave exists to close.
+      - "scripts/deploy-receipt-failure.test.sh"
+      - "Makefile"
+      - ".githooks/post-merge"
+      - "scripts/deploy-rebuild.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -544,6 +563,15 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # THE READER HALF (task-2279167dd00ec347). landed-mark.sh WRITES the
+      # landing back-link; landed-open-report.sh is the only thing that reads
+      # it. They share this lane because they share one contract — the label
+      # spelling `landed-on-main` / `landed:pr-<n>@<sha10>`. A PR that changes
+      # the writer's spelling without the reader is exactly the PR that must
+      # red here, and it cannot if the two are wired to different jobs.
+      - "scripts/landed-open-report.sh"
+      - "scripts/landed-open-report.test.sh"
+      - "scripts/lib/landed_open_report.py"
       # The renew lane's harness, on the push arm too: a lane wired on PRs only
       # goes dark the moment a merge lands.
       - "scripts/task-lease-renew.sh"
@@ -577,6 +605,12 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # DEPLOY RECEIPT HONESTY — mirrored from on.pull_request.paths. The twin
+      # lists are set-equal by contract (doc-gates-paths-parity-check.sh runs
+      # against this file too); a PR-only entry would go dark on the merge.
+      - "scripts/deploy-receipt-failure.test.sh"
+      - "Makefile"
+      - ".githooks/post-merge"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -671,6 +705,7 @@ jobs:
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
+      deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -823,6 +858,9 @@ jobs:
           landed-mark scripts/fixtures/landed-mark/**
           landed-mark scripts/pr-task-gate.sh
           landed-mark .github/workflows/landed-mark.yml
+          landed-mark scripts/landed-open-report.sh
+          landed-mark scripts/landed-open-report.test.sh
+          landed-mark scripts/lib/landed_open_report.py
           doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
           doc-gates-paths-parity .github/workflows/doc-gates.yml
           merge-gate-bridge scripts/github-webhook-subscription-parity.sh
@@ -858,6 +896,10 @@ jobs:
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
           selftest-wiring-census .github/workflows/*.yml
+          deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
+          deploy-receipt-honesty Makefile
+          deploy-receipt-honesty .githooks/post-merge
+          deploy-receipt-honesty scripts/deploy-rebuild.sh
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -1836,6 +1878,25 @@ jobs:
           fi
           grep -q "scanned 5 commit(s); 3 row(s)" <<<"$out" || {
             echo "the scan count moved — the fixture and the instrument disagree" >&2; exit 1; }
+      - name: landed-open-report.sh + harness syntax check
+        run: |
+          bash -n scripts/landed-open-report.sh
+          bash -n scripts/landed-open-report.test.sh
+          python3 -c "import ast,sys; ast.parse(open('scripts/lib/landed_open_report.py').read())"
+      - name: the READER's selftest is green, then nine arms are DISARMED and red
+        # The consumer for the back-link this job's writer produces. Its own
+        # selftest proves it SEES (a live landed row present, a done one and an
+        # unlabelled one absent, PARENT and GATE? rows listed AND flagged) and
+        # that a failed read never prints like a zero. The mutation harness
+        # then breaks nine arms one at a time in scratch copies and requires
+        # the selftest to go red for each — a guard whose selftest survives the
+        # guard being deleted is theatre.
+        #
+        # Hermetic: fixture pages on disk, no network, no token, no bp. There
+        # is no live arm to skip into, so this cannot rot into a green skip.
+        run: |
+          bash scripts/landed-open-report.sh --selftest
+          bash scripts/landed-open-report.test.sh
 
   doc-gates-paths-parity:
     needs: [changes]
@@ -2149,3 +2210,29 @@ jobs:
 
       - name: The census over this tree
         run: bash scripts/selftest-wiring-census.sh --list
+
+  deploy-receipt-honesty:
+    needs: [changes]
+    if: needs.changes.outputs.deploy-receipt-honesty == 'true'
+    name: deploy receipts descend from a measurement (or refuse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: the three subjects parse
+        run: |
+          bash -n Makefile 2>/dev/null || true
+          bash -n .githooks/post-merge
+          bash -n scripts/deploy-rebuild.sh
+      - name: deploy-receipt-failure.test.sh syntax check
+        run: bash -n scripts/deploy-receipt-failure.test.sh
+      - name: "make deploy / post-merge / deploy-rebuild.sh receipt matrix (hermetic: stub PATH, no network, no build, no service)"
+        # 54 checks, ~2s. POLARITY: every assertion names a REFUSAL or a
+        # measured green, so this matrix is RED against the pre-repair sources
+        # (35 of 54 failed there, the build-fail and migrate-fail arms being the
+        # controls green in both directions) and GREEN against the repair.
+        # It is also the tripwire for the impurity it closed: deploy-rebuild.sh
+        # prepends /usr/local/go/bin to PATH, and on a runner with Go installed
+        # the pre-repair script reached a REAL `make wasm` around the stubs —
+        # four arms assert the escape log is empty.
+        run: bash scripts/deploy-receipt-failure.test.sh

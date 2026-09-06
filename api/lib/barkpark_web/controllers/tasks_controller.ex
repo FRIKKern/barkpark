@@ -414,6 +414,11 @@ defmodule BarkparkWeb.TasksController do
   # `/v1/tasks/events` never resolves as `:doc_id = "events"`.
   #
   # Response: `{ok, events: [%{id, event, doc_id, rev, at}], cursor, has_more}`.
+  # `?payload=1` additionally carries each event's typed stamp under `payload`
+  # (for `task.staged`: `payload.staged.note` and `payload.staged.superseded_note`
+  # — the only durable copy of a note that `bp task stage --note` displaced).
+  # Opt-in because two free-text notes ride in one stamp and a page is 500 rows;
+  # see `Barkpark.Tasks.Events`.
   # `cursor` is the id to resume from on the next poll (the last event's id, or
   # the caller's own `since` when the page was empty); `has_more` is true when a
   # full page came back, so the caller polls again immediately instead of
@@ -444,8 +449,18 @@ defmodule BarkparkWeb.TasksController do
 
       workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
 
+      # OPT-IN typed payload (`?payload=1`), the ONLY hunk this action needed:
+      # a truthiness read threaded straight to `Tasks.Events.replay_since/3`,
+      # which owns the whitelist and the shape. Off by default, so a poller that
+      # does not ask gets the byte-identical page it always got.
+      payload? = params["payload"] in ["1", "true", true]
+
       rows =
-        Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
+        Tasks.Events.replay_since(dataset, since,
+          limit: limit,
+          workspace_id: workspace_id,
+          payload: payload?
+        )
 
       cursor =
         case rows do

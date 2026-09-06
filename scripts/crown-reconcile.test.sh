@@ -1947,10 +1947,30 @@ fi
 for n in 0 1 2 3 4; do
   if grep -q "^            $n)" "$WF"; then ok "the case arm for rc $n exists"; else bad "rc $n has no case arm of its own"; fi
 done
-if [ -f "$SPEC" ] && grep -q "crown-reconcile" "$SPEC"; then
-  bad "crown-reconcile appears in .github/required-checks.json — it must NOT be a required context"
+# READ THE REQUIRED SET, never grep the whole file (2026-09-06). This was
+# `grep -q "crown-reconcile" "$SPEC"`, which cannot tell a REQUIRED context from
+# an EXCLUSION row — and an exclusion row is the exact OPPOSITE of the thing the
+# assertion forbids. The every-rendered-name census gave `Crown reconcile` and
+# `Crown reconcile harness` written S4 rows whose reasons quote this workflow's
+# own "must never become a required context" header; the substring `crown-
+# reconcile` then appeared in the file as prose and this clause reddened on the
+# ledger entry that AGREES with it. Ask jq for the contexts instead.
+if [ ! -f "$SPEC" ]; then
+  ok "crown-reconcile is not in the required-check spec (no spec file to read)"
+elif jq -e '[.protection.required_status_checks.checks[]?.context]
+            | map(ascii_downcase)
+            | any(test("crown[ -]?reconcile"))' "$SPEC" >/dev/null 2>&1; then
+  bad "a crown-reconcile context is REQUIRED in .github/required-checks.json — this workflow must never be a required context: $(jq -r '[.protection.required_status_checks.checks[]?.context] | join(", ")' "$SPEC")"
 else
-  ok "crown-reconcile is not in the required-check spec"
+  ok "no crown-reconcile context is in the required set ($(jq -r '.protection.required_status_checks.checks | length' "$SPEC") required context(s) read with jq, not grepped)"
+fi
+# …and the mirror, so the clause above cannot be satisfied by a spec that simply
+# forgot the name: a rendered check with NO status is the defect the census
+# clause in required-checks-verify.sh exists for, so assert the row is there.
+if jq -e '[.exclusions[]?.context] | index("Crown reconcile")' "$SPEC" >/dev/null 2>&1; then
+  ok "…and it carries an EXCLUSION row, so the name is accounted rather than merely absent"
+else
+  bad "\`Crown reconcile\` has no exclusion row in $SPEC — an unaccounted rendered name reds the census clause"
 fi
 
 # THE SILENCE STOPS EXITING 0. The rc=2 arm's own text has always said it is not

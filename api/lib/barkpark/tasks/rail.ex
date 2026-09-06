@@ -116,6 +116,7 @@ defmodule Barkpark.Tasks.Rail do
   """
   @spec unsatisfied_blockers(binary()) :: [String.t()]
   def unsatisfied_blockers(task_uuid) when is_binary(task_uuid) do
+    # global-read: by-PK notice re-read — `task_uuid` IS the Document PK and is never caller-supplied: the one production caller (`TasksController.add_blocked_notice/2`) passes `task.id` off a Document it already loaded through the tenant-scoped in-progress query, so tenancy is resolved by that caller's scope, not re-threaded here. Same internal-worker posture as the by-PK re-reads in close.ex / stamp.ex / pulse.ex. (The marker MUST stay the line directly above the call — tenant-scope-check.sh reads only the immediately-preceding line.)
     case Repo.get(Document, task_uuid) do
       nil -> []
       %Document{} = doc -> Blockers.unsatisfied(doc)

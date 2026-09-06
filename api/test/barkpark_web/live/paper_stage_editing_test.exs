@@ -36,6 +36,20 @@ defmodule BarkparkWeb.PaperStageEditingTest do
       assert has_element?(view, "#stage-form-stage")
       refute has_element?(view, "bp-paper-canvas[data-canvas-blocks*='stage']")
       assert has_element?(view, "[data-test-id='paper-stage-preview']", "Original")
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-stage-preview'] textarea[name='stage-title']",
+               "Original"
+             )
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-stage-preview'] textarea[name='stage-detail']"
+             )
+
+      refute has_element?(view, "details [name='stage-title'], details [name='stage-detail']")
+      assert has_element?(view, "details [name='stage-source-mode']")
       assert render(view) =~ "4 words"
       rev = revision(view)
 
