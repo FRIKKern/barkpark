@@ -2275,19 +2275,15 @@ defmodule BarkparkWeb.TasksController do
 
           from(d in Document,
             where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-            # THE THIRD FORK (task-ca05dd6a02a0b55f). This one cannot RAISE —
-            # it reads through `Repo.all() |> List.first()`, not `Repo.one/1` —
-            # but published-vs-draft alone is a PARTIAL order, and `dataset` is
-            # only filtered when the caller names one. With a slug in two
-            # datasets the remaining tie was broken by whatever Postgres
-            # returned first, so the same request could answer with a different
-            # row on a different connection. That is the failure mode the
-            # `limit: 1` fixes in the sibling forks would have INTRODUCED
-            # without a total order, so it is closed here by the same rule
-            # rather than left as the quiet member of the family.
+            # THE THIRD FORK (task-ca05dd6a02a0b55f, closed here by
+            # task-327276db28c99818). Published-vs-draft is the CORRECT axis and
+            # it stays. The `asc: d.dataset` that used to sit under it is gone:
+            # a dataset the caller did not name may not decide which row they
+            # get (`Barkpark.Tasks.TwinResolver` rule 2), and the tie it broke
+            # is now REFUSED for a task id rather than picked — see the
+            # refuse_ambiguous_task! call below.
             order_by: [
               asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id),
-              asc: d.dataset,
               asc: d.id
             ]
           )
@@ -2296,7 +2292,23 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_dataset(dataset)
 
-    case query |> Repo.all() |> List.first() do
+    rows = Repo.all(query)
+
+    # THE ONE RULE at the graph root (`Barkpark.Tasks.TwinResolver` — read that
+    # moduledoc; this door writes no second rule). TASK-SCOPED on purpose: the
+    # graph roots on ANY content type, and a second copy of a non-task document
+    # in another dataset is the dataset feature working, so only a `type ==
+    # "task"` id spanning datasets with no `?dataset=` refuses (409
+    # `ambiguous_dataset`, naming both). Every non-task root — and every task id
+    # with one row in scope — resolves byte-identically to before.
+    #
+    # AFTER the query, BEFORE the answer, and after the perspective filter is in
+    # the query: a draft-only id still 404s at the published perspective (the
+    # graph_draft_leak_test.exs gate), and the refusal can only name rows this
+    # caller's own scope already admitted.
+    TwinResolver.refuse_ambiguous_task!(rows, pub_id, dataset)
+
+    case List.first(rows) do
       %Document{} = doc -> {:ok, doc}
       _ -> {:error, :not_found}
     end
