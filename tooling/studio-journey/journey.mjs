@@ -1829,7 +1829,7 @@ async function legC(page, ctx, ledger, run) {
       // WHERE THIS ROW WAS SEEN. A press replaces the pane its siblings live in,
       // so by the time a sibling's turn comes its node is gone; navigating back
       // to the URL the row was ENUMERATED at re-renders the pane that held it.
-      const rec = { ...r, enum_url: c.full_url || null, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0, recovered: false };
+      const rec = { ...r, enum_url: c.full_url || null, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0, recovered: false, wire: null };
       byKey.set(r.key, rec);
       roster.push(rec);
     }
@@ -1911,6 +1911,10 @@ async function legC(page, ctx, ledger, run) {
     rec.detail = r.detail;
     rec.presses = r.presses;
     rec.waited_ms = r.waited;
+    // The reading, in the RECORD and not only in the sentence: the self-test
+    // asserts on it, and a fact only a human can read out of prose is a fact no
+    // gate can hold.
+    rec.wire = r.wire ? r.wire.verdict : null;
 
     // An anchor is a real page load: come back, and RE-ARM, before the next row
     // is judged. Same for any press that left a page with no desk rows on it.
@@ -2023,6 +2027,11 @@ async function pressCensusRow(page, rec, deadline) {
       detail: `the page would not answer a witness probe for this row — ${UNMEASURED}` };
   }
   let after = before, won = null, presses = 0, landed = false, ranOut = false;
+  // THE WIRE MARK, taken before the first press on this row. Every FAIL below
+  // used to end "it is DEAD as far as any observer can tell" — true of an
+  // observer confined to the DOM, and this one is not: the tap reads
+  // /live/websocket, so a dead row now says WHICH KIND of dead it is.
+  const wireMark = page.wireMark();
   for (let attempt = 1; attempt <= LEG_C_PRESS_ATTEMPTS && !won; attempt++) {
     if (Date.now() >= deadline) { ranOut = true; break; }
     presses = attempt;
@@ -2052,6 +2061,7 @@ async function pressCensusRow(page, rec, deadline) {
     }
   }
   const waited = Date.now() - t0;
+  const wire = page.wireVerdict(wireMark);
   // THE COUNTS ARE IN THE RECORD AND THEY DECIDE NOTHING. They are the drift a
   // snapshot diff used to call an answer, which is how the dead #item-sheet was
   // credited with its neighbour's URL 900 ms later.
@@ -2060,19 +2070,19 @@ async function pressCensusRow(page, rec, deadline) {
     `.pane-item ${before.item_rows}→${after.item_rows} · .pane-doc-item ${before.doc_rows}→${after.doc_rows} · ` +
     `url ${before.url} → ${after.url}`;
   if (won) {
-    return { status: PASS, witness: `IDENTITY: ${won}`, presses, waited,
-      detail: `answered in ${ms(waited)} after ${presses} press(es) · ${drift}` };
+    return { status: PASS, witness: `IDENTITY: ${won}`, presses, waited, wire,
+      detail: `answered in ${ms(waited)} after ${presses} press(es) · wire: ${wire.verdict} · ${drift}` };
   }
   // THE BUDGET IS NOT A VERDICT. A row whose measurement was cut off mid-flight
   // is UNMEASURED, never dead: converting an exhausted runner budget into a dead
   // row fabricates a defect, which is the failure mode this whole epic exists to
   // stop.
   if (ranOut) {
-    return { status: PENDING, witness: "none", presses, waited,
+    return { status: PENDING, witness: "none", presses, waited, wire,
       detail: `the ${ms(LEG_C_BUDGET)} LEG_C_BUDGET ran out WHILE this row was being measured (${presses} press(es), ${ms(waited)}) — ${UNMEASURED} · ${drift}` };
   }
   if (!landed) {
-    return { status: FAIL, witness: "none", presses, waited,
+    return { status: FAIL, witness: "none", presses, waited, wire,
       detail: `NO PRESS EVER LANDED on it in ${ms(waited)} (${presses} attempt(s)) — the element had no layout box to click, so it is on the page and cannot be pointed at · ${drift}` };
   }
   const unavailable =
@@ -2081,8 +2091,18 @@ async function pressCensusRow(page, rec, deadline) {
       : rec.kind === "collapsed_strip"
         ? `witness = #${rec.id || "(NO ID — nothing can name this strip; only the strip COUNT could move, and a count cannot name a row)"} losing .pane-column--collapsed`
         : `aria-current ${isCurrent(before.aria_current) ? `was ALREADY "${before.aria_current}" before the press, so that witness was unavailable and only the URL could name this row` : `stayed ${after.aria_current === null ? "absent" : `"${after.aria_current}"`}`}, and the URL never carried ${rec.phx_value_id ? `"${rec.phx_value_id}"` : "(this row has NO phx-value-id)"} as a path segment`;
-  return { status: FAIL, witness: "none", presses, waited,
-    detail: `NOTHING NAMED THIS ROW after ${presses} press(es) in ${ms(waited)}: ${unavailable} · ${drift} — whatever moved above, no effect claimed THIS row, so it is DEAD as far as any observer can tell` +
+  return { status: FAIL, witness: "none", presses, waited, wire,
+    detail: `NOTHING NAMED THIS ROW after ${presses} press(es) in ${ms(waited)}: ${unavailable} · ${drift}` +
+    // WHICH KIND OF DEAD. Without this clause the sentence below says only that
+    // nothing happened, which is the one thing a reader already knew — and it
+    // used to end "DEAD as far as any observer can tell", a claim that was only
+    // ever true of a DOM-bound observer.
+    ` · WIRE: ${wire.detail}` +
+    (wire.verdict === "NOT SENT"
+      ? ` — so this row is not "dead": its press was DISCARDED IN THE BROWSER and the server never heard it. Fix the affordance, not the handler.`
+      : wire.verdict === "SENT"
+        ? ` — so the press DID reach the server and nothing observable came back: this is a server-side non-answer, not a client discard.`
+        : ` — and the wire could not be read, so this run cannot say which.`) +
       ` · READ IT AS "no witness within ${ms(LEG_C_ROW_CAP)}": measured answer latency on this seam runs 1.6s to never-within-15s, so against a LIVE host this row is either dead or slower than the cap, and LEG_C_ROW_CAP_MS raises the cap` };
 }
 
@@ -2185,7 +2205,21 @@ ${
   // so the presence tripwire is proven to FIRE offline on every run.
   site === "rot" ? `<div class="pane-section-header">Content</div>` : ""
 }
-${rows.map((r) => `<button type="button" class="pane-item" id="${r.id}" phx-click="select" phx-value-id="${r.value}" phx-value-pane="0"><span class="pane-item-label">${r.label}</span></button>`).join("\n")}
+${rows.map((r) => `<button type="button" class="pane-item" id="${r.id}" phx-click="select" phx-value-id="${r.value}" phx-value-pane="0"${
+  // THE REF-STUCK ROW, /rot only. `data-phx-ref-src` is what LiveView stamps on
+  // an element while its event is in flight, and `syncPendingAttrs` CARRIES IT
+  // ACROSS a re-render — so a row whose earlier press is still outstanding is
+  // rendered exactly like this. bindClick then returns EARLY on it
+  // (live_socket.js: `!r.hasAttribute(N) && this.debounce(...)`), and the press
+  // is discarded with no frame, no exception and no server trace.
+  //
+  // It is here so the tap's NOT SENT verdict is DEMONSTRATED offline on every
+  // run rather than promised in a comment. /rot's other dead rows are dead the
+  // OTHER way — their press goes out on the wire and nothing answers it — so
+  // the two verdicts red for different reasons on the same site, which is the
+  // whole distinction this instrument exists to draw.
+  site === "rot" && r.id === "item-sheet" ? ` data-phx-ref-src="phx-fixture"` : ""
+}><span class="pane-item-label">${r.label}</span></button>`).join("\n")}
 ${decoy}
 <!-- components.ex:1192 — an <a>, not a button. It matches .pane-item, so a
      census enumerates it, and neither identity witness exists on it. -->
@@ -2204,6 +2238,47 @@ ${decoy}
   // for the same reason it failed against guerrilla.
   var main = document.getElementById("phx-fixture");
   setTimeout(function () { main.className = "phx-connected"; }, 700);
+
+  // ── THE LIVEVIEW SOCKET, AND THE TWO CLIENT-SIDE DROP GATES ───────────────
+  // (spd-w18-desk-click-latency, criterion 0)
+  //
+  // The whole point of the wire tap is that "never sent" and "sent and ignored"
+  // are the SAME silence in the DOM and need OPPOSITE fixes. That distinction
+  // can only be asserted offline if this fixture actually puts frames on a
+  // socket, and drops them where the real client drops them. Both gates below
+  // are transcribed from the shipped client, not invented:
+  //
+  //   1. NOT JOINED YET — 'View.pushWithReply' opens with
+  //      'if(!this.isConnected()) return Promise.reject(new Error("no connection"))',
+  //      and 'View.isConnected(){ return this.channel.canPush() }'. A press
+  //      before the channel joins produces NO frame.
+  //   2. A REF IS ALREADY STAMPED — 'bindClick' ends
+  //      '!r.hasAttribute(N) && this.debounce(...)' with N = "data-phx-ref-src".
+  //      A press on an element whose previous event is still in flight produces
+  //      NO frame.
+  //
+  // Neither raises, neither flashes, and neither leaves a server-side trace.
+  // Everything else pushes — INCLUDING a press on a row this fixture answers
+  // with nothing, which is the other arm: the server heard it and said nothing.
+  var LV = null;
+  setTimeout(function () {
+    try {
+      LV = new WebSocket(location.origin.replace(/^http/, "ws") + "/" + site + "/live/websocket?vsn=2.0.0");
+      LV.addEventListener("error", function () { /* the tap reads the SENT side */ });
+    } catch (e) { LV = null; }
+  }, 700);
+  // Capture phase on document, so this models the client's window-level binding
+  // running for EVERY press regardless of which per-row listener also fires.
+  document.addEventListener("click", function (ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest("[phx-click]") : null;
+    if (!el) return;
+    if (!LV || LV.readyState !== 1) return;              // gate 1: no connection
+    if (el.hasAttribute("data-phx-ref-src")) return;     // gate 2: bindClick's early return
+    try {
+      LV.send('["4","5","lv:phx-fixture","event",{"type":"click","event":' +
+        JSON.stringify(el.getAttribute("phx-click") || "") + ',"value":{}}]');
+    } catch (e) { /* a closing socket is not a press */ }
+  }, true);
   // The ONE honest answer a selecting row gives: aria-current moves onto THIS
   // element and the URL gains THIS row's own phx-value-id. Both are per-row
   // identity, which is what LEG C attributes on.
@@ -2632,6 +2707,34 @@ function startFixture() {
     return send(404, "fixture: no route " + rest, "text/plain");
   });
 
+  // ── /live/websocket, FOR REAL (spd-w18-desk-click-latency, criterion 0) ────
+  //
+  // The wire tap reads Chrome's own `Network.webSocketFrameSent`, so a fixture
+  // with no socket would make the tap report CANNOT READ on every offline run
+  // and its two real verdicts would be asserted NOWHERE. This handshake is the
+  // whole server side: 101, then ignore everything. Nothing here needs to
+  // DECODE a frame — the tap reads what the BROWSER sent, on the browser's
+  // side, and the server is only required to keep the socket open so the page
+  // can send at all.
+  server.on("upgrade", (req, socket) => {
+    const key = req.headers["sec-websocket-key"];
+    if (!/^\/(good|rot)\/live\/websocket/.test(req.url || "") || !key) {
+      socket.destroy();
+      return;
+    }
+    const accept = crypto
+      .createHash("sha1")
+      .update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+      .digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.on("data", () => { /* the fixture never replies; the tap reads the SENT side */ });
+    socket.on("error", () => { /* a closed tab is not a fixture failure */ });
+  });
+
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, store }));
   });
@@ -2869,6 +2972,11 @@ const SELF_TEST_CENSUS_EXPECT = {
   },
 };
 
+// The one /rot row the fixture renders with `data-phx-ref-src` already stamped.
+// Named ONCE, here, because two of the wire assertions below are defined against
+// it and its complement — a key spelled twice is a key that drifts apart.
+const SELF_TEST_REFSTUCK_KEY = "pane_item#item-sheet|Sheets";
+
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();
   const results = {}, exits = {}, residue = {}, censuses = {};
@@ -2958,6 +3066,36 @@ async function selfTest(opts) {
       }
       if (rec.outcome !== want[rec.key]) {
         problems.push(`${site}: census row "${rec.key}" expected ${want[rec.key]}, got ${rec.outcome} — ${rec.detail}`);
+      }
+      // ── THE WIRE READING, ASSERTED (spd-w18-desk-click-latency, crit. 0) ──
+      // A reading nobody asserts is a decoration, and this one has a specific
+      // way of going quietly blind: if the tap ever stops seeing the socket it
+      // returns CANNOT READ for EVERY row, and every sentence it writes stays
+      // grammatical. So CANNOT READ is a self-test failure on both sites.
+      if (rec.wire === "CANNOT READ" || rec.wire === null) {
+        problems.push(
+          `${site}: census row "${rec.key}" came back with NO WIRE READING (${rec.wire}) — ` +
+            `the tap saw no /live/websocket socket, so the SENT / NOT SENT distinction was asserted nowhere on this run`,
+        );
+      }
+      // The two verdicts, pinned to the two shapes the fixture builds. Without
+      // BOTH of these the instrument could be stuck on one answer and stay green.
+      if (site === "rot" && rec.key === SELF_TEST_REFSTUCK_KEY && rec.wire !== "NOT SENT") {
+        problems.push(
+          `rot: "${rec.key}" carries data-phx-ref-src, so its press is discarded IN THE BROWSER and the wire ` +
+            `must read NOT SENT — it read ${rec.wire}. Either the drop gate stopped firing or the tap counts frames it should not.`,
+        );
+      }
+      if (site === "rot" && rec.outcome === FAIL && rec.key !== SELF_TEST_REFSTUCK_KEY && rec.wire === "NOT SENT") {
+        problems.push(
+          `rot: "${rec.key}" is dead SERVER-side (the fixture answers it with nothing) and its press does go out, ` +
+            `so the wire must read SENT — it read NOT SENT. The tap is not seeing frames the browser sent.`,
+        );
+      }
+      if (site === "good" && rec.outcome === PASS && rec.wire !== "SENT") {
+        problems.push(
+          `good: "${rec.key}" ANSWERED, so its press was necessarily on the wire — the wire read ${rec.wire}`,
+        );
       }
     }
     const producedKeys = new Set(rows.map((r) => r.key));
