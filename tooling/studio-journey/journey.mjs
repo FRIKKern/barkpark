@@ -161,6 +161,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 
 // ── caps (ms) ────────────────────────────────────────────────────────────────
@@ -425,6 +426,24 @@ class Page {
     this.sid = sessionId;
     this.exceptions = [];
     this.lastDocument = null; // { status, url } of the most recent main document
+    // ── THE WIRE TAP (spd-w18-desk-click-latency, criterion 0) ──────────────
+    //
+    // A press that was NEVER SENT and a press that was SENT AND IGNORED look
+    // IDENTICAL from inside the DOM — nothing happens, either way — and they
+    // need OPPOSITE fixes: the first is a client-side discard (make the
+    // affordance refuse the press or survive the window), the second is a
+    // server-side answer that did not come (make the handler answer, or say it
+    // is working). Every "dead row" verdict this harness has ever printed was
+    // silent about which one it saw. These three fields are what tells them
+    // apart, and they are read OFF THE SOCKET, which no page JavaScript can do.
+    //
+    // `lvSocketIds` is not decoration: a CDP frame event carries only a
+    // requestId, so without the created-event mapping there is no way to know a
+    // frame belongs to `/live/websocket` rather than to some other socket the
+    // page opened. An EMPTY set therefore means CANNOT READ — never "0 frames".
+    this.lvSocketIds = new Set();
+    this.lvSocketUrl = null;
+    this.lvClickFrames = [];
   }
 
   static async open(cdp) {
@@ -443,6 +462,30 @@ class Page {
     cdp.on("Network.responseReceived", (p) => {
       if (p.type !== "Document") return;
       page.lastDocument = { status: p.response?.status ?? null, url: p.response?.url ?? null };
+    });
+    // The wire tap's three subscriptions. `Network.enable` above already turned
+    // the WebSocket events on — they ride the same domain as the status line, so
+    // this costs one more listener and no extra protocol state.
+    cdp.on("Network.webSocketCreated", (p) => {
+      // The LiveView socket is the ONE this harness reasons about. Matching on
+      // the path, not on "the first socket", because the Studio also opens
+      // sockets for the tmux terminal and (in dev) live_reload, and a frame from
+      // one of those must never be counted as a press.
+      if (typeof p.url === "string" && p.url.includes("/live/websocket")) {
+        page.lvSocketIds.add(p.requestId);
+        page.lvSocketUrl = p.url;
+      }
+    });
+    cdp.on("Network.webSocketFrameSent", (p) => {
+      if (!page.lvSocketIds.has(p.requestId)) return;
+      const data = p.response?.payloadData;
+      if (typeof data !== "string") return;
+      // A LiveView click rides as `[join_ref,ref,topic,"event",{"type":"click",…}]`.
+      // `"type":"click"` is the discriminator — it is the field the server
+      // switches on, and it is absent from every join, heartbeat, form, keydown
+      // and hook push on the same socket.
+      if (data.indexOf('"type":"click"') === -1) return;
+      page.lvClickFrames.push({ at: Date.now(), payload: data.slice(0, 240) });
     });
     cdp.on("Runtime.exceptionThrown", (p) => {
       const d = p.exceptionDetails || {};
@@ -539,6 +582,10 @@ class Page {
   async clickUntil(selector, predicate, { cap, attempts = 3, label = selector } = {}) {
     const per = Math.max(1500, Math.floor(cap / attempts));
     const t0 = Date.now();
+    // Taken before the FIRST press, so `wire` covers every press this helper
+    // made — which is the honest scope: the question "was it sent" is about the
+    // presses, plural, that produced (or failed to produce) this outcome.
+    const mark = this.wireMark();
     let clicked = false;
     for (let i = 1; i <= attempts; i++) {
       const hit = await this.click(selector);
@@ -550,10 +597,10 @@ class Page {
         continue;
       }
       const r = await poll(predicate, per, label);
-      if (r.value) return { value: r.value, attempts: i, waited: Date.now() - t0, clicked };
+      if (r.value) return { value: r.value, attempts: i, waited: Date.now() - t0, clicked, wire: this.wireVerdict(mark) };
       if (Date.now() - t0 >= cap) break;
     }
-    return { value: null, attempts, waited: Date.now() - t0, clicked };
+    return { value: null, attempts, waited: Date.now() - t0, clicked, wire: this.wireVerdict(mark) };
   }
 
   /** Put the caret at the END of a contenteditable node and confirm the
@@ -571,6 +618,58 @@ class Page {
         `var a=s.anchorNode;` +
         `return !!(a&&(el.contains(a)||a===el));})()`,
     );
+  }
+
+  /** A high-water mark on the click frames seen so far. Take it IMMEDIATELY
+   *  before a press; `wireVerdict` reads what arrived after it. */
+  wireMark() { return this.lvClickFrames.length; }
+
+  /** THE THREE-VALUED ANSWER, and the third value is the point.
+   *
+   *    SENT        ≥1 `"type":"click"` frame left the browser on
+   *                `/live/websocket` after the mark — the press reached the
+   *                server, so a missing answer is the SERVER's.
+   *    NOT SENT    the LiveView socket was observed and carried ZERO click
+   *                frames — the press was discarded IN THE CLIENT and no
+   *                server-side fix can help it.
+   *    CANNOT READ no `/live/websocket` socket was ever observed at all, so
+   *                this instrument has NO reading. It is deliberately NOT the
+   *                same value as zero: reporting a failed read as "0 frames"
+   *                would manufacture a confident client-side verdict out of a
+   *                broken tap, which is the exact instrument fault this
+   *                criterion exists to forbid. Callers must treat it as a
+   *                FAILED check (exit non-zero), never as a NOT SENT.
+   */
+  wireVerdict(mark) {
+    const frames = this.lvClickFrames.length - mark;
+    if (this.lvSocketIds.size === 0) {
+      return {
+        verdict: "CANNOT READ",
+        frames: null,
+        detail:
+          "CANNOT READ — no /live/websocket socket was ever observed on this tab, " +
+          "so this run cannot say whether the press was sent. This is an INSTRUMENT " +
+          "failure, not a zero: check that Network.enable is on and that the Studio " +
+          "actually opens a LiveView socket at this base.",
+      };
+    }
+    if (frames > 0) {
+      return {
+        verdict: "SENT",
+        frames,
+        detail: `SENT — ${frames} "type":"click" frame(s) left the browser on ${this.lvSocketUrl}`,
+      };
+    }
+    return {
+      verdict: "NOT SENT",
+      frames: 0,
+      detail:
+        `NOT SENT — the LiveView socket (${this.lvSocketUrl}) was open and carried ZERO ` +
+        `"type":"click" frames for this press: the client DISCARDED it (LiveView's ` +
+        `bindClick returns early when the element carries data-phx-ref-src, and ` +
+        `pushWithReply rejects with "no connection" before the channel has joined — ` +
+        `both drop with no exception, no flash and no server trace)`,
+    };
   }
 
   exceptionMark() { return this.exceptions.length; }
@@ -1072,11 +1171,35 @@ async function legA(page, ctx, ledger, run) {
       postAdd = { ...(postAdd && !postAdd.__throw ? postAdd : {}), orphans: orphans.ids };
       run.post_add_state = postAdd;
     }
+    // ── THE WIRE READING (spd-w18-desk-click-latency, criterion 0) ───────
+    //
+    // The old detail on the row below ENDED "the row's phx-click never reached
+    // the server" — a claim this harness had no instrument for. It was a guess,
+    // and it is exactly the guess that costs a wave: "never reached the server"
+    // and "reached the server and the server said nothing" are opposite defects
+    // with opposite fixes, and from inside the DOM they are the same silence.
+    // `patched.wire` is the reading, and it is taken off /live/websocket.
+    run.press_wire = { item_paper: patched.wire || null, new_document: nav.wire || null };
+    const wire = patched.wire || { verdict: "CANNOT READ", frames: null, detail: "no reading was taken" };
     createChecks = [
       check("#item-paper click patches the URL to the paper pane", clickedPaper && patched.value ? PASS : FAIL,
         patched.value
-          ? `${patched.value} in ${ms(patched.waited)} after ${patched.attempts} press(es)`
-          : `the URL never reached /studio/paper after ${patched.attempts} press(es) in ${ms(patched.waited)} (a press landed=${clickedPaper}) — the row's phx-click never reached the server`),
+          ? `${patched.value} in ${ms(patched.waited)} after ${patched.attempts} press(es) · ${wire.detail}`
+          : `the URL never reached /studio/paper after ${patched.attempts} press(es) in ${ms(patched.waited)} (a press landed=${clickedPaper}) · ${wire.detail}`),
+      // A THREE-VALUED CHECK, and CANNOT READ is a FAIL on purpose (which drives
+      // the run's non-zero exit): an instrument with no reading must never print
+      // the same line as an instrument that read a zero.
+      check(
+        "the run says whether the press put a phx-click frame on /live/websocket",
+        wire.verdict === "CANNOT READ" ? FAIL : PASS,
+        patched.value
+          ? `the press ANSWERED (URL patched), and the wire says ${wire.verdict}. ${wire.detail}`
+          : `THE PRESS DID NOT PATCH THE URL, and the wire says ${wire.verdict}. ${wire.detail}` +
+            (wire.verdict === "NOT SENT"
+              ? " — so this is a CLIENT-SIDE DISCARD: the fix belongs on the affordance (refuse the press visibly, or make it survive the pre-join window), NOT on the server handler."
+              : wire.verdict === "SENT"
+                ? " — so this is a SERVER-SIDE non-answer: the press arrived and nothing came back in time. The fix belongs on the handler's latency, NOT on the client."
+                : "")),
       check("the paper pane lands .pane-doc-item document rows", docRows.value ? PASS : FAIL,
         docRows.value
           ? `${docRows.value} rows in ${ms(docRows.waited)}`
