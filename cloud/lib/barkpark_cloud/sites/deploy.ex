@@ -867,9 +867,11 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  defp site_template("astro"), do: "astro-starter"
-  defp site_template("nextjs"), do: "next-starter"
-  defp site_template(_framework), do: nil
+  # ssw8-bl-accepted-frameworks-no-implementation: the astro→astro-starter /
+  # nextjs→next-starter map moved to `Site.shipped_starters/0`, which the create
+  # door ALSO reads to decide which frameworks it accepts. Two copies of this
+  # mapping is exactly how a door and a builder drift apart.
+  defp site_template(framework), do: Map.get(Site.shipped_starters(), framework)
 
   # For a node deploy, carry down the IDLE slot's PORT — the port the box builds+
   # boots the new Node process on, health-gates, THEN flips the Caddy upstream to

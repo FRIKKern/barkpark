@@ -314,6 +314,7 @@ js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
 scripts/cloud-path-escape-check.test.sh
+templates/**
 templates/astro-search-starter/src/lib/bp.ts
 templates/search-starter/lib/markers.corpus-status.test.ts'
 
