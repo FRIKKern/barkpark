@@ -1833,6 +1833,47 @@ const drillDie = (msg, seen) =>
       `\n\n  This is not a measurement and must not be recorded as one. Re-run, or pass ` +
       `--doc=<slug> to name a different document (--doc=any takes the first row that opens).`);
 
+/** How the drill counts pane columns. A template string for the same reason
+ *  PAGE_MEASURE is one — it is evaluated IN THE PAGE. */
+export const PANE_COUNT = /* js */ `() => document.querySelectorAll('.pane-column').length`;
+
+/**
+ * EDGE-TRIGGERED, because quiescence is not arrival.
+ *
+ * `waitForDeskSettled()` is a QUIESCENCE detector: it returns as soon as its
+ * structural signature has held still for `quietMs` (800ms) with the socket
+ * connected. It structurally cannot tell "settled because the patch finished"
+ * from "settled because the patch has not started" — and the pre-click desk is
+ * already, trivially, still. Measured live against guerrilla on 2026-09-06 at
+ * served sha 9a837ed38: after a real click on the "Papers" type row the second
+ * `.pane-column` appears between t+1000ms and t+2000ms, i.e. AFTER the 800ms
+ * quiet window has already fired. `openPapersPane` then read
+ * `.pane-column.last()` and got the ROOT pane back.
+ *
+ * That is charter D138's "failure C" and its stderr has been misread ever
+ * since: the drill reported `4 rows rendered. First 8 slugs: paper / sheet /
+ * plugin-doclist-75745103 / rest` and the ledger row calls that "a PARTIALLY-
+ * LOADED Papers list". It is not. Those five strings are DOCUMENT TYPES — the
+ * root pane's own rows, which reach `[phx-click="select"]` through the `_`
+ * catch-all `pane_item` in `studio_live/components.ex:1485`, exactly like a
+ * document row does. A Papers list has 100 rows, never 4. The drill was
+ * reading the wrong pane and naming the right one.
+ *
+ * So: read the count BEFORE the click and wait for it to GROW. `now` is
+ * injectable so the wait can be proven without a browser — see
+ * `scripts/studio-desk-drill-pane.test.mjs`.
+ */
+export async function waitForNewPane(page, before, opts = {}) {
+  const { timeoutMs = 20_000, pollMs = 100, now = () => Date.now() } = opts;
+  const started = now();
+  for (;;) {
+    const panes = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
+    if (panes > before) return { grew: true, panes, waited_ms: now() - started };
+    if (now() - started >= timeoutMs) return { grew: false, panes, waited_ms: now() - started };
+    await page.waitForTimeout(pollMs);
+  }
+}
+
 /** Open the Papers list pane. Returns the pane locator. */
 async function openPapersPane(page, base) {
   await page.goto(`${base}/w/default/p/default/d/production/studio`, { waitUntil: 'domcontentloaded' });
@@ -1842,7 +1883,15 @@ async function openPapersPane(page, base) {
   if (await typeItem.count() === 0) {
     drillDie('the root desk rendered no "Papers" entry to drill into.');
   }
+  const panesBefore = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
   await typeItem.click();
+  const grown = await waitForNewPane(page, panesBefore);
+  if (!grown.grew) {
+    drillDie(
+      `clicking the "Papers" type row never added a pane column — ${panesBefore} before the click, ` +
+      `${grown.panes} still after ${grown.waited_ms}ms. Every row the drill could have read would ` +
+      `have come from the ROOT pane, whose rows are document TYPES and not documents.`);
+  }
   await waitForDeskSettled(page);
   return page.locator('.pane-column').last();
 }
@@ -1892,12 +1941,21 @@ async function drillToDocument(page, base, target) {
       if (await named.count() === 0) {
         const visible = await rows.evaluateAll(
           (els) => els.slice(0, 8).map((e) => e.getAttribute('phx-value-id')));
+        // WHICH pane produced these rows is part of the evidence. Without it,
+        // a root-pane read (5 type rows) and a real Papers list (100 document
+        // rows) print the same sentence — which is how D138's "failure C" was
+        // diagnosed as a partially-loaded list for seven weeks.
+        const paneCount = await page.evaluate((src) => eval(`(${src})`)(), PANE_COUNT);
         drillDie(
           `the Papers list has no row with phx-value-id="${target.slug}" ` +
           `(target came from the ${target.source}).`,
-          `    ${rowCount} rows rendered. First 8 slugs:\n` +
+          `    ${paneCount} pane column(s) on screen; the last one rendered ${rowCount} ` +
+          `[phx-click="select"] rows. First 8 phx-value-ids:\n` +
           visible.map((s) => `      ${s}`).join('\n') +
-          `\n    If the target has simply aged off the list, pass --doc=<slug> with one of these.`);
+          `\n    A Papers list is ~100 rows, newest first. A handful of rows named after ` +
+          `\n    document TYPES (paper / sheet / rest / ...) means this is the ROOT pane and the ` +
+          `\n    drill never entered the list at all.` +
+          `\n    If the target has simply aged off the 100-row window, pass --doc=<slug> with one of these.`);
       }
       const landed = await tryOpenRow(page, named);
       if (landed) {
