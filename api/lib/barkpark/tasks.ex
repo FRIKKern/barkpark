@@ -204,7 +204,11 @@ defmodule Barkpark.Tasks do
   See `Barkpark.Tasks.Expectations.driven_tasks/2`.
   """
   @spec driven_tasks(binary(), keyword()) ::
-          %{tasks: [Expectations.driven_task()], truncated: boolean()}
+          %{
+            tasks: [Expectations.driven_task()],
+            truncated: boolean(),
+            unhydrated: [String.t()]
+          }
   defdelegate driven_tasks(paper_id, opts \\ []), to: Expectations
 
   # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────

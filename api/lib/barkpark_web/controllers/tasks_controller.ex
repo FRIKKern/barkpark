@@ -1573,7 +1573,9 @@ defmodule BarkparkWeb.TasksController do
     case resolve_graph_root(id, conn) do
       {:ok, %Document{} = root} ->
         opts = scope_opts(conn) |> Keyword.put(:dataset, root.dataset)
-        %{tasks: tasks, truncated: truncated} = Tasks.driven_tasks(root.doc_id, opts)
+
+        %{tasks: tasks, truncated: truncated, unhydrated: unhydrated} =
+          Tasks.driven_tasks(root.doc_id, opts)
 
         json(conn, %{
           ok: true,
@@ -1581,7 +1583,13 @@ defmodule BarkparkWeb.TasksController do
           root: Content.published_id(root.doc_id),
           tasks: Enum.map(tasks, &render_driven_task/1),
           count: length(tasks),
-          truncated: truncated
+          truncated: truncated,
+          # A citing task whose edge was read but whose document did not
+          # hydrate under this read's scope. `truncated` cannot carry it (the
+          # node budget never bit), and a short list that reports itself
+          # complete is how three real citations stayed invisible for two
+          # weeks — task-464b89f30e3f8e41. Always present, `[]` when clean.
+          unhydrated: unhydrated
         })
 
       {:error, :not_found} ->
