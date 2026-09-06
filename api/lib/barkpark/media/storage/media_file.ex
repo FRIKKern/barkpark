@@ -32,6 +32,20 @@ defmodule Barkpark.Media.Storage.MediaFile do
       type: :binary_id
 
     timestamps(type: :utc_datetime_usec)
+
+    # KEYSET-CURSOR ELIGIBILITY OF THE ROW AS THIS PAGE SERVED IT
+    # (task-a00f46ef36eca19e). Virtual, set by
+    # `Media.Delivery.Search.search/2`, read by `Search.next_cursor/1`.
+    #
+    # The cursor token is `{id, inserted_at}` — a total order over
+    # `media_files` ALONE. It can therefore page the `created-desc` and
+    # `created-asc` arms and nothing else: `updated-desc` orders by
+    # `d.updated_at` (nullable, on the LEFT-JOINed document, and not unique per
+    # media row) and `relevance` orders by a computed similarity score that is
+    # not a column at all. Minting a cursor on those arms is what made paging
+    # skip and repeat rows. `false` here means "this page carries no cursor" —
+    # the caller pages that arm by offset, over an ORDER BY that is now total.
+    field :search_cursorable, :boolean, virtual: true, default: true
   end
 
   def changeset(media_file, attrs) do
