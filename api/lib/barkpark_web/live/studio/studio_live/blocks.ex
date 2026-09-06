@@ -98,6 +98,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def terminal_form_state(_block), do: {:error, :malformed_terminal}
 
   @doc false
+  def stage_form_state(%{"type" => "stage", "id" => id} = block) when is_binary(id) do
+    with true <- String.trim(id) != "",
+         {:ok, slots} <- card_slots(block),
+         {:ok, kind} <- stage_field_state(block, slots, "kind"),
+         {:ok, title} <- stage_field_state(block, slots, "title"),
+         {:ok, detail} <- stage_field_state(block, slots, "detail"),
+         {:ok, files} <- stage_scalar_text(Map.get(block, "files")),
+         {:ok, source_mode, source_text} <- stage_source_state(Map.get(block, "source")) do
+      {:ok,
+       %{
+         kind: kind.text,
+         title: title.text,
+         detail: detail.text,
+         files: files,
+         source_mode: source_mode,
+         source_text: source_text,
+         carriers: %{"kind" => kind, "title" => title, "detail" => detail}
+       }}
+    else
+      _ -> {:error, :malformed_stage}
+    end
+  end
+
+  def stage_form_state(_block), do: {:error, :malformed_stage}
+
+  @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
   # by patch.ex regardless. Mirrors the EXACT block shapes in
@@ -226,6 +252,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def build_block_patch(%{"type" => "terminal"} = block, params) do
     case terminal_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "stage"} = block, params) do
+    case stage_patch(block, params) do
       {:ok, patch} -> patch
       {:error, _reason} -> %{}
     end
@@ -382,6 +415,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "terminal"} = block, params),
     do: terminal_patch(block, params)
+
+  def validate_block_patch(%{"type" => "stage"} = block, params),
+    do: stage_patch(block, params)
 
   def validate_block_patch(%{"type" => "section"} = block, params) do
     section_structure_patch(block, params)
@@ -888,6 +924,128 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
       {:ok, patch}
     end
+  end
+
+  defp stage_scalar_text(nil), do: {:ok, ""}
+  defp stage_scalar_text(value) when is_binary(value), do: {:ok, value}
+  defp stage_scalar_text(value) when is_integer(value), do: {:ok, Integer.to_string(value)}
+  defp stage_scalar_text(_), do: :error
+
+  defp stage_source_state(true), do: {:ok, "origin", ""}
+  defp stage_source_state(value) when value in [nil, false, ""], do: {:ok, "none", ""}
+  defp stage_source_state(value) when is_binary(value), do: {:ok, "provenance", value}
+  defp stage_source_state(_), do: :error
+
+  defp stage_field_state(block, slots, field) do
+    with {:ok, scalar} <- stage_scalar_text(Map.get(block, field)) do
+      case Map.get(slots, field) do
+        nil ->
+          {:ok, %{text: scalar, carrier: :scalar}}
+
+        [] when field != "title" ->
+          {:ok, %{text: "", carrier: {:slot, []}}}
+
+        [%{"type" => "paragraph"} = paragraph] ->
+          case stage_inline_text(Map.get(paragraph, "content")) do
+            {:ok, text} -> {:ok, %{text: text, carrier: {:slot, [paragraph]}}}
+            _ -> :error
+          end
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  defp stage_inline_text(value) when value in [nil, []], do: {:ok, ""}
+
+  defp stage_inline_text([%{"type" => type} = leaf]) when type in ["text", "code"],
+    do: stage_scalar_text(Map.get(leaf, "value"))
+
+  defp stage_inline_text([%{"children" => [_] = children}]), do: stage_inline_text(children)
+  defp stage_inline_text(_), do: :error
+
+  defp stage_put_inline(value, text) when value in [nil, []],
+    do: [%{"type" => "text", "value" => text}]
+
+  defp stage_put_inline([%{"type" => type} = leaf], text) when type in ["text", "code"],
+    do: [Map.put(leaf, "value", text)]
+
+  defp stage_put_inline([%{"children" => children} = wrapper], text),
+    do: [Map.put(wrapper, "children", stage_put_inline(children, text))]
+
+  defp stage_patch(block, params) do
+    with {:ok, state} <- stage_form_state(block),
+         :ok <- validate_stage_params(params, state) do
+      patch =
+        Enum.reduce(~w(kind title detail), %{}, fn field, patch ->
+          carrier = state.carriers[field]
+
+          case Map.fetch(params, "stage-" <> field) do
+            {:ok, text} when text != carrier.text ->
+              case carrier.carrier do
+                :scalar ->
+                  Map.put(patch, field, text)
+
+                {:slot, elements} ->
+                  paragraph =
+                    case elements do
+                      [] -> %{"type" => "paragraph"}
+                      [element] -> element
+                    end
+
+                  updated =
+                    Map.put(paragraph, "content", stage_put_inline(paragraph["content"], text))
+
+                  slots = Map.get(patch, "slots", block["slots"])
+                  patch = Map.put(patch, "slots", Map.put(slots, field, [updated]))
+
+                  if is_binary(block[field]) and block[field] == carrier.text,
+                    do: Map.put(patch, field, text),
+                    else: patch
+              end
+
+            _ ->
+              patch
+          end
+        end)
+
+      patch = put_action_field(patch, params, "stage-files", "files", state.files)
+      mode = Map.get(params, "stage-source-mode", state.source_mode)
+      text = Map.get(params, "stage-source-text", state.source_text)
+
+      source_changed? =
+        mode != state.source_mode or (mode == "provenance" and text != state.source_text)
+
+      source =
+        case mode do
+          "origin" -> true
+          "provenance" -> text
+          "none" -> nil
+        end
+
+      {:ok, if(source_changed?, do: Map.put(patch, "source", source), else: patch)}
+    end
+  end
+
+  defp validate_stage_params(params, state) do
+    fields =
+      ~w(stage-kind stage-title stage-detail stage-files stage-source-mode stage-source-text)
+
+    present? = Enum.any?(fields, &Map.has_key?(params, &1))
+    binary? = Enum.all?(fields, &(not Map.has_key?(params, &1) or is_binary(params[&1])))
+
+    unexpected? =
+      Enum.any?(
+        Map.keys(params),
+        &(is_binary(&1) and String.starts_with?(&1, "stage-") and &1 not in fields)
+      )
+
+    mode = Map.get(params, "stage-source-mode", state.source_mode)
+    text = Map.get(params, "stage-source-text", state.source_text)
+
+    if present? and binary? and not unexpected? and mode in ~w(none origin provenance) and
+         (mode != "provenance" or text != ""), do: :ok, else: {:error, :invalid_stage_form}
   end
 
   defp canonical_terminal_children(%{"children" => children} = block)
