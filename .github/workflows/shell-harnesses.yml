@@ -109,6 +109,7 @@ on:
       # `changes` job's per-target filters rather than copying them, so an edit
       # to that workflow can invalidate this matrix without touching the script.
       - "scripts/deploy-convergence-check.sh"
+      - "scripts/deploy-convergence-check.test.sh"
       # DEPLOY STARVATION (task-8e5eae5c71635a5e). Same INPUT relationship:
       # the concurrency gate reads deploy.yml's own stanza and its harness
       # EXTRACTS the changes/f step body, so an edit to that workflow can
@@ -327,6 +328,7 @@ on:
       # `changes` job's per-target filters rather than copying them, so an edit
       # to that workflow can invalidate this matrix without touching the script.
       - "scripts/deploy-convergence-check.sh"
+      - "scripts/deploy-convergence-check.test.sh"
       # DEPLOY STARVATION (task-8e5eae5c71635a5e). Same INPUT relationship:
       # the concurrency gate reads deploy.yml's own stanza and its harness
       # EXTRACTS the changes/f step body, so an edit to that workflow can
@@ -639,6 +641,7 @@ jobs:
           registration-sample-bar scripts/cloud-path-escape-check.sh
           registration-sample-bar scripts/console-path-escape-check.sh
           deploy-convergence scripts/deploy-convergence-check.sh
+          deploy-convergence scripts/deploy-convergence-check.test.sh
           deploy-convergence .github/workflows/deploy.yml
           deploy-concurrency scripts/deploy-concurrency-check.sh
           deploy-concurrency scripts/deploy-concurrency-check.test.sh
@@ -1088,6 +1091,13 @@ jobs:
         # owed. A guard with only the first half trades a false positive for a
         # false negative, which on this axis means a silent stale production.
         run: bash scripts/deploy-convergence-check.sh --selftest
+      - name: the convergence job CONCLUDES on its verdict (task-103b5cc5ec4a8ccd)
+        # 20 cases: `adjudicate` in both directions (stranded+nothing-coming
+        # reds, stranded+in-flight stays green) and the deploy.yml wiring
+        # EXTRACTED by a YAML parser — B6 asserts the check step's LAST
+        # statement exits the adjudicated rc, and B7 proves B6 loses on the
+        # pre-fix `exit 0`. deploy.yml is in this job's paths for that reason.
+        run: bash scripts/deploy-convergence-check.test.sh
 
   # ── DEPLOY STARVATION (task-8e5eae5c71635a5e) ──────────────────────────────
   # deploy-convergence above answers "did the box end up on the right commit?".
