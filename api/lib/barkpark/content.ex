@@ -693,6 +693,7 @@ defmodule Barkpark.Content do
   children are filled. Idempotent. See `Content.Papers.BlockOps.ensure_block_ids/1`.
   """
   defdelegate ensure_block_ids(blocks), to: Papers.BlockOps
+  defdelegate project_block_ids_safely(blocks), to: Papers.BlockOps
 
   @doc """
   Coerce legacy flat-STRING list items to the canonical inline-array shape (the

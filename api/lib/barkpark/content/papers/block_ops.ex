@@ -1270,28 +1270,35 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp normalize_stored_paper_ops_receipt(_),
     do: {:error, :idempotency_receipt_invalid}
 
-  defp normalize_stored_document_op_receipt(%{
-         "block" => block,
-         "block_id" => block_id,
-         "op_kind" => op_kind,
-         "position" => position,
-         "written_doc_id" => written_doc_id,
-         "written_row_id" => written_row_id,
-         "rev" => rev
-       })
-       when is_map(block) and (is_binary(block_id) or is_nil(block_id)) and
+  defp normalize_stored_document_op_receipt(
+         %{
+           "block" => block,
+           "block_id" => block_id,
+           "op_kind" => op_kind,
+           "position" => position,
+           "written_doc_id" => written_doc_id,
+           "written_row_id" => written_row_id,
+           "rev" => rev
+         } = stored
+       )
+       when (is_map(block) or is_nil(block)) and (is_binary(block_id) or is_nil(block_id)) and
               is_binary(op_kind) and (is_integer(position) or is_nil(position)) and
               is_binary(written_doc_id) and is_binary(written_row_id) and is_binary(rev) do
-    {:ok,
-     %{
-       block: block,
-       block_id: block_id,
-       op_kind: op_kind,
-       position: position,
-       written_doc_id: written_doc_id,
-       written_row_id: written_row_id,
-       rev: rev
-     }}
+    receipt = %{
+      block: block,
+      block_id: block_id,
+      op_kind: op_kind,
+      position: position,
+      written_doc_id: written_doc_id,
+      written_row_id: written_row_id,
+      rev: rev
+    }
+
+    case Map.get(stored, "no_op", false) do
+      false -> {:ok, receipt}
+      true -> {:ok, Map.put(receipt, :no_op, true)}
+      _other -> {:error, :idempotency_receipt_invalid}
+    end
   end
 
   defp normalize_stored_document_op_receipt(_),
@@ -1305,6 +1312,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
        ) do
     Broadcast.flush_deferred_broadcasts()
     _ = Writer.finish_deferred_after_save({:ok, saved}, payload)
+    {:ok, receipt, :applied}
+  end
+
+  defp finish_document_op_transaction(
+         {:ok, {:applied, %{no_op: true} = receipt, nil}},
+         _dataset,
+         _previous_doc,
+         _opts
+       ) do
+    Broadcast.clear_deferred_broadcasts()
+    Writer.clear_deferred_after_save()
     {:ok, receipt, :applied}
   end
 
@@ -1323,6 +1341,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
     Broadcast.clear_deferred_broadcasts()
     Writer.clear_deferred_after_save()
     {:error, reason}
+  end
+
+  defp document_op_applied_result(
+         %{no_op: true, written_row_id: row_id} = receipt,
+         current_row_id
+       )
+       when row_id == current_row_id do
+    case Writer.take_deferred_after_save() do
+      nil -> {:applied, receipt, nil}
+      _unexpected -> Repo.rollback(:document_after_save_effect_unexpected)
+    end
+  end
+
+  defp document_op_applied_result(%{no_op: true}, _current_row_id),
+    do: Repo.rollback(:idempotency_target_replaced)
+
+  defp document_op_applied_result(receipt, _current_row_id) do
+    case Writer.take_deferred_after_save() do
+      {{:ok, %Document{id: row_id}}, _payload} = deferred
+      when row_id == receipt.written_row_id ->
+        {:applied, receipt, deferred}
+
+      _ ->
+        Repo.rollback(:document_after_save_effect_missing)
+    end
   end
 
   # Atomic fold: thread the block list through each op via Patch.apply_patch/2,
@@ -1661,55 +1704,89 @@ defmodule Barkpark.Content.Papers.BlockOps do
       when is_binary(doc_id) and is_binary(type) and is_map(op) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_document_if_rev(doc, if_rev),
          {blocks, _synth?} = Papers.resolve_blocks_for_edit(doc, type, dataset),
+         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
          {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
-      content =
-        (doc.content || %{})
-        |> Map.put("blocks", new_blocks)
-        # Project-on-write — the SOLE writer of content[fieldName]/content["body"]
-        # for this document, identical to the paper path. Bound title → "title",
-        # free body blocks → content["body"]. Pre-patch `blocks` as old_blocks so
-        # a Beta-editor unbind clears the orphaned content[fieldName].
-        |> Projection.project(blocks, new_blocks, doc_project_opts(dataset, type, doc))
-
-      # Derive the row title from the bound title field if present (matches the
-      # Classic-save title precedence), else keep the document's current title.
-      new_title = blank_to_nil(Map.get(content, "title")) || doc.title
-
-      attrs = %{
-        "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
-        "title" => new_title,
-        "status" => doc.status,
-        "content" => content
-      }
-
-      case Content.upsert_document(type, attrs, dataset, opts) do
-        {:ok, saved} ->
-          {:ok,
-           %{
-             block: affected.block,
-             block_id: affected.block_id,
-             op_kind: Map.get(op, "op"),
-             position: affected.position,
-             # Session-handoff (final review, F5): the row this path actually
-             # WROTE is the `drafts.<slug>` twin (see `attrs["doc_id"]` above),
-             # NOT the published `<slug>` row a reader resolves. Naming it in
-             # the result lets an HTTP receipt be honest about which document
-             # changed instead of echoing the requested slug.
-             written_doc_id: attrs["doc_id"],
-             written_row_id: saved.id,
-             rev: saved.rev
-           }}
-
-        {:error, _} = err ->
-          err
+      if not is_nil(if_rev) and new_blocks == blocks do
+        {:ok, document_no_op_receipt(doc, op, affected)}
+      else
+        persist_document_block_op(
+          doc,
+          doc_id,
+          type,
+          op,
+          blocks,
+          new_blocks,
+          affected,
+          dataset,
+          opts
+        )
       end
     else
       {:error, :not_found} -> {:error, :not_found}
       {:error, _reason} = err -> err
     end
   end
+
+  defp persist_document_block_op(
+         doc,
+         doc_id,
+         type,
+         op,
+         blocks,
+         new_blocks,
+         affected,
+         dataset,
+         opts
+       ) do
+    content =
+      (doc.content || %{})
+      |> Map.put("blocks", new_blocks)
+      |> Projection.project(blocks, new_blocks, doc_project_opts(dataset, type, doc))
+
+    attrs = %{
+      "doc_id" => DraftId.draft_id(DraftId.published_id(doc_id)),
+      "title" => blank_to_nil(Map.get(content, "title")) || doc.title,
+      "status" => doc.status,
+      "content" => content
+    }
+
+    case Content.upsert_document(type, attrs, dataset, opts) do
+      {:ok, saved} ->
+        {:ok,
+         %{
+           block: affected.block,
+           block_id: affected.block_id,
+           op_kind: Map.get(op, "op"),
+           position: affected.position,
+           written_doc_id: attrs["doc_id"],
+           written_row_id: saved.id,
+           rev: saved.rev
+         }}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp document_no_op_receipt(doc, op, affected) do
+    %{
+      block: affected.block,
+      block_id: affected.block_id,
+      op_kind: Map.get(op, "op"),
+      position: affected.position,
+      written_doc_id: doc.doc_id,
+      written_row_id: doc.id,
+      rev: doc.rev,
+      no_op: true
+    }
+  end
+
+  defp project_document_op_ids(blocks, nil), do: {:ok, blocks}
+  defp project_document_op_ids(blocks, _if_rev), do: project_block_ids_safely(blocks)
 
   @doc """
   Apply one request-identified Beta document block operation exactly once.
@@ -1781,14 +1858,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
                       case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
                         :ok ->
-                          case Writer.take_deferred_after_save() do
-                            {{:ok, %Document{id: row_id}}, _payload} = deferred
-                            when row_id == receipt.written_row_id ->
-                              {:applied, receipt, deferred}
-
-                            _ ->
-                              Repo.rollback(:document_after_save_effect_missing)
-                          end
+                          document_op_applied_result(receipt, current_id)
 
                         {:error, reason} ->
                           Repo.rollback(reason)
@@ -1912,9 +1982,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
               with {:ok, %Document{id: current_id} = current_doc} <-
                      lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
                    true <- current_id == doc.id,
-                   :ok <- check_document_if_rev(current_doc, Keyword.get(opts, :if_rev)),
+                   if_rev = Keyword.get(opts, :if_rev),
+                   :ok <- check_document_block_form_rev(current_doc, if_rev),
                    {blocks, _synth?} =
                      Papers.resolve_blocks_for_edit(current_doc, type, dataset),
+                   {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
                    {:ok, op} <- normalize_document_block_form_resolution(resolver.(blocks)) do
                 write_opts = Keyword.put(opts, :defer_after_save, true)
 
@@ -1924,14 +1996,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
                     case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
                       :ok ->
-                        case Writer.take_deferred_after_save() do
-                          {{:ok, %Document{id: row_id}}, _payload} = deferred
-                          when row_id == receipt.written_row_id ->
-                            {:applied, receipt, deferred}
-
-                          _ ->
-                            Repo.rollback(:document_after_save_effect_missing)
-                        end
+                        document_op_applied_result(receipt, current_id)
 
                       {:error, reason} ->
                         Repo.rollback(reason)
@@ -2011,6 +2076,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} -> {:error, :invalid_canvas_run_context}
     end
   end
+
+  defp check_document_block_form_rev(%Document{rev: current}, nil),
+    do: {:error, {:rev_mismatch, %{expected: nil, actual: current}}}
+
+  defp check_document_block_form_rev(doc, if_rev), do: check_document_if_rev(doc, if_rev)
+
+  defp check_document_if_rev(_doc, nil), do: :ok
 
   defp check_document_if_rev(%Document{rev: current}, expected)
        when is_binary(expected) and expected != "" do
@@ -2422,13 +2494,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
       children under `"items"` / `"content"` are NOT recursed. Child prefixes
       use the parent's (or row's) ensured id, keeping minted ids deterministic.
 
-  Collision-safe WITHIN each list (and each nested list). Before minting, the
-  set of all present non-blank ids at this level is collected. The positional
-  candidate `<prefix>-<index>` is checked against that set PLUS every id already
-  minted this pass; if taken, a deterministic suffix (`-<k>`, k incrementing
-  from 1) is appended until free. So a MIXED list — an id-bearing block whose
-  literal id collides with the positional slot of an id-less block, or two
-  id-less blocks resolving to the same slot — can never produce DUPLICATE ids.
+  Collision-safe across the authored tree. Before minting, every present
+  non-blank block and steps-row id is reserved globally, including ids in
+  hidden `children` / `blocks` aliases. Only reader-visible paths are projected,
+  but a minted positional id can never collide with authored identity elsewhere
+  in the document. If taken, a deterministic suffix (`-<k>`, k incrementing
+  from 1) is appended until free.
 
   Idempotent: re-running over an already-id-bearing list is a no-op (a present
   non-blank id is preserved exactly). This is the SINGLE chokepoint every write
@@ -2439,38 +2510,37 @@ defmodule Barkpark.Content.Papers.BlockOps do
   and the backfill Mix task all call it, so an id-less block can never reach
   storage.
 
-  Post-condition: within any block list (and each nested list), all ids are
-  UNIQUE.
+  Existing explicit duplicate ids are preserved byte-identical. Revision-fenced
+  identified document operations reject such an ambiguous target before traversal.
   """
   @spec ensure_block_ids(list()) :: list()
-  def ensure_block_ids(blocks) when is_list(blocks), do: ensure_block_ids(blocks, "block")
-
-  defp ensure_block_ids(blocks, prefix) when is_list(blocks) do
-    # Seed the working set with EVERY present non-blank id at this level, so a
-    # minted positional id can never collide with a literal id already present
-    # (the mixed-paper duplicate-id corruption). The set then grows as each
-    # id-less block is filled, so two id-less blocks at the same level can't
-    # collide either.
-    taken = present_ids(blocks)
-
-    {ensured, _taken} =
-      blocks
-      |> Enum.with_index()
-      |> Enum.map_reduce(taken, fn {block, index}, taken ->
-        ensure_block_id(block, prefix, index, taken)
-      end)
-
+  def ensure_block_ids(blocks) when is_list(blocks) do
+    {ensured, _taken} = ensure_block_ids(blocks, "block", MapSet.new(authored_tree_ids(blocks)))
     ensured
   end
 
-  # The set of all present, non-blank string ids in a block list (this level
-  # only — nested lists carry their own scope).
-  defp present_ids(blocks) do
-    Enum.reduce(blocks, MapSet.new(), fn block, acc ->
-      case is_map(block) && Map.get(block, "id") do
-        id when is_binary(id) and id != "" -> MapSet.put(acc, id)
-        _ -> acc
-      end
+  @doc """
+  Project stable ids only when every authored block and steps-row identity is
+  unambiguous across the full tree. Hidden body aliases participate in the
+  duplicate fence even though only the reader-visible alias is projected.
+  """
+  @spec project_block_ids_safely(list()) ::
+          {:ok, list()} | {:error, {:duplicate_id, String.t()}}
+  def project_block_ids_safely(blocks) when is_list(blocks) do
+    ids = authored_tree_ids(blocks)
+    counts = Enum.frequencies(ids)
+
+    case Enum.find(ids, &(Map.fetch!(counts, &1) > 1)) do
+      nil -> {:ok, ensure_block_ids(blocks)}
+      id -> {:error, {:duplicate_id, id}}
+    end
+  end
+
+  defp ensure_block_ids(blocks, prefix, taken) when is_list(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn {block, index}, taken ->
+      ensure_block_id(block, prefix, index, taken)
     end)
   end
 
@@ -2482,19 +2552,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
     {block, taken} = ensure_identity(block, prefix, index, taken)
     id = block["id"]
 
-    block =
+    {block, taken} =
       case block do
         %{"type" => "steps", "steps" => rows} when is_list(rows) ->
-          Map.put(block, "steps", ensure_step_ids(rows, id <> "-step"))
+          {rows, taken} = ensure_step_ids(rows, id <> "-step", taken)
+          {Map.put(block, "steps", rows), taken}
 
         %{"type" => "expandable"} ->
-          ensure_visible_body_ids(block, id)
+          ensure_visible_body_ids(block, id, taken)
 
         %{"blocks" => children} when is_list(children) ->
-          Map.put(block, "blocks", ensure_block_ids(children, id))
+          {children, taken} = ensure_block_ids(children, id, taken)
+          {Map.put(block, "blocks", children), taken}
 
         _ ->
-          block
+          {block, taken}
       end
 
     {block, taken}
@@ -2513,29 +2585,73 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  defp ensure_step_ids(rows, prefix) do
-    {ensured, _taken} =
-      rows
-      |> Enum.with_index()
-      |> Enum.map_reduce(present_ids(rows), fn
-        {row, index}, taken when is_map(row) ->
-          {row, taken} = ensure_identity(row, prefix, index, taken)
+  defp ensure_step_ids(rows, prefix, taken) do
+    rows
+    |> Enum.with_index()
+    |> Enum.map_reduce(taken, fn
+      {row, index}, taken when is_map(row) ->
+        {row, taken} = ensure_identity(row, prefix, index, taken)
 
-          # A row is not a block. Project its selected body only; do not let
-          # generic blocks recursion rewrite a hidden compatibility alias.
-          {ensure_visible_body_ids(row, row["id"]), taken}
+        # A row is not a block. Project its selected body only; do not let
+        # generic blocks recursion rewrite a hidden compatibility alias.
+        ensure_visible_body_ids(row, row["id"], taken)
 
-        {other, _index}, taken ->
-          {other, taken}
-      end)
-
-    ensured
+      {other, _index}, taken ->
+        {other, taken}
+    end)
   end
 
-  defp ensure_visible_body_ids(container, prefix) do
-    key = visible_body_key(container)
-    if key, do: Map.update!(container, key, &ensure_block_ids(&1, prefix)), else: container
+  defp ensure_visible_body_ids(container, prefix, taken) do
+    case visible_body_key(container) do
+      nil ->
+        {container, taken}
+
+      key ->
+        {children, taken} = ensure_block_ids(Map.fetch!(container, key), prefix, taken)
+        {Map.put(container, key, children), taken}
+    end
   end
+
+  defp authored_tree_ids(blocks) when is_list(blocks),
+    do: Enum.flat_map(blocks, &authored_block_tree_ids/1)
+
+  defp authored_block_tree_ids(block) when is_map(block) do
+    nested =
+      case block do
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          Enum.flat_map(rows, &authored_step_tree_ids/1)
+
+        %{"type" => "expandable"} ->
+          authored_body_alias_ids(block)
+
+        %{"blocks" => children} when is_list(children) ->
+          authored_tree_ids(children)
+
+        _ ->
+          []
+      end
+
+    authored_identity(block) ++ nested
+  end
+
+  defp authored_block_tree_ids(_block), do: []
+
+  defp authored_step_tree_ids(row) when is_map(row),
+    do: authored_identity(row) ++ authored_body_alias_ids(row)
+
+  defp authored_step_tree_ids(_row), do: []
+
+  defp authored_body_alias_ids(container) do
+    Enum.flat_map(["children", "blocks"], fn key ->
+      case Map.get(container, key) do
+        children when is_list(children) -> authored_tree_ids(children)
+        _other -> []
+      end
+    end)
+  end
+
+  defp authored_identity(%{"id" => id}) when is_binary(id) and id != "", do: [id]
+  defp authored_identity(_value), do: []
 
   defp visible_body_key(container) do
     case Map.get(container, "children") do
