@@ -104,6 +104,7 @@
             "properties": {
               "code": {
                 "enum": [
+                  "ambiguous_dataset",
                   "batch_too_large",
                   "blob_path_conflict",
                   "bpml",
@@ -119,6 +120,7 @@
                   "cors_forbidden",
                   "create_wall",
                   "csrf_required",
+                  "dataset_twin",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",

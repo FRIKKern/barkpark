@@ -129,6 +129,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "invalid_epic_paper_quality", 422, [:details]},
       {"duplicate_task", {:error, {:duplicate_task, %{similar: []}}}, "duplicate_task", 409,
        [:details]},
+      # THE ONE RULE (task-49eef068420df918 + task-baf9b74a0ffc83f4): the task
+      # doors' read refusal and its producer-side twin. Both 409 — the
+      # `conflict` family, a ledger-STATE collision, never a server fault.
+      {"ambiguous_dataset",
+       {:error, Barkpark.Tasks.AmbiguousTwinError.new("task-1", ["aker-brygge", "production"])},
+       "ambiguous_dataset", 409, [:details]},
+      {"dataset_twin", {:error, {:dataset_twin, %{doc_id: "task-1", datasets: ["production"]}}},
+       "dataset_twin", 409, [:details]},
       {"duplicate_of", {:error, {:duplicate_of, %{duplicate_of: "doc-1"}}}, "duplicate_of", 409,
        [:details]},
       {"unknown_tag", {:error, {:unknown_tag, %{unknown: ["nope"], suggestions: []}}},

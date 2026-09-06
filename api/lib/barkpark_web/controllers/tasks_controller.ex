@@ -96,6 +96,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.Validation
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.ReadPerspective
@@ -2528,22 +2529,21 @@ defmodule BarkparkWeb.TasksController do
   # Disambiguation: if BOTH `t1` and `drafts.t1` exist (a task that was
   # published and still has a live draft), the exact match on `t1` wins —
   # the caller gets the published row, consistent with "exact match first".
+  #
+  # ── THE ONE RULE (task-49eef068420df918 + task-baf9b74a0ffc83f4) ─────────
+  # The exact-then-`drafts.`-fallback dance above is now ONE query decided by
+  # `Barkpark.Tasks.TwinResolver` — read that moduledoc for the rule. The
+  # observable deltas: a `drafts.` twin can no longer answer for a doc_id whose
+  # published row exists but was filtered out by nothing (it never should have),
+  # and a doc_id living in two datasets is REFUSED (409 naming both) instead of
+  # answered from whichever dataset sorts first. `?dataset=` on the task doors is
+  # honoured as the caller's disambiguator — it used to be ignored here.
   defp find_task_by_doc_id(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
-    case fetch_task_exact(doc_id, workspace_id, project_id) do
-      {:ok, _} = hit ->
-        hit
-
-      {:error, :not_found} ->
-        if String.starts_with?(doc_id, "drafts.") do
-          {:error, :not_found}
-        else
-          fetch_task_exact("drafts." <> doc_id, workspace_id, project_id)
-        end
-    end
+    fetch_task_exact(doc_id, workspace_id, project_id, dataset: conn.params["dataset"])
   end
 
   # Single-doc fetch by exact doc_id string, scoped to workspace + project.
@@ -2577,27 +2577,29 @@ defmodule BarkparkWeb.TasksController do
   # A `LIMIT 1` here can only ever CHANGE the outcome for a doc_id that has
   # more than one row in scope — the shape that used to raise. A doc_id with
   # exactly one row (every ordinary task) reads byte-identically.
-  defp fetch_task_exact(doc_id, workspace_id, project_id) do
-    base =
-      from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task",
-        order_by: [
-          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
-          asc: d.dataset,
-          asc: d.id
-        ],
-        limit: 1
-      )
-
-    query =
-      base
-      |> Params.maybe_filter_workspace(workspace_id)
-      |> Params.maybe_filter_project(project_id)
-
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      %Document{} = doc -> {:ok, doc}
-    end
+  # THE REPAIR (task-49eef068420df918 + task-baf9b74a0ffc83f4). The total order
+  # above bought determinism and paid for it with a SILENT WRONG ROW: the tie it
+  # broke by `asc: d.dataset` is precisely the tie the caller named nothing to
+  # break. `Barkpark.Tasks.TwinResolver` owns the rule now (published wins, a
+  # draft twin never wins over a published row, and an unnamed cross-dataset tie
+  # is REFUSED at 409 rather than picked). A doc_id with exactly one row in scope
+  # — every ordinary task — still reads byte-identically.
+  #
+  # The scoping stays EXACTLY as it was (`Params.maybe_filter_*`, fail-open on
+  # nil): `Tasks.Claim` scopes fail-CLOSED through `Scope.scope_to_workspace/3`,
+  # and unifying the two is a different row's work, so the resolver takes the
+  # caller's scoping rather than imposing one.
+  defp fetch_task_exact(doc_id, workspace_id, project_id, opts) do
+    TwinResolver.resolve(
+      doc_id,
+      fn q ->
+        q
+        |> Params.maybe_filter_workspace(workspace_id)
+        |> Params.maybe_filter_project(project_id)
+      end,
+      &Repo.all/1,
+      opts
+    )
   end
 
   # ─── rail-l1: rail-awareness envelope extras ────────────────────────────
