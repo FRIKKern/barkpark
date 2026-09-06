@@ -1,6 +1,6 @@
 {
-  "population": 369,
-  "mapped": 358,
+  "population": 386,
+  "mapped": 370,
   "unmapped": [
     {
       "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
@@ -16,6 +16,26 @@
     },
     {
       "path": "api/assets/paper-editor/src/__locked_mounted.test.mjs",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__control_matrix.test.mjs",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__diagram_preview.test.mjs",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__flush_pending.test.mjs",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__node_flush.test.mjs",
+      "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__node_view_flush.test.mjs",
       "why": "no scan site found (no readdir, glob, find, ls-files or repo-relative literal)"
     },
     {
@@ -211,7 +231,23 @@
         {
           "kind": "file",
           "p": "api/assets/paper-editor/src/canvas/field-node.js",
-          "evidence": "api/assets/paper-editor/src/__featured_placeholder.test.mjs:22"
+          "evidence": "api/assets/paper-editor/src/__featured_placeholder.test.mjs:23"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__field_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__field_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__field_flush.test.mjs:7"
+        },
+        {
+          "kind": "file",
+          "p": "test/final.jpg",
+          "evidence": "api/assets/paper-editor/src/__field_flush.test.mjs:139"
         }
       ]
     },
@@ -253,6 +289,17 @@
       ]
     },
     {
+      "path": "api/assets/paper-editor/src/__generic_field_flush.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__generic_field_flush.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__generic_field_flush.test.mjs:6"
+        }
+      ]
+    },
+    {
       "path": "api/assets/paper-editor/src/__locked.test.mjs",
       "run": "node --test api/assets/paper-editor/src/__locked.test.mjs",
       "scans": [
@@ -265,6 +312,17 @@
           "kind": "file",
           "p": "api/assets/paper-editor/src/canvas/locks.js",
           "evidence": "api/assets/paper-editor/src/__locked.test.mjs:22"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__mutation_concurrency.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__mutation_concurrency.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__mutation_concurrency.test.mjs:37"
         }
       ]
     },
@@ -368,6 +426,17 @@
           "kind": "file",
           "p": "priv/static/assets/bp-media-picker.js",
           "evidence": "api/assets/paper-editor/src/__picker_focal.test.mjs:21"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/__reader_hooks.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/__reader_hooks.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/__reader_hooks.test.mjs:18"
         }
       ]
     },
@@ -498,6 +567,17 @@
           "kind": "file",
           "p": ".github/workflows/paper-editor.yml",
           "evidence": "api/assets/paper-editor/src/canvas/__enter_tail.test.mjs:28"
+        }
+      ]
+    },
+    {
+      "path": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs",
+      "run": "node --test api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "priv/static/assets/bp-paper-editor-hooks.js",
+          "evidence": "api/assets/paper-editor/src/canvas/__save_ack_mounted.test.mjs:57"
         }
       ]
     },
@@ -706,182 +786,182 @@
         {
           "kind": "file",
           "p": "internal/taskboard/testdata/styleguide_lifecycle.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8542"
+          "evidence": "cloud/priv/static/__app.test.mjs:8608"
         },
         {
           "kind": "file",
           "p": "internal/pdrender/testdata/styleguide_tokens.txt",
-          "evidence": "cloud/priv/static/__app.test.mjs:8543"
+          "evidence": "cloud/priv/static/__app.test.mjs:8609"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:9187"
+          "evidence": "cloud/priv/static/__app.test.mjs:9253"
         },
         {
           "kind": "file",
           "p": "lib/containerd/io.containerd.runtime.v2.task",
-          "evidence": "cloud/priv/static/__app.test.mjs:11620"
+          "evidence": "cloud/priv/static/__app.test.mjs:11686"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_instance_top_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11656"
+          "evidence": "cloud/priv/static/__app.test.mjs:11722"
         },
         {
           "kind": "file",
           "p": "internal/cloudclient/client.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11709"
+          "evidence": "cloud/priv/static/__app.test.mjs:11775"
         },
         {
           "kind": "file",
           "p": "internal/cli/cloud_status_cmd.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:11844"
+          "evidence": "cloud/priv/static/__app.test.mjs:11910"
         },
         {
           "kind": "file",
           "p": "web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:13332"
+          "evidence": "cloud/priv/static/__app.test.mjs:13398"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14476"
+          "evidence": "cloud/priv/static/__app.test.mjs:14542"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:14477"
+          "evidence": "cloud/priv/static/__app.test.mjs:14543"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:14490"
+          "evidence": "cloud/priv/static/__app.test.mjs:14556"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:14517"
+          "evidence": "cloud/priv/static/__app.test.mjs:14583"
         },
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__app.test.mjs:14907"
+          "evidence": "cloud/priv/static/__app.test.mjs:14973"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/sold_capability_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15197"
+          "evidence": "cloud/priv/static/__app.test.mjs:15263"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:15443"
+          "evidence": "cloud/priv/static/__app.test.mjs:15509"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:17274"
+          "evidence": "cloud/priv/static/__app.test.mjs:17343"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/transport_manifest_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17659"
+          "evidence": "cloud/priv/static/__app.test.mjs:17728"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/notifications/withhold_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:17773"
+          "evidence": "cloud/priv/static/__app.test.mjs:17842"
         },
         {
           "kind": "file",
           "p": "cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18150"
+          "evidence": "cloud/priv/static/__app.test.mjs:18230"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/notifications.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18156"
+          "evidence": "cloud/priv/static/__app.test.mjs:18236"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/render.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18192"
+          "evidence": "cloud/priv/static/__app.test.mjs:18272"
         },
         {
           "kind": "file",
           "p": "cloud/notifications/email_settings.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18193"
+          "evidence": "cloud/priv/static/__app.test.mjs:18273"
         },
         {
           "kind": "file",
           "p": "cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18194"
+          "evidence": "cloud/priv/static/__app.test.mjs:18274"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/push.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:18202"
+          "evidence": "cloud/priv/static/__app.test.mjs:18282"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:19802"
+          "evidence": "cloud/priv/static/__app.test.mjs:19962"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__app.test.mjs:19972"
+          "evidence": "cloud/priv/static/__app.test.mjs:20132"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/router.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:21320"
+          "evidence": "cloud/priv/static/__app.test.mjs:21480"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/web/auth.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:22334"
+          "evidence": "cloud/priv/static/__app.test.mjs:22494"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:22550"
-        },
-        {
-          "kind": "file",
-          "p": "internal/agent/report.go",
-          "evidence": "cloud/priv/static/__app.test.mjs:23973"
+          "evidence": "cloud/priv/static/__app.test.mjs:22710"
         },
         {
           "kind": "dir",
           "p": "internal/agent",
-          "evidence": "cloud/priv/static/__app.test.mjs:23979"
+          "evidence": "cloud/priv/static/__app.test.mjs:24148"
         },
         {
           "kind": "file",
           "p": "scripts/console-path-escape-check.sh",
-          "evidence": "cloud/priv/static/__app.test.mjs:23980"
+          "evidence": "cloud/priv/static/__app.test.mjs:24149"
+        },
+        {
+          "kind": "file",
+          "p": "internal/agent/report.go",
+          "evidence": "cloud/priv/static/__app.test.mjs:24149"
         },
         {
           "kind": "file",
           "p": "cloud/priv/audit-actions.json",
-          "evidence": "cloud/priv/static/__app.test.mjs:25463"
+          "evidence": "cloud/priv/static/__app.test.mjs:25675"
         },
         {
           "kind": "file",
           "p": "test/barkpark_cloud/accounts/role_agreement_census_test.exs",
-          "evidence": "cloud/priv/static/__app.test.mjs:26769"
+          "evidence": "cloud/priv/static/__app.test.mjs:26981"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26779"
+          "evidence": "cloud/priv/static/__app.test.mjs:26991"
         },
         {
           "kind": "file",
           "p": "lib/barkpark_cloud/accounts/authz.ex",
-          "evidence": "cloud/priv/static/__app.test.mjs:26801"
+          "evidence": "cloud/priv/static/__app.test.mjs:27013"
         }
       ]
     },
@@ -1353,33 +1433,28 @@
       "scans": [
         {
           "kind": "file",
-          "p": "scripts/studio-desk-measure.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:16"
+          "p": ".github/workflows/console-harness.yml",
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:17"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/modal-oracle.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:72"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:85"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:121"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:134"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/font-pin.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:122"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:135"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/bringup-retry.mjs",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:123"
-        },
-        {
-          "kind": "file",
-          "p": ".github/workflows/console-harness.yml",
-          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:318"
+          "evidence": "cloud/priv/static/__preview__/modal-oracle.mjs:136"
         }
       ]
     },
@@ -1425,42 +1500,42 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:503"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:504"
         },
         {
           "kind": "dir",
           "p": "cloud/priv/static/__preview__",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2505"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2506"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2768"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:2769"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3157"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3158"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3839"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:3840"
         },
         {
           "kind": "file",
           "p": "cloud/config/runtime.exs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4887"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:4888"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.css",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6343"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6344"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6387"
+          "evidence": "cloud/priv/static/__preview__/overflow-guard.mjs:6388"
         }
       ]
     },
@@ -1527,87 +1602,87 @@
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry/site.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:745"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:675"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-9c1f2ab.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:846"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:971"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-4e7d0c9.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:874"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:999"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:939"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1064"
         },
         {
           "kind": "file",
           "p": "deploy/lib/site-deploy-common.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:944"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1069"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/__preview__/scenarios.mjs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:956"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1081"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/failure_copy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:986"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1111"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy.sh",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:995"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1120"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/registry.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1134"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1259"
         },
         {
           "kind": "file",
           "p": "internal/builder/console.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1142"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1267"
         },
         {
           "kind": "file",
           "p": "internal/builder/builder.go",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1145"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1270"
         },
         {
           "kind": "file",
           "p": "lib/tokens/resolve.ts",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1170"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1295"
         },
         {
           "kind": "file",
           "p": "web/releases/20260802T094118Z-9c1f2ab/.next",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1174"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1299"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/sites/deploy.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:1941"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2066"
         },
         {
           "kind": "file",
           "p": "lib/barkpark/artifacts/acme-web-8c00e1b.tar.gz",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2030"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2155"
         },
         {
           "kind": "file",
           "p": "cloud/priv/repo/migrations/20260702130000_provision_job_error_to_text.exs",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2536"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2661"
         },
         {
           "kind": "file",
           "p": "cloud/lib/barkpark_cloud/accounts/user.ex",
-          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2609"
+          "evidence": "cloud/priv/static/__preview__/scenarios.mjs:2734"
         }
       ]
     },
@@ -1796,7 +1871,7 @@
         {
           "kind": "file",
           "p": "deploy/i.test",
-          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3817"
+          "evidence": "cloud/priv/static/__preview__/smoke.mjs:3819"
         }
       ]
     },
@@ -3179,7 +3254,7 @@
         {
           "kind": "file",
           "p": "web/lib/find.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:89"
+          "evidence": "scripts/check-web-fork-drift.sh:90"
         },
         {
           "kind": "file",
@@ -3194,102 +3269,102 @@
         {
           "kind": "file",
           "p": "web/lib/config.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:102"
+          "evidence": "scripts/check-web-fork-drift.sh:106"
         },
         {
           "kind": "file",
           "p": "lib/config.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:103"
-        },
-        {
-          "kind": "file",
-          "p": "web/lib/tokens.gen.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:104"
-        },
-        {
-          "kind": "file",
-          "p": "lib/tokens.gen.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:105"
-        },
-        {
-          "kind": "file",
-          "p": "web/lib/find-search.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:106"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/preview-parity-check.sh",
-          "evidence": "scripts/check-web-fork-drift.sh:106"
-        },
-        {
-          "kind": "file",
-          "p": "lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:107"
         },
         {
           "kind": "file",
-          "p": "web/lib/use-live-search.ts",
+          "p": "web/lib/tokens.gen.ts",
           "evidence": "scripts/check-web-fork-drift.sh:108"
         },
         {
           "kind": "file",
-          "p": "lib/use-live-search.ts",
+          "p": "lib/tokens.gen.ts",
           "evidence": "scripts/check-web-fork-drift.sh:109"
         },
         {
           "kind": "file",
-          "p": "web/lib/listings.ts",
+          "p": "web/lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:110"
         },
         {
           "kind": "file",
-          "p": "lib/listings.ts",
+          "p": "scripts/preview-parity-check.sh",
+          "evidence": "scripts/check-web-fork-drift.sh:110"
+        },
+        {
+          "kind": "file",
+          "p": "lib/find-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:111"
         },
         {
           "kind": "file",
-          "p": "web/lib/bp-env.ts",
+          "p": "web/lib/use-live-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:112"
         },
         {
           "kind": "file",
-          "p": "lib/bp-env.ts",
+          "p": "lib/use-live-search.ts",
           "evidence": "scripts/check-web-fork-drift.sh:113"
         },
         {
           "kind": "file",
-          "p": "lib/base-path.ts",
+          "p": "web/lib/listings.ts",
           "evidence": "scripts/check-web-fork-drift.sh:114"
         },
         {
           "kind": "file",
-          "p": "lib/markers.ts",
+          "p": "lib/listings.ts",
           "evidence": "scripts/check-web-fork-drift.sh:115"
         },
         {
           "kind": "file",
-          "p": "lib/provenance.ts",
+          "p": "web/lib/bp-env.ts",
           "evidence": "scripts/check-web-fork-drift.sh:116"
         },
         {
           "kind": "file",
-          "p": "web/lib/graph-truncation.ts",
+          "p": "lib/bp-env.ts",
           "evidence": "scripts/check-web-fork-drift.sh:117"
         },
         {
           "kind": "file",
-          "p": "web/lib/graph.ts",
+          "p": "lib/base-path.ts",
           "evidence": "scripts/check-web-fork-drift.sh:118"
         },
         {
           "kind": "file",
+          "p": "lib/markers.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:119"
+        },
+        {
+          "kind": "file",
+          "p": "lib/provenance.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:120"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/graph-truncation.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:121"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/graph.ts",
+          "evidence": "scripts/check-web-fork-drift.sh:122"
+        },
+        {
+          "kind": "file",
           "p": "lib/get-document.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:263"
+          "evidence": "scripts/check-web-fork-drift.sh:267"
         },
         {
           "kind": "file",
           "p": "lib/graph.ts",
-          "evidence": "scripts/check-web-fork-drift.sh:274"
+          "evidence": "scripts/check-web-fork-drift.sh:278"
         }
       ]
     },
@@ -3315,8 +3390,28 @@
         },
         {
           "kind": "file",
+          "p": ".github/workflows/fake.yml",
+          "evidence": "scripts/ci-measure.sh:774"
+        },
+        {
+          "kind": "file",
+          "p": "docs/ops/ci-value-audit.md",
+          "evidence": "scripts/ci-measure.sh:802"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/gate.sh",
+          "evidence": "scripts/ci-measure.sh:847"
+        },
+        {
+          "kind": "file",
+          "p": "docs/ops/ci-workflow-verdicts.md",
+          "evidence": "scripts/ci-measure.sh:866"
+        },
+        {
+          "kind": "file",
           "p": "scripts/main-red-breaker.sh",
-          "evidence": "scripts/ci-measure.sh:738"
+          "evidence": "scripts/ci-measure.sh:934"
         }
       ]
     },
@@ -4760,32 +4855,32 @@
         {
           "kind": "file",
           "p": "cloud/priv/static/moved.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1544"
+          "evidence": "scripts/console-path-escape-check.test.sh:1564"
         },
         {
           "kind": "file",
           "p": "docs/guide.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1545"
+          "evidence": "scripts/console-path-escape-check.test.sh:1565"
         },
         {
           "kind": "file",
           "p": "docs/another.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1581"
+          "evidence": "scripts/console-path-escape-check.test.sh:1601"
         },
         {
           "kind": "file",
           "p": "docs/moved.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1624"
+          "evidence": "scripts/console-path-escape-check.test.sh:1644"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/guide.md",
-          "evidence": "scripts/console-path-escape-check.test.sh:1631"
+          "evidence": "scripts/console-path-escape-check.test.sh:1651"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/orphan.js",
-          "evidence": "scripts/console-path-escape-check.test.sh:1656"
+          "evidence": "scripts/console-path-escape-check.test.sh:1676"
         }
       ]
     },
@@ -4796,17 +4891,17 @@
         {
           "kind": "file",
           "p": ".github/workflows/console-harness.yml",
-          "evidence": "scripts/console-runtime-pin-check.sh:37"
+          "evidence": "scripts/console-runtime-pin-check.sh:43"
         },
         {
           "kind": "file",
           "p": "scripts/console-tdz-order-check.mjs",
-          "evidence": "scripts/console-runtime-pin-check.sh:44"
+          "evidence": "scripts/console-runtime-pin-check.sh:50"
         },
         {
           "kind": "file",
           "p": "scripts/console-runtime-pin-check.sh",
-          "evidence": "scripts/console-runtime-pin-check.sh:48"
+          "evidence": "scripts/console-runtime-pin-check.sh:54"
         }
       ]
     },
@@ -5333,17 +5428,17 @@
         {
           "kind": "file",
           "p": "scripts/foo.sh",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:496"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:514"
         },
         {
           "kind": "dir",
           "p": "web",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:505"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:523"
         },
         {
           "kind": "dir",
           "p": "docs",
-          "evidence": "scripts/doc-gates-paths-parity-check.sh:529"
+          "evidence": "scripts/doc-gates-paths-parity-check.sh:547"
         }
       ]
     },
@@ -5404,307 +5499,307 @@
         {
           "kind": "file",
           "p": "docs/cards/ghost.md",
-          "evidence": "scripts/docs-anchors-check.sh:169"
+          "evidence": "scripts/docs-anchors-check.sh:182"
         },
         {
           "kind": "file",
           "p": "api/lib/moved.ex",
-          "evidence": "scripts/docs-anchors-check.sh:176"
+          "evidence": "scripts/docs-anchors-check.sh:189"
         },
         {
           "kind": "file",
           "p": "docs/media.md",
-          "evidence": "scripts/docs-anchors-check.sh:178"
+          "evidence": "scripts/docs-anchors-check.sh:191"
         },
         {
           "kind": "file",
           "p": "docs/bare.md",
-          "evidence": "scripts/docs-anchors-check.sh:186"
+          "evidence": "scripts/docs-anchors-check.sh:199"
         },
         {
           "kind": "file",
           "p": "docs/dup.md",
-          "evidence": "scripts/docs-anchors-check.sh:190"
+          "evidence": "scripts/docs-anchors-check.sh:203"
         },
         {
           "kind": "file",
           "p": "docs/n1.md",
-          "evidence": "scripts/docs-anchors-check.sh:192"
+          "evidence": "scripts/docs-anchors-check.sh:205"
         },
         {
           "kind": "file",
           "p": "docs/n2.md",
-          "evidence": "scripts/docs-anchors-check.sh:193"
+          "evidence": "scripts/docs-anchors-check.sh:206"
         },
         {
           "kind": "file",
           "p": "docs/nope.md",
-          "evidence": "scripts/docs-anchors-check.sh:201"
+          "evidence": "scripts/docs-anchors-check.sh:214"
         },
         {
           "kind": "file",
           "p": "api/lib/x.rb",
-          "evidence": "scripts/docs-anchors-check.sh:213"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/x_test.exs",
-          "evidence": "scripts/docs-anchors-check.sh:218"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/x_test.go",
-          "evidence": "scripts/docs-anchors-check.sh:219"
-        },
-        {
-          "kind": "dir",
-          "p": "js",
-          "evidence": "scripts/docs-anchors-check.sh:221"
-        },
-        {
-          "kind": "file",
-          "p": "api/lib/dup.mjs",
           "evidence": "scripts/docs-anchors-check.sh:226"
         },
         {
           "kind": "file",
-          "p": "api/lib/private.mjs",
-          "evidence": "scripts/docs-anchors-check.sh:228"
+          "p": "api/lib/x_test.exs",
+          "evidence": "scripts/docs-anchors-check.sh:231"
         },
         {
           "kind": "file",
-          "p": "api/lib/plain.js",
+          "p": "api/lib/x_test.go",
+          "evidence": "scripts/docs-anchors-check.sh:232"
+        },
+        {
+          "kind": "dir",
+          "p": "js",
           "evidence": "scripts/docs-anchors-check.sh:234"
         },
         {
           "kind": "file",
+          "p": "api/lib/dup.mjs",
+          "evidence": "scripts/docs-anchors-check.sh:239"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/private.mjs",
+          "evidence": "scripts/docs-anchors-check.sh:241"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/plain.js",
+          "evidence": "scripts/docs-anchors-check.sh:247"
+        },
+        {
+          "kind": "file",
           "p": "api/lib/quote.ex",
-          "evidence": "scripts/docs-anchors-check.sh:249"
+          "evidence": "scripts/docs-anchors-check.sh:262"
         },
         {
           "kind": "file",
           "p": "api/lib/y.ts",
-          "evidence": "scripts/docs-anchors-check.sh:254"
+          "evidence": "scripts/docs-anchors-check.sh:267"
         },
         {
           "kind": "file",
           "p": "docs/cold-a.md",
-          "evidence": "scripts/docs-anchors-check.sh:265"
+          "evidence": "scripts/docs-anchors-check.sh:278"
         },
         {
           "kind": "file",
           "p": "docs/cold-b.md",
-          "evidence": "scripts/docs-anchors-check.sh:275"
+          "evidence": "scripts/docs-anchors-check.sh:288"
         },
         {
           "kind": "file",
           "p": "docs/cold-c.md",
-          "evidence": "scripts/docs-anchors-check.sh:289"
+          "evidence": "scripts/docs-anchors-check.sh:302"
         },
         {
           "kind": "file",
           "p": "docs/cold-d.md",
-          "evidence": "scripts/docs-anchors-check.sh:301"
+          "evidence": "scripts/docs-anchors-check.sh:314"
         },
         {
           "kind": "file",
           "p": "docs/warm-e.md",
-          "evidence": "scripts/docs-anchors-check.sh:312"
+          "evidence": "scripts/docs-anchors-check.sh:325"
         },
         {
           "kind": "file",
           "p": "scripts/canonical-marker-bindings.pin",
-          "evidence": "scripts/docs-anchors-check.sh:407"
+          "evidence": "scripts/docs-anchors-check.sh:420"
         },
         {
           "kind": "file",
           "p": "docs/media/DISCOVERY.md",
-          "evidence": "scripts/docs-anchors-check.sh:548"
+          "evidence": "scripts/docs-anchors-check.sh:596"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/media/search.ex",
-          "evidence": "scripts/docs-anchors-check.sh:549"
+          "evidence": "scripts/docs-anchors-check.sh:597"
         },
         {
           "kind": "tree",
           "p": "docs",
-          "evidence": "scripts/docs-anchors-check.sh:589"
+          "evidence": "scripts/docs-anchors-check.sh:637"
         },
         {
           "kind": "dir",
           "p": "docs/cli/fixtures",
-          "evidence": "scripts/docs-anchors-check.sh:589"
+          "evidence": "scripts/docs-anchors-check.sh:637"
         },
         {
           "kind": "dir",
           "p": "tooling/grip/ledger",
-          "evidence": "scripts/docs-anchors-check.sh:642"
+          "evidence": "scripts/docs-anchors-check.sh:690"
         },
         {
           "kind": "file",
           "p": "tooling/grip/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:693"
+          "evidence": "scripts/docs-anchors-check.sh:741"
         },
         {
           "kind": "file",
           "p": "docs/ops/studio-nav-bug-2026-04-19.md",
-          "evidence": "scripts/docs-anchors-check.sh:695"
+          "evidence": "scripts/docs-anchors-check.sh:743"
         },
         {
           "kind": "file",
           "p": "docs/ops/bokbasen-go-live.md",
-          "evidence": "scripts/docs-anchors-check.sh:744"
+          "evidence": "scripts/docs-anchors-check.sh:792"
         },
         {
           "kind": "file",
           "p": "deploy/systemd/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:744"
+          "evidence": "scripts/docs-anchors-check.sh:792"
         },
         {
           "kind": "file",
           "p": "js/CLAUDE.md",
-          "evidence": "scripts/docs-anchors-check.sh:746"
+          "evidence": "scripts/docs-anchors-check.sh:794"
         },
         {
           "kind": "file",
           "p": "deploy/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:752"
+          "evidence": "scripts/docs-anchors-check.sh:800"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/sync/HANDOFF.md",
-          "evidence": "scripts/docs-anchors-check.sh:755"
+          "evidence": "scripts/docs-anchors-check.sh:803"
         },
         {
           "kind": "file",
           "p": "scripts/bp-vercel-quick-setup.sh",
-          "evidence": "scripts/docs-anchors-check.sh:757"
+          "evidence": "scripts/docs-anchors-check.sh:805"
         },
         {
           "kind": "file",
           "p": "tooling/doc-onboarding/TRUTH-AUDIT.md",
-          "evidence": "scripts/docs-anchors-check.sh:762"
+          "evidence": "scripts/docs-anchors-check.sh:810"
         },
         {
           "kind": "file",
           "p": "docs/ops/PROD_OPS.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/ops/adding-a-domain.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/ops/vercel-dns-connect.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "deploy/uptime-kuma/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/studio/user-guide.md",
-          "evidence": "scripts/docs-anchors-check.sh:766"
+          "evidence": "scripts/docs-anchors-check.sh:814"
         },
         {
           "kind": "file",
           "p": "docs/contracts/webhook-realtime.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "js/packages/create-barkpark-app/templates/blog-starter/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "js/packages/create-barkpark-app/templates/website-starter/README.md",
-          "evidence": "scripts/docs-anchors-check.sh:768"
+          "evidence": "scripts/docs-anchors-check.sh:816"
         },
         {
           "kind": "file",
           "p": "docs/api-v1.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "api/CLAUDE.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/SETUP.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/WINDOWS.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/setup/TASK-SYSTEM.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "docs/ops/branch-protection-and-overrides.md",
-          "evidence": "scripts/docs-anchors-check.sh:770"
+          "evidence": "scripts/docs-anchors-check.sh:818"
         },
         {
           "kind": "file",
           "p": "internal/apiclient/client.go",
-          "evidence": "scripts/docs-anchors-check.sh:819"
+          "evidence": "scripts/docs-anchors-check.sh:867"
         },
         {
           "kind": "file",
           "p": "cloud/priv/static/app.js",
-          "evidence": "scripts/docs-anchors-check.sh:872"
+          "evidence": "scripts/docs-anchors-check.sh:920"
         },
         {
           "kind": "file",
           "p": "api/scripts/sobelow-inline-overlap-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:942"
+          "evidence": "scripts/docs-anchors-check.sh:990"
         },
         {
           "kind": "file",
           "p": "docs/ops/merge-gates.md",
-          "evidence": "scripts/docs-anchors-check.sh:994"
+          "evidence": "scripts/docs-anchors-check.sh:1042"
         },
         {
           "kind": "file",
           "p": ".github/workflows/elixir.yml",
-          "evidence": "scripts/docs-anchors-check.sh:996"
+          "evidence": "scripts/docs-anchors-check.sh:1044"
         },
         {
           "kind": "dir",
           "p": ".github/workflows",
-          "evidence": "scripts/docs-anchors-check.sh:1007"
+          "evidence": "scripts/docs-anchors-check.sh:1055"
         },
         {
           "kind": "file",
           "p": ".github/required-checks.json",
-          "evidence": "scripts/docs-anchors-check.sh:1013"
+          "evidence": "scripts/docs-anchors-check.sh:1061"
         },
         {
           "kind": "file",
           "p": "scripts/merge-gates-elixir-anchor-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1017"
+          "evidence": "scripts/docs-anchors-check.sh:1065"
         },
         {
           "kind": "file",
           "p": "scripts/roster-drift-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1248"
+          "evidence": "scripts/docs-anchors-check.sh:1296"
         },
         {
           "kind": "file",
           "p": "scripts/no-inplace-bp-copy-check.sh",
-          "evidence": "scripts/docs-anchors-check.sh:1285"
+          "evidence": "scripts/docs-anchors-check.sh:1333"
         }
       ]
     },
@@ -5786,6 +5881,505 @@
       ]
     },
     {
+      "path": "scripts/elixir-impacted-tests.sh",
+      "run": "bash scripts/elixir-impacted-tests.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": ".github/workflows/elixir.yml",
+          "evidence": "scripts/elixir-impacted-tests.sh:29"
+        },
+        {
+          "kind": "file",
+          "p": ".github/workflows/elixir-main-red-attribution.yml",
+          "evidence": "scripts/elixir-impacted-tests.sh:36"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/elixir-impacted-tests.sh",
+          "evidence": "scripts/elixir-impacted-tests.sh:49"
+        },
+        {
+          "kind": "dir",
+          "p": "api",
+          "evidence": "scripts/elixir-impacted-tests.sh:72"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/elixir-path-escape-check.sh",
+          "evidence": "scripts/elixir-impacted-tests.sh:73"
+        },
+        {
+          "kind": "dir",
+          "p": "api/lib",
+          "evidence": "scripts/elixir-impacted-tests.sh:76"
+        },
+        {
+          "kind": "dir",
+          "p": "api/test",
+          "evidence": "scripts/elixir-impacted-tests.sh:77"
+        },
+        {
+          "kind": "dir",
+          "p": "api/config",
+          "evidence": "scripts/elixir-impacted-tests.sh:81"
+        },
+        {
+          "kind": "dir",
+          "p": "api/priv",
+          "evidence": "scripts/elixir-impacted-tests.sh:81"
+        },
+        {
+          "kind": "file",
+          "p": "api/mix.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:81"
+        },
+        {
+          "kind": "file",
+          "p": "api/mix.lock",
+          "evidence": "scripts/elixir-impacted-tests.sh:81"
+        },
+        {
+          "kind": "dir",
+          "p": "api/test/support",
+          "evidence": "scripts/elixir-impacted-tests.sh:82"
+        },
+        {
+          "kind": "dir",
+          "p": "api/test/fixtures",
+          "evidence": "scripts/elixir-impacted-tests.sh:82"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/test_helper.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:82"
+        },
+        {
+          "kind": "dir",
+          "p": "api/assets",
+          "evidence": "scripts/elixir-impacted-tests.sh:83"
+        },
+        {
+          "kind": "dir",
+          "p": "web",
+          "evidence": "scripts/elixir-impacted-tests.sh:83"
+        },
+        {
+          "kind": "dir",
+          "p": "internal",
+          "evidence": "scripts/elixir-impacted-tests.sh:83"
+        },
+        {
+          "kind": "dir",
+          "p": "scripts",
+          "evidence": "scripts/elixir-impacted-tests.sh:83"
+        },
+        {
+          "kind": "file",
+          "p": "docs/openapi.json",
+          "evidence": "scripts/elixir-impacted-tests.sh:84"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/canonical-marker-bindings.pin",
+          "evidence": "scripts/elixir-impacted-tests.sh:94"
+        },
+        {
+          "kind": "dir",
+          "p": "cloud/test",
+          "evidence": "scripts/elixir-impacted-tests.sh:125"
+        },
+        {
+          "kind": "dir",
+          "p": "web/node_modules",
+          "evidence": "scripts/elixir-impacted-tests.sh:125"
+        },
+        {
+          "kind": "dir",
+          "p": "lib",
+          "evidence": "scripts/elixir-impacted-tests.sh:175"
+        },
+        {
+          "kind": "file",
+          "p": "docs/api-v1.md",
+          "evidence": "scripts/elixir-impacted-tests.sh:175"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/foo.ex",
+          "evidence": "scripts/elixir-impacted-tests.sh:178"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/plugin_free_boot_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:208"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/plugin_routes_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:209"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/plugin_route_kill_switch_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:210"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/plugins/registry_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:211"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/plugins/manifest_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:212"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/plugins/census_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:213"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/contract/capabilities_manifest_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:214"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/contract/router_manifest_drift_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:215"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/require_admin_route_census_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:216"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/flat_alias_route_census_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:217"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/live/liveview_mount_authz_census_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:218"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/repo.ex",
+          "evidence": "scripts/elixir-impacted-tests.sh:309"
+        },
+        {
+          "kind": "file",
+          "p": "lib/a/b.ex",
+          "evidence": "scripts/elixir-impacted-tests.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "test/a/b_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "api/CLAUDE.md",
+          "evidence": "scripts/elixir-impacted-tests.sh:422"
+        }
+      ]
+    },
+    {
+      "path": "scripts/elixir-impacted-tests.test.sh",
+      "run": "bash scripts/elixir-impacted-tests.test.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/config/runtime.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:93"
+        },
+        {
+          "kind": "file",
+          "p": "api/config/config.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:94"
+        },
+        {
+          "kind": "file",
+          "p": "api/mix.lock",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:95"
+        },
+        {
+          "kind": "file",
+          "p": "api/mix.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:96"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/test_helper.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:97"
+        },
+        {
+          "kind": "dir",
+          "p": "api/test/support",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:101"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/support/conn_case.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:101"
+        },
+        {
+          "kind": "dir",
+          "p": "api/test/fixtures",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:102"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/fixtures/onix/sample.xml",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:102"
+        },
+        {
+          "kind": "dir",
+          "p": "api/priv/repo/migrations",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:103"
+        },
+        {
+          "kind": "file",
+          "p": "api/priv/repo/migrations/20260101000000_add_thing.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:103"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark_web/components/layouts/root.html.heex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:104"
+        },
+        {
+          "kind": "dir",
+          "p": "api/assets",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:105"
+        },
+        {
+          "kind": "file",
+          "p": "api/assets/sheet-grid/grid.mjs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:105"
+        },
+        {
+          "kind": "file",
+          "p": ".github/workflows/elixir.yml",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:106"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/test/barkpark_cloud/accounts_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:108"
+        },
+        {
+          "kind": "dir",
+          "p": "internal/taskboard",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:109"
+        },
+        {
+          "kind": "file",
+          "p": "internal/taskboard/board.go",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:109"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/canonical-marker-bindings.pin",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:123"
+        },
+        {
+          "kind": "file",
+          "p": "docs/openapi.json",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:134"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/api/openapi_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:138"
+        },
+        {
+          "kind": "dir",
+          "p": "lib/barkpark",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:149"
+        },
+        {
+          "kind": "dir",
+          "p": "api/lib/barkpark",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:155"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/nomodule.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:166"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/thing.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:174"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/thing.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:175"
+        },
+        {
+          "kind": "dir",
+          "p": "test/barkpark",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:187"
+        },
+        {
+          "kind": "tree",
+          "p": "test",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:195"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/content/envelope.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:337"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/content/envelope_internal_sentinel_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:337"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/tasks/close.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:338"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/tasks/close_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:338"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/tasks/claim.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:339"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/tasks/claim_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:339"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/search/documents_retriever.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:340"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/search/documents_retriever_tags_meta_parity_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:340"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark_web/router.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark_web/plugin_routes_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/media.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:342"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/media_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:342"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/plugins/registry.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:343"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/plugins/registry_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:343"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/portable_doc/render.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:344"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/portable_doc/render_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:344"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/papers/paper.ex",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:345"
+        },
+        {
+          "kind": "file",
+          "p": "test/barkpark/papers/paper_test.exs",
+          "evidence": "scripts/elixir-impacted-tests.test.sh:345"
+        }
+      ]
+    },
+    {
+      "path": "scripts/elixir-main-red-attribution.sh",
+      "run": "bash scripts/elixir-main-red-attribution.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/elixir-impacted-tests.sh",
+          "evidence": "scripts/elixir-main-red-attribution.sh:7"
+        }
+      ]
+    },
+    {
+      "path": "scripts/elixir-main-red-attribution.test.sh",
+      "run": "bash scripts/elixir-main-red-attribution.test.sh",
+      "scans": [
+        {
+          "kind": "dir",
+          "p": "lib/barkpark",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:65"
+        },
+        {
+          "kind": "dir",
+          "p": "api/lib/barkpark",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:68"
+        },
+        {
+          "kind": "file",
+          "p": "api/mix.lock",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:74"
+        },
+        {
+          "kind": "tree",
+          "p": "test",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:82"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/new-lineref-check.sh",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:130"
+        },
+        {
+          "kind": "file",
+          "p": "lib/barkpark/thing.ex",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:135"
+        },
+        {
+          "kind": "file",
+          "p": "lib/enum.ex",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:136"
+        },
+        {
+          "kind": "file",
+          "p": "docs/openapi.json",
+          "evidence": "scripts/elixir-main-red-attribution.test.sh:145"
+        }
+      ]
+    },
+    {
       "path": "scripts/elixir-path-escape-check.sh",
       "run": "bash scripts/elixir-path-escape-check.sh",
       "scans": [
@@ -5841,298 +6435,323 @@
         },
         {
           "kind": "file",
-          "p": "scripts/gate-announces-skips.test.sh",
+          "p": "scripts/elixir-impacted-tests.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:109"
         },
         {
           "kind": "file",
-          "p": "scripts/prod-build-cache-guard.sh",
+          "p": "scripts/elixir-impacted-tests.test.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:110"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/elixir-main-red-attribution.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:111"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/elixir-main-red-attribution.test.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:112"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/gate-announces-skips.test.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:113"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/prod-build-cache-guard.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:114"
         },
         {
           "kind": "dir",
           "p": "internal/provisioner/catalog/templates",
-          "evidence": "scripts/elixir-path-escape-check.sh:118"
+          "evidence": "scripts/elixir-path-escape-check.sh:122"
         },
         {
           "kind": "file",
           "p": "scripts/claude-pinned-version.txt",
-          "evidence": "scripts/elixir-path-escape-check.sh:119"
+          "evidence": "scripts/elixir-path-escape-check.sh:123"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark_web/studio/claude_chat_real_binary_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:120"
+          "evidence": "scripts/elixir-path-escape-check.sh:124"
         },
         {
           "kind": "file",
           "p": "api/test/test_helper.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:121"
+          "evidence": "scripts/elixir-path-escape-check.sh:125"
         },
         {
           "kind": "dir",
           "p": "docs",
-          "evidence": "scripts/elixir-path-escape-check.sh:124"
+          "evidence": "scripts/elixir-path-escape-check.sh:128"
         },
         {
           "kind": "dir",
           "p": "deploy",
-          "evidence": "scripts/elixir-path-escape-check.sh:131"
+          "evidence": "scripts/elixir-path-escape-check.sh:135"
         },
         {
           "kind": "dir",
           "p": "scripts/connectors",
-          "evidence": "scripts/elixir-path-escape-check.sh:135"
+          "evidence": "scripts/elixir-path-escape-check.sh:139"
         },
         {
           "kind": "file",
           "p": "deploy/site-deploy-node.sh",
-          "evidence": "scripts/elixir-path-escape-check.sh:137"
+          "evidence": "scripts/elixir-path-escape-check.sh:141"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/sites/deploy_runner_stage_names_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:138"
+          "evidence": "scripts/elixir-path-escape-check.sh:142"
         },
         {
           "kind": "file",
           "p": ".github/workflows/deploy.yml",
-          "evidence": "scripts/elixir-path-escape-check.sh:139"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/check-deployyml-filters.sh",
-          "evidence": "scripts/elixir-path-escape-check.sh:139"
-        },
-        {
-          "kind": "file",
-          "p": "api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:140"
-        },
-        {
-          "kind": "file",
-          "p": "api/test/barkpark/paper_editor_vendor_drift_test.exs",
           "evidence": "scripts/elixir-path-escape-check.sh:143"
         },
         {
           "kind": "file",
+          "p": "scripts/check-deployyml-filters.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:143"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs",
+          "evidence": "scripts/elixir-path-escape-check.sh:144"
+        },
+        {
+          "kind": "file",
+          "p": "api/test/barkpark/paper_editor_vendor_drift_test.exs",
+          "evidence": "scripts/elixir-path-escape-check.sh:147"
+        },
+        {
+          "kind": "file",
           "p": "web/public/bp-paper-editor.bundle.js",
-          "evidence": "scripts/elixir-path-escape-check.sh:152"
+          "evidence": "scripts/elixir-path-escape-check.sh:156"
         },
         {
           "kind": "file",
           "p": "web/public/assets/bp-paper-editor.css",
-          "evidence": "scripts/elixir-path-escape-check.sh:152"
+          "evidence": "scripts/elixir-path-escape-check.sh:156"
         },
         {
           "kind": "dir",
           "p": "cloud/test",
-          "evidence": "scripts/elixir-path-escape-check.sh:155"
+          "evidence": "scripts/elixir-path-escape-check.sh:159"
         },
         {
           "kind": "file",
           "p": "scripts/async_env_seam_scan.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:158"
+          "evidence": "scripts/elixir-path-escape-check.sh:162"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/async_global_seam_guard_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:163"
+          "evidence": "scripts/elixir-path-escape-check.sh:167"
         },
         {
           "kind": "file",
           "p": "cloud/test/barkpark_cloud/accounts_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:178"
+          "evidence": "scripts/elixir-path-escape-check.sh:182"
         },
         {
           "kind": "dir",
           "p": "cloud/test/support",
-          "evidence": "scripts/elixir-path-escape-check.sh:200"
+          "evidence": "scripts/elixir-path-escape-check.sh:204"
         },
         {
           "kind": "dir",
           "p": "api/assets/sheet-grid",
-          "evidence": "scripts/elixir-path-escape-check.sh:204"
+          "evidence": "scripts/elixir-path-escape-check.sh:208"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:204"
+          "evidence": "scripts/elixir-path-escape-check.sh:208"
         },
         {
           "kind": "dir",
           "p": "web/components",
-          "evidence": "scripts/elixir-path-escape-check.sh:207"
-        },
-        {
-          "kind": "file",
-          "p": "api/test/barkpark_web/live/sheets_cf_live_matrix_receipt_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:207"
-        },
-        {
-          "kind": "dir",
-          "p": "web/lib",
-          "evidence": "scripts/elixir-path-escape-check.sh:208"
-        },
-        {
-          "kind": "file",
-          "p": "web/components/sheet-grid.tsx",
-          "evidence": "scripts/elixir-path-escape-check.sh:208"
-        },
-        {
-          "kind": "dir",
-          "p": "web/node_modules",
-          "evidence": "scripts/elixir-path-escape-check.sh:209"
-        },
-        {
-          "kind": "dir",
-          "p": "web/app",
           "evidence": "scripts/elixir-path-escape-check.sh:211"
         },
         {
           "kind": "file",
+          "p": "api/test/barkpark_web/live/sheets_cf_live_matrix_receipt_test.exs",
+          "evidence": "scripts/elixir-path-escape-check.sh:211"
+        },
+        {
+          "kind": "dir",
+          "p": "web/lib",
+          "evidence": "scripts/elixir-path-escape-check.sh:212"
+        },
+        {
+          "kind": "file",
+          "p": "web/components/sheet-grid.tsx",
+          "evidence": "scripts/elixir-path-escape-check.sh:212"
+        },
+        {
+          "kind": "dir",
+          "p": "web/node_modules",
+          "evidence": "scripts/elixir-path-escape-check.sh:213"
+        },
+        {
+          "kind": "dir",
+          "p": "web/app",
+          "evidence": "scripts/elixir-path-escape-check.sh:215"
+        },
+        {
+          "kind": "file",
           "p": ".github/unreachable-assert-message.allow",
-          "evidence": "scripts/elixir-path-escape-check.sh:216"
+          "evidence": "scripts/elixir-path-escape-check.sh:220"
         },
         {
           "kind": "dir",
           "p": "testdata",
-          "evidence": "scripts/elixir-path-escape-check.sh:221"
-        },
-        {
-          "kind": "file",
-          "p": "docs/api-v1.md",
-          "evidence": "scripts/elixir-path-escape-check.sh:224"
-        },
-        {
-          "kind": "file",
-          "p": "docs/api/error-codes.md",
           "evidence": "scripts/elixir-path-escape-check.sh:225"
         },
         {
           "kind": "file",
-          "p": "docs/openapi.json",
-          "evidence": "scripts/elixir-path-escape-check.sh:226"
-        },
-        {
-          "kind": "dir",
-          "p": "internal/pdrender/testdata",
+          "p": "docs/api-v1.md",
           "evidence": "scripts/elixir-path-escape-check.sh:228"
         },
         {
           "kind": "file",
-          "p": "js/packages/react/src/blocks/sheet.ts",
-          "evidence": "scripts/elixir-path-escape-check.sh:231"
+          "p": "docs/api/error-codes.md",
+          "evidence": "scripts/elixir-path-escape-check.sh:229"
+        },
+        {
+          "kind": "file",
+          "p": "docs/openapi.json",
+          "evidence": "scripts/elixir-path-escape-check.sh:230"
         },
         {
           "kind": "dir",
-          "p": "js/packages/react/tests/fixtures",
+          "p": "internal/pdrender/testdata",
           "evidence": "scripts/elixir-path-escape-check.sh:232"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-door-census.sh",
+          "p": "js/packages/react/src/blocks/sheet.ts",
           "evidence": "scripts/elixir-path-escape-check.sh:235"
         },
         {
-          "kind": "file",
-          "p": "scripts/pds-elixir-receipt-census.exs",
+          "kind": "dir",
+          "p": "js/packages/react/tests/fixtures",
           "evidence": "scripts/elixir-path-escape-check.sh:236"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-published-artifact-door.sh",
-          "evidence": "scripts/elixir-path-escape-check.sh:237"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-published-artifact-door_test.sh",
-          "evidence": "scripts/elixir-path-escape-check.sh:238"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-record-parity.test.sh",
+          "p": "scripts/pds-door-census.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:239"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-status-only-residue.exs",
+          "p": "scripts/pds-elixir-receipt-census.exs",
           "evidence": "scripts/elixir-path-escape-check.sh:240"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-window-sentinel_test.sh",
+          "p": "scripts/pds-published-artifact-door.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:241"
         },
         {
           "kind": "file",
-          "p": "scripts/test-env-leak-allowlist.txt",
+          "p": "scripts/pds-pull-proof_test.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:242"
         },
         {
           "kind": "file",
-          "p": "scripts/test-env-leak-gate.sh",
+          "p": "scripts/pds-published-artifact-door_test.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:243"
         },
         {
           "kind": "file",
-          "p": "scripts/test-env-leak-gate.test.sh",
+          "p": "scripts/pds-record-parity.test.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:244"
         },
         {
           "kind": "file",
-          "p": "scripts/unreachable-assert-message-check.sh",
+          "p": "scripts/pds-status-only-residue.exs",
           "evidence": "scripts/elixir-path-escape-check.sh:245"
         },
         {
-          "kind": "dir",
-          "p": "web/__tests__",
+          "kind": "file",
+          "p": "scripts/pds-window-sentinel_test.sh",
           "evidence": "scripts/elixir-path-escape-check.sh:246"
         },
         {
           "kind": "file",
+          "p": "scripts/test-env-leak-allowlist.txt",
+          "evidence": "scripts/elixir-path-escape-check.sh:247"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/test-env-leak-gate.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:248"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/test-env-leak-gate.test.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:249"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/unreachable-assert-message-check.sh",
+          "evidence": "scripts/elixir-path-escape-check.sh:250"
+        },
+        {
+          "kind": "dir",
+          "p": "web/__tests__",
+          "evidence": "scripts/elixir-path-escape-check.sh:251"
+        },
+        {
+          "kind": "file",
           "p": "scripts/console-path-escape-check.sh",
-          "evidence": "scripts/elixir-path-escape-check.sh:272"
+          "evidence": "scripts/elixir-path-escape-check.sh:277"
         },
         {
           "kind": "tree",
           "p": "api/lib",
-          "evidence": "scripts/elixir-path-escape-check.sh:276"
+          "evidence": "scripts/elixir-path-escape-check.sh:281"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/pds_door_census_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:362"
+          "evidence": "scripts/elixir-path-escape-check.sh:367"
         },
         {
           "kind": "dir",
           "p": "api/lib",
-          "evidence": "scripts/elixir-path-escape-check.sh:699"
+          "evidence": "scripts/elixir-path-escape-check.sh:704"
         },
         {
           "kind": "dir",
           "p": "api/test",
-          "evidence": "scripts/elixir-path-escape-check.sh:700"
+          "evidence": "scripts/elixir-path-escape-check.sh:705"
         },
         {
           "kind": "file",
           "p": "priv/foo.ex",
-          "evidence": "scripts/elixir-path-escape-check.sh:732"
+          "evidence": "scripts/elixir-path-escape-check.sh:737"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/plugins/tickets/attachments.ex",
-          "evidence": "scripts/elixir-path-escape-check.sh:1010"
+          "evidence": "scripts/elixir-path-escape-check.sh:1015"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
-          "evidence": "scripts/elixir-path-escape-check.sh:1011"
+          "evidence": "scripts/elixir-path-escape-check.sh:1016"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/elixir-path-escape-check.sh:1087"
+          "evidence": "scripts/elixir-path-escape-check.sh:1092"
         }
       ]
     },
@@ -8099,277 +8718,287 @@
         {
           "kind": "file",
           "p": "scripts/pds-live-bp-write-receipt.sh",
-          "evidence": "scripts/pds-door-census.sh:328"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-ledger-census.sh",
           "evidence": "scripts/pds-door-census.sh:329"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-pull-proof.sh",
+          "p": "scripts/pds-ledger-census.sh",
           "evidence": "scripts/pds-door-census.sh:330"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-secret-scan.sh",
+          "p": "scripts/pds-pull-proof.sh",
           "evidence": "scripts/pds-door-census.sh:331"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-scratch-target.sh",
+          "p": "scripts/pds-secret-scan.sh",
           "evidence": "scripts/pds-door-census.sh:332"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-crown-stamp.sh",
+          "p": "scripts/pds-scratch-target.sh",
           "evidence": "scripts/pds-door-census.sh:333"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-crown-launch.sh",
+          "p": "scripts/pds-crown-stamp.sh",
           "evidence": "scripts/pds-door-census.sh:334"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-climb-preflight.sh",
+          "p": "scripts/pds-crown-launch.sh",
           "evidence": "scripts/pds-door-census.sh:335"
         },
         {
           "kind": "file",
-          "p": "scripts/pds-export-peak-measure.sh",
+          "p": "scripts/pds-climb-preflight.sh",
           "evidence": "scripts/pds-door-census.sh:336"
         },
         {
           "kind": "file",
+          "p": "scripts/pds-export-peak-measure.sh",
+          "evidence": "scripts/pds-door-census.sh:337"
+        },
+        {
+          "kind": "file",
           "p": "scripts/pds-blind-spot.sh",
-          "evidence": "scripts/pds-door-census.sh:338"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-blind-spot-check.sh",
-          "evidence": "scripts/pds-door-census.sh:338"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-idle-sampler.sh",
           "evidence": "scripts/pds-door-census.sh:339"
         },
         {
           "kind": "file",
-          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "p": "scripts/pds-blind-spot-check.sh",
+          "evidence": "scripts/pds-door-census.sh:339"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-idle-sampler.sh",
           "evidence": "scripts/pds-door-census.sh:340"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-check.sh",
+          "evidence": "scripts/pds-door-census.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-predicate.exs",
+          "evidence": "scripts/pds-door-census.sh:342"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/rerun-adjudicate.mjs",
+          "evidence": "scripts/pds-door-census.sh:343"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fixtures/live-corpus-2026-07-31.json",
-          "evidence": "scripts/pds-door-census.sh:340"
+          "evidence": "scripts/pds-door-census.sh:343"
         },
         {
           "kind": "file",
           "p": "tooling/pds/rerun-adjudicate.test.mjs",
-          "evidence": "scripts/pds-door-census.sh:341"
+          "evidence": "scripts/pds-door-census.sh:344"
         },
         {
           "kind": "file",
           "p": ".github/workflows/research-coverage-suite.yml",
-          "evidence": "scripts/pds-door-census.sh:341"
+          "evidence": "scripts/pds-door-census.sh:344"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:381"
+          "evidence": "scripts/pds-door-census.sh:385"
         },
         {
           "kind": "file",
           "p": "test/barkpark/pds_elixir_census_test.exs",
-          "evidence": "scripts/pds-door-census.sh:381"
+          "evidence": "scripts/pds-door-census.sh:385"
         },
         {
           "kind": "dir",
           "p": "tooling/pds",
-          "evidence": "scripts/pds-door-census.sh:428"
+          "evidence": "scripts/pds-door-census.sh:432"
         },
         {
           "kind": "file",
           "p": "scripts/pds-elixir-receipt-census.exs",
-          "evidence": "scripts/pds-door-census.sh:943"
+          "evidence": "scripts/pds-door-census.sh:947"
         },
         {
           "kind": "file",
           "p": "scripts/pds-door-census.sh",
-          "evidence": "scripts/pds-door-census.sh:1492"
+          "evidence": "scripts/pds-door-census.sh:1496"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-inbeam.exs",
-          "evidence": "scripts/pds-door-census.sh:1843"
+          "evidence": "scripts/pds-door-census.sh:1847"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/three_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1846"
+          "evidence": "scripts/pds-door-census.sh:1850"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-three.sh",
-          "evidence": "scripts/pds-door-census.sh:1849"
+          "evidence": "scripts/pds-door-census.sh:1853"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark_web/studio/four_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1862"
+          "evidence": "scripts/pds-door-census.sh:1866"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-four.sh",
-          "evidence": "scripts/pds-door-census.sh:1865"
+          "evidence": "scripts/pds-door-census.sh:1869"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/inline_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1878"
-        },
-        {
-          "kind": "file",
-          "p": "scripts/pds-fx-inline.sh",
           "evidence": "scripts/pds-door-census.sh:1882"
         },
         {
           "kind": "file",
+          "p": "scripts/pds-fx-inline.sh",
+          "evidence": "scripts/pds-door-census.sh:1886"
+        },
+        {
+          "kind": "file",
           "p": "api/test/barkpark/inbeam_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1890"
+          "evidence": "scripts/pds-door-census.sh:1894"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/fraud_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1901"
+          "evidence": "scripts/pds-door-census.sh:1905"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-fraud.sh",
-          "evidence": "scripts/pds-door-census.sh:1904"
+          "evidence": "scripts/pds-door-census.sh:1908"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/orphan_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1913"
+          "evidence": "scripts/pds-door-census.sh:1917"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-orphan.sh",
-          "evidence": "scripts/pds-door-census.sh:1916"
+          "evidence": "scripts/pds-door-census.sh:1920"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearcomment_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1932"
+          "evidence": "scripts/pds-door-census.sh:1936"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearcomment.sh",
-          "evidence": "scripts/pds-door-census.sh:1935"
+          "evidence": "scripts/pds-door-census.sh:1939"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/nearread_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1947"
+          "evidence": "scripts/pds-door-census.sh:1951"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-nearread.sh",
-          "evidence": "scripts/pds-door-census.sh:1950"
+          "evidence": "scripts/pds-door-census.sh:1954"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/trailing_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1962"
+          "evidence": "scripts/pds-door-census.sh:1966"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-trailing.sh",
-          "evidence": "scripts/pds-door-census.sh:1965"
+          "evidence": "scripts/pds-door-census.sh:1969"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/port_test.exs",
-          "evidence": "scripts/pds-door-census.sh:1979"
+          "evidence": "scripts/pds-door-census.sh:1983"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-port.sh",
-          "evidence": "scripts/pds-door-census.sh:1982"
+          "evidence": "scripts/pds-door-census.sh:1986"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/tail_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2003"
+          "evidence": "scripts/pds-door-census.sh:2007"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-tail.sh",
-          "evidence": "scripts/pds-door-census.sh:2006"
+          "evidence": "scripts/pds-door-census.sh:2010"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/sigil_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2021"
+          "evidence": "scripts/pds-door-census.sh:2025"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-sigil.sh",
-          "evidence": "scripts/pds-door-census.sh:2024"
+          "evidence": "scripts/pds-door-census.sh:2028"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-long.sh",
-          "evidence": "scripts/pds-door-census.sh:2039"
+          "evidence": "scripts/pds-door-census.sh:2043"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/long_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2047"
+          "evidence": "scripts/pds-door-census.sh:2051"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-shonly.sh",
-          "evidence": "scripts/pds-door-census.sh:2122"
+          "evidence": "scripts/pds-door-census.sh:2126"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-through.sh",
-          "evidence": "scripts/pds-door-census.sh:2150"
+          "evidence": "scripts/pds-door-census.sh:2154"
         },
         {
           "kind": "file",
           "p": "scripts/pds-fx-shut.sh",
-          "evidence": "scripts/pds-door-census.sh:2151"
+          "evidence": "scripts/pds-door-census.sh:2155"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/census_door_test.exs",
-          "evidence": "scripts/pds-door-census.sh:2152"
+          "evidence": "scripts/pds-door-census.sh:2156"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fx-lib.mjs",
-          "evidence": "scripts/pds-door-census.sh:2454"
+          "evidence": "scripts/pds-door-census.sh:2458"
         },
         {
           "kind": "file",
           "p": "scripts/fx-lib.mjs",
-          "evidence": "scripts/pds-door-census.sh:2455"
+          "evidence": "scripts/pds-door-census.sh:2459"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fx-main.mjs",
-          "evidence": "scripts/pds-door-census.sh:2456"
+          "evidence": "scripts/pds-door-census.sh:2460"
         },
         {
           "kind": "file",
           "p": "tooling/pds/fx-orphan.mjs",
-          "evidence": "scripts/pds-door-census.sh:2485"
+          "evidence": "scripts/pds-door-census.sh:2489"
         }
       ]
     },
@@ -8489,27 +9118,27 @@
         {
           "kind": "file",
           "p": "scripts/pds-ledger-census_test.sh",
-          "evidence": "scripts/pds-ledger-census.sh:502"
+          "evidence": "scripts/pds-ledger-census.sh:560"
         },
         {
           "kind": "file",
           "p": "tooling/pds/adjudicate.mjs",
-          "evidence": "scripts/pds-ledger-census.sh:1270"
+          "evidence": "scripts/pds-ledger-census.sh:1411"
         },
         {
           "kind": "file",
           "p": "api/test/barkpark/workspace_bundle_test.exs",
-          "evidence": "scripts/pds-ledger-census.sh:1303"
+          "evidence": "scripts/pds-ledger-census.sh:1444"
         },
         {
           "kind": "file",
           "p": "scripts/elixir-path-escape-check.sh",
-          "evidence": "scripts/pds-ledger-census.sh:2064"
+          "evidence": "scripts/pds-ledger-census.sh:2209"
         },
         {
           "kind": "file",
           "p": "scripts/pds-door-census.sh",
-          "evidence": "scripts/pds-ledger-census.sh:2065"
+          "evidence": "scripts/pds-ledger-census.sh:2210"
         }
       ]
     },
@@ -8584,18 +9213,23 @@
         },
         {
           "kind": "file",
+          "p": "config/barkpark/config.json",
+          "evidence": "scripts/pds-ledger-census_test.sh:861"
+        },
+        {
+          "kind": "file",
           "p": "scripts/pds-ledger-census.sh",
-          "evidence": "scripts/pds-ledger-census_test.sh:1581"
+          "evidence": "scripts/pds-ledger-census_test.sh:1777"
         },
         {
           "kind": "file",
           "p": "scripts/elixir-path-escape-check.sh",
-          "evidence": "scripts/pds-ledger-census_test.sh:1584"
+          "evidence": "scripts/pds-ledger-census_test.sh:1780"
         },
         {
           "kind": "file",
           "p": "scripts/pds-door-census.sh",
-          "evidence": "scripts/pds-ledger-census_test.sh:1586"
+          "evidence": "scripts/pds-ledger-census_test.sh:1782"
         }
       ]
     },
@@ -8707,6 +9341,32 @@
       ]
     },
     {
+      "path": "scripts/pds-pre-gate-papers-check.sh",
+      "run": "bash scripts/pds-pre-gate-papers-check.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "api/test/barkpark/content/pds_w49_pre_gate_edit_rule_test.exs",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:13"
+        },
+        {
+          "kind": "file",
+          "p": "tooling/pds/pre-gate-papers.json",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:18"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-check.sh",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:41"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pre-gate-papers-predicate.exs",
+          "evidence": "scripts/pds-pre-gate-papers-check.sh:56"
+        }
+      ]
+    },
+    {
       "path": "scripts/pds-published-artifact-door.sh",
       "run": "bash scripts/pds-published-artifact-door.sh",
       "scans": [
@@ -8780,7 +9440,23 @@
         {
           "kind": "file",
           "p": "api/lib/barkpark/tenancy/workspace_bundle/catalog.ex",
-          "evidence": "scripts/pds-pull-proof.sh:1048"
+          "evidence": "scripts/pds-pull-proof.sh:1081"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-pull-proof_test.sh",
+          "evidence": "scripts/pds-pull-proof.sh:1385"
+        }
+      ]
+    },
+    {
+      "path": "scripts/pds-pull-proof_test.sh",
+      "run": "bash scripts/pds-pull-proof_test.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/pds-pull-proof.sh",
+          "evidence": "scripts/pds-pull-proof_test.sh:2"
         }
       ]
     },
@@ -8871,6 +9547,32 @@
           "kind": "file",
           "p": "scripts/pds-secret-scan.sh",
           "evidence": "scripts/pds-secret-scan.sh:47"
+        }
+      ]
+    },
+    {
+      "path": "scripts/pds-stranded-draft-cause.sh",
+      "run": "bash scripts/pds-stranded-draft-cause.sh",
+      "scans": [
+        {
+          "kind": "file",
+          "p": "scripts/pds-draft-only-task-census.sh",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:22"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/content/authoring_wall.ex",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:27"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/content/label_spine.ex",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:43"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/pds-stranded-draft-cause.sh",
+          "evidence": "scripts/pds-stranded-draft-cause.sh:85"
         }
       ]
     },
@@ -9118,17 +9820,72 @@
         {
           "kind": "file",
           "p": "scripts/preview-parity-check.sh",
-          "evidence": "scripts/preview-parity-check.sh:27"
+          "evidence": "scripts/preview-parity-check.sh:30"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/a.js",
+          "evidence": "scripts/preview-parity-check.sh:53"
+        },
+        {
+          "kind": "file",
+          "p": "js/.mjs/.json",
+          "evidence": "scripts/preview-parity-check.sh:55"
+        },
+        {
+          "kind": "file",
+          "p": "docs/ops/merge-gates.md",
+          "evidence": "scripts/preview-parity-check.sh:61"
+        },
+        {
+          "kind": "file",
+          "p": ".github/workflows/doc-gates.yml",
+          "evidence": "scripts/preview-parity-check.sh:61"
         },
         {
           "kind": "file",
           "p": "scripts/docs-anchors-check.sh",
-          "evidence": "scripts/preview-parity-check.sh:54"
+          "evidence": "scripts/preview-parity-check.sh:78"
         },
         {
           "kind": "file",
           "p": "web/lib/get-document.ts",
-          "evidence": "scripts/preview-parity-check.sh:74"
+          "evidence": "scripts/preview-parity-check.sh:109"
+        },
+        {
+          "kind": "file",
+          "p": "web/lib/getDocument.ts",
+          "evidence": "scripts/preview-parity-check.sh:291"
+        },
+        {
+          "kind": "file",
+          "p": "js/.mjs/.css/.json",
+          "evidence": "scripts/preview-parity-check.sh:341"
+        },
+        {
+          "kind": "file",
+          "p": "web/src/leak.ts",
+          "evidence": "scripts/preview-parity-check.sh:352"
+        },
+        {
+          "kind": "file",
+          "p": "web/node_modules/vendor/dep.ts",
+          "evidence": "scripts/preview-parity-check.sh:371"
+        },
+        {
+          "kind": "file",
+          "p": "web/src/notes.md",
+          "evidence": "scripts/preview-parity-check.sh:378"
+        },
+        {
+          "kind": "file",
+          "p": "docs/merge-gates.ts",
+          "evidence": "scripts/preview-parity-check.sh:389"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/some-check.py",
+          "evidence": "scripts/preview-parity-check.sh:390"
         }
       ]
     },
@@ -10492,6 +11249,46 @@
           "kind": "file",
           "p": "scripts/sync-starter-templates.mjs",
           "evidence": "scripts/sync-starter-templates.mjs:2"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/test/barkpark_cloud/templates/app_files_drift_test.exs",
+          "evidence": "scripts/sync-starter-templates.mjs:31"
+        },
+        {
+          "kind": "file",
+          "p": ".github/required-checks.json",
+          "evidence": "scripts/sync-starter-templates.mjs:35"
+        },
+        {
+          "kind": "file",
+          "p": "scripts/cloud-path-escape-check.sh",
+          "evidence": "scripts/sync-starter-templates.mjs:36"
+        },
+        {
+          "kind": "dir",
+          "p": "cloud",
+          "evidence": "scripts/sync-starter-templates.mjs:37"
+        },
+        {
+          "kind": "dir",
+          "p": "js/packages/create-barkpark-app/templates",
+          "evidence": "scripts/sync-starter-templates.mjs:37"
+        },
+        {
+          "kind": "file",
+          "p": "cloud/priv/templates/blog-starter/lib/csp.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:45"
+        },
+        {
+          "kind": "file",
+          "p": "lib/csp.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:46"
+        },
+        {
+          "kind": "file",
+          "p": "js/packages/create-barkpark-app/src/constants.ts",
+          "evidence": "scripts/sync-starter-templates.mjs:67"
         }
       ]
     },
