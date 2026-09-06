@@ -6,7 +6,8 @@ defmodule BarkparkCloud.Web.RouterGithubReposTest do
 
   Fake-backed end-to-end: connect (fake) → create a repo from blog-starter →
   the fake records the created repo + pushed files → response shape. Plus every
-  honest gate: 401 / 422 no_team / 503 not-configured / 409 no_installation /
+  honest gate: 401 / 403 no_team (the admin gate answers it) / 503
+  not-configured / 409 no_installation /
   403 member / 422 invalid_name / 422 unknown_template.
 
   `async: false` — toggles the global `BarkparkCloud.GitHub` app env to simulate

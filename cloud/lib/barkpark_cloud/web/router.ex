@@ -2186,7 +2186,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       true ->
         stream_events(conn, conn.assigns.current_team.id)
@@ -2476,7 +2476,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       not (is_binary(conn.body_params["name"]) and conn.body_params["name"] != "") ->
         json(conn, 422, %{error: "invalid", details: %{name: ["can't be blank"]}})
@@ -2791,7 +2791,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       key_var not in @agent_key_vars ->
         json(conn, 422, %{
@@ -4554,10 +4554,13 @@ defmodule BarkparkCloud.Web.Router do
   # OWNED list (always well-formed UUIDs from the DB) drops junk before any query
   # runs, so `?site_ids=nope` is an honest `200` with `volume: 0`.
   #
-  # A TEAMLESS CALLER GETS 422 no_team, not 404. Every one of the router's 404
+  # A TEAMLESS CALLER GETS 403 no_team, not 404. Every one of the router's 404
   # nil-team arms belongs to a PATH-ID route, where 404 correctly conflates
   # "wrong team" with "no such id". This route has no path id, so a 404 would lie
-  # about a route that exists; a 403 would assert an authority no grant supplies.
+  # about a route that exists. cch-w40-bl: it was 422 until the inline emitters
+  # converged on the gate's `403 {forbidden, reason: "no_team", scope: "team"}` —
+  # holding no team at all IS an authority answer, and the same one every
+  # `gate_role/4`-guarded route already gave.
   get "/v1/deploy-ledger/census" do
     conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
 
@@ -4566,7 +4569,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       true ->
         team = conn.assigns.current_team
@@ -5277,8 +5280,14 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      # DELETED, not converted (cch-w40-bl): this arm was UNREACHABLE. POST /v1/providers
+      # is gated by Auth.require_team_admin/2 -> gate_role/4 (auth.ex),
+      # which answers a teamless caller 403 {"error":"forbidden","reason":
+      # "no_team","scope":"team"} and HALTS — so `conn.halted` above catches that
+      # caller one clause earlier and this `is_nil(current_team)` arm could never
+      # be entered. Keeping a second, DIFFERENT wire shape here would have been a
+      # contract no client can ever receive. Driven proof:
+      # test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
 
       true ->
         connect_provider_request(conn)
@@ -5516,8 +5525,14 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      # DELETED, not converted (cch-w40-bl): this arm was UNREACHABLE. POST /v1/github/installations
+      # is gated by Auth.require_team_admin/2 -> gate_role/4 (auth.ex),
+      # which answers a teamless caller 403 {"error":"forbidden","reason":
+      # "no_team","scope":"team"} and HALTS — so `conn.halted` above catches that
+      # caller one clause earlier and this `is_nil(current_team)` arm could never
+      # be entered. Keeping a second, DIFFERENT wire shape here would have been a
+      # contract no client can ever receive. Driven proof:
+      # test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
 
       not GitHub.configured?() ->
         json(conn, 503, %{error: "feature_not_configured"})
@@ -5619,7 +5634,8 @@ defmodule BarkparkCloud.Web.Router do
   # push-files), NOT GitHub's template-repo feature, so ANY template works.
   #
   # Gates (checked in order, honest surfacing):
-  #   401 unauth · 422 no_team · 503 feature_not_configured (App creds absent) ·
+  #   401 unauth · 403 no_team (from require_team_admin -> gate_role) ·
+  #   503 feature_not_configured (App creds absent) ·
   #   409 no_installation (team not connected) · 422 invalid_name ·
   #   422 unknown_template (no deployable app tree for the slug) ·
   #   409 repo_exists (name already taken on the account) · 502 github_error.
@@ -5635,8 +5651,14 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      # DELETED, not converted (cch-w40-bl): this arm was UNREACHABLE. POST /v1/github/repos
+      # is gated by Auth.require_team_admin/2 -> gate_role/4 (auth.ex),
+      # which answers a teamless caller 403 {"error":"forbidden","reason":
+      # "no_team","scope":"team"} and HALTS — so `conn.halted` above catches that
+      # caller one clause earlier and this `is_nil(current_team)` arm could never
+      # be entered. Keeping a second, DIFFERENT wire shape here would have been a
+      # contract no client can ever receive. Driven proof:
+      # test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
 
       not GitHub.configured?() ->
         json(conn, 503, %{error: "feature_not_configured"})
@@ -5707,7 +5729,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       true ->
         settings = Notifications.get_or_create_settings(conn.assigns.current_team)
@@ -5854,7 +5876,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/notifications/test {to?} → 200 {ok: true} | 429 {error: "rate_limited",
-  # retry_after} | 422 {error: "no_team"|"no_recipient"}. Sends a test email over
+  # retry_after} | 403 {forbidden, reason: "no_team"} (from the admin gate) |
+  # 422 {error: "no_recipient"}. Sends a test email over
   # the platform transport. Rate-limited to one per 10s per team (Coolify parity),
   # enforced in the context via last_test_sent_at. `to` defaults to the first
   # team member's email and MUST be a team member (the platform mailer is not an
@@ -6364,7 +6387,9 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/tokens {name, abilities[], expires_in_days?} → 201
   # {token: <plaintext ONCE>, pat: {...}}. The plaintext is the ONLY moment the
   # credential leaves the server; pat carries no hash/no plaintext.
-  #   422 {error: "no_team"}            — the user has no team to mint under.
+  #   403 {forbidden, reason: "no_team", scope: "team"}
+  #                                     — the user has no team to mint under
+  #                                       (cch-w40-bl: the gate shape, was 422).
   #   422 {error: "invalid", details}   — changeset rejection (bad name/ability).
   post "/v1/tokens" do
     conn = Auth.require_user(conn, [])
@@ -6374,7 +6399,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       true ->
         user = conn.assigns.current_user
@@ -6564,12 +6589,14 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_current_team_owner above already
-      # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
-      # before it), so `conn.halted` catches that case one clause earlier. Kept
-      # as a fail-closed guard, NOT as a contract this route can emit.
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      # DELETED, not converted (cch-w40-bl): this arm was UNREACHABLE. POST /v1/billing/checkout
+      # is gated by Auth.require_current_team_owner/1 (auth.ex),
+      # which answers a teamless caller 403 {"error":"forbidden","reason":
+      # "no_team","scope":"team"} and HALTS — so `conn.halted` above catches that
+      # caller one clause earlier and this `is_nil(current_team)` arm could never
+      # be entered. Keeping a second, DIFFERENT wire shape here would have been a
+      # contract no client can ever receive. Driven proof:
+      # test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
 
       true ->
         plan = conn.body_params["plan"]
@@ -6636,12 +6663,14 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_current_team_owner above already
-      # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
-      # before it), so `conn.halted` catches that case one clause earlier. Kept
-      # as a fail-closed guard, NOT as a contract this route can emit.
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      # DELETED, not converted (cch-w40-bl): this arm was UNREACHABLE. POST /v1/billing/portal
+      # is gated by Auth.require_current_team_owner/1 (auth.ex),
+      # which answers a teamless caller 403 {"error":"forbidden","reason":
+      # "no_team","scope":"team"} and HALTS — so `conn.halted` above catches that
+      # caller one clause earlier and this `is_nil(current_team)` arm could never
+      # be entered. Keeping a second, DIFFERENT wire shape here would have been a
+      # contract no client can ever receive. Driven proof:
+      # test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
 
       true ->
         case Billing.billing_portal_url(conn.assigns.current_team) do
@@ -7853,7 +7882,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       true ->
         team = conn.assigns.current_team
@@ -10176,6 +10205,30 @@ defmodule BarkparkCloud.Web.Router do
   # The incoming value is REFLECTED into a response header and a JSON body, so
   # it is accepted only as a bounded, boring token — never trusted verbatim.
   # Anything else (or nothing) gets a freshly minted id.
+  # ONE SHAPE FOR ONE CONDITION (cch-w40-bl). "You hold no team" is an AUTHORITY
+  # answer — the caller's body was fine, they simply hold no grant — and
+  # `Auth.gate_role/4` and `Auth.require_current_team_owner/1` have answered it
+  # `403 {"error":"forbidden","reason":"no_team","scope":"team"}` since
+  # cch-w38-s2. The routes that resolve their team INLINE (because they must not
+  # re-run `require_user/2` and discard a resolved PAT, or because they gate on
+  # a bare `require_user`) each carried their OWN `json(conn, 422, %{error:
+  # "no_team"})` copy, so the same condition reached a client as two different
+  # statuses and two different bodies depending on which route it hit, and no
+  # client could tell which gate had replied.
+  #
+  # This is the ONE emitter for that condition on the inline side, delegating to
+  # the SAME `Auth.forbidden/2` seam the module gates use — not a tenth hand copy
+  # of the shape, so the two halves cannot drift apart again. The status flip
+  # (422 -> 403) is safe because the CLI half landed FIRST as cch-w40-s4 (PR
+  # #11711): `internal/cli/cloud_rollback_cmd.go` and `cloud_update_cmd.go` key
+  # their narration on the CAUSE (`reason == "no_team" or code == "no_team"`),
+  # never on the status, so `bp` keeps its exit code and its `bp team use` hint
+  # across the flip.
+  #
+  # Driven, per-route reachability proof (and the proof that the five DELETED
+  # arms were dead): test/barkpark_cloud/web/router_no_team_gate_shape_test.exs.
+  defp no_team(conn), do: Auth.forbidden(conn, reason: "no_team", scope: "team")
+
   defp request_id(conn) do
     case get_req_header(conn, "x-request-id") do
       [id | _] when is_binary(id) ->
@@ -10284,7 +10337,8 @@ defmodule BarkparkCloud.Web.Router do
         conn.assigns[:current_token] ->
           Auth.require_ability(conn, "deploy")
 
-        # Session with no team → fall through to the 422 no_team branch below.
+        # Session with no team → fall through to the no_team branch below.
+        # (403 forbidden/no_team since cch-w40-bl; 422 before it.)
         is_nil(conn.assigns[:current_team]) ->
           conn
 
@@ -10306,7 +10360,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       # The launch gate: ENTITLEMENT is REQUIRED — an active subscription, or a
       # past_due one still inside its grace window (a transient dunning state
@@ -10468,7 +10522,7 @@ defmodule BarkparkCloud.Web.Router do
   # mirrors go_live's 4xx-at-the-button doctrine: reject everything cheap BEFORE
   # any row/job exists so a bad request never strands a half-built instance.
   #
-  #   * no team / not admin        → 422 no_team / 403 forbidden
+  #   * no team / not admin        → 403 no_team / 403 forbidden
   #   * blank name                 → 422 name_required
   #   * unknown provider           → 422 invalid_provider
   #   * azure w/o a verified row    → 422 provider_not_connected + remediation (D17)
@@ -10495,7 +10549,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json(conn, 422, %{error: "no_team"})
+        no_team(conn)
 
       # cch-w37-s2: NAME THE AUTHORITY. The rendered "Resurrect" CTA sends a
       # member's refusal through resurrectOutcome → friendly(), where a bare body

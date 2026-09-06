@@ -185,7 +185,17 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "no_queued",
              "no_recipient",
              "no_subscription",
-             "no_team",
+             # "no_team" IS NOT AN ERROR CODE ANY MORE (cch-w40-bl). It never
+             # named a malformed body — it names a MISSING GRANT — so it moved
+             # off the `error:` axis and onto the `reason:` axis, where
+             # `Auth.forbidden/2` already carried it for every `gate_role/4`
+             # route: `403 {"error":"forbidden","reason":"no_team","scope":"team"}`.
+             # The nine inline `json(conn, 422, %{error: "no_team"})` emitters
+             # that kept it alive on THIS axis were converged onto that shape and
+             # five more were deleted as unreachable, so the DECLARED->EMITTED arm
+             # correctly reds if the name is left here. It is pinned on its new
+             # axis by `reason_no_team_is_still_emitted` below — removing it from
+             # @catalog does NOT unpin the vocabulary, it re-points the pin.
              "no_webhook",
              "node_ports_exhausted",
              "not_a_support",
@@ -297,6 +307,39 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
            A console/CLI client branches on these exact strings. Add each one to @catalog
            in this file (alphabetically) as part of the change that introduced it.
            """
+  end
+
+  # cch-w40-bl: `no_team` left the `error:` axis for the `reason:` axis. Without
+  # this pin, deleting @catalog's entry would have silently retired the whole
+  # vocabulary item — the console (`FORBIDDEN_REASON_COPY.no_team`) and `bp`
+  # (`cloud_rollback_cmd.go`, `cloud_update_cmd.go`, `cloud_site_cmd.go`, all
+  # keyed on `reason == "no_team"`) still branch on this exact string.
+  test "reason_no_team_is_still_emitted: the no_team vocabulary survived the axis move" do
+    reasons =
+      @emitter_globs
+      |> Enum.flat_map(&Path.wildcard/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn path ->
+        path
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.reject(&Regex.match?(~r/^\s*#/, &1))
+        |> Enum.flat_map(fn line ->
+          ~r/reason:\s*"([a-zA-Z0-9_]+)"/
+          |> Regex.scan(line)
+          |> Enum.map(fn [_, reason] -> reason end)
+        end)
+      end)
+      |> MapSet.new()
+
+    assert MapSet.member?(reasons, "no_team"),
+           "no cloud/lib/barkpark_cloud/web/** emitter writes `reason: \"no_team\"` any more — " <>
+             "the console's FORBIDDEN_REASON_COPY.no_team arm and bp's no_team narration are dead."
+
+    refute MapSet.member?(emitted_codes(), "no_team"),
+           "an `error: \"no_team\"` emitter is back under cloud/lib/barkpark_cloud/web/**. " <>
+             "One condition, one wire answer: route it through the router's `no_team/1` " <>
+             "helper (or Auth.forbidden/2) so it stays on the `reason:` axis."
   end
 
   test "every code declared in @catalog is still emitted somewhere" do

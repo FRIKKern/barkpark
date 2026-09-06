@@ -1998,14 +1998,17 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn.status == 401
     end
 
-    test "valid ?ticket= for a teamless user → 422 no_team (query-param auth resolves a real user)" do
+    test "valid ?ticket= for a teamless user → 403 no_team (query-param auth resolves a real user)" do
       user = user_fixture()
       {:ok, ticket} = Accounts.create_sse_ticket(user)
 
       conn = call(:get, "/v1/events?ticket=#{ticket}")
 
-      assert conn.status == 422
-      assert json_body(conn)["error"] == "no_team"
+      # cch-w40-bl: this inline emitter now speaks the GATE's shape — the same
+      # 403 {"error":"forbidden","reason":"no_team","scope":"team"} that
+      # Auth.gate_role/4 emits — so one condition has one wire answer.
+      assert conn.status == 403
+      assert json_body(conn)["reason"] == "no_team"
     end
 
     # THE LEAK THIS SLICE CLOSES (cch-w3). A 30-day session token in the query
@@ -2016,7 +2019,7 @@ defmodule BarkparkCloud.Web.RouterTest do
     test "a session token in the query string no longer opens the stream" do
       # A TEAMLESS user throughout, so every branch answers synchronously (a
       # user WITH a team parks in the SSE receive loop and would hang the test):
-      # 401 = the credential was refused, 422 no_team = it resolved a real user.
+      # 401 = the credential was refused, 403 no_team = it resolved a real user.
       user = user_fixture()
       {:ok, token} = Accounts.create_user_session_token(user)
 
@@ -2027,7 +2030,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert call(:get, "/v1/events?ticket=#{token}").status == 401
       # The header path still takes a session token (curl / an EventSource
       # polyfill / the CLI) — that path never writes the credential into a URL.
-      assert call(:get, "/v1/events", nil, token).status == 422
+      assert call(:get, "/v1/events", nil, token).status == 403
     end
   end
 
