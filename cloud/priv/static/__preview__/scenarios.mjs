@@ -1359,7 +1359,7 @@ const depRailFailedKind = deployment({
 // NO `line` CONSOLE ENTRY IS COMMITTED. The raw capture does survive one element
 // away in the real product (`console_entry/1` folds it into `line`, and
 // `deployConsoleHtml` renders it), but the two rail fixtures above carry stage
-// entries only, and adding a 189-char capture with a 45-char URL run to THIS
+// entries only, and adding the 108-char capture with its 45-char URL run to THIS
 // fixture's console would put an unmeasured string on the page the W25 leg
 // asserts the page width of. The rail is what this fixture exists to render.
 const depRailFailedClassifying = deployment({
