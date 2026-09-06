@@ -2574,6 +2574,21 @@ defmodule Barkpark.StudioChatTest do
                      __DIR__
                    )
 
+  # The LIVE mid-flight sibling. The two committed captures are SETTLED, so the
+  # live card shape (outcome "live", terminal? false, an open ended_at) cannot be
+  # folded from either of them end-to-end — `live_rail_fixture/0` halts the same
+  # real epic-cycle capture MID-STREAM and that in-flight rail is what the
+  # producer folds. Same generator, same REGEN_WORKFLOW_SUMMARY=1 pass, same two
+  # mirrors: nothing here is hand-authored.
+  @building_api_path Path.expand(
+                       "../support/fixtures/workflow_summary/workflow_building.json",
+                       __DIR__
+                     )
+  @building_go_path Path.expand(
+                      "../../../internal/chat/testdata/workflow_building.json",
+                      __DIR__
+                    )
+
   defp fresh_summaries do
     %{
       "epic_cycle_progress" => summary_of("epic_cycle_progress.ndjson", & &1),
@@ -2585,12 +2600,20 @@ defmodule Barkpark.StudioChatTest do
   # the committed bytes carry — so a fresh fold compares cleanly to the mirror.
   defp normalized_fresh, do: fresh_summaries() |> Jason.encode!() |> Jason.decode!()
 
+  defp fresh_building, do: StudioChat.workflow_summary(live_rail_fixture())
+
+  defp normalized_fresh_building, do: fresh_building() |> Jason.encode!() |> Jason.decode!()
+
   describe "workflow_summary parity fixtures (Mechanism A)" do
     test "the committed api mirror equals a fresh fold" do
       if System.get_env("REGEN_WORKFLOW_SUMMARY") do
         json = Jason.encode!(fresh_summaries(), pretty: true) <> "\n"
         File.write!(@summary_api_path, json)
         File.write!(@summary_go_path, json)
+
+        live_json = Jason.encode!(fresh_building(), pretty: true) <> "\n"
+        File.write!(@building_api_path, live_json)
+        File.write!(@building_go_path, live_json)
       end
 
       assert File.read!(@summary_api_path) |> Jason.decode!() == normalized_fresh(),
@@ -2609,6 +2632,42 @@ defmodule Barkpark.StudioChatTest do
       # the 13/17-style settled counter survives the round-trip
       assert committed["epic_cycle_progress"]["agents_done"] == 29
       assert committed["epic_cycle_interrupted"]["agents_done"] == 1
+    end
+
+    test "the committed LIVE api mirror equals a fresh in-flight fold" do
+      assert File.read!(@building_api_path) |> Jason.decode!() == normalized_fresh_building(),
+             "workflow_building.json is stale — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the LIVE api and Go mirrors are byte-identical" do
+      assert File.read!(@building_api_path) == File.read!(@building_go_path),
+             "the Go live mirror drifted — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the live fixture carries the LIVE-ONLY shape a settled fold cannot" do
+      # Non-vacuity: without this, a regenerate that silently produced a SETTLED
+      # summary would still satisfy freshness + byte-parity, and the five Go
+      # render tests that read this file for the mid-flight card would go quiet.
+      committed = File.read!(@building_api_path) |> Jason.decode!()
+
+      assert committed["outcome"] == "live",
+             "the live fixture must fold an IN-FLIGHT rail, got outcome " <>
+               inspect(committed["outcome"])
+
+      assert committed["terminal?"] == false,
+             "a live turn is not terminal — got terminal? " <> inspect(committed["terminal?"])
+
+      assert is_integer(committed["started_at"]),
+             "started_at must be an epoch-ms integer, got " <> inspect(committed["started_at"])
+
+      assert committed["ended_at"] == nil,
+             "a live turn has no end — got ended_at " <> inspect(committed["ended_at"])
+
+      # and the mid-flight fleet is genuinely mid-flight: some agents settled,
+      # some still running, and the tick row still holds an unreached phase.
+      assert committed["running"] > 0
+      assert committed["agents_done"] < committed["agents_total"]
+      assert "future" in committed["ticks"] or "unreached" in committed["ticks"]
     end
   end
 

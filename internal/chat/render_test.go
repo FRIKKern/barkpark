@@ -433,7 +433,9 @@ func TestSessionSummaryDecodesWorkflow(t *testing.T) {
 // TestWorkflowCardLinesRender proves the two card lines paint from the decoded
 // summary: seven glyphs, the settled/total counter, the phase word (or the
 // terminal outcome), the token total, and the epic-goal line when present. This
-// is what makes '13/17 agents done' visible in the session list.
+// is what makes '23/28 agents done' visible in the session list. The literals
+// track the PRODUCER-GENERATED live fixture (workflow_building.json is folded
+// from a mid-stream halt of the real epic-cycle capture), not a hand guess.
 func TestWorkflowCardLinesRender(t *testing.T) {
 	wf := loadWorkflowFixture(t, "workflow_building.json")
 	epic := &EpicGoal{ID: "task-x", Title: "Epic Cycle chat", SlicesDone: 2, SlicesTotal: 5,
@@ -443,17 +445,17 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 		t.Fatalf("a workflow row with an epic goal grows two lines, got %d:\n%v", len(lines), lines)
 	}
 	out := strings.Join(lines, "\n")
-	if !strings.Contains(out, "13/17") {
-		t.Errorf("tick line must carry the settled/total counter 13/17, got:\n%s", out)
+	if !strings.Contains(out, "23/28") {
+		t.Errorf("tick line must carry the settled/total counter 23/28, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Build") {
+	if !strings.Contains(out, "Security Review") {
 		t.Errorf("tick line must carry the active phase word, got:\n%s", out)
 	}
 	if !strings.Contains(out, "●") || !strings.Contains(out, "◉") || !strings.Contains(out, "○") {
 		t.Errorf("tick line must draw done/active/future glyphs, got:\n%s", out)
 	}
-	if !strings.Contains(out, "1.5M") {
-		t.Errorf("tick line must render wire-carried tokens (1.5M), got:\n%s", out)
+	if !strings.Contains(out, "1.6M") {
+		t.Errorf("tick line must render wire-carried tokens (1.6M), got:\n%s", out)
 	}
 	if !strings.Contains(out, "2/5 slices") {
 		t.Errorf("epic-goal line must carry the slices counter, got:\n%s", out)
@@ -489,7 +491,7 @@ func TestWorkflowCardLinesRender(t *testing.T) {
 // a terminal wave is never needs-you (its lifecycle word wins even with pending);
 // and a plain workflow row (pending=0) is unchanged.
 func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
-	wf := loadWorkflowFixture(t, "workflow_building.json") // live, phase word "Build"
+	wf := loadWorkflowFixture(t, "workflow_building.json") // live, phase word "Security Review"
 
 	pill := workflowTickLine(80, &wf, 2)
 	if !strings.Contains(pill, "needs you") || !strings.Contains(pill, "⏸") {
@@ -498,11 +500,11 @@ func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
 	if strings.Contains(pill, "\n") {
 		t.Fatalf("the needs-you pill must never add a line (single-badge law), got:\n%q", pill)
 	}
-	if strings.Contains(pill, "Build") {
+	if strings.Contains(pill, "Security Review") {
 		t.Fatalf("needs-you > working — the pill must REPLACE the live status word, got:\n%q", pill)
 	}
 	// the fleet counter still rides alongside (the pill only swaps the word slot).
-	if !strings.Contains(pill, "13/17") {
+	if !strings.Contains(pill, "23/28") {
 		t.Fatalf("the pill must not eat the settled/total counter, got:\n%q", pill)
 	}
 
@@ -511,7 +513,7 @@ func TestWorkflowTickLineNeedsYouPill(t *testing.T) {
 	if strings.Contains(plain, "needs you") {
 		t.Fatalf("no pending gate must show no pill, got:\n%q", plain)
 	}
-	if !strings.Contains(plain, "Build") {
+	if !strings.Contains(plain, "Security Review") {
 		t.Fatalf("without a gate the live phase word must render, got:\n%q", plain)
 	}
 
@@ -625,7 +627,7 @@ func TestPickerRowsWorkflowMultiline(t *testing.T) {
 	if n := strings.Count(wfRow, "\n"); n != 2 {
 		t.Fatalf("a workflow row (with goal) spans three lines, got %d newlines:\n%q", n, wfRow)
 	}
-	if !strings.Contains(wfRow, "13/17") {
+	if !strings.Contains(wfRow, "23/28") {
 		t.Fatalf("workflow row must surface the fleet counter, got:\n%q", wfRow)
 	}
 	if !strings.Contains(wfRow, "2/5 slices") {
