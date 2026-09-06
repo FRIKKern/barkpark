@@ -7200,8 +7200,13 @@
       "scans": [
         {
           "kind": "file",
+          "p": "api/lib/barkpark/validation.ex",
+          "evidence": "scripts/main-red-breaker.sh:46"
+        },
+        {
+          "kind": "file",
           "p": ".github/workflows/architecture.yml",
-          "evidence": "scripts/main-red-breaker.sh:43"
+          "evidence": "scripts/main-red-breaker.sh:116"
         }
       ]
     },
@@ -7217,47 +7222,52 @@
         {
           "kind": "dir",
           "p": ".github/workflows",
-          "evidence": "scripts/main-red-breaker.test.sh:55"
+          "evidence": "scripts/main-red-breaker.test.sh:58"
         },
         {
           "kind": "file",
           "p": "scripts/required-checks-verify.sh",
-          "evidence": "scripts/main-red-breaker.test.sh:69"
+          "evidence": "scripts/main-red-breaker.test.sh:72"
         },
         {
           "kind": "file",
           "p": "docs/ci/required-checks.json",
-          "evidence": "scripts/main-red-breaker.test.sh:73"
+          "evidence": "scripts/main-red-breaker.test.sh:76"
         },
         {
           "kind": "file",
           "p": ".github/workflows/compose-smoke.yml",
-          "evidence": "scripts/main-red-breaker.test.sh:74"
+          "evidence": "scripts/main-red-breaker.test.sh:77"
         },
         {
           "kind": "file",
           "p": ".github/workflows/architecture.yml",
-          "evidence": "scripts/main-red-breaker.test.sh:83"
+          "evidence": "scripts/main-red-breaker.test.sh:86"
         },
         {
           "kind": "file",
           "p": "scripts/breaker-capture.sh",
-          "evidence": "scripts/main-red-breaker.test.sh:127"
+          "evidence": "scripts/main-red-breaker.test.sh:130"
         },
         {
           "kind": "file",
           "p": "docs/x.md",
-          "evidence": "scripts/main-red-breaker.test.sh:270"
+          "evidence": "scripts/main-red-breaker.test.sh:273"
         },
         {
           "kind": "file",
           "p": "api/lib/barkpark/content/query.ex",
-          "evidence": "scripts/main-red-breaker.test.sh:306"
+          "evidence": "scripts/main-red-breaker.test.sh:309"
         },
         {
           "kind": "file",
           "p": "web/app/page.tsx",
-          "evidence": "scripts/main-red-breaker.test.sh:316"
+          "evidence": "scripts/main-red-breaker.test.sh:319"
+        },
+        {
+          "kind": "file",
+          "p": "api/lib/barkpark/validation.ex",
+          "evidence": "scripts/main-red-breaker.test.sh:479"
         }
       ]
     },
