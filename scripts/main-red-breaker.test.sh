@@ -707,4 +707,134 @@ if mutate "19i Sobelow finding-shape fold" "SOBELOW = re.compile(r'^[A-Z][A-Za-z
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 
+# ── 22. M6 — A RED THE HOST CAUSED IS NEITHER INHERITED NOR OWN ─────────────
+# (task-572a62485cb1f8da; the measurement is task-f21e6a627ca13ef8's.)
+# compose-smoke's green/refusal arms die intermittently at BEAM boot with
+# `sys_sigaltstack(): Internal error: Failed to set alternate signal stack`.
+# It is a HOST property: every crash since the hardware census step landed ran
+# on INTEL(R) XEON(R) PLATINUM 8573C (34020171927, 34020897938, 34020905909),
+# 0 of 7 clean census runs did; over 85 runs, 9 of 16 in Azure westus3+
+# centralus crashed and 0 of 69 elsewhere. Six PR runs were told the red was
+# theirs — and TWO of the three accused arms took the PASSED path, which never
+# compares signatures at all. So the check cannot live inside the signature
+# clause: it has to run BEFORE both attribution routes, on this PR's own body.
+#
+# The capture below is the REAL one, verbatim from run 33981944988's job
+# 'Smoke arms (census, green boot, refusal boot — one image build)', step
+# 'Green arm (compose up → healthy → exec wget /api/schemas + /login)'.
+RL_DATA="$ROOT/scripts/main-red-breaker.runner-local.json"
+sigalt_cap="$TMP/our-sigaltstack.txt"; cat > "$sigalt_cap" <<'L'
+2026-09-05T17:48:38.4918340Z »» green arm: waiting up to 600s for the api healthcheck (first boot = migrations + seeds)
+2026-09-05T17:48:38.7472355Z ── api container logs ──
+2026-09-05T17:48:38.7599882Z sys/unix/sys_signal_stack.c:101:sys_sigaltstack(): Internal error: Failed to set alternate signal stack
+2026-09-05T17:48:38.7600992Z Aborted (core dumped)
+2026-09-05T17:48:38.7601807Z sys/unix/sys_signal_stack.c:101:sys_sigaltstack(): Internal error: Failed to set alternate signal stack
+2026-09-05T17:48:38.7603582Z ────────────────────────
+2026-09-05T17:48:38.7604555Z FAIL  green arm: api container is not cleanly running (running=true restarts=1 health=starting) — with valid generated secrets a boot must never crash or restart
+2026-09-05T17:48:38.7605263Z »» cleanup: docker compose -p bp-smoke-green down
+2026-09-05T17:48:39.1238005Z ##[error]Process completed with exit code 1.
+L
+# The SAME step failing for a reason the tree owns: same wording, same shape,
+# NO sigaltstack lines. Nothing about this may change.
+plain_cap="$TMP/our-plain-greenarm.txt"; cat > "$plain_cap" <<'L'
+2026-09-05T17:48:38.4918340Z »» green arm: waiting up to 600s for the api healthcheck (first boot = migrations + seeds)
+2026-09-05T17:48:38.7472355Z ── api container logs ──
+2026-09-05T17:48:38.7599882Z ** (Mix) Could not start application barkpark: exited in: Barkpark.Application.start(:normal, [])
+2026-09-05T17:48:38.7603582Z ────────────────────────
+2026-09-05T17:48:38.7604555Z FAIL  green arm: api container is not cleanly running (running=true restarts=1 health=starting) — with valid generated secrets a boot must never crash or restart
+2026-09-05T17:48:39.1238005Z ##[error]Process completed with exit code 1.
+L
+# An entry with the RIGHT pattern and no date, no measurement. The tripwire: an
+# allowlist that grows stops discriminating, so an entry that cannot say WHEN
+# and HOW it was measured must buy its author nothing at all.
+bad_data="$TMP/runner-local-bad.json"; cat > "$bad_data" <<'J'
+{"signatures":[{"id":"undated-sigaltstack","pattern":"sys_sigaltstack\\(\\): Internal error: Failed to set alternate signal stack"}]}
+J
+rl_run() { # $1 outcomes, $2 main jobs fixture, $3 OUR capture, $4 MAIN job log (or ""), $5 data file, $6 subject override
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" \
+      WORKFLOW_FILE="compose-smoke.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$2" BREAKER_ERROR_LOG="$3" \
+      MAIN_RED_BREAKER_RUNNER_LOCAL_DATA="$5"
+    [ -n "${4:-}" ] && export MAIN_RED_BREAKER_LOG_FIXTURE="$4"
+    bash "${6:-$SUBJECT}" 2>&1; echo "RC=$?" )
+}
+# 22a. THE PASSED PATH — main RAN this step and PASSED it. This is the branch
+#      that accused runs 34018218144 and 34018443211, and it reaches its verdict
+#      without ever reading an error message.
+out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA")"
+has "$out" "RUNNER-LOCAL" "22a) real sigaltstack capture + main GREEN on the step => RUNNER-LOCAL"
+has "$out" "beam-sigaltstack-boot-abort" "22a) names the data-file entry that matched"
+has "$out" "PLATINUM 8573C" "22a) and the host measurement that justified the entry"
+has "$out" "task-572a62485cb1f8da" "22a) and the row that filed it"
+has "$out" "::warning" "22a) a warning annotation, so it is not silently green"
+has "$out" "RC=0" "22a) rc 0 — a host crash does not red the PR's check"
+case "$out" in *"the red is this PR's own"*|*"a step main does not"*) bad "22a) ACCUSED THE PR of a runner-local crash" ;; *) ok "22a) makes no ownership claim against the PR" ;; esac
+case "$out" in *INHERITED-FROM-MAIN*) bad "22a) claimed INHERITED — it is neither" ;; *) ok "22a) does not claim INHERITED either" ;; esac
+# 22a2. THE SIGNATURE PATH — main is red on the very same step, with a different
+#       failure body (crash log lines vary run to run: that is how run
+#       34019839592 was accused). Same verdict, and no comparison was needed.
+out="$(rl_run "$out_s2" "$main_red_s2" "$sigalt_cap" "$main_log_15650" "$RL_DATA")"
+has "$out" "RUNNER-LOCAL" "22a2) same step red on main with a DIFFERENT body => still RUNNER-LOCAL"
+has "$out" "RC=0" "22a2) rc 0"
+case "$out" in *"NOT with the same failure signature"*) bad "22a2) fell through to the signature clause and blamed the PR" ;; *) ok "22a2) settled before the signature comparison" ;; esac
+# 22b. THE CONTROL — the same step, the same wording, WITHOUT the signature.
+#      Attributed exactly as before this change. If this ever stops failing, M6
+#      has become an 'ignore compose-smoke' switch.
+out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA")"
+has "$out" "failed on a step main does not" "22b) no signature => attributed exactly as today"
+has "$out" "RC=1" "22b) rc 1"
+case "$out" in *RUNNER-LOCAL*) bad "22b) excused a red that carries no runner-local signature" ;; *) ok "22b) does not excuse an unsigned red" ;; esac
+# 22c. THE TRIPWIRE — an entry with the right pattern but no date and no
+#      measurement is REFUSED, and it buys nothing: the red is attributed
+#      exactly as it would have been with no data file at all.
+out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data")"
+has "$out" "REFUSED entry 'undated-sigaltstack'" "22c) an entry with no date/measurement is refused by name"
+has "$out" "no ISO date" "22c) and says the date is missing"
+has "$out" "no measurement" "22c) and says the measurement is missing"
+has "$out" "failed on a step main does not" "22c) the refused entry suppresses nothing"
+has "$out" "RC=1" "22c) rc 1"
+case "$out" in *"RUNNER-LOCAL —"*) bad "22c) a dateless, measurement-free entry silenced an accusation" ;; *) ok "22c) the allowlist cannot be widened without a measurement" ;; esac
+# 22d. ORDERING AS A TEXTUAL INVARIANT. 22a/22a2 pass only because the M6 block
+#      runs before BOTH attribution routes; a later refactor could move it and
+#      still leave those arms green on one path. Pin the order in the file.
+rl_ln="$(grep -n 'RUNNER-LOCAL — ' "$SUBJECT" | head -1 | cut -d: -f1)"
+own_ln="$(grep -n "failed on a step main does not" "$SUBJECT" | tail -1 | cut -d: -f1)"
+sig_ln="$(grep -n "NOT with the same failure signature" "$SUBJECT" | tail -1 | cut -d: -f1)"
+if [ -n "$rl_ln" ] && [ "$rl_ln" -lt "$own_ln" ] && [ "$rl_ln" -lt "$sig_ln" ]; then ok "22d) the RUNNER-LOCAL verdict (line $rl_ln) precedes BOTH the PASSED path ($own_ln) and the signature path ($sig_ln)"; else bad "22d) the RUNNER-LOCAL verdict does not precede both attribution routes (rl=$rl_ln passed=$own_ln sig=$sig_ln)"; fi
+# 22e. every shipped entry carries a date and a measurement — the data file the
+#      repo ships must itself pass the loader's tripwire.
+python3 - "$RL_DATA" <<'PY' && ok "22e) every entry in the shipped data file carries an ISO date and a measurement" || bad "22e) the shipped data file has an entry the loader would refuse"
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+sigs = d["signatures"]
+assert sigs, "no signatures"
+for e in sigs:
+    assert re.match(r'^\d{4}-\d{2}-\d{2}$', e.get("date", "")), e.get("id")
+    assert len(e.get("measurement", "")) >= 40, e.get("id")
+    assert e.get("pattern"), e.get("id")
+    re.compile(e["pattern"])
+PY
+
+# 19j. MUTATION — delete the check IN THE WRONG DIRECTION: make the signature
+#      match everything. 22b must go red, i.e. an ordinary red gets excused.
+if mutate "19j runner-local signature match" '        if rx.search(body):' '        if True:' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+    case "$out" in *RUNNER-LOCAL*) echo "  PASS  19j) matching everything excuses a red with no signature — 22b is not vacuous" ;; *) echo "  FAIL  19j) MUTATION SURVIVED: still attributed the unsigned red"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19k. MUTATION — remove the RUNNER-LOCAL verdict entirely. 22a must go back to
+#      the sentence that accused four PRs.
+if mutate "19k runner-local verdict" 'if [ -n "$RL_ID" ]; then' 'if false; then' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+    case "$out" in *"a step main does not"*) echo "  PASS  19k) without the verdict the sigaltstack crash is blamed on the PR — 22a is not vacuous" ;; *) echo "  FAIL  19k) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19l. MUTATION — drop the date/measurement tripwire. 22c must go red: the
+#      undated entry would then silence a real accusation.
+if mutate "19l runner-local data tripwire" '    if why:' '    if False:' 1; then
+  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
+    case "$out" in *RUNNER-LOCAL*) echo "  PASS  19l) without the tripwire an undated entry DOES suppress the accusation — 22c is not vacuous" ;; *) echo "  FAIL  19l) MUTATION SURVIVED: the undated entry still bought nothing"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

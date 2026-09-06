@@ -18,6 +18,8 @@
 #   FAIL (this PR's own)     exit 1, ::error    main PROVABLY ran the step and passed it
 #   OWNERSHIP-UNDETERMINED   exit 1, ::warning  main's state is unreadable, absent,
 #                                               cancelled, or never reached the step
+#   RUNNER-LOCAL             exit 0, ::warning  the HOST caused it — a known signature
+#                                               in this red's OWN body (see M6)
 #
 # UNDETERMINED still exits 1 — these are non-required jobs, so the red blocks
 # nothing, and failing closed can never wave a real PR defect through. What
@@ -92,6 +94,53 @@
 #     THAT COULD NOT SEE THE FINDING. Both closed here; see the M5 block at the
 #     run selection and the SOBELOW block in the normaliser.
 #
+# M6. IT ACCUSED FOUR PRs OF A CRASH THE RUNNER CAUSED (task-572a62485cb1f8da).
+#     MEASURED 2026-09-06 (task-f21e6a627ca13ef8): compose-smoke's green and
+#     refusal arms die intermittently with
+#       sys/unix/sys_signal_stack.c:101:sys_sigaltstack(): Internal error:
+#       Failed to set alternate signal stack   ->   Aborted (core dumped)
+#       ->   FAIL green arm: api container is not cleanly running
+#     The BEAM aborts at boot inside the musl runtime image, before any repo
+#     code runs. It is a HOST property: every crash since the hardware census
+#     step landed ran on INTEL(R) XEON(R) PLATINUM 8573C (runs 34020171927,
+#     34020897938, 34020905909) and 0 of 7 clean census runs did; over 85
+#     executed runs, 9 of 16 in Azure westus3+centralus crashed and 0 of 69
+#     elsewhere (p~1e-8), runner/image/agent/OS identical across all 85.
+#
+#     Every verdict this script had was a claim about the TREE — main's or the
+#     author's — so a host-caused red could only be sorted into one of them,
+#     and it was sorted into the worst one. Runs 33981944988, 33985199172,
+#     33988481430, 34018218144, 34018443211 and 34019839592 were told the red
+#     was the PR's own. TWO OF THE THREE ACCUSED ARMS TOOK THE **PASSED** PATH:
+#     main had run the same step and passed it, so the script said "yours"
+#     WITHOUT EVER COMPARING SIGNATURES. A third (34019839592) took the
+#     signature path and read OWN because the crash log lines vary between
+#     runs. And 34019702764 read INHERITED only by luck — main happened to
+#     crash on the same host minutes earlier.
+#
+#     FIX, and the ORDER IS THE FIX: a RUNNER-LOCAL check on the PR's OWN
+#     failure body, running BEFORE main is read at all — therefore before both
+#     the PASSED path and the signature path, the only two routes to an
+#     accusation. It needs nothing from main, because "the host did this" is
+#     not a comparative claim. Its verdict is a FOURTH one: neither inherited
+#     nor own. It does not red the check (exit 0), and it is not silently green
+#     either — it prints a ::warning naming the signature, the host measurement
+#     that justified the entry, and the row that filed it.
+#
+#     THE SIGNATURE LIST IS DATA, NOT A REGEX IN THIS FILE:
+#     scripts/main-red-breaker.runner-local.json, one entry per signature, each
+#     carrying the DATE and the MEASUREMENT that established the host-property
+#     claim. An allowlist that grows stops discriminating, so the loader
+#     REFUSES an entry missing either field, says so in the log, and attributes
+#     the red exactly as if the entry were absent. A future entry therefore
+#     costs its author a measurement, which is the price of the exemption.
+#
+#     WHY ONLY ON A PULL REQUEST. The not-a-pull_request clause below still
+#     exits first, so a push to main never prints RUNNER-LOCAL. That is
+#     deliberate twice over: main's red is MAIN'S STATE (a host that keeps
+#     crashing main is a thing to see, not to excuse), and the log-recovery
+#     parser reads exactly one wording out of main's log.
+#
 # ── WHY A FAILED SOBELOW JOB DOES NOT RED THE SECURITY GATE ─────────────────
 # Recorded, NOT changed (task-e65c78b1cd214237 criterion c3). The `Security
 # gate` aggregator in .github/workflows/security.yml lists, in its `needs`,
@@ -116,6 +165,10 @@
 #                                              is also why main's log only ever
 #                                              carries the FAIL wording, never
 #                                              UNDETERMINED — see LOG RECOVERY.
+#   our own failure body matches a known
+#     runner-local signature                 -> exit 0, RUNNER-LOCAL (M6). FIRST,
+#                                              before main is read: it is not a
+#                                              claim about either tree.
 #   main unreadable / no informative run     -> UNDETERMINED
 #   main's jobs JSON unparsable              -> UNDETERMINED
 #   no job of this name in main's run        -> UNDETERMINED (M1's shape)
@@ -197,7 +250,8 @@
 # only make the breaker LESS forgiving and never more accusing; an unreadable
 # main LOG only makes the signature unknown, which the notice states.
 #
-# HARNESS HOOKS. MAIN_RED_BREAKER_RUNS_FIXTURE=<file> supplies the runs listing,
+# HARNESS HOOKS. MAIN_RED_BREAKER_RUNNER_LOCAL_DATA=<file> overrides the
+# runner-local signature data file, MAIN_RED_BREAKER_RUNS_FIXTURE=<file> supplies the runs listing,
 # MAIN_RED_BREAKER_FIXTURE=<file> main's jobs JSON and
 # MAIN_RED_BREAKER_LOG_FIXTURE=<file> main's raw job log, instead of the API
 # (the harness also stubs curl); nothing else differs.
@@ -249,6 +303,98 @@ if [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]; then
     [ -n "$_s" ] && say "MAIN-FAILED-STEP in '${JOB_NAME}': ${_s}"
   done <<< "$OURS"
   exit 1
+fi
+
+# ── M6: IS THIS RED THE HOST'S? (task-572a62485cb1f8da) ─────────────────────
+# FIRST, and on THIS PR's failure body alone. Both routes to an accusation read
+# main: the PASSED path ("main ran this step and passed it") and the signature
+# path ("same step, different error text"). Two of the three accused compose-
+# smoke runs took the PASSED path, which never looks at an error message at all
+# — so a check placed inside the signature comparison would have caught one of
+# three. A host-caused crash is not a claim about either tree, so it is settled
+# before either tree is read, and it needs no API call to settle.
+OUR_LOG="${BREAKER_ERROR_LOG:-${RUNNER_TEMP:-/nonexistent}/main-red-breaker-errors.txt}"
+RUNNER_LOCAL_DATA="${MAIN_RED_BREAKER_RUNNER_LOCAL_DATA:-$(cd "$(dirname "$0")" && pwd)/main-red-breaker.runner-local.json}"
+python3 - "$RUNNER_LOCAL_DATA" "$OUR_LOG" > "$TMPD/runner-local.txt" 2>/dev/null <<'PY' || : > "$TMPD/runner-local.txt"
+import json, re, sys
+data_path, log_path = sys.argv[1:3]
+try:
+    d = json.load(open(data_path))
+except FileNotFoundError:
+    print("NODATA\t%s\t\t" % data_path); raise SystemExit
+except Exception as err:
+    print("BADFILE\t%s\t%s\t" % (data_path, err)); raise SystemExit
+sigs = d.get("signatures")
+if not isinstance(sigs, list):
+    print("BADFILE\t%s\tno 'signatures' list\t" % data_path); raise SystemExit
+
+# THE TRIPWIRE THAT KEEPS THE ALLOWLIST HONEST. An entry here suppresses an
+# accusation, so it must carry the two things that make the suppression
+# checkable by a reader: WHEN the host-property claim was established, and HOW.
+# A missing one is not a warning to fix later — the entry is REFUSED and the red
+# is attributed exactly as it would have been with no file at all.
+DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+TS   = re.compile(r'^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s')
+ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+MIN_MEASUREMENT = 40   # a sentence, not a shrug
+good = []
+for i, e in enumerate(sigs):
+    if not isinstance(e, dict):
+        print("REJECT\tentry #%d\tnot an object\t" % i); continue
+    sid  = str(e.get("id") or "").strip()
+    pat  = str(e.get("pattern") or "")
+    date = str(e.get("date") or "").strip()
+    meas = str(e.get("measurement") or "").strip()
+    label = sid or ("entry #%d" % i)
+    why = []
+    if not sid:                    why.append("no id")
+    if not pat:                    why.append("no pattern")
+    if not DATE.match(date):       why.append("no ISO date (YYYY-MM-DD) saying when this was measured")
+    if len(meas) < MIN_MEASUREMENT:why.append("no measurement saying how the host-property claim was established")
+    if why:
+        print("REJECT\t%s\t%s\t" % (label, "; ".join(why))); continue
+    try:
+        rx = re.compile(pat)
+    except re.error as err:
+        print("REJECT\t%s\tpattern is not a valid regular expression: %s\t" % (label, err)); continue
+    good.append((sid, date, meas, rx))
+print("LOADED\t%d\t%d\t" % (len(good), len(sigs)))
+try:
+    fh = open(log_path, errors="replace")
+except Exception:
+    raise SystemExit
+for raw in fh:
+    body = ANSI.sub('', TS.sub('', raw.rstrip('\r\n'))).strip()
+    for sid, date, meas, rx in good:
+        if rx.search(body):
+            # One field per line, NEVER an empty one: tab is IFS whitespace,
+            # so bash's `read` collapses a run of tabs into a single delimiter
+            # and an empty middle field would shift every field after it.
+            print("MATCH\t%s\t%s\t%s" % (sid, date, ' '.join(body.split())[:300]))
+            print("MEASUREMENT\t%s" % ' '.join(meas.split()))
+            raise SystemExit
+PY
+
+RL_ID=""; RL_DATE=""; RL_LINE=""; RL_MEAS=""
+while IFS="$(printf '\t')" read -r _k _f2 _f3 _f4; do
+  case "$_k" in
+    REJECT)
+      say "RUNNER-LOCAL DATA: REFUSED entry '${_f2}' in ${RUNNER_LOCAL_DATA} — ${_f3}. An allowlist entry that cannot say WHEN and HOW the host-property claim was measured may not suppress an accusation, so this red is attributed exactly as if the entry were absent." >&2
+      echo "::warning title=Main-red breaker: runner-local entry REFUSED::'${_f2}' in ${RUNNER_LOCAL_DATA}: ${_f3}. It suppresses nothing."
+      ;;
+    NODATA)  say "RUNNER-LOCAL DATA: no signature file at ${_f2} — every red is attributed on the tree alone." ;;
+    BADFILE) say "RUNNER-LOCAL DATA: ${_f2} did not load (${_f3}); no signature suppresses anything." >&2 ;;
+    MATCH)       RL_ID="$_f2"; RL_DATE="$_f3"; RL_LINE="$_f4" ;;
+    MEASUREMENT) RL_MEAS="$_f2" ;;
+  esac
+done < "$TMPD/runner-local.txt"
+
+if [ -n "$RL_ID" ]; then
+  MSG="RUNNER-LOCAL — '${JOB_NAME}' failed on: ${OURS_1L}, and this red's OWN failure body carries the known runner-local signature '${RL_ID}' (recorded ${RL_DATE} in ${RUNNER_LOCAL_DATA}, filed as task-572a62485cb1f8da): \"${RL_LINE}\". That is a property of the HOST this job landed on, not of this branch. ${RL_MEAS} So this red is NOT attributed to this PR, and it is not inherited from main either — it is neither, and no comparison against main was made. ACTION: rerun this job; it will usually land on a different host. If it reproduces across several reruns, the entry above is wrong for your case — remove or narrow it with a new measurement, never widen it."
+  say "$MSG"
+  echo "::warning title=Main-red breaker: RUNNER-LOCAL, not this PR::${MSG}"
+  { echo "### Runner-local failure — not attributed to this PR"; echo; echo "$MSG"; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
 fi
 
 # ── the three verdicts ──────────────────────────────────────────────────────
@@ -676,7 +822,6 @@ for n in sorted(out):
 PY
 }
 
-OUR_LOG="${BREAKER_ERROR_LOG:-${RUNNER_TEMP:-/nonexistent}/main-red-breaker-errors.txt}"
 : > "$TMPD/our-sigs.txt"
 [ -s "$OUR_LOG" ] && sigfile "$OUR_LOG" > "$TMPD/our-sigs.txt"
 
