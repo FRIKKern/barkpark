@@ -132,10 +132,19 @@ if grep -q "^[^ ]* $SELF_ENTRY\$" "$TMP/roster.txt"; then
 else ok "A: the workflow file is not a roster row (it is implicit in every set)"; fi
 
 # ── B: UNION ─────────────────────────────────────────────────────────────────
+# The roster's path column is MATERIALISED once, never piped per candidate.
+# `awk … | grep -qxF` reads like a lookup but is a PIPELINE: `grep -q` exits at
+# its first match, the `awk` takes SIGPIPE on its next write, and `pipefail`
+# makes the pipeline's status the awk's 141 — which this `||` reads as "no
+# match". On Linux the whole roster fits the pipe buffer before grep is
+# scheduled, so awk never blocks and CI is green; on macOS it lost EVERY path
+# (20 passed / 1 failed here against 21/0 in CI, deterministic across 5 runs).
+# One file, one grep, one exit status — and it is faster besides.
+awk '{ print $2 }' "$TMP/roster.txt" >"$TMP/roster-paths.txt"
 missing_down=""
 while IFS= read -r p; do
   [ "$p" = "$SELF_ENTRY" ] && continue
-  awk '{ print $2 }' "$TMP/roster.txt" | grep -qxF -- "$p" || missing_down="$missing_down $p"
+  grep -qxF -- "$p" "$TMP/roster-paths.txt" || missing_down="$missing_down $p"
 done <"$TMP/paths.txt"
 if [ -z "$missing_down" ]; then ok "B union: every on.pull_request.paths entry has a roster row"
 else bad "B union: workflow paths with NO roster row (a harness that would never fire):$missing_down"; fi
