@@ -1097,6 +1097,19 @@ jobs:
       # rule one job up. main runs the whole suite at its own sha, elixir-nightly
       # runs it again with the excluded tags, and those two unnarrowed passes are
       # what make a PR-time subset survivable at all.
+      # Reported on EVERY run, including the ones that select ALL for reasons
+      # having nothing to do with xref. A dead `mix xref` reds nothing — it just
+      # makes every selection fall back to ALL, which is indistinguishable from a
+      # week of wide diffs, and the narrowing would be gone with no symptom. This
+      # line is the symptom. It is deliberately not a failure: falling back to
+      # ALL is the safe answer, and reddening a required context because an
+      # optimisation is unavailable would be the wrong trade.
+      - name: Is the compile-closure instrument alive?
+        id: xref-probe
+        working-directory: .
+        continue-on-error: true
+        run: bash scripts/elixir-impacted-tests.sh --xref-probe
+
       - name: Which tests does this pull request need?
         id: impacted
         working-directory: .

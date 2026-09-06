@@ -501,6 +501,21 @@ EOF
 case "${1:---select}" in
   --select) select_tests ;;
   --print-always) always_set ;;
+  --xref-probe)
+    # THE INSTRUMENT'S OWN LIVENESS, reportable on its own. A broken `mix xref`
+    # does not red anything: it makes every selection fall back to ALL, which
+    # looks exactly like a repo where every diff happens to be wide. Months
+    # could pass. So the workflow prints this on EVERY run, including the runs
+    # that select ALL for unrelated reasons, and the one line is the difference
+    # between "the closure was not needed" and "the closure has been dead since
+    # August".
+    if xref_probe; then
+      echo "xref-probe: OK — mix xref answers, so an empty closure means a leaf."
+      exit 0
+    fi
+    echo "xref-probe: DEAD — the compile closure is unavailable; every selection will fall back to ALL."
+    exit 1
+    ;;
   --print-pins) printf '%s\n' "$ALWAYS_PINS" ;;
   --check-pins)
     # A pinned entry that no longer exists is a hole in the net wearing the
