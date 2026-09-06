@@ -1816,6 +1816,30 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		obj["unset"] = unsetKeys
 	}
 
+	// BEFORE ADDING A GUARD HERE, READ internal/cli/set_key_nesting_test.go.
+	// Three of its cases pin a ruling that exists nowhere else in the repo, one
+	// stating it in a comment verbatim: "the CORRECT spelling still lands — the
+	// refusal is not a wall." A bare `--set description=NEW` patch on a type:task
+	// document is a SUPPORTED operation. The author who built the dotted-key
+	// nesting refusal above deliberately fenced it that way, and those tests are
+	// the only record of that decision.
+	//
+	// It has already killed one approved design. A task's `brief` mirrors its
+	// `description`, and a client-side guard refusing a description-only task
+	// patch was built here to stop the two drifting apart — it worked, and it red
+	// those three contracts. The reason is structural rather than incidental:
+	// buildBody holds only the patch, never the current document, so client-side
+	// the only moves are to refuse the edit or to clobber the brief's other
+	// blocks. Neither is acceptable, and no amount of care with the message
+	// changes that.
+	//
+	// The mirror is kept in step SERVER-side instead, at the writer chokepoint
+	// that does hold the document: Barkpark.Tasks.BriefMirror
+	// (api/lib/barkpark/tasks/brief_mirror.ex, @canonical
+	// capability:task-brief-mirror-resync), wired into create_document/4 and
+	// upsert_document/4. That also covers the MCP bridge, LiveView and raw HTTP,
+	// which a CLI guard never could.
+	//
 	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
 	// into the mutate batch shape: {mutations: [{<op>: {type, id, …}}]}.
 	if cmd.MutationOp != "" {
