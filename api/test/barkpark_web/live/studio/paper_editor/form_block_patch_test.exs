@@ -326,6 +326,53 @@ defmodule BarkparkWeb.Studio.PaperEditor.FormBlockPatchTest do
     assert {:ok, %{}} = Blocks.validate_block_patch(block, wire(block))
   end
 
+  test "changed and newly activated scale bounds must be ordered while legacy reversed no-ops survive" do
+    ordered =
+      form([
+        question("score", "Score", "scale")
+        |> Map.put("scale", %{"min" => 1, "max" => 5})
+      ])
+
+    assert {:error, {:malformed_collection, "questions"}} =
+             Blocks.validate_block_patch(
+               ordered,
+               wire(ordered) |> Map.put("question-0-scale-min", "9")
+             )
+
+    legacy_row =
+      question("legacy", "Legacy", "scale")
+      |> Map.put("scale", %{"min" => "09", "max" => "+5", "keep" => true})
+
+    legacy = form([legacy_row])
+    assert {:ok, %{}} = Blocks.validate_block_patch(legacy, wire(legacy))
+
+    assert {:ok, %{"questions" => [prompt_only]}} =
+             Blocks.validate_block_patch(
+               legacy,
+               wire(legacy) |> Map.put("question-0-prompt", "Updated")
+             )
+
+    assert prompt_only["scale"] == legacy_row["scale"]
+
+    assert {:ok, %{"questions" => [%{"scale" => %{"max" => 10}}]}} =
+             Blocks.validate_block_patch(
+               legacy,
+               wire(legacy) |> Map.put("question-0-scale-max", "10")
+             )
+
+    inactive_reversed =
+      form([
+        question("future")
+        |> Map.put("scale", %{"min" => 9, "max" => 5, "keep" => true})
+      ])
+
+    assert {:error, {:malformed_collection, "questions"}} =
+             Blocks.validate_block_patch(
+               inactive_reversed,
+               wire(inactive_reversed) |> Map.put("question-0-type", "scale")
+             )
+  end
+
   defp form(rows),
     do: %{"id" => "survey", "type" => "form", "kind" => "grill", "questions" => rows}
 

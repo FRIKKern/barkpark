@@ -13,9 +13,9 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 // sanitizes "+5" to an empty value before the backend can preserve the wire.
 {
   const dom = new JSDOM(`<form>
-    <input type="text" inputmode="numeric" pattern="[+-]?[0-9]+"
+    <input type="text" inputmode="numeric" pattern="([+]|-)?[0-9]+"
            name="question-0-scale-min" value="01">
-    <input type="text" inputmode="numeric" pattern="[+-]?[0-9]+"
+    <input type="text" inputmode="numeric" pattern="([+]|-)?[0-9]+"
            name="question-0-scale-max" value="+5">
   </form>`);
   const form = dom.window.document.querySelector("form");
@@ -24,6 +24,9 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
     Object.fromEntries(new dom.window.FormData(form)),
     { "question-0-scale-min": "01", "question-0-scale-max": "+5" },
   );
+  form.elements.namedItem("question-0-scale-max").value = "not-a-number";
+  assert.equal(form.checkValidity(), false, "alphabetic scale bounds fail browser validation");
+  assert.equal(form.elements.namedItem("question-0-scale-max").validity.patternMismatch, true);
   dom.window.close();
 }
 

@@ -5078,6 +5078,26 @@
         return out.join("|");
       },
 
+      // Segmented controls such as Classic/Beta express their observed
+      // selection by FLIPPING aria-pressed. Capture only the CLICKED control:
+      // an unrelated toggle moving cannot prove that this press succeeded.
+      _paPressedWitness(el) {
+        if (!el || !el.hasAttribute("aria-pressed")) return null;
+        return {el: el, value: el.getAttribute("aria-pressed")};
+      },
+
+      _paPressedChanged(witness) {
+        // Fail closed if LiveView replaced the node. Matching by text or a
+        // container-wide signature could mistake an unrelated change for this
+        // action's result; the still-mounted clicked element is exact evidence.
+        return !!(
+          witness &&
+          witness.el &&
+          this.el.contains(witness.el) &&
+          witness.el.getAttribute("aria-pressed") !== witness.value
+        );
+      },
+
       // Drop the pending press and every timer it owns, then say `text` (empty
       // = the region disappears). This is the ONLY place a pending is released,
       // so ref-drop, detach, ceiling and unload all clear through one path and
@@ -5104,6 +5124,7 @@
       _paSettleWord(p) {
         if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
         if (this._paCurrentSig() !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paPressedChanged(p.pressed)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
         return null;
       },
 
@@ -5168,6 +5189,7 @@
           name: this._paName(el),
           url: location.href,
           sig: this._paCurrentSig(),
+          pressed: this._paPressedWitness(el),
         };
         // Newest press owns the region; the previous one's timers die with it.
         this._paRelease("");

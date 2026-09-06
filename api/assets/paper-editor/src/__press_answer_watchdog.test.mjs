@@ -16,6 +16,11 @@ assert.ok(helper, "the press watchdog must classify native disclosure-only summa
 const nativeDisclosureOnly = new Function("target", "action", helper[1]);
 const dom = new JSDOM(`
   <main id="panes" phx-click="select-block">
+    <div role="group" aria-label="Editor mode">
+      <button id="classic-mode" phx-click="editor-set-mode" aria-pressed="true">Classic</button>
+      <button data-test-id="editor-mode-beta" phx-click="editor-set-mode" aria-pressed="false">Beta</button>
+    </div>
+    <button id="unrelated-toggle" aria-pressed="false">Unrelated</button>
     <details id="plain-details">
       <summary id="plain-summary"><span id="plain-label">Configure tabs</span></summary>
       <button id="body-action" phx-click="save-block">Save</button>
@@ -64,6 +69,78 @@ assert.equal(
   "a real server button in the details body remains watchdog-protected",
 );
 
+const pressedWitnessHelper = layout.match(/_paPressedWitness\(el\) \{([\s\S]*?)\n      \},/);
+assert.ok(
+  pressedWitnessHelper,
+  "the watchdog must capture the exact clicked control's aria-pressed state",
+);
+const pressedWitness = new Function("el", pressedWitnessHelper[1]);
+const pressedChangedHelper = layout.match(/_paPressedChanged\(witness\) \{([\s\S]*?)\n      \},/);
+assert.ok(
+  pressedChangedHelper,
+  "the watchdog must compare only the clicked control's aria-pressed state",
+);
+const pressedChanged = new Function("witness", pressedChangedHelper[1]);
+const settleHelper = layout.match(/_paSettleWord\(p\) \{([\s\S]*?)\n      \},/);
+assert.ok(settleHelper, "the watchdog settle classifier must remain present");
+const settleWord = new Function("p", settleHelper[1]);
+const hook = {
+  el: document.getElementById("panes"),
+  _paCurrentSig: () => "same-current",
+  _paPressedWitness: pressedWitness,
+  _paPressedChanged: pressedChanged,
+};
+const betaMode = document.querySelector('[data-test-id="editor-mode-beta"]');
+const betaPressed = hook._paPressedWitness(betaMode);
+assert.equal(
+  hook._paPressedWitness(document.getElementById("body-action")),
+  null,
+  "a clicked control without aria-pressed must not invent a selection witness",
+);
+
+const previousLocation = globalThis.location;
+globalThis.location = { href: "http://localhost/studio/forms" };
+try {
+  document.getElementById("unrelated-toggle").setAttribute("aria-pressed", "true");
+  assert.equal(
+    settleWord.call(hook, {
+      url: globalThis.location.href,
+      sig: "same-current",
+      pressed: betaPressed,
+      name: "Beta",
+    }),
+    null,
+    "an unrelated aria-pressed change must not waive a failed Beta press",
+  );
+
+  betaMode.setAttribute("aria-pressed", "true");
+  assert.equal(
+    settleWord.call(hook, {
+      url: globalThis.location.href,
+      sig: "same-current",
+      pressed: betaPressed,
+      name: "Beta",
+    }),
+    "Selected “Beta”.",
+    "a fast successful Beta mode reply must settle from its aria-pressed change, not false-alarm",
+  );
+
+  betaMode.remove();
+  assert.equal(
+    settleWord.call(hook, {
+      url: globalThis.location.href,
+      sig: "same-current",
+      pressed: betaPressed,
+      name: "Beta",
+    }),
+    null,
+    "a replaced clicked control must fail closed instead of matching another toggle",
+  );
+} finally {
+  if (previousLocation === undefined) delete globalThis.location;
+  else globalThis.location = previousLocation;
+}
+
 const onPressStart = layout.indexOf("_paOnPress(ev) {");
 const onPressEnd = layout.indexOf("\n      mounted()", onPressStart);
 const onPress = layout.slice(onPressStart, onPressEnd);
@@ -73,6 +150,10 @@ assert.ok(
   onPress.includes("if (this._paNativeDisclosureOnly(t, el)) return;"),
   "the press handler must apply the native-summary classification before arming",
 );
+assert.ok(
+  onPress.includes("pressed: this._paPressedWitness(el)"),
+  "the pending press must capture the exact clicked control's pre-click aria-pressed state",
+);
 
 dom.window.close();
-console.log("press answer watchdog: 5 native disclosure/action scenarios passed");
+console.log("press answer watchdog: native disclosure and fast mode-reply scenarios passed");

@@ -225,7 +225,7 @@ const tocMarkup = `
 {
   const env = mountedForm(`
     <form id="question-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
-          phx-debounce="0" data-test-id="paper-questionnaire-editor">
+          phx-debounce="0" data-test-id="paper-form-editor">
       <input type="hidden" name="block_id" value="questions">
       <input type="hidden" name="question-count" value="1">
       <input type="hidden" name="question-0-original-id" value="answer:one">
@@ -349,6 +349,76 @@ const tocMarkup = `
   env.close();
 }
 
+// A positional acknowledgement can expose a newer same-source draft while a
+// second source is already queued. Review/discard must stay bound to the
+// acknowledged source; the next queue head remains intact and progresses.
+{
+  const env = mountedForm(`
+    <form id="source-a" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="0" data-test-id="paper-gauge-list-editor">
+      <input type="hidden" name="block_id" value="gauges">
+      <input name="title" value="Original title">
+      <input type="hidden" name="gauge-count" value="2">
+      <input name="gauge-0-label" value="First">
+      <input name="gauge-0-value" value="1">
+      <input name="gauge-1-label" value="Second">
+      <input name="gauge-1-value" value="2">
+    </form>
+  `);
+  let actionPayload;
+  let settleAction;
+  const action = env.hook._exitCoordinator.mutate(env.form, {
+    payload: { block_id: "gauges", "gauge-action": "up:1" },
+    send: (payload) => {
+      actionPayload = payload;
+      return new Promise((resolve) => { settleAction = resolve; });
+    },
+  }).promise;
+  await tick();
+  const title = env.form.elements.namedItem("title");
+  title.value = "Source A retained draft";
+  title.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+
+  const sourceB = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(sourceB);
+  const sourceBCalls = [];
+  let settleSourceB;
+  const queuedB = env.hook._exitCoordinator.mutate(sourceB, {
+    payload: { ops: [{ op: "patch-block", id: "body-b", patch: { text: "B" } }] },
+    send: (payload) => {
+      sourceBCalls.push(payload);
+      return new Promise((resolve) => { settleSourceB = resolve; });
+    },
+  }).promise;
+  assert.equal(sourceBCalls.length, 0, "source B waits behind source A");
+
+  env.form.elements.namedItem("gauge-0-label").value = "Second";
+  env.form.elements.namedItem("gauge-0-value").value = "2";
+  env.form.elements.namedItem("gauge-1-label").value = "First";
+  env.form.elements.namedItem("gauge-1-value").value = "1";
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleAction({ saved: true, request_id: actionPayload.request_id, rev: 8 });
+  assert.equal(await action, true);
+  await tick();
+
+  let banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner);
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(
+    banner.querySelector("[data-conflict-draft]").textContent,
+    /Source A retained draft/,
+    "review remains bound to acknowledged source A rather than queued source B",
+  );
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  assert.equal(sourceBCalls.length, 1, "discarding A lets queued source B progress");
+  assert.equal(sourceBCalls[0].if_rev, 8);
+  settleSourceB({ saved: true, request_id: sourceBCalls[0].request_id, rev: 9 });
+  assert.equal(await queuedB, true);
+  await tick();
+  env.close();
+}
+
 // Discarding one conflicted source must surface a deferred sibling draft for
 // its own explicit review/discard choice instead of leaving it timerless.
 {
@@ -413,6 +483,77 @@ const tocMarkup = `
   env.close();
 }
 
+// An external echo is not required to name the locally dirty form. When the
+// mutation queue is already empty, conflict review must still bind to each
+// retained fallback source instead of showing an empty, retryable payload.
+{
+  const env = mountedForm(`
+    <form id="number-form" class="bp-paper-edit-form" phx-change="paper-edit-block"
+          phx-debounce="1000" data-test-id="paper-field-number-editor">
+      <input type="hidden" name="block_id" value="number">
+      <input name="label" value="Number">
+      <input type="number" name="value" value="15" step="any">
+      <input type="number" name="min" value="1" step="any">
+      <input type="number" name="max" value="15" step="any">
+      <input type="number" name="step" value="" min="0" step="any">
+    </form>
+    <form id="questions-form" class="bp-paper-edit-form" phx-change="paper-block-autosave"
+          phx-debounce="1000" data-test-id="paper-form-editor">
+      <input type="hidden" name="block_id" value="questions">
+      <input type="hidden" name="question-count" value="1">
+      <input type="hidden" name="question-0-original-id" value="answer:one">
+      <input name="question-0-id" value="answer:one">
+      <input name="question-0-prompt" value="Original prompt">
+      <input type="hidden" name="question-0-option-count" value="1">
+      <input name="question-0-option-0" value="Studio">
+    </form>
+  `);
+  const numberForm = env.window.document.querySelector("#number-form");
+  const questionsForm = env.window.document.querySelector("#questions-form");
+  const label = numberForm.elements.namedItem("label");
+  const prompt = questionsForm.elements.namedItem("question-0-prompt");
+  label.value = "Public";
+  label.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  prompt.value = "Latest question";
+  prompt.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  assert.equal(numberForm.checkValidity(), true, "the authored number range is natively valid");
+
+  const echoSource = env.window.document.createElement("div");
+  env.window.document.querySelector("main").append(echoSource);
+  env.hook._exitCoordinator.observeRevision({
+    rev: 8,
+    observedDocumentKey: "production:paper:validation",
+    source: echoSource,
+    apply() {
+      env.window.document.querySelector("main").dataset.paperRev = "8";
+      label.value = "Number";
+      prompt.value = "Server question";
+    },
+  });
+  let banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "an echo source without a local draft still enters explicit review");
+  assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(
+    banner.querySelector("[data-conflict-draft]").textContent,
+    /Public/,
+    "review binds to the first dirty form snapshot instead of an empty payload",
+  );
+
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, "discarding the first draft surfaces the second dirty form");
+  assert.equal(banner.querySelector('[data-action="keep"]').disabled, true);
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(banner.querySelector("[data-conflict-draft]").textContent, /Latest question/);
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  assert.equal(env.window.document.querySelector("[data-bp-paper-conflict]"), null);
+  assert.equal(env.calls.length, 0, "explicit discard never saves either old-base draft");
+  env.close();
+}
+
 for (const [name, value, valid] of [
   ["max", "0", false], ["max", "-1", false], ["max", "invalid", false],
   ["max", "", true], ["max", "120", true],
@@ -440,6 +581,83 @@ for (const [name, value, valid] of [
     assert.ok(field.validationMessage, "invalid gauges explain the field constraint");
     assert.equal(field.value, value, "invalid local input remains available for correction");
   }
+  env.close();
+}
+
+// Questionnaire scale bounds use text inputs to preserve exact integer wires.
+// Validate syntax and authored order before debounce, while an unchanged
+// reversed legacy pair remains a valid no-op when another field changes.
+{
+  const env = mountedForm(`
+    <form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"
+          data-test-id="paper-form-editor">
+      <input type="hidden" name="block_id" value="questions">
+      <input type="hidden" name="question-count" value="1">
+      <input name="question-0-prompt" value="Prompt">
+      <input name="question-0-scale-min" value="1">
+      <input name="question-0-scale-max" value="5">
+    </form>
+  `);
+  const min = env.form.elements.namedItem("question-0-scale-min");
+  min.value = "not-a-number";
+  min.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  assert.equal(env.calls.length, 0, "a non-integer scale bound never reaches the server");
+  assert.match(min.validationMessage, /whole number/i);
+  assert.equal(min.value, "not-a-number", "the invalid bound remains available to correct");
+
+  min.value = "+2";
+  min.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  assert.equal(env.calls.length, 1, "a corrected signed integer saves once");
+  assert.equal(env.calls[0].payload["question-0-scale-min"], "+2");
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 8 });
+  await tick();
+  env.close();
+}
+
+{
+  const env = mountedForm(`
+    <form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"
+          data-test-id="paper-form-editor">
+      <input type="hidden" name="block_id" value="questions">
+      <input type="hidden" name="question-count" value="1">
+      <input name="question-0-prompt" value="Prompt">
+      <input name="question-0-scale-min" value="1">
+      <input name="question-0-scale-max" value="5">
+    </form>
+  `);
+  const min = env.form.elements.namedItem("question-0-scale-min");
+  const max = env.form.elements.namedItem("question-0-scale-max");
+  min.value = "9";
+  min.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  assert.equal(env.calls.length, 0, "newly reversed scale bounds never reach the server");
+  assert.match(max.validationMessage, /at least the minimum/i);
+  assert.equal(min.value, "9", "the reversed draft remains available to correct");
+  env.close();
+}
+
+{
+  const env = mountedForm(`
+    <form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"
+          data-test-id="paper-form-editor">
+      <input type="hidden" name="block_id" value="questions">
+      <input type="hidden" name="question-count" value="1">
+      <input name="question-0-prompt" value="Legacy prompt">
+      <input name="question-0-scale-min" value="09">
+      <input name="question-0-scale-max" value="+5">
+    </form>
+  `);
+  const prompt = env.form.elements.namedItem("question-0-prompt");
+  prompt.value = "Updated prompt";
+  prompt.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  assert.equal(env.calls.length, 1, "unchanged reversed legacy bounds do not block another edit");
+  assert.equal(env.calls[0].payload["question-0-scale-min"], "09");
+  assert.equal(env.calls[0].payload["question-0-scale-max"], "+5");
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 8 });
+  await tick();
   env.close();
 }
 

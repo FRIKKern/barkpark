@@ -1963,7 +1963,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           <input
                             type="text"
                             inputmode="numeric"
-                            pattern="[+-]?[0-9]+"
+                            pattern="([+]|-)?[0-9]+"
                             name={"question-#{index}-scale-min"}
                             value={form_scale_bound(question, "min")}
                             class="bp-paper-edit-number"
@@ -1974,7 +1974,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           <input
                             type="text"
                             inputmode="numeric"
-                            pattern="[+-]?[0-9]+"
+                            pattern="([+]|-)?[0-9]+"
                             name={"question-#{index}-scale-max"}
                             value={form_scale_bound(question, "max")}
                             class="bp-paper-edit-number"

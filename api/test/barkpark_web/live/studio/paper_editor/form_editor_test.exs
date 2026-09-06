@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.FormEditorTest do
       input = LazyHTML.query(tree, "input[name='#{name}']")
       assert LazyHTML.attribute(input, "type") == ["text"]
       assert LazyHTML.attribute(input, "inputmode") == ["numeric"]
-      assert LazyHTML.attribute(input, "pattern") == ["[+-]?[0-9]+"]
+      assert LazyHTML.attribute(input, "pattern") == ["([+]|-)?[0-9]+"]
       assert LazyHTML.attribute(input, "value") == [value]
     end
   end

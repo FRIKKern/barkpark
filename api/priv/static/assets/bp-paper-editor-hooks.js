@@ -220,6 +220,29 @@
       return;
     }
 
+    if (editor === "paper-form-editor") {
+      const count = Number(form.elements.namedItem("question-count")?.value);
+      if (!Number.isSafeInteger(count) || count < 0) return;
+      for (let index = 0; index < count; index += 1) {
+        const min = form.elements.namedItem(`question-${index}-scale-min`);
+        const max = form.elements.namedItem(`question-${index}-scale-max`);
+        if (!min || !max) continue;
+        min.setCustomValidity?.("");
+        max.setCustomValidity?.("");
+        const integer = (field) => /^[+-]?\d+$/.test(field.value.trim());
+        const minValid = integer(min);
+        const maxValid = integer(max);
+        if (!minValid) min.setCustomValidity?.("Enter a whole number.");
+        if (!maxValid) max.setCustomValidity?.("Enter a whole number.");
+        const boundsChanged = min.value !== min.defaultValue || max.value !== max.defaultValue;
+        if (boundsChanged && minValid && maxValid &&
+            BigInt(min.value.trim()) > BigInt(max.value.trim())) {
+          max.setCustomValidity?.("Maximum must be at least the minimum.");
+        }
+      }
+      return;
+    }
+
     if (editor !== "paper-field-number-editor") return;
     const fields = Object.fromEntries(["value", "min", "max", "step"].map((name) =>
       [name, form.querySelector(`[name="${name}"]`)]));
@@ -778,9 +801,20 @@
           }
           if (mutationQueue.length || coordinator.hasUnsaved()) {
             quarantinedEchoes.push({ rev, requestId, apply, documentKey });
-            if (!mutationActive) coordinator._setConflict(
-              { current_rev: rev }, source, observedDocumentKey,
-            );
+            if (!mutationActive) {
+              for (const [fallbackSource, fallbackRecord] of sources) {
+                if (!fallbackRecord.dirty ||
+                    !fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") ||
+                    fallbackRecord.documentKey !== documentKey) continue;
+                clearTimeout(fallbackRecord.timer);
+                fallbackRecord.timer = null;
+                fallbackRecord.fallbackDeferred = true;
+                fallbackRecord.fallbackUnsafe = true;
+              }
+              coordinator._setConflict(
+                { current_rev: rev }, source, observedDocumentKey,
+              );
+            }
             return false;
           }
           confirmedRevision = rev;
@@ -934,19 +968,31 @@
         }));
       };
       coordinator._setConflict = (reply, source, sourceDocumentKey, conflictEntry = null) => {
-        const conflictSource = source || mutationQueue[0]?.source;
+        const dirtyFallbackSource = [...sources].find(([fallbackSource, record]) =>
+          record.dirty && fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") &&
+          record.documentKey === (sourceDocumentKey || documentKey))?.[0];
+        const sourceRecord = sources.get(source);
+        const sourceHasDraft = sourceRecord && (sourceRecord.dirty || sourceRecord.active > 0);
+        const conflictSource = conflictEntry?.source ||
+          (sourceHasDraft ? source : null) || mutationQueue[0]?.source ||
+          dirtyFallbackSource || source;
         const entry = conflictEntry ||
           mutationQueue.find((queued) => queued.source === conflictSource) ||
           mutationQueue[0] || null;
+        const snapshot = sources.get(conflictSource)?.formSnapshot;
+        const positional = bpPaperPositionalCollectionEntry(entry) ||
+          snapshot?.countValues?.some(([name]) => PAPER_POSITIONAL_COLLECTION_PARAM.test(name)) === true;
         conflict = {
           currentRev: reply?.current_rev,
           reply,
           source: conflictSource,
-          documentKey: sourceDocumentKey || mutationQueue[0]?.documentKey || documentKey,
+          documentKey: sourceDocumentKey || conflictEntry?.documentKey ||
+            mutationQueue[0]?.documentKey || documentKey,
           entry,
-          snapshot: sources.get(conflictSource)?.formSnapshot,
+          snapshot,
           latestSnapshot: null,
-          positional: reply?.fallback_unsafe === true || bpPaperPositionalCollectionEntry(entry),
+          positional,
+          keepUnavailable: reply?.fallback_unsafe === true || positional || !entry,
         };
         mutationPaused = true;
         coordinator._renderConflict();
@@ -973,6 +1019,8 @@
               detail.hidden = false;
               detail.querySelector("[data-conflict-message]").textContent = positional
                 ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+                : conflict.keepUnavailable
+                  ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
                 : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
               const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
               const reviewDraft = conflict.latestSnapshot
@@ -993,15 +1041,15 @@
             }
           });
         }
-        const positional = conflict.positional;
+        const keepUnavailable = conflict.keepUnavailable;
         const keep = banner.querySelector('[data-action="keep"]');
-        keep.disabled = positional;
-        keep.setAttribute("aria-disabled", String(positional));
-        keep.title = positional ? "Row positions may have changed; review or use latest." : "";
+        keep.disabled = keepUnavailable;
+        keep.setAttribute("aria-disabled", String(keepUnavailable));
+        keep.title = keepUnavailable ? "This retained draft has no safe exact rebase path." : "";
       };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
-        if (!head || conflict?.currentRev == null || bpPaperPositionalCollectionEntry(head)) {
+        if (!head || conflict?.currentRev == null || conflict.keepUnavailable) {
           return false;
         }
         const replacementId = bpPaperRequestId();

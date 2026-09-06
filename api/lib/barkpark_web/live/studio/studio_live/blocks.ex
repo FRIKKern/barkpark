@@ -1276,6 +1276,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
            :ok <- validate_form_param_names(params, rows),
            {:ok, submitted} <- submitted_form_questions(params, rows),
            true <- valid_form_type_activations?(rows, submitted),
+           true <- valid_changed_form_scale_bounds?(rows, submitted),
            true <- Enum.map(submitted, & &1.original_id) == Enum.map(rows, &Map.fetch!(&1, "id")),
            true <- unique_nonblank_submitted_question_ids?(submitted),
            {:ok, question_action} <-
@@ -1383,6 +1384,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       |> Map.put("type", fields.type)
       |> valid_active_form_question_fields?()
     end)
+  end
+
+  defp valid_changed_form_scale_bounds?(rows, submitted) do
+    rows
+    |> Enum.zip(submitted)
+    |> Enum.all?(fn {row, fields} -> valid_changed_form_scale_bounds_for_row?(row, fields) end)
+  end
+
+  defp valid_changed_form_scale_bounds_for_row?(row, %{type: "scale"} = fields) do
+    scale = effective_form_scale(row)
+
+    if effective_question_type(row) == "scale" do
+      (unchanged_form_integer_wire?(fields.scale_min, scale, "min", 1) and
+         unchanged_form_integer_wire?(fields.scale_max, scale, "max", 5)) or
+        fields.scale_min_value <= fields.scale_max_value
+    else
+      with {:ok, min} <- form_scale_value(scale, "min", 1),
+           {:ok, max} <- form_scale_value(scale, "max", 5) do
+        min <= max
+      else
+        _ -> false
+      end
+    end
+  end
+
+  defp valid_changed_form_scale_bounds_for_row?(_row, _fields), do: true
+
+  defp form_scale_value(scale, field, default) do
+    case Map.fetch(scale, field) do
+      :error -> {:ok, default}
+      {:ok, nil} -> {:ok, default}
+      {:ok, value} -> parse_form_integer(value)
+    end
   end
 
   defp effective_question_type(row) do
