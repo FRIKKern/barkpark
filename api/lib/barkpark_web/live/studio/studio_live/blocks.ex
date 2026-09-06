@@ -219,6 +219,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def validate_block_patch(%{"type" => "toc"} = block, params) do
     with :ok <- validate_collection_count(block, params, "items", "toc"),
          :ok <- validate_positive_integer_form_field(block, params, "depth", "depth"),
+         :ok <- validate_boolean_form_fields(params, ~w(numbered sticky)),
+         :ok <- validate_collection_text_fields(params, "toc", ~w(text anchor), "items"),
          :ok <- validate_toc_item_levels(block, params) do
       {:ok, build_block_patch(block, params)}
     end
@@ -226,6 +228,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "criteria-progress"} = block, params) do
     with :ok <- validate_collection_count(block, params, "rows", "criterion"),
+         :ok <- validate_text_form_fields(params, ~w(detail), "detail"),
+         :ok <- validate_collection_text_fields(params, "criterion", ~w(label), "rows"),
          :ok <- validate_criteria_progress_numbers(block, params) do
       {:ok, build_block_patch(block, params)}
     end
@@ -590,6 +594,57 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     else
       {:error, {:invalid_number, error_field}}
     end
+  end
+
+  defp validate_text_form_fields(params, fields, error_field) do
+    if Enum.all?(fields, fn field ->
+         not Map.has_key?(params, field) or is_binary(params[field])
+       end) do
+      :ok
+    else
+      {:error, {:invalid_text, error_field}}
+    end
+  end
+
+  defp validate_boolean_form_fields(params, fields) do
+    case Enum.find(fields, fn field ->
+           Map.has_key?(params, field) and params[field] not in ["true", "false", true, false]
+         end) do
+      nil -> :ok
+      field -> {:error, {:invalid_boolean, field}}
+    end
+  end
+
+  defp validate_collection_text_fields(params, prefix, fields, error_field) do
+    malformed? =
+      Enum.any?(params, fn
+        {param, value} when is_binary(param) ->
+          collection_text_param?(param, prefix, fields) and not is_binary(value)
+
+        {_param, _value} ->
+          false
+      end)
+
+    if malformed?, do: {:error, {:invalid_text, error_field}}, else: :ok
+  end
+
+  defp collection_text_param?(param, prefix, fields) do
+    Enum.any?(fields, fn field ->
+      start = prefix <> "-"
+      suffix = "-" <> field
+
+      if String.starts_with?(param, start) and String.ends_with?(param, suffix) do
+        index_size = byte_size(param) - byte_size(start) - byte_size(suffix)
+
+        index_size > 0 and
+          case param |> binary_part(byte_size(start), index_size) |> Integer.parse() do
+            {index, ""} when index >= 0 -> true
+            _ -> false
+          end
+      else
+        false
+      end
+    end)
   end
 
   defp valid_submitted_number?(value, positive?) do

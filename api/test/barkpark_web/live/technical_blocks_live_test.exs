@@ -459,8 +459,14 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
 
       for {id, params} <- [
             {"toc", %{"depth" => "0"}},
+            {"toc", %{"numbered" => "garbage"}},
+            {"toc", %{"sticky" => %{"unexpected" => "true"}}},
+            {"toc", %{"toc-count" => "2", "toc-0-text" => %{"unexpected" => "text"}}},
+            {"toc", %{"toc-count" => "2", "toc-0-anchor" => ["unexpected"]}},
             {"toc", %{"toc-count" => "2", "toc-0-level" => "invalid"}},
             {"toc", %{"toc-count" => "1", "toc-action" => "remove:0"}},
+            {"criteria", %{"detail" => %{"unexpected" => "total"}}},
+            {"criteria", %{"criterion-count" => "2", "criterion-0-label" => ["unexpected"]}},
             {"criteria", %{"criterion-count" => "2", "criterion-0-met" => "NaN"}},
             {"criteria", %{"criterion-count" => "1", "criterion-action" => "remove:0"}}
           ] do

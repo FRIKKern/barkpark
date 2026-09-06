@@ -253,6 +253,68 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualProgressNavigationTest do
              })
   end
 
+  test "toc and criteria progress reject malformed text and checkbox payloads" do
+    toc = %{
+      "type" => "toc",
+      "items" => [%{"text" => "One", "level" => 1, "anchor" => "one"}]
+    }
+
+    progress = %{
+      "type" => "criteria-progress",
+      "detail" => "rows",
+      "rows" => [%{"label" => "One", "met" => 0, "total" => 1}]
+    }
+
+    for {params, reason} <- [
+          {%{"numbered" => "garbage"}, {:invalid_boolean, "numbered"}},
+          {%{"sticky" => %{"value" => true}}, {:invalid_boolean, "sticky"}},
+          {%{"toc-count" => "1", "toc-0-text" => %{"value" => "bad"}}, {:invalid_text, "items"}},
+          {%{"toc-count" => "1", "toc-0-anchor" => ["bad"]}, {:invalid_text, "items"}}
+        ] do
+      assert {:error, ^reason} = Blocks.validate_block_patch(toc, params)
+    end
+
+    assert {:error, {:invalid_text, "detail"}} =
+             Blocks.validate_block_patch(progress, %{"detail" => %{"value" => "total"}})
+
+    assert {:error, {:invalid_text, "rows"}} =
+             Blocks.validate_block_patch(progress, %{
+               "criterion-count" => "1",
+               "criterion-0-label" => ["bad"]
+             })
+  end
+
+  test "binary form values preserve malformed authored text and checkbox legacy shapes" do
+    toc = %{
+      "type" => "toc",
+      "numbered" => %{"legacy" => true},
+      "sticky" => "true",
+      "items" => [%{"text" => %{"legacy" => "text"}, "level" => 1, "anchor" => ["old"]}]
+    }
+
+    assert {:ok, %{}} =
+             Blocks.validate_block_patch(toc, %{
+               "numbered" => "false",
+               "sticky" => "false",
+               "toc-count" => "1",
+               "toc-0-text" => "",
+               "toc-0-anchor" => ""
+             })
+
+    progress = %{
+      "type" => "criteria-progress",
+      "detail" => %{"legacy" => "detail"},
+      "rows" => [%{"label" => ["old"], "met" => 0, "total" => 1}]
+    }
+
+    assert {:ok, %{}} =
+             Blocks.validate_block_patch(progress, %{
+               "detail" => "",
+               "criterion-count" => "1",
+               "criterion-0-label" => ""
+             })
+  end
+
   test "toc and criteria progress have add-menu defaults" do
     assert Blocks.default_block("toc", "toc-id") == %{
              "id" => "toc-id",
