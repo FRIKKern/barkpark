@@ -366,7 +366,20 @@ config :barkpark_cloud, Oban,
        # sweeps, and it rides :site_deploy (concurrency 1) rather than
        # :maintenance — a sweep that starts builds belongs behind the same serial
        # gate the debounced auto-deploy uses.
-       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
+       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker},
+       # dr-w11: re-register the content-publish webhook of any site that should
+       # have one and does not. Registration used to run on site create and on an
+       # explicit human backfill ONLY, so a create-time failure (guerrilla's
+       # `auto-proof` 422'd inside a 20-minute defect window on 2026-07-14) left
+       # that site unable to auto-deploy FOREVER, silently — `sites` carries no
+       # column recording registration state, so nothing could even find it.
+       # Hourly rather than per-minute because each swept site costs a cross-host
+       # webhook LIST against its box and the fault it repairs is a create-time
+       # one-shot measured in weeks. Bounded per tick
+       # (`@content_webhook_reconcile_limit`) and offset to :53 so it never
+       # stampedes the :00 / :07 / :17 / :41 sweeps. Rides :maintenance, not
+       # :site_deploy — it registers an endpoint, it never starts a build.
+       {"53 * * * *", BarkparkCloud.Workers.ContentWebhookReconciler}
      ]}
   ]
 

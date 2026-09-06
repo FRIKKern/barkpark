@@ -3895,4 +3895,90 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.get_deployment(dep["id"]).status == "queued"
     end
   end
+
+  ## dr-w11 — THE PUBLISH TRIGGER IS ON THE WIRE, ON EVERY SITE-SHAPED ROUTE.
+  ##
+  ## Eight of guerrilla's thirteen sites had no content-publish webhook, and the
+  ## payload described them EXACTLY like the five that did. `publish_trigger` is
+  ## the key that ends that: derived by `Registry.publish_trigger/1`, emitted by
+  ## the ONE `site_json/2` every site-shaped route pipes, so `bp`, the SPA and
+  ## the console gain it together rather than one surface at a time.
+
+  describe "site payload: publish_trigger (dr-w11)" do
+    test "EVERY site-shaped route carries it — create, list and read" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      created =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "trigger-blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert created.status == 201
+      assert json_body(created)["site"]["publish_trigger"] == "present"
+      site_id = json_body(created)["site"]["id"]
+
+      listed = call(:get, "/v1/sites", nil, token)
+      assert listed.status == 200
+      row = Enum.find(json_body(listed)["sites"], &(&1["id"] == site_id))
+      assert row["publish_trigger"] == "present"
+
+      read = call(:get, "/v1/sites/#{site_id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "present"
+    end
+
+    test "a site with no minted secret reads `absent` — the state no surface could report" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+      site = static_site(bp)
+
+      # The six of guerrilla's eight that no sweep can repair: content-bound,
+      # production dataset, and no content-publish secret was ever minted, so
+      # their per-site receiver 404s every delivery it could ever get.
+      site
+      |> Ecto.Changeset.change(content_webhook_secret_encrypted: nil)
+      |> BarkparkCloud.Repo.update!()
+
+      read = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "absent"
+    end
+
+    test "a container site reads `not_applicable` — an absence that is not a fault" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "App #{System.unique_integer([:positive])}",
+          slug: "app-#{System.unique_integer([:positive])}",
+          kind: "container",
+          framework: "nextjs"
+        })
+
+      read = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert read.status == 200
+      assert json_body(read)["site"]["publish_trigger"] == "not_applicable"
+    end
+  end
 end

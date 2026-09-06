@@ -2431,6 +2431,12 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"project":   s.Project,
 		"dataset":   s.Dataset,
 	}
+	// dr-w11: echoed only when the control plane sent it — an empty string means
+	// a CP that predates the field, and inventing "absent" for it would
+	// manufacture the very fault this key exists to report.
+	if pt := strings.TrimSpace(s.PublishTrigger); pt != "" {
+		m["publish_trigger"] = pt
+	}
 	if s.BarkparkID != "" {
 		m["barkpark_id"] = s.BarkparkID
 	}
@@ -2456,6 +2462,40 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		m["current_deployment_id"] = s.CurrentDeploymentID
 	}
 	return m
+}
+
+// sitePublishTriggerLine renders the control plane's `publish_trigger` verdict as
+// the sentence a site owner can act on, or "" when there is nothing honest to say.
+//
+// THREE VERDICTS, THREE DIFFERENT FACTS, and collapsing any two would re-create
+// the silence this row exists to break:
+//
+//   - "absent" is a FAULT and gets a sentence naming the consequence, not the
+//     mechanism — a reader does not need to know what a webhook is to understand
+//     that publishing will not update this site.
+//   - "not_applicable" is NOT a fault: a container site binds no content dataset,
+//     so no trigger is owed and printing a warning there would train owners to
+//     ignore the row on the sites where it means something.
+//   - "present" says CONFIGURED, deliberately not "verified live on the box" —
+//     the control plane derives it from the site row and makes no cross-host
+//     call, and a claim of liveness it cannot back is exactly the kind of green
+//     tick that let this fault survive eight weeks.
+//
+// An unrecognised word from a newer control plane is echoed VERBATIM rather than
+// dropped or bucketed into one of the three above.
+func sitePublishTriggerLine(trigger string) string {
+	switch t := strings.ToLower(strings.TrimSpace(trigger)); t {
+	case "":
+		return ""
+	case "absent":
+		return "no publish trigger — content publishes never reach this site"
+	case "not_applicable":
+		return "not applicable — this site binds no content dataset"
+	case "present":
+		return "present — a publish on the bound dataset triggers a rebuild"
+	default:
+		return hzCell(t)
+	}
 }
 
 // spawnSiteStatusMap is the KV view of a site's status header (the human table
@@ -2484,6 +2524,19 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// header stays exactly as it was.
 	if dt := strings.TrimSpace(s.DocType); dt != "" {
 		m["doc type"] = hzCell(dt)
+	}
+	// dr-w11: THE PUBLISH TRIGGER, and it is the one row on this header that can
+	// say a site is unreachable by content at all. `bp cloud site status` is the
+	// surface a site owner runs, and for eight of guerrilla's thirteen sites it
+	// printed a clean header over a site no publish could ever reach: no webhook
+	// exists on the box, so no deploy is ever attempted, so the deploy ledger has
+	// nothing to report and every count on this page is honestly zero. An absence
+	// nothing measures reads exactly like health.
+	//
+	// Guarded like every other optional row: a control plane that predates the
+	// field sends "" and the header is unchanged, rather than inventing "absent".
+	if line := sitePublishTriggerLine(s.PublishTrigger); line != "" {
+		m["publish trigger"] = line
 	}
 	// Runtime target + slot port (charter D62): a node site advertises the node-slot
 	// SSR runtime and the port its live process is bound to, so a user reading
