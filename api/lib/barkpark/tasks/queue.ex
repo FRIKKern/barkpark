@@ -359,9 +359,10 @@ defmodule Barkpark.Tasks.Queue do
   #   * a TIE at the winning tier suppresses BOTH — rule 3. The queue does not
   #     pick a dataset the caller did not name. The withheld ids are not hidden:
   #     `dataset_ambiguous/1` names each once with the dataset set it spans, and
-  #     `GET /v1/tasks/ready` renders that in `page.dataset_ambiguous` with a
-  #     `help[]` line. `?dataset=` is the way through — the same way out the
-  #     by-id 409 hints at.
+  #     `GET /v1/tasks/ready` renders that in `page.dataset_ambiguous` — in the
+  #     `page` block, NOT in `help[]`, which on this route rides mutation
+  #     successes only (axi-s4 R5, pinned by tasks_controller_test.exs).
+  #     `?dataset=` is the way through — the same way out the by-id 409 hints at.
   #
   # ACTIVE ONLY WHEN THE CALLER NAMED NO DATASET. `?dataset=` IS the
   # disambiguation, so a dataset-scoped read sees its own dataset's row
@@ -519,6 +520,38 @@ defmodule Barkpark.Tasks.Queue do
   end
 
   # SAME id (`drafts.`-stripped), SAME workspace+project, DIFFERENT dataset.
+  #
+  # THE `regexp_replace` ON THE INNER COLUMN IS THE SARGABLE FORM HERE, and it is
+  # counter-intuitive enough to be worth the lines, because the obvious review
+  # note is "a function on the inner column forbids an index — rewrite it as an
+  # equality on the bare column". That note is right in general and WRONG on this
+  # table: migration 20260901180000 built `documents_task_ready_dep_idx`, a
+  # PARTIAL EXPRESSION index on exactly
+  #
+  #     (regexp_replace(doc_id, '^drafts\\.', ''), workspace_id,
+  #      content->>'lifecycle_status', dataset, project_id)  WHERE type = 'task'
+  #
+  # for the dependency gate's identical probe. This predicate is therefore an
+  # `Index Cond` on that index, and the four trailing columns resolve most of the
+  # surrounding scope filter inside the index instead of on the heap. Axis 3's
+  # collapse above is the same shape for the same reason.
+  #
+  # MEASURED, not assumed — 6,002 candidate rows, three runs of each form on one
+  # test DB, `EXPLAIN (ANALYZE, BUFFERS)` over `Repo.to_sql(:all, ready_query/1)`:
+  #
+  #   * THIS form → `Index Scan using documents_task_ready_dep_idx on documents sd0`,
+  #     `Index Cond: (regexp_replace(doc_id, '^drafts\\.', '') = regexp_replace(d0.doc_id, ...))`
+  #     — 118 / 129 / 136 ms.
+  #   * The "sargable" rewrite (`o.doc_id = strip(parent) OR o.doc_id =
+  #     'drafts.' || strip(parent)`) → also index-driven, a `BitmapOr` of two
+  #     `documents_doc_id_type_dataset_id_index` probes — but 212 / 226 / 233 ms,
+  #     because that index carries NONE of the scope columns and every candidate
+  #     then pays a heap recheck (`Heap Blocks: exact=6002`).
+  #
+  # 1.8x slower for the same rows. 20260901180000's moduledoc states the general
+  # law this is one instance of: re-costing this probe onto a different index
+  # measured 3.2 s there. Do NOT "fix" the function call away without re-running
+  # that comparison and quoting both plans.
   defp cross_dataset_twin_base do
     dynamic(
       [o],
