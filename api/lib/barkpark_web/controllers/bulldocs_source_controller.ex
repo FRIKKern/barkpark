@@ -98,12 +98,18 @@ defmodule BarkparkWeb.BulldocsSourceController do
   # the ops path's if_rev guard compares against — NOT the row's _rev hash
   # (which the JSON envelope already exposes as "_rev").
   defp send_bpml(conn, paper, blocks) do
-    bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks))
+    case Content.Papers.op_rev(paper) do
+      {:error, {:unreadable_rev, field}} ->
+        rev_unreadable(conn, paper, field)
 
-    conn
-    |> put_resp_content_type("text/bpml")
-    |> put_resp_header("x-paper-rev", to_string(paper_op_rev(paper)))
-    |> send_resp(200, bpml)
+      {:ok, rev} ->
+        bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks))
+
+        conn
+        |> put_resp_content_type("text/bpml")
+        |> put_resp_header("x-paper-rev", to_string(rev))
+        |> send_resp(200, bpml)
+    end
   rescue
     # The printer's ONE typed refusal, for ALL FOUR unprintable positions
     # (block, inline node, mark, table head cell). It used to rescue only
@@ -124,13 +130,22 @@ defmodule BarkparkWeb.BulldocsSourceController do
       })
   end
 
-  # The op-anchor rev: the integer content["rev"] the if_rev guard reads,
-  # falling back to the row hash for legacy papers that never carried one.
-  defp paper_op_rev(paper) do
-    case get_in(paper.content || %{}, ["rev"]) do
-      rev when is_integer(rev) -> rev
-      _ -> paper.rev
-    end
+  # An UNREADABLE op-anchor is a failed READ, never a rev. Refusing here (rather
+  # than serving some substitute) is what keeps the push side's precondition
+  # from ever comparing against a value nobody could derive — the two sides read
+  # `Content.Papers.op_rev/1`, the ONE owner, and refuse on the same input.
+  defp rev_unreadable(conn, paper, field) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      "error" => %{
+        "code" => "paper_rev_unreadable",
+        "message" =>
+          "cannot read the op-anchor rev of paper #{paper.doc_id}: #{field} is present but not an integer",
+        "hint" =>
+          "this paper's #{field} is corrupt; repair it before pulling or pushing a working copy"
+      }
+    })
   end
 
   # `/papers/:slug/source` takes `dataset` from the QUERY STRING (only the

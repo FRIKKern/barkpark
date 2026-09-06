@@ -164,6 +164,7 @@
                   "missing_slug",
                   "missing_source",
                   "not_found",
+                  "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",
                   "quota_exceeded",
