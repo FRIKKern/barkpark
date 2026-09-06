@@ -43,13 +43,118 @@ cd "$(dirname "$0")/.."
 # alone cannot discriminate a dep error from a real verdict — the text does).
 scan() {
   python3 - "$1" <<'PY'
-import sys, glob, os, fnmatch
+import sys, glob, os, re, json, fnmatch
 
 try:
     import yaml
 except ImportError:
     print("HARNESS-UNAVAILABLE: PyYAML not importable; this is NOT a verdict on the workflows")
     sys.exit(2)
+
+
+# ── THE COLLAPSE MARKER (task-e376642d6d69fa3f) ────────────────────────────
+# A workflow may declare itself COLLAPSIBLE on main: one shared group for every
+# main push, cancel-in-progress true, so a burst of merges leaves one run on the
+# newest sha. That is a DELIBERATE loss of per-commit resolution, and it is only
+# safe for a workflow that certifies nothing anybody merges on and does nothing
+# anybody depends on having happened. The declaration is a comment line in the
+# workflow, EXACTLY:
+#
+#     # main-collapse: harness-ok - <one-line ground> (<task id>)
+#
+# matched by MARKER_RE below. It is a CLAIM, not a permission: this function
+# re-derives the two facts the claim asserts and REFUSES the marker when either
+# is false, so planting the marker on elixir.yml or on deploy.yml reds rather
+# than waives.
+MARKER_RE = re.compile(r"^[ \t]*#[ \t]*main-collapse:[ \t]*harness-ok\b")
+
+
+def has_marker(path):
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if MARKER_RE.match(line):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def required_contexts():
+    """The required set, READ from .github/required-checks.json - never typed.
+
+    Returns None when the file cannot be read, which callers turn into
+    HARNESS-UNAVAILABLE: an unreadable authority is not an empty required set.
+    """
+    try:
+        with open(".github/required-checks.json") as fh:
+            spec = json.load(fh)
+        checks = spec["protection"]["required_status_checks"]["checks"]
+        return set(str(c["context"]) for c in checks)
+    except Exception:
+        return None
+
+
+# THE ACTION/WATCHER DENYLIST. Not a shrink-only ledger like GRANDFATHERED - the
+# safe direction here is the OPPOSITE. A grandfather line waives a defect, so it
+# must only ever be deleted; a denylist line REFUSES a waiver, so adding one is
+# always safe and deleting one is the dangerous edit. What keeps it honest is a
+# POSITIVE CONTROL in --selftest: every pattern must match at least one file in
+# the live tree (a typo protects nothing), and every live workflow that deploys,
+# releases, renews or watches must be matched by some pattern.
+DENY_PATTERNS = [
+    "deploy.yml",           # performs the production deploy
+    "release.yml",          # publishes packages
+    "release-artifact.yml", # builds and uploads a release artifact
+    "cli-release.yml",      # publishes the CLI
+    "landed-mark.yml",      # WRITES to the task ledger for the pushed sha
+    "*-watch.yml",          # breakglass / main-gate / stale-verdict: a skipped watch is a blind window
+    "task-lease-renew.yml", # a skipped renewal lets a claim lapse
+    "cron-overdue-probe.yml",
+    "crown-reconcile.yml",
+    "scaffy-catalog-drift.yml",  # its own job name calls it a post-merge watcher
+]
+
+
+def denied(basename):
+    for pat in DENY_PATTERNS:
+        if fnmatch.fnmatch(basename, pat):
+            return pat
+    return None
+
+
+def job_names(doc):
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    out = []
+    for key, val in jobs.items():
+        if isinstance(val, dict) and isinstance(val.get("name"), str):
+            out.append(val["name"])
+        else:
+            out.append(str(key))
+    return out
+
+
+def marker_verdict(path, doc):
+    """(ok, reason). Only called when the marker is PRESENT."""
+    base = os.path.basename(path)
+    pat = denied(base)
+    if pat is not None:
+        return (False, "it matches the action/watcher denylist pattern %r - a "
+                       "collapsed run of a workflow that deploys, releases, "
+                       "renews or watches is a skipped action or a blind "
+                       "window, never a saved CI slot" % pat)
+    req = required_contexts()
+    if req is None:
+        return (None, "REQUIRED-SET-UNREADABLE")
+    published = [n for n in job_names(doc) if n in req]
+    if published:
+        return (False, "it publishes required context(s) %s - branch protection "
+                       "merges on that name, so its main runs must stay per-sha "
+                       "and bisectable" % sorted(published))
+    return (True, "publishes no required context and is not on the action/watcher denylist")
+
 
 
 def triggers_push_to_main(on):
@@ -116,10 +221,31 @@ for path in sorted(glob.glob(os.path.join(root, "*.yml")) + glob.glob(os.path.jo
     on_main = triggers_push_to_main(on)
 
     name = os.path.basename(path)
-    if on_main:
-        print(f"FAIL {name}: runs on push-to-main with a bare `cancel-in-progress: true`")
-    else:
+    if not on_main:
         print(f"NOTE {name}: bare `cancel-in-progress: true`, but no push-to-main trigger (harmless today)")
+        continue
+
+    # THE ONE EXEMPTION, and it is DECLARED and RE-DERIVED, never inferred from
+    # a name. A workflow carrying the main-collapse marker has said out loud
+    # that its main runs may collapse to the newest sha; marker_verdict() then
+    # re-checks the two facts that claim depends on - it publishes no context in
+    # .github/required-checks.json, and it is not on the action/watcher denylist
+    # - and REFUSES the marker otherwise. So the marker cannot waive D12 for
+    # elixir.yml, deploy.yml or a watcher: those red here exactly as before.
+    if has_marker(path):
+        verdict, reason = marker_verdict(path, doc)
+        if verdict is None:
+            print("HARNESS-UNAVAILABLE: %s carries the main-collapse marker but "
+                  ".github/required-checks.json could not be read, so the marker "
+                  "cannot be re-derived; this is NOT a verdict" % name)
+            sys.exit(2)
+        if verdict:
+            print(f"COLLAPSE {name}: `cancel-in-progress: true` on push-to-main is DECLARED by the main-collapse marker and re-derived OK - {reason}")
+            continue
+        print(f"FAIL {name}: the main-collapse marker is REFUSED - {reason}")
+        continue
+
+    print(f"FAIL {name}: runs on push-to-main with a bare `cancel-in-progress: true`")
 PY
 }
 
@@ -128,7 +254,7 @@ cleanup_selftest() { [ -n "$SELFTEST_TMP" ] && rm -rf "$SELFTEST_TMP"; return 0;
 trap cleanup_selftest EXIT
 
 selftest() {
-  local tmp
+  local tmp failed=0 e2e_rc=0
   SELFTEST_TMP="$(mktemp -d)"
   tmp="$SELFTEST_TMP"
 
@@ -254,6 +380,99 @@ jobs:
     steps: [{ run: "true" }]
 EOF
 
+  # ── THE MAIN-COLLAPSE MARKER: CAN-LOSE ARMS (task-e376642d6d69fa3f) ──────
+  # The marker exempts a workflow from D12. An exemption that cannot be REFUSED
+  # is a waiver, so each arm below plants the marker on a fixture that must NOT
+  # get it and asserts the gate reds anyway. The `clean` fixture is the positive
+  # control: without it a gate hard-wired to refuse every marker would pass all
+  # three refusal arms while making the feature useless.
+  write_marked() {
+    # write_marked <file> <marker:yes|no> <job-name>
+    local file="$1" marker="$2" jobname="$3"
+    {
+      echo "name: $(basename "$file" .yml)"
+      echo "on:"
+      echo "  push:"
+      echo "    branches: [main]"
+      echo "concurrency:"
+      [ "$marker" = yes ] && echo "  # main-collapse: harness-ok - fixture (task-e376642d6d69fa3f)"
+      # shellcheck disable=SC2016
+      echo '  group: fx-${{ github.ref == '"'"'refs/heads/main'"'"' && '"'"'main'"'"' || github.ref }}'
+      echo "  cancel-in-progress: true"
+      echo "jobs:"
+      echo "  a:"
+      echo "    name: $jobname"
+      echo "    runs-on: ubuntu-latest"
+      echo "    steps: [{ run: \"true\" }]"
+    } > "$file"
+  }
+
+  local mdir="$tmp/marker"
+  mkdir -p "$mdir"
+  write_marked "$mdir/clean-harness.yml"  yes "Harness arm"
+  write_marked "$mdir/reqctx.yml"         yes "Elixir gate"
+  write_marked "$mdir/deploy.yml"         yes "Harness arm"
+  write_marked "$mdir/pretend-watch.yml"  yes "Harness arm"
+  write_marked "$mdir/unmarked.yml"       no  "Harness arm"
+
+  local mout mstatus=0
+  mout="$(scan "$mdir")" || mstatus=$?
+  if [ "$mstatus" -ne 0 ] || grep -q '^HARNESS-UNAVAILABLE' <<<"$mout"; then
+    echo "SELFTEST HARNESS FAILURE on the marker fixtures (exit $mstatus):" >&2
+    echo "$mout" >&2
+    exit 2
+  fi
+
+  if ! grep -q '^COLLAPSE clean-harness.yml' <<<"$mout"; then
+    echo "SELFTEST FAILED: a MARKED, clean fixture must be accepted as COLLAPSE, not red" >&2
+    failed=1
+  fi
+  if grep -q '^FAIL clean-harness.yml' <<<"$mout"; then
+    echo "SELFTEST FAILED: a marked, clean fixture must not FAIL" >&2
+    failed=1
+  fi
+  if ! grep -q '^FAIL reqctx.yml.*REFUSED' <<<"$mout"; then
+    echo "SELFTEST FAILED (CAN-LOSE): the marker on a fixture publishing the required context 'Elixir gate' must be REFUSED" >&2
+    failed=1
+  fi
+  if ! grep -q '^FAIL deploy.yml.*REFUSED' <<<"$mout"; then
+    echo "SELFTEST FAILED (CAN-LOSE): the marker on a fixture named deploy.yml must be REFUSED by the denylist" >&2
+    failed=1
+  fi
+  if ! grep -q '^FAIL pretend-watch.yml.*REFUSED' <<<"$mout"; then
+    echo "SELFTEST FAILED (CAN-LOSE): the marker on a *-watch.yml fixture must be REFUSED by the denylist" >&2
+    failed=1
+  fi
+  if ! grep -q "^FAIL unmarked.yml: runs on push-to-main with a bare" <<<"$mout"; then
+    echo "SELFTEST FAILED: an UNMARKED push-to-main workflow with a bare true must still red exactly as before" >&2
+    failed=1
+  fi
+
+  # E2E: a root of the marked-clean fixture alone must exit 0; a root carrying a
+  # refused marker must exit 1 (the verdict wiring, not just scan() text).
+  local cleandir="$tmp/marker-clean-only"
+  mkdir -p "$cleandir"; cp "$mdir/clean-harness.yml" "$cleandir/"
+  e2e_rc=0
+  NCM_SCAN_ROOT="$cleandir" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 0 ]; then
+    echo "SELFTEST FAILED (E2E): a root of only a marked, clean workflow must exit 0, got ${e2e_rc}." >&2
+    failed=1
+  fi
+  local refuseddir="$tmp/marker-refused-only"
+  mkdir -p "$refuseddir"; cp "$mdir/reqctx.yml" "$refuseddir/"
+  e2e_rc=0
+  NCM_SCAN_ROOT="$refuseddir" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 1 ]; then
+    echo "SELFTEST FAILED (E2E): a root whose only workflow carries a REFUSED marker must exit 1, got ${e2e_rc}." >&2
+    failed=1
+  fi
+
+  if [ "$failed" -ne 0 ]; then
+    echo "--- marker fixture scan output ---" >&2
+    echo "$mout" >&2
+    exit 1
+  fi
+
   local out scan_status=0
   # `|| scan_status=$?` so `set -e` cannot abort the assignment and discard the
   # captured text — see the same guard on the real scan below.
@@ -264,7 +483,6 @@ EOF
     exit 2
   fi
 
-  local failed=0
   if ! grep -q '^FAIL hazard.yml' <<<"$out"; then
     echo "SELFTEST FAILED: the gate did NOT red on push-to-main + bare true" >&2
     failed=1
@@ -309,7 +527,6 @@ EOF
   #
   # So these arms re-exec THIS SCRIPT against fixture roots and assert on the
   # exit code of the whole program. A disarm of the verdict now reds here.
-  local e2e_rc
 
   # (a) a root carrying the hazard must exit 1.
   e2e_rc=0
@@ -415,7 +632,7 @@ if [ "$SCAN_STATUS" -ne 0 ] || grep -q '^HARNESS-UNAVAILABLE' <<<"$RESULT"; then
   exit 2
 fi
 
-grep '^NOTE ' <<<"$RESULT" || true
+grep -E '^(NOTE|COLLAPSE) ' <<<"$RESULT" || true
 
 if grep -q '^FAIL ' <<<"$RESULT"; then
   echo "" >&2

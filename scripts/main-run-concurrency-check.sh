@@ -169,13 +169,118 @@ PY
 # NO APOSTROPHES OR BACKTICKS IN THE PYTHON BLOCK (bash 3.2 heredoc-in-subst).
 scan() {
   python3 - "$1" <<'PY'
-import sys
+import sys, os, re, json, fnmatch
 
 try:
     import yaml
 except ImportError:
     print("HARNESS-UNAVAILABLE: PyYAML not importable; this is NOT a verdict on the workflow")
     sys.exit(2)
+
+
+# ── THE COLLAPSE MARKER (task-e376642d6d69fa3f) ────────────────────────────
+# A workflow may declare itself COLLAPSIBLE on main: one shared group for every
+# main push, cancel-in-progress true, so a burst of merges leaves one run on the
+# newest sha. That is a DELIBERATE loss of per-commit resolution, and it is only
+# safe for a workflow that certifies nothing anybody merges on and does nothing
+# anybody depends on having happened. The declaration is a comment line in the
+# workflow, EXACTLY:
+#
+#     # main-collapse: harness-ok - <one-line ground> (<task id>)
+#
+# matched by MARKER_RE below. It is a CLAIM, not a permission: this function
+# re-derives the two facts the claim asserts and REFUSES the marker when either
+# is false, so planting the marker on elixir.yml or on deploy.yml reds rather
+# than waives.
+MARKER_RE = re.compile(r"^[ \t]*#[ \t]*main-collapse:[ \t]*harness-ok\b")
+
+
+def has_marker(path):
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if MARKER_RE.match(line):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def required_contexts():
+    """The required set, READ from .github/required-checks.json - never typed.
+
+    Returns None when the file cannot be read, which callers turn into
+    HARNESS-UNAVAILABLE: an unreadable authority is not an empty required set.
+    """
+    try:
+        with open(".github/required-checks.json") as fh:
+            spec = json.load(fh)
+        checks = spec["protection"]["required_status_checks"]["checks"]
+        return set(str(c["context"]) for c in checks)
+    except Exception:
+        return None
+
+
+# THE ACTION/WATCHER DENYLIST. Not a shrink-only ledger like GRANDFATHERED - the
+# safe direction here is the OPPOSITE. A grandfather line waives a defect, so it
+# must only ever be deleted; a denylist line REFUSES a waiver, so adding one is
+# always safe and deleting one is the dangerous edit. What keeps it honest is a
+# POSITIVE CONTROL in --selftest: every pattern must match at least one file in
+# the live tree (a typo protects nothing), and every live workflow that deploys,
+# releases, renews or watches must be matched by some pattern.
+DENY_PATTERNS = [
+    "deploy.yml",           # performs the production deploy
+    "release.yml",          # publishes packages
+    "release-artifact.yml", # builds and uploads a release artifact
+    "cli-release.yml",      # publishes the CLI
+    "landed-mark.yml",      # WRITES to the task ledger for the pushed sha
+    "*-watch.yml",          # breakglass / main-gate / stale-verdict: a skipped watch is a blind window
+    "task-lease-renew.yml", # a skipped renewal lets a claim lapse
+    "cron-overdue-probe.yml",
+    "crown-reconcile.yml",
+    "scaffy-catalog-drift.yml",  # its own job name calls it a post-merge watcher
+]
+
+
+def denied(basename):
+    for pat in DENY_PATTERNS:
+        if fnmatch.fnmatch(basename, pat):
+            return pat
+    return None
+
+
+def job_names(doc):
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    out = []
+    for key, val in jobs.items():
+        if isinstance(val, dict) and isinstance(val.get("name"), str):
+            out.append(val["name"])
+        else:
+            out.append(str(key))
+    return out
+
+
+def marker_verdict(path, doc):
+    """(ok, reason). Only called when the marker is PRESENT."""
+    base = os.path.basename(path)
+    pat = denied(base)
+    if pat is not None:
+        return (False, "it matches the action/watcher denylist pattern %r - a "
+                       "collapsed run of a workflow that deploys, releases, "
+                       "renews or watches is a skipped action or a blind "
+                       "window, never a saved CI slot" % pat)
+    req = required_contexts()
+    if req is None:
+        return (None, "REQUIRED-SET-UNREADABLE")
+    published = [n for n in job_names(doc) if n in req]
+    if published:
+        return (False, "it publishes required context(s) %s - branch protection "
+                       "merges on that name, so its main runs must stay per-sha "
+                       "and bisectable" % sorted(published))
+    return (True, "publishes no required context and is not on the action/watcher denylist")
+
 
 path = sys.argv[1]
 try:
@@ -203,15 +308,61 @@ cip = conc.get("cancel-in-progress", False)
 
 GUARD = "${{ github.ref != 'refs/heads/main' }}".replace("'", chr(39))
 findings = []
-if "github.sha" not in group or "refs/heads/main" not in group:
+per_sha = "github.sha" in group and "refs/heads/main" in group
+cip_ok = cip is False or (isinstance(cip, str) and cip.strip() == GUARD)
+
+marked = has_marker(path)
+collapse_ok = False
+if marked:
+    verdict, reason = marker_verdict(path, doc)
+    if verdict is None:
+        print("HARNESS-UNAVAILABLE: %s carries the main-collapse marker but "
+              ".github/required-checks.json could not be read, so the marker "
+              "cannot be re-derived; this is NOT a verdict" % path)
+        sys.exit(2)
+    if verdict is False:
+        findings.append(
+            "the main-collapse marker is REFUSED on %s: %s. Delete the marker "
+            "line and keep the per-sha group." % (os.path.basename(path), reason)
+        )
+    else:
+        collapse_ok = True
+
+if collapse_ok and not per_sha:
+    # THE COLLAPSED SHAPE. One group for every main push, and cancel-in-progress
+    # true so the burst leaves exactly one run on the NEWEST sha. Per-commit
+    # resolution is knowingly traded away; nothing merges on this name.
+    if "refs/heads/main" not in group:
+        findings.append(
+            "concurrency.group %r carries the main-collapse marker but does not "
+            "branch on refs/heads/main, so PR refs would share the main group "
+            "too. Expected <name>-${{ github.ref == %s && %s || github.ref }}."
+            % (group, chr(39) + "refs/heads/main" + chr(39), chr(39) + "main" + chr(39))
+        )
+    if cip is not True:
+        findings.append(
+            "concurrency.cancel-in-progress is %r on a main-collapse workflow; "
+            "the collapse only drains the queue when it is the literal true "
+            "(otherwise the shared group merely QUEUES every merge behind one "
+            "slot, which is strictly worse than per-sha)." % (cip,)
+        )
+elif not per_sha:
     findings.append(
         "concurrency.group %r is not per push sha on main. GitHub keeps ONE "
         "not-yet-started run per group, so under merge cadence each merge evicts "
         "the pending main run before a runner picks it up (measured 2026-09-02: "
         "37 of 40 main runs cancelled). Expected an expression mentioning "
-        "github.sha under a refs/heads/main condition." % group
+        "github.sha under a refs/heads/main condition, or the main-collapse "
+        "marker if this workflow publishes no required context and performs no "
+        "action." % group
     )
-if cip is not False and (not isinstance(cip, str) or cip.strip() != GUARD):
+    if not cip_ok:
+        findings.append(
+            "concurrency.cancel-in-progress is %r, neither the literal false nor the "
+            "never-cancel-main guard %r; a bare true cancels a RUNNING main run."
+            % (cip, GUARD)
+        )
+elif not cip_ok:
     findings.append(
         "concurrency.cancel-in-progress is %r, neither the literal false nor the "
         "never-cancel-main guard %r; a bare true cancels a RUNNING main run."
@@ -221,10 +372,17 @@ if cip is not False and (not isinstance(cip, str) or cip.strip() != GUARD):
 print("target: %s" % path)
 print("group: %s" % group)
 print("cancel-in-progress: %r" % (cip,))
+if marked:
+    print("main-collapse marker: present")
 for f in findings:
     print("FAIL " + f)
 if not findings:
-    print("OK a queued main run cannot be evicted, and a running one cannot be cancelled")
+    if collapse_ok and not per_sha:
+        print("OK main-collapse declared and re-derived: one main group, newest "
+              "sha wins; publishes no required context, not on the "
+              "action/watcher denylist")
+    else:
+        print("OK a queued main run cannot be evicted, and a running one cannot be cancelled")
 PY
 }
 
