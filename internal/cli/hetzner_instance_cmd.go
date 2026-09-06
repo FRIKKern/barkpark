@@ -568,6 +568,116 @@ func instDeleteA(ctx context.Context, dns *hcloud.Client, zone, label string) er
 	return hzWait(ctx, dns, result.Action)
 }
 
+// ── by-VALUE DNS (task-688ebffc4b0aa50a, PDF-D101) ───────────────────────────
+//
+// A teardown that deletes and verifies the fqdn's FIRST LABEL ONLY is blind by
+// construction. The platform name is not the only A rrset a box owns: go-live
+// publishes the `<slug>-<teamid>` sibling at the same address, and attach-domain
+// upserts the customer's custom host there too. Deleting `<label>` releases the
+// box while those keep resolving to an address Hetzner will hand to a stranger
+// (subdomain takeover) — and, worse, a by-NAME verify then reads clean and the
+// receipt exits zero. `bp cloud support remove` was fixed out of exactly this
+// trap (cloud_support_cmd.go stepDNS + census leg 5, riding
+// cloud.SweepARecordsByValue); these two helpers are the same law for the
+// instance teardown, which speaks to the zone through *hcloud.Client directly.
+//
+// THE WIDENED BLAST RADIUS IS DELIBERATE and fenced the same way
+// cloud.WarmPool.DeprovisionByIP fences it: a by-value sweep takes EVERY A rrset
+// at the address, which is the point (an unknown extra name at a released
+// address IS the orphan) — so callers sweep ONLY at an address they hold
+// exclusively, and degrade to the by-name delete otherwise. Never wider than the
+// box we actually own.
+
+// instARecordNamesByValue returns the sorted names of every A rrset in zone
+// holding a record whose value equals ip. Empty ip → no names and no call: a
+// check that cannot see the address must never read as clean by accident.
+func instARecordNamesByValue(ctx context.Context, dns *hcloud.Client, zone, ip string) ([]string, error) {
+	if strings.TrimSpace(ip) == "" {
+		return nil, nil
+	}
+	rrsets, err := dns.Zone.AllRRSets(ctx, hzZoneRef(zone))
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, rr := range rrsets {
+		if rr.Type != hcloud.ZoneRRSetTypeA {
+			continue
+		}
+		for _, rec := range rr.Records {
+			if strings.TrimSpace(rec.Value) == ip {
+				names = append(names, rr.Name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// instSweepAByValue deletes every A rrset in zone that resolves to ip, returning
+// the names it actually removed. An individual delete failure does not stop the
+// sweep — the siblings still go — and the failures aggregate into the error
+// alongside whatever WAS deleted (cloud.SweepARecordsByValue's contract).
+func instSweepAByValue(ctx context.Context, dns *hcloud.Client, zone, ip string) ([]string, error) {
+	names, err := instARecordNamesByValue(ctx, dns, zone, ip)
+	if err != nil {
+		return nil, err
+	}
+	var deleted, errs []string
+	for _, name := range names {
+		if derr := instDeleteA(ctx, dns, zone, hzLabelOfRRSetName(name)); derr != nil {
+			errs = append(errs, derr.Error())
+			continue
+		}
+		deleted = append(deleted, name)
+	}
+	if len(errs) > 0 {
+		return deleted, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return deleted, nil
+}
+
+// hzLabelOfRRSetName is hzRRSetName's inverse: the apex rrset is named "@" in
+// the API and the empty label locally, so a sweep that read "@" back must hand
+// the empty label to the delete rather than a literal at-sign.
+func hzLabelOfRRSetName(name string) string {
+	if name == "@" {
+		return ""
+	}
+	return name
+}
+
+// instTeardownDNS is the DNS half of an instance teardown: sweep BY VALUE when
+// the box's address is known AND exclusively ours, otherwise the historical
+// by-name delete of the platform label. `exclusive` is the caller's answer to
+// "do we hold this address alone?" — false (another managed box sits on it under
+// a different identity) degrades to by-name, because a sweep there would take a
+// live co-tenant's record down with ours. The orphan is the lesser failure, and
+// it is loud in the zone rather than silent on someone else's running site.
+func instTeardownDNS(ctx context.Context, dns *hcloud.Client, zone, label, ip string, exclusive bool) ([]string, error) {
+	// The by-name delete ALWAYS fires, sweep or no sweep. It is strictly the old
+	// behaviour and it is not redundant: a platform record whose value has
+	// drifted off the box IP (a hand-repointed A, a stale row) is invisible to a
+	// by-value sweep, and dropping the name delete in favour of the sweep would
+	// have made this teardown NARROWER than the one it replaces. Idempotent —
+	// absent is a no-op — so it costs one call.
+	if derr := instDeleteA(ctx, dns, zone, label); derr != nil {
+		return nil, derr
+	}
+	deleted := []string{hzRRSetName(label)}
+	if strings.TrimSpace(ip) == "" || !exclusive {
+		return deleted, nil
+	}
+	swept, serr := instSweepAByValue(ctx, dns, zone, ip)
+	for _, n := range swept {
+		if n != hzRRSetName(label) {
+			deleted = append(deleted, n)
+		}
+	}
+	return deleted, serr
+}
+
 // instLookupA returns the A values currently at label.zone (nil when absent).
 func instLookupA(ctx context.Context, dns *hcloud.Client, zone, label string) ([]string, error) {
 	rrsets, err := dns.Zone.AllRRSets(ctx, hzZoneRef(zone))
@@ -911,6 +1021,11 @@ func runInstanceDecommission(out *writer, g globals, args []string) int {
 
 	report := map[string]any{"fqdn": fqdn}
 
+	// The box address the DNS verify matches record VALUES against. Set by the
+	// direct-teardown arm below; empty on the registry arm (the worker swept by
+	// value itself and the box is already gone), where the by-name check stands.
+	verifyIP := ""
+
 	// 1. Archive first — nothing is destroyed before the resurrection point
 	//    exists. Data writers are stopped (the box is about to die anyway).
 	if srv != nil && !a.bools["no-archive"] {
@@ -983,19 +1098,37 @@ func runInstanceDecommission(out *writer, g globals, args []string) int {
 	// 3. Direct teardown of whatever survives: the box (fqdn-fenced) and the
 	//    A record.
 	if !registryHandled {
+		// The box IP is read BEFORE the server goes — it is the only handle the
+		// by-value sweep below has, and a deleted server no longer carries it.
+		// The exclusivity fence is answered here too, while the co-tenant (if
+		// any) is still listable (task-688ebffc4b0aa50a).
+		boxIP, sweepExclusive := "", false
+		if srv != nil {
+			boxIP = hzIPv4(srv)
+			sweepExclusive = boxIP != "" && !instIPOwnedByOther(ctx, hc, boxIP, fqdn)
+		}
 		if srv != nil {
 			if derr := instDeleteServer(ctx, hc, srv, fqdn, a.bools["force"]); derr != nil {
 				return useError(out, "failed", "decommission "+fqdn+": "+derr.Error(), exitGeneric)
 			}
 			report["server_deleted"] = srv.Name
 		}
-		if derr := instDeleteA(ctx, dns, fzone, label); derr != nil {
+		// BY VALUE, not name: the go-live `<slug>-<teamid>` sibling and any
+		// attached custom host live at this same address and would otherwise
+		// outlive the box at an IP about to be reassigned.
+		swept, derr := instTeardownDNS(ctx, dns, fzone, label, boxIP, sweepExclusive)
+		if derr != nil {
 			return useError(out, "failed", "decommission "+fqdn+": "+derr.Error(), exitGeneric)
 		}
+		report["dns_deleted"] = swept
+		if boxIP != "" && !sweepExclusive {
+			out.errf("⚠ dns: %s is shared with another managed box (or its address is unknown) — swept BY NAME only; a sibling A record at that address may survive", fqdn)
+		}
+		verifyIP = boxIP
 	}
 
 	// 4. VERIFY no residue — the whole point. Any survivor is a non-zero exit.
-	residue := instVerifyGone(ctx, hc, dns, cp, fqdn, label, fzone)
+	residue := instVerifyGone(ctx, hc, dns, cp, fqdn, label, fzone, verifyIP)
 	report["residue"] = residue
 	report["ok"] = len(residue) == 0
 	if out.emitStructured(report) {
@@ -1062,7 +1195,7 @@ func instWaitRowGone(cp *cpFleet, id string) error {
 }
 
 // instVerifyGone re-reads all three surfaces and lists every survivor.
-func instVerifyGone(ctx context.Context, hc *hcloud.Client, dns *hcloud.Client, cp *cpFleet, fqdn, label, zone string) []string {
+func instVerifyGone(ctx context.Context, hc *hcloud.Client, dns *hcloud.Client, cp *cpFleet, fqdn, label, zone, ip string) []string {
 	var residue []string
 	servers, err := hc.Server.AllWithOpts(ctx, hcloud.ServerListOpts{
 		ListOpts: hcloud.ListOpts{LabelSelector: cloud.ManagedLabelKey + "=true"},
@@ -1081,6 +1214,23 @@ func instVerifyGone(ctx context.Context, hc *hcloud.Client, dns *hcloud.Client, 
 		residue = append(residue, "could not verify DNS: "+derr.Error())
 	} else if len(values) > 0 {
 		residue = append(residue, fmt.Sprintf("DNS A %s.%s still resolves to %s", label, zone, strings.Join(values, ", ")))
+	}
+	// BY VALUE (task-688ebffc4b0aa50a, PDF-D101): the by-name check above reads
+	// clean while the go-live `<label>-<teamid>` sibling — or an attached custom
+	// host — still points at the released address. The VALUE is the truth, so a
+	// survivor is NAMED here instead of silently passing as delta zero.
+	if strings.TrimSpace(ip) != "" {
+		names, verr := instARecordNamesByValue(ctx, dns, zone, ip)
+		if verr != nil {
+			residue = append(residue, "could not verify DNS by value: "+verr.Error())
+		} else {
+			for _, n := range names {
+				if n == hzRRSetName(label) {
+					continue // already reported by the by-name check above
+				}
+				residue = append(residue, fmt.Sprintf("DNS A %s still resolves to the released box IP %s", cloud.Fqdn(hzLabelOfRRSetName(n), zone), ip))
+			}
+		}
 	}
 	if cp != nil {
 		rows, lerr := cp.List()

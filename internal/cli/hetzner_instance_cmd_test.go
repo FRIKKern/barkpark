@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1303,4 +1304,275 @@ func TestInstanceAdoptRegistrationIsConfirmedNotAssumed(t *testing.T) {
 			t.Error("a row pointing at a destroyed box produces the same receipt as a correct adoption")
 		}
 	})
+}
+
+// task-688ebffc4b0aa50a — THE BY-NAME TRAP, ported to the instance teardown.
+//
+// `instance decommission` deleted the A rrset for the fqdn's FIRST LABEL only
+// and then verified the same single name, so a sibling rrset at the SAME box IP
+// — the go-live `<slug>-<teamid>` record `provision_support`/go-live publishes,
+// or an attached custom domain the claim payload never mentions — survived the
+// teardown while the receipt printed "no residue" and exited zero. That is the
+// exact failure `bp cloud support remove` was fixed out of (stepDNS's by-VALUE
+// sweep, PDF-D101) and the exact failure this row names: "not by deleting the
+// row-URL's first label, which would remove `<name>` and leave `<name>-<teamid>`
+// while still reporting delta zero."
+//
+// The zone here holds THREE A rrsets: the platform name, its go-live sibling at
+// the same address, and a bystander at a DIFFERENT address. A correct teardown
+// takes the first two and leaves the third standing — the by-value sweep must be
+// wide enough to catch the sibling and narrow enough to spare the stranger.
+func TestInstanceDecommissionSweepsSiblingAtSameIPBystanderSurvives(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	var mu sync.Mutex
+	deleted := false
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		mu.Lock()
+		gone := deleted
+		mu.Unlock()
+		if gone {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/9/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":777,"type":"snapshot"},"action":{"id":31,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/9", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		deleted = true
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":90,"status":"success","progress":100}}`)
+	})
+
+	// The live zone, mutated by the DELETEs the run issues — so the verify leg
+	// re-reads what the teardown actually left behind, never a canned answer.
+	zone := map[string]string{
+		"okey":          "192.0.2.9",
+		"okey-506f035e": "192.0.2.9",
+		"bystander":     "192.0.2.77",
+	}
+	f.mux.HandleFunc("DELETE /zones/barkpark.cloud/rrsets/{name}/A", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		delete(zone, r.PathValue("name"))
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":91,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		names := make([]string, 0, len(zone))
+		for n := range zone {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, `{"id":"`+n+`/A","name":"`+n+`","type":"A","records":[{"value":"`+zone[n]+`"}]}`)
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"rrsets":[`+strings.Join(parts, ",")+`]}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success"},{"id":90,"status":"success"},{"id":91,"status":"success"}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "decommission", "okey.barkpark.cloud")
+
+	mu.Lock()
+	_, platformLeft := zone["okey"]
+	_, siblingLeft := zone["okey-506f035e"]
+	_, bystanderLeft := zone["bystander"]
+	mu.Unlock()
+
+	if platformLeft {
+		t.Error("the platform A record okey.barkpark.cloud survived the teardown")
+	}
+	if siblingLeft {
+		t.Error("the go-live sibling okey-506f035e.barkpark.cloud survived the teardown at the released box IP — a by-name delete left it standing (task-688ebffc4b0aa50a)")
+	}
+	if !bystanderLeft {
+		t.Error("the by-value sweep took bystander.barkpark.cloud, which sits at a DIFFERENT address — the sweep is too wide")
+	}
+	if code != exitOK {
+		t.Fatalf("decommission exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+	}
+	var report map[string]any
+	_ = json.Unmarshal([]byte(stdout), &report)
+	if report["ok"] != true {
+		t.Errorf("report.ok = %v, want true (residue: %v)", report["ok"], report["residue"])
+	}
+}
+
+// task-688ebffc4b0aa50a — THE DEGRADED ARM, and the only test that reaches the
+// verify leg on its own. When another MANAGED box sits on the same address under
+// a different identity label, the by-value sweep would take that co-tenant's live
+// A record down with ours, so the teardown degrades to the by-name delete
+// (cloud.WarmPool.DeprovisionByIP's `exclusiveIP` law, ported). The sibling then
+// legitimately survives — and the point of this row is that the run must SAY SO:
+// the by-value verify names it and the exit is non-zero, instead of the by-name
+// verify reading "no residue" over a record that is still live.
+func TestInstanceDecommissionSharedIPDegradesToByNameAndReportsResidue(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	var mu sync.Mutex
+	deleted := false
+	// TWO managed boxes at 192.0.2.9: ours, and a stranger under a different
+	// barkpark-fqdn label. Only ours is ever deleted (the fqdn fence).
+	coTenant := instServerJSON(11, "bp-stranger-1", "192.0.2.9", "stranger.barkpark.cloud")
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		mu.Lock()
+		gone := deleted
+		mu.Unlock()
+		if gone {
+			hzWriteJSON(w, 200, `{"servers":[`+coTenant+`]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`,`+coTenant+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/9/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":777,"type":"snapshot"},"action":{"id":31,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/9", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		deleted = true
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":90,"status":"success","progress":100}}`)
+	})
+
+	zone := map[string]string{"okey": "192.0.2.9", "stranger": "192.0.2.9"}
+	f.mux.HandleFunc("DELETE /zones/barkpark.cloud/rrsets/{name}/A", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		delete(zone, r.PathValue("name"))
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":91,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		names := make([]string, 0, len(zone))
+		for n := range zone {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, `{"id":"`+n+`/A","name":"`+n+`","type":"A","records":[{"value":"`+zone[n]+`"}]}`)
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"rrsets":[`+strings.Join(parts, ",")+`]}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success"},{"id":90,"status":"success"},{"id":91,"status":"success"}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "decommission", "okey.barkpark.cloud")
+
+	mu.Lock()
+	_, strangerLeft := zone["stranger"]
+	mu.Unlock()
+	if !strangerLeft {
+		t.Fatal("the co-tenant's live A record was swept — the exclusivity fence did not hold")
+	}
+	if code == exitOK {
+		t.Errorf("decommission exited 0 with a record still live at the released address — the by-value verify read clean (stdout: %s)", stdout)
+	}
+	var report map[string]any
+	_ = json.Unmarshal([]byte(stdout), &report)
+	if report["ok"] != false {
+		t.Errorf("report.ok = %v, want false", report["ok"])
+	}
+	residue := fmt.Sprint(report["residue"])
+	if !strings.Contains(residue, "stranger.barkpark.cloud") {
+		t.Errorf("residue does not name the surviving record: %s", residue)
+	}
+	if !strings.Contains(stderr, "shared with another managed box") {
+		t.Errorf("the degraded sweep was not narrated on stderr:\n%s", stderr)
+	}
+}
+
+// task-688ebffc4b0aa50a — THE NARROWING GUARD. The by-value sweep must never
+// REPLACE the by-name delete: a platform A record whose value has drifted off
+// the box IP (hand-repointed, or a stale row) is invisible to a value match, so
+// a sweep-only teardown would be NARROWER than the by-name one it replaces and
+// would leave the instance's own name resolving after its box is gone. Both
+// fire, always.
+func TestInstanceDecommissionStillDeletesPlatformRecordWhenValueDrifted(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	var mu sync.Mutex
+	deleted := false
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		mu.Lock()
+		gone := deleted
+		mu.Unlock()
+		if gone {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/9/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":777,"type":"snapshot"},"action":{"id":31,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/9", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		deleted = true
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":90,"status":"success","progress":100}}`)
+	})
+
+	// The platform record points at a DIFFERENT address than the box it names —
+	// a by-value sweep at 192.0.2.9 can never see it.
+	zone := map[string]string{"okey": "203.0.113.4"}
+	f.mux.HandleFunc("DELETE /zones/barkpark.cloud/rrsets/{name}/A", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		delete(zone, r.PathValue("name"))
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"action":{"id":91,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		names := make([]string, 0, len(zone))
+		for n := range zone {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, `{"id":"`+n+`/A","name":"`+n+`","type":"A","records":[{"value":"`+zone[n]+`"}]}`)
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"rrsets":[`+strings.Join(parts, ",")+`]}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success"},{"id":90,"status":"success"},{"id":91,"status":"success"}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "decommission", "okey.barkpark.cloud")
+
+	mu.Lock()
+	_, platformLeft := zone["okey"]
+	mu.Unlock()
+	if platformLeft {
+		t.Error("the platform A record survived because its value had drifted off the box IP — the by-value sweep REPLACED the by-name delete instead of adding to it")
+	}
+	if code != exitOK {
+		t.Fatalf("decommission exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+	}
 }
