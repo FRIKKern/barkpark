@@ -4350,6 +4350,21 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); color: var(--ok-strong); }
 .wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); color: var(--danger); }
 .wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); color: var(--info); }
+/* dr-w26 — the status chip's CAVEAT, in the chip's own row. `sent` means the
+   mail transport ACCEPTED the message, not that it was delivered, and the
+   sentence that says so ships on the payload (`status_meaning`). It sits
+   IMMEDIATELY after the pill and is allowed to wrap — a truncated caveat is a
+   caveat nobody finishes reading, and the row already wraps for `.wh-del-err`.
+   Muted and un-toned on purpose: it qualifies the pill, it does not compete
+   with it for the eye. No `--tone` variants, so no value space for
+   __css_check's E15 to police. */
+.wh-del-meaning {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-text);
+}
 .wh-del-meta { font-size: 12px; color: var(--muted-text); }
 .wh-del-spacer { flex: 1 1 auto; }
 .wh-del-when { font-size: 12px; color: var(--muted-text); }
