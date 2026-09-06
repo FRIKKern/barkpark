@@ -328,9 +328,37 @@ if [ -f "$WORKFLOW" ]; then
   check "28. …with no continue-on-error KEY laundering the one loud arm" "$CIE" "0"
   # Absent from the required set is a PROPERTY of this mechanism, not an
   # oversight, so it is asserted rather than remembered.
-  if [ -f "$ROOT/.github/required-checks.json" ]; then
-    hasnt "$(cat "$ROOT/.github/required-checks.json")" "Keep the claim alive" \
-      "29. this job is NOT in the required set — a ledger state must never refuse a PR"
+  #
+  # THIS CLAUSE USED TO GREP THE WHOLE FILE, and that was wrong in the one
+  # direction that matters: a whole-file substring search cannot tell a REQUIRED
+  # context from an EXCLUSION row, and an exclusion row is the exact OPPOSITE of
+  # what it forbids. #16597 gave this job's rendered name `Keep the claim alive
+  # while this PR is open` an S7 exclusion row — the ledger AGREEING that it must
+  # never gate — and this clause reddened main on it (runs 34062750066,
+  # 34064052560). Ask jq for the contexts. Identical fix to the one #16597 made
+  # in crown-reconcile.test.sh; this was its underived sibling.
+  SPEC_LR="$ROOT/.github/required-checks.json"
+  if [ ! -f "$SPEC_LR" ]; then
+    ok "29. this job is not in the required set (no spec file to read)"
+  elif ! command -v jq >/dev/null 2>&1; then
+    # Never silently pass: an unreadable input is a failed read, not a green.
+    bad "29. jq is unavailable, so the required set could not be read — this clause refuses rather than guessing"
+  elif jq -e '[.protection.required_status_checks.checks[]?.context]
+              | any(. == "Keep the claim alive while this PR is open")' "$SPEC_LR" >/dev/null 2>&1; then
+    bad "29. \`Keep the claim alive while this PR is open\` is a REQUIRED context in $SPEC_LR — a ledger state must never refuse a PR: $(jq -r '[.protection.required_status_checks.checks[]?.context] | join(", ")' "$SPEC_LR")"
+  else
+    ok "29. this job is NOT in the required set — a ledger state must never refuse a PR ($(jq -r '.protection.required_status_checks.checks | length' "$SPEC_LR") required context(s) read with jq, not grepped)"
+  fi
+  # …and the mirror, so the clause above cannot be satisfied by a spec that
+  # simply FORGOT the name: an unaccounted rendered name is the defect the
+  # census clause in required-checks-verify.sh exists for. Absent-from-required
+  # and absent-from-the-file are different states and only one of them is right.
+  if [ ! -f "$SPEC_LR" ] || ! command -v jq >/dev/null 2>&1; then
+    :
+  elif jq -e '[.exclusions[]?.context] | index("Keep the claim alive while this PR is open")' "$SPEC_LR" >/dev/null 2>&1; then
+    ok "29b. …and it carries an EXCLUSION row, so the name is accounted rather than merely absent"
+  else
+    bad "29b. \`Keep the claim alive while this PR is open\` has no exclusion row in $SPEC_LR — an unaccounted rendered name reds the census clause"
   fi
 else
   bad "26. the workflow .github/workflows/task-lease-renew.yml is missing"
