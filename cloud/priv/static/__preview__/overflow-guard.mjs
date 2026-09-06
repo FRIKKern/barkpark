@@ -5226,10 +5226,18 @@ async function main() {
     //          shrinkable column — the role chip, Change role and Remove never
     //          yield, so the column holding WHO the row is about absorbs the
     //          whole deficit.
-    //      (b) `.set-row-name` declares `overflow: hidden; text-overflow:
-    //          ellipsis` and never `white-space: nowrap`, so the ellipsis is
-    //          INERT: an email is a single unbreakable word, it overflows a
-    //          21px column, and `overflow: hidden` hides it with NO cue.
+    //      (b) `.set-row-name` declared `overflow: hidden; text-overflow:
+    //          ellipsis` on a column that could not fit an email, and hid the
+    //          overflow. The MECHANISM first written here — "and never
+    //          `white-space: nowrap`, so the ellipsis is INERT" — is REFUTED
+    //          (charter D253, re-driven on Linux; see the predicate below): an
+    //          unbreakable run wider than its box paints the "…" whatever
+    //          `white-space` says. What was actually wrong is narrower and
+    //          worse: at the measured widths the identity did not merely lose a
+    //          cue, it lost 77px of `rex@acme.com` at 390 — and the FIX that
+    //          landed, `overflow-wrap: anywhere`, works by giving the run break
+    //          opportunities so it wraps and never overflows the line at all,
+    //          not by making a declared ellipsis paint.
     //      (c) there is no `@media` anywhere in app.css touching `.set-row*` —
     //          the roster has ONE layout at every width.
     //
@@ -5251,12 +5259,16 @@ async function main() {
     //    button at all.
     //
     //    THE CUE PREDICATE IS THE POINT, and it is deliberately not "does the
-    //    element declare text-overflow: ellipsis". `text-overflow` paints only
-    //    when the line cannot wrap, i.e. when `white-space` computes to a
-    //    non-wrapping value. Declaring it beside `white-space: normal` is a
-    //    sentence, not a cue — which is exactly the pre-fix state. So a row
-    //    passes when the identity FITS (scrollWidth <= clientWidth) or when a
-    //    cue can ACTUALLY PAINT, never when one is merely declared.
+    //    element declare text-overflow: ellipsis". It is also not "does
+    //    `white-space` compute to a non-wrapping value" — that was this leg's
+    //    first answer and charter D253 refuted it at the pixel. `text-overflow`
+    //    paints when the overflowing LINE has no break opportunity that fits
+    //    the box and carries a text run to truncate; `white-space` is one of
+    //    several inputs to that, not the test. So the predicate MEASURES a
+    //    min-content width and a text-run width per row (see the block comment
+    //    at the predicate itself for the driven pixels) and a row passes when
+    //    the identity FITS (scrollWidth <= clientWidth) or when a cue can
+    //    ACTUALLY PAINT, never when one is merely declared.
     //
     //    FONT PINNED (D218, paid by cch-w22-s1): `nav()` now load()s EVERY
     //    declared @font-face, awaits `document.fonts.ready` and check()s each
@@ -5325,7 +5337,58 @@ async function main() {
               `  });` +
               `  var n=r.getElementsByClassName('set-row-name')[0];` +
               `  if(n){var cs=getComputedStyle(n);` +
+              // ── THE BREAK-OPPORTUNITY MEASUREMENT (charter D253) ──────────
+              // `mw` is the element's MIN-CONTENT width, taken off a hidden
+              // `width:min-content` clone appended into the element's OWN
+              // parent so every inherited value that decides breaking — font,
+              // `white-space`, `overflow-wrap`, `word-break`, `hyphens` — is
+              // the real one rather than a UA default. `position:absolute`
+              // lifts it out of the flex line so the measurement cannot
+              // perturb the row it is measuring, and it is removed in the same
+              // turn. min-content is the narrowest box the content can occupy:
+              // `mw > clientWidth` means NO break opportunity fits inside the
+              // box, so the overflow is on the LINE and something truncates.
+              // `mw <= clientWidth` means the text CAN wrap — the overflow is
+              // then VERTICAL, `overflow: hidden` eats whole lines, and no
+              // `text-overflow` marker is ever reached.
+              `    var cl=n.cloneNode(true);` +
+              // cssText is APPENDED, never assigned. `cloneNode(true)` copies
+              // the style ATTRIBUTE, and assigning cssText would delete it —
+              // an element whose `overflow-wrap`/`white-space` is set INLINE
+              // would then be measured under the class cascade alone and read
+              // a min-content it does not have. Driven on the D253 probe's
+              // host D (`overflow-wrap: anywhere` declared inline): assigning
+              // measured mw 304 — the run's FULL width, i.e. the declaration
+              // gone — while appending measures mw 9, one glyph of its own
+              // font, which is what the same declaration produces from a class
+              // on the live `.set-row-name` rows (mw 13 in that font).
+              // The overrides still win because every one of them is
+              // !important and comes last in the same declaration block.
+              `    cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+              `    n.parentNode.appendChild(cl);` +
+              `    var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+              `    cl.parentNode.removeChild(cl);` +
+              // `tw` is the widest TEXT run on the element — a line holding
+              // only atomic inlines has nothing to ellipsize (driven below), so
+              // a break-opportunity test alone would still exempt it. Range
+              // rects over the text nodes reachable through `display:inline`
+              // only: an inline-block/flex/grid child is an ATOM, its inner
+              // text cannot be the truncation point of this element's line.
+              `    var tw=0;` +
+              `    (function walk(e){` +
+              `      for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+              `        if(ch.nodeType===3){` +
+              `          if(!(ch.nodeValue||'').trim()) continue;` +
+              `          var rg=document.createRange();rg.selectNodeContents(ch);` +
+              `          var rl=rg.getClientRects();` +
+              `          for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+              `        } else if(ch.nodeType===1){` +
+              `          var d=getComputedStyle(ch).display;` +
+              `          if(d==='inline'||d==='contents') walk(ch);` +
+              `        }` +
+              `      }})(n);` +
               `    rec.name={sw:n.scrollWidth,cw:n.clientWidth,ws:cs.whiteSpace,te:cs.textOverflow,` +
+              `      mw:mw,tw:Math.round(tw*100)/100,` +
               // `overflow` IS THE THIRD LEG OF THE CUE (cch-w29-s3). `ellipsis`
               // paints only where the box actually clips; the model arm below
               // (`ov:cs.overflow`) has always read it, this arm never did.
@@ -5379,19 +5442,71 @@ async function main() {
               }
               const n = r.name;
               if (!n) continue;
-              // A CUE THAT CAN ACTUALLY PAINT, ON ALL THREE LEGS. `text-overflow`
-              // is inert unless the line is forbidden to wrap AND the box itself
-              // clips — declaring `ellipsis` beside `white-space: normal` is a
-              // sentence, and so is declaring it beside `overflow: visible`,
-              // where the text simply spills past the box in full view of
-              // nothing. `pre-wrap` and `pre-line` WRAP, so they are not on the
-              // white-space list; `visible` is the ONLY computed overflow value
-              // that suppresses the ellipsis, which is why this leg tests for it
-              // by name rather than for "some kind of clip" (cch-w29-s3) — and
-              // it tests the X AXIS, because that is the only one a single-line
-              // ellipsis truncates on and the shorthand can legally read
-              // "visible clip" while the horizontal axis does not clip at all.
-              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre") && n.ox !== "visible";
+              // A CUE THAT CAN ACTUALLY PAINT — MEASURED, NOT READ OFF THE
+              // DECLARATIONS. This leg used to ask `white-space` whether the
+              // line was forbidden to wrap. Charter D253 REFUTED that by
+              // decoding PNGs, and the probe was RE-RUN ON THE GATING PLATFORM
+              // for this correction — D253's own pixels were Chrome/150 on
+              // macOS and the gate machine is ubuntu, so its caveat was
+              // UNDISCHARGED until here. Twin 200px boxes holding one
+              // unbreakable run, Ubuntu 24.04.4 LTS / kernel 6.8.0-117-generic,
+              // Google Chrome 151.0.7922.71, decoded to the rightmost inked
+              // column:
+              //
+              //   clip     / white-space:normal    ink to x=199  hash 68225e2f
+              //   ellipsis / white-space:normal    ink to x=193  hash c5e77c70
+              //   ellipsis / white-space:nowrap    ink to x=193  hash c5e77c70
+              //
+              // The SAME four verdicts came off a second engine build on a
+              // different distro (Chromium 152.0.7977.82 / Debian 12 bookworm):
+              // identical inkRightX on every host, different hashes only because
+              // the two builds hint the glyphs differently. So the result is a
+              // property of the layout engine, not of one container image.
+              //
+              // The `normal` host is PIXEL-IDENTICAL to the `nowrap` control and
+              // differs from `clip`, so the "…" painted with `white-space:
+              // normal` — exactly what D253 measured, reproduced on ubuntu. The
+              // rule is not about `white-space` at all. `text-overflow` is inert
+              // when the text CAN WRAP inside the box: the overflow is then
+              // VERTICAL and `overflow: hidden` eats whole lines with no cue.
+              //
+              // So the predicate asks for a BREAK OPPORTUNITY, measured:
+              //
+              //   (1) the marker is declared            te === "ellipsis"
+              //   (2) the box clips on the X axis       ox !== "visible"
+              //   (3) NO break point fits the box       mw > cw   (min-content)
+              //   (4) there is TEXT on that line        tw > 0
+              //
+              // (2) stays because `visible` is the ONLY computed overflow value
+              // that suppresses the ellipsis, and it is read on the X AXIS by
+              // name: the shorthand can legally serialise "visible clip" while
+              // the horizontal axis — the only one a single-line ellipsis
+              // truncates on — does not clip at all (cch-w29-s3).
+              //
+              // (3) is the leg `white-space` was standing in for, and standing
+              // in for WRONGLY in both directions. `white-space: normal` with an
+              // unbreakable run has min-content 303 > 200 and DOES paint (the
+              // old predicate called it inert — too STRICT). `overflow-wrap:
+              // anywhere`, which `.set-row-name` now carries, drops min-content
+              // to about one character, so the text wraps, `scrollWidth` never
+              // exceeds `clientWidth`, and the host does not reach this arm at
+              // all (driven: sw 200 / cw 200 on the same probe).
+              //
+              // (4) closes the limit `ellipsisCanPaint` in breakpoint-sweep.mjs
+              // records and names this row as the owner of. DRIVEN on the same
+              // Linux run: a `nowrap` + `ellipsis` box whose overflowing line
+              // holds ONE atomic inline (an inline-block child, sw 408 / cw 200)
+              // inks to x=199 — the box edge — so NO "…" painted. A line with
+              // nothing to truncate cannot be ellipsized however the
+              // declarations read, and a break-opportunity test alone would
+              // still have exempted it.
+              //
+              // A ZERO `mw` — a min-content clone that failed to measure — makes
+              // (3) false and therefore FLAGS the row rather than exempting it,
+              // and `mw` is printed in both the failure sentence and the clean
+              // cell string, so an instrument that stopped measuring reds loudly
+              // instead of certifying quietly.
+              const cuePaints = n.te === "ellipsis" && n.ox !== "visible" && n.mw > n.cw && n.tw > 0;
               if (n.sw > n.cw && !cuePaints) {
                 clipped++;
                 // THE SENTENCE NAMES THE LEG THAT ACTUALLY FAILED. Blaming
@@ -5400,10 +5515,14 @@ async function main() {
                 // inside the instrument that polices it, so all three computed
                 // values are printed and the trailing clause is chosen by which
                 // leg is the one standing between the reader and a paintable cue.
-                const why = n.ox === "visible"
+                const why = n.te !== "ellipsis"
+                  ? `no ellipsis is declared at all, so there is no marker to paint`
+                  : n.ox === "visible"
                   ? `ellipsis is inert while overflow-x computes "visible" — the box does not clip horizontally, so nothing truncates and nothing paints`
-                  : `ellipsis is inert unless white-space forbids wrapping`;
-                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}"; ${why}). This is WHO the row's Remove button acts on`);
+                  : n.mw <= n.cw
+                  ? `ellipsis is inert because the text CAN wrap inside this box — min-content ${n.mw}px fits clientWidth ${n.cw}px, so the overflow is vertical and \`overflow: hidden\` eats whole lines silently. white-space is NOT the test (charter D253: an unbreakable run paints "…" under white-space: normal, driven on Linux)`
+                  : `ellipsis is inert because the overflowing line carries no text run to truncate (widest text rect ${n.tw}px) — an atomic inline cannot be ellipsized`;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (measured min-content ${n.mw}px vs clientWidth ${n.cw}px, widest text run ${n.tw}px; computed text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}", white-space "${n.ws}" — REPORTED, never the test; ${why}). This is WHO the row's Remove button acts on`);
               }
             }
             // The cell string carries the NUMBERS, not a verdict glyph: the
@@ -5413,7 +5532,7 @@ async function main() {
             // from the clean line alone, which is what makes a green here
             // quotable rather than merely trusted.
             const rm = m.rows.flatMap((r) => r.btns.map((b) => b.right)).join(",");
-            const id = m.rows.map((r) => (r.name ? `${r.name.cw}/${r.name.sw}` : "-")).join(",");
+            const id = m.rows.map((r) => (r.name ? `${r.name.cw}/${r.name.sw}m${r.name.mw}t${r.name.tw}` : "-")).join(",");
             row.push(
               `${width}:${m.rows.length}r/${withBtns}a psw${m.psw}` +
               (rm ? ` act[${rm}]<=${m.pcw}` : ` act[none]`) +
@@ -5428,7 +5547,9 @@ async function main() {
           `${cells} / ${cells} cells clean — ${rowsSeen} \`#members-body .set-row\` iterated in total ` +
           `(${actionRows} of them carrying an action cluster, asserted non-zero per cell) across ` +
           `${MEM_WIDTHS.join("/")} x light+dark on ${MEM_SCENS.join(" + ")}: ${offScreen} controls past the ` +
-          `viewport edge, ${clipped} identities hidden with no cue that can paint, ${pageOver} pages ` +
+          `viewport edge, ${clipped} identities hidden with no cue that can paint — where "can paint" is ` +
+          `MEASURED per row (min-content width vs clientWidth, plus a non-zero text run on the overflowing ` +
+          `line), never inferred from a white-space declaration (charter D253) — ${pageOver} pages ` +
           `scrolling sideways. Every row is walked, never sampled — row 0 is the self row, has no buttons, ` +
           `and is clean on the PRE-FIX bytes, so a sampled leg certifies the screen off the one row that works`,
         );
