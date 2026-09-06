@@ -86,7 +86,10 @@ func usageTop(out *writer) {
 	out.errf("      --dry-run          print the request, do not send")
 	out.errf("      --yes              skip the prod write confirmation")
 	out.errf("      --limit/--offset/--all   pagination")
-	out.errf("      --manifest <path>  load the manifest from a file (offline)")
+	// The help line NAMES THE WRITER. A flag that takes a file and never says
+	// which file sent every reader to `bp capabilities -o json`, whose rendered
+	// brief this loader cannot use (task-9f726e783347b60e).
+	out.errf("      --manifest <path>  load the manifest from a file (offline); write one with `%s`", manifestCaptureCmd)
 	out.errf("")
 	for _, line := range usageBuiltinLines() {
 		out.errf("%s", line)
@@ -390,9 +393,25 @@ func authTierLabel(tier string) string {
 // source label, plus, in the shadow case, the one-line remedy that actually
 // restores the command. Anonymous/default callers still see the login advice,
 // which for them is correct.
-func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, prov tokenProvenance) int {
+func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, prov tokenProvenance, manifestFile string) int {
 	if authHiddenNoun(tree, tier, typed) {
 		label := authTierLabel(tier)
+		// A TIER-LIMITED MANIFEST, not a credential failure. When the tree came
+		// from --manifest/BARKPARK_MANIFEST, the tier that hid this command is
+		// the one baked into the FILE at capture time; the live credential was
+		// never consulted and may well be admin. The old copy blamed the
+		// credential and sent the operator to `barkpark login`, which cannot
+		// fix a stale capture no matter how many times it succeeds — the file
+		// has to be re-captured. Detection is the override path itself, which
+		// is exact: a hidden noun under a file manifest is hidden BY that file.
+		// The captured tier is named because the manifest carries auth_tier.
+		if manifestFile != "" {
+			return usageErrHintf(out, func() {
+				out.errf("`barkpark %s` is a real command, but it is missing from the manifest FILE you loaded (%s), which was captured at auth_tier=%s.", typed, manifestFile, label)
+				out.errf("that is a TIER-LIMITED MANIFEST, not a credential failure: the file bakes in the auth tier of whoever fetched it, and your live credential was never consulted.")
+				out.errf("re-capture it WITH the credential you want, from a healthy server: `%s`", manifestCaptureCmd)
+			}, manifestCaptureCmd, manifestFileTierMsg(), typed, manifestFile, label, manifestCaptureCmd)
+		}
 		cred := prov.describe()
 		shadow := prov.shadowsSaved()
 		return usageErrHintf(out, func() {
@@ -420,6 +439,14 @@ func tierHiddenMsg(prov tokenProvenance) string {
 			" credential for this server, so `unset " + prov.EnvVar + "` and retry before logging in again"
 	}
 	return "command %q exists but is hidden at your auth tier (tier=%s); the credential in use came from %s — run `barkpark login` (or pass --token <tok>) with a credential that grants it"
+}
+
+// manifestFileTierMsg is the machine-readable refusal for a command hidden by a
+// tier-limited manifest FILE. The %q/%s/%s/%s slots are (typed, file path,
+// captured tier, re-capture command). It deliberately does NOT mention the
+// credential in use: the credential is not what hid the command.
+func manifestFileTierMsg() string {
+	return "command %q exists but is missing from the manifest file %s, which was captured at auth_tier=%s — the manifest is TIER-LIMITED, not your credential; re-capture it with `%s`"
 }
 
 // tierHiddenHint is the copy-pasteable fix. In the shadow case the fix is NOT
