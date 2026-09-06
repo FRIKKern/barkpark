@@ -38,8 +38,11 @@ out="$(run "$out_s2" pull_request "$main_red_s2")"; has "$out" "INHERITED-FROM-M
 out="$(run "$out_s2" pull_request "$main_green")"; has "$out" "FAIL" "3) main green => the red is ours"; has "$out" "Code-comment citation guard" "3) names our failed step"; has "$out" "RC=1" "3) rc 1"
 # 4. main red on the same step AND we fail an extra step -> exit 1 naming only the extra
 out="$(run "$out_s2_s3" pull_request "$main_red_s2")"; has "$out" "failed on a step main does not: Tenant fail-open" "4) the extra step is ours"; has "$out" "RC=1" "4) rc 1"
-# 5. main red on a different JOB -> not inherited
-out="$(run "$out_s2" pull_request "$main_other_job")"; has "$out" "GREEN or absent" "5) a red on another job does not transfer"; has "$out" "RC=1" "5) rc 1"
+# 5. main red on a different JOB -> not inherited, and NOT blamed on the author:
+#    main's run holding no job of this name is indistinguishable from the name
+#    having drifted (see arm 18a), so it is UNDETERMINED, never "yours".
+out="$(run "$out_s2" pull_request "$main_other_job")"; has "$out" "OWNERSHIP-UNDETERMINED" "5) a red on another job does not transfer"; has "$out" "NO job named" "5) and says main's run has no job of this name"; has "$out" "RC=1" "5) rc 1"
+case "$out" in *"the red is this PR's own"*) bad "5) blamed the author for a job it could not find" ;; *) ok "5) makes no ownership claim" ;; esac
 # 6. not a pull_request (push to main) -> never inherited, even with main red
 out="$(run "$out_s2" push "$main_red_s2")"; has "$out" "not a pull_request run" "6) on main the red stands"; has "$out" "RC=1" "6) rc 1"
 # 7. main unreadable (no fixture, stub curl fails) -> exit 1, says so
@@ -342,5 +345,243 @@ case "$out" in *INHERITED-FROM-MAIN*) bad "17c) waved a red through on step name
 out="$(run "$out_s2" pull_request "$main_red_s2" "$TMP/absent-capture.txt" "$main_log_15650")"
 has "$out" "INHERITED-FROM-MAIN" "17d) the pre-existing API path keeps v1's fallback"
 has "$out" "RC=0" "17d) rc 0"
+
+# ── 18. THE THREE MISLABELS (task-e638b950726fea51) ─────────────────────────
+# All three were observed on live PRs on 2026-09-05/06 and all three produced
+# the SAME confident sentence — "the red is this PR's own" — from three
+# different mechanisms. Each arm below replays one, and each has a MUTATION
+# under 19 proving the arm can still fail.
+
+# 18a. M1 — MAIN'S JOB IS A MATRIX LEG. GitHub publishes a matrixed job as
+#      "<name> (27.0, 1.18.1)"; security.yml passes JOB_NAME without the tuple.
+#      MEASURED on main run 33968984175: RUN conclusion "success", JOB
+#      'Sobelow … (27.0, 1.18.1)' conclusion "failure". v1 matched by exact name,
+#      found nothing, and told #16189/#16136 the red was theirs.
+main_matrix="$TMP/main-matrix.json"; cat > "$main_matrix" <<'J'
+{"jobs":[{"id":42,"name":"Doc budgets + anchors (27.0, 1.18.1)","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"success"},{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"}]}]}
+J
+out="$(run "$out_s2" pull_request "$main_matrix")"
+has "$out" "INHERITED-FROM-MAIN" "18a) M1: a matrix leg of main's job is found, so the red is inherited"
+has "$out" "RC=0" "18a) rc 0"
+case "$out" in *"the red is this PR's own"*) bad "18a) still blamed the author for main's matrixed red" ;; *) ok "18a) does not blame the author" ;; esac
+
+# 18b. M2 — MAIN NEVER REACHED THE STEP. Steps are sequential and unconditional,
+#      so main's first red stamps every later step `skipped`. PR #15517's
+#      `Smoke arms` crash was labelled the PR's own on exactly this shape:
+#      "not failing on main" was VACUOUSLY true because main never ran it.
+main_notreached="$TMP/main-notreached.json"; cat > "$main_notreached" <<'J'
+{"jobs":[{"id":43,"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"failure"},{"name":"Code-comment citation guard (fails this job)","conclusion":"skipped"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"skipped"}]}]}
+J
+out="$(run "$out_s2" pull_request "$main_notreached")"
+has "$out" "OWNERSHIP-UNDETERMINED" "18b) M2: a step main SKIPPED is undetermined, not the author's"
+has "$out" "did NOT REACH" "18b) and says main never ran it"
+has "$out" "RC=1" "18b) rc 1 — the red still stands, nothing is waved through"
+has "$out" "::warning" "18b) a warning annotation, distinct from an error and from a notice"
+case "$out" in *"the red is this PR's own"*) bad "18b) blamed the author for a step main never ran" ;; *) ok "18b) makes no ownership claim" ;; esac
+case "$out" in *INHERITED-FROM-MAIN*) bad "18b) waved a red through as inherited on no evidence" ;; *) ok "18b) does not inherit either" ;; esac
+
+# 18b2. THE ORDER MATTERS. Main provably PASSED one of our two failed steps and
+#       never reached the other. A guard that answered UNDETERMINED here would
+#       be the same defect with the opposite sign — it would hide a real PR red.
+#       The pass is reported AND the unsettled step is named, not folded in.
+main_mixed="$TMP/main-mixed.json"; cat > "$main_mixed" <<'J'
+{"jobs":[{"id":44,"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"failure"},{"name":"Code-comment citation guard (fails this job)","conclusion":"success"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"skipped"}]}]}
+J
+out="$(run "$out_s2_s3" pull_request "$main_mixed")"
+has "$out" "failed on a step main does not: Code-comment citation guard" "18b2) a step main RAN and PASSED is still reported as the PR's own"
+has "$out" "UNDETERMINED, not attributed to you: Tenant fail-open" "18b2) and the unreached step is named as undetermined in the same line"
+has "$out" "RC=1" "18b2) rc 1"
+
+# 18c. M3(i) — MAIN'S JOBS LISTING IS AN API ERROR BODY. v1 read the empty
+#      result as "GREEN or absent" and blamed the author. A 404/403 envelope is
+#      not evidence about anybody.
+main_err="$TMP/main-err.json"; echo '{"message":"Not Found","status":"404"}' > "$main_err"
+out="$(run "$out_s2" pull_request "$main_err")"
+has "$out" "OWNERSHIP-UNDETERMINED" "18c) M3: an API error body is undetermined, not green"
+has "$out" "did not parse as JSON" "18c) and says the listing was unreadable"
+has "$out" "RC=1" "18c) rc 1"
+case "$out" in *"the red is this PR's own"*) bad "18c) called an API error body 'main is green'" ;; *) ok "18c) makes no ownership claim" ;; esac
+
+# 18d. M3(ii) — MAIN'S JOB WAS CANCELLED. This fleet cancels superseded main
+#      runs constantly (21 of 60 doc-gates runs, measured 2026-09-01). A
+#      cancelled job has nothing to compare against.
+main_cancelled="$TMP/main-cancelled.json"; cat > "$main_cancelled" <<'J'
+{"jobs":[{"id":45,"name":"Doc budgets + anchors","conclusion":"cancelled","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"cancelled"}]}]}
+J
+out="$(run "$out_s2" pull_request "$main_cancelled")"
+has "$out" "OWNERSHIP-UNDETERMINED" "18d) M3: a cancelled main job is undetermined"
+has "$out" "RC=1" "18d) rc 1"
+
+# 18e. M3(iii) — RUN SELECTION SKIPS UNINFORMATIVE RUNS, and every verdict
+#      carries the chosen run's id, head sha, conclusion and AGE, so a stale
+#      comparison is visible instead of implied. (No jobs fixture here: the
+#      stub curl fails the jobs fetch, so this lands on 18c's clause — what is
+#      under test is WHICH run was picked and what the line says about it.)
+runs_fx="$TMP/main-runs.json"; cat > "$runs_fx" <<'J'
+{"workflow_runs":[{"id":999001,"conclusion":"cancelled","head_sha":"aaaaaaaabbbb","updated_at":"2026-01-01T00:00:00Z"},{"id":999002,"conclusion":"failure","head_sha":"deadbeefcafe","updated_at":"2026-01-01T00:00:00Z"}]}
+J
+out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_fx"; bash "$SUBJECT" 2>&1; echo "RC=$?") )"
+has "$out" "Main run 999002" "18e) the newest CANCELLED run is skipped for the newest informative one"
+has "$out" "head deadbeef" "18e) the verdict names main's head sha"
+has "$out" "concluded failure" "18e) and main's run conclusion"
+has "$out" "min ago" "18e) and how stale the comparison is"
+has "$out" "skipping 1 uninformative" "18e) and that it walked past an uninformative run"
+has "$out" "RC=1" "18e) rc 1"
+
+# 18f. every candidate run is uninformative -> undetermined, and it says main's
+#      state is unknown rather than inventing a green.
+runs_all_cancelled="$TMP/main-runs-cancelled.json"; echo '{"workflow_runs":[{"id":1,"conclusion":"cancelled","head_sha":"aa","updated_at":"2026-01-01T00:00:00Z"}]}' > "$runs_all_cancelled"
+out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_all_cancelled"; bash "$SUBJECT" 2>&1; echo "RC=$?") )"
+has "$out" "OWNERSHIP-UNDETERMINED" "18f) no informative run at all is undetermined"
+has "$out" "Could not read main" "18f) and says so"
+has "$out" "RC=1" "18f) rc 1"
+
+# 18g. THE THREE VERDICTS ARE THREE DIFFERENT ANNOTATIONS. A reader (and any
+#      log scraper) must be able to tell them apart without parsing prose.
+out="$(run "$out_s2" pull_request "$main_red_s2")";        has "$out" "::notice"  "18g) inherited emits ::notice"
+out="$(run "$out_s2" pull_request "$main_green")";         has "$out" "::error"   "18g) the PR's own red emits ::error"
+out="$(run "$out_s2" pull_request "$main_notreached")";    has "$out" "::warning" "18g) undetermined emits ::warning"
+
+# 18h. M4 — A STEP NAME THAT CONTAINS THE DELIMITER. Found on 2026-09-06 by
+#      replaying main run 33968984175 (security.yml) through v1 and v2 rather
+#      than through a fixture. Main's verdict sentence joins its failed step
+#      names with ';', and security.yml's gate step is literally named
+#        "Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds …)".
+#      Split back on ';' that yields two names matching nothing, so a PR failing
+#      the EXACT step main fails read as "a step main does not" — a fourth route
+#      to the same wrong sentence. Main now also prints ONE UNAMBIGUOUS LINE PER
+#      STEP; until main has run the new script, the ';'-shredded recovery is
+#      treated as AMBIGUOUS and can never license a blame verdict.
+SEMI_STEP='Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)'
+semi_names="$(python3 -c 'import json,sys; print(json.dumps({"s1":"Fetch deps","s2":sys.argv[1]}))' "$SEMI_STEP")"
+semi_out='{"s1":{"outcome":"success"},"s2":{"outcome":"failure"}}'
+# main's REAL API shape: every gate step "success" (continue-on-error), Decide red.
+semi_jobs="$TMP/semi-jobs.json"; python3 - "$SEMI_STEP" > "$semi_jobs" <<'J'
+import json, sys
+print(json.dumps({"jobs":[{"id":77,"name":"Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)","conclusion":"failure","steps":[
+  {"name":"Fetch deps","conclusion":"success"},
+  {"name":sys.argv[1],"conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}))
+J
+semi_run() { # $1 main log fixture, $2 our capture (or "")
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$semi_out" STEP_NAMES="$semi_names" \
+      JOB_NAME="Sobelow static analysis (regression gate, baseline .sobelow-skips)" \
+      WORKFLOW_FILE=security.yml GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$semi_jobs" MAIN_RED_BREAKER_LOG_FIXTURE="$1"
+    [ -n "${2:-}" ] && export BREAKER_ERROR_LOG="$2"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+# main's log as it exists TODAY: the ';'-joined sentence and nothing else.
+# TWO failed steps on main, so the ';'-shred is genuinely unrecoverable: with
+# one step the whole unsplit blob is itself a valid candidate and the marker
+# buys nothing (measured — the first draft of mutation 19f survived on exactly
+# that). Two steps is the shape the marker exists for.
+semi_log_legacy="$TMP/semi-legacy.log"; { printf '2026-09-05T13:31:00.0Z FAIL: DOS.StringToAtom api/lib/barkpark/validation.ex:188\n'
+  printf "2026-09-05T13:31:00.1Z main-red-breaker: FAIL — 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' failed on: Fetch deps;%s. This is not a pull_request run, so the red is main's state and stands.\n" "$SEMI_STEP"; } > "$semi_log_legacy"
+out="$(semi_run "$semi_log_legacy")"
+case "$out" in *"a step main does not"*) bad "18h1) M4: a ';' in the step name still shreds main's list and blames the author" ;; *) ok "18h1) M4: a ';'-bearing step name is not blamed on the author" ;; esac
+has "$out" "OWNERSHIP-UNDETERMINED" "18h1) and the shredded legacy recovery is reported as undetermined"
+has "$out" "RC=1" "18h1) rc 1"
+# main's log once main has RUN the new script: one unambiguous line per step.
+semi_log_marked="$TMP/semi-marked.log"; cp "$semi_log_legacy" "$semi_log_marked"
+printf "2026-09-05T13:31:00.2Z main-red-breaker: MAIN-FAILED-STEP in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)': Fetch deps\n" >> "$semi_log_marked"
+printf "2026-09-05T13:31:00.3Z main-red-breaker: MAIN-FAILED-STEP in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)': %s\n" "$SEMI_STEP" >> "$semi_log_marked"
+semi_cap="$TMP/semi-ours.txt"; printf 'FAIL: DOS.StringToAtom api/lib/barkpark/validation.ex:190\n' > "$semi_cap"
+out="$(semi_run "$semi_log_marked" "$semi_cap")"
+has "$out" "INHERITED-FROM-MAIN" "18h2) the marker line recovers the name intact, so the same defect inherits"
+has "$out" "Signature matched too" "18h2) and only because the signature agreed (line drifted 188 -> 190)"
+has "$out" "RC=0" "18h2) rc 0"
+# and a DIFFERENT defect in that same step is still the author's.
+semi_cap2="$TMP/semi-ours2.txt"; printf 'FAIL: DOS.StringToAtom web/app/page.tsx:12\n' > "$semi_cap2"
+out="$(semi_run "$semi_log_marked" "$semi_cap2")"
+has "$out" "NOT with the same failure signature" "18h3) a different defect in the same ';'-named step is still the PR's own"
+has "$out" "RC=1" "18h3) rc 1"
+
+# ── 19. MUTATIONS — the ownership decision lives in FOUR places, and a partial
+#       mutation returns a confident green for the opposite conclusion. Each
+#       mutation is asserted to have APPLIED (anchor matched exactly once, diff
+#       non-empty) before its arm is believed.
+mutate() { # $1 label, $2 anchor, $3 replacement, $4 EXPECTED occurrence count (default 1)
+  #          -> writes $TMP/mut-subject.sh, rc 0 only if the mutation demonstrably applied.
+  # $4 is not a convenience. The matrix-leg match lives in TWO python blocks
+  # (the job-id lookup and the classifier); a mutation that reached only one of
+  # them left the arm GREEN and would have certified a fix that was half
+  # present. Stating the count makes a new copy of the behaviour a test failure
+  # instead of a silent survival.
+  local lbl="$1" anchor="$2" repl="$3" want="${4:-1}" n
+  cp "$SUBJECT" "$TMP/mut-subject.sh"
+  n="$(grep -cF "$anchor" "$TMP/mut-subject.sh")"
+  if [ "$n" != "$want" ]; then bad "19) MUTATION $lbl anchor matched $n time(s), not the declared $want — the mutation is not aimed at every place the behaviour lives"; return 1; fi
+  ANCHOR="$anchor" REPL="$repl" WANT="$want" python3 - "$TMP/mut-subject.sh" <<'M'
+import os, sys
+p = sys.argv[1]; s = open(p).read()
+assert s.count(os.environ["ANCHOR"]) == int(os.environ["WANT"])
+open(p, "w").write(s.replace(os.environ["ANCHOR"], os.environ["REPL"]))
+M
+  if diff -q "$SUBJECT" "$TMP/mut-subject.sh" >/dev/null 2>&1; then bad "19) MUTATION $lbl produced an EMPTY diff — it did not apply"; return 1; fi
+  if ! bash -n "$TMP/mut-subject.sh" 2>/dev/null; then bad "19) MUTATION $lbl broke the syntax — the arm below would fail for the wrong reason"; return 1; fi
+  ok "19) MUTATION $lbl applied (anchor matched once, diff non-empty, still parses)"
+  return 0
+}
+mutrun() { MAIN_RED_BREAKER_SUBJECT="$TMP/mut-subject.sh" SUBJECT="$TMP/mut-subject.sh" run "$@"; }
+
+# 19a. Kill the matrix-leg match (M1's fix) -> 18a must stop inheriting.
+if mutate "19a matrix-leg match (BOTH copies)" 'return n == want or (isinstance(n, str) and n.startswith(want + " ("))' 'return n == want' 2; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_matrix")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19a) MUTATION SURVIVED: still inherited with the matrix match removed"; exit 1 ;; *) echo "  PASS  19a) removing the matrix-leg match breaks 18a — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19b. Treat a SKIPPED step as a pass (v1's M2 bug) -> 18b must stop being
+#      undetermined and start blaming the author again.
+# 19b's first draft flipped the `if st in ("skipped","cancelled")` test and the
+# arm STAYED GREEN — a skipped step then fell through to UNKNOWN, which is ALSO
+# undetermined. A partial mutation returns a confident green for the opposite
+# conclusion. The aimed mutation is the verdict itself: call a skipped step a
+# pass, which is precisely what v1 did.
+if mutate "19b not-reached classification" 'cls = "NOTREACHED"            # M2: main never executed it' 'cls = "PASSED"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_notreached")"
+    case "$out" in *OWNERSHIP-UNDETERMINED*) echo "  FAIL  19b) MUTATION SURVIVED: still undetermined with the not-reached rule removed"; exit 1 ;; *) echo "  PASS  19b) removing the not-reached rule breaks 18b — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19c. THE OPPOSITE DEFECT. Never emit PASSED — the breaker would then answer
+#      UNDETERMINED to everything and never accuse anyone, which is the same
+#      failure wearing the other mask. Arms 3 and 4 must both go red.
+if mutate "19c the accusing path" 'cls = "PASSED"                 # the ONLY accusing evidence' 'cls = "UNKNOWN"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    o3="$(run "$out_s2" pull_request "$main_green")"; o4="$(run "$out_s2_s3" pull_request "$main_red_s2")"
+    bad3=1; bad4=1
+    case "$o3" in *"the red is this PR's own"*) bad3=0 ;; esac
+    case "$o4" in *"failed on a step main does not"*) bad4=0 ;; esac
+    if [ "$bad3" = 1 ] && [ "$bad4" = 1 ]; then echo "  PASS  19c) with PASSED removed the breaker stops accusing anyone — the accusing path is live, not decorative"; else echo "  FAIL  19c) MUTATION SURVIVED: still accused (arm3=$bad3 arm4=$bad4)"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19d. Treat an unparsable jobs listing as an empty one (v1's M3 bug) -> 18c
+#      must stop being undetermined.
+if mutate "19d unparsable-JSON status" 'status = "NOJSON"' 'status = "OK"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_err")"
+    case "$out" in *"did not parse as JSON"*) echo "  FAIL  19d) MUTATION SURVIVED: still reported the parse failure"; exit 1 ;; *) echo "  PASS  19d) removing the NOJSON status breaks 18c — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19e. Stop skipping uninformative runs -> 18e must pick the cancelled run.
+if mutate "19e uninformative-run filter" 'UNINFORMATIVE = {"cancelled", "skipped", "startup_failure", "stale", None, ""}' 'UNINFORMATIVE = {None, ""}'; then
+  ( out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_fx"; bash "$TMP/mut-subject.sh" 2>&1) )"
+    case "$out" in *"Main run 999001"*) echo "  PASS  19e) without the filter the cancelled run IS chosen — 18e is not vacuous" ;; *) echo "  FAIL  19e) MUTATION SURVIVED: still chose the informative run"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19f. Drop the unambiguous marker parse (M4's fix) -> 18h2 must stop inheriting
+#      and fall back to the shredded ';' recovery.
+if mutate "19f MAIN-FAILED-STEP marker parse" "mark = \"main-red-breaker: MAIN-FAILED-STEP in '%s': \" % want" "mark = \"__no_such_marker__\"" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$semi_log_marked" "$semi_cap")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19f) MUTATION SURVIVED: still inherited with the marker parse removed"; exit 1 ;; *) echo "  PASS  19f) removing the marker parse breaks 18h2 — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19g. Drop the AMBIGUITY guard -> 18h1 must go back to blaming the author,
+#      which is exactly the sentence #16189/#16136 got.
+if mutate "19g legacy ';' ambiguity guard" '            log_ambiguous = True' '            log_ambiguous = False' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$semi_log_legacy")"
+    case "$out" in *"a step main does not"*) echo "  PASS  19g) without the ambiguity guard the shredded name blames the author — 18h1 is not vacuous" ;; *) echo "  FAIL  19g) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
 
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
