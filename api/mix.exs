@@ -165,8 +165,88 @@ defmodule Barkpark.MixProject do
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      test: [&strict_test_paths/1, "ecto.create --quiet", "ecto.migrate --quiet", "test"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
+
+  # `mix test <path>` where <path> does not exist exits 0 and silently runs only
+  # the paths that DO exist — a gate prescription naming a renamed test file
+  # therefore prints a green trailer indistinguishable from a real run
+  # (task-9dc1b0aaf43797df: share_link_controller_test.exs, which never existed,
+  # rode alongside a real file and nobody could tell). This runs FIRST in the
+  # `test` alias — before ecto.create, before a single test — and refuses.
+  #
+  # It reads System.argv/0, not the alias argument: Mix hands the alias's own
+  # arguments to the LAST task in the list, so a leading function receives [].
+  defp strict_test_paths(args) do
+    case missing_test_paths(args ++ System.argv()) do
+      [] ->
+        :ok
+
+      missing ->
+        Mix.raise(
+          "mix test: refusing to run — " <>
+            "#{length(missing)} named path(s) do not exist:\n" <>
+            Enum.map_join(missing, "\n", &"  CANNOT READ #{&1}") <>
+            "\n\nA nonexistent path is skipped silently by `mix test` and the run " <>
+            "still exits 0. Fix the path (or drop it) before quoting this gate."
+        )
+    end
+  end
+
+  # Public so it can be unit-tested (test/mix_strict_test_paths_test.exs).
+  # Returns, in argv order and de-duplicated, every explicit path argument that
+  # does not exist on disk. A token counts as a path argument only when it looks
+  # like one — ends in `.exs` (with an optional `:LINE` / `:LINE:LINE` suffix) or
+  # contains a `/`. Flags and the values of value-taking flags are never checked,
+  # so `--only foo`, `--include bar:1` and a bare `mix test` stay untouched.
+  @value_flags ~w(
+    --only --include --exclude --seed --max-cases --max-failures --formatter
+    --slowest --partitions --repeat-until-failure --timeout --exit-status
+    --cover-export-name --profile-require --name
+  )
+  def missing_test_paths(argv) when is_list(argv) do
+    argv
+    |> path_arguments()
+    |> Enum.reject(&File.exists?/1)
+    |> Enum.uniq()
+  end
+
+  defp path_arguments(argv), do: path_arguments(argv, [])
+
+  defp path_arguments([], acc), do: Enum.reverse(acc)
+
+  defp path_arguments([flag, _value | rest], acc) when is_binary(flag) do
+    if flag in @value_flags do
+      path_arguments(rest, acc)
+    else
+      path_arguments_one(flag, rest, acc)
+    end
+  end
+
+  defp path_arguments([token | rest], acc), do: path_arguments_one(token, rest, acc)
+
+  defp path_arguments_one(token, rest, acc) do
+    cond do
+      String.starts_with?(token, "-") -> path_arguments(rest, acc)
+      path_like?(token) -> path_arguments(rest, [strip_line_suffix(token) | acc])
+      true -> path_arguments(rest, acc)
+    end
+  end
+
+  defp path_like?(token) do
+    String.contains?(token, "/") or String.ends_with?(strip_line_suffix(token), ".exs")
+  end
+
+  # `test/foo_test.exs:42` and `test/foo_test.exs:42:99` address lines in a file;
+  # the suffix must come off before the existence check.
+  defp strip_line_suffix(token) do
+    case String.split(token, ":") do
+      [path | rest] -> if Enum.all?(rest, &line_number?/1), do: path, else: token
+      _ -> token
+    end
+  end
+
+  defp line_number?(part), do: part != "" and String.match?(part, ~r/\A\d+\z/)
 end
