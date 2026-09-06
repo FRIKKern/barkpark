@@ -975,6 +975,31 @@ run_delivers() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
   return 1
 }
 
+# ONE READ PER RUN, PER INVOCATION. Every run inside the examined window is asked
+# about TWICE — once to build the delivering population, once to build the wider
+# ALIBI set below — and the two answers came from two separate jobs-API calls.
+# That is what produced the 6-of-24 false WRONG on main: run 33985744753's first
+# read succeeded (the POPULATION line of run 34012723514 printed `0 unreadable`,
+# so it was IN the 90 that delivered) and its second read did not, which struck
+# its id out of the alibi set and made a TRUE row a ghost. The second read buys
+# nothing — the answer cannot change inside one invocation — so it is not made.
+# This is the CURE; the UNREADABLE-ALIBI class below is the guarantee that holds
+# even when the one remaining read is the one that fails.
+run_delivers_cached() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
+  local id="$1" rc
+  local f="$WORK/verdict-$id.rc"
+  if [ -f "$f" ]; then
+    RUN_LEG_MIXED=0
+    rc="$(cat "$f")"
+    case "$rc" in ''|*[!0-9]*) rc=2 ;; esac
+    return "$rc"
+  fi
+  run_delivers "$id"
+  rc=$?
+  printf '%s' "$rc" > "$f"
+  return "$rc"
+}
+
 # ── run ──────────────────────────────────────────────────────────────────────
 select_reader || exit 3
 [ "$READER" = "ssh" ] && write_remote_reader
@@ -1067,7 +1092,7 @@ NONDELIVERING=0
 MIXED_LEG=0
 while IFS=' ' read -r id sha at; do
   [ -n "$id" ] || continue
-  run_delivers "$id"
+  run_delivers_cached "$id"
   case $? in
     0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt"
        [ "$RUN_LEG_MIXED" = "1" ] && MIXED_LEG=$((MIXED_LEG + 1)) ;;
@@ -1085,13 +1110,29 @@ DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 # ALIBI for a row, never as a population this verdict reports a rate over.
 : > "$WORK/wide-shas.txt"
 : > "$WORK/wide-runs.txt"
+# THREE ANSWERS, NOT TWO. `if run_delivers "$id"` folded rc 2 — the jobs list
+# could not be READ — into rc 1 — the run delivered NOTHING. Those are opposite
+# statements: one is a fact about the deploy, the other is a fact about this
+# script's own reading. Folding them struck an unreadable run's id out of the
+# alibi set with no trace, and the very next block then reported the honest crown
+# row that names it as WRONG. An unreadable alibi is now its own set, counted and
+# named, and a row it covers is DEFERRED rather than accused.
+: > "$WORK/wide-unreadable.txt"
+WIDE_UNREADABLE=0
 while IFS=' ' read -r id sha; do
   [ -n "$id" ] || continue
-  if run_delivers "$id"; then
-    printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
-    printf '%s\n' "$id" >> "$WORK/wide-runs.txt"
-  fi
+  run_delivers_cached "$id"
+  case $? in
+    0) printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
+       printf '%s\n' "$id" >> "$WORK/wide-runs.txt" ;;
+    1) ;;
+    *) WIDE_UNREADABLE=$((WIDE_UNREADABLE + 1))
+       printf '%s %s\n' "$id" "$sha" >> "$WORK/wide-unreadable.txt" ;;
+  esac
 done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
+sort -u -k1,1 "$WORK/wide-unreadable.txt" > "$WORK/wide-unreadable-sorted.txt"
+awk 'NF {print $1}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-runs.txt"
+awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-shas.txt"
 
 say ""
 say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
@@ -1149,6 +1190,11 @@ INFLIGHT_EXPIRED=0
 # the oldest run we could see, so it can be neither found nor ruled out. These
 # go through reason(), so they land in rc 2 and still page.
 TRUNC_UNJUDGED=0
+# Rows whose stated deliverer's JOB LIST could not be read. Not a tolerance and
+# not a WRONG: the alibi was never READ, so it was never absent. Each is printed
+# by name with the run it names, subtracted from the WRONG denominator, and put
+# through reason() so the run lands in rc 2 (SILENCE) and still pages.
+UNREADABLE_ALIBI=0
 # The quiescence count, for the QUIET WINDOW arm below (charter D597). Distinct
 # from ROWS_EXAMINED on purpose: an in-window row seen down the no-alibi branch
 # was COUNTED but never CLASSIFIED — there is no alibi source to judge it
@@ -1160,6 +1206,7 @@ QUIET_ROWS_READ=0
 # reason() call would silently tolerate nothing, or everything.
 NOALIBI_REASON="no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 : > "$WORK/wrong.txt"
+: > "$WORK/unreadable-alibi.txt"
 : > "$WORK/inflight.txt"
 : > "$WORK/inflight-expired.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
@@ -1272,6 +1319,31 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
                continue
              fi ;;
         esac
+      fi
+      # ── AN ALIBI THAT WAS NEVER READ IS NOT AN ALIBI THAT IS ABSENT ─────
+      # The alibi set above is built by asking the jobs API once per run. When
+      # that read FAILS the run is not "a run that delivered nothing" — it is a
+      # run this script has no opinion about, and accusing a row that names it
+      # is accusing the crown of this script's own read failure. That is the
+      # 6-of-24 false WRONG on main (task-a8bb36d8622be137). Disjoint from the
+      # three arms above by construction: every id here came off the SAME
+      # completed-run page, so it is neither non-terminal, nor above the page
+      # maximum, nor below its minimum.
+      _cannot_read_alibi=0
+      if [ "$run" != "-" ]; then
+        grep -qx "$run" "$WORK/wide-unreadable-runs.txt" && _cannot_read_alibi=1
+      else
+        grep -qx "$sha" "$WORK/wide-unreadable-shas.txt" && _cannot_read_alibi=1
+      fi
+      if [ "$_cannot_read_alibi" = "1" ]; then
+        UNREADABLE_ALIBI=$((UNREADABLE_ALIBI + 1))
+        printf '%s %s\n' "$sha" "${run:--}" >> "$WORK/unreadable-alibi.txt"
+        if [ "$run" != "-" ]; then
+          reason "row $sha: the job list of run $run — the run this row names as its deliverer — could NOT be read, so whether it delivered is UNKNOWN. The row is NOT counted clean and NOT counted as a ghost — an alibi that was never read is not an alibi that is absent."
+        else
+          reason "row $sha: it names no delivering run, and the job list of the run carrying that head sha could NOT be read, so whether it delivered is UNKNOWN. The row is NOT counted clean and NOT counted as a ghost."
+        fi
+        continue
       fi
       WRONG=$((WRONG + 1))
       printf '%s %s\n' "$sha" "$run" >> "$WORK/wrong.txt"
@@ -1474,6 +1546,26 @@ if [ "$TRUNC_UNJUDGED" -gt 0 ]; then
   say "TRUNCATED-UNJUDGEABLE: ${TRUNC_UNJUDGED} crown row(s) name a delivering run older than the oldest run on the truncated page (minimum id ${MIN_RUN_ID}). A run that fell off a bounded page is not a ghost, so they are an UNREADABLE condition by name — counted in neither direction, never counted clean, and this run exits 2."
   say ""
 fi
+if [ "$WIDE_UNREADABLE" -gt 0 ]; then
+  say "ALIBI SET INCOMPLETE: ${WIDE_UNREADABLE} run(s) in the widened alibi window could not have their JOB LIST read. None of them is counted as a run that delivered nothing — a read that did not happen is not a fact about the deploy:"
+  while IFS=' ' read -r uid usha; do
+    [ -n "$uid" ] || continue
+    say "    run ${uid}  (head ${usha}) — its job list could not be read, so this run can neither alibi a row nor be ruled out as its deliverer"
+  done < "$WORK/wide-unreadable-sorted.txt"
+  say ""
+fi
+if [ "$UNREADABLE_ALIBI" -gt 0 ]; then
+  say "UNREADABLE-ALIBI: ${UNREADABLE_ALIBI} of ${ROWS_EXAMINED} crown row(s) name a deliverer whose job list could NOT be read. They are DEFERRED, not accused — this run exits 2, and the next run, whose read is a fresh one, judges them normally:"
+  while IFS=' ' read -r usha urun; do
+    [ -n "$usha" ] || continue
+    if [ "${urun:--}" = "-" ]; then
+      say "    ${usha} — names no run, and the run carrying that head sha could not have its job list read"
+    else
+      say "    ${usha}  (run ${urun}) — that run's job list could not be read; it is neither an alibi nor a ghost"
+    fi
+  done < "$WORK/unreadable-alibi.txt"
+  say ""
+fi
 if [ "$BEHIND" -gt 0 ]; then
   say "BEHIND: ${BEHIND} of ${RECONCILABLE} delivering run(s) examined ($(pct "$BEHIND" "$RECONCILABLE")) delivered a sha the crown has NO row for:"
   while IFS=' ' read -r sha id; do
@@ -1484,7 +1576,7 @@ fi
 # watermark excluded, and rows a truncated page made unjudgeable, are printed
 # above with their own counts — an exemption has to be a denominator a reader
 # can subtract, never a quieter one.
-JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED))
+JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - UNREADABLE_ALIBI))
 [ "$JUDGED_ROWS" -lt 0 ] && JUDGED_ROWS=0
 if [ "$WRONG" -gt 0 ]; then
   say "WRONG: ${WRONG} of ${JUDGED_ROWS} crown row(s) examined ($(pct "$WRONG" "$JUDGED_ROWS")) were written by no delivering run:"
@@ -1514,7 +1606,7 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, unreadable-alibi=${UNREADABLE_ALIBI}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 
