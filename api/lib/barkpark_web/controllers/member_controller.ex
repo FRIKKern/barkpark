@@ -29,11 +29,23 @@ defmodule BarkparkWeb.MemberController do
   @default_role "member"
 
   @doc """
-  `GET /w/:ws/p/:proj/v1/members` — the roster, humans and tokens alike.
+  `GET /w/:ws/p/:proj/v1/members` — the roster, humans and tokens alike, ONE
+  PAGE at a time.
+
+  `?limit=` (default 100, clamped to [1, 1000]) and `?offset=` (clamped to
+  [0, 100_000]) — the same spelling and the same clamps `doc query` already
+  uses, so one paginator works against both. The envelope keeps `members:`
+  and adds the `count/total/limit/offset/hasMore/nextOffset` quintet the other
+  paginated list reads carry: without a `total` a caller cannot tell a page
+  that happens to be short from the last one.
   """
-  def index(conn, _params) do
+  def index(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace] do
-      json(conn, %{members: Members.list_members(ws_id)})
+      {limit, offset} = page_window(params)
+      members = Members.list_members(ws_id, limit: limit, offset: offset)
+      total = Members.count_members(ws_id)
+
+      json(conn, page_envelope(:members, members, total, limit, offset))
     else
       _ -> unresolved_workspace(conn)
     end
@@ -118,10 +130,20 @@ defmodule BarkparkWeb.MemberController do
   Answers "which credentials can reach my workspace, and are any stale or
   revoked?". Secrets are never returned (only the hash is stored, and it is
   never selected).
+
+  Paged like the roster beside it: `?limit=` (default 100, clamped to
+  [1, 1000]) and `?offset=` (clamped to [0, 100_000]), `tokens:` plus
+  `count/total/limit/offset/hasMore/nextOffset`. A live instance holding ~100
+  credentials is the case this exists for — an unbounded inventory is both a
+  slow read and one a client cannot page through.
   """
-  def tokens(conn, _params) do
+  def tokens(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace] do
-      json(conn, %{tokens: Members.list_workspace_tokens(ws_id)})
+      {limit, offset} = page_window(params)
+      tokens = Members.list_workspace_tokens(ws_id, limit: limit, offset: offset)
+      total = Members.count_workspace_tokens(ws_id)
+
+      json(conn, page_envelope(:tokens, tokens, total, limit, offset))
     else
       _ -> unresolved_workspace(conn)
     end
@@ -159,6 +181,56 @@ defmodule BarkparkWeb.MemberController do
 
   defp principal_type(%{"principal_type" => "api_token"}), do: :api_token
   defp principal_type(_), do: :user
+
+  # The page window, in the spelling and with the clamps query_controller.ex
+  # already uses (limit default 100, [1, 1000]; offset [0, 100_000]). Clamping
+  # rather than 422ing is deliberate and matches that sibling: `--limit 0` and
+  # `--offset -1` answer a page instead of an error, and the echoed limit/offset
+  # in the body report what the query ACTUALLY used, so a paginator that reads
+  # them back computes the right next page.
+  defp page_window(params) do
+    limit = params |> Map.get("limit") |> parse_int(100) |> min(1000) |> max(1)
+    offset = params |> Map.get("offset") |> parse_int(0) |> max(0) |> min(100_000)
+    {limit, offset}
+  end
+
+  # `hasMore` is `offset + returned < total`, never `returned == limit`: a last
+  # page that is exactly `limit` rows long would otherwise advertise a next page
+  # that does not exist, and `nextOffset` would point past the end. The offset
+  # is emitted ONLY when a next page genuinely exists, so an exhausted read
+  # never leaves a dangling cursor.
+  defp page_envelope(key, rows, total, limit, offset) do
+    returned = length(rows)
+    has_more = offset + returned < total
+
+    envelope = %{
+      key => rows,
+      count: returned,
+      total: total,
+      limit: limit,
+      offset: offset,
+      hasMore: has_more
+    }
+
+    if has_more, do: Map.put(envelope, :nextOffset, offset + returned), else: envelope
+  end
+
+  defp parse_int(nil, default), do: default
+
+  defp parse_int(value, default) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} -> n
+      :error -> default
+    end
+  end
+
+  defp parse_int(value, _default) when is_integer(value), do: value
+
+  # Catch-all: `?limit[]=1` reaches Plug as `["1"]`, and a list (or any other
+  # non-scalar) must fall back to the default rather than raise
+  # FunctionClauseError — a 500 on a malformed query string is a denial of
+  # service the caller controls.
+  defp parse_int(_, default), do: default
 
   # `on_missing` is a STATIC atom supplied by the call site. It used to be
   # derived from the request key at runtime — atoms are never garbage
