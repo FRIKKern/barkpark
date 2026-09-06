@@ -24,7 +24,7 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
 
   The refusal test below (`the 2026-07-23 witness shape`) is MUTATION-PROVEN:
   collapsing `DraftTerminalFence.check/6` to `:ok` reds that test and ONLY that
-  test.
+  test — the other nine, which pin what the fence must NOT break, stay green.
   """
   use Barkpark.DataCase, async: false
 
@@ -112,16 +112,11 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
     assert status("dtf-witness", scope) == "open"
   end
 
-  test "the BIRTH arm: a brand-new draft born `done` with no close provenance is REFUSED",
+  test "the BIRTH exemption is DELIBERATE and intact: a brand-new draft born `done` " <>
+         "still lands (the importer shape; the read side defangs it, not this fence)",
        %{scope: scope} do
-    result = write("dtf-birth", %{"lifecycle_status" => "done"}, scope)
-
-    assert {:error, {:invalid_task_content, details}} = result
-    message = details["lifecycle_status"] |> List.first()
-    assert message =~ "draft task row cannot be set to a terminal lifecycle_status"
-
-    assert {:error, :not_found} =
-             Content.get_document("drafts.dtf-birth", "task", @dataset, scope)
+    assert {:ok, doc} = write("dtf-birth", %{"lifecycle_status" => "done"}, scope)
+    assert doc.content["lifecycle_status"] == "done"
   end
 
   # ── (b) THE ESCAPE — a real close still lands ────────────────────────────
@@ -192,8 +187,11 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
     assert {:ok, doc} =
              write(
                "dtf-samesame",
-               %{"lifecycle_status" => "cancelled", "close_reason" => "created for probe",
-                 "priority" => 3},
+               %{
+                 "lifecycle_status" => "cancelled",
+                 "close_reason" => "created for probe",
+                 "priority" => 3
+               },
                scope
              )
 
@@ -232,7 +230,7 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
        %{scope: scope} do
     draft_only!("dtf-discard", scope)
     {:ok, _pub} = Content.publish_document("dtf-discard", "task", @dataset, scope)
-    {:ok, _draft} = write("dtf-discard", %{"priority" => 5}, scope)
+    {:ok, _draft} = write("dtf-discard", %{"priority" => 2}, scope)
 
     assert {:ok, _} = Content.discard_draft("dtf-discard", "task", @dataset, scope)
 

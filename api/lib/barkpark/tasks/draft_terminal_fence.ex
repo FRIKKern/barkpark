@@ -23,7 +23,8 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
       is a LEGAL charter-D7 edge — legal for the sanctioned `close` verb, which
       is not what walked through.
     * BIRTH — `bp doc create task` with `lifecycle_status: "cancelled"` on a
-      fresh id. Every sibling guard exempts a birth (`was == nil`), by design.
+      fresh id. Every sibling guard exempts a birth (`was == nil`) and so does
+      this one; see the exemption list below for why that stays.
 
   This is the 2026-07-23 witness shape: `task-77620317484e1185` reached
   `cancelled` with no `claim.closed_by` and no `claim.closed_at`, ~45.8h AFTER
@@ -31,8 +32,8 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
 
   ## The rule
 
-  A `type:task` write that lands a CLOSED-terminal `lifecycle_status` on a
-  `drafts.<id>` row with NO published twin is refused, unless the same write
+  A `type:task` write that MOVES a `drafts.<id>` row with NO published twin
+  into a CLOSED-terminal `lifecycle_status` is refused, unless the same write
   carries close provenance.
 
   Keyed on provenance, not on a revision precondition, and not on a role — the
@@ -52,6 +53,18 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
     * **A row with a published twin.** Untouched — the publish door owns it,
       and this fence exists precisely for the rows that door never sees. The
       blast radius is draft-only task rows, nothing else.
+    * **A BIRTH.** Measured, not assumed: adding the birth arm reddened 30+
+      existing tests, including `MutateControllerTest`'s "the FRESH-create
+      exemption is intact: an importer can still file an already-done task" and
+      `PublishDoorLifecycleGuardTest`'s "the importer's born-done draft" — the
+      exemption is DELIBERATE and load-bearing (migration 20260528100000 seeds
+      already-`done` rows). The codebase's standing answer to a forged birth is
+      not a refusal but a DEFANGING on the read side: a `done` row satisfies a
+      dependent only if it also carries close provenance
+      (`Tasks.Queue.ready`'s `ready_done_tasks` CTE). This fence adds nothing
+      there and does not relitigate it. What it fences is the MOVE — the write
+      that takes a live draft row somebody could still work and closes it with
+      no attribution, which is the 2026-07-23 witness.
     * **Same → same.** An already-`cancelled` draft may still be patched on
       every other field. The tombstone fence paid for this lesson
       (`Writer.ensure_close_reason_lands_with_a_close/6`): `/v1/data/mutate`
@@ -110,6 +123,10 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
       not DraftId.draft?(doc_id) -> :ok
       # The sanctioned close verb lands all three of these; a raw write lands none.
       close_provenance?(content) -> :ok
+      # A BIRTH, or a legacy no-lifecycle row — the exemption every sibling
+      # guard takes, kept here for the reasons in the moduledoc. This fence
+      # is about the MOVE, not the filing.
+      is_nil(previous_status(prev_doc)) -> :ok
       # Same → same: correcting other fields on an already-closed draft stays legal.
       previous_status(prev_doc) == now -> :ok
       # A published twin exists → the publish gate sees this write. Last, because
@@ -128,7 +145,8 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
     claim = fetch(content, "claim", :claim)
     claim = if is_map(claim), do: claim, else: %{}
 
-    present?(fetch(claim, "closed_by", :closed_by)) or present?(fetch(claim, "closed_at", :closed_at)) or
+    present?(fetch(claim, "closed_by", :closed_by)) or
+      present?(fetch(claim, "closed_at", :closed_at)) or
       present?(fetch(content, "close_reason", :close_reason))
   end
 
