@@ -67,15 +67,19 @@ defmodule BarkparkWeb.CSP do
   #   modals.ex          — onclick="this.select()" (two share-url inputs)
   #   modals.ex          — onclick copy (airdrop link, reads previous sibling)
   #   api_tester_live/components.ex — onclick copy-curl
-  # UNCONSUMED as of spd-w5-secondary-pane-reachability. Its sole consumer was
+  #
+  # RETIRED — `event.stopPropagation()`. Its sole consumer was
   # `editor_fields.ex`'s secondary-picker card, where the inline handler killed
-  # every window-delegated `phx-click` inside the modal (charter D96) and was
-  # removed. The hash stays allow-listed only so this review does not change the
-  # CSP surface as a side effect of a markup fix; retiring it — entry, comment
-  # and all — is `spd-b35`, which owns the browser proof that nothing else
-  # depends on it. Do NOT re-add a consumer: reintroducing the attribute
+  # every window-delegated `phx-click` inside the modal (charter D96); that
+  # attribute was removed by spd-w5-secondary-pane-reachability, leaving the
+  # hash allow-listing a string no template emits. The constant and its
+  # `'unsafe-hashes'` sha256 are gone (spd-csp-stop-propagation-allowlist-dead);
+  # `browser_csp_test.exs` asserts the hash's ABSENCE from the emitted policy so
+  # it cannot creep back. Do NOT re-add a consumer: reintroducing the attribute
   # reintroduces the bug, and `studio_live_secondary_pane_dom_test.exs` reds.
-  @handler_stop_propagation "event.stopPropagation()"
+  # (The `e.stopPropagation();` inside the nonced `<script>` block in
+  # `bulldocs.html.heex` is NOT an inline handler — nonced script blocks are
+  # covered by `'nonce-…'`, never by these `'unsafe-hashes'` entries.)
   @handler_img_error "this.onerror=null;this.classList.add('image-picker-thumb-broken');this.removeAttribute('src');"
   @handler_select "this.select()"
   @handler_copy_prev "var u=this.previousElementSibling.value; if(navigator.clipboard){navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"
@@ -84,7 +88,6 @@ defmodule BarkparkWeb.CSP do
   @inline_handlers [
     @handler_dataset_switch,
     @handler_copy_data_url,
-    @handler_stop_propagation,
     @handler_img_error,
     @handler_select,
     @handler_copy_prev,

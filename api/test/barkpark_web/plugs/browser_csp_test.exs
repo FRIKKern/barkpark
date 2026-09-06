@@ -82,6 +82,53 @@ defmodule BarkparkWeb.Plugs.BrowserCspTest do
       assert sha_source(CSP.swatch_theme_script("light")) in CSP.script_hashes()
       assert sha_source(CSP.swatch_theme_script("dark")) in CSP.script_hashes()
     end
+
+    # ── The retired stop-propagation entry, proven dead in BOTH directions ──
+    #
+    # spd-w5-secondary-pane-reachability removed the only consumer of
+    # `onclick="event.stopPropagation()"` (editor_fields.ex, charter D96), so
+    # spd-csp-stop-propagation-allowlist-dead retired the constant. Direction A
+    # asserts the hash is GONE; direction B asserts a still-live handler is
+    # still hashed AND still emitted by a template — without B, A would pass
+    # just as happily against a policy that emits no hashes at all.
+
+    test "DIRECTION A: the retired stop-propagation handler is NOT allow-listed" do
+      dead = sha_source("event.stopPropagation()")
+      [policy] = run() |> csp()
+
+      refute dead in CSP.script_hashes()
+      refute policy =~ dead
+    end
+
+    test "DIRECTION B: a still-live handler is still hashed AND still emitted" do
+      # `this.select()` is a dead-stable literal on the two share-url inputs in
+      # modals.ex. Read the template source so the proof binds to the bytes the
+      # browser receives, not to a constant in csp.ex quoting itself.
+      modals = File.read!("lib/barkpark_web/components/studio_components/modals.ex")
+      assert modals =~ ~s|onclick="this.select()"|
+
+      live = sha_source("this.select()")
+      [policy] = run() |> csp()
+
+      assert live in CSP.script_hashes()
+      assert policy =~ live
+    end
+
+    test "the emitted policy carries exactly the allow-listed hashes, no more" do
+      [policy] = run() |> csp()
+
+      emitted =
+        ~r/'sha256-[A-Za-z0-9+\/=]+'/
+        |> Regex.scan(policy)
+        |> List.flatten()
+        |> MapSet.new()
+
+      assert emitted == MapSet.new(CSP.script_hashes())
+
+      # 6 inline handlers + 2 swatch variants. Was 9 before the stop-propagation
+      # entry was retired; the previous set minus exactly one.
+      assert MapSet.size(emitted) == 8
+    end
   end
 
   describe "sso_policy/1 (the SAML SLO surface)" do
