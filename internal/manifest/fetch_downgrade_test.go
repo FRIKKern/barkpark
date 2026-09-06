@@ -19,6 +19,17 @@ func downgradeManifest(generatedAt, etag string) string {
 
 // captureStderr redirects os.Stderr for the duration of fn and returns
 // whatever was written to it.
+//
+// The pipe is drained by a goroutine started BEFORE fn runs, and that ordering
+// is the whole point. A pipe write that fills the kernel buffer blocks the
+// writer until a reader takes bytes out, and on darwin a fresh pipe's buffer is
+// 512 bytes (Linux gives 64 KiB, which is why CI never saw this). The code
+// under test here writes more than that in one call: apiclient's retry notifier
+// prints a line per attempt on a transient 500, and warnServingCachedManifest
+// then adds a 179-byte notice. Reading only after fn returned meant nothing
+// drained the pipe while those writes happened, so
+// TestFetchServesCachedManifestOnServerFaultAndTransportError/500 blocked
+// forever inside Fetch and the package ended in `panic: test timed out`.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
@@ -27,18 +38,27 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
-	defer func() { os.Stderr = old }()
 
-	fn()
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
 
-	if cerr := w.Close(); cerr != nil {
-		t.Fatalf("close stderr pipe writer: %v", cerr)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatalf("read stderr pipe: %v", err)
-	}
-	return buf.String()
+	// Restore and close inside a defer so a t.Fatalf (runtime.Goexit) inside fn
+	// still releases the reader instead of leaking a blocked goroutine.
+	func() {
+		defer func() {
+			os.Stderr = old
+			_ = w.Close()
+		}()
+		fn()
+	}()
+
+	out := <-done
+	_ = r.Close()
+	return out
 }
 
 // DECISION RECORD (acceptance criterion #2): on a detected downgrade, Fetch

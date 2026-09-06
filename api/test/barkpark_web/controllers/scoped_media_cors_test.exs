@@ -25,7 +25,7 @@ defmodule BarkparkWeb.ScopedMediaCorsTest do
 
   ## The per-route verdict: (1) and (2) hold, (3) FAILS — on all four
 
-  The flat scope rides `[:media_public_cors, :api, :strict_bearer_media_read]`,
+  The flat scope rides `[:media_public_cors, :api, :api_strict_bearer]`,
   and NEITHER of those pipelines mounts `:fetch_session` or
   `OptionalSessionToken` — `:current_user` is unassignable there, so
   `Media.Storage.Access.account_member?/1` (the only session-reading arm of

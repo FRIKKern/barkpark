@@ -4660,3 +4660,100 @@ func TestSiteStageTimestampsReachTheJSONEnvelope(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteStatusRendersThePublishTrigger — dr-w11-bl-eight-sites-never-autodeploy.
+//
+// THE FAULT. Eight of guerrilla's thirteen sites had no content-publish webhook,
+// so a publish reached them never. `bp cloud site status` printed a header
+// indistinguishable from the five that did — and it could not do otherwise: no
+// webhook means no deploy is ever attempted, so the ledger has nothing to report
+// and every count on the page is honestly zero. An absence that nothing measures
+// reads exactly like health.
+//
+// The test drives the REAL wire through the REAL decoder into the REAL renderer,
+// because the failure this slice closes is TWO failures stacked: the control
+// plane emitting a key, and Go's json.Unmarshal dropping it in silence because no
+// struct field declared it.
+func TestSiteStatusRendersThePublishTrigger(t *testing.T) {
+	const wire = `{"id":"site-1","name":"auto-proof","slug":"auto-proof","kind":"static","framework":"astro","dataset":"production","publish_trigger":"absent"}`
+
+	var site cloudclient.SpawnSite
+	if err := json.Unmarshal([]byte(wire), &site); err != nil {
+		t.Fatalf("the wire payload must decode: %v", err)
+	}
+	// ANTI-VACUITY: prove the DECODE before asserting on the render, or a missing
+	// json tag would fail below and blame the renderer.
+	if site.PublishTrigger != "absent" {
+		t.Fatalf("SpawnSite.PublishTrigger did not DECODE: got %q — the json tag is missing, not the render", site.PublishTrigger)
+	}
+
+	out, buf, _ := newTestWriter()
+	renderKV(out, spawnSiteStatusMap(site, nil, nil, nil))
+	stdout := buf.String()
+
+	for _, want := range []string{
+		"publish trigger",
+		"no publish trigger — content publishes never reach this site",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("`bp cloud site status` must render %q — the absence is otherwise reportable from no surface:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestPublishTriggerLineSaysADifferentThingForEachVerdict pins the three-way
+// split. Collapsing any two re-creates the silence: `not_applicable` warned about
+// would train owners to ignore the row where it matters, and `present` claiming
+// LIVE rather than CONFIGURED would be the same unbacked green tick that let this
+// fault survive eight weeks. An empty string is a control plane that predates the
+// field — it must say NOTHING, never invent an absence.
+func TestPublishTriggerLineSaysADifferentThingForEachVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		wantSub string
+	}{
+		{in: "", want: ""},
+		{in: "absent", wantSub: "content publishes never reach this site"},
+		{in: "not_applicable", wantSub: "binds no content dataset"},
+		{in: "present", wantSub: "triggers a rebuild"},
+		// A word a newer control plane invents is echoed, never bucketed into one
+		// of the three above and never dropped.
+		{in: "quarantined", wantSub: "quarantined"},
+	} {
+		got := sitePublishTriggerLine(tc.in)
+		if tc.wantSub == "" {
+			if got != tc.want {
+				t.Errorf("sitePublishTriggerLine(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			continue
+		}
+		if !strings.Contains(got, tc.wantSub) {
+			t.Errorf("sitePublishTriggerLine(%q) = %q, want it to contain %q", tc.in, got, tc.wantSub)
+		}
+	}
+
+	// The three verdicts must not render the same sentence as each other.
+	seen := map[string]string{}
+	for _, v := range []string{"absent", "not_applicable", "present"} {
+		line := sitePublishTriggerLine(v)
+		if prev, dup := seen[line]; dup {
+			t.Fatalf("%q and %q render the SAME line %q — the split is what carries the meaning", prev, v, line)
+		}
+		seen[line] = v
+	}
+}
+
+// TestSiteStatusJSONCarriesThePublishTrigger — the machine surface, which is the
+// one a fleet sweep would read. Guarded: a control plane that predates the field
+// leaves the key OFF rather than sending a fabricated "absent".
+func TestSiteStatusJSONCarriesThePublishTrigger(t *testing.T) {
+	with := spawnSiteMap(cloudclient.SpawnSite{ID: "s1", PublishTrigger: "absent"})
+	if got := with["publish_trigger"]; got != "absent" {
+		t.Errorf(`spawnSiteMap must carry publish_trigger: got %v`, got)
+	}
+	without := spawnSiteMap(cloudclient.SpawnSite{ID: "s1"})
+	if _, ok := without["publish_trigger"]; ok {
+		t.Errorf("an unsent publish_trigger must be OMITTED, never rendered as an absence the CP did not claim: %v", without)
+	}
+}

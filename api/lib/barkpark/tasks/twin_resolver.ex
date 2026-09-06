@@ -165,6 +165,66 @@ defmodule Barkpark.Tasks.TwinResolver do
     |> choose(doc_id, opts)
   end
 
+  @doc """
+  Rule 3 for the TYPE-AGNOSTIC doors — the graph root resolver
+  (`BarkparkWeb.TasksController.resolve_graph_root/2`) and
+  `Barkpark.Content.Graph.resolve_doc/3`, the canonical slug resolver for EVERY
+  type.
+
+  Those doors are not task doors, so they cannot use `choose/3`: a second copy
+  of a NON-task document in another dataset is content replication working as
+  designed, and re-tiering their rows would change which row a non-task id
+  resolves to. This helper therefore does TWO things and no more:
+
+    * it decides only whether the door may answer at all — the caller's own
+      ordering still picks the row, so every non-task read stays byte-identical;
+    * it refuses ONLY the task case — the `type == "task"` rows this id names,
+      at the winning SPELLING tier (a published bare-id row outranks a
+      `drafts.` twin, rule 1), spanning more than one dataset, with no dataset
+      named by the caller.
+
+  Returns `:ok`, or RAISES `Barkpark.Tasks.AmbiguousTwinError` (rule 3 — 409
+  `ambiguous_dataset`, naming every dataset that holds the id). It raises for
+  the same reason the task doors do: each of these doors' callers collapses a
+  `nil`/`{:error, _}` into "not found", which is the silent-wrong-answer family
+  one level up.
+  """
+  @spec refuse_ambiguous_task!([Document.t()], String.t(), String.t() | nil) :: :ok
+  def refuse_ambiguous_task!(rows, doc_id, dataset \\ nil)
+
+  def refuse_ambiguous_task!(_rows, _doc_id, dataset)
+      when is_binary(dataset) and dataset != "",
+      do: :ok
+
+  def refuse_ambiguous_task!(rows, doc_id, _dataset) when is_list(rows) do
+    datasets =
+      rows
+      |> Enum.filter(&(&1.type == "task"))
+      |> winning_spelling_tier()
+      |> Enum.map(& &1.dataset)
+      |> Enum.uniq()
+
+    if length(datasets) > 1 do
+      raise AmbiguousTwinError.new(DraftId.published_id(doc_id), datasets)
+    else
+      :ok
+    end
+  end
+
+  # The winning tier for a door that orders only on spelling (`drafts.` last):
+  # bare-id rows when any exist, the `drafts.` twins otherwise. Deliberately
+  # coarser than `tier/1` — these doors never split on `status`, and giving them
+  # that split here would change a non-task read.
+  defp winning_spelling_tier(rows) do
+    case Enum.reject(rows, &draft_spelling?/1) do
+      [] -> rows
+      bare -> bare
+    end
+  end
+
+  defp draft_spelling?(%Document{doc_id: "drafts." <> _}), do: true
+  defp draft_spelling?(%Document{}), do: false
+
   # A bare id means either spelling; an explicit `drafts.` prefix means itself.
   defp spellings("drafts." <> _ = draft_id), do: [draft_id]
   defp spellings(doc_id), do: [doc_id, DraftId.draft_id(doc_id)]

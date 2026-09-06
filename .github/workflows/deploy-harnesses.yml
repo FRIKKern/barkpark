@@ -1,8 +1,56 @@
 name: Deploy harnesses
 
-# Venue (2026-09-05, task-33742276cf0a35b1): push-to-main + nightly, NOT pull_request.
-# 3.8 min per execution on a harness that does not test the PR's own code; the issue-filer job below is its reader.
+# VENUE, AMENDED 2026-09-06 (task-037c3c1494f0d59e; amends the 2026-09-05 ruling
+# in task-33742276cf0a35b1). The earlier line here read "push-to-main + nightly,
+# NOT pull_request — 3.8 min per execution on a harness that does not test the
+# PR's own code". Its premise was right for the PR fleet at large and WRONG for
+# the only PRs this workflow can ever see: on a PR that touches `deploy/**` the
+# harness tests EXACTLY the PR's own code. The consequence was measured
+# (task-037c3c1494f0d59e, 2026-09-06): the 184-check cp-deploy harness is green
+# on every push to main and HAS NEVER GATED A SINGLE PR. main IS the deploy, so
+# a post-merge red arrives after the box has already pulled — the harness could
+# only ever answer "did we already break it", never "would this break it".
+#
+# The amendment is a PATH FILTER, not an exception. The CI-policy rule as
+# written ("a PR runs only what can block it, or finishes under 60 s") has no
+# clause for work that is cheap IN AGGREGATE because it almost never fires; the
+# third clause proposed alongside this change is "...**or is PATH-FILTERED to
+# paths the PR actually changes**". Blast radius, measured: of the newest 400
+# merged PRs since 2026-08-07 (a `gh pr list -L 400` sample — a FLOOR on the
+# denominator; the true 30-day count is higher), 10 touched `deploy/**` or this
+# file — about 2.3 per week, <=2.5% of merges. The arm therefore costs roughly
+# 10 x 3.8 min per MONTH, not 3.8 min per push.
+#
+# VENUE IS DECIDED PER JOB, never per file:
+#   * offline-deploy-harnesses  — push + schedule + pull_request. It reads only
+#     deploy/** and this file; on a matching PR it IS the PR's own code.
+#   * git-2-34-fetch            — push/schedule only (`if:` below). It pulls the
+#     real remote's main inside an ubuntu:22.04 container; on a PR head that
+#     probe measures main, not the PR, and would be a 8-min container per PR for
+#     a verdict the PR cannot change.
+#   * report-main-failure       — push/schedule only. It FILES GITHUB ISSUES; a
+#     per-PR issue-filer is a spam machine. A PR red is read on the PR.
+#
+# WHY THIS CONTEXT STAYS ADVISORY AND CAN NEVER BE REQUIRED. A workflow-level
+# `paths:` filter emits NO check run at all on a non-matching PR, so a required
+# context pointing here would report "expected" forever and DEADLOCK every
+# unrelated PR (honest-gates D18; docs/ops/merge-gates.md, the S4 PATHS-FILTERED
+# exclusion and its note that a paths-filtered workflow "is invisible to that
+# census by construction"). Absence-on-non-matching-PRs is FINE for an advisory
+# check and is exactly what disqualifies it from the required set. The filter is
+# kept at workflow level here — and NOT pushed down into a dispatcher job the way
+# compose-smoke.yml and cloud.yml do it — precisely because those two publish
+# required names and this one must not. `scripts/shim-trigger-filter-check.sh`
+# forbids a workflow-level pull_request paths filter only on SHIMMED workflows
+# (6 of 62; this file is not one of them) — verified before this change landed.
 on:
+  pull_request:
+    # Mirrors the push list below, entry for entry, including the
+    # deploy_runner.ex entry and its @stage_names reasoning.
+    paths:
+      - "deploy/**"
+      - ".github/workflows/deploy-harnesses.yml"
+      - "api/lib/barkpark/sites/deploy_runner.ex"
   push:
     branches: [main]
     paths:
@@ -132,6 +180,10 @@ jobs:
     # against the real remote; reds if the pinned form stops working on 2.34 or
     # if cp-deploy.sh loses the pin. deploy/** only.
     name: cp-deploy.sh's pull form works on the box's git 2.34 (ubuntu:22.04 container)
+    # PUSH/SCHEDULE ONLY (venue note at the top of this file). It clones and
+    # pulls the REAL remote's main inside a container: on a PR head it measures
+    # main, not the PR, so it is 8 minutes for a verdict the PR cannot change.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -161,7 +213,11 @@ jobs:
   report-main-failure:
     name: Report main-push failure to a human
     needs: [offline-deploy-harnesses, git-2-34-fetch]
-    if: failure() && github.ref == 'refs/heads/main'
+    # PUSH/SCHEDULE ONLY, and belt-and-braces: this job FILES GITHUB ISSUES, so
+    # a per-PR arm would be a spam machine. The `github.ref` half already
+    # excludes pull_request (its ref is refs/pull/N/merge), the event_name half
+    # says so out loud so the venue is readable without knowing that.
+    if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -173,9 +229,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: deploy-harnesses-main
           CI_FAILURE_DETAIL: |
-            `deploy-harnesses` is RED on main. It left the pull_request path on 2026-09-05
-            (docs/ops/ci-workflow-verdicts.md, task-33742276cf0a35b1), so this
-            issue is its only reader: nobody sees a red here on a PR any more.
+            `deploy-harnesses` is RED on main. Since 2026-09-06 the
+            `offline-deploy-harnesses` job ALSO runs on pull requests that touch
+            `deploy/**`, this workflow, or `deploy_runner.ex`
+            (task-037c3c1494f0d59e, amending task-33742276cf0a35b1) — so a red
+            here means either the change reached main without a matching PR arm
+            (a non-`deploy/**` cause, or a merge queue race), or the push-only
+            `git-2-34-fetch` container job reds, which no PR ever runs. This
+            issue remains the ONLY reader for those two cases.
             Read the failed job's log, fix or revert on main, and close this issue
             once the next main-push or nightly run is green.
         run: bash scripts/file-ci-failure-issue.sh

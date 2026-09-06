@@ -13,7 +13,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
 
   ## Why `*` is safe HERE and nowhere else on the core API
 
-  The scope rides `[:api, :strict_bearer_media_read]`. NEITHER pipeline mounts
+  The scope rides `[:api, :api_strict_bearer]`. NEITHER pipeline mounts
   `:fetch_session` or `OptionalSessionToken`, so `conn.assigns[:current_user]`
   is NEVER set on these four routes — `Access.account_member?/1` (the only
   session-reading arm of `Access.authenticated?/1`) is false by construction.
@@ -35,7 +35,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
   ## Ordering
 
   `:media_public_cors` is piped FIRST, before `:api`, so a response produced by
-  a HALTING plug (the 401 from `:strict_bearer_media_read`'s
+  a HALTING plug (the 401 from `:api_strict_bearer`'s
   `strict_on_presented`, a 429 from `RateLimit`) still carries the header and
   the browser can read the real status instead of an opaque CORS failure.
   `serves the header even on the strict-bearer 401` pins that ordering.

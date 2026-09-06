@@ -124,6 +124,38 @@ arm_refusal() {
   rm -f "$log"
 }
 
+# Re-inspect the container's liveness and, when it has MOVED, fail with the
+# container-state cause rather than the caller's cause.
+#
+# THE DEFECT THIS CLOSES. The health-wait loop below inspects Running /
+# RestartCount / Health.Status every 5s and dies with a precise container-state
+# message — but it `break`s the moment health reads healthy, and nothing
+# re-inspected those two signals ever again. The very next statement was the
+# in-container wget. So a container that died, restarted, or lost its listener
+# in the window between the last health probe and the exec was reported as
+# "in-container wget /api/schemas failed": an HTTP probe failure, when what
+# actually happened was a boot crash. Measured twice (#12879, #12889); it sent
+# two investigations at the diff instead of at the boot.
+#
+# Called after the loop breaks AND on every probe failure, so an exec that
+# cannot connect always answers "is the container still there?" before blaming
+# the request. When the container IS still cleanly running this is a no-op and
+# the caller's own probe-failure message stands (that is the negative arm).
+assert_container_alive() { # assert_container_alive <cid> <where>
+  local cid="$1" where="$2" running restarts status
+  running="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+  restarts="$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo unknown)"
+  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo unknown)"
+  if [ "$running" = "true" ] && [ "$restarts" = "0" ]; then
+    return 0
+  fi
+  note "green arm: container re-inspected at ${where} — it is no longer cleanly running"
+  echo "── api container logs ──"
+  docker logs --tail 100 "$cid" 2>&1 || true
+  echo "────────────────────────"
+  die "green arm: api container is not cleanly running (running=$running restarts=$restarts health=$status) — with valid generated secrets a boot must never crash or restart"
+}
+
 # ── green arm ────────────────────────────────────────────────────────────────
 
 arm_green() {
@@ -170,10 +202,15 @@ arm_green() {
   done
   pass "api healthcheck healthy after ~${waited}s"
 
+  # The loop can only have broken on health=healthy. That is a PAST observation;
+  # re-read the present before the probes attribute anything to HTTP.
+  assert_container_alive "$cid" "after the health-wait loop"
+
   # IN-CONTAINER probes via exec, verbatim the charter D20 commands. busybox
   # wget exits non-zero on any HTTP error status, so exit 0 asserts the 200.
   note "green arm: in-container probe /api/schemas"
   if ! compose exec -T api wget -q -O /dev/null http://localhost:4000/api/schemas; then
+    assert_container_alive "$cid" "the failed /api/schemas probe"
     die "green arm: in-container wget /api/schemas failed"
   fi
   pass "/api/schemas serves in-container"
@@ -182,6 +219,7 @@ arm_green() {
   # actually fail. /api/schemas alone is structurally blind to a short secret.
   note "green arm: in-container probe /login (session route)"
   if ! compose exec -T api wget -q -O /dev/null http://localhost:4000/login; then
+    assert_container_alive "$cid" "the failed /login probe"
     die "green arm: in-container wget /login failed — the session route is the one a bad SECRET_KEY_BASE breaks"
   fi
   pass "/login serves in-container — session key derivation works"

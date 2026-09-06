@@ -13334,6 +13334,19 @@ defmodule BarkparkCloud.Web.Router do
       content_bound: content_bound_from_verdict(s.content_binding_verdict),
       content_binding_verdict: s.content_binding_verdict,
       content_binding_checked_at: s.content_binding_checked_at,
+      # dr-w11: DOES A CONTENT PUBLISH REACH THIS SITE AT ALL? "present" |
+      # "absent" | "not_applicable", derived from the row by
+      # `Registry.publish_trigger/1` and never stored — the truth lives on the
+      # box, and a stamped column would go stale the moment a webhook was deleted
+      # by hand. Until this key, the absence was reportable from NO surface: eight
+      # of guerrilla's thirteen sites had no content-publish trigger and every
+      # payload described them exactly like the five that did. Emitted for every
+      # site on every site-shaped route (one serializer), so `bp`, the SPA and the
+      # console all gain it at once. Read the honest bound on `publish_trigger/1`:
+      # "present" means CONFIGURED to receive triggers, not verified live on the
+      # box this second — confirming that costs a cross-host call a serializer
+      # must not make, which is what the hourly ContentWebhookReconciler is for.
+      publish_trigger: Atom.to_string(Registry.publish_trigger(s)),
       github_repo: s.github_repo,
       github_branch: s.github_branch,
       github_webhook_configured: not is_nil(s.github_webhook_secret_encrypted),
