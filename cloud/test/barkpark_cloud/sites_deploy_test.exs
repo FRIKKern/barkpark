@@ -1150,7 +1150,8 @@ defmodule BarkparkCloud.SitesDeployTest do
         "the box is at its build capacity (1 of 1 build slots in use) — " <>
           "site 'other-site' is building; retry when it finishes"
 
-      assert capacity_body =~ ~r/^the box is at its build capacity \(\d+ of \d+ build slots in use\) — /
+      assert capacity_body =~
+               ~r/^the box is at its build capacity \(\d+ of \d+ build slots in use\) — /
 
       FakeBoxRelay.program(
         start:
