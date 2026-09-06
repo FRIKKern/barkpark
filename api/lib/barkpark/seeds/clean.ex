@@ -105,7 +105,7 @@ defmodule Barkpark.Seeds.Clean do
   #      generate one and print it ONCE in the store-it-now banner. Raw
   #      tokens are SHA256-hashed at rest — unrecoverable after that print.
   defp bootstrap_admin_token(scope) do
-    if admin_token_present?(scope.dataset) do
+    if admin_token_present?(scope) do
       IO.puts("Admin token already present — skipping token bootstrap.")
     else
       case System.get_env("BARKPARK_SEED_ADMIN_TOKEN") do
@@ -121,9 +121,13 @@ defmodule Barkpark.Seeds.Clean do
     end
   end
 
-  defp admin_token_present?(dataset) do
-    dataset
-    |> Auth.list_tokens()
+  # Fenced to the SEED SCOPE's workspace, matching what mint_admin_token! below
+  # writes (create_token/5 stamps scope.workspace_id). `Auth.list_tokens/2`
+  # returns secret-free MAPS — `has_permission?/2` reads `:permissions` and the
+  # guard reads `:revoked_at`, both of which the select list carries.
+  defp admin_token_present?(scope) do
+    scope.workspace_id
+    |> Auth.list_tokens(scope.dataset)
     |> Enum.any?(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
