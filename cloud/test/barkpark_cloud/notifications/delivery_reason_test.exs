@@ -438,7 +438,7 @@ defmodule BarkparkCloud.Notifications.DeliveryReasonTest do
 
       {:ok, _} =
         Notifications.put_channel(team, "discord", true, %{
-          "url" => "https://discord.com/api/webhooks/1/abc"
+          "url" => "https://203.0.113.11/api/webhooks/1/abc"
         })
 
       {:ok, team: team}

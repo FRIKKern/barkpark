@@ -1,11 +1,14 @@
 defmodule BarkparkCloud.Notifications.SafeUrl do
   @moduledoc """
-  SSRF guard for the GENERIC webhook channel — a port of Coolify's
-  `app/Rules/SafeWebhookUrl.php`. The five first-party channels (Discord, Slack,
-  Telegram, Pushover) post to known provider domains and skip this; only
-  `Channels.Webhook` (an operator-supplied arbitrary URL) is gated, at BOTH
-  validation time (`put_channel`) and send time (defense in depth, the way Coolify
-  re-checks inside `SendWebhookJob`).
+  SSRF guard for EVERY url-bearing channel — a port of Coolify's
+  `app/Rules/SafeWebhookUrl.php`. `discord`, `slack` and `webhook` all carry the
+  same `%{"url" => …}` credential, and a Slack/Discord incoming-webhook URL is
+  pasted by the operator exactly as a generic webhook URL is, so all three are
+  gated at BOTH validation time (`Notifications.put_channel/4`) and send time
+  (defense in depth, the way Coolify re-checks inside `SendWebhookJob`). Both
+  fences key on the credential SHAPE, so a url-bearing type added later is gated
+  the day it lands. Telegram and Pushover carry no URL credential and are not
+  gated here — their endpoints are constants in their shapers.
 
   ## What it blocks — and the one improvement over Coolify
 

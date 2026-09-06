@@ -839,7 +839,7 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
 
     {:ok, _} =
       Notifications.put_channel(team, "slack", true, %{
-        "url" => "https://hooks.slack.com/services/T0/B0/xxx"
+        "url" => "https://203.0.113.12/services/T0/B0/xxx"
       })
 
     {team, emails}

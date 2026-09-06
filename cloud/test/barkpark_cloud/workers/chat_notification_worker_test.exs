@@ -19,7 +19,7 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorkerTest do
 
     {:ok, _} =
       Notifications.put_channel(team, "discord", true, %{
-        "url" => "https://discord.com/api/webhooks/1/abc"
+        "url" => "https://203.0.113.11/api/webhooks/1/abc"
       })
 
     team
@@ -42,7 +42,7 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorkerTest do
 
     # One request went out, to the discord webhook URL.
     assert [req] = FakeHttpClient.requests()
-    assert req.url =~ "discord.com/api/webhooks"
+    assert req.url =~ "203.0.113.11/api/webhooks"
 
     # A durable delivery row was written with the provider status.
     assert [%Delivery{status: "sent", http_status: 204, channel: "discord"}] =
@@ -122,7 +122,7 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorkerTest do
 
     # Exactly ONE request went out — the redirect Location was NOT fetched.
     assert [req] = FakeHttpClient.requests()
-    assert req.url =~ "discord.com/api/webhooks"
+    assert req.url =~ "203.0.113.11/api/webhooks"
     refute Enum.any?(FakeHttpClient.requests(), &(&1.url =~ "169.254.169.254"))
 
     # And the Location target itself resolves private, so even a re-validated

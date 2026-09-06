@@ -72,7 +72,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
         %{
           "type" => "discord",
           "enabled" => true,
-          "credentials" => %{"url" => "https://discord.com/api/webhooks/1/topsecret"}
+          "credentials" => %{"url" => "https://203.0.113.11/api/webhooks/1/topsecret"}
         },
         token
       )
@@ -116,7 +116,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
         %{
           "type" => "slack",
           "enabled" => true,
-          "credentials" => %{"url" => "https://hooks.slack.com/x"}
+          "credentials" => %{"url" => "https://203.0.113.12/x"}
         },
         token
       )
@@ -146,7 +146,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
         %{
           "type" => "discord",
           "enabled" => true,
-          "credentials" => %{"url" => "https://discord.com/x"}
+          "credentials" => %{"url" => "https://203.0.113.11/x"}
         },
         token
       )
@@ -186,7 +186,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
         %{
           "type" => "discord",
           "enabled" => false,
-          "credentials" => %{"url" => "https://discord.com/x"}
+          "credentials" => %{"url" => "https://203.0.113.11/x"}
         },
         token
       )
@@ -213,7 +213,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
         %{
           "type" => "slack",
           "enabled" => true,
-          "credentials" => %{"url" => "https://hooks.slack.com/x"}
+          "credentials" => %{"url" => "https://203.0.113.12/x"}
         },
         token
       )
@@ -285,7 +285,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
           %{
             "type" => "slack",
             "enabled" => true,
-            "credentials" => %{"url" => "https://hooks.slack.com/x"}
+            "credentials" => %{"url" => "https://203.0.113.12/x"}
           },
           token
         )
@@ -371,7 +371,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
           %{
             "type" => "slack",
             "enabled" => true,
-            "credentials" => %{"url" => "https://hooks.slack.com/x"}
+            "credentials" => %{"url" => "https://203.0.113.12/x"}
           },
           token
         )

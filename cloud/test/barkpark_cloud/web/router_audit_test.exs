@@ -1259,7 +1259,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
           %{
             "type" => "slack",
             "enabled" => true,
-            "credentials" => %{"url" => "https://hooks.slack.com/services/secret-hook"}
+            "credentials" => %{"url" => "https://203.0.113.12/services/secret-hook"}
           },
           token
         )
@@ -1274,7 +1274,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
       refute Enum.any?(
                Map.values(ev.metadata),
-               &(&1 == "https://hooks.slack.com/services/secret-hook")
+               &(&1 == "https://203.0.113.12/services/secret-hook")
              )
     end
 

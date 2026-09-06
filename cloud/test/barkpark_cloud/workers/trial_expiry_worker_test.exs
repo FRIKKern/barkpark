@@ -230,7 +230,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
 
     {:ok, _} =
       BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
-        "url" => "https://hooks.slack.com/x"
+        "url" => "https://203.0.113.12/x"
       })
 
     assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
@@ -270,7 +270,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
 
     {:ok, _} =
       BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
-        "url" => "https://hooks.slack.com/x"
+        "url" => "https://203.0.113.12/x"
       })
 
     {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
@@ -599,7 +599,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
 
       {:ok, _} =
         BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
-          "url" => "https://hooks.slack.com/x"
+          "url" => "https://203.0.113.12/x"
         })
 
       assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
@@ -691,7 +691,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
 
         {:ok, _} =
           BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
-            "url" => "https://hooks.slack.com/x"
+            "url" => "https://203.0.113.12/x"
           })
 
         assert {:ok, summary} = perform_job(TrialExpiryWorker, %{})
