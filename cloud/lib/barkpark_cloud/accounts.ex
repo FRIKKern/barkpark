@@ -487,6 +487,87 @@ defmodule BarkparkCloud.Accounts do
     |> Repo.all()
   end
 
+  # The `target_type` an account-security row stamps for the human it is about.
+  # `audit_account_security/2` in the router writes `target_type: "user",
+  # target_id: user.id` alongside `actor_user_id: user.id`; the self predicate
+  # below is only meaningful against that spelling, so it is named once here
+  # rather than inlined as a bare string in a `where`.
+  @self_audit_target_type "user"
+
+  @doc """
+  The MEMBER SELF-READ over account-security audit rows: the rows where `user` is
+  BOTH THE ACTOR AND THE TARGET. Newest first, same shape and same cursor as
+  `list_audit_events/2`.
+
+  THE PREDICATE IS COMPOUND, DELIBERATELY (the owner's ruling of 2026-08-23).
+  "Self" on an audit row is not a column — a row carries an actor, a target and a
+  team. This function requires ALL of:
+
+    * `actor_user_id == user.id` — the member did it, and
+    * `target_type == "user"` AND `target_id == user.id` — it was done TO them.
+
+  A row where the member is the TARGET but not the actor (an admin disabling
+  someone else's 2FA) is NOT self-scoped and is NOT returned; neither is the
+  reverse (the member acting on someone else). Both halves are load-bearing: a
+  single-column check would satisfy one direction and silently fail the other.
+
+  The general team trail (`list_audit_events/2`, `GET /v1/audit`) is UNTOUCHED
+  and stays admin-gated. This is an additional, strictly narrower read, not a
+  widening of that one.
+
+  ## THE MOVED-MEMBER DECISION — `:team_scope`
+
+  Audit team scoping resolves by PRIMARY-TEAM-AT-WRITE-TIME (`audit_account_security/2`
+  stamps `conn.assigns.current_team`), so a member whose primary team later
+  changes has rows sitting under a FORMER team. Either answer is implementable
+  and the query would silently pick one, so the choice is an EXPLICIT OPTION with
+  a default, never something emergent:
+
+    * `:across_teams` (DEFAULT, and the shipped behaviour) — the member sees
+      their own actor=self AND target=self rows REGARDLESS of which team each row
+      was written under. The rows are about THEM, not about the team: "I enabled
+      2FA on my account" is a fact about one human's credentials, and losing
+      sight of it because an admin moved them between teams would make the
+      security history a member is being given deliberately incomplete — the
+      exact cost the ruling refused to carry.
+    * `:current_team` — clamp to one team; pass `:team` alongside. Not wired to
+      any route today; it exists so the alternative is a NAMED clause a reader
+      can see was considered, not an absence.
+
+  `opts`: `:limit` (default 50, capped 200, floored 1), `:before` + `:before_id`
+  (the same compound keyset cursor as `list_audit_events/2`), `:action_prefix`,
+  `:team_scope` (`:across_teams` | `:current_team`) and `:team`.
+
+  Preloads `:actor_user`, so the row renders identically to a `/v1/audit` row.
+  """
+  @spec list_self_security_audit_events(User.t() | binary(), keyword()) :: [AuditEvent.t()]
+  def list_self_security_audit_events(user, opts \\ []) do
+    uid = user_id(user)
+    limit = opts |> Keyword.get(:limit, 50) |> min(200) |> max(1)
+
+    AuditEvent
+    |> where([e], e.actor_user_id == ^uid)
+    |> where([e], e.target_type == ^@self_audit_target_type and e.target_id == ^uid)
+    |> self_audit_team_scope(Keyword.get(opts, :team_scope, :across_teams), opts[:team])
+    |> maybe_audit_before(opts[:before], opts[:before_id])
+    |> maybe_audit_action_prefix(opts[:action_prefix])
+    |> order_by([e], desc: e.inserted_at, desc: e.id)
+    |> limit(^limit)
+    |> preload(:actor_user)
+    |> Repo.all()
+  end
+
+  # The moved-member decision, IN CODE. Two named clauses, so the shipped answer
+  # is a value the caller passes and not a property of whichever `where` happened
+  # to be written. `:across_teams` adds NO team predicate at all — that absence is
+  # the decision, which is why it has a clause of its own instead of being the
+  # fall-through of a `maybe_`.
+  defp self_audit_team_scope(query, :across_teams, _team), do: query
+
+  defp self_audit_team_scope(query, :current_team, team) do
+    where(query, [e], e.team_id == ^team_id(team))
+  end
+
   # The keyset cursor. The trail is ordered by the COMPOUND key
   # `(inserted_at DESC, id DESC)`, so the page predicate has to compare that same
   # compound key or the page boundary is not a real cut: with a stamp-only
