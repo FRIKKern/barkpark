@@ -1569,6 +1569,17 @@
    summary pair preserves keyboard and disclosure semantics without JS. */
 .bp-paper-edit-block:has(.bp-paper-contextual-editor) { margin-top: 0; }
 .bp-paper-contextual-editor { position: relative; }
+/* Figure is a reader-wide evidence surface. Expand the editor block itself to
+   that same band so its hover outline and floating toolbar surround the child
+   and caption instead of staying behind in the narrow prose column. The inner
+   reader-style figure then resolves its inherited pull to zero inside the
+   already-expanded block. Keep this scoped to the contextual Figure editor;
+   legacy canvas Figures and reader output retain their existing geometry. */
+.bp-paper-edit-block[data-block-type="figure"]:has(.bp-paper-figure-editor-frame) {
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+}
 .bp-expandable__body > .bp-paper-edit-canvas:first-child .bp-paper-editor-body .ProseMirror > :first-child {
   margin-top: 0;
 }

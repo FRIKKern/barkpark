@@ -7,6 +7,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
+  @editor_shell_css Path.expand(
+                      "../../../../../priv/static/assets/bp-paper-editor-shell.css",
+                      __DIR__
+                    )
+
   test "Figure is creatable with the canonical singular child shape" do
     html =
       render_component(&PaperEditor.paper_block_editor/1,
@@ -65,6 +70,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
     assert LazyHTML.attribute(frame, "style") == [
              "margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"
            ]
+  end
+
+  test "Figure editing chrome expands to the same evidence band as the reader frame" do
+    css = File.read!(@editor_shell_css)
+
+    assert css =~
+             ~r/\.bp-paper-edit-block\[data-block-type="figure"\]:has\(\.bp-paper-figure-editor-frame\)\s*\{[^}]*margin-inline:\s*var\(--bp-evidence-pull,\s*0px\);[^}]*width:\s*var\(--bp-evidence-width,\s*100%\);/s
   end
 
   test "generic Beta recursively edits the child and keeps caption as a sibling form" do
