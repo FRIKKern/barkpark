@@ -2017,6 +2017,23 @@ function fixtureDeskHtml(site, { paneAtLoad = false } = {}) {
     // not. A third identical one only costs another 16s of dead-row cap on /rot/.
     { id: "item-sheet", value: "sheet", label: "Sheets" },
   ];
+  // THE DOCUMENT ROWS. /good/ carries THREE — spd-w19-census-doc-row-coverage
+  // c2 needs more than one, because with a single row the "the row was gone from
+  // the desk when its turn came" shape cannot occur offline at all and the
+  // recovery could never be asserted. Three means the census has to recover
+  // TWICE to measure them all.
+  //
+  // /rot/ carries ONE, and that is the same arithmetic the two-Structure-row
+  // comment above makes: on /rot/ every row is dead, so each extra one costs a
+  // full 16s of dead-row cap (2 presses × the 3s LEG_C_ROW_CAP, plus probes) and
+  // buys no red that the first row does not already buy. Three of them ran /rot/
+  // to 128.5s of its 150s LEG_C_BUDGET — a fixture that truncates reds this
+  // self-test, so the margin is the point.
+  const docRows = [
+    { id: "doc-fossil-old",   value: "paper-fossil-old",   title: "An older paper", label: "An older paper, published" },
+    { id: "doc-fossil-two",   value: "paper-fossil-two",   title: "A second paper", label: "A second paper, published" },
+    { id: "doc-fossil-three", value: "paper-fossil-three", title: "A third paper",  label: "A third paper, published" },
+  ].slice(0, site === "rot" ? 1 : 3);
   const decoy =
     site === "rot"
       ? `<button type="button" class="pane-item" id="item-counts-decoy" phx-click="select" phx-value-id="counts-decoy" phx-value-pane="0"><span class="pane-item-label">Counts only</span></button>`
@@ -2074,15 +2091,7 @@ ${decoy}
   // away. Both matter — the second is what a doc row's RECOVERY navigates back
   // to, and if the two disagreed the recovery would be testing a pane the press
   // never produces.
-  var DOC_ROWS = [
-    { id: "doc-fossil-old",   value: "paper-fossil-old",   title: "An older paper",  label: "An older paper, published" },
-    // MORE THAN ONE DOC ROW is the point (spd-w19-census-doc-row-coverage c2):
-    // with a single row the "the row was gone when its turn came" shape cannot
-    // occur offline at all, so the recovery could never be asserted. Three rows
-    // means the census must recover TWICE to measure them all.
-    { id: "doc-fossil-two",   value: "paper-fossil-two",   title: "A second paper",  label: "A second paper, published" },
-    { id: "doc-fossil-three", value: "paper-fossil-three", title: "A third paper",   label: "A third paper, published" },
-  ];
+  var DOC_ROWS = ${JSON.stringify(docRows)};   // three on /good/, one on /rot/ — see docRows
   var DOC_PANE_HTML =
     '<div class="pane-column" id="pane-papers">' +
     // The DECOY first, exactly as components.ex:1106 renders it: same class,
@@ -2706,15 +2715,21 @@ const CENSUS_ROWS_GOOD = {
 };
 const SELF_TEST_CENSUS_EXPECT = {
   good: CENSUS_ROWS_GOOD,
+  // /rot/ SERVES ONE DOC ROW, not three (see `docRows`), so the other two are
+  // NOT named here: the coverage guard reds BOTH ways, and a key named for a row
+  // the fixture never renders is as much a fault as a row nobody named. Hence a
+  // literal rather than a spread of CENSUS_ROWS_GOOD.
   rot: {
-    ...CENSUS_ROWS_GOOD,
+    'plugin_link#plugin-link-tickets|Tickets': PASS,
+    'pane_item#item-paper|Papers': PASS,
+    'add_btn#(no id)|title:"Share access to paper"': PASS,
+    'add_btn#(no id)|title:"Review scoped access grants"': PASS,
+    'add_btn#(no id)|New paper': PASS,
     // /rot/'s dead rows — the reds LEG C exists to produce, each for a stated
     // reason rather than because the fixture wired nothing.
     'pane_item#item-sheet|Sheets': FAIL,
     'collapsed_strip#pane-navigate|Back to Navigate': FAIL,
     'pane_doc_item#doc-fossil-old|An older paper, published': FAIL,
-    'pane_doc_item#doc-fossil-two|A second paper, published': FAIL,
-    'pane_doc_item#doc-fossil-three|A third paper, published': FAIL,
     'pane_item#item-counts-decoy|Counts only': FAIL,
     'pane_item#item-decoy-spawn|Spawned by the counts decoy': FAIL,
     // THE PRESENCE TRIPWIRE, fired. /rot/ renders one `.pane-section-header`;
