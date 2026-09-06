@@ -478,6 +478,46 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   end
 
   ## ── ROW 2: the NEGATIVE CONTROL — the sixth FK edge is not a cascade ───
+  #
+  # C0 RULING (cch-w57-bl-deleting-a-fleet-main-orphans-its-support-box, settled
+  # 2026-09-06): `:nilify_all` IS DELIBERATE. The evidence is in the migration
+  # that chose it, written in the SAME commit as the column — 41794061c, Frikk
+  # Jarl, 2026-07-23, "feat(cloud): fleet group record" (PR #5931) —
+  # `priv/repo/migrations/20260723000000_add_fleet_group_to_barkparks.exs`
+  # lines 15-17, verbatim:
+  #
+  #     *  `fleet_parent_id` — a SELF-referential FK to the main's `barkparks.id`, set
+  #                            ONLY on support rows. `on_delete: :nilify_all` — deleting
+  #                            a main orphans (does not cascade-delete) its supports;
+  #                            they become ungrouped rather than silently vanishing.
+  #
+  # and line 25 spends real money on that choice, indexing for it: "the
+  # `nilify_all` scan a main-delete triggers". A support box is a MACHINE the
+  # team is paying Hetzner for; the main is its GROUPING, not its owner, so a
+  # cascade would silently destroy a server the operator never named in the
+  # confirm they typed. Charter D667 reaches the same reading from the other
+  # side, treating the edge as this register's built-in negative control.
+  #
+  # SO THE RESIDUE IS NOT A DEFECT IN THE FK. It is a defect in the SENTENCE:
+  # the console tears down the main and never says the support box is still
+  # standing and still billed. That half is the console lane's (`app.js` is
+  # fenced out of this slice), and this row now pins the SERVER-side fact that
+  # half depends on:
+  #
+  #   THE CONFIRM NEEDS NO NEW PAYLOAD FIELD. There is no `fleet_children` key
+  #   and there should not be one: `GET /v1/barkparks` already carries
+  #   `fleet_role` and `fleet_parent_id` on EVERY row, and `app.js` already has
+  #   `supportsOf(list, mainId)` (app.js:9761) filtering on exactly that pair —
+  #   it is what `fleetSupportCardHtml` renders on the very instance page the
+  #   Decommission button sits on, off the same `fleetCache` `loadInstance`
+  #   awaits before it paints. `confirmDecommission/1` simply never calls it.
+  #   Adding a second, server-computed source for a fact the client already
+  #   holds would buy nothing and cost a permanently UNREAD key in
+  #   `payload_key_set_census_test.exs`.
+  #
+  #   Which means the console's sentence would go SILENTLY BLANK — no error, no
+  #   red — if either key ever left that payload. LEG 1 below is the guard for
+  #   that, taken on the driven wire and not on the serializer's source.
 
   test "ROW 2 (NEGATIVE CONTROL) — fleet_parent_id is :nilify_all: deleting a fleet MAIN leaves its SUPPORT box standing, orphaned" do
     {_user, team, token} = logged_in()
@@ -492,15 +532,39 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert support.fleet_parent_id == main.id,
            "the support box was not grouped — nothing to orphan"
 
+    # ── LEG 1: BEFORE THE BUTTON, the payload the confirm reads can NAME the
+    # box this delete is about to orphan. Driven over HTTP, because what the
+    # console gets is the wire, not the struct.
+    before_list = call(:get, "/v1/barkparks", nil, token)
+    assert before_list.status == 200
+
+    support_row =
+      before_list
+      |> json_body()
+      |> Map.fetch!("barkparks")
+      |> Enum.find(&(&1["id"] == support.id))
+
+    assert support_row,
+           "the support box is absent from GET /v1/barkparks — the read `loadInstance` " <>
+             "awaits before it paints the Decommission button, so the confirm has nothing " <>
+             "to name"
+
+    assert support_row["fleet_role"] == "support" and
+             support_row["fleet_parent_id"] == main.id,
+           "GET /v1/barkparks no longer carries the (fleet_role, fleet_parent_id) PAIR that " <>
+             "app.js's supportsOf/2 filters on, so the decommission confirm cannot name the " <>
+             "box this delete orphans and its sentence goes silently blank. Row: " <>
+             inspect(support_row)
+
     conn = call(:delete, "/v1/barkparks/#{main.id}", nil, token)
     assert conn.status == 200
 
     assert Repo.get(Barkpark, main.id) == nil
 
-    # ONE delete, TWO opposite outcomes: the main vanishes, the support machine
-    # SURVIVES — still a row, still billable, no longer grouped to anything.
-    # Migration 20260723000000_add_fleet_group_to_barkparks.exs:30 declares
-    # `on_delete: :nilify_all`, and this is that declaration, driven.
+    # ── LEG 2: ONE delete, TWO opposite outcomes: the main vanishes, the
+    # support machine SURVIVES — still a row, still billable, no longer grouped
+    # to anything. Migration 20260723000000_add_fleet_group_to_barkparks.exs:30
+    # declares `on_delete: :nilify_all`, and this is that declaration, driven.
     assert %Barkpark{} = survivor = Repo.get(Barkpark, support.id)
 
     assert survivor.fleet_parent_id == nil,
@@ -510,6 +574,22 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert survivor.fleet_role == "support",
            "the orphaned box no longer calls itself a support machine — nothing in the delete path " <>
              "should have touched this column"
+
+    # ── LEG 3: and the orphan is still SERVED — it did not merely survive in
+    # Postgres, it keeps appearing on the dashboard as a machine, which is what
+    # makes "still billed, no longer grouped" a user-visible residue rather than
+    # a schema curiosity.
+    orphan_row =
+      call(:get, "/v1/barkparks", nil, token)
+      |> json_body()
+      |> Map.fetch!("barkparks")
+      |> Enum.find(&(&1["id"] == support.id))
+
+    assert orphan_row, "the orphaned support box vanished from the fleet listing after the delete"
+
+    assert orphan_row["fleet_parent_id"] == nil,
+           "the listing still shows the orphan grouped to a main that no longer exists: " <>
+             inspect(orphan_row)
   end
 
   ## ── ROW 3: THE METERING ROW ──────────────────────────────────────────────
