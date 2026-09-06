@@ -604,4 +604,58 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     # EVERY row names its remedy, not just the one under test.
     assert Enum.all?(body["barkparks"], &is_binary(&1["remedy"]))
   end
+
+  # Console review of #16486, folded in: a box with NO token ever and NO check-in
+  # is provisioning, not disarmed. Its remedy must say what TO do (wait, re-check
+  # after N minutes) and must NOT be the terminal "re-provision or resurrect".
+  test "a still-provisioning box (no token ever, never seen) gets a WAIT remedy with a clock, not re-provision" do
+    {operator, team} = operator_fixture()
+    token = session_token(operator)
+
+    fresh = barkpark_fixture(team)
+    assert fresh.last_seen_at == nil, "the fixture must never have checked in"
+
+    conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
+    assert conn.status == 200
+    row = Enum.find(json_body(conn)["barkparks"], &(&1["slug"] == fresh.slug))
+    assert row, "a never-armed box must still be IN the census — it holds no live token"
+
+    assert row["token_count"] == 0
+    assert row["inserted_at"], "inserted_at rides on the row so the operator can see the clock"
+    assert row["remedy"] =~ "still provisioning"
+    assert row["remedy"] =~ ~r/re-check this census after \d+ min/
+    refute row["remedy"] =~ "resurrect"
+    refute row["remedy"] =~ ~r/^re-provision/
+  end
+
+  test "a never-armed box registered PAST the support-provision threshold is told the provision never completed" do
+    {operator, team} = operator_fixture()
+    token = session_token(operator)
+
+    old = barkpark_fixture(team)
+    past = DateTime.add(DateTime.utc_now(), -(Registry.stale_after_seconds("provision_support") + 60), :second)
+    {:ok, _} = old |> Ecto.Changeset.change(inserted_at: past) |> Repo.update()
+
+    conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
+    row = Enum.find(json_body(conn)["barkparks"], &(&1["slug"] == old.slug))
+    assert row
+
+    assert row["remedy"] =~ "the provision never completed"
+    assert row["remedy"] =~ "Re-provision the box"
+    refute row["remedy"] =~ "still provisioning"
+  end
+
+  test "a DISARMED box (had a token, revoked) keeps the terminal remedy — the wait branch is scoped to never-armed" do
+    {operator, team} = operator_fixture()
+    token = session_token(operator)
+
+    disarmed = barkpark_fixture(team)
+    {:ok, pt, _t} = Registry.mint_agent_token(disarmed, "report:health")
+    {:ok, _} = Registry.revoke_agent_token(pt)
+
+    conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
+    row = Enum.find(json_body(conn)["barkparks"], &(&1["slug"] == disarmed.slug))
+    assert row["remedy"] =~ "re-provision or resurrect"
+    refute row["remedy"] =~ "still provisioning"
+  end
 end

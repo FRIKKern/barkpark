@@ -5631,6 +5631,7 @@ defmodule BarkparkCloud.Registry do
         agent_status: b.agent_status,
         suspended: b.suspended,
         last_seen_at: b.last_seen_at,
+        inserted_at: b.inserted_at,
         token_count: count(t.id),
         revoked_token_count: count(fragment("CASE WHEN ? IS NOT NULL THEN 1 END", t.revoked_at)),
         last_revoked_at: max(t.revoked_at)
