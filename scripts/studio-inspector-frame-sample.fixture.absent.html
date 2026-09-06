@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>frame-sample fixture — INSTRUMENT-FAILURE (no inspector on the page)</title>
+<script>
+  (function () {
+    var w = window.innerWidth;
+    document.documentElement.dataset.widthBucket =
+      w >= 1280 ? 'wide' : w >= 1024 ? 'standard' : w >= 640 ? 'narrow' : 'phone';
+  })();
+</script>
+<link rel="stylesheet" href="studio-inspector-frame-sample.fixture.css">
+</head>
+<body>
+<div class="editor-with-preview">
+  <div class="editor-panel"><p>a desk with no inspector</p></div>
+</div>
+</body>
+</html>

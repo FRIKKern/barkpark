@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>frame-sample fixture — MISS (open panel flashes for a few frames)</title>
+<script>
+  (function () {
+    var w = window.innerWidth;
+    document.documentElement.dataset.widthBucket =
+      w >= 1280 ? 'wide' : w >= 1024 ? 'standard' : w >= 640 ? 'narrow' : 'phone';
+  })();
+</script>
+<link rel="stylesheet" href="studio-inspector-frame-sample.fixture.css">
+</head>
+<body>
+<div class="editor-with-preview">
+  <div class="editor-panel"><p>the reading column</p></div>
+  <!-- data-user-opened is present at parse time and removed three frames later.
+       The bucket precondition HOLDS throughout (standard), so this run is a
+       valid reading that reports MISS — not a void one. -->
+  <aside id="bp-doc-sidebar" class="bp-doc-sidebar is-open" data-user-opened>
+    <div class="bp-doc-sidebar__head">
+      <button class="bp-doc-sidebar__collapse" data-test-id="sidebar-toggle-panel">&#9776;</button>
+      <span class="bp-doc-sidebar__title">Document</span>
+    </div>
+    <div class="bp-doc-sidebar__body">inspector contents</div>
+  </aside>
+</div>
+<script>
+  (function () {
+    var n = 0;
+    function tick() {
+      if (++n >= 3) {
+        document.getElementById('bp-doc-sidebar').removeAttribute('data-user-opened');
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  })();
+</script>
+</body>
+</html>

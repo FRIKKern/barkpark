@@ -1,0 +1,38 @@
+/* Copied VERBATIM from the shipped api/lib/barkpark_web/layouts/root.html.heex
+   <style> block (the three rules spd-b29 criterion 0 quotes). A fixture that
+   re-typed the rule would prove the harness sees a rule this repo does not
+   ship. Line references are to root.html.heex at the base sha in the run JSON:
+   .bp-doc-sidebar (2069), .is-open (2081), .is-collapsed (2082), and the
+   painted-closed pair (2126, 2141-2142). */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; }
+.editor-with-preview { display: flex; height: 100vh; }
+.editor-panel { flex: 1 1 auto; min-width: 0; background: #fff; }
+
+.bp-doc-sidebar {
+  display: flex; flex-direction: column;
+  border-left: 1px solid #ddd; background: #f6f6f6; overflow: hidden;
+}
+.bp-doc-sidebar.is-open { flex: 0 0 300px; min-width: 0; }
+.bp-doc-sidebar.is-collapsed { flex: 0 0 auto; }
+
+html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) {
+  position: static;
+  flex: 0 0 auto;
+  width: auto;
+  transform: none;
+  box-shadow: none;
+  z-index: auto;
+}
+html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
+html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
+  display: none;
+}
+
+.bp-doc-sidebar__head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid #ddd;
+}
+.bp-doc-sidebar__collapse { background: none; border: 0; cursor: pointer; width: 24px; height: 24px; }
+.bp-doc-sidebar__title { font-size: 12px; white-space: nowrap; }
+.bp-doc-sidebar__body { overflow-y: auto; padding: 12px; flex: 1 1 auto; }

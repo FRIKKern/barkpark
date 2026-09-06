@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>frame-sample fixture — MEET (painted closed from frame zero)</title>
+<!-- The pre-paint stamp, the same shape as the shipped <head> script: it runs
+     synchronously in <head>, before the body is parsed and before first paint,
+     so html[data-width-bucket] is already "standard" when the cascade first
+     resolves .bp-doc-sidebar. This is the fixture of a CORRECT build. -->
+<script>
+  (function () {
+    var w = window.innerWidth;
+    document.documentElement.dataset.widthBucket =
+      w >= 1280 ? 'wide' : w >= 1024 ? 'standard' : w >= 640 ? 'narrow' : 'phone';
+  })();
+</script>
+<link rel="stylesheet" href="studio-inspector-frame-sample.fixture.css">
+</head>
+<body>
+<div class="editor-with-preview">
+  <div class="editor-panel"><p>the reading column</p></div>
+  <aside id="bp-doc-sidebar" class="bp-doc-sidebar is-open">
+    <div class="bp-doc-sidebar__head">
+      <button class="bp-doc-sidebar__collapse" data-test-id="sidebar-toggle-panel"
+              onclick="var a=document.getElementById('bp-doc-sidebar');
+                       if (a.hasAttribute('data-user-opened')) a.removeAttribute('data-user-opened');
+                       else a.setAttribute('data-user-opened','');">&#9776;</button>
+      <span class="bp-doc-sidebar__title">Document</span>
+    </div>
+    <div class="bp-doc-sidebar__body">inspector contents</div>
+  </aside>
+</div>
+</body>
+</html>
