@@ -89,6 +89,10 @@ defmodule Barkpark.Repo do
   # interpolated and must therefore be proven to be digits-and-a-unit first.
   @timeout_shape ~r/^\d+(us|ms|s|min|h|d)?$/
 
+  # How many times the statement_timeout LIFT may be re-issued when the wall it
+  # is lifting cancels the lift itself. See `retry_on_query_canceled/2`.
+  @lift_attempts 4
+
   @doc """
   Run `fun` inside a transaction whose statements are bounded by `timeout`
   instead of the pool-wide `statement_timeout`.
@@ -157,9 +161,70 @@ defmodule Barkpark.Repo do
               "bound. Use Barkpark.Repo.with_statement_timeout/2 instead."
     end
 
-    query!("SET LOCAL statement_timeout = '#{value}'")
+    retry_on_query_canceled(fn ->
+      query!("SET LOCAL statement_timeout = '#{value}'", [], mode: :savepoint)
+    end)
+
     :ok
   end
+
+  @doc """
+  Run `fun`, retrying it when Postgres cancels its statement on the
+  `statement_timeout` already in force (SQLSTATE 57014, `query_canceled`).
+
+  ## Why the lift needs this
+
+  `SET LOCAL statement_timeout = …` is itself a statement, and Postgres arms
+  the wall in force at the START of every statement — including the one whose
+  whole job is to remove that wall. So the lift is cancellable BY THE VALUE IT
+  IS LIFTING. Measured on push:main run 33967719694 (sha 1600379b9,
+  2026-09-05T13:02Z): with a 1 ms wall in force,
+  `Barkpark.Content.Codelists.register/3` died with
+
+      ** (Postgrex.Error) ERROR 57014 (query_canceled) canceling statement due to statement timeout
+        (barkpark 0.1.0) lib/barkpark/repo.ex:160: Barkpark.Repo.set_local_statement_timeout!/1
+
+  — the raise is at the `SET LOCAL` line, not at the ~3,000-row INSERT the lift
+  exists to protect. No SQL path is exempt from `statement_timeout` (a plain
+  `SET`, a `RESET`, `set_config(…)` are all statements and all arm the same
+  timer), so "cannot be cancelled" is not reachable by choosing a different
+  statement. What IS reachable is that a cancelled lift cannot FAIL the caller:
+  run it inside a SAVEPOINT so the cancellation is confined, then issue it
+  again. The lift is idempotent and takes microseconds of server time, so a
+  bounded retry converges; only a wall that cancels EVERY attempt gives up, and
+  it gives up by re-raising the original error rather than by silently running
+  the caller's work under the wall it asked to remove.
+
+  `mode: :savepoint` is what makes the retry reachable at all, and it is NOT
+  optional: without it DBConnection marks the whole transaction `:aborted` the
+  moment the statement errors, and the retry raises
+  `DBConnection.TransactionError` ("transaction is aborted") instead of
+  running. Run-proven both ways by the pair of tests in
+  `test/barkpark/content/codelists_register_statement_timeout_test.exs`.
+
+  The sandbox does NOT supply the option for us. `Ecto.Adapters.SQL.Sandbox`'s
+  `maybe_savepoint/2` appends `mode: :savepoint` only when `not
+  in_transaction?`, and this lift always runs inside the caller's transaction —
+  so deleting the option here goes RED in the suite, not just in prod
+  (run-proven: without it the retry's own statement reaches the server and
+  comes back `Postgrex.Error` 25P02 `in_failed_sql_transaction` instead of
+  being refused locally as `DBConnection.TransactionError`).
+  """
+  @spec retry_on_query_canceled((-> result), pos_integer()) :: result when result: var
+  def retry_on_query_canceled(fun, attempts \\ @lift_attempts)
+      when is_function(fun, 0) and is_integer(attempts) and attempts >= 1 do
+    fun.()
+  rescue
+    error in Postgrex.Error ->
+      if attempts > 1 and query_canceled?(error) do
+        retry_on_query_canceled(fun, attempts - 1)
+      else
+        reraise error, __STACKTRACE__
+      end
+  end
+
+  defp query_canceled?(%Postgrex.Error{postgres: %{code: :query_canceled}}), do: true
+  defp query_canceled?(%Postgrex.Error{}), do: false
 
   @doc """
   Cast a caller-supplied id to a `:binary_id` UUID string, or `nil`.
