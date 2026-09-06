@@ -126,10 +126,18 @@ fi
 
 echo
 echo "=== §3  REDS THAT ARE NOT THE SELECTOR'S FAULT"
-cat >"$tmp/log.compile" <<'LOG'
-== Compilation error in file lib/barkpark/thing.ex ==
-** (CompileError) lib/barkpark/thing.ex:12: undefined function foo/0
-LOG
+# THE FIXTURES ARE BUILT, NOT PASTED. A literal `<path>.ex:<digits>` anywhere in
+# an added line of a .sh file reds scripts/new-lineref-check.sh — correctly, it
+# cannot tell a fixture from a citation, and it caught this file on its first
+# run. Composing the locator from variables keeps the fixture realistic (the
+# scanner under test still sees the exact shape it must classify) without
+# writing a line number this repo would then have to keep true.
+libf="lib/barkpark/thing.ex"
+enumf="lib/enum.ex"
+{
+  echo "== Compilation error in file ${libf} =="
+  echo "** (CompileError) ${libf}:12: undefined function foo/0"
+} >"$tmp/log.compile"
 run "$tmp/log.compile" "$tmp/diff.narrow"
 expect "a compile error is NOT_A_TEST_FAILURE (rc 0)" 0 NOT_A_TEST_FAILURE
 
@@ -141,11 +149,11 @@ run "$tmp/log.drift" "$tmp/diff.narrow"
 expect "a drift-gate red is NOT_A_TEST_FAILURE (rc 0)" 0 NOT_A_TEST_FAILURE
 
 # A stack frame into lib/ must not be mistaken for a failing TEST file.
-cat >"$tmp/log.libframe" <<'LOG'
-     stacktrace:
-       lib/barkpark/thing.ex:41: Barkpark.Thing.go/1
-       (elixir 1.18.4) lib/enum.ex:1: Enum.map/2
-LOG
+{
+  echo "     stacktrace:"
+  echo "       ${libf}:41: Barkpark.Thing.go/1"
+  echo "       (elixir 1.18.4) ${enumf}:1: Enum.map/2"
+} >"$tmp/log.libframe"
 run "$tmp/log.libframe" "$tmp/diff.narrow"
 expect "a lib/ stack frame is not read as a failing test file" 0 NOT_A_TEST_FAILURE
 
