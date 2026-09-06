@@ -87,7 +87,7 @@ cd "$ROOT"
 ALLOW_REL=".github/run-level-readers.allow"
 
 # PIN. Hand-maintained. See "WHY THE ROW COUNT IS A COMMITTED LITERAL" above.
-ALLOW_ROWS_EXPECTED=16
+ALLOW_ROWS_EXPECTED=17
 
 SCAN_DIRS="scripts tooling .github/workflows"
 

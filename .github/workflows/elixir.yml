@@ -524,6 +524,45 @@ jobs:
       # skip-disclosure ratchet: a new job here reds the sibling path-escape
       # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
       # name, so required-checks-verify.sh's roster is unchanged.
+      # ── the PR test-selector harness, riding this job ────────────────────
+      # scripts/elixir-impacted-tests.sh decides WHICH ExUnit files a pull
+      # request runs. Its only dangerous failure is selecting too little and
+      # reporting green, so its harness has to run where it cannot be skipped:
+      # this job carries no `if:` and is in the aggregator's `needs` with the
+      # gate value NEVER. Putting it in `mix-test` instead would have gated the
+      # selector's own proof on the selector's own path set.
+      #
+      # UNCONDITIONAL, and it is free. This job averages 2m35s against
+      # `mix-test`'s 10-16 minutes and the two run in parallel, so the ~35 s
+      # this harness costs is off the critical path entirely. The alternative —
+      # scoping it to diffs that touch the selector — would leave the ALWAYS
+      # set, which is DERIVED from the test tree on every run, unproven on
+      # exactly the diffs that grow the test tree.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      - name: The PR test selector must fail safe (47-case harness)
+        run: bash scripts/elixir-impacted-tests.sh --selftest
+
+      # The pinned half of the selector's ALWAYS set is the net under the tests
+      # a compile closure structurally cannot reach — the plugin registry, the
+      # runtime route table, the capabilities manifest. A rename that silently
+      # dropped one would shrink that net with no symptom at all, so the
+      # existence of every pin is asserted separately from the harness.
+      - name: Every pinned ALWAYS test still exists
+        run: bash scripts/elixir-impacted-tests.sh --check-pins
+
+      # The main-red attribution reporter (elixir-main-red-attribution.yml) runs
+      # only when main is red, which is rare — so its own harness would go
+      # months without executing if it lived only there. It rides here as well,
+      # on a job that runs on every head, for the reason charter D26 records:
+      # a proof that only runs when the thing it proves is already firing has
+      # never been observed to fail.
+      - name: The main-red attribution reporter must be able to report a miss
+        run: bash scripts/elixir-main-red-attribution.test.sh
+
       - name: The pin-agreement gate must be able to fail
         run: bash scripts/toolchain-skew-check.sh --selftest
 
@@ -1025,6 +1064,94 @@ jobs:
           mix ecto.create
           mix ecto.migrate
 
+      # ── WHICH TESTS DOES THIS PULL REQUEST NEED? ────────────────────────
+      # The suite is 1,458 files and 10-16 minutes, and every PR waits on it.
+      # This step computes the impacted subset; the `Test` step below runs it.
+      #
+      # THE POLARITY IS THE WHOLE DESIGN, so it is spelled out here as well as
+      # in the script. There are two possible answers, `ALL` and a file list,
+      # and `ALL` is what every path this step cannot positively classify
+      # produces: a non-pull_request event, an unresolvable HEAD^1, a `git diff`
+      # that errors, an empty file set, a selector that exits non-zero, or an
+      # empty selection file. Only a clean success can narrow, and the script
+      # itself refuses to emit an empty list. A selector that shrugged and
+      # selected nothing would publish a green required context over a suite
+      # nobody ran, which is strictly worse than the 16 minutes it saved.
+      #
+      # `git diff HEAD^1 HEAD`, NOT the three-dot diff the dispatcher uses.
+      # This job checks out `refs/pull/N/merge` (no `ref:` override), where
+      # HEAD^1 IS the base and HEAD^1..HEAD is exactly the PR's file set — the
+      # same derivation the path-escape job's checkout comment records as
+      # measured against `gh pr view --json files`. `fetch-depth: 0` above
+      # already guarantees both parents are present.
+      #
+      # `-z` + `--no-renames` for the same two reasons the dispatcher gives:
+      # plain `--name-only` octal-escapes non-ASCII paths, which the selector's
+      # anchored patterns would then miss and classify as unclassifiable, and
+      # rename detection prints only the destination, so `git mv` would hide the
+      # source. Here both faults would only WIDEN the selection, but the two
+      # readings of one diff should not disagree.
+      #
+      # PUSH TO MAIN IS NEVER NARROWED. `github.event_name` is checked first and
+      # anything but `pull_request` writes `ALL`, matching the dispatcher's own
+      # rule one job up. main runs the whole suite at its own sha, elixir-nightly
+      # runs it again with the excluded tags, and those two unnarrowed passes are
+      # what make a PR-time subset survivable at all.
+      # Reported on EVERY run, including the ones that select ALL for reasons
+      # having nothing to do with xref. A dead `mix xref` reds nothing — it just
+      # makes every selection fall back to ALL, which is indistinguishable from a
+      # week of wide diffs, and the narrowing would be gone with no symptom. This
+      # line is the symptom. It is deliberately not a failure: falling back to
+      # ALL is the safe answer, and reddening a required context because an
+      # optimisation is unavailable would be the wrong trade.
+      - name: Is the compile-closure instrument alive?
+        id: xref-probe
+        working-directory: .
+        continue-on-error: true
+        run: bash scripts/elixir-impacted-tests.sh --xref-probe
+
+      - name: Which tests does this pull request need?
+        id: impacted
+        working-directory: .
+        run: |
+          sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
+          echo "ALL" >"$sel"
+
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "event '${{ github.event_name }}' is not a pull_request — the FULL suite runs."
+            exit 0
+          fi
+
+          base="$(git rev-parse --verify --quiet 'HEAD^1' || true)"
+          if [ -z "$base" ]; then
+            echo "::warning::test selector: HEAD^1 is not resolvable, so the PR's file set is unknown. Running the FULL suite."
+            exit 0
+          fi
+
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "$base" HEAD | tr '\0' '\n')" || changed=""
+          if [ -z "$changed" ]; then
+            echo "::warning::test selector: the changed-file set is EMPTY against ${base}. Running the FULL suite."
+            exit 0
+          fi
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          out=""
+          rc=0
+          out="$(printf '%s\n' "$changed" | bash scripts/elixir-impacted-tests.sh --select)" || rc=$?
+          if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+            echo "::warning::test selector: exited rc=${rc} with $(printf '%s' "$out" | wc -c) bytes of output. Running the FULL suite."
+            exit 0
+          fi
+          printf '%s\n' "$out" >"$sel"
+
+          if grep -qxF 'ALL' "$sel"; then
+            echo "selection: ALL — the full suite."
+          else
+            echo "selection: $(grep -c . "$sel") of $(find api/test -name '*_test.exs' | wc -l) test files."
+            cat "$sel"
+          fi
+
       - name: Test
         # CI-BLOCKING GATES ride this default `mix test` — no separate/advisory
         # job. Among them: the canvas⇄reader render-parity gate
@@ -1055,7 +1182,47 @@ jobs:
         # UNMEASURED: the 43 stalls >=5 s that make up ~56% of the wall time
         # are today located only by log timestamps, with the owning test
         # inferred from adjacent lines. This names them.
-        run: mix test --slowest 50
+        #
+        # THE SELECTION IS READ FROM A FILE, and the ALL branch is the default
+        # in three separate ways: a missing file, an empty file, and a file
+        # holding the token `ALL` all run everything. `grep -qxF ALL <file>`
+        # reads a FILE, not a pipe — D37: `printf … | grep -q` returns 141 under
+        # pipefail when grep exits first, and 141 here would read as "not ALL"
+        # and narrow on a verdict nobody produced.
+        run: |
+          sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
+          if [ ! -s "$sel" ] || grep -qxF 'ALL' "$sel"; then
+            echo "running the FULL suite"
+            mix test --slowest 50
+            exit 0
+          fi
+          files=()
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            files+=("$f")
+          done <"$sel"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::warning::the selection file held no usable paths — running the FULL suite."
+            mix test --slowest 50
+            exit 0
+          fi
+          echo "running ${#files[@]} selected test files"
+          mix test --slowest 50 "${files[@]}"
+
+      # The selection is UPLOADED on every run, pass or fail. It is the only
+      # record of what a given sha actually executed, and the attribution
+      # watcher (elixir-main-red-attribution.yml) reads nothing else when it
+      # asks whether a red on main was on a file the PR did not run. Without the
+      # artifact that question is answerable only by re-deriving the selection
+      # from a tree that has since moved.
+      - name: Upload the selection (what this run actually executed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elixir-impacted-selection
+          path: elixir-impacted-selection.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: OpenAPI drift check (docs/openapi.json must match the manifest)
         # Regenerates the spec from the live capabilities manifest and fails if
