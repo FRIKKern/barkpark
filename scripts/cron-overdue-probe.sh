@@ -190,6 +190,30 @@ table() {
 # scripts/absent-context-census.sh uses.
 iso_to_epoch() { # <iso8601-Z>
   local iso="$1" e
+  # SHAPE FIRST, and it is load-bearing rather than tidy. The two date
+  # implementations DISAGREE about junk, and the disagreement is not symmetric:
+  #
+  #   GNU coreutils 9.4  `date -u -d "" +%s`   -> rc 0, 1788652800 (today 00:00Z)
+  #   BSD (stock macOS)  `date -u -j -f … "" ` -> rc 1, "illegal time format"
+  #
+  # So a run row with a missing or malformed timestamp was silently stamped with
+  # a time NEAR NOW on Linux and refused on macOS. That is not a cosmetic split:
+  # in_flight() below would read such a row as "a run is in flight right now" and
+  # suppress the dispatch forever, and try_dispatch() would read it as "the
+  # dispatched run appeared" — both are the laundered green this whole file
+  # exists to refuse, handed out by whichever libc the runner happens to have.
+  # It shipped: every push:main run of #16411 red on selftest c8b3, which passed
+  # 26/26 on macOS (measured under `docker run ubuntu:24.04`, 2026-09-06).
+  #
+  # The guard makes the two agree BY CONSTRUCTION, at the stricter of the two —
+  # the exact `%Y-%m-%dT%H:%M:%SZ` the BSD branch already demanded and the exact
+  # shape the Actions API emits — so nothing that worked on macOS is lost and
+  # Linux stops being the lax one. A glob `case`, not a regex: no bashisms, and
+  # nothing to get wrong about anchoring.
+  case "$iso" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) return 1 ;;
+  esac
   e="$(date -u -d "$iso" +%s 2>/dev/null)" && { echo "$e"; return 0; }
   e="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%s 2>/dev/null)" && { echo "$e"; return 0; }
   return 1
@@ -691,11 +715,20 @@ FIX
   fi
 
   # c8b3 — and a STALE workflow_dispatch row cannot be mistaken for this one.
+  # This stub answers the two api reads SEPARATELY. It did not: written before
+  # in_flight() existed, it returned its two-field dispatch row to every api
+  # call, so in_flight() read the id and the timestamp into the wrong fields and
+  # got an EMPTY timestamp — which is the junk the parser above now refuses.
   cat > "$tmp/bin/gh-old" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
   workflow) exit 0 ;;
-  api) echo "11112222 2026-08-30T09:00:00Z"; exit 0 ;;
+  api)
+    case "$2" in
+      *event=workflow_dispatch*) echo "11112222 2026-08-30T09:00:00Z" ;;
+      *) : ;;  # nothing in flight
+    esac
+    exit 0 ;;
 esac
 exit 1
 STUB
@@ -705,6 +738,40 @@ STUB
     pass=$((pass+1)); echo "  ok   c8b3 …and a four-day-old workflow_dispatch row is not accepted as THIS dispatch landing"
   else
     fail=$((fail+1)); echo "  FAIL c8b3 a stale dispatch row was accepted (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8g — THE PLATFORM SEAM ITSELF (#16411 was red on main for this). The shared
+  # timestamp parser must refuse junk on BOTH date implementations, because GNU
+  # answers `date -d ""` with today-00:00Z at exit 0 and BSD refuses it.
+  if ! iso_to_epoch "" >/dev/null 2>&1 \
+     && ! iso_to_epoch "not-a-date" >/dev/null 2>&1 \
+     && ! iso_to_epoch "2026-09-03 12:00:00" >/dev/null 2>&1 \
+     && ! iso_to_epoch "2026-09-03T12:00:00+00:00" >/dev/null 2>&1; then
+    pass=$((pass+1)); echo "  ok   c8g the timestamp parser REFUSES an empty/loose stamp — the GNU-vs-BSD split that reddened main cannot come back"
+  else
+    fail=$((fail+1)); echo "  FAIL c8g the parser accepted junk: empty -> '$(iso_to_epoch "" 2>/dev/null)', loose -> '$(iso_to_epoch "2026-09-03 12:00:00" 2>/dev/null)'"
+  fi
+  # …and it can LOSE: a real stamp still parses, and two an hour apart are an
+  # hour apart. No pinned epoch number, so this holds under either date.
+  if [ -n "$(iso_to_epoch 2026-09-03T12:00:00Z)" ] \
+     && [ "$(( $(iso_to_epoch 2026-09-03T13:00:00Z) - $(iso_to_epoch 2026-09-03T12:00:00Z) ))" = "3600" ]; then
+    pass=$((pass+1)); echo "  ok   c8g2 …and it still parses a real stamp — two an hour apart differ by exactly 3600s, so c8g is not a parser that refuses everything"
+  else
+    fail=$((fail+1)); echo "  FAIL c8g2 the guard broke the parser for VALID stamps — c8g would be passing vacuously"
+  fi
+  # c8g3 — the exact production shape the seam produced: an in-flight row whose
+  # timestamp field is missing. It must NOT suppress the dispatch. Before the
+  # guard this printed "run 11112222 is in flight RIGHT NOW" on Linux and
+  # dispatched on macOS; now both dispatch.
+  : > "$tmp/dispatch.log"
+  out="$(STUB_IN_FLIGHT="11112222 2026-08-30T09:00:00Z" STUB_LOG="$tmp/dispatch.log" \
+         RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && grep -q 'DISPATCHED it: run 99887766' <<<"$out" \
+     && ! grep -q 'in flight RIGHT NOW' <<<"$out" \
+     && grep -q 'workflow run main-gate-watch.yml' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8g3 …and a MALFORMED in-flight row (no timestamp field) does not masquerade as a live run — the dispatch still went out"
+  else
+    fail=$((fail+1)); echo "  FAIL c8g3 a malformed in-flight row suppressed the dispatch (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
   fi
 
   # c8c — THE ARM DOES NOT WEAKEN A push-ARMED WORKFLOW. task-lease-renew is
