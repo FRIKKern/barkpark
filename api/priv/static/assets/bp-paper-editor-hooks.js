@@ -827,6 +827,25 @@
         const waiters = entry.waiters.splice(0);
         waiters.forEach((resolve) => resolve(saved));
       };
+      coordinator._notifyResult = (entry, saved, result) => {
+        try {
+          entry.onResult?.(saved, result);
+        } catch (error) {
+          // Mutation settlement owns the document queue. A canvas/native adapter
+          // failure must not strand later form drafts or navigation waiters.
+          const message = "Mutation result could not be applied by its local editor adapter.";
+          try {
+            console.error(message, error);
+          } catch (_) {}
+          try {
+            entry.source?.dispatchEvent?.(new CustomEvent("bp-error", {
+              detail: { code: "paper_mutation_result_callback_failed", error: message },
+              bubbles: true,
+              composed: true,
+            }));
+          } catch (_) {}
+        }
+      };
       coordinator._pauseFallbackForReview = (source, record, entry = null) => {
         clearTimeout(record.timer);
         record.timer = null;
@@ -1082,7 +1101,7 @@
           if (entry.source !== chosenSource) continue;
           mutationQueue.splice(index, 1);
           mutationById.delete(entry.requestId);
-          entry.onResult?.(false, { discarded: true });
+          coordinator._notifyResult(entry, false, { discarded: true });
           coordinator._resolveWaiters(entry, false);
         }
         sources.delete(chosenSource);
@@ -1151,7 +1170,16 @@
             ownRevisions.set(entry.requestId, confirmedRevision);
             mutationQueue.shift();
             mutationById.delete(entry.requestId);
-            entry.onResult?.(true, reply);
+            const continuingSource = sources.get(entry.source);
+            if (continuingSource?.dirty &&
+                continuingSource.documentKey === entry.documentKey &&
+                !entry.source.matches?.(".bp-paper-edit-form[phx-change]")) {
+              // Canvas/native adapters may synchronously enqueue work retained
+              // behind this exact batch from onResult. Give only that same source
+              // the acknowledged base before its adapter creates the next entry.
+              continuingSource.authoredRev = confirmedRevision;
+            }
+            coordinator._notifyResult(entry, true, reply);
             coordinator._advanceFallbackDrafts(entry);
             coordinator._resolveWaiters(entry, true);
             for (let i = quarantinedEchoes.length - 1; i >= 0; i--) {
@@ -1189,7 +1217,7 @@
                 currentIdentity,
                 main,
               );
-            entry.onResult?.(false, reply);
+            coordinator._notifyResult(entry, false, reply);
             if (restored && mutationQueue[0] === entry) {
               const newerVersion = record?.version > (entry.formVersion ?? record.version);
               mutationQueue.shift();
@@ -1954,7 +1982,7 @@
               onResult: (saved, result) => {
                 this._sendingOps = false;
                 if (result?.discarded) {
-                  this._opsQueue = this._opsQueue.filter((queued) => queued !== entry);
+                  this._opsQueue = [];
                   this._opsFailed = false;
                   return;
                 }
@@ -1962,9 +1990,14 @@
                   this._opsQueue.shift();
                 }
                 const canvas = this.el.querySelector("bp-paper-canvas");
+                let acknowledgementError = null;
                 if (entry.seq != null &&
                     typeof canvas?.acknowledgeOps === "function") {
-                  canvas.acknowledgeOps(entry.seq, saved);
+                  try {
+                    canvas.acknowledgeOps(entry.seq, saved);
+                  } catch (error) {
+                    acknowledgementError = error;
+                  }
                 }
                 if (saved) {
                   this._opsFailed = false;
@@ -1972,6 +2005,7 @@
                 } else {
                   this._opsFailed = true;
                 }
+                if (acknowledgementError) throw acknowledgementError;
               },
             });
             entry.mutationEntry = mutation.entry;

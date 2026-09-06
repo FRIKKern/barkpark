@@ -21,6 +21,7 @@ function mountedForm(formHtml) {
     </main>
   `, { url: "http://localhost/", virtualConsole });
   const { window } = dom;
+  const clientErrors = [];
   let uuid = 0;
   Object.defineProperty(window, "crypto", { configurable: true, value: {
     randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
@@ -33,14 +34,20 @@ function mountedForm(formHtml) {
     Date,
     setTimeout,
     clearTimeout,
+    customElements: { whenDefined: () => Promise.resolve() },
+    console: { error: (...args) => clientErrors.push(args) },
   }));
 
   const calls = [];
   const replies = [];
+  const toggleCalls = [];
   const hook = {
     ...window.BarkparkPaperEditorHooks.BarkparkPaperEditToggle,
     el: window.document.querySelector("#toggle"),
-    pushEvent: () => Promise.resolve({}),
+    pushEvent: (event, payload) => {
+      toggleCalls.push({ event, payload });
+      return Promise.resolve({});
+    },
     pushEventTo: (_target, event, payload) => {
       calls.push({ event, payload });
       return new Promise((resolve, reject) => replies.push({ resolve, reject, payload }));
@@ -54,6 +61,8 @@ function mountedForm(formHtml) {
     hook,
     calls,
     replies,
+    toggleCalls,
+    clientErrors,
     form: window.document.querySelector("form"),
     clickView() {
       hook.el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -122,6 +131,195 @@ const tocMarkup = `
     "the canvas repaint cannot replace the captured fallback draft");
   env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 9 });
   await tick();
+  env.close();
+}
+
+// A Figure's singular child is a nested canvas while its caption remains a
+// sibling fallback form. If the child save is active when the caption changes,
+// the own echo must advance and send that retained caption exactly once.
+{
+  const env = mountedForm(`
+    <div id="figure-carrier" data-paper-doc-key="production:paper:validation" data-paper-rev="7">
+      <div id="paper-canvas-figure-run" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+           data-paper-container-kind="figure" data-paper-container-id="figure-a"
+           data-paper-container-run="0" data-canvas-blocks="[]">
+        <bp-paper-canvas></bp-paper-canvas>
+      </div>
+      <form id="figure-form-figure-a" class="bp-paper-edit-form"
+            phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+            phx-debounce="10" data-test-id="paper-figure-caption-editor">
+        <input type="hidden" name="block_id" value="figure-a">
+        <input id="figure-caption-figure-a" name="caption" value="">
+      </form>
+    </div>
+  `);
+  const wrapper = env.window.document.querySelector("#paper-canvas-figure-run");
+  const canvas = wrapper.querySelector("bp-paper-canvas");
+  let acknowledgements = 0;
+  canvas.acknowledgeOps = () => {
+    acknowledgements += 1;
+    if (acknowledgements === 1) {
+      throw new Error("simulated canvas acknowledgement adapter failure");
+    }
+  };
+  canvas.applyServerBlocks = () => {};
+  const canvasCalls = [];
+  const canvasReplies = [];
+  const adapterErrors = [];
+  wrapper.addEventListener("bp-error", (event) => adapterErrors.push(event.detail));
+  const handlers = new Map();
+  const bridge = {
+    ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+    el: wrapper,
+    handleEvent: (name, handler) => handlers.set(name, handler),
+    pushEvent: (event, payload) => {
+      assert.equal(event, "paper-ops");
+      canvasCalls.push(payload);
+      return new Promise((resolve) => canvasReplies.push(resolve));
+    },
+  };
+  bridge.mounted();
+  canvas.blocks = [{ id: "child-a" }];
+
+  const caption = env.form.elements.namedItem("caption");
+  caption.value = "Caption retained behind child";
+  caption.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  wrapper.dispatchEvent(new env.window.CustomEvent("bp-canvas-ops", {
+    bubbles: true,
+    detail: {
+      ops: [{ op: "patch-block", id: "child-a", patch: { text: "Saved child" } }],
+      seq: 1,
+    },
+  }));
+  assert.equal(canvasCalls.length, 1, "the nested child save starts before caption debounce");
+  wrapper.dispatchEvent(new env.window.CustomEvent("bp-canvas-ops", {
+    bubbles: true,
+    detail: {
+      ops: [{ op: "patch-block", id: "child-a", patch: { text: "Saved child twice" } }],
+      seq: 2,
+    },
+  }));
+  assert.equal(canvasCalls.length, 1, "the second child batch remains behind its immutable head");
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(env.calls.length, 0, "the caption cannot overtake its child save");
+
+  const requestId = canvasCalls[0].request_id;
+  env.window.document.querySelector("#figure-carrier").dataset.paperRev = "8";
+  wrapper.dataset.paperRev = "8";
+  handlers.get("bp:canvas-update")({
+    rev: 8,
+    request_id: requestId,
+    runs: [{ run_id: "figure-run", blocks: [{ id: "child-a", text: "Saved child" }] }],
+  });
+  canvasReplies.shift()({ saved: true, request_id: requestId, rev: 8 });
+  await tick();
+
+  assert.equal(canvasCalls.length, 2, "adapter failure cannot strand the second child batch");
+  assert.deepEqual(canvasCalls[1].ops, [
+    { op: "patch-block", id: "child-a", patch: { text: "Saved child twice" } },
+  ]);
+  assert.equal(canvasCalls[1].if_rev, 8);
+  assert.equal(env.calls.length, 0, "the caption remains behind both child batches");
+  env.clickView();
+  assert.equal(env.toggleCalls.length, 0, "View waits for both overlapping Figure edits");
+
+  const secondRequestId = canvasCalls[1].request_id;
+  env.window.document.querySelector("#figure-carrier").dataset.paperRev = "9";
+  wrapper.dataset.paperRev = "9";
+  handlers.get("bp:canvas-update")({
+    rev: 9,
+    request_id: secondRequestId,
+    runs: [{ run_id: "figure-run", blocks: [{ id: "child-a", text: "Saved child twice" }] }],
+  });
+  canvasReplies.shift()({ saved: true, request_id: secondRequestId, rev: 9 });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.equal(env.calls.length, 1, "the retained Figure caption sends after the child ack");
+  assert.equal(env.calls[0].payload.caption, "Caption retained behind child");
+  assert.equal(env.calls[0].payload.if_rev, 9);
+  assert.equal(adapterErrors.length, 1);
+  assert.equal(adapterErrors[0].code, "paper_mutation_result_callback_failed");
+  assert.equal(
+    adapterErrors[0].error,
+    "Mutation result could not be applied by its local editor adapter.",
+  );
+  assert.equal(env.clientErrors.length, 1, "the adapter failure remains observable in browser logs");
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 10 });
+  await tick();
+  assert.equal(env.toggleCalls.length, 1, "View resumes after the retained caption is durable");
+  assert.equal(env.toggleCalls[0].event, "paper-toggle-edit");
+  bridge.destroyed();
+  env.close();
+}
+
+// Use latest replaces one conflicted canvas source with authoritative server
+// state. Later local batches for that same canvas have not entered the global
+// queue yet, so discarding the chosen source must clear its whole local queue.
+{
+  const env = mountedForm(`
+    <div id="discard-carrier" data-paper-doc-key="production:paper:validation" data-paper-rev="7">
+      <div id="paper-canvas-discard-run" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+           data-paper-container-kind="figure" data-paper-container-id="figure-discard"
+           data-paper-container-run="0" data-canvas-blocks="[]">
+        <bp-paper-canvas></bp-paper-canvas>
+      </div>
+      <form class="bp-paper-edit-form" phx-change="paper-block-autosave">
+        <input type="hidden" name="block_id" value="figure-discard">
+        <input name="caption" value="Server caption">
+      </form>
+    </div>
+  `);
+  const wrapper = env.window.document.querySelector("#paper-canvas-discard-run");
+  const canvas = wrapper.querySelector("bp-paper-canvas");
+  canvas.acknowledgeOps = () => {};
+  canvas.applyServerBlocks = () => {};
+  canvas.hasPendingChanges = () => false;
+  const calls = [];
+  const replies = [];
+  const bridge = {
+    ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+    el: wrapper,
+    handleEvent: () => {},
+    pushEvent: (_event, payload) => {
+      calls.push(payload);
+      return new Promise((resolve) => replies.push(resolve));
+    },
+  };
+  bridge.mounted();
+  canvas.blocks = [{ id: "child-discard" }];
+
+  for (const [text, seq] of [["First local", 1], ["Second local", 2]]) {
+    wrapper.dispatchEvent(new env.window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: {
+        ops: [{ op: "patch-block", id: "child-discard", patch: { text } }],
+        seq,
+      },
+    }));
+  }
+  assert.equal(calls.length, 1, "only the conflicted head enters the global queue");
+  replies.shift()({
+    saved: false,
+    request_id: calls[0].request_id,
+    conflict: true,
+    current_rev: 8,
+  });
+  await tick();
+
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner);
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+
+  assert.equal(calls.length, 1, "Use latest never sends the superseded second local batch");
+  assert.equal(bridge._opsQueue.length, 0, "Use latest clears all local work for its chosen canvas");
+  env.clickView();
+  await tick();
+  assert.equal(env.toggleCalls.length, 1, "discarded local canvas work cannot strand View");
+  bridge.destroyed();
   env.close();
 }
 
