@@ -893,33 +893,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     "b-" <> (:crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false))
   end
 
-  # Find a block by id anywhere in the tree (recurses section / expandable
-  # containers), so a nested control still resolves its block.
+  # Resolve visible block bodies; step rows are containers, not block targets.
   @doc false
   def find_paper_block(blocks, id) when is_list(blocks) do
-    Enum.find_value(blocks, fn b ->
-      cond do
-        Map.get(b, "id") == id ->
-          b
+    Enum.find_value(blocks, fn
+      b when is_map(b) ->
+        cond do
+          Map.get(b, "id") == id ->
+            b
 
-        Map.get(b, "type") in ["section", "expandable"] ->
-          find_paper_block(container_children(b), id)
+          Map.get(b, "type") in ["section", "expandable"] ->
+            find_paper_block(container_children(b), id)
 
-        true ->
-          nil
-      end
+          Map.get(b, "type") == "steps" and is_list(b["steps"]) ->
+            Enum.find_value(b["steps"], fn
+              row when is_map(row) -> find_paper_block(visible_body_children(row), id)
+              _ -> nil
+            end)
+
+          true ->
+            nil
+        end
+
+      _ ->
+        nil
     end)
   end
 
   def find_paper_block(_blocks, _id), do: nil
 
   @doc false
-  def container_children(%{"type" => "expandable", "children" => children})
-      when is_list(children),
-      do: children
+  def container_children(%{"type" => "expandable"} = block), do: visible_body_children(block)
 
   def container_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
   def container_children(_block), do: []
+
+  defp visible_body_children(%{"children" => children}) when is_list(children), do: children
+  defp visible_body_children(%{"children" => children}) when children not in [nil, false], do: []
+  defp visible_body_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  defp visible_body_children(_block), do: []
 
   @doc false
   def canvas_run_context(params) when is_map(params) do
