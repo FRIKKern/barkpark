@@ -138,6 +138,24 @@ func TestStageRendersNormally(t *testing.T) {
 	}
 }
 
+func TestStageUsesSlotTextBeforeScalarShadows(t *testing.T) {
+	attrs := map[string]any{"title": "stale shadow", "source": "queue.ex:42", "slots": map[string]any{
+		"title": []any{map[string]any{"type": "paragraph", "content": []any{
+			map[string]any{"type": "strong", "children": []any{map[string]any{"type": "text", "value": "Authored title"}}},
+		}}},
+	}}
+	got := ansi.Strip(strings.Join(testRegistry().Render(Block{Type: "stage", Attrs: attrs}, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), "\n"))
+	if !strings.Contains(got, "Authored title") || strings.Contains(got, "stale shadow") || !strings.Contains(got, "queue.ex:42") {
+		t.Fatalf("Stage must use authoritative slots without changing provenance:\n%s", got)
+	}
+	for _, slot := range []any{[]any{}, []any{map[string]any{"type": "paragraph", "content": []any{}}}} {
+		attrs["slots"].(map[string]any)["title"] = slot
+		if got := stageFieldText(attrs, "title"); got != "" {
+			t.Fatalf("empty materialized slot must suppress scalar shadow, got %q", got)
+		}
+	}
+}
+
 // TestCardRendersNormally checks the model-B box: a rounded border, the slots
 // in media→title→body→action order, all four slots' recursed content present,
 // and NO per-slot label chrome (the `media`/`action` caption lines model B

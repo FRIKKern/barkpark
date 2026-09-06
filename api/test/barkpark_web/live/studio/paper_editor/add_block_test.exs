@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   @addable_block_types ~w(
     paragraph heading list callout code blockquote divider section steps tabs
     eyebrow byline ingress pullquote
-    action card table terminal diagram figure equation route toc criteria-progress gauge-list
+    action card table terminal stage diagram figure equation route toc criteria-progress gauge-list
     diff filetree footnote code-tabs api-endpoint form questionnaire
     field-string field-slug field-text field-boolean field-select field-datetime field-color field-number
     field-image field-reference video
@@ -162,6 +162,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
        when is_map(v),
        do: true
 
+  defp addable_block_valid?(%{"type" => "stage", "title" => "New stage"}), do: true
   defp addable_block_valid?(_), do: false
 
   for type <- @addable_block_types do

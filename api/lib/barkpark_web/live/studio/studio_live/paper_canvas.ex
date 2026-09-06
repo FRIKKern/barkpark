@@ -228,7 +228,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # the identical pnode cell, so it renders == one legacy pipeline node; the legacy
   # `pipeline` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED. MUST
   # stay in lockstep with run-convert.js (isCanvasStage*) and stage-node.js.
-  @canvas_widget_types ~w(card stage)
+  @canvas_widget_types ~w(card)
 
   # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds the canvas handles as
   # SERVER-PAINTED atoms — the SAME bpFleet node + `bp:block-html` paint channel the

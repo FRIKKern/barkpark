@@ -358,7 +358,7 @@ function liveViewMorph(window, from, to) {
   hookB.destroyed();
 }
 
-{
+for (const type of ["terminal", "stage"]) {
   const { window, hooks } = environment(`
     <main data-paper-doc-key="production:paper:terminal" data-paper-rev="11">
       <div id="legacy-terminal-run" phx-hook="BarkparkPaperCanvas"
@@ -383,7 +383,7 @@ function liveViewMorph(window, from, to) {
       return Promise.resolve({
         saved: false,
         request_id: payload.request_id,
-        rejected: "outdated_terminal_canvas",
+        rejected: `outdated_${type}_canvas`,
         current_rev: 11,
         error: "Reload the Paper editor before editing this Terminal. Your draft has not been saved.",
       });

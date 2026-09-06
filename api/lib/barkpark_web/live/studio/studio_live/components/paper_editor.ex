@@ -553,6 +553,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"card", "Card"},
          {"table", "Table"},
          {"terminal", "Terminal"},
+         {"stage", "Stage"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
@@ -1160,6 +1161,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp beta_node_text(%{"type" => "action", "label" => label}) when is_binary(label), do: label
   defp beta_node_text(%{"type" => "action"}), do: ""
 
+  defp beta_node_text(%{"type" => "stage"} = block) do
+    fields = Enum.map(~w(kind title detail), &Slots.stage_field_text(block, &1))
+
+    provenance =
+      Enum.map(~w(files source), fn field ->
+        case Map.get(block, field) do
+          value when is_binary(value) -> value
+          value when is_integer(value) and field == "files" -> to_string(value)
+          _ -> ""
+        end
+      end)
+
+    Enum.join(fields ++ provenance, " ")
+  end
+
   defp beta_node_text(%{"type" => "card"} = block) do
     non_action =
       ~w(media title body)
@@ -1597,6 +1613,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <p class="bp-paper-edit-readonly">
                 This Action's authored fields are malformed and cannot be edited here; original content is preserved.
               </p>
+          <% end %>
+        </div>
+      <% "stage" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-stage-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.stage_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"stage-controls-" <> @id}
+                class="bp-paper-contextual-controls bp-paper-contextual-controls--stage"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Configure stage</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"stage-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-stage-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <%= for {field, label, value} <- [{"kind", "Kind", state.kind}, {"title", "Title", state.title}, {"detail", "Detail", state.detail}, {"files", "Files", state.files}] do %>
+                      <label class="bp-paper-edit-fieldlabel" for={"stage-#{field}-#{@id}"}><%= label %></label>
+                      <input id={"stage-#{field}-#{@id}"} type="text" name={"stage-" <> field}
+                        class="bp-paper-edit-text" value={value} />
+                    <% end %>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-mode-" <> @id}>Source</label>
+                    <select id={"stage-source-mode-" <> @id} name="stage-source-mode" class="bp-paper-edit-select">
+                      <option :for={{mode, label} <- [{"none", "None"}, {"origin", "Origin stage"}, {"provenance", "Source reference"}]}
+                        value={mode} selected={mode == state.source_mode}><%= label %></option>
+                    </select>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-text-" <> @id}>Source reference</label>
+                    <input id={"stage-source-text-" <> @id} type="text" name="stage-source-text"
+                      class="bp-paper-edit-text" value={state.source_text} />
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <p class="bp-paper-edit-readonly">This Stage's authored fields need an unambiguous shape before editing; original content is preserved.</p>
           <% end %>
         </div>
       <% "terminal" -> %>

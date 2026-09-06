@@ -735,15 +735,17 @@ defmodule BarkparkWeb.BulldocsLive do
         BarkparkWeb.Studio.StudioLive.Shared.paper_top_level_blocks(socket)
       )
 
-    if context == {:error, :outdated_terminal_canvas} do
+    if context in [{:error, :outdated_terminal_canvas}, {:error, :outdated_stage_canvas}] do
+      widget = if context == {:error, :outdated_terminal_canvas}, do: "Terminal", else: "Stage"
+
       {:reply,
        %{
          saved: false,
          request_id: request_id,
-         rejected: "outdated_terminal_canvas",
+         rejected: Atom.to_string(elem(context, 1)),
          current_rev: socket.assigns[:paper_rev],
          error:
-           "Reload the Paper editor before editing this Terminal. Your draft has not been saved."
+           "Reload the Paper editor before editing this #{widget}. Your draft has not been saved."
        }, socket}
     else
       case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do

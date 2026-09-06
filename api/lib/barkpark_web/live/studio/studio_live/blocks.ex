@@ -3270,27 +3270,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def canvas_run_context(params, blocks) when is_map(params) do
     ops = Map.get(params, "ops")
 
-    outdated_terminal? =
-      is_list(ops) and
-        Enum.any?(ops, fn
-          %{"op" => kind} = op ->
-            parent_write? =
-              kind in ["patch-block", "replace-block"] and
-                match?(%{"type" => "terminal"}, find_paper_block(blocks, op["id"]))
+    outdated_type =
+      Enum.find(["terminal", "stage"], fn type ->
+        is_list(ops) and
+          Enum.any?(ops, fn
+            %{"op" => kind} = op ->
+              parent_write? =
+                kind in ["patch-block", "replace-block"] and
+                  match?(%{"type" => ^type}, find_paper_block(blocks, op["id"]))
 
-            introduced_terminal? =
-              kind in ["append-block", "insert-after", "replace-block"] and
-                match?(%{"type" => "terminal"}, op["block"])
+              introduced_terminal? =
+                kind in ["append-block", "insert-after", "replace-block"] and
+                  match?(%{"type" => ^type}, op["block"])
 
-            parent_write? or introduced_terminal?
+              parent_write? or introduced_terminal?
 
-          _ ->
-            false
-        end)
+            _ ->
+              false
+          end)
+      end)
 
-    if outdated_terminal?,
-      do: {:error, :outdated_terminal_canvas},
-      else: canvas_run_context(params)
+    case outdated_type do
+      "terminal" -> {:error, :outdated_terminal_canvas}
+      "stage" -> {:error, :outdated_stage_canvas}
+      nil -> canvas_run_context(params)
+    end
   end
 
   def canvas_run_context(_params, _blocks), do: {:error, :invalid_container_context}
@@ -3719,6 +3723,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("columns", id),
     do: %{"id" => id, "type" => "columns", "columns" => [[], []]}
+
+  def default_block("stage", id), do: %{"id" => id, "type" => "stage", "title" => "New stage"}
 
   def default_block("terminal", id),
     do: %{"id" => id, "type" => "terminal", "children" => []}

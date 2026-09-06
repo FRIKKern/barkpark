@@ -1508,9 +1508,9 @@
             const validationReply =
               reply?.saved === false && reply?.request_id === entry.requestId &&
               reply?.rejected === "validation";
-            const outdatedTerminalReply =
+            const outdatedCanvasReply =
               reply?.saved === false && reply?.request_id === entry.requestId &&
-              reply?.rejected === "outdated_terminal_canvas";
+              ["outdated_terminal_canvas", "outdated_stage_canvas"].includes(reply?.rejected);
             const matchingValidationRevision =
               validationReply && reply.current_rev === entry.ifRev;
             const record = sources.get(entry.source);
@@ -1538,13 +1538,13 @@
               coordinator._resolveWaiters(entry, false);
               mutationPaused = true;
               if (newerVersion) coordinator._scheduleFallback(entry.source);
-            } else if (validationReply || outdatedTerminalReply) {
+            } else if (validationReply || outdatedCanvasReply) {
               mutationQueue.forEach((queued) => coordinator._resolveWaiters(queued, false));
               coordinator._setConflict(
                 {
                   ...reply,
                   conflict: true,
-                  ...(outdatedTerminalReply
+                  ...(outdatedCanvasReply
                     ? { fallback_unsafe: true, reload_on_latest: true }
                     : {}),
                 },

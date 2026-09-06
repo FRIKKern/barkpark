@@ -30,6 +30,75 @@ defmodule BarkparkWeb.Studio.StudioBetaTerminalEditingTest do
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
+  test "generic Beta edits a slotted Stage inside Terminal without changing its carrier", %{
+    conn: conn
+  } do
+    stage = %{
+      "id" => "stage",
+      "type" => "stage",
+      "source" => "queue.ex:42",
+      "qa" => "stage",
+      "slots" => %{
+        "title" => [
+          %{
+            "id" => "title",
+            "type" => "paragraph",
+            "content" => [
+              %{"id" => "text", "type" => "text", "value" => "Original", "qa" => "leaf"}
+            ]
+          }
+        ],
+        "future" => [1, 2]
+      }
+    }
+
+    original = [
+      %{"id" => "terminal", "type" => "terminal", "children" => [stage], "qa" => "terminal"}
+    ]
+
+    doc = legacy_document!("stage", original)
+    {view, path} = mount_beta(conn, doc.doc_id)
+    assert has_element?(view, "#stage-form-stage")
+    before = stored_document(doc.doc_id)
+    request = Ecto.UUID.generate()
+
+    wire = %{
+      "block_id" => "stage",
+      "stage-title" => "Changed in Beta",
+      "if_rev" => before.rev,
+      "request_id" => request
+    }
+
+    render_hook(view, "paper-edit-block", wire)
+    assert_reply(view, %{saved: true, request_id: ^request, replayed: false, rev: saved_rev})
+
+    expected =
+      put_in(
+        original,
+        [
+          Access.at(0),
+          "children",
+          Access.at(0),
+          "slots",
+          "title",
+          Access.at(0),
+          "content",
+          Access.at(0),
+          "value"
+        ],
+        "Changed in Beta"
+      )
+
+    assert stored_blocks(doc.doc_id) == expected
+    render_hook(view, "paper-edit-block", wire)
+    assert_reply(view, %{saved: true, request_id: ^request, replayed: true, rev: ^saved_rev})
+    assert stored_blocks(doc.doc_id) == expected
+    {:ok, reloaded, _} = live(conn, path)
+    reloaded |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+    assert has_element?(reloaded, "[data-test-id='paper-stage-preview']", "Changed in Beta")
+    assert stored_blocks(doc.doc_id) == expected
+  end
+
   test "generic Beta external refetch carries unsupported Terminal revision and identity", %{
     conn: conn
   } do
