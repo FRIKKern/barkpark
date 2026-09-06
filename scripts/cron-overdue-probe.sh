@@ -85,7 +85,9 @@ chronicle-paper.yml|report|1440|2026-09-03: nightly narrative digest. A late chr
 codebase-intel.yml|report|10080|2026-09-03: weekly intelligence sweep. Weekly cadence, weekly tolerance.
 cron-overdue-probe.yml|critical|60|2026-09-03: this probe itself. Hourly, and it carries push: branches [main] — a silence watch delivered only by the mechanism it watches is a smoke detector wired to the fire. It appeared in this table because its own table/tree check REFUSED the first live run that did not classify it.
 crown-reconcile.yml|periodic|360|2026-09-03: 6 h reconciliation sweep; carries push: branches [main] already.
+deploy-harnesses.yml|periodic|1440|2026-09-06: nightly re-run of the deploy harnesses (cron 03:20Z) so a rot in deploy/ is seen within a day; carries push: branches [main]. Added when cron-overdue-probe c1 reddened main on the three schedules landed after the 2026-09-03 table.
 elixir-nightly.yml|report|1440|2026-09-03: the long Elixir suite, nightly. Its reds are found the next morning either way.
+grip-suite.yml|periodic|1440|2026-09-06: nightly Grip suite (cron 03:25Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 main-gate-watch.yml|critical|30|2026-09-03: the second scream on main tip verdicts. push-refused:scripts/main-gate-watch.test.sh — a push arm was MEASURED harmful (wave 60 D721: 2 of 2 push runs red on tip 026c5b1d78 while main was green, because ~15 s after a merge no check-run row exists yet) and a committed test reds if one comes back. Its fallback is THIS probe: a workflow that may not carry a trigger fallback must at least be watched for silence.
 paper-readers.yml|report|1440|2026-09-03: daily paper-reader digest; did not run at all on 09-03, which is the tolerated case for a report.
 renew-mail-cert.yml|report|43200|2026-09-03: monthly certificate renewal. 3x a month is a 90-day bound, which is not a useful alarm — the certificate expiry is the alarm, and it is watched where it lands, not here.
@@ -95,6 +97,7 @@ search-starter-smoke.yml|report|1440|2026-09-03: daily starter smoke; carries pu
 stale-verdict-watch.yml|critical|30|2026-09-03: watches PRs asserting a green main has moved past. Carries push: branches [main].
 studio-journey-smoke.yml|report|1440|2026-09-03: daily Studio journey smoke; carries push: branches [main].
 task-lease-renew.yml|critical|20|2026-09-03: the claim sweep. Ran ZERO times in 3 h on 09-03; push: branches [main] was added in #15757 and is present.
+twoslash.yml|periodic|1440|2026-09-06: nightly twoslash type-check of the documentation snippets (cron 03:30Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 weekly-changelog.yml|report|10080|2026-09-03: weekly changelog digest.'
 
 usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -137,7 +140,15 @@ scheduled_files() {
   local f
   for f in "$WORKFLOWS_DIR"/*.yml; do
     [ -f "$f" ] || continue
-    if sed 's/#.*//' "$f" | grep -qE '^[[:space:]]{2}schedule:[[:space:]]*$'; then
+    # ONE grep over the FILE, never `sed … | grep -q`: grep -q exits on its first
+    # match, sed then takes SIGPIPE writing the rest of a long workflow, and under
+    # `set -o pipefail` the pipeline reads as "no match" — so a long file whose
+    # schedule: sits near the top (required-checks-drift.yml) dropped out of the
+    # tree on some runs and c1 reported it as "classified but carries no schedule"
+    # (main run 34015146623: `sed: couldn't write 108 items to stdout: Broken
+    # pipe`, 19 files found, then 20 on the next). The trailing group is the
+    # comment sed used to strip.
+    if grep -qE '^[[:space:]]{2}schedule:[[:space:]]*(#.*)?$' "$f"; then
       basename "$f"
     fi
   done | sort
@@ -180,7 +191,10 @@ check_fallbacks() {
     [ "$class" = "critical" ] || continue
     wf="$WORKFLOWS_DIR/$file"
     if [ ! -f "$wf" ]; then echo "REFUSED: $file is classified critical and does not exist" >&2; rc=2; continue; fi
-    if sed 's/#.*//' "$wf" | grep -qE '^[[:space:]]{2}push:[[:space:]]*$'; then
+    # Same shape as scheduled_files: one grep over the file, no sed|grep -q pipe
+    # (the SIGPIPE flip made c7 report every critical workflow as push-less on
+    # a shell with pipefail — measured on this repo's own tree, 4 false REFUSEDs).
+    if grep -qE '^[[:space:]]{2}push:[[:space:]]*(#.*)?$' "$wf"; then
       echo "  ok   $file (critical, every ${_interval}m) carries a push: trigger — cron is not its only way to fire"
       continue
     fi
