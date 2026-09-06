@@ -89,6 +89,10 @@
 #     main also prints one unambiguous MAIN-FAILED-STEP line per step, the
 #     parser prefers those, and a legacy ';'-joined recovery that contained a
 #     ';' is marked AMBIGUOUS — it can still inherit, but it can never blame.
+#     M4b (2026-09-06, task-11060320ab1e6650): that AMBIGUOUS flag was set from
+#     the sentence and never cleared when the markers WERE parsed, so on a main
+#     failing 2+ steps every PR-own red read OWNERSHIP-UNDETERMINED — 7 of 8
+#     doc-gates PR reds that day. The flag now means what it says: legacy-only.
 #
 # M5. IT COMPARED AGAINST A RUN THAT NEVER RAN THE JOB, AND AGAINST A SIGNATURE
 #     THAT COULD NOT SEE THE FINDING. Both closed here; see the M5 block at the
@@ -653,6 +657,17 @@ try:
                 legacy.add(name)
 except Exception:
     pass
+# M4b: the ';' ambiguity is a property of the LEGACY sentence being the ONLY
+# source. Once main printed the unambiguous one-name-per-line markers its failed
+# set is known EXACTLY, so whether the prose sentence would have shredded a name
+# is no longer a fact about anything. Leaving the flag set made the UNKNOWN
+# clause below outrank PASSED on every main that fails 2+ steps — which is
+# main's state all day: 7 of 8 doc-gates PR reds on 2026-09-06 (runs 34048731323
+# 34048702712 34048598999 34048312911 34048184632 34047628152 34046862261) were
+# told OWNERSHIP-UNDETERMINED for a red that was demonstrably their own
+# (task-11060320ab1e6650). Legacy-only logs keep M4's protection untouched.
+if log_marked:
+    log_ambiguous = False
 if not log_marked:
     log_failed |= legacy
 
