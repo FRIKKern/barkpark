@@ -234,4 +234,151 @@ defmodule Barkpark.Tasks.DependencySatisfactionTest do
              "the SQL fragment matched a forged birth — it cannot return false"
     end
   end
+
+  describe "THE CALL SITES — the predicate must be reached, not merely correct" do
+    # Mutation 1 on the first attempt reverted queue.ex's SQL and reddened
+    # NOTHING, because every test above drove the module directly. A correct
+    # predicate that a call site does not reach is not a fix; it is a fix's
+    # decoration. These arms drive the SITES.
+
+    defp dep_pair!(scope, blocker_content) do
+      blocker = uniq("ds-blocker")
+      dependent = uniq("ds-dependent")
+
+      {:ok, b} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => blocker, "title" => blocker, "content" => blocker_content},
+          @dataset,
+          scope
+        )
+
+      {:ok, d} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => dependent,
+            "title" => dependent,
+            "content" => %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "dependencies" => [blocker],
+              "acceptance_criteria" => [
+                %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "f"}
+              ]
+            }
+          },
+          @dataset,
+          scope
+        )
+
+      # THE TWO SITES READ DIFFERENT SOURCES, which this test discovered the
+      # hard way: queue.ex reads `content.dependencies` (a JSON array) while
+      # claim.ex reads task_edges via `Edges.dependencies/2`. A fixture that
+      # sets only one reaches only one site, and the arm for the other passes
+      # while proving nothing. Both are created here.
+      {:ok, _} = Barkpark.Tasks.Edges.add_dep(d.id, b.id, :blocks)
+
+      {blocker, dependent}
+    end
+
+    defp ready_ids(scope) do
+      scope |> Keyword.put(:dataset, @dataset) |> Tasks.ready() |> Enum.map(& &1.doc_id)
+    end
+
+    test "QUEUE: a forged done blocker does NOT make its dependent ready", %{scope: scope} do
+      {_b, dependent} = dep_pair!(scope, @forged)
+      {_b2, free} = dep_pair!(scope, Map.put(@forged, "claim", %{"closed_by" => "w"}))
+
+      ids = ready_ids(scope)
+
+      refute Enum.any?(ids, &String.ends_with?(&1, dependent)),
+             "a dependent was made READY by a blocker that only claims to be done"
+
+      # NON-VACUITY: the queue must be returning rows at all, or the refutation
+      # above passes for free — the exact accidental agreement this file already
+      # caught once between its own SQL and Elixir halves.
+      assert Enum.any?(ids, &String.ends_with?(&1, free)),
+             "the queue returned no ready dependents at all — the refutation above is vacuous"
+    end
+
+    test "CLAIM: the claim door refuses on a forged blocker and allows on an honest one",
+         %{scope: scope} do
+      {_b, dependent} = dep_pair!(scope, @forged)
+      assert {:error, :blocked_by_unsatisfied_deps} = Tasks.claim_by_id(dependent, "w-ds", scope)
+
+      {_b2, ok_dep} = dep_pair!(scope, Map.put(@forged, "close_reason", "shipped in PR #1"))
+      assert {:ok, _} = Tasks.claim_by_id(ok_dep, "w-ds", scope)
+    end
+
+    test "CLOSE cascade: a dependent stays BLOCKED when a co-blocker is only forged",
+         %{scope: scope} do
+      # cascade_unblock_dependents!/1 flips a dependent blocked -> open once
+      # ALL its blockers are done. With the old predicate a forged co-blocker
+      # counted, so closing the honest one unblocked work whose other
+      # prerequisite had never been finished by anyone.
+      forged = uniq("ds-cb-forged")
+      honest = uniq("ds-cb-honest")
+      dependent = uniq("ds-cb-dep")
+
+      {:ok, f} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => forged, "title" => forged, "content" => @forged},
+          @dataset,
+          scope
+        )
+
+      {:ok, h} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => honest,
+            "title" => honest,
+            "content" => %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "acceptance_criteria" => [
+                %{"criterion" => "bar", "met" => true, "evidence" => "f"}
+              ]
+            }
+          },
+          @dataset,
+          scope
+        )
+
+      {:ok, d} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => dependent,
+            "title" => dependent,
+            "content" => %{"kind" => "task", "lifecycle_status" => "blocked"}
+          },
+          @dataset,
+          scope
+        )
+
+      {:ok, _} = Barkpark.Tasks.Edges.add_dep(d.id, f.id, :blocks)
+      {:ok, _} = Barkpark.Tasks.Edges.add_dep(d.id, h.id, :blocks)
+
+      {:ok, claimed} = Tasks.claim_by_id(honest, "w-cb", scope)
+
+      {:ok, _} =
+        Tasks.close(h.id, "w-cb",
+          observed_epoch: claimed.content["claim"]["epoch"],
+          lifecycle_status: "done",
+          reason: "shipped in PR #1 abc1234"
+        )
+
+      after_close = Repo.get!(Barkpark.Content.Document, d.id)
+
+      assert after_close.content["lifecycle_status"] == "blocked",
+             """
+             the dependent was UNBLOCKED while one of its blockers is a forged
+             birth that nobody ever closed. The cascade counted a row that only
+             claims to be done.
+             """
+    end
+  end
 end
