@@ -5550,6 +5550,88 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  THE DISARMED-BOX CENSUS: every Barkpark holding NO live (unrevoked, unexpired)
+  agent token, newest-revocation first. Read-only; it writes nothing and heals
+  nothing.
+
+  WHY THIS EXISTS (task-5cc3689cb0ab6637, the companion to the mass-revoke fix
+  that removed `revoke_all_agent_tokens_for_user/1` — see the RULING on
+  `revoke_agent_token/1` above). A box in this state looks HEALTHY in every
+  other projection: the row is intact, `suspended` is false,
+  `autoupdate_enabled` is true. It simply stops beating, and the only symptom
+  is `agent_status` drifting to "offline" via `StalenessWorker` — which is
+  indistinguishable from a host that is genuinely down. Nothing anywhere
+  answered "is this box DISARMED or is it DOWN?", so an operator diagnosing it
+  had no reason to suspect a credential rather than a machine.
+
+  IT IS URGENT RATHER THAN NICE because `AgentRetentionWorker` prunes tokens 30
+  days past `revoked_at`. Once those rows are deleted the evidence that a box
+  was disarmed — as opposed to broken — is gone, and the population becomes
+  unanswerable even as a question.
+
+  LIVENESS IS THE SAME PREDICATE `verify_agent_token/1` APPLIES, and
+  deliberately so: `is_nil(revoked_at) and (is_nil(expires_at) or expires_at >
+  now)`. A box whose only token EXPIRED is just as dark as one whose token was
+  revoked — the agent presents it, `verify_agent_token/1` returns nil, every
+  `/v1/agent/*` and `/v1/builder/*` route 401s — so an expired-but-unrevoked
+  token counts as NOT live here. If these two predicates ever diverge this
+  census starts lying in the direction that hides boxes.
+
+  THE `t.id` NULL-GUARD IS LOAD-BEARING. This is a LEFT JOIN, so a barkpark
+  with zero tokens still produces one row whose token columns are all NULL —
+  and `is_nil(revoked_at) and is_nil(expires_at)` is TRUE of that phantom row.
+  Without `not is_nil(t.id)` inside the live-count filter, every never-minted
+  box would count ONE live token and the census would report exactly the
+  opposite of its name.
+
+  EACH ROW CARRIES WHAT AN OPERATOR NEEDS TO ACT, not just an id:
+  `agent_status` and `suspended` (is this box even supposed to be beating?),
+  `token_count` and `revoked_token_count` and `last_revoked_at` — which is what
+  tells DISARMED (was armed, revoked at T) from NEVER ARMED (no token ever
+  minted), the distinction the 30-day prune is about to erase.
+
+  There is NO automatic re-mint here and none is constructible: the only channel
+  that can deliver a fresh agent token is the provision claim, and the box's own
+  live channel is authenticated by the token it no longer has. See the RULING on
+  `revoke_agent_token/1`.
+  """
+  @spec barkparks_without_live_agent_token() :: [map()]
+  def barkparks_without_live_agent_token do
+    now = DateTime.utc_now()
+
+    from(b in Barkpark,
+      left_join: t in AgentToken,
+      on: t.barkpark_id == b.id,
+      group_by: b.id,
+      having:
+        count(
+          fragment(
+            "CASE WHEN ? IS NOT NULL AND ? IS NULL AND (? IS NULL OR ? > ?) THEN 1 END",
+            t.id,
+            t.revoked_at,
+            t.expires_at,
+            t.expires_at,
+            ^now
+          )
+        ) == 0,
+      order_by: [desc_nulls_last: max(t.revoked_at), asc: b.slug],
+      select: %{
+        id: b.id,
+        slug: b.slug,
+        name: b.name,
+        team_id: b.team_id,
+        agent_status: b.agent_status,
+        suspended: b.suspended,
+        last_seen_at: b.last_seen_at,
+        token_count: count(t.id),
+        revoked_token_count: count(fragment("CASE WHEN ? IS NOT NULL THEN 1 END", t.revoked_at)),
+        last_revoked_at: max(t.revoked_at)
+      }
+    )
+    |> Repo.all()
+  end
+
   ## Sites — hosted websites running co-located with a Barkpark.
 
   @doc """
