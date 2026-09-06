@@ -302,7 +302,13 @@ defmodule Barkpark.Media.Delivery.Search do
             ordered
             |> where(
               [m, _d],
-              fragment("(?,?) < (?,?)", m.inserted_at, m.id, ^cursor_at, type(^cursor_id, Ecto.UUID))
+              fragment(
+                "(?,?) < (?,?)",
+                m.inserted_at,
+                m.id,
+                ^cursor_at,
+                type(^cursor_id, Ecto.UUID)
+              )
             )
             |> Repo.all()
 
