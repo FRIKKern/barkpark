@@ -683,7 +683,10 @@ defmodule BarkparkWeb.MemberControllerTest do
       seat_principals!(ws, 2)
       seat_tokens!(ws, 2)
 
-      for {id, envelope_key} <- [{"workspace.member-ls", "members"}, {"token.ls", "tokens"}] do
+      for {id, envelope_key, suffix} <- [
+            {"workspace.member-ls", "members", "/members"},
+            {"token.ls", "tokens", "/tokens"}
+          ] do
         cmd = Map.fetch!(by_id, id)
 
         assert cmd["paginated"],
@@ -699,7 +702,13 @@ defmodule BarkparkWeb.MemberControllerTest do
         assert limit_flag["default"] == 100,
                "#{id} --limit default #{inspect(limit_flag["default"])} does not match the server's 100"
 
-        path = "#{base(ws, project)}" <> String.replace(cmd["http"]["path"], "/v1", "")
+        # The route under test is the one the manifest entry NAMES — a drift
+        # test that hard-coded the path would keep passing after the entry was
+        # re-pointed somewhere else.
+        assert String.ends_with?(cmd["http"]["path_template"], "/v1" <> suffix),
+               "#{id} points at #{cmd["http"]["path_template"]}, not /v1#{suffix}"
+
+        path = base(ws, project) <> suffix
 
         body = req(admin_raw) |> get("#{path}?limit=1") |> json_response(200)
 
