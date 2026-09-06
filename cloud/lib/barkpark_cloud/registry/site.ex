@@ -65,6 +65,21 @@ defmodule BarkparkCloud.Registry.Site do
   @serving_modes ~w(direct cf_proxied)
   @tls_modes ~w(on_demand cf_internal cf_origin_ca)
 
+  # ssw8-persist-binding-verdict (site-spawner W8, charter D73): the PERSISTED
+  # verdict of the create-time content-binding read. `content_bound` on the wire
+  # is DERIVED from this — it used to be `not is_nil(read_token_encrypted)`, i.e.
+  # "a token was minted", which every content-bound site has.
+  #
+  #   * "bound"          — the site read its OWN content with its OWN token.
+  #   * "unverified"     — the read could not be performed, or its body could not
+  #                        be interpreted. NOT a verdict on the user's content.
+  #   * "not_applicable" — a container site: there is no binding to check.
+  #   * "never_checked"  — nobody ever looked. THE DEFAULT, and its own value
+  #                        rather than a nullable `bound`: a NULL that a reader
+  #                        rounds up to "probably fine" is the un-backed field
+  #                        this column exists to retire.
+  @binding_verdicts ~w(bound unverified not_applicable never_checked)
+
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
   # Two segments separated by one slash; each segment is letters/digits/_/-/.
   @github_repo_format ~r/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
@@ -144,6 +159,13 @@ defmodule BarkparkCloud.Registry.Site do
     # byte-identical to today.
     field :prebuilt_enabled, :boolean, default: false
 
+    # ssw8-persist-binding-verdict (charter D73): what the control plane OBSERVED
+    # when it read this site's binding at create, and when. Written by
+    # `POST /v1/sites` from `verify_content_binding/2`; `never_checked` until
+    # something actually looks.
+    field :content_binding_verdict, :string, default: "never_checked"
+    field :content_binding_checked_at, :utc_datetime_usec
+
     # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
     # OWN domain (blog.example.com), bound to THIS deployed site through the user's
     # CF account — the OPPOSITE of `Barkpark.custom_host` (platform own-zone, box
@@ -188,6 +210,7 @@ defmodule BarkparkCloud.Registry.Site do
   def scale_modes, do: @scale_modes
   def serving_modes, do: @serving_modes
   def tls_modes, do: @tls_modes
+  def binding_verdicts, do: @binding_verdicts
   def domain_format, do: @domain_format
 
   @doc """
@@ -234,6 +257,10 @@ defmodule BarkparkCloud.Registry.Site do
       # site-spawner W9 (charter D87): settable at create so a site can be
       # spawned prebuilt-first (a CI runner never has to make a second call).
       :prebuilt_enabled,
+      # ssw8-persist-binding-verdict: written by the create route from the
+      # binding read it already performs.
+      :content_binding_verdict,
+      :content_binding_checked_at,
       :barkpark_id,
       :team_id
     ])
@@ -248,6 +275,11 @@ defmodule BarkparkCloud.Registry.Site do
     |> validate_template()
     |> validate_theme()
     |> validate_inclusion(:scale_mode, @scale_modes)
+    # A verdict outside the enum is a validation error, never a silent bad row:
+    # `content_bound` is DERIVED from this string, so an unknown value would be
+    # a wire answer nothing downstream could read.
+    |> validate_inclusion(:content_binding_verdict, @binding_verdicts)
+    |> validate_required([:content_binding_verdict])
     |> validate_github_repo()
     |> validate_length(:github_branch, max: 255)
     |> normalize_domains()
