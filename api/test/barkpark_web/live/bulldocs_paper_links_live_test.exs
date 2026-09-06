@@ -76,6 +76,13 @@ defmodule BarkparkWeb.BulldocsPaperLinksLiveTest do
     assert render(view) =~ "The daily release, clarified"
     assert render(view) =~ "release-updated"
     refute render(view) =~ "The concrete daily release"
+
+    # Flat readers have no URL-derived scope. The post-save buffer refresh must
+    # retain the mounted Paper's public metadata instead of clearing the map.
+    socket = :sys.get_state(view.pid).socket
+    assert is_nil(socket.assigns.reader_scope)
+    synced = BarkparkWeb.BulldocsLive.Edit.sync(socket)
+    assert synced.assigns.paper_link_details[@target].title == "The daily release, clarified"
   end
 
   test "an unresolved ref remains a useful authored link without invented metadata", %{conn: conn} do

@@ -548,7 +548,22 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   end
 
   defp paper_link_details(socket, paper) do
-    scope = (socket.assigns[:reader_scope] || []) |> Keyword.put(:published_only, true)
+    reader_scope = socket.assigns[:reader_scope] || []
+
+    # Flat /papers routes have no URL scope. Preserve the same tenant boundary
+    # as the reader after a save, using the freshly fetched Paper as authority.
+    workspace_id =
+      (paper && paper.workspace_id) || Keyword.get(reader_scope, :workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    scope = [
+      workspace_id: workspace_id,
+      project_id: (paper && paper.project_id) || Keyword.get(reader_scope, :project_id),
+      published_only: true
+    ]
 
     Content.Papers.resolve_paper_link_details(
       blocks_of(paper),
