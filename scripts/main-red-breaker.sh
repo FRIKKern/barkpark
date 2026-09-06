@@ -88,6 +88,26 @@
 #     parser prefers those, and a legacy ';'-joined recovery that contained a
 #     ';' is marked AMBIGUOUS — it can still inherit, but it can never blame.
 #
+# M5. IT COMPARED AGAINST A RUN THAT NEVER RAN THE JOB, AND AGAINST A SIGNATURE
+#     THAT COULD NOT SEE THE FINDING. Both closed here; see the M5 block at the
+#     run selection and the SOBELOW block in the normaliser.
+#
+# ── WHY A FAILED SOBELOW JOB DOES NOT RED THE SECURITY GATE ─────────────────
+# Recorded, NOT changed (task-e65c78b1cd214237 criterion c3). The `Security
+# gate` aggregator in .github/workflows/security.yml lists, in its `needs`,
+# [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint,
+# mix-audit] — and NOT `sobelow`. That omission is BY DESIGN, not a fail-open
+# hole: security.yml's header declares Sobelow ADVISORY because its fingerprints
+# are derived from compiled AST and are not stable across Elixir toolchains, so
+# a blocking gate would red the fleet on baseline drift rather than on real
+# regressions; and scripts/security-gate-shape.test.sh (the 'Security gate shape
+# ratchet' job) ENFORCES that every continue-on-error job stays OUT of the
+# aggregator's needs. So a FAILED Sobelow job sitting inside a GREEN required
+# `Security gate` context is the documented posture, and main accepted it again
+# on 2026-09-05 14:15Z. Whether that posture should change is a RULING FOR MAIN,
+# never a silent edit from a breaker PR: this script only decides WHOSE red it
+# is, never whether a red blocks.
+#
 # DECISION (in order)
 #   no step failed                          -> exit 0 (nothing to decide)
 #   event is not pull_request               -> exit 1 on any failure. On main
@@ -249,6 +269,27 @@ undetermined() {
 # taking it and finding nothing is exactly how M3 read a red main as green.
 MAIN_JOBS="$TMPD/main-jobs.json"
 MAIN_RUN_DESC=""
+# M5's predicate: did a job of this name actually EXECUTE in this run's jobs
+# listing? `skipped` and `cancelled` are NOT executions — they are the two ways
+# a job can be present and carry no evidence. Absent is not an execution either.
+# The matrix-leg match is the same one the classifier uses (M1).
+job_executed() { # $1 = jobs JSON, $2 = JOB_NAME -> rc 0 if some leg ran to a verdict
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+want = sys.argv[2]
+try:
+    d = json.load(open(sys.argv[1]))
+    jobs = d.get("jobs") or []
+except Exception:
+    raise SystemExit(1)
+for j in jobs:
+    n = j.get("name")
+    if n == want or (isinstance(n, str) and n.startswith(want + " (")):
+        if j.get("conclusion") in ("success", "failure"):
+            raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
 if [ -n "${MAIN_RED_BREAKER_FIXTURE:-}" ]; then
   cp -- "$MAIN_RED_BREAKER_FIXTURE" "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
   MAIN_RUN_ID="fixture"
@@ -273,6 +314,11 @@ except Exception:
 runs = d.get("workflow_runs") or []
 UNINFORMATIVE = {"cancelled", "skipped", "startup_failure", "stale", None, ""}
 skipped = 0
+# M5: emit up to LIMIT candidates, newest first, instead of stopping at the
+# first one. The bash side walks them until it finds a run that actually RAN
+# the job of interest; without candidates there is nothing to walk.
+LIMIT = 5
+out = []
 for r in runs:
     c = r.get("conclusion")
     if c in UNINFORMATIVE:
@@ -284,8 +330,10 @@ for r in runs:
         age = str(max(0, int((time.time() - t) // 60)))
     except Exception:
         pass
+    out.append(r)
     print("%s %s %s %s %d" % (r.get("id"), (r.get("head_sha") or "?")[:8], c, age, skipped))
-    raise SystemExit
+    if len(out) >= LIMIT:
+        break
 print("")
 PY
   MAIN_RUN_ID=""; MAIN_RUN_SHA=""; MAIN_RUN_CONCL=""; MAIN_RUN_AGE=""; MAIN_SKIPPED=""
@@ -293,8 +341,63 @@ PY
   if [ -z "${MAIN_RUN_ID:-}" ]; then
     undetermined "Could not read main: no informative completed run of ${WORKFLOW_FILE} on main was returned by the API (every one of the newest 10 was cancelled/skipped, or the request failed). Main's state is unknown from here."
   fi
+
+  # ── M5: THE NEWEST RUN NEED NOT HAVE RUN THIS JOB (task-e65c78b1cd214237) ──
+  # A run being informative says nothing about the JOB inside it. security.yml's
+  # sobelow job carries `if: needs.changes.outputs.api == 'true'` (security.yml:274),
+  # and the workflow's own header records that a job skipped by a job-level `if:`
+  # PUBLISHES a check run with conclusion `skipped`. So after any main merge that
+  # touches no api/ path, main's newest completed run holds this job as
+  # `skipped` — a state carrying zero evidence about main's health at that step,
+  # which the classifier can only render as NOT-REACHED (undetermined) while the
+  # run one merge older was failing the very step this PR fails.
+  #
+  # A skipped job is NOT a green job and it is NOT an absent job: it is a run
+  # that has nothing to say. So the selection WALKS BACK, newest first, over at
+  # most MAIN_RUN_WALKBACK informative runs, and stops at the first one where a
+  # job of this name actually EXECUTED — conclusion `success` or `failure`.
+  # Bounded on purpose: an unbounded walk turns one API read into a paging loop
+  # and, worse, would silently compare against a tree that is hours old. If no
+  # candidate ran the job, the newest informative run is kept (the pre-M5
+  # behaviour) and the existing NOJOB / NOT-REACHED clauses answer UNDETERMINED.
+  #
+  # MEASURED 2026-09-06: 160 of 160 newest completed security.yml push runs on
+  # main ran the sobelow job (7 jobs each), so this shape is LATENT here today
+  # rather than the mechanism behind the six mislabels of 2026-09-05 (those were
+  # M1, the matrix-leg name). It is one non-api merge away from being live, and
+  # every dispatcher-gated job in every breaker workflow shares it.
+  MAIN_RUN_WALKBACK="${MAIN_RUN_WALKBACK:-5}"
+  _cand_id=""; _cand_sha=""; _cand_concl=""; _cand_age=""; _cand_skipped=""; _walked=0; _chosen=0
+  while read -r _cand_id _cand_sha _cand_concl _cand_age _cand_skipped; do
+    [ -n "${_cand_id:-}" ] || continue
+    [ "$_walked" -lt "$MAIN_RUN_WALKBACK" ] || break
+    if [ -n "${MAIN_RED_BREAKER_JOBS_DIR:-}" ]; then
+      cp -- "${MAIN_RED_BREAKER_JOBS_DIR}/${_cand_id}.json" "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
+    else
+      curl -sS --max-time 20 "${auth[@]}" "${API}/actions/runs/${_cand_id}/jobs?per_page=100" -o "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
+    fi
+    _walked=$((_walked + 1))
+    if job_executed "$MAIN_JOBS" "$JOB_NAME"; then
+      MAIN_RUN_ID="$_cand_id"; MAIN_RUN_SHA="$_cand_sha"; MAIN_RUN_CONCL="$_cand_concl"
+      MAIN_RUN_AGE="$_cand_age"; MAIN_SKIPPED="$_cand_skipped"; _chosen=1
+      break
+    fi
+  done < "$TMPD/runsel.txt"
+  if [ "$_chosen" = 0 ]; then
+    # Nothing in the window executed the job. Keep the newest informative run so
+    # the verdict still names a real run, and say the walk found nothing.
+    if [ -n "${MAIN_RED_BREAKER_JOBS_DIR:-}" ]; then
+      cp -- "${MAIN_RED_BREAKER_JOBS_DIR}/${MAIN_RUN_ID}.json" "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
+    else
+      curl -sS --max-time 20 "${auth[@]}" "${API}/actions/runs/${MAIN_RUN_ID}/jobs?per_page=100" -o "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
+    fi
+  fi
   MAIN_RUN_DESC="(Main run ${MAIN_RUN_ID}, head ${MAIN_RUN_SHA}, concluded ${MAIN_RUN_CONCL} ${MAIN_RUN_AGE} min ago${MAIN_SKIPPED:+, after skipping ${MAIN_SKIPPED} uninformative cancelled/skipped run(s)}.)"
-  curl -sS --max-time 20 "${auth[@]}" "${API}/actions/runs/${MAIN_RUN_ID}/jobs?per_page=100" -o "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
+  if [ "$_chosen" = 1 ] && [ "$_walked" -gt 1 ]; then
+    MAIN_RUN_DESC="${MAIN_RUN_DESC} (Walked back past $((_walked - 1)) newer main run(s) in which '${JOB_NAME}' did not EXECUTE — a job skipped by its dispatcher is not a green job.)"
+  elif [ "$_chosen" = 0 ] && [ "$_walked" -gt 0 ]; then
+    MAIN_RUN_DESC="${MAIN_RUN_DESC} (No job named '${JOB_NAME}' EXECUTED in any of the newest ${_walked} informative main run(s).)"
+  fi
 fi
 
 # Main's job log. Fetched BEFORE the classification, because it carries main's
@@ -523,17 +626,48 @@ DIG   = re.compile(r'\d+')
 # file:line detail underneath it. A first-line-only signature would have
 # inherited that red too.
 START = re.compile(r'##\[error\]|(?:^|[^A-Za-z])(?:FAIL|FAILED|ERROR)\b|\berror:|^\s*✗')
+# THE SOBELOW FINDING SHAPE (task-e65c78b1cd214237, criterion c2). Sobelow does
+# not print FAIL, ERROR, or an ##[error] annotation for a finding: it prints
+#
+#     DOS.StringToAtom: Unsafe `String.to_atom` - Low Confidence
+#     File: lib/barkpark/content/validation.ex
+#     Line: 188
+#     Function: get_in_field:187
+#     Variable: key
+#
+# — a header matching none of START's alternatives, and four UNINDENTED
+# continuation lines that the indentation rule below therefore also drops. So
+# for the whole security.yml sobelow job the signature set collapsed to the one
+# line the runner appends, `Process completed with exit code 1`, which is
+# byte-identical on every red anywhere. That is not a weak signature; it is a
+# VACUOUS one, and it fails in the DANGEROUS direction: `comm -23` finds nothing
+# our side has that main's lacks, so a PR carrying a BRAND-NEW Sobelow finding
+# inherits main's unrelated red — the exact 2026-09-03 miss (#15784) the
+# signature clause was built to stop, reopened for this one job.
+# MEASURED 2026-09-05: main run 33968984175 job 101314071568 and PR job
+# 101316469061 both report DOS.StringToAtom at
+# lib/barkpark/content/validation.ex (Sobelow's own reported line, which the
+# normaliser erases as a digit run anyway) — the harness feeds those two logs
+# verbatim and asserts INHERITED, and asserts a DIFFERENT file still reads OWN.
+SOBELOW = re.compile(r'^[A-Z][A-Za-z0-9]*\.[A-Za-z0-9_]+:\s.+\s-\s(?:High|Medium|Low) Confidence\s*$')
+SOBELOW_FIELD = re.compile(r'^(?:File|Line|Col|Function|Variable|Template|Parameter):\s*\S')
 def norm(t):
     t = DIG.sub('#', SHA.sub('<sha>', ANN.sub('', t)))
     return ' '.join(t.split())
-out, inblock = set(), False
+out, inblock, insob = set(), False, False
 for raw in open(sys.argv[1], errors='replace'):
     body = ANSI.sub('', TS.sub('', raw.rstrip('\r\n')))
-    if START.search(body):
-        inblock = True
-    elif not (inblock and body.strip() and body[:1].isspace()):
-        inblock = False
-        continue
+    if SOBELOW.search(body):
+        insob, inblock = True, False        # a finding block OPENS
+    elif insob and SOBELOW_FIELD.match(body):
+        pass                                 # its unindented File:/Line:/... rows
+    else:
+        insob = False
+        if START.search(body):
+            inblock = True
+        elif not (inblock and body.strip() and body[:1].isspace()):
+            inblock = False
+            continue
     n = norm(body)
     if n:
         out.add(n)

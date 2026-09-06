@@ -584,4 +584,127 @@ if mutate "19g legacy ';' ambiguity guard" '            log_ambiguous = True' ' 
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 
+# ── 20. M5(i) — MAIN'S NEWEST RUN SKIPPED THE JOB (task-e65c78b1cd214237 c1) ─
+# security.yml's sobelow job carries `if: needs.changes.outputs.api == 'true'`,
+# and security.yml's own header records that a job skipped by a job-level `if:`
+# PUBLISHES a check run with conclusion `skipped`. So one non-api merge to main
+# is enough for main's NEWEST completed run to hold this job as `skipped` while
+# the run one merge older was failing the very step the PR fails. `skipped` is
+# neither a pass nor an absence — it is a run with nothing to say — so the
+# selection now WALKS BACK (bounded) to the newest run in which a job of this
+# name actually EXECUTED (conclusion success or failure).
+# MEASURED 2026-09-06: 160 of 160 newest completed security.yml push runs on
+# main ran the job, so this shape is LATENT today rather than the mechanism
+# behind the six mislabels of 2026-09-05 (those were M1, the matrix-leg name).
+runs_walk="$TMP/runs-walk.json"; cat > "$runs_walk" <<'J'
+{"workflow_runs":[{"id":900001,"conclusion":"success","head_sha":"1111aaaabbbb","updated_at":"2026-09-06T07:00:00Z"},{"id":900002,"conclusion":"failure","head_sha":"2222ccccdddd","updated_at":"2026-09-06T06:00:00Z"}]}
+J
+jobsdir="$TMP/jobsdir"; mkdir -p "$jobsdir"
+# 900001 — the newest run: the job is PRESENT and `skipped` (its dispatcher said
+# no api/ path changed). Zero evidence about main at that step.
+cat > "$jobsdir/900001.json" <<'J'
+{"jobs":[{"id":9001,"name":"Doc budgets + anchors","conclusion":"skipped","steps":[]}]}
+J
+# 900002 — one merge older: the job RAN and failed on our step.
+cp "$main_red_s2" "$jobsdir/900002.json"
+walk_run() { # $1 = subject override (or "")
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" \
+      WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_walk" MAIN_RED_BREAKER_JOBS_DIR="$jobsdir"
+    bash "${1:-$SUBJECT}" 2>&1; echo "RC=$?" )
+}
+out="$(walk_run)"
+has "$out" "INHERITED-FROM-MAIN" "20) M5: a job SKIPPED on main's newest run is walked past to the run that ran it => inherited"
+has "$out" "Main run 900002" "20) and the verdict names the run it actually compared against"
+has "$out" "Walked back past 1 newer main run" "20) and says how many runs it walked past, and why"
+has "$out" "RC=0" "20) rc 0"
+case "$out" in *"the red is this PR's own"*) bad "20) blamed the author over a skipped job" ;; *) ok "20) does not blame the author" ;; esac
+# 20b. the walk is BOUNDED and it FAILS HONESTLY: if no run in the window ran
+#      the job, the newest informative run is kept and the verdict is
+#      undetermined — never an invented green.
+jobsdir2="$TMP/jobsdir2"; mkdir -p "$jobsdir2"
+cp "$jobsdir/900001.json" "$jobsdir2/900001.json"; cp "$jobsdir/900001.json" "$jobsdir2/900002.json"
+out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$out_s2" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_RUNS_FIXTURE="$runs_walk" MAIN_RED_BREAKER_JOBS_DIR="$jobsdir2"; bash "$SUBJECT" 2>&1; echo "RC=$?") )"
+has "$out" "OWNERSHIP-UNDETERMINED" "20b) no run in the window executed the job => undetermined, not green"
+has "$out" "EXECUTED in any of the newest 2 informative main run" "20b) and the walk says it found none"
+has "$out" "RC=1" "20b) rc 1"
+
+# ── 21. M5(ii) — THE SOBELOW FINDING SHAPE IS INVISIBLE TO THE NORMALISER ────
+# (task-e65c78b1cd214237 c2.) Sobelow prints neither FAIL nor ERROR nor an
+# ##[error] annotation for a finding — it prints a `<Detector>: <message> - <N>
+# Confidence` header and four UNINDENTED File:/Line:/Function:/Variable: rows,
+# so the START regex missed the header and the indentation rule dropped the
+# rows. The signature set for the whole sobelow job collapsed to the runner's
+# own `Process completed with exit code 1`, which is byte-identical on every red
+# anywhere: the subset test then found nothing our side had that main lacked and
+# a BRAND-NEW finding inherited main's unrelated red. Vacuous, and vacuous in
+# the dangerous direction.
+# These two fixtures are the REAL logs, byte-for-byte including the ANSI colour:
+#   main run 33968984175 job 101314071568 (the red main carried on 2026-09-05)
+#   PR   run 33969823799 job 101316469061 (plugins3/writes-failclosed)
+# Both report DOS.StringToAtom in lib/barkpark/content/validation.ex, at the
+# same Sobelow-reported line (the normaliser erases the digits either way).
+sob_main_log="$TMP/sob-main.log"; sob_ours_same="$TMP/sob-ours-same.txt"; sob_ours_diff="$TMP/sob-ours-diff.txt"
+python3 - "$SEMI_STEP" "$sob_main_log" "$sob_ours_same" "$sob_ours_diff" <<'PY'
+import io, sys
+step = sys.argv[1]
+job = "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
+E = "\x1b"
+def w(path, lines):
+    io.open(path, "w", encoding="utf-8").write("".join(l + "\n" for l in lines))
+w(sys.argv[2], [
+  "2026-09-05T13:29:19.4819840Z %s[32mDOS.StringToAtom: Unsafe `String.to_atom` - Low Confidence%s[0m" % (E, E),
+  "2026-09-05T13:29:19.4821335Z File: lib/barkpark/content/validation.ex",
+  "2026-09-05T13:29:19.4822496Z Line: 188",
+  "2026-09-05T13:29:19.4823318Z Function: get_in_field:187",
+  "2026-09-05T13:29:19.4823799Z Variable: key",
+  "2026-09-05T13:29:20.0000000Z ##[error]Process completed with exit code 1.",
+  "2026-09-05T13:29:21.0000000Z main-red-breaker: MAIN-FAILED-STEP in '%s': %s" % (job, step),
+])
+# the PR's own capture: the SAME finding, a later clock, the line drifted 188->190.
+w(sys.argv[3], [
+  "2026-09-05T13:48:00.0136121Z %s[32mDOS.StringToAtom: Unsafe `String.to_atom` - Low Confidence%s[0m" % (E, E),
+  "2026-09-05T13:48:00.0137235Z File: lib/barkpark/content/validation.ex",
+  "2026-09-05T13:48:00.0138180Z Line: 190",
+  "2026-09-05T13:48:00.0138850Z Function: get_in_field:187",
+  "2026-09-05T13:48:00.0139280Z Variable: key",
+  "2026-09-05T13:48:22.0000000Z ##[error]Process completed with exit code 1.",
+])
+# a DIFFERENT finding, also real: PR #16339 run 34018729630 job 101448180182,
+# SQL.Query in a function (relation_bytes) that does not exist on main at all.
+w(sys.argv[4], [
+  "2026-09-06T07:34:12.1245117Z %s[32mSQL.Query: SQL injection - Low Confidence%s[0m" % (E, E),
+  "2026-09-06T07:34:12.1245818Z File: lib/barkpark/tenancy/workspace_bundle.ex",
+  "2026-09-06T07:34:12.1246288Z Line: 972",
+  "2026-09-06T07:34:12.1246669Z Function: relation_bytes:962",
+  "2026-09-06T07:34:12.1247119Z Variable: sql",
+  "2026-09-06T07:34:22.5925004Z ##[error]Process completed with exit code 1.",
+])
+PY
+out="$(semi_run "$sob_main_log" "$sob_ours_same")"
+has "$out" "INHERITED-FROM-MAIN" "21a) the SAME Sobelow finding on both sides inherits"
+has "$out" "Signature matched too" "21a) and the signature was actually compared, not assumed"
+has "$out" "RC=0" "21a) rc 0"
+out="$(semi_run "$sob_main_log" "$sob_ours_diff")"
+has "$out" "NOT with the same failure signature" "21b) a DIFFERENT Sobelow finding in the same step is the PR's own"
+has "$out" "workspace_bundle.ex" "21b) and it prints the finding that differs"
+has "$out" "RC=1" "21b) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "21b) waved a fresh Sobelow finding through as inherited" ;; *) ok "21b) does not inherit a fresh finding" ;; esac
+
+# 19h. MUTATION on M5's walk-back: always take the newest informative run (the
+#      pre-M5 selection) -> arm 20 must stop inheriting.
+if mutate "19h M5 run walk-back" 'if job_executed "$MAIN_JOBS" "$JOB_NAME"; then' 'if true; then' 1; then
+  ( out="$(walk_run "$TMP/mut-subject.sh")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19h) MUTATION SURVIVED: still inherited with the walk-back removed"; exit 1 ;; *) echo "  PASS  19h) without the walk-back the SKIPPED job is taken and arm 20 breaks — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+# 19i. MUTATION on the Sobelow fold: make the finding header unmatchable (the
+#      pre-M5 normaliser) -> arm 21b must stop calling the fresh finding OWN,
+#      because both sides collapse to `Process completed with exit code #`.
+if mutate "19i Sobelow finding-shape fold" "SOBELOW = re.compile(r'^[A-Z][A-Za-z0-9]*\.[A-Za-z0-9_]+:\s.+\s-\s(?:High|Medium|Low) Confidence\s*\$')" "SOBELOW = re.compile(r'^(?!x)x')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$sob_main_log" "$sob_ours_diff")"
+    case "$out" in *"NOT with the same failure signature"*) echo "  FAIL  19i) MUTATION SURVIVED: still caught the fresh finding without the fold"; exit 1 ;; *) echo "  PASS  19i) without the Sobelow fold a BRAND-NEW finding inherits main's red — the fold is load-bearing, arm 21b is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
