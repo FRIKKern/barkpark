@@ -770,10 +770,59 @@ defmodule Barkpark.Auth do
     end
   end
 
-  def list_tokens(dataset) do
-    ApiToken
-    |> where([t], t.dataset == ^dataset)
-    |> Repo.all()
+  @doc """
+  Tokens bound to `dataset` **inside `workspace_id`** — SECRET-FREE rows.
+
+  THE FENCE IS THE FIRST ARGUMENT, and it is not optional. `dataset` is a
+  per-tenant STRING: every workspace on an instance has a `"production"`, so
+  the old dataset-only `list_tokens/1` answered "every token on the box that
+  happens to share this dataset name" while reading like the tenant inventory.
+  It took no actor, crossed every workspace, and returned whole `%ApiToken{}`
+  structs — `token_hash` included. Nothing on a request path called it, which
+  is exactly why it had to be closed BEFORE one did.
+
+  Two rails, both load-bearing:
+
+    * `workspace_id` is REQUIRED and a nil/malformed id answers `[]` — it never
+      falls back to the Default workspace. A fence with a permissive nil arm is
+      not a fence: the next caller that forgets to thread a workspace would get
+      the Default tenant's credentials instead of a denial.
+    * The select list is SECRET-FREE, mirroring the fenced twin
+      `Barkpark.Tenancy.Members.list_workspace_tokens/1` ("Secrets are never
+      selected"). Rows come back as MAPS, not structs, so `token_hash` cannot
+      be reached even by accident. A consequence worth stating: these rows are
+      NOT `%ApiToken{}`, so `revoke_token/1` must be called with `row.id` (its
+      binary-id clause), never with the row.
+
+  `Members.list_workspace_tokens/1` remains the workspace ROSTER (it joins
+  memberships and carries the seat `role`). This door is the narrower
+  dataset-within-workspace question the seed bootstrap and the cloud warmpool
+  provisioning recipe ask.
+  """
+  @spec list_tokens(binary() | nil, binary()) :: [map()]
+  def list_tokens(workspace_id, dataset) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      uuid ->
+        ApiToken
+        |> where([t], t.dataset == ^dataset and t.workspace_id == ^uuid)
+        |> select([t], %{
+          id: t.id,
+          label: t.label,
+          name: t.name,
+          kind: t.kind,
+          permissions: t.permissions,
+          dataset: t.dataset,
+          workspace_id: t.workspace_id,
+          revoked_at: t.revoked_at,
+          expires_at: t.expires_at,
+          last_used_at: t.last_used_at,
+          inserted_at: t.inserted_at
+        })
+        |> Repo.all()
+    end
   end
 
   # ── PAT fast-follow: self-service Personal Access Tokens ───────────────

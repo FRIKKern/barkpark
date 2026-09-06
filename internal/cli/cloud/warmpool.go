@@ -538,7 +538,11 @@ func adminTokenStep(token string) CaddyStep {
 	// changeset) — NEVER the token itself — so the failure is diagnosable without
 	// leaking the secret into stderr/journal.
 	const elixir = `scope = Barkpark.Seeds.Shared.ensure_default_scope(); ` +
-		`Barkpark.Auth.list_tokens(scope.dataset) |> Enum.filter(&Barkpark.Auth.has_permission?(&1, "admin")) |> Enum.each(&Barkpark.Auth.revoke_token/1); ` +
+		// list_tokens/2 is workspace-FENCED (its first arg) and returns secret-free
+		// MAPS, not %ApiToken{} structs — hence revoke_token(&1.id), which is the
+		// binary-id clause. Same rows as before on a freshly provisioned box: the
+		// baked seed admin token is minted under this very Default scope.
+		`Barkpark.Auth.list_tokens(scope.workspace_id, scope.dataset) |> Enum.filter(&Barkpark.Auth.has_permission?(&1, "admin")) |> Enum.each(&Barkpark.Auth.revoke_token(&1.id)); ` +
 		`case Barkpark.Auth.create_token(System.fetch_env!("BP_TOK"), "barkpark cloud admin", scope.dataset, ["read", "write", "admin"], scope.workspace_id) do {:ok, _} -> :ok; other -> IO.inspect(other, label: "admin-token create failed"); System.halt(1) end`
 	script := `set -a; . /opt/barkpark/.env; set +a; export BP_TOK='` + token + `'; . /root/.asdf/asdf.sh && cd /opt/barkpark/api && mix run -e '` + elixir + `'`
 	return CaddyStep{
