@@ -202,8 +202,10 @@ jobs:
       # THE FILTER THIS DEPENDS ON IS THIS FILE'S OWN. `on.pull_request` here
       # carries no `paths:`, which is what makes the coverage total; adding one
       # later would blind this step silently, so the step asserts its own venue
-      # before it measures. Advisory job, like everything else here — it RUNS, it
-      # does not BLOCK (pr-meta is not one of main's four required contexts).
+      # before it measures.
+      # spec-authority: advisory-ok — this step reports on the PR; pr-meta is not
+      # in .github/required-checks.json, so a red here informs the author and
+      # stops nothing. The word `gate-map` above is a FILE NAME, not a claim.
       - name: "gate-map: the committed snapshot still describes the tree"
         run: |
           set -euo pipefail
