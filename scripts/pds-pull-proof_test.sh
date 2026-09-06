@@ -80,12 +80,23 @@ fi
 FIX="$TMP/fixtures"; mkdir -p "$FIX"
 
 # ── fixture builders ────────────────────────────────────────────────────────
-mk_bundle() { # <name> <manifest-body> [documents.copy body]
+# mk_bundle <name> <manifest-body> [documents.copy body]
+# Members are named EXPLICITLY, never `.`: a bundle built with `tar -c .` carries
+# `./manifest.json`, and whether `tar -x <tar> manifest.json` matches that member
+# differs between bsdtar and GNU tar. The shipped extractor asks for the bare
+# names, so these fixtures carry the bare names — otherwise the arms would be
+# measuring tar's matching rules on one platform rather than the predicate.
+mk_bundle() {
   local name="$1" manifest="$2" docs="${3-}" d="$TMP/build-$1"
   rm -rf "$d"; mkdir -p "$d/tables"
   printf '%s' "$manifest" > "$d/manifest.json"
-  if [ "$#" -ge 3 ]; then printf '%s' "$docs" > "$d/tables/documents.copy"; else rmdir "$d/tables"; fi
-  ( cd "$d" && tar -cf "$FIX/$name.tar" . ) 2>/dev/null
+  if [ "$#" -ge 3 ]; then
+    printf '%s' "$docs" > "$d/tables/documents.copy"
+    tar -cf "$FIX/$name.tar" -C "$d" manifest.json tables 2>/dev/null
+  else
+    rmdir "$d/tables"
+    tar -cf "$FIX/$name.tar" -C "$d" manifest.json 2>/dev/null
+  fi
   printf '%s' "$FIX/$name.tar"
 }
 
@@ -96,7 +107,10 @@ printf '{"error":"forbidden"}' > "$FIX/json.tar"
 printf 'this is not a tar at all, it is a gzipped sentence' | gzip > "$FIX/gz.tar"
 : > "$FIX/zero.tar"
 
-mkdir -p "$TMP/emptydir" && ( cd "$TMP/emptydir" && tar -cf "$FIX/no-members.tar" . ) 2>/dev/null
+# A tar with NO members at all. `-T /dev/null` is the portable spelling (bsdtar
+# and GNU tar both take it); `tar -c .` would carry a `./` entry and be a
+# different fixture.
+tar -cf "$FIX/no-members.tar" -T /dev/null 2>/dev/null
 
 GOOD="$(mk_bundle good '{"profile":"full","served_sha":"cd5d861da"}' "$(printf 'id\ttype\tdoc_id\n1\tpost\tp1\n')")"
 LEGACY="$(mk_bundle legacy '{"served_sha":"cd5d861da","format":"bp-export-v1"}' "$(printf 'id\ttype\tdoc_id\n1\tpost\tp1\n')")"
