@@ -482,8 +482,45 @@ export const RETRYABLE_ABORTS = [
   { id: 'user-opened-vanished', why: 'the [data-user-opened] marker vanished mid-sweep' },
   { id: 'element-vanished',     why: 'a required element vanished between the settle and the measure' },
   { id: 'provenance-bracket',   why: 'the deployment moved under the sweep — a deploy, not a desk fact' },
+  // NOT thrown by this file. Playwright raises it, out of whatever `evaluate`
+  // was in flight, when the page navigates or the target closes underneath —
+  // which is what a blue/green slot rotation does to an open sweep. It reaches
+  // the retry layer as a plain Error, so `isRetryableBrowserRace()` classifies
+  // it there rather than at a throw site this file does not own.
+  { id: 'browser-race',         why: "playwright's execution context died under a navigation or restart",
+    classified_at: 'the retry layer — playwright throws it, not this file' },
 ];
 const RETRYABLE_ABORT_IDS = new Set(RETRYABLE_ABORTS.map((a) => a.id));
+
+/**
+ * THE ABORT D138 CALLED "FAILURE B" AND COULD NOT DIAGNOSE, CAUGHT.
+ *
+ * Failure B was one zero-byte exit-1 whose operator suppressed stderr, so its
+ * text is gone and it has sat undiagnosed since. The N=22 characterisation
+ * sweep of 2026-09-06 reproduced it WITH stderr intact:
+ *
+ *     page.evaluate: Execution context was destroyed, most likely because of a
+ *     navigation
+ *         at waitForDeskSettled (studio-desk-measure.mjs)
+ *         at async runB29Probes
+ *
+ * It arrived in the same minutes as two `provenance-bracket` aborts reporting a
+ * LIVE SLOT CHANGE — i.e. guerrilla was rotating blue/green under the sweep. A
+ * restart navigates the open page, playwright's execution context dies inside
+ * whichever `evaluate` was in flight, and the run exits 1 having written
+ * nothing. That is the same deploy-under-the-sweep race the bracket catches at
+ * the END of a run, reaching us EARLIER, through a different door.
+ *
+ * It is not a MeasureError — playwright throws it — so without this it counts
+ * as TERMINAL and burns the run. Matching on the message is narrow on purpose:
+ * these three strings are playwright's own vocabulary for "the thing you were
+ * talking to went away", and nothing about the desk is implied by any of them.
+ */
+export function isRetryableBrowserRace(err) {
+  if (err instanceof MeasureError) return false;
+  return /Execution context was destroyed|Target (page, context or browser has been )?closed|Navigation (failed because page was closed|to .* is interrupted)/i
+    .test(String(err?.message ?? ''));
+}
 
 /** A fail-closed abort the operator is AUTHORISED to re-run, BY NAME. */
 const dieRetryable = (id, msg) => {
@@ -4179,13 +4216,15 @@ export async function runWithRetries(attemptFn, retries, { onRetry = () => {} } 
       const value = await attemptFn(attempt);
       return { value, attempts, attempt };
     } catch (err) {
-      const retryable = err instanceof MeasureError && err.retryable === true;
-      attempts.push({ attempt, retryable, abort_id: err?.abortId ?? null, message: err?.message ?? String(err) });
+      const browserRace = isRetryableBrowserRace(err);
+      const retryable = browserRace || (err instanceof MeasureError && err.retryable === true);
+      const abortId = browserRace ? 'browser-race' : (err?.abortId ?? null);
+      attempts.push({ attempt, retryable, abort_id: abortId, message: err?.message ?? String(err) });
       if (!retryable || attempt > retries) {
         err.attempts = attempts;
         throw err;
       }
-      onRetry({ attempt, retries, abort_id: err.abortId, message: err.message });
+      onRetry({ attempt, retries, abort_id: abortId, message: err.message });
     }
   }
 }
@@ -4228,9 +4267,9 @@ if (INVOKED_DIRECTLY) {
     .catch((err) => {
       process.stderr.write('\nMEASURE FAILED — no matrix was produced.\n\n');
       process.stderr.write((err instanceof MeasureError ? err.message : (err?.stack || String(err))) + '\n\n');
-      if (err instanceof MeasureError && err.retryable) {
+      if ((err instanceof MeasureError && err.retryable) || isRetryableBrowserRace(err)) {
         process.stderr.write(
-          `  RETRYABLE ABORT "${err.abortId}" — this is a race the harness lost, not a fact about the ` +
+          `  RETRYABLE ABORT "${err.abortId ?? 'browser-race'}" — this is a race the harness lost, not a fact about the ` +
           `desk, and re-running is the CORRECT response rather than a deviation ` +
           `(${(err.attempts || []).length} attempt(s) made). The full list of retryable aborts is ` +
           `RETRYABLE_ABORTS in this file.\n\n`);

@@ -39,6 +39,7 @@ import {
   browserPolicy,
   emptyFaceIntegrity,
   isMissingBrowserError,
+  isRetryableBrowserRace,
   launchMeasureBrowser,
   missingBrowserMessage,
   parseRetries,
@@ -205,10 +206,72 @@ test('every dieRetryable call site uses an id that is IN the table', () => {
 test('every table entry is actually THROWN somewhere — no phantom authority', () => {
   const ids = new Set([...SRC.matchAll(/dieRetryable\(\s*'([a-z-]+)'/g)].map((m) => m[1]));
   for (const a of RETRYABLE_ABORTS) {
+    // An entry may declare that it is classified elsewhere — `browser-race` is
+    // playwright's error, not ours, and has no throw site in this file. It must
+    // SAY so; an entry that neither throws nor declares is phantom authority.
+    if (a.classified_at) continue;
     assert.ok(ids.has(a.id),
       `RETRYABLE_ABORTS names "${a.id}" but nothing throws it. A table that over-promises tells an ` +
       'operator they may retry a failure that will never occur, and hides the one that will.');
   }
+});
+
+test('a declared-elsewhere entry really is classified elsewhere', () => {
+  for (const a of RETRYABLE_ABORTS.filter((x) => x.classified_at)) {
+    assert.equal(a.id, 'browser-race', 'only the playwright race is classified outside a throw site');
+    assert.equal(isRetryableBrowserRace(new Error('page.evaluate: Execution context was destroyed')), true,
+      'the entry claims a classifier exists; this is it');
+  }
+});
+
+// ── FAILURE B, CAUGHT — the abort D138 could not diagnose ────────────────────
+//
+// The N=22 sweep of 2026-09-06 reproduced a zero-byte exit-1 with its stderr
+// intact: `page.evaluate: Execution context was destroyed, most likely because
+// of a navigation`, thrown out of waitForDeskSettled, in the same minutes as
+// two provenance-bracket aborts reporting a LIVE SLOT CHANGE. A blue/green
+// rotation navigated the open page. It is a race, and before this it counted as
+// TERMINAL because playwright — not this file — raised it.
+
+test("playwright's execution-context death is retryable", () => {
+  for (const msg of [
+    'page.evaluate: Execution context was destroyed, most likely because of a navigation',
+    'Target page, context or browser has been closed',
+    'Target closed',
+  ]) {
+    assert.equal(isRetryableBrowserRace(new Error(msg)), true, msg);
+  }
+});
+
+test('an ordinary browser failure stays TERMINAL', () => {
+  for (const msg of [
+    'Timeout 30000ms exceeded.',
+    "locator.click: Element is not visible",
+    "browserType.launch: Executable doesn't exist",
+  ]) {
+    assert.equal(isRetryableBrowserRace(new Error(msg)), false, msg);
+  }
+});
+
+test('a MeasureError never routes through the browser-race classifier', () => {
+  assert.equal(isRetryableBrowserRace(new MeasureError('Execution context was destroyed')), false,
+    'this file\'s own aborts earn their retry by being NAMED; the message-matcher is for the one ' +
+    'error class we do not own, and must not become a back door into the table');
+});
+
+test('the retry loop actually retries a browser race', async () => {
+  let calls = 0;
+  const seen = [];
+  const { value, attempt } = await runWithRetries(async (n) => {
+    calls += 1;
+    if (n < 2) throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+    return 'matrix';
+  }, 2, { onRetry: (r) => seen.push(r.abort_id) });
+  assert.equal(value, 'matrix');
+  assert.equal(attempt, 2);
+  assert.deepEqual(seen, ['browser-race'],
+    'the retry must be ATTRIBUTED — an operator reading the stderr has to see which race was lost');
+  assert.equal(calls, 2);
 });
 
 test('the five aborts D138 met are all named', () => {
