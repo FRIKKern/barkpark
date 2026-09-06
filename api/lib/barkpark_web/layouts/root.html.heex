@@ -5125,10 +5125,27 @@
         this._paSettle(p);
       },
 
+      // A native <details>/<summary> disclosure changes local browser state and
+      // does not promise a server round trip. A surrounding selectable block may
+      // still carry phx-click, so target.closest("[phx-click]") alone would arm the
+      // watchdog against that ANCESTOR and announce a false lost-press failure.
+      // Exempt only the disclosure-only shape: an explicit phx-click on the summary
+      // itself or on the clicked descendant remains protected, as do real action
+      // buttons in the details body.
+      _paNativeDisclosureOnly(target, action) {
+        var summary = target.closest("summary");
+        return !!(
+          summary &&
+          summary.closest("details") &&
+          (!action || !summary.contains(action))
+        );
+      },
+
       _paOnPress(ev) {
         var t = ev.target;
         if (!t || !t.closest) return;
         var el = t.closest("[phx-click]");
+        if (this._paNativeDisclosureOnly(t, el)) return;
         if (!el || !this.el.contains(el)) return;
         var spec = el.getAttribute("phx-click") || "";
         // A pure client-side JS command list never reaches the server and never
