@@ -2471,6 +2471,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end)
   end
 
+  defp paper_child_lists(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: [[child]]
+
   defp paper_child_lists(_), do: []
 
   defp visible_body_lists(container) when is_map(container) do
@@ -2487,9 +2490,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   (`block-<index>`, sections recurse with a `<parent>.<index>` prefix) for
   any block that lacks one. A block already carrying a non-blank "id" is left
   untouched, so author/op-supplied ids — which DocPatchOps address blocks by —
-  survive byte-identical and stay resolvable. Sections recurse so a nested
-  id-less child also gets a unique id (the stream only keys on top-level ids,
-  but `apply_paper_block_op` addresses children too).
+  survive byte-identical and stay resolvable. Visible containers recurse so a
+  nested id-less child also gets a unique id (the stream only keys on top-level
+  ids, but `apply_paper_block_op` addresses children too).
 
   Coverage (the three id-less shapes a block can take):
 
@@ -2497,16 +2500,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
     * BLANK  — `"id" => ""` or `"id" => nil` → gets `<prefix>-<index>`.
     * NESTED — recursion covers `"blocks"` lists, expandable `"children"`, each
       steps row's reader-visible body, and each plain-tabs row's canonical
-      `"blocks"`. Steps and tabs rows gain stable row ids; hidden / opaque
-      aliases remain untouched. Composite / arrayOf inline children under
-      `"items"` / `"content"` are NOT recursed. Child prefixes use the parent's
-      (or row's) ensured id, keeping minted ids deterministic.
+      `"blocks"`, plus the singular map-valued `"child"` of a `figure` and its
+      visible descendants. Steps and tabs rows gain stable row ids; hidden /
+      opaque aliases remain untouched. A figure with a missing, nil, scalar, or
+      array child is opaque, as are any figure `"children"` / `"blocks"`
+      compatibility keys. Composite / arrayOf inline children under `"items"` /
+      `"content"` are NOT recursed. Child prefixes use the parent's (or row's)
+      ensured id, keeping minted ids deterministic.
 
   Collision-safe across the authored tree. Before minting, every present
-  non-blank block, steps-row, and tabs-row id is reserved globally, including
-  ids in hidden steps `children` / `blocks` aliases. Only reader-visible paths
-  are projected, but a minted positional id can never collide with authored
-  identity elsewhere in the document. If taken, a deterministic suffix
+  non-blank block, steps-row, tabs-row, and canonical figure-child id is
+  reserved globally, including ids in hidden steps `children` / `blocks`
+  aliases. Only reader-visible paths are projected, but a minted positional id
+  can never collide with authored identity elsewhere in the document. If taken,
+  a deterministic suffix
   (`-<k>`, k incrementing from 1) is appended until free.
 
   Idempotent: re-running over an already-id-bearing list is a no-op (a present
@@ -2528,10 +2535,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   @doc """
-  Project stable ids only when every authored block, steps-row, and tabs-row
-  identity is unambiguous across the full tree. Hidden steps body aliases
-  participate in the duplicate fence even though only the reader-visible alias
-  is projected.
+  Project stable ids only when every authored block, steps-row, tabs-row, and
+  canonical figure-child identity is unambiguous across the full visible tree.
+  Hidden steps body aliases participate in the duplicate fence even though only
+  the reader-visible alias is projected; malformed and compatibility-only
+  figure child aliases remain opaque.
   """
   @spec project_block_ids_safely(list()) ::
           {:ok, list()} | {:error, {:duplicate_id, String.t()}}
@@ -2579,6 +2587,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         %{"type" => "expandable"} ->
           ensure_visible_body_ids(block, id, taken)
+
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          {child, taken} = ensure_block_id(child, id <> "-child", 0, taken)
+          {Map.put(block, "child", child), taken}
+
+        %{"type" => "figure"} ->
+          {block, taken}
 
         %{"blocks" => children} when is_list(children) ->
           {children, taken} = ensure_block_ids(children, id, taken)
@@ -2669,6 +2684,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         %{"type" => "expandable"} ->
           authored_body_alias_ids(block)
+
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          authored_block_tree_ids(child)
+
+        %{"type" => "figure"} ->
+          []
 
         %{"blocks" => children} when is_list(children) ->
           authored_tree_ids(children)

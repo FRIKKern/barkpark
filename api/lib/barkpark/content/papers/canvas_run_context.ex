@@ -6,6 +6,11 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
           | %{
               container_kind: String.t(),
               container_id: String.t(),
+              container_run_ids: [String.t()]
+            }
+          | %{
+              container_kind: String.t(),
+              container_id: String.t(),
               container_row_id: String.t(),
               container_run_ids: [String.t()]
             }
@@ -29,6 +34,14 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
              container_kind: kind,
              container_id: container_id,
              container_row_id: row_id,
+             container_run_ids: run_ids
+           }}
+
+        kind == "figure" and kind_present? and not row_present? and length(run_ids) == 1 ->
+          {:ok,
+           %{
+             container_kind: kind,
+             container_id: container_id,
              container_run_ids: run_ids
            }}
 
@@ -59,6 +72,31 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   end
 
   def map_run(_blocks, _context, _fun), do: {:error, :invalid_canvas_run_context}
+
+  defp map_normalized_run(blocks, %{container_kind: "figure"} = context, fun) do
+    before_counts = id_occurrences(blocks)
+
+    with {:ok, match} <- unique_figure(blocks, context),
+         result <- fun.([match.child]) do
+      case result do
+        {:ok, [next_child], value} when is_map(next_child) ->
+          next_blocks = put_path(blocks, match.path ++ ["child"], next_child)
+
+          with :ok <- reject_increased_duplicate_ids(before_counts, id_occurrences(next_blocks)) do
+            {:ok, next_blocks, value}
+          end
+
+        {:ok, _next_run, _value} ->
+          {:error, :canvas_run_figure_cardinality}
+
+        {:error, _reason} = error ->
+          error
+
+        _other ->
+          {:error, :invalid_canvas_run_result}
+      end
+    end
+  end
 
   defp map_normalized_run(blocks, %{container_run_ids: run_ids} = context, fun) do
     before_counts = id_occurrences(blocks)
@@ -94,6 +132,30 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp unique_container_run(blocks, %{container_id: container_id}),
     do: unique_expandable(blocks, container_id)
+
+  defp unique_figure(
+         blocks,
+         %{container_id: container_id, container_run_ids: [run_id]}
+       ),
+       do: unique_figure(blocks, container_id, run_id)
+
+  defp unique_figure(blocks, container_id, run_id) do
+    case find_containers(blocks, "figure", container_id, []) do
+      [%{child: child} = match] when is_map(child) ->
+        if block_id(child) == run_id,
+          do: {:ok, match},
+          else: {:error, :canvas_run_not_found}
+
+      [_one] ->
+        {:error, :canvas_run_figure_cardinality}
+
+      [] ->
+        {:error, :canvas_run_container_not_found}
+
+      [_first | _rest] ->
+        {:error, :canvas_run_container_ambiguous}
+    end
+  end
 
   defp unique_expandable(blocks, container_id) do
     case find_containers(blocks, "expandable", container_id, []) do
@@ -223,6 +285,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp container_match(%{"type" => "tabs"} = block, path),
     do: %{path: path, rows: Map.get(block, "tabs")}
 
+  defp container_match(%{"type" => "figure"} = block, path),
+    do: %{path: path, child: Map.get(block, "child")}
+
   defp container_match(block, path) do
     {alias_key, children} = effective_children(block)
     %{path: path, alias: alias_key, children: children}
@@ -282,6 +347,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end)
   end
 
+  defp recursive_child_entries(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: [{[{:singular, "child"}], [child]}]
+
   defp recursive_child_entries(_block), do: []
 
   defp put_children(blocks, path, alias_key, children) do
@@ -304,6 +372,20 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
         row
       end
     end)
+  end
+
+  defp put_path(current, [{:singular, key} | rest], replacement)
+       when is_map(current) and is_binary(key) do
+    case Map.fetch(current, key) do
+      {:ok, child} when is_map(child) ->
+        case put_path([child], rest, replacement) do
+          [next_child] when is_map(next_child) -> Map.put(current, key, next_child)
+          _invalid -> current
+        end
+
+      _invalid ->
+        current
+    end
   end
 
   defp put_path(current, [key | rest], replacement) when is_map(current) and is_binary(key) do
@@ -386,6 +468,9 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
       _row -> []
     end)
   end
+
+  defp all_child_lists(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: [[child]]
 
   defp all_child_lists(_block), do: []
 

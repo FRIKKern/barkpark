@@ -1874,11 +1874,17 @@
           const rowContext = hasContainerId && hasLegacyRunMarker &&
             hasContainerKind && ["steps", "tabs"].includes(containerKind) &&
             hasContainerRowId && containerRowId.trim() !== "";
-          if (!legacyContext && !rowContext) return { wire: {}, invalid: true };
+          const figureContext = hasContainerId && hasLegacyRunMarker &&
+            containerKind === "figure" && !hasContainerRowId && runIds.length === 1;
+          if (!legacyContext && !rowContext && !figureContext) {
+            return { wire: {}, invalid: true };
+          }
           return {
             wire: Object.freeze({
-              ...(rowContext ? {
+              ...(rowContext || figureContext ? {
                 container_kind: containerKind,
+              } : {}),
+              ...(rowContext ? {
                 container_row_id: containerRowId,
               } : {}),
               container_id: containerId,

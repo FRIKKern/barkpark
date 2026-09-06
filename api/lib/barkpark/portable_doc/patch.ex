@@ -22,7 +22,9 @@ defmodule Barkpark.PortableDoc.Patch do
   and a block is `%{"id" => "…", "type" => "…", …}`. A `section` block nests
   the tree under its own `"blocks"` key; an `expandable` uses `"children"`
   (with `"blocks"` retained as a compatibility alias); each `steps` row uses
-  the same visible-body aliases.
+  the same visible-body aliases. A `figure` has exactly one canonical child
+  block under its singular map-valued `"child"` key; its other keys are not
+  treated as child collections.
 
   ## The six ops
 
@@ -40,7 +42,9 @@ defmodule Barkpark.PortableDoc.Patch do
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` and `expandable`
   children, each visible `steps` row body, and each plain `tabs` row's canonical
-  `blocks` list at any depth. `append-block` is top-level only.
+  `blocks` list, plus a `figure`'s canonical child and that child's visible
+  descendants, at any depth. `patch-block` and a map-valued `replace-block`
+  may target the figure child. `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -76,9 +80,12 @@ defmodule Barkpark.PortableDoc.Patch do
   effect would shift a locked block's top-level position (e.g. an insert-after
   landing inside the locked prefix).
 
-  `:constraint` is the CONSTRAINT-VOCABULARY backstop (pdd-t20) — the calm
-  SIBLING of `:locked_block`. When the caller threads a doc type's constraint
-  DECLARATIONS via `apply_patch/3`'s `opts[:constraints]`
+  `:constraint` covers intrinsic container shape as well as the optional
+  CONSTRAINT-VOCABULARY backstop (pdd-t20). A figure must retain exactly one
+  map-valued child, so direct `insert-after`, direct `remove-block`, and a
+  non-map direct `replace-block` are refused even without opts. For declared
+  constraints, when the caller threads a doc type's DECLARATIONS via
+  `apply_patch/3`'s `opts[:constraints]`
   (`Barkpark.PortableDoc.Constraints` shape), an op whose result would break a
   CARDINALITY (min/max/exactly) or RELATIVE-order (after/before/index) rule is
   rejected — a `remove-block` dropping below a min-N, an `insert-after` adding
@@ -86,11 +93,13 @@ defmodule Barkpark.PortableDoc.Patch do
   block. `message` is the first human-readable violation string. The veto fires
   ONLY when the doc was VALID before the op (D12): a legacy / already-invalid
   doc plus an unrelated op is NOT rejected, so no edit is punished for a
-  pre-existing violation. With no declarations passed the engine is
-  byte-identical to the pre-vocabulary behaviour (D3 additive).
+  pre-existing violation. With no declarations passed, non-figure behavior is
+  byte-identical to the pre-vocabulary behavior (D3 additive).
   """
 
   alias Barkpark.PortableDoc.Constraints
+
+  @figure_child_constraint "figure must contain exactly one child"
 
   @type block :: %{required(String.t()) => term()}
   @type blocks :: [block()]
@@ -194,6 +203,9 @@ defmodule Barkpark.PortableDoc.Patch do
       id_exists?(blocks, block_id(block)) ->
         {:error, {:duplicate_id, block_id(block), "insert-after"}}
 
+      direct_figure_child_id?(blocks, after_id) ->
+        {:error, {:constraint, @figure_child_constraint, "insert-after"}}
+
       true ->
         case transform_at_id(blocks, after_id, fn target -> [target, block] end) do
           nil -> {:error, {:block_not_found, after_id, "insert-after"}}
@@ -235,13 +247,18 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp apply_to_blocks(blocks, %{"op" => "replace-block", "id" => id, "block" => block}) do
-    if locked_at_id?(blocks, id) do
-      {:error, {:locked_block, id, "replace-block"}}
-    else
-      case transform_at_id(blocks, id, fn _target -> [block] end) do
-        nil -> {:error, {:block_not_found, id, "replace-block"}}
-        new_blocks -> {:ok, new_blocks}
-      end
+    cond do
+      locked_at_id?(blocks, id) ->
+        {:error, {:locked_block, id, "replace-block"}}
+
+      direct_figure_child_id?(blocks, id) and not is_map(block) ->
+        {:error, {:constraint, @figure_child_constraint, "replace-block"}}
+
+      true ->
+        case transform_at_id(blocks, id, fn _target -> [block] end) do
+          nil -> {:error, {:block_not_found, id, "replace-block"}}
+          new_blocks -> {:ok, new_blocks}
+        end
     end
   end
 
@@ -250,22 +267,27 @@ defmodule Barkpark.PortableDoc.Patch do
     # by ANY client, canvas diff or raw API. Checked before the transform so
     # the atomic batch halts with a clear error instead of silently unmaking
     # the guarantee. Op-of-absent stays a no-op below.
-    if locked_at_id?(blocks, id) do
-      {:error, {:locked_block, id, "remove-block"}}
-    else
-      case transform_at_id(blocks, id, fn _target -> [] end) do
-        # Idempotent re-send safety for the canvas incremental-diff model: removing a
-        # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
-        # (id gone) is already true, so we return the block list unchanged and let the
-        # atomic batch continue. Without this, a stale remove-block (the canvas can
-        # re-send a batch that crosses an echo in flight, or a leading-block delete can
-        # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
-        # fold and discard the user's real edits riding the same batch. Other not-found
-        # cases (patch-block / insert-after / replace-block of a missing anchor) keep
-        # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
-        nil -> {:ok, blocks}
-        new_blocks -> {:ok, new_blocks}
-      end
+    cond do
+      locked_at_id?(blocks, id) ->
+        {:error, {:locked_block, id, "remove-block"}}
+
+      direct_figure_child_id?(blocks, id) ->
+        {:error, {:constraint, @figure_child_constraint, "remove-block"}}
+
+      true ->
+        case transform_at_id(blocks, id, fn _target -> [] end) do
+          # Idempotent re-send safety for the canvas incremental-diff model: removing a
+          # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
+          # (id gone) is already true, so we return the block list unchanged and let the
+          # atomic batch continue. Without this, a stale remove-block (the canvas can
+          # re-send a batch that crosses an echo in flight, or a leading-block delete can
+          # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
+          # fold and discard the user's real edits riding the same batch. Other not-found
+          # cases (patch-block / insert-after / replace-block of a missing anchor) keep
+          # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
+          nil -> {:ok, blocks}
+          new_blocks -> {:ok, new_blocks}
+        end
     end
   end
 
@@ -431,6 +453,9 @@ defmodule Barkpark.PortableDoc.Patch do
         %{"type" => "expandable"} ->
           authored_alias_ids(block)
 
+        %{"type" => "figure", "child" => child} when is_map(child) ->
+          authored_block_ids(child)
+
         %{"type" => "steps", "steps" => rows} when is_list(rows) ->
           Enum.flat_map(rows, &authored_step_row_ids/1)
 
@@ -511,6 +536,20 @@ defmodule Barkpark.PortableDoc.Patch do
     end)
   end
 
+  defp direct_figure_child_id?(blocks, id) do
+    Enum.any?(blocks, fn
+      %{"type" => "figure", "child" => child} = block when is_map(child) ->
+        block_id(child) == id or
+          Enum.any?(visible_child_lists(block), &direct_figure_child_id?(&1, id))
+
+      block when is_map(block) ->
+        Enum.any?(visible_child_lists(block), &direct_figure_child_id?(&1, id))
+
+      _block ->
+        false
+    end)
+  end
+
   # Transform a block list, applying `fn` to the matching block at any depth.
   #
   # `fn` returns the replacement list for the array slot it was handed (one
@@ -575,6 +614,18 @@ defmodule Barkpark.PortableDoc.Patch do
         case transform_tabs_rows(rows, id, fun, []) do
           {nil, _flag} -> {nil, false}
           {next_rows, flag} -> {Map.put(block, "tabs", next_rows), flag}
+        end
+
+      {:figure, child} ->
+        case transform_with_flag([child], id, fun) do
+          {nil, _flag} ->
+            {nil, false}
+
+          {[next_child], flag} when is_map(next_child) ->
+            {Map.put(block, "child", next_child), flag}
+
+          {_invalid_shape, _flag} ->
+            {nil, false}
         end
 
       nil ->
@@ -642,6 +693,9 @@ defmodule Barkpark.PortableDoc.Patch do
           _row -> []
         end)
 
+      {:figure, child} ->
+        [[child]]
+
       nil ->
         []
     end
@@ -663,6 +717,9 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp visible_child_container(%{"type" => "tabs", "tabs" => rows}) when is_list(rows),
     do: {:tabs, rows}
+
+  defp visible_child_container(%{"type" => "figure", "child" => child}) when is_map(child),
+    do: {:figure, child}
 
   defp visible_child_container(_block), do: nil
 

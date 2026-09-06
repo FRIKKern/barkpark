@@ -146,6 +146,53 @@ for (const kind of ["steps", "tabs"]) {
 }
 
 {
+  const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
+    'data-paper-container-kind="figure" data-paper-container-id="figure-1" ' +
+      'data-paper-container-run="1"',
+  );
+  canvas.blocks = [{ id: "figure-child" }];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: { ops: [{ op: "patch-block", id: "figure-child" }], seq: 11 },
+    }),
+  );
+
+  assert.equal(pending.length, 1);
+  const original = structuredClone(pending[0].payload);
+  assert.equal(original.container_kind, "figure");
+  assert.equal(original.container_id, "figure-1");
+  assert.equal("container_row_id" in original, false);
+  assert.deepEqual(original.container_run_ids, ["figure-child"]);
+
+  wrapper.dataset.paperContainerKind = "tabs";
+  wrapper.dataset.paperContainerId = "moved";
+  wrapper.dataset.paperContainerRowId = "row";
+  canvas.blocks = [{ id: "different-child" }];
+  pending.shift().reject(new Error("figure reply lost"));
+  await tick();
+
+  const barriers = [];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-flush-pending", {
+      bubbles: true,
+      detail: { waitUntil: (promise) => barriers.push(promise) },
+    }),
+  );
+  assert.equal(pending.length, 1);
+  assert.deepEqual(
+    structuredClone(pending[0].payload),
+    original,
+    "retry freezes the original figure kind, parent, one-child run, revision and request ID",
+  );
+
+  pending[0].resolve({ saved: true, request_id: original.request_id, rev: 8 });
+  await Promise.all(barriers);
+  bridge.destroyed();
+  dom.window.close();
+}
+
+{
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas("");
   canvas.blocks = [{ id: "top-level" }];
   wrapper.dispatchEvent(
@@ -182,6 +229,9 @@ for (const [attributes, confirmedBlocks] of [
   ['data-paper-container-kind="steps" data-paper-container-id="procedure" data-paper-container-row-id="   " data-paper-container-run="1"', [{ id: "a" }]],
   ['data-paper-container-kind="tabs" data-paper-container-id="panels" data-paper-container-run="1"', [{ id: "a" }]],
   ['data-paper-container-kind="tabs" data-paper-container-id="panels" data-paper-container-row-id="   " data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="figure" data-paper-container-id="figure"', [{ id: "child" }]],
+  ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-row-id="row" data-paper-container-run="1"', [{ id: "child" }]],
+  ['data-paper-container-kind="figure" data-paper-container-id="figure" data-paper-container-run="1"', [{ id: "a" }, { id: "b" }]],
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending, errors } = mountCanvas(attributes);
   canvas.blocks = confirmedBlocks;
@@ -202,4 +252,4 @@ for (const [attributes, confirmedBlocks] of [
   dom.window.close();
 }
 
-console.log("nested canvas context: expandable/steps/tabs retry + top-level + 13 fail-closed cases passed");
+console.log("nested canvas context: expandable/steps/tabs/figure retry + top-level + 16 fail-closed cases passed");
