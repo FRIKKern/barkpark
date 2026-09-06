@@ -74,6 +74,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     %{"source" => params["source"] || "", "caption" => params["caption"] || ""}
   end
 
+  def build_block_patch(%{"type" => "figure"} = block, params) do
+    put_form_param_preserving_shape(%{}, block, params, "caption", "caption")
+  end
+
   def build_block_patch(%{"type" => "route"} = block, params) do
     put_fetched_form_fields(
       %{},
@@ -263,6 +267,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
        |> put_if_parsed(params, "step", step)}
     else
       _ -> {:error, :invalid_number}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "figure"} = block, params) do
+    with :ok <- validate_text_form_fields(params, ~w(caption), "caption") do
+      {:ok, build_block_patch(block, params)}
     end
   end
 
@@ -2271,6 +2281,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
               %{"blocks" => blocks} when is_list(blocks) -> find_paper_block(blocks, id)
               _row -> nil
             end)
+
+          Map.get(b, "type") == "figure" and is_map(b["child"]) ->
+            find_paper_block([b["child"]], id)
 
           true ->
             nil

@@ -503,6 +503,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       {"Visual",
        [
          {"diagram", "Diagram"},
+         {"figure", "Figure"},
          {"equation", "Equation"},
          {"route", "Route"},
          {"toc", "Table of contents"},
@@ -1098,6 +1099,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     |> Enum.map_join(" ", &beta_form_question_text/1)
   end
 
+  defp beta_node_text(%{"type" => "figure"} = block) do
+    child_text =
+      case Map.get(block, "child") do
+        child when is_map(child) -> beta_node_text(child)
+        _malformed -> ""
+      end
+
+    child_text <> " " <> beta_figure_caption_text(Map.get(block, "caption"))
+  end
+
   defp beta_node_text(%{} = m) do
     ["text", "value", "children", "content", "items", "body"]
     |> Enum.map_join(" ", fn k -> beta_node_text(Map.get(m, k)) end)
@@ -1131,6 +1142,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     do: to_string(value)
 
   defp beta_form_visible_string(_value), do: ""
+
+  defp beta_figure_caption_text(nil), do: ""
+  defp beta_figure_caption_text(value) when is_binary(value), do: value
+
+  defp beta_figure_caption_text(value) when is_atom(value) or is_number(value),
+    do: to_string(value)
+
+  defp beta_figure_caption_text(_value), do: ""
 
   # ── Properties panel (Storage Model A) ──────────────────────────────────────
   # A collapsible section ABOVE the body editor. Each row is a BOUND field-block
@@ -1371,6 +1390,79 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
+      <% "figure" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-figure-editor">
+          <%= if editable_figure_child?(@block) do %>
+            <figure
+              class="bp-paper-figure-editor-frame"
+              style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"
+            >
+              <div class="bp-paper-figure-editor-child" data-test-id="paper-figure-child">
+                <%= case figure_child_segment(@block, @canvas_enabled) do %>
+                  <% {:run, [child], run_ordinal} -> %>
+                    <.canvas_run
+                      slug={PaperCanvas.figure_run_slug(@root_slug, @id)}
+                      run_blocks={[child]}
+                      run_ordinal={run_ordinal}
+                      dataset={@dataset}
+                      api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix}
+                      picker_browse={@picker_browse}
+                      doc_key={@doc_key || "#{@dataset}:#{@doc_type}:#{@root_slug}"}
+                      paper_rev={@doc_type == "paper" && @paper_rev}
+                      document_rev={@doc_type != "paper" && @document_rev}
+                      container_id={@id}
+                      container_kind="figure"
+                    />
+                  <% {:block, child} -> %>
+                    <.paper_block_fields
+                      block={child}
+                      dataset={@dataset}
+                      api_token_raw={@api_token_raw}
+                      scope_prefix={@scope_prefix}
+                      picker_browse={@picker_browse}
+                      doc_type={@doc_type}
+                      paper_rev={@paper_rev}
+                      document_rev={@document_rev}
+                      root_slug={@root_slug}
+                      doc_key={@doc_key}
+                      canvas_enabled={@canvas_enabled}
+                      paper_links={@paper_links}
+                    />
+                <% end %>
+              </div>
+              <figcaption class="bp-figcaption">
+                <form
+                  id={"figure-form-" <> @id}
+                  class="bp-paper-edit-form"
+                  phx-submit="paper-edit-block"
+                  phx-change="paper-block-autosave"
+                  phx-debounce="500"
+                  data-test-id="paper-figure-caption-editor"
+                >
+                  <input type="hidden" name="block_id" value={@id} />
+                  <label class="bp-paper-edit-fieldlabel" for={"figure-caption-" <> @id}>
+                    Caption
+                  </label>
+                  <input
+                    id={"figure-caption-" <> @id}
+                    type="text"
+                    name="caption"
+                    class="bp-paper-edit-text"
+                    value={Blocks.form_value(Map.get(@block, "caption"))}
+                  />
+                </form>
+              </figcaption>
+            </figure>
+          <% else %>
+            <div class="bp-paper-contextual-preview" data-test-id="paper-figure-preview">
+              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            </div>
+            <p class="bp-paper-edit-readonly">
+              This Figure's singular child needs a stable identity before it can be edited; original content is preserved.
+            </p>
+          <% end %>
+        </div>
       <% "route" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview">
@@ -2963,6 +3055,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       _ -> if(key == "min", do: 1, else: 5)
     end
   end
+
+  defp editable_figure_child?(%{"child" => %{"id" => id}}) when is_binary(id),
+    do: String.trim(id) != ""
+
+  defp editable_figure_child?(_block), do: false
+
+  defp figure_child_segment(%{"child" => child}, true) do
+    [child]
+    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.with_run_ordinals()
+    |> List.first()
+  end
+
+  defp figure_child_segment(%{"child" => child}, false), do: {:block, child}
 
   # Tolerant readers for the image block's `src` / `role` (t13). A raw-API
   # paper can carry a non-string in either key; the reader side degrades

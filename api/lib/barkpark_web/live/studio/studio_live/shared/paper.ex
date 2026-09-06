@@ -1161,6 +1161,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             []
         end)
 
+      %{"type" => "figure", "id" => id, "child" => child}
+      when is_binary(id) and id != "" and is_map(child) ->
+        children = [child]
+
+        run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
+          nested_canvas_echo_runs(root_slug, children)
+
       _ ->
         []
     end)
@@ -1180,6 +1187,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{"type" => "steps", "steps" => rows} = block when is_list(rows) ->
         children = Enum.flat_map(rows, &expandable_children/1)
         [block | expandable_render_blocks(children)]
+
+      %{"type" => "figure", "child" => child} = block when is_map(child) ->
+        [block | expandable_render_blocks([child])]
 
       block ->
         [block]

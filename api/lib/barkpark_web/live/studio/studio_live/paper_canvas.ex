@@ -193,18 +193,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
   @canvas_table_types ~w(table)
 
-  # editable-figure: a `figure` wraps ONE child + a caption; the canvas handles it as
-  # a SERVER-PAINTED read-only-CHILD atom (`bpFigure`; run-convert.js
-  # CANVAS_FIGURE_TYPES → figure-node.js). The child rides VERBATIM (bpChild) and
-  # paints via the SAME `bp:block-html` hook the fleet atoms use (CHILD-only HTML,
-  # keyed by the figure id); the caption is the SINGLE editable attr
-  # (patch-block{caption}). Flipping `figure` from a run boundary (the per-block
-  # "not editable yet" stub) INTO a run is what makes the bpFigure atom mount.
-  #
-  # This is a THREE-way lockstep (mirroring the @canvas_fleet_types note): keep
-  # @canvas_figure_types ⇄ run-convert.js CANVAS_FIGURE_TYPES ⇄ shared/paper.ex
-  # @figure_render_types (plus figure-node.js BP_FIGURE_NODE_NAME) aligned.
-  @canvas_figure_types ~w(figure)
+  # `figure` intentionally remains a server-rendered run boundary. Its singular
+  # child receives a nested contextual canvas. JS retains the old bpFigure atom
+  # only as a compatibility receiver for already-mounted/in-flight clients.
 
   # live-data task-list: a `task-list` carrying a `query` map is the LIVE editable
   # WIDGET (bpTaskList; run-convert.js CANVAS_TASK_LIST_NODE_NAME → task-list-node.js).
@@ -295,17 +286,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
   # atoms (t12a, excluding contextual `form` / `questionnaire` boundaries) ∪ canvas
-  # article-chrome ROLE prose ∪ the canvas TABLE node tree
-  # (editable-table) ∪ the canvas FIGURE server-paint-child atom (editable-figure) ∪
-  # canvas CONTAINER nodes (columns, section). A run is a maximal contiguous stretch of
+  # article-chrome ROLE prose ∪ the canvas TABLE node tree (editable-table) ∪ canvas
+  # CONTAINER nodes (columns, section). A run is a maximal contiguous stretch of
   # these; any other kind is a run boundary. Keep this aligned with run-convert.js
   # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
   # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
-  # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_FIGURE_TYPES ∪
-  # CANVAS_CONTAINER_TYPES), except that JS keeps receive-only legacy recognition for
-  # form/questionnaire while this partition intentionally routes them to contextual
-  # boundary editors. The remaining boundaries also include nested-structure fields
-  # (composite / object / arrayOf / codelist / localizedText).
+  # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_CONTAINER_TYPES),
+  # except that JS keeps receive-only legacy recognition for form/questionnaire/figure
+  # while this partition intentionally routes them to contextual boundary editors. The
+  # remaining boundaries also include nested-structure fields (composite / object /
+  # arrayOf / codelist / localizedText).
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -317,7 +307,6 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_fleet_types ++
                   @canvas_role_types ++
                   @canvas_table_types ++
-                  @canvas_figure_types ++
                   @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types ++
@@ -408,11 +397,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
   editable inline runs) OR a CONTAINER node (`columns` and `section` — a recursive
   nested-block node whose interior is an editable block tree, container-in-container
-  FORBIDDEN in v1). `form` and `questionnaire` are intentionally NOT canvas-eligible:
+  FORBIDDEN in v1). `form`, `questionnaire`, and `figure` are intentionally NOT canvas-eligible:
   they remain boundary blocks so their contextual authored-field editors render.
   Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
-  `field-reference` RIDE a run too — contextual form/questionnaire editors and the DEEP
+  `field-reference` RIDE a run too — contextual form/questionnaire/figure editors and the DEEP
   nested-structure fields composite / arrayOf / codelist / localizedText stay
   boundaries) is a `{:block, …}`
   boundary. This is the predicate `partition_runs/1` chunks on.
@@ -485,6 +474,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def tabs_run_slug(slug, tabs_id, row_id)
       when is_binary(slug) and is_binary(tabs_id) and is_binary(row_id),
       do: slug <> "-tabs-" <> Base.url_encode64(Jason.encode!([tabs_id, row_id]), padding: false)
+
+  @doc false
+  @spec figure_run_slug(String.t(), String.t()) :: String.t()
+  def figure_run_slug(slug, figure_id)
+      when is_binary(slug) and is_binary(figure_id),
+      do: slug <> "-figure-" <> Base.url_encode64(Jason.encode!([figure_id]), padding: false)
 
   @doc """
   Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL
