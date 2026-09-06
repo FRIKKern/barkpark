@@ -1530,8 +1530,16 @@
         this._saveBridgeDestroyed = false;
         const captureContainerContext = () => {
           const containerId = this.el.dataset.paperContainerId;
+          const containerKind = this.el.dataset.paperContainerKind;
+          const containerRowId = this.el.dataset.paperContainerRowId;
           const hasLegacyRunMarker = this.el.dataset.paperContainerRun != null;
-          if (containerId == null && !hasLegacyRunMarker) return { wire: {}, invalid: false };
+          const hasContainerId = containerId != null;
+          const hasContainerKind = containerKind != null;
+          const hasContainerRowId = containerRowId != null;
+          if (!hasContainerId && !hasLegacyRunMarker &&
+              !hasContainerKind && !hasContainerRowId) {
+            return { wire: {}, invalid: false };
+          }
           const confirmedBlocks = this.el.querySelector("bp-paper-canvas")?.blocks;
           const runIds = Array.isArray(confirmedBlocks)
             ? confirmedBlocks.map((block) => block?.id)
@@ -1542,11 +1550,21 @@
           if (!containerId?.trim() || !validIds) {
             return { wire: {}, invalid: true };
           }
+          const legacyContext = hasContainerId && hasLegacyRunMarker &&
+            !hasContainerKind && !hasContainerRowId;
+          const stepsContext = hasContainerId && hasLegacyRunMarker &&
+            hasContainerKind && containerKind === "steps" &&
+            hasContainerRowId && containerRowId.trim() !== "";
+          if (!legacyContext && !stepsContext) return { wire: {}, invalid: true };
           return {
-            wire: {
+            wire: Object.freeze({
+              ...(stepsContext ? {
+                container_kind: containerKind,
+                container_row_id: containerRowId,
+              } : {}),
               container_id: containerId,
               container_run_ids: Object.freeze([...runIds]),
-            },
+            }),
             invalid: false,
           };
         };

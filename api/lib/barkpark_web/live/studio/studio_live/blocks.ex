@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   shapes in `Barkpark.PortableDoc.Render.compose_block/1,2`.
   """
 
+  alias Barkpark.Content.Papers.CanvasRunContext
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
 
   @doc false
@@ -922,25 +923,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def canvas_run_context(params) when is_map(params) do
-    case {Map.fetch(params, "container_id"), Map.fetch(params, "container_run_ids")} do
-      {:error, :error} ->
-        {:ok, nil}
+    keys = ~w(container_kind container_id container_row_id container_run_ids)
 
-      {{:ok, id}, {:ok, ids}} when is_binary(id) and is_list(ids) ->
-        id = String.trim(id)
+    if Enum.any?(keys, &Map.has_key?(params, &1)) do
+      raw =
+        keys
+        |> Enum.reduce(%{}, fn key, context ->
+          case Map.fetch(params, key) do
+            {:ok, value} -> Map.put(context, key, value)
+            :error -> context
+          end
+        end)
+        |> Map.update("container_id", nil, fn
+          id when is_binary(id) -> String.trim(id)
+          id -> id
+        end)
 
-        valid_ids? =
-          ids != [] and Enum.all?(ids, &(is_binary(&1) and String.trim(&1) != "")) and
-            Enum.uniq(ids) == ids
-
-        if id != "" and valid_ids? do
-          {:ok, %{container_id: id, container_run_ids: ids}}
-        else
-          {:error, :invalid_container_context}
-        end
-
-      _ ->
-        {:error, :invalid_container_context}
+      case CanvasRunContext.normalize(raw) do
+        {:ok, context} when is_map(context) -> {:ok, context}
+        _invalid -> {:error, :invalid_container_context}
+      end
+    else
+      {:ok, nil}
     end
   end
 

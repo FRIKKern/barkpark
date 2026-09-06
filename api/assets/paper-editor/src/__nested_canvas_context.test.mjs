@@ -99,6 +99,53 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 {
+  const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas(
+    'data-paper-container-kind="steps" data-paper-container-id="procedure-1" ' +
+      'data-paper-container-row-id="row-1" data-paper-container-run="2"',
+  );
+  canvas.blocks = [{ id: "step-a" }, { id: "step-b" }];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: { ops: [{ op: "patch-block", id: "step-a" }], seq: 10 },
+    }),
+  );
+
+  assert.equal(pending.length, 1);
+  const original = structuredClone(pending[0].payload);
+  assert.equal(original.container_kind, "steps");
+  assert.equal(original.container_id, "procedure-1");
+  assert.equal(original.container_row_id, "row-1");
+  assert.deepEqual(original.container_run_ids, ["step-a", "step-b"]);
+
+  wrapper.dataset.paperContainerKind = "unknown";
+  wrapper.dataset.paperContainerId = "procedure-moved";
+  wrapper.dataset.paperContainerRowId = "row-moved";
+  canvas.blocks = [{ id: "different-current-run" }];
+  pending.shift().reject(new Error("steps reply lost"));
+  await tick();
+
+  const barriers = [];
+  wrapper.dispatchEvent(
+    new window.CustomEvent("bp-flush-pending", {
+      bubbles: true,
+      detail: { waitUntil: (promise) => barriers.push(promise) },
+    }),
+  );
+  assert.equal(pending.length, 1);
+  assert.deepEqual(
+    structuredClone(pending[0].payload),
+    original,
+    "retry freezes the original steps parent, row, run, revision and request ID",
+  );
+
+  pending[0].resolve({ saved: true, request_id: original.request_id, rev: 8 });
+  await Promise.all(barriers);
+  bridge.destroyed();
+  dom.window.close();
+}
+
+{
   const { dom, window, wrapper, canvas, bridge, pending } = mountCanvas("");
   canvas.blocks = [{ id: "top-level" }];
   wrapper.dispatchEvent(
@@ -127,6 +174,12 @@ for (const [attributes, confirmedBlocks] of [
   ['data-paper-container-id="details-1"', []],
   ['data-paper-container-id="details-1"', [{ id: "" }]],
   ['data-paper-container-id="details-1"', [{ id: "duplicate" }, { id: "duplicate" }]],
+  ['data-paper-container-kind="steps" data-paper-container-row-id="row-1"', [{ id: "a" }]],
+  ['data-paper-container-id="procedure" data-paper-container-run="1" data-paper-container-row-id="row-1"', [{ id: "a" }]],
+  ['data-paper-container-kind="steps" data-paper-container-id="procedure" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="unknown" data-paper-container-id="procedure" data-paper-container-row-id="row-1" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="expandable" data-paper-container-id="details" data-paper-container-run="1"', [{ id: "a" }]],
+  ['data-paper-container-kind="steps" data-paper-container-id="procedure" data-paper-container-row-id="   " data-paper-container-run="1"', [{ id: "a" }]],
 ]) {
   const { dom, window, wrapper, canvas, bridge, pending, errors } = mountCanvas(attributes);
   canvas.blocks = confirmedBlocks;
@@ -147,4 +200,4 @@ for (const [attributes, confirmedBlocks] of [
   dom.window.close();
 }
 
-console.log("nested canvas context: retry + top-level + 5 fail-closed cases passed");
+console.log("nested canvas context: expandable/steps retry + top-level + 11 fail-closed cases passed");
