@@ -1386,7 +1386,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     case slug &&
            Content.get_paper(slug, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
       %{content: content} = fresh when is_map(content) ->
-        assign(socket, paper_doc: fresh, paper_rev: Map.get(content, "rev") || 0)
+        blocks = Projection.read_blocks(content) || []
+
+        assign(socket,
+          paper_doc: fresh,
+          paper_rev: Map.get(content, "rev") || 0,
+          paper_link_details: paper_link_details(socket, fresh, blocks)
+        )
 
       _ ->
         socket
@@ -1406,6 +1412,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           _ -> []
         end
     end
+  end
+
+  defp paper_link_details(socket, paper, blocks) do
+    socket_scope = ScopeHelpers.scope_opts(socket)
+
+    scope = [
+      workspace_id: Map.get(paper, :workspace_id) || Keyword.get(socket_scope, :workspace_id),
+      project_id: Map.get(paper, :project_id) || Keyword.get(socket_scope, :project_id),
+      published_only: true
+    ]
+
+    Content.Papers.resolve_paper_link_details(blocks, socket.assigns.dataset, scope)
   end
 
   @doc false
@@ -1616,6 +1634,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: true,
         paper_edit_mode: false,
+        paper_link_details: paper_link_details(socket, paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -1654,6 +1673,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: false,
         paper_edit_mode: false,
+        paper_link_details: %{},
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -1764,6 +1784,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_block_mode: false,
         paper_edit_mode: false,
         paper_task_previews: %{},
+        paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
@@ -1772,6 +1793,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     else
       assign(socket,
         editor_view: :form,
+        paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
@@ -1939,6 +1961,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             )
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_link_details, paper_link_details(socket, paper, blocks))
             |> assign(:paper_block_mode, true)
 
           _ ->
@@ -1946,6 +1969,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> assign(:paper_doc, paper)
             |> assign(:paper_html, reader_paper_html(socket, paper))
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
+            |> assign(:paper_link_details, %{})
             |> assign(:paper_block_mode, false)
         end
     end

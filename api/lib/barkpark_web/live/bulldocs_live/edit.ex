@@ -121,6 +121,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
+    |> assign(:paper_link_details, paper_link_details(socket, paper))
     |> assign(:save_status, "")
     |> assign(:last_save_ok?, true)
     |> assign(:paper_halt, nil)
@@ -538,11 +539,22 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
+    |> assign(:paper_link_details, paper_link_details(socket, paper))
   end
 
   @doc "Find a block by id anywhere in the editor buffer (recurses sections)."
   def block_by_id(socket, id) do
     Blocks.find_paper_block(socket.assigns[:edit_blocks] || [], id)
+  end
+
+  defp paper_link_details(socket, paper) do
+    scope = (socket.assigns[:reader_scope] || []) |> Keyword.put(:published_only, true)
+
+    Content.Papers.resolve_paper_link_details(
+      blocks_of(paper),
+      socket.assigns[:dataset] || Content.paper_default_dataset(),
+      scope
+    )
   end
 
   # ── internals ───────────────────────────────────────────────────────────────

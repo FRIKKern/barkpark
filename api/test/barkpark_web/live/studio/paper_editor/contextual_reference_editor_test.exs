@@ -6,7 +6,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
-  test "paper-links keeps the reader render visible and its existing form closed contextually" do
+  test "paper-links keeps the live reader render visible and its existing form closed contextually" do
     block = %{
       "id" => "related",
       "type" => "paper-links",
@@ -21,9 +21,23 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContextualReferenceEditorTest do
       ]
     }
 
-    html = render_component(&PaperEditor.paper_block_fields/1, %{block: block})
+    live_details = %{
+      "release-week" => %{
+        title: "Release week, live",
+        description: "The published account",
+        event_type: "release"
+      }
+    }
 
-    assert html =~ Render.render_block(block, %{style: :article})
+    html =
+      render_component(&PaperEditor.paper_block_fields/1, %{
+        block: block,
+        paper_links: live_details
+      })
+
+    assert html =~ Render.render_block(block, %{style: :article, paper_links: live_details})
+    assert html =~ "Release week, live"
+    refute html =~ ">Release week</a>"
     assert html =~ ~s(data-test-id="paper-links-preview")
     assert html =~ ~s(class="bp-paper-contextual-controls")
     assert html =~ "ignore_attrs"

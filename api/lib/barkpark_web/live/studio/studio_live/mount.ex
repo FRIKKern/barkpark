@@ -234,6 +234,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # for the canvas boundary widgets (never the save baseline — doctrine
       # D5); (re)filled by Shared.push_task_previews on open / edit / op.
       paper_task_previews: %{},
+      paper_link_details: %{},
       # ── In-Studio sheet grid editor (Sheets M2) ───────────────────────
       # A type:"sheet" document opens as the collaborative grid editor
       # (`editor_view: :sheet`), not the field form. The LiveView

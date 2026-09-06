@@ -133,6 +133,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
   # paint via task_block_preview/1. The flag-OFF list render never reads it.
   attr(:task_previews, :map, default: %{})
+  attr(:paper_links, :map, default: %{})
   # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
   # write). `save_status` drives the footer echo; `paper_halt` (a server reason
   # string or nil) raises the shared halt banner near the top of the editor.
@@ -246,6 +247,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         root_slug={@slug}
         doc_key={@paper_doc_key}
         canvas_enabled={@canvas_on?}
+        paper_links={@paper_links}
       />
 
       <%!-- spd-w18 — an honest empty state names WHICH document is empty and
@@ -304,6 +306,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 scope_prefix={@scope_prefix}
                 picker_browse={@picker_browse}
                 task_previews={@task_previews}
+                paper_links={@paper_links}
                 doc_type={@doc_type}
                 paper_rev={@paper_rev}
                 document_rev={@document_rev}
@@ -408,6 +411,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             root_slug={@slug}
             doc_key={@paper_doc_key}
             canvas_enabled={@canvas_on?}
+            paper_links={@paper_links}
           />
         </div>
       <% end %>
@@ -831,6 +835,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:root_slug, :string, default: "")
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
 
   def edit_block(assigns) do
     ~H"""
@@ -923,6 +928,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         root_slug={@root_slug}
         doc_key={@doc_key}
         canvas_enabled={@canvas_enabled}
+        paper_links={@paper_links}
       />
     </div>
     """
@@ -1063,6 +1069,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:root_slug, :string, default: "")
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
 
   def properties_panel(assigns) do
     ~H"""
@@ -1101,6 +1108,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           root_slug={@root_slug}
           doc_key={@doc_key}
           canvas_enabled={@canvas_enabled}
+          paper_links={@paper_links}
         />
       </div>
 
@@ -1172,6 +1180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:root_slug, :string, default: "")
   attr(:doc_key, :string, default: nil)
   attr(:canvas_enabled, :boolean, default: false)
+  attr(:paper_links, :map, default: %{})
 
   def paper_block_fields(assigns) do
     assigns =
@@ -1387,7 +1396,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "paper-links" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-links-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-links-preview">
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
           </div>
           <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -1522,6 +1531,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           root_slug={@root_slug}
                           doc_key={@doc_key}
                           canvas_enabled={@canvas_enabled}
+                          paper_links={@paper_links}
                         />
                       </div>
                   <% end %>
@@ -1545,6 +1555,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     root_slug={@root_slug}
                     doc_key={@doc_key}
                     canvas_enabled={false}
+                    paper_links={@paper_links}
                   />
                 </div>
               <% end %>

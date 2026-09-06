@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # t9 — live task-block previews (block_id ⇒ preview entry), display-only rows
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
+  attr(:paper_links, :map, default: %{})
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -316,6 +317,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   scope_prefix={@scope_prefix}
                   canvas_eligible={true}
                   task_previews={@task_previews}
+                  paper_links={@paper_links}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -1542,6 +1544,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
+          paper_links={@paper_link_details}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
@@ -1717,6 +1720,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     dataset={@dataset}
                     api_token_raw={Map.get(assigns, :api_token_raw, "")}
                     scope_prefix={Map.get(assigns, :scope_prefix, "")}
+                    paper_links={Map.get(assigns, :paper_link_details, %{})}
                   />
                 </main>
               </div>
