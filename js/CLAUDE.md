@@ -18,7 +18,7 @@ pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`.
 
 - **CI gate:** `.github/workflows/js-tests.yml` — build → test → lint → typecheck → size on every `js/**` push/PR.
 - **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`). `webhook` was ported to Web Crypto (#498); only `draft-mode` still VIOLATES this (Phase-5 `node:crypto`, sync `signDraftModeToken`), so the check step is ADVISORY pending the ADR-002 port-or-amend call (`docs/decisions/deferred.md`).
-- **Bundle budget:** `pnpm size` — an **absolute byte cap per entry** in that package's `.size-limit.json`; no percentage, no baseline, nothing compared against a previous build. Headroom is often under 1 KB. **On a breach: trim, never raise the cap.** Don't grow core to fix an integration.
+- **Bundle budget:** `pnpm size` — an **absolute byte cap per entry** in that package's `.size-limit.json`. **Trim first.** Raise only when the bytes are irremovable, with the derivation in the entry's `name`, re-basing a package's entries TOGETHER. Don't grow core to fix an integration.
 - **ADR amendment rule:** any change to a locked ADR's Decision section requires a follow-up amendment ADR (`docs/decisions/`).
 - **Changesets:** every PR touching `packages/**` MUST carry one, `git add`ed — `changeset status --since` reads git, so untracked still reds. That job (js-tests.yml) is NOT advisory: it FAILS HARD, just outside main's required set. Green only certifies a changeset FILE exists, never that its bump is correct (#9601 shipped a wrong one green).
 
