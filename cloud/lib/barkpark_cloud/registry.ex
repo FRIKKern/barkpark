@@ -8880,6 +8880,31 @@ defmodule BarkparkCloud.Registry do
       (clear claim_worker / claimed_at only — status STAYS `pushing`) so
       `claim_pending_deployment_for_barkpark/2` re-matches them for a fresh agent
       (a transient blip is still retried).
+    * (v) FAIL an UNCLAIMED `pushing` row nobody has touched for a full claim
+      budget (task-bbe3ecbf50c733e3) — the terminal bound pass (iv) was missing.
+      (iii) and (iv) both require `not is_nil(d.claim_worker)`, and (iv) itself
+      writes `claim_worker: nil` while LEAVING the status at `pushing`, so the
+      row it just released matches NEITHER pass again: a box that never comes
+      back can no longer burn `claim_epoch`, `claim_epoch` never reaches
+      `max_deploy_claims/0`, and the row is invisible to the whole sweep
+      FOREVER. The builder's handoff (`Web.Router`'s `put_handoff_claim_worker/2`
+      sends `claim_worker: null` + `claim_epoch: 0`) leaves the identical shape,
+      so a handed-off row no box ever claims wedges the same way. Its cost is
+      not cosmetic: `deployments_active_site_env_index` is partial on
+      `status IN ('queued','building','pushing') AND environment = 'production'`,
+      so ONE wedged row blocks every future production deploy for that site and
+      `Sites.AutoDeployWorker` defers behind it on an unbounded 60s loop. The
+      budget is TIME, mirroring pass (0c) for the same reason: a row with no
+      claim on it has no epoch to count, so it is given exactly what a claimed
+      row is given — `max_deploy_claims/0` leases of
+      `deployment_stale_after_seconds/0` — measured from `updated_at`, which
+      pass (iv) stamps on release. A box that DOES come back inside that window
+      re-claims (bumping `claim_epoch`), and if it dies again (iv) releases it
+      with a fresh `updated_at`: the transient-blip retry is unbounded for a box
+      that keeps returning, and only permanent silence terminates. Stamped with
+      @instance_unreachable_reason — the SAME fault pass (iii) names, so its
+      count is summed into `pushing_failed` rather than minted as a new key
+      (the (0a)/(0b) → `no_source_failed` precedent: one fault, one number).
 
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
@@ -9079,7 +9104,7 @@ defmodule BarkparkCloud.Registry do
     # exhausts its budget; without this it would be re-released every sweep and
     # never fail (the eternal-spinner class this reaper exists to kill). Run
     # before the release pass so an exhausted row terminates instead of releasing.
-    {pushing_failed, pushing_rows} =
+    {claimed_pushing_failed, pushing_rows} =
       from(d in Deployment,
         where:
           d.status == "pushing" and not is_nil(d.claim_worker) and
@@ -9109,6 +9134,78 @@ defmodule BarkparkCloud.Registry do
       )
       |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
 
+    # (v) THE RELEASED ROW NOBODY EVER CAME BACK FOR (task-bbe3ecbf50c733e3).
+    #
+    # Pass (iv) directly above is the hole. It clears `claim_worker` and LEAVES
+    # the status at `pushing`, and both (iii) and (iv) are gated on
+    # `not is_nil(d.claim_worker)` — so the row (iv) just released matches
+    # neither of them ever again. The premise (iv) is written on is "the on-box
+    # agent will re-claim it", and re-claiming is the ONLY thing that bumps
+    # `claim_epoch` (`claim_pending_deployment_for_barkpark/2`), which is the
+    # only thing that can ever satisfy (iii). A box that is permanently gone
+    # therefore leaves the row `pushing` with a NULL claim_worker forever,
+    # invisible to every pass: the eternal spinner this sweep exists to kill,
+    # wearing the sweep's own uniform.
+    #
+    # It is NOT invisible to the database. `deployments_active_site_env_index` is
+    # partial on `status IN ('queued','building','pushing') AND environment =
+    # 'production'`, so one wedged row refuses every future production deploy for
+    # that site; `Sites.AutoDeployWorker.drive/2` then takes the
+    # `{:duplicate, _}` arm into `defer_behind_running_build/2`, which mints no
+    # row and (with no `deferred` head to count) never leaves its 60s base
+    # backoff. Zero deploys, zero failures, a climbing `coalesced_attempts`.
+    #
+    # THE SAME SHAPE ARRIVES A SECOND WAY, and this pass is deliberately keyed on
+    # the shape rather than on "was released by (iv)": the builder's handoff
+    # (`Web.Router`'s `put_handoff_claim_worker/2` / `put_handoff_claim_epoch/2`)
+    # transitions building → pushing with `claim_worker: null` + `claim_epoch: 0`
+    # on purpose, so the agent's claim query matches it. A handed-off row whose
+    # box never claims it wedges identically, and a predicate that could only see
+    # (iv)'s rows would leave that twin behind.
+    #
+    # THE BUDGET IS TIME, not attempts — pass (0c)'s reasoning exactly. A row
+    # with no claim on it has no epoch to burn, so it is given what a claimed row
+    # is given: `max_deploy_claims/0` leases of
+    # `deployment_stale_after_seconds/0`, measured from `updated_at` (pass (iv)
+    # stamps it on release; the handoff changeset stamps it too, and any progress
+    # write on the row pushes it out again). This PRESERVES the retry (iv) exists
+    # for: a box that comes back inside the window re-claims, and if it then dies
+    # (iv) releases it again with a FRESH `updated_at` — so a box that keeps
+    # returning is retried without bound, and (iii)'s epoch budget still
+    # terminates a box that returns only to fail. Only unbroken silence ends here.
+    #
+    # Disjoint from (iv) by construction (`is_nil` vs `not is_nil` on the same
+    # column), so the pass order between the two is irrelevant; and a row
+    # released in THIS sweep carries `updated_at == now`, far inside the window.
+    #
+    # @instance_unreachable_reason, not a new one: the fault is the fault (iii)
+    # already names — the box never took delivery. Its count is summed into
+    # `pushing_failed` for the same reason (0a) and (0b) sum into
+    # `no_source_failed`: one fault, one number, and the worker's asserted return
+    # shape is unchanged.
+    handoff_budget_before =
+      DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
+
+    {abandoned_pushing_failed, abandoned_pushing_rows} =
+      from(d in Deployment,
+        where:
+          d.status == "pushing" and is_nil(d.claim_worker) and
+            d.updated_at < ^handoff_budget_before,
+        select: {d.id, d.site_id}
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: @instance_unreachable_reason,
+          detail: failure_detail(@instance_unreachable_reason),
+          claim_worker: nil,
+          claimed_at: nil,
+          updated_at: now
+        ]
+      )
+
+    pushing_failed = claimed_pushing_failed + abandoned_pushing_failed
+
     # notifications (wave 28 S6): the reaper is the OTHER half of the covering
     # set. These four passes are bare `Repo.update_all` writes — no changeset, no
     # callback — so they never touch `transition_deployment_fenced/4`, and a
@@ -9126,7 +9223,8 @@ defmodule BarkparkCloud.Registry do
       {spawn_rows, @spawn_refused_reason},
       {upload_missing_rows, @prebuilt_upload_missing_reason},
       {failed_rows, @stale_builder_reason},
-      {pushing_rows, @instance_unreachable_reason}
+      {pushing_rows, @instance_unreachable_reason},
+      {abandoned_pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
       Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)

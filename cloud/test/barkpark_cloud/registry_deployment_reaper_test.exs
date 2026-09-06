@@ -21,7 +21,8 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
   use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Registry}
-  alias BarkparkCloud.Registry.Deployment
+  alias BarkparkCloud.Registry.{Deployment, Vault}
+  alias BarkparkCloud.Sites.AutoDeployWorker
   alias BarkparkCloud.Workers.StaleDeploymentReaper
 
   ## Fixtures (mirror RouterAgentRuntimeTest)
@@ -674,5 +675,251 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     # means "waiting for its claimer", not "invisible to the whole fleet".
     assert {:ok, claimed} = Registry.claim_next_deployment("container-builder-1")
     assert claimed.id == d.id
+  end
+
+  ## ── pass (v): the released `pushing` row nobody came back for ────────────
+  ##
+  ## task-bbe3ecbf50c733e3. Pass (iv) clears `claim_worker` and LEAVES the status
+  ## at `pushing`; passes (iii) and (iv) are both gated on
+  ## `not is_nil(d.claim_worker)`. So the row (iv) releases matches neither pass
+  ## again, and only a re-claim (the one thing a permanently-gone box cannot do)
+  ## bumps the `claim_epoch` that (iii) counts. Pass (v) is the terminal bound.
+
+  # Push a row's `updated_at` back — pass (v)'s clock. Deliberately NOT
+  # `backdate/1` (claimed_at) or `backdate_mint/2` (inserted_at): the point of
+  # pass (v) is that it reads a column the claim-gated passes do not.
+  defp backdate_touch(deployment_id, seconds) do
+    touched_at =
+      DateTime.utc_now()
+      |> DateTime.add(-seconds, :second)
+      |> DateTime.truncate(:microsecond)
+
+    Repo.update_all(
+      from(d in Deployment, where: d.id == ^deployment_id),
+      set: [updated_at: touched_at]
+    )
+  end
+
+  # The budget pass (v) spends, in seconds — the same product pass (0c) uses.
+  defp handoff_budget,
+    do: Registry.max_deploy_claims() * Registry.deployment_stale_after_seconds()
+
+  # A `pushing` row whose on-box agent claim has just been RELEASED by pass (iv):
+  # status "pushing", claim_worker NULL, claim_epoch 1 (well under the budget).
+  defp released_pushing_row(bp, site) do
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, _d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "img-1"})
+    {:ok, claimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-1")
+    backdate(claimed.id)
+
+    assert {:ok, %{released: 1}} = perform_job(StaleDeploymentReaper, %{})
+
+    row = Repo.get(Deployment, claimed.id)
+    assert row.status == "pushing"
+    assert is_nil(row.claim_worker)
+    assert row.claim_epoch < Registry.max_deploy_claims()
+    row
+  end
+
+  ## C0 — THE GAP ITSELF. A row released by (iv) is invisible to every
+  ##      claim-gated pass, sweep after sweep, and it HOLDS the active-deployment
+  ##      index while it is. Before pass (v) that state was permanent; with pass
+  ##      (v) it is merely the inside of the budget, which is what this pins.
+
+  test "pass (v) gap: a released pushing row survives repeated sweeps untouched, holding the index" do
+    {bp, site} = setup_site()
+    released = released_pushing_row(bp, site)
+
+    # Three more sweeps, back to back: NOTHING sees it. (iii) and (iv) are gated
+    # on a claim_worker it no longer has, and only a re-claim could bump the
+    # epoch (iii) counts — which is exactly what a gone box cannot do.
+    for _ <- 1..3 do
+      assert {:ok, %{pushing_failed: 0, released: 0, failed: 0, requeued: 0}} =
+               perform_job(StaleDeploymentReaper, %{})
+    end
+
+    still = Repo.get(Deployment, released.id)
+    assert still.status == "pushing"
+    assert is_nil(still.claim_worker)
+    assert still.claim_epoch == released.claim_epoch
+
+    # NON-VACUITY, and the reason this is CRITICAL rather than cosmetic: while it
+    # sits there, `deployments_active_site_env_index` refuses every future
+    # production deploy for this site.
+    assert {:error, %Ecto.Changeset{}} = Registry.create_deployment(site, %{git_ref: "main"})
+  end
+
+  ## C1 shape 1 — THE BOX COMES BACK. Pass (iv)'s whole reason for existing must
+  ##              survive: the released row is re-claimable, and once re-claimed
+  ##              pass (v) cannot see it however long the row has existed.
+
+  test "pass (v) shape 1: a box that comes back re-claims the released row and finishes it" do
+    {bp, site} = setup_site()
+    released = released_pushing_row(bp, site)
+
+    assert {:ok, reclaimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-2")
+    assert reclaimed.id == released.id
+    assert reclaimed.claim_epoch == released.claim_epoch + 1
+
+    # Age the row far past pass (v)'s budget. It is CLAIMED, so (v)'s
+    # `is_nil(claim_worker)` guard blinds it, and the fresh claimed_at keeps
+    # (iii)/(iv) away too.
+    backdate_touch(reclaimed.id, handoff_budget() + 3600)
+
+    assert {:ok, %{pushing_failed: 0, released: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    held = Repo.get(Deployment, reclaimed.id)
+    assert held.status == "pushing"
+    assert held.claim_worker == "agent-2"
+
+    # And it can still finish, which is what the retry was for.
+    assert {:ok, live} = Registry.transition_deployment(held, %{status: "live"})
+    assert live.status == "live"
+  end
+
+  ## C1 shape 2 — THE BOX NEVER COMES BACK. Bounded: one claim budget of silence
+  ##              after the release and the row is terminal, and the index is
+  ##              free again.
+
+  test "pass (v) shape 2: a box that never returns leaves a terminal row, and the index is freed" do
+    {bp, site} = setup_site()
+    released = released_pushing_row(bp, site)
+
+    backdate_touch(released.id, handoff_budget() + 60)
+
+    assert {:ok, %{pushing_failed: 1, released: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, released.id)
+    assert failed.status == "failed"
+    assert failed.failure_reason =~ "instance unreachable"
+    assert failed.detail =~ "instance unreachable"
+    assert is_nil(failed.claim_worker)
+    assert is_nil(failed.claimed_at)
+
+    # THE POINT OF THE WHOLE TASK: the site can deploy to production again.
+    assert {:ok, fresh} = Registry.create_deployment(site, %{git_ref: "main"})
+    assert fresh.status == "queued"
+  end
+
+  ## C1 sibling — the SAME shape arrives a second way. The builder's handoff
+  ##              writes `claim_worker: null` + `claim_epoch: 0` on the
+  ##              building → pushing edge (Web.Router's put_handoff_claim_worker/2),
+  ##              so a handed-off row no box ever claims wedges identically. A
+  ##              predicate keyed on "was released by (iv)" would miss this twin;
+  ##              pass (v) is keyed on the SHAPE.
+
+  test "pass (v) also terminates a handed-off pushing row that was never claimed at all" do
+    {_bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, handed_off} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "i"})
+
+    # The handoff shape, asserted rather than assumed.
+    assert is_nil(handed_off.claim_worker)
+    assert handed_off.claim_epoch == 0
+
+    backdate_touch(handed_off.id, handoff_budget() + 60)
+
+    assert {:ok, %{pushing_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, handed_off.id).status == "failed"
+  end
+
+  ## C1 negative 1 — the fix must not be too broad in TIME: inside the budget the
+  ##                 row is left alone AND is still claimable, so the retry pass
+  ##                 (iv) exists for is genuinely preserved, not merely narrowed.
+
+  test "pass (v) leaves an unclaimed pushing row alone inside the budget, and it is still claimable" do
+    {bp, site} = setup_site()
+    released = released_pushing_row(bp, site)
+
+    # One minute short of the budget.
+    backdate_touch(released.id, handoff_budget() - 60)
+
+    assert {:ok, %{pushing_failed: 0}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, released.id).status == "pushing"
+
+    assert {:ok, reclaimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-late")
+    assert reclaimed.id == released.id
+  end
+
+  ## C1 negative 2 — and not too broad in SHAPE: a live agent claim is never
+  ##                 yanked by (v), no matter how old the row's last write is.
+
+  test "pass (v) never touches a pushing row that is currently claimed" do
+    {bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, _d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "img-1"})
+    {:ok, claimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-live")
+
+    backdate_touch(claimed.id, handoff_budget() + 3600)
+
+    assert {:ok, %{pushing_failed: 0, released: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    fresh = Repo.get(Deployment, claimed.id)
+    assert fresh.status == "pushing"
+    assert fresh.claim_worker == "agent-live"
+  end
+
+  ## C2 — THE CONSEQUENCE, END TO END. `Sites.AutoDeployWorker` defers behind the
+  ##      wedge forever (minting no row, on an unbounded 60s loop) and starts
+  ##      producing deployments again the moment pass (v) clears it.
+
+  defp auto_site do
+    n = System.unique_integer([:positive])
+    team = team_fixture()
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+    bp =
+      bp
+      |> Ecto.Changeset.change(
+        url: "https://acme-#{n}.barkpark.cloud",
+        git_commit: "abc123",
+        admin_token_encrypted: Vault.encrypt("instance-admin-token")
+      )
+      |> Repo.update!()
+
+    {:ok, site} =
+      Registry.create_site(bp, %{
+        name: "Blog #{n}",
+        slug: "blog-#{n}",
+        kind: "static",
+        framework: "astro",
+        bootstrap_workspace: "acme",
+        bootstrap_project: "blog",
+        bootstrap_dataset: "production",
+        read_token: "bpt_read_#{n}"
+      })
+
+    {bp, site}
+  end
+
+  defp content_autos(site) do
+    Registry.list_deployments(site, 20) |> Enum.filter(&(&1.trigger == "content-auto"))
+  end
+
+  test "pass (v) unblocks AutoDeployWorker: it defers behind the wedge, then deploys again" do
+    {_bp, site} = auto_site()
+
+    # THE WEDGE: an abandoned, unclaimed `pushing` row holding the site's
+    # production slot in `deployments_active_site_env_index`.
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, wedge} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "i"})
+
+    # Every publish coalesces onto it, mints NO row, and re-fires: zero deploys,
+    # zero failures, forever.
+    for _ <- 1..3 do
+      assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+    end
+
+    assert content_autos(site) == [],
+           "the fixture did not reproduce the wedge — a deployment was minted"
+
+    # Pass (v) spends the budget and terminates it.
+    backdate_touch(wedge.id, handoff_budget() + 60)
+    assert {:ok, %{pushing_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, wedge.id).status == "failed"
+
+    # And the next publish MINTS A BUILD instead of deferring.
+    refute perform_job(AutoDeployWorker, %{"site_id" => site.id}) == {:ok, :deferred}
+    assert [%Deployment{}] = content_autos(site)
   end
 end
