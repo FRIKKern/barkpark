@@ -1208,6 +1208,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
           nested_canvas_echo_runs(root_slug, children)
 
+      %{"type" => "terminal", "id" => id} = block when is_binary(id) and id != "" ->
+        case terminal_children(block) do
+          {:ok, children} ->
+            run_entries(PaperCanvas.terminal_run_slug(root_slug, id), children) ++
+              nested_canvas_echo_runs(root_slug, children)
+
+          :error ->
+            []
+        end
+
       %{"type" => "section", "id" => id, "blocks" => children} = block
       when is_binary(id) and id != "" and is_list(children) ->
         own_runs =
@@ -1255,6 +1265,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{"type" => "figure", "child" => child} = block when is_map(child) ->
         [block | expandable_render_blocks([child])]
 
+      %{"type" => "terminal"} = block ->
+        case terminal_children(block) do
+          {:ok, children} -> [block | expandable_render_blocks(children)]
+          :error -> [block]
+        end
+
       %{"type" => "section", "blocks" => children} = block when is_list(children) ->
         [block | expandable_render_blocks(children)]
 
@@ -1273,6 +1289,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   defp tab_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
   defp tab_children(_row), do: []
+
+  defp terminal_children(%{"children" => children} = block) when is_list(children) do
+    if Map.has_key?(block, "blocks"), do: :error, else: {:ok, children}
+  end
+
+  defp terminal_children(_block), do: :error
 
   defp expandable_children(%{"children" => children}) when is_list(children), do: children
   defp expandable_children(%{"children" => children}) when children not in [nil, false], do: []

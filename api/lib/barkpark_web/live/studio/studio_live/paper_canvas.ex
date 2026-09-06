@@ -459,6 +459,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       do: slug <> "-figure-" <> Base.url_encode64(Jason.encode!([figure_id]), padding: false)
 
   @doc false
+  @spec terminal_run_slug(String.t(), String.t()) :: String.t()
+  def terminal_run_slug(slug, terminal_id)
+      when is_binary(slug) and is_binary(terminal_id),
+      do: slug <> "-terminal-" <> Base.url_encode64(Jason.encode!([terminal_id]), padding: false)
+
+  @doc false
   @spec section_run_slug(String.t(), String.t()) :: String.t()
   def section_run_slug(slug, section_id)
       when is_binary(slug) and is_binary(section_id),

@@ -55,7 +55,8 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
              container_run_ids: run_ids
            }}
 
-        kind == "section" and kind_present? and not row_present? and not column_present? ->
+        kind in ["section", "terminal"] and kind_present? and not row_present? and
+            not column_present? ->
           {:ok,
            %{
              container_kind: kind,
@@ -166,6 +167,12 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
 
   defp unique_container_run(
          blocks,
+         %{container_kind: "terminal", container_id: container_id}
+       ),
+       do: unique_terminal(blocks, container_id)
+
+  defp unique_container_run(
+         blocks,
          %{
            container_kind: "columns",
            container_id: container_id,
@@ -214,6 +221,15 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp unique_section(blocks, container_id) do
     case find_containers(blocks, "section", container_id, []) do
       [%{alias: "blocks"} = match] -> {:ok, match}
+      [_one] -> {:error, :canvas_run_container_children_invalid}
+      [] -> {:error, :canvas_run_container_not_found}
+      [_first | _rest] -> {:error, :canvas_run_container_ambiguous}
+    end
+  end
+
+  defp unique_terminal(blocks, container_id) do
+    case find_containers(blocks, "terminal", container_id, []) do
+      [%{alias: "children"} = match] -> {:ok, match}
       [_one] -> {:error, :canvas_run_container_children_invalid}
       [] -> {:error, :canvas_run_container_not_found}
       [_first | _rest] -> {:error, :canvas_run_container_ambiguous}
@@ -382,6 +398,16 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
   defp container_match(%{"type" => "columns"} = block, path),
     do: %{path: path, columns: Map.get(block, "columns")}
 
+  defp container_match(%{"type" => "terminal"} = block, path) do
+    case block do
+      %{"children" => children} when is_list(children) and not is_map_key(block, "blocks") ->
+        %{path: path, alias: "children", children: children}
+
+      _opaque ->
+        %{path: path, alias: nil, children: []}
+    end
+  end
+
   defp container_match(block, path) do
     {alias_key, children} = effective_children(block)
     %{path: path, alias: alias_key, children: children}
@@ -404,6 +430,16 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     case effective_children(block) do
       {key, children} when key in ["children", "blocks"] -> [{[key], children}]
       _invalid -> []
+    end
+  end
+
+  defp recursive_child_entries(%{"type" => "terminal"} = block) do
+    case block do
+      %{"children" => children} when is_list(children) and not is_map_key(block, "blocks") ->
+        [{["children"], children}]
+
+      _opaque ->
+        []
     end
   end
 
@@ -552,7 +588,7 @@ defmodule Barkpark.Content.Papers.CanvasRunContext do
     end)
   end
 
-  defp all_child_lists(%{"type" => "expandable"} = block) do
+  defp all_child_lists(%{"type" => type} = block) when type in ["expandable", "terminal"] do
     [Map.get(block, "children"), Map.get(block, "blocks")]
     |> Enum.filter(&is_list/1)
   end

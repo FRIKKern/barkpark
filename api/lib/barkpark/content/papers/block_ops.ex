@@ -2947,24 +2947,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
     * ABSENT — no `"id"` key at all → gets `<prefix>-<index>`.
     * BLANK  — `"id" => ""` or `"id" => nil` → gets `<prefix>-<index>`.
     * NESTED — recursion covers `"blocks"` lists, expandable `"children"`, each
-      steps row's reader-visible body, and each plain-tabs row's canonical
-      `"blocks"`, plus the singular map-valued `"child"` of a `figure` and its
-      visible descendants, and map children inside each list row of an exact
-      `columns.columns` list. Steps and tabs rows gain stable row ids; columns
-      do not gain synthetic row identities. Scalar column rows/elements and
-      hidden / opaque aliases remain untouched. A figure with a missing, nil,
-      scalar, or array child is opaque, as are any figure or columns
-      `"children"` / `"blocks"` compatibility keys. Composite / arrayOf inline
-      children under `"items"` / `"content"` are NOT recursed. Child prefixes
-      use the parent's (or row/column index's) ensured id, keeping minted ids
-      deterministic.
+      steps row's reader-visible body, each plain-tabs row's canonical
+      `"blocks"`, and a Terminal's canonical `"children"`, plus the singular
+      map-valued `"child"` of a `figure` and its visible descendants, and map
+      children inside each list row of an exact `columns.columns` list. Steps
+      and tabs rows gain stable row ids; columns do not gain synthetic row
+      identities. Scalar column rows/elements and hidden / opaque aliases remain
+      untouched. A figure with a missing, nil, scalar, or array child is opaque,
+      as are any figure, Terminal, or columns compatibility aliases. Composite /
+      arrayOf inline children under `"items"` / `"content"` are NOT recursed.
+      Child prefixes use the parent's (or row/column index's) ensured id, keeping
+      minted ids deterministic.
 
   Collision-safe across the authored tree. Before minting, every present
-  non-blank block, steps-row, tabs-row, canonical figure-child, and valid column
-  descendant id is reserved globally, including ids in hidden steps `children`
-  / `blocks` aliases. Only reader-visible paths are projected, but a minted
-  positional id can never collide with authored identity elsewhere in the
-  document. If taken, a deterministic suffix
+  non-blank block, steps-row, tabs-row, canonical figure-child, Terminal child,
+  and valid column descendant id is reserved globally, including ids in hidden
+  steps and Terminal `children` / `blocks` aliases. Only reader-visible paths are
+  projected, but a minted positional id can never collide with authored identity
+  elsewhere in the document. If taken, a deterministic suffix
   (`-<k>`, k incrementing from 1) is appended until free.
 
   Idempotent: re-running over an already-id-bearing list is a no-op (a present
@@ -2987,10 +2987,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   @doc """
   Project stable ids only when every authored block, steps-row, tabs-row,
-  canonical figure-child, and valid column-descendant identity is unambiguous
-  across the full visible tree. Hidden steps body aliases participate in the
-  duplicate fence even though only the reader-visible alias is projected;
-  malformed and compatibility-only figure/columns aliases remain opaque.
+  canonical figure-child, canonical Terminal child, and valid column-descendant
+  identity is unambiguous across the full visible tree. Hidden steps and Terminal
+  body aliases participate in the duplicate fence even when they are not
+  projected; malformed and compatibility-only aliases remain opaque.
   """
   @spec project_block_ids_safely(list()) ::
           {:ok, list()} | {:error, {:duplicate_id, String.t()}}
@@ -3013,9 +3013,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # Returns `{ensured_block, taken'}` — the block with a guaranteed-unique id
-  # (recursing into a section's children), and the working id-set extended with
-  # any id this block now occupies. A present non-blank id is preserved exactly
-  # (already in `taken`); an id-less block mints a collision-free positional id.
+  # (recursing into its canonical visible descendants), and the working id-set
+  # extended with any id this block now occupies. A present non-blank id is
+  # preserved exactly (already in `taken`); an id-less block mints a
+  # collision-free positional id.
   defp ensure_block_id(block, prefix, index, taken) when is_map(block) do
     {block, taken} = ensure_identity(block, prefix, index, taken)
     id = block["id"]
@@ -3051,6 +3052,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
           {Map.put(block, "child", child), taken}
 
         %{"type" => "figure"} ->
+          {block, taken}
+
+        %{"type" => "terminal", "children" => children} when is_list(children) ->
+          if Map.has_key?(block, "blocks") do
+            {block, taken}
+          else
+            {children, taken} = ensure_block_ids(children, id, taken)
+            {Map.put(block, "children", children), taken}
+          end
+
+        %{"type" => "terminal"} ->
           {block, taken}
 
         %{"blocks" => children} when is_list(children) ->
@@ -3169,6 +3181,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         %{"type" => "figure"} ->
           []
+
+        %{"type" => "terminal"} ->
+          authored_body_alias_ids(block)
 
         %{"blocks" => children} when is_list(children) ->
           authored_tree_ids(children)

@@ -42,9 +42,10 @@ defmodule Barkpark.PortableDoc.Patch do
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` and `expandable`
-  children, each visible `steps` row body, and each plain `tabs` row's canonical
-  `blocks` list, plus a `figure`'s canonical child and that child's visible
-  descendants, and map children within each valid `columns` list, at any depth.
+  children, each visible `steps` row body, each plain `tabs` row's canonical
+  `blocks` list, and a `terminal`'s canonical `children` list, plus a `figure`'s
+  canonical child and that child's visible descendants, and map children within
+  each valid `columns` list, at any depth.
   `patch-block` and a map-valued `replace-block` may target the figure child.
   `append-block` is top-level only.
 
@@ -464,6 +465,9 @@ defmodule Barkpark.PortableDoc.Patch do
         %{"type" => "figure", "child" => child} when is_map(child) ->
           authored_block_ids(child)
 
+        %{"type" => "terminal"} ->
+          authored_alias_ids(block)
+
         %{"type" => "steps", "steps" => rows} when is_list(rows) ->
           Enum.flat_map(rows, &authored_step_row_ids/1)
 
@@ -756,6 +760,13 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp visible_child_container(%{"type" => "figure", "child" => child}) when is_map(child),
     do: {:figure, child}
+
+  defp visible_child_container(%{"type" => "terminal", "children" => children} = block)
+       when is_list(children) do
+    if Map.has_key?(block, "blocks"), do: nil, else: {:blocks, "children", children}
+  end
+
+  defp visible_child_container(%{"type" => "terminal"}), do: nil
 
   defp visible_child_container(_block), do: nil
 

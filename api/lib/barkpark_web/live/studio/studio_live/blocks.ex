@@ -2932,7 +2932,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
           Map.get(b, "id") == id ->
             b
 
-          Map.get(b, "type") in ["section", "expandable"] ->
+          Map.get(b, "type") in ["section", "expandable", "terminal"] ->
             find_paper_block(container_children(b), id)
 
           Map.get(b, "type") == "steps" and is_list(b["steps"]) ->
@@ -2969,6 +2969,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def container_children(%{"type" => "expandable"} = block), do: visible_body_children(block)
+
+  def container_children(%{"type" => "terminal"} = block) do
+    case block do
+      %{"children" => children} when is_list(children) and not is_map_key(block, "blocks") ->
+        children
+
+      _opaque ->
+        []
+    end
+  end
 
   def container_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
   def container_children(_block), do: []
