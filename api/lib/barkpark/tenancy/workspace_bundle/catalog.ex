@@ -242,6 +242,40 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
       {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"}
   }
 
+  # ── Connector-credential exclusion (an EXPLICIT deny, not a namespace accident)
+  #
+  # SECURITY INVARIANT: `connector_installs` is the connector bridge's install
+  # table. It carries `credential_ref` and `chat_token_ref` — sealed AES-256-GCM
+  # blobs no Elixir ever opens (Connectors D38, `Barkpark.Connectors.Install`).
+  # It lives in the `chat_bridge` schema, which the bridge owns and no Ecto
+  # migration may create (Connectors D28), so every live_* query in this module
+  # — all of which filter `table_schema = 'public'` — happens not to see it.
+  #
+  # THAT IS AN ACCIDENT OF NAMESPACING, NOT A DECISION. A migration that moves
+  # `chat_bridge` into `public`, or a workspace-scoped MIRROR of connector
+  # config (a table or a view over the bridge's rows), would make the sealed
+  # references bundle-reachable with no sentinel firing: the first signal would
+  # be a customer's export artifact carrying connector credentials.
+  #
+  # `assert_connector_credential_exclusion!/1` turns the accident into a named
+  # refusal, and it is keyed TWO ways so a rename cannot defeat it:
+  #   * by NAME — a `public` relation called `connector_installs`;
+  #   * by SHAPE — any `public` relation exposing the whole sealed column set,
+  #     whatever it is called (the mirror case).
+  # Relations of every kind are scanned (table, partitioned table, view,
+  # materialized view, foreign table), because a VIEW over `chat_bridge` is the
+  # cheapest way to make these columns look like public workspace data.
+  @credential_denied_tables ~w(connector_installs)
+  @credential_denied_columns ~w(chat_token_ref credential_ref)
+
+  @doc "Relation names that may never exist in the exportable (`public`) namespace."
+  @spec credential_denied_tables() :: [String.t()]
+  def credential_denied_tables, do: @credential_denied_tables
+
+  @doc "The sealed connector reference columns — no `public` relation may expose the set."
+  @spec credential_denied_columns() :: [String.t()]
+  def credential_denied_columns, do: @credential_denied_columns
+
   def root_table, do: @root_table
   def e2_joins, do: @e2_joins
   def e3_doc_keyed, do: @e3_doc_keyed
@@ -426,6 +460,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   classify (and, for E2/E3, spec the extraction of) a new tenant table.
   """
   def assert_partition!(repo) do
+    assert_connector_credential_exclusion!(repo)
+
     live_e1 = live_e1(repo)
     live_e2 = live_e2(repo)
     live_e3 = live_e3(repo)
@@ -487,6 +523,67 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     assert_webhook_delivery_confinement!(repo)
+
+    :ok
+  end
+
+  @doc """
+  RAISE if any connector-credential carrier is visible in the exportable
+  (`public`) namespace — the explicit deny behind the `chat_bridge` namespacing.
+
+  Checked by NAME (`connector_installs`) and by SHAPE (any `public` relation
+  exposing every sealed reference column), over relations of every kind, so
+  neither a schema move nor a renamed workspace-scoped mirror nor a view can
+  put `credential_ref` / `chat_token_ref` into a bundle unnoticed.
+
+  Called FIRST from both partition sentinels so the failure names the
+  credential hazard instead of surfacing as generic E1/unaccounted drift.
+  """
+  @spec assert_connector_credential_exclusion!(module()) :: :ok
+  def assert_connector_credential_exclusion!(repo) do
+    %{rows: rows} =
+      repo.query!(
+        """
+        SELECT c.relname,
+               (c.relname = ANY($1::text[])) AS denied_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind = ANY (ARRAY['r', 'p', 'v', 'm', 'f'])
+          AND (
+            c.relname = ANY($1::text[])
+            OR (
+              SELECT count(DISTINCT a.attname)
+              FROM pg_attribute a
+              WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                AND a.attname = ANY($2::text[])
+            ) = $3
+          )
+        ORDER BY c.relname
+        """,
+        [
+          @credential_denied_tables,
+          @credential_denied_columns,
+          length(@credential_denied_columns)
+        ]
+      )
+
+    if rows != [] do
+      offenders =
+        Enum.map_join(rows, ", ", fn
+          [name, true] -> "#{name} (denied name)"
+          [name, _] -> "#{name} (exposes #{Enum.join(@credential_denied_columns, " + ")})"
+        end)
+
+      raise "WorkspaceBundle.Catalog: connector-credential carrier(s) reachable in the " <>
+              "exportable `public` namespace: #{offenders}. `connector_installs` holds the " <>
+              "sealed AES-256-GCM references #{inspect(@credential_denied_columns)} and is " <>
+              "kept out of every workspace bundle ONLY because it lives in the bridge-owned " <>
+              "`chat_bridge` schema that this module's live_* scans never read. Moving it " <>
+              "into `public` — or mirroring its columns there under any name — would export " <>
+              "connector credentials in the next bundle. Keep it in `chat_bridge`; if a " <>
+              "workspace-scoped mirror is genuinely needed, it must omit these columns."
+    end
 
     :ok
   end
@@ -719,6 +816,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   the real map would never carry); production callers use the default.
   """
   def assert_dev_partition!(repo, partition \\ @dev_partition) do
+    assert_connector_credential_exclusion!(repo)
+
     malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
 
     if malformed != [] do
