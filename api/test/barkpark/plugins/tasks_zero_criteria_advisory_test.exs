@@ -56,8 +56,12 @@ defmodule Barkpark.Plugins.TasksZeroCriteriaAdvisoryTest do
       # A plain filter rather than a pattern-match assert: other emitters may
       # queue their own advisories on the same create, and this row owns
       # exactly one code.
-      assert [warning] = Enum.filter(body["warnings"] || [], &(&1["code"] == @code)),
+      matched = Enum.filter(body["warnings"] || [], &(&1["code"] == @code))
+
+      assert length(matched) == 1,
              "the zero-criteria create carried no #{@code} advisory: #{inspect(body["warnings"])}"
+
+      [warning] = matched
 
       assert warning["severity"] == "warning"
       assert warning["message"] =~ "zero acceptance_criteria"
