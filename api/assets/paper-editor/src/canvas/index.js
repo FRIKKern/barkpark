@@ -455,6 +455,11 @@ class BpPaperCanvas extends HTMLElement {
     this._mount = null;
     this._bubble = null; // FormatBubble instance (selection format toolbar)
     this._debounceTimer = null;
+    // Baseline captured when a local debounce window opens. Server broadcasts may
+    // advance `_blocks` while that draft is waiting; the eventual diff must still
+    // describe only the local transaction, not manufacture an inverse patch that
+    // reverts newly queued authority.
+    this._debounceBaselineBlocks = null;
     // The RUN this canvas mounted — an array of prose blocks. This is the
     // "prev" runToOps diffs the live doc against. As of S4a this baseline is
     // ECHO-ADVANCED: after the server applies a batch it echoes the confirmed
@@ -944,6 +949,7 @@ class BpPaperCanvas extends HTMLElement {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
     }
+    this._debounceBaselineBlocks = null;
     // S4a: drop any queued external-edit echo + its release listeners.
     this._clearPendingServerBlocks();
     // P4: destroy both autocomplete popups (each owns a document.body element +
@@ -1030,6 +1036,7 @@ class BpPaperCanvas extends HTMLElement {
   resolveConflictWithServerBlocks(blocks) {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
+    this._debounceBaselineBlocks = null;
     this._inflightOps = null;
     this._dirtyWhileInflight = false;
     this._awaitingOwnEchoes = [];
@@ -1047,10 +1054,18 @@ class BpPaperCanvas extends HTMLElement {
 
   _scheduleEmit() {
     if (!this._editable) return; // read mode emits no ops
+    if (!this._debounceTimer) {
+      this._debounceBaselineBlocks = deepCloneBlocks(this._blocks);
+    }
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {
       this._debounceTimer = null;
-      this._emitOps();
+      const emitted = this._emitOps();
+      // An external echo can arrive after blur but before this debounce fires.
+      // If the local transaction normalized to no PortableDoc change, no save/echo
+      // will release it, so apply the queued authority now. A real emitted batch
+      // remains protected by the in-flight/own-echo acknowledgement path.
+      if (!emitted) this._flushPendingServerBlocks();
     }, DEBOUNCE_MS);
   }
 
@@ -1062,6 +1077,7 @@ class BpPaperCanvas extends HTMLElement {
   // the next dispatch is incremental even if its server echo arrives later.
   _emitOps() {
     if (!this._editor) return false;
+    const diffBaseline = this._debounceBaselineBlocks || this._blocks;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
     const nextBlocks = docToBlocks(nextDoc);
     const stableDoc = runToTiptap(nextBlocks);
@@ -1080,7 +1096,8 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
 
-    const ops = runToOps(this._blocks, stableDoc, { preserveNewIds: true });
+    this._debounceBaselineBlocks = null;
+    const ops = runToOps(diffBaseline, stableDoc, { preserveNewIds: true });
     return this._dispatchOps(ops, nextBlocks);
   }
 
@@ -1095,6 +1112,7 @@ class BpPaperCanvas extends HTMLElement {
         ops,
         afterBlocks: deepCloneBlocks(nextBlocks || this._blocks),
         echoSeen: false,
+        requestId: null,
       };
     }
     this.dispatchEvent(
@@ -1110,20 +1128,40 @@ class BpPaperCanvas extends HTMLElement {
   // Called by the LiveView bridge after the exact `paper-ops` request settles.
   // Failure retains the batch so the bridge can retry it byte-for-byte. Success
   // advances the local baseline and releases any edits made while it was pending.
+  identifyOpsRequest(seq, requestId) {
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq || typeof requestId !== "string" || requestId === "") {
+      return false;
+    }
+    if (current.requestId && current.requestId !== requestId) return false;
+    current.requestId = requestId;
+    return true;
+  }
+
   acknowledgeOps(seq, saved) {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
     if (saved !== true) return false;
 
-    this._blocks = deepCloneBlocks(current.afterBlocks);
+    this._blocks = deepCloneBlocks(current.confirmedBlocks || current.afterBlocks);
+    // A newer local edit may still be inside its debounce while this earlier
+    // batch is acknowledged. Advance that draft's captured baseline with the
+    // confirmed local snapshot so its next diff stays incremental.
+    if (this._debounceBaselineBlocks) {
+      this._debounceBaselineBlocks = deepCloneBlocks(current.afterBlocks);
+    }
     if (!current.echoSeen) {
-      this._awaitingOwnEchoes.push(deepCloneBlocks(current.afterBlocks));
+      this._awaitingOwnEchoes.push({
+        blocks: deepCloneBlocks(current.afterBlocks),
+        requestId: current.requestId,
+      });
     }
     this._inflightOps = null;
     const dirty = this._dirtyWhileInflight;
     this._dirtyWhileInflight = false;
     if (dirty) this._emitOps();
+    else this._flushPendingServerBlocks();
     return true;
   }
 
@@ -2138,31 +2176,74 @@ class BpPaperCanvas extends HTMLElement {
   //     or kind mismatch) or a REAL content change. We reset the baseline AND
   //     update the editor to the confirmed content. The setContent transaction is
   //     marked addToHistory:false so an external edit NEVER enters the user's undo
-  //     stack. GUARD: if the editor is FOCUSED or composing (IME), we QUEUE the
-  //     update and apply it on blur / compositionend so we never yank the caret
-  //     mid-edit — the baseline still advances immediately (so own ops keep
-  //     diffing incrementally), only the visible re-render defers.
-  applyServerBlocks(blocks) {
+  //     stack. GUARD: if the editor is FOCUSED, composing (IME), or has an edit in
+  //     its debounce window, we QUEUE the update and apply it after that local
+  //     state settles so we never yank the caret or erase an un-emitted draft —
+  //     the baseline still advances immediately, only the visible re-render defers.
+  applyServerBlocks(blocks, echoMeta = null) {
     if (!this._editor) return;
     const next = Array.isArray(blocks) ? blocks : [];
+    const echoMode = echoMeta && typeof echoMeta === "object" ? echoMeta.mode : null;
+    const echoRequestId = echoMeta && typeof echoMeta === "object"
+      ? echoMeta.requestId
+      : null;
+    const coordinatorOwnMode = echoMode === "own" || echoMode === "own-stale";
 
     // An echo can confirm an earlier local snapshot while the user has already
     // edited beyond it. Recognize that snapshot as our own and advance only the
     // confirmed baseline; replacing the live doc here would erase the newer edit.
-    if (this._inflightOps && reconcileServerEcho(
-      next,
-      runToTiptap(this._inflightOps.afterBlocks).content || [],
-    ).ownEcho) {
-      this._inflightOps.echoSeen = true;
-      this._clearPendingServerBlocks();
-      return;
+    if (this._inflightOps) {
+      const exactInflightEcho = reconcileServerEcho(
+        next,
+        runToTiptap(this._inflightOps.afterBlocks).content || [],
+      ).ownEcho;
+      const foreignOwnRequest = coordinatorOwnMode && echoRequestId != null &&
+        this._inflightOps.requestId != null && echoRequestId !== this._inflightOps.requestId;
+      const correlatedOwnEcho = echoMode === "own" && echoRequestId != null &&
+        echoRequestId === this._inflightOps.requestId;
+      if ((!foreignOwnRequest && exactInflightEcho) || correlatedOwnEcho) {
+        this._inflightOps.echoSeen = true;
+        if (!exactInflightEcho) {
+          this._inflightOps.confirmedBlocks = deepCloneBlocks(next);
+          this._queueServerBlocks(next);
+        } else if (echoMode !== "own-stale") {
+          this._clearPendingServerBlocks();
+        }
+        return;
+      }
     }
-    const awaitingIndex = this._awaitingOwnEchoes.findIndex((snapshot) =>
-      reconcileServerEcho(next, runToTiptap(snapshot).content || []).ownEcho
+    const awaitingIndex = this._awaitingOwnEchoes.findIndex((entry) =>
+      !(coordinatorOwnMode && echoRequestId != null && entry.requestId != null &&
+        echoRequestId !== entry.requestId) &&
+      reconcileServerEcho(next, runToTiptap(entry.blocks).content || []).ownEcho
     );
     if (awaitingIndex !== -1) {
       this._awaitingOwnEchoes.splice(0, awaitingIndex + 1);
-      this._clearPendingServerBlocks();
+      if (echoMode === "own-stale") this._flushPendingServerBlocks();
+      else this._clearPendingServerBlocks();
+      return;
+    }
+    // The coordinator has already observed a newer confirmed revision. A stale
+    // own receipt can close an exact snapshot above, but a non-exact payload is
+    // never authority and must not replace or queue over the newer document.
+    if (echoMode === "own-stale") return;
+    const correlatedAwaitingIndex = echoMode === "own" && echoRequestId != null
+      ? this._awaitingOwnEchoes.findIndex((entry) => entry.requestId === echoRequestId)
+      : -1;
+    if (correlatedAwaitingIndex !== -1) {
+      this._awaitingOwnEchoes.splice(0, correlatedAwaitingIndex + 1);
+      this._blocks = deepCloneBlocks(next);
+      if (this._isEditingNow()) {
+        this._queueServerBlocks(next);
+      } else {
+        this._clearPendingServerBlocks();
+        this._programmaticApply = true;
+        try {
+          this._applyExternalContent(next);
+        } finally {
+          this._programmaticApply = false;
+        }
+      }
       return;
     }
 
@@ -2287,9 +2368,9 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // True when the editor is actively being edited and a setContent would yank the
-  // caret OR clobber an unseen edit: it has focus, OR ProseMirror is mid-IME-
-  // composition, OR we are in SOURCE mode. Each is a reason to DEFER an external
-  // re-render.
+  // caret OR clobber an unseen edit: it has focus, ProseMirror is mid-IME-
+  // composition, a local update is waiting in the debounce window, OR we are in
+  // SOURCE mode. Each is a reason to DEFER an external re-render.
   //
   // SOURCE mode is the MAJOR case: the rich editor is HIDDEN and a Markdown textarea
   // owns input. If applyServerBlocks applied an external echo now, it would setContent
@@ -2302,7 +2383,7 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return false;
     if (this._mode === "source") return true;
     const composing = !!(this._editor.view && this._editor.view.composing);
-    return this._editor.isFocused || composing;
+    return this._editor.isFocused || composing || this._debounceTimer != null;
   }
 
   // Apply the confirmed external content to the editor WITHOUT entering the undo
@@ -2321,15 +2402,17 @@ class BpPaperCanvas extends HTMLElement {
       .run();
   }
 
-  // Queue an external-edit re-render to fire once the user stops editing. We
-  // listen for compositionend (IME release) and the editor's blur; whichever
-  // comes first flushes the latest queued blocks. Re-queuing overwrites the
-  // pending blocks (only the latest confirmed state matters).
+  // Queue an external-edit re-render to fire once the user stops editing and any
+  // local debounce settles. We listen for compositionend (IME release) and the
+  // editor's blur; the debounce callback also flushes after a zero-op local diff.
+  // Re-queuing overwrites the pending blocks (only latest authority matters).
   _queueServerBlocks(blocks) {
     this._pendingServerBlocks = blocks;
     if (this._onBlurFlush) return; // listeners already armed
 
-    const flush = () => this._flushPendingServerBlocks();
+    // TipTap's blur notification can run before `editor.isFocused` flips false.
+    // Release on the next task so the focus guard observes the settled state.
+    const flush = () => setTimeout(() => this._flushPendingServerBlocks(), 0);
 
     this._onBlurFlush = flush;
     this._onComposeEnd = flush;
@@ -2345,17 +2428,25 @@ class BpPaperCanvas extends HTMLElement {
   // Apply the queued external-edit echo, if one is pending and the user is no longer
   // mid-edit. Called by the blur / compositionend release listeners AND by the
   // source-mode exit (so a queued external edit lands once the user is back in rich).
-  // Idempotent + guarded: a still-composing editor waits for the next release; a
-  // still-in-source mode (e.g. a spurious call) waits for exit; an empty queue no-ops.
+  // Idempotent + guarded: focus/composition waits for blur/release, source mode
+  // waits for exit, a live debounce waits for its callback, and an empty queue no-ops.
   _flushPendingServerBlocks() {
     if (!this._pendingServerBlocks) return;
-    // Still mid-composition or still in source mode? Wait for the real release.
+    // Still mid-composition/source mode, or still holding an un-emitted local
+    // transaction in the debounce window? Wait for the real release. A blur can
+    // be delivered after the server echo armed this listener; applying at that
+    // point would overwrite the draft before its debounce gets a chance to emit.
     if (this._editor && this._editor.view && this._editor.view.composing) return;
     if (this._mode === "source") return;
+    if (this._editor && this._editor.isFocused) return;
+    if (this._debounceTimer) return;
     if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) return;
     const pending = this._pendingServerBlocks;
     this._clearPendingServerBlocks();
-    if (pending) this._applyExternalContent(pending);
+    if (pending) {
+      this._blocks = deepCloneBlocks(pending);
+      this._applyExternalContent(pending);
+    }
   }
 
   // Tear down any queued external-edit echo + its release listeners.

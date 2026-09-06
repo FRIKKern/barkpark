@@ -33,7 +33,7 @@
   const PAPER_POSITIONAL_COLLECTION_PARAM =
     /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-(?:count|action|\d+-)/;
   const PAPER_POSITIONAL_COLLECTION_ACTION_PARAM =
-    /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-action|option-action)$/;
+    /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question|section|column)-action|option-action)$/;
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -47,6 +47,132 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
+    const nestedMatch = /^(section|column)-action$/.exec(submitter?.name || "");
+    if (nestedMatch) {
+      if (document.activeElement !== submitter) return () => {};
+      const prefix = nestedMatch[1];
+      const value = submitter.value || "";
+      let columnIndex = null;
+      let kind = null;
+      let index = null;
+      let rowId = null;
+      let beforeIds = [];
+      let beforeColumns = null;
+      if (prefix === "section") {
+        const count = Number(form.elements.namedItem("section-child-count")?.value);
+        if (!Number.isSafeInteger(count) || count < 0) return () => {};
+        beforeIds = Array.from({ length: count }, (_unused, rowIndex) =>
+          form.elements.namedItem(`section-child-${rowIndex}-id`)?.value);
+        if (beforeIds.some((id) => typeof id !== "string" || id === "") ||
+            new Set(beforeIds).size !== beforeIds.length) return () => {};
+        if (value === "add") {
+          kind = "add";
+          index = count;
+          rowId = form.elements.namedItem("section-new-child-id")?.value;
+        } else {
+          const matches = beforeIds.flatMap((id, rowIndex) =>
+            ["up", "down", "remove"].filter((candidate) =>
+              value === `${candidate}:${id}`).map((candidate) => [candidate, rowIndex, id]));
+          if (matches.length !== 1) return () => {};
+          [[kind, index, rowId]] = matches;
+        }
+      } else {
+        const columnCount = Number(form.elements.namedItem("column-count")?.value);
+        if (!Number.isSafeInteger(columnCount) || columnCount < 0) return () => {};
+        const matches = [];
+        beforeColumns = [];
+        for (let candidateColumn = 0; candidateColumn < columnCount; candidateColumn += 1) {
+          const count = Number(
+            form.elements.namedItem(`column-${candidateColumn}-child-count`)?.value,
+          );
+          if (!Number.isSafeInteger(count) || count < 0) return () => {};
+          const ids = Array.from({ length: count }, (_unused, rowIndex) =>
+            form.elements.namedItem(`column-${candidateColumn}-child-${rowIndex}-id`)?.value);
+          if (ids.some((id) => typeof id !== "string" || id === "") ||
+              new Set(ids).size !== ids.length) return () => {};
+          beforeColumns.push(ids);
+          if (value === `add:${candidateColumn}`) {
+            matches.push(["add", candidateColumn, count,
+              form.elements.namedItem("column-new-child-id")?.value, ids]);
+          }
+          ids.forEach((id, rowIndex) => {
+            ["up", "down", "remove"].forEach((candidate) => {
+              if (value === `${candidate}:${candidateColumn}:${id}`) {
+                matches.push([candidate, candidateColumn, rowIndex, id, ids]);
+              }
+            });
+          });
+        }
+        if (matches.length !== 1) return () => {};
+        [[kind, columnIndex, index, rowId, beforeIds]] = matches;
+      }
+      if (typeof rowId !== "string" || rowId === "" ||
+          (kind === "up" && index === 0) ||
+          (kind === "down" && index === beforeIds.length - 1)) return () => {};
+      const expectedIds = [...beforeIds];
+      if (kind === "add") expectedIds.push(rowId);
+      if (kind === "remove") expectedIds.splice(index, 1);
+      if (kind === "up") [expectedIds[index - 1], expectedIds[index]] =
+        [expectedIds[index], expectedIds[index - 1]];
+      if (kind === "down") [expectedIds[index], expectedIds[index + 1]] =
+        [expectedIds[index + 1], expectedIds[index]];
+      const nextCount = expectedIds.length;
+      return () => {
+        if (!form.isConnected ||
+            (document.activeElement !== submitter &&
+              !(document.activeElement === document.body && !submitter.isConnected))) return;
+        const nextColumnCount = prefix === "column"
+          ? Number(form.elements.namedItem("column-count")?.value)
+          : null;
+        if (prefix === "column" &&
+            nextColumnCount !== beforeColumns.length) return;
+        if (prefix === "column") {
+          for (let candidateColumn = 0; candidateColumn < nextColumnCount; candidateColumn += 1) {
+            if (candidateColumn === columnIndex) continue;
+            const count = Number(
+              form.elements.namedItem(`column-${candidateColumn}-child-count`)?.value,
+            );
+            const ids = Array.from(
+              { length: Number.isSafeInteger(count) && count >= 0 ? count : 0 },
+              (_unused, rowIndex) => form.elements.namedItem(
+                `column-${candidateColumn}-child-${rowIndex}-id`,
+              )?.value,
+            );
+            if (count !== beforeColumns[candidateColumn].length ||
+                JSON.stringify(ids) !== JSON.stringify(beforeColumns[candidateColumn])) return;
+          }
+        }
+        const actualCount = Number(form.elements.namedItem(prefix === "section"
+          ? "section-child-count"
+          : `column-${columnIndex}-child-count`)?.value);
+        if (actualCount !== nextCount) return;
+        const afterIds = Array.from({ length: nextCount }, (_unused, rowIndex) =>
+          form.elements.namedItem(prefix === "section"
+            ? `section-child-${rowIndex}-id`
+            : `column-${columnIndex}-child-${rowIndex}-id`)?.value);
+        if (afterIds.some((id) => typeof id !== "string" || id === "") ||
+            new Set(afterIds).size !== afterIds.length ||
+            JSON.stringify(afterIds) !== JSON.stringify(expectedIds)) return;
+        const nextIndex = kind === "remove" ? Math.min(index, nextCount - 1) : expectedIds.indexOf(rowId);
+        if (nextCount > 0 &&
+            (!Number.isSafeInteger(nextIndex) || nextIndex < 0 || nextIndex >= nextCount)) return;
+        const targetId = nextCount > 0 ? afterIds[nextIndex] : null;
+        const actionName = `${prefix}-action`;
+        const actionValue = (candidate, id) => prefix === "section"
+          ? `${candidate}:${id}`
+          : `${candidate}:${columnIndex}:${id}`;
+        const buttons = [...form.elements].filter((control) =>
+          control.name === actionName && !control.disabled);
+        const exact = kind !== "add" && kind !== "remove" && targetId
+          ? buttons.find((control) => control.value === actionValue(kind, targetId))
+          : null;
+        const rowControl = targetId && (exact || ["up", "down", "remove"].map((candidate) =>
+          buttons.find((control) => control.value === actionValue(candidate, targetId))).find(Boolean));
+        const add = buttons.find((control) => control.value ===
+          (prefix === "section" ? "add" : `add:${columnIndex}`));
+        (rowControl || add)?.focus();
+      };
+    }
     const match = /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-action$/.exec(submitter?.name || "");
     if (!match || document.activeElement !== submitter) return () => {};
     const prefix = match[1];
@@ -159,11 +285,24 @@
   // form, so mint afresh after every acknowledged insert. Failed and
   // transport-ambiguous writes keep the same value for exact replay.
   function bpPaperRotateConsumedCollectionId(form, submitter) {
-    const match = /^(panel|step|question)-action$/.exec(submitter?.name || "");
-    const action = /^(add|add-body)(?::.+)?$/.exec(submitter?.value || "");
-    if (!match || !action) return () => {};
-    const name = match[1] === "question" ? "question-new-id"
-      : `${match[1]}-${action[1] === "add" ? "new-row-id" : "new-child-id"}`;
+    const match = /^(panel|step|question|section|column)-action$/.exec(submitter?.name || "");
+    if (!match) return () => {};
+    const prefix = match[1];
+    const value = submitter.value || "";
+    let name;
+    if (prefix === "section") {
+      if (value !== "add") return () => {};
+      name = "section-new-child-id";
+    } else if (prefix === "column") {
+      const add = /^add:(0|[1-9]\d*)$/.exec(value);
+      if (!add || !Number.isSafeInteger(Number(add[1]))) return () => {};
+      name = "column-new-child-id";
+    } else {
+      const action = /^(add|add-body)(?::.+)?$/.exec(value);
+      if (!action) return () => {};
+      name = prefix === "question" ? "question-new-id"
+        : `${prefix}-${action[1] === "add" ? "new-row-id" : "new-child-id"}`;
+    }
     const consumed = form.elements.namedItem(name)?.value;
     if (typeof consumed !== "string" || consumed === "") return () => {};
     return () => {
@@ -435,6 +574,17 @@
           ? [...control.options].map((option) => option.selected)
           : null,
       })),
+      reviewFields: [...editable, ...controls.filter((control) => control.type === "hidden" &&
+        (/^section-(?:child-count|child-\d+-id|new-child-id)$/.test(control.name) ||
+          /^column-(?:count|new-child-id|\d+-child-count|\d+-child-\d+-id)$/.test(control.name)))]
+        .map((control) => ({
+        control,
+        value: control.value,
+        checked: control.checked,
+        selected: control.tagName === "SELECT"
+          ? [...control.options].map((option) => option.selected)
+          : null,
+      })),
     };
   }
 
@@ -508,15 +658,20 @@
       collectionCounts: snapshot.countValues,
       stableRowIds: snapshot.stableRowIds,
     } : null;
-    const values = snapshot
-      ? snapshot.fields.map(({ control, value, checked, selected }) => ({
+    const snapshotValues = snapshot
+      ? (snapshot.reviewFields || snapshot.fields).map(({ control, value, checked, selected }) => ({
         name: control.name,
         type: control.type,
         value,
         ...(control.type === "checkbox" || control.type === "radio" ? { checked } : {}),
         ...(selected ? { selected } : {}),
       }))
-      : Object.entries(entry?.payload || {}).map(([name, value]) => ({ name, value }));
+      : [];
+    const snapshotNames = new Set(snapshotValues.map(({ name }) => name));
+    const entryValues = Object.entries(entry?.payload || {})
+      .filter(([name]) => !snapshotNames.has(name))
+      .map(([name, value]) => ({ name, value }));
+    const values = [...snapshotValues, ...entryValues];
     return { identity, structure, values };
   }
 
@@ -1000,6 +1155,7 @@
           mutationQueue[0] || null;
         const snapshot = sources.get(conflictSource)?.formSnapshot;
         const positional = bpPaperPositionalCollectionEntry(entry) ||
+          bpPaperPositionalCollectionActionEntry(entry) ||
           snapshot?.countValues?.some(([name]) => PAPER_POSITIONAL_COLLECTION_PARAM.test(name)) === true;
         conflict = {
           currentRev: reply?.current_rev,
@@ -1546,22 +1702,32 @@
         const restoreCollectionFocus = bpPaperCollectionFocus(form, event.submitter);
         const restoreOptionFocus = bpPaperOptionFocus(form, event.submitter);
         const rotateConsumedCollectionId = bpPaperRotateConsumedCollectionId(form, event.submitter);
+        const options = typeof driver.pushEventTo === "function"
+          ? { target: form.getAttribute("phx-target") || form }
+          : {};
+        options.onResult = (saved) => {
+          if (!saved) return;
+          // onResult belongs to the retained queue entry, so an exact retry
+          // reaches this callback too. Defer until the receipt handler applies
+          // its correlated LiveView echo; that repaint may restore a consumed
+          // hidden ID or replace the operated collection row.
+          Promise.resolve().then(() => {
+            rotateConsumedCollectionId();
+            restoreCollectionFocus();
+            restoreOptionFocus();
+          }).catch((error) => {
+            try {
+              console.error("Acknowledged collection form could not restore its local controls.", error);
+            } catch (_) {}
+          });
+        };
         coordinator.run(() => bpPaperMutation(
           driver,
           form,
           form.getAttribute("phx-submit"),
           bpPaperEventParams(event.submitter, params),
-          typeof driver.pushEventTo === "function"
-            ? { target: form.getAttribute("phx-target") || form }
-            : {},
-        ).promise.then((saved) => {
-          if (saved) {
-            rotateConsumedCollectionId();
-            restoreCollectionFocus();
-            restoreOptionFocus();
-          }
-          return saved;
-        }));
+          options,
+        ).promise);
       };
       document.addEventListener("input", coordinator._onInput);
       document.addEventListener("change", coordinator._onInput);
@@ -2036,14 +2202,19 @@
         this._onCanvasOps = (e) => {
           this._exitCoordinator?.markDirty(this.el);
           const containerContext = captureContainerContext();
-          this._opsQueue.push({
+          const entry = {
             ops: e.detail.ops,
             seq: e.detail.seq,
             containerContext: containerContext.wire,
             invalidContainerContext: containerContext.invalid,
             requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
             expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
-          });
+          };
+          const canvas = this.el.querySelector("bp-paper-canvas");
+          if (entry.seq != null && typeof canvas?.identifyOpsRequest === "function") {
+            canvas.identifyOpsRequest(entry.seq, entry.requestId);
+          }
+          this._opsQueue.push(entry);
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
@@ -2100,7 +2271,10 @@
                   typeof wc.resolveConflictWithServerBlocks === "function") {
                 wc.resolveConflictWithServerBlocks(run.blocks);
               } else {
-                wc.applyServerBlocks(run.blocks);
+                wc.applyServerBlocks(run.blocks, {
+                  mode,
+                  requestId: payload.request_id,
+                });
               }
             };
             this._exitCoordinator?.observeRevision({

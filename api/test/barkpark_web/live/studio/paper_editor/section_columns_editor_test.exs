@@ -127,6 +127,54 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert html =~ PaperCanvas.section_run_slug("paper", "section")
   end
 
+  test "Section structural form emits a fenced vector and appends paragraphs" do
+    section = %{
+      "id" => "section",
+      "type" => "section",
+      "blocks" => [
+        Map.put(paragraph("first", "One"), "locked", true),
+        paragraph("second:part", "Two")
+      ]
+    }
+
+    tree = section |> render_fields() |> LazyHTML.from_fragment()
+    form = LazyHTML.query(tree, "#section-structure-form-section")
+
+    assert LazyHTML.attribute(form, "phx-submit") == ["paper-edit-block"]
+    assert LazyHTML.attribute(form, "phx-change") == []
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "input[name='section-child-count']"), "value") ==
+             ["2"]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(form, "input[name^='section-child-'][name$='-id']"),
+             "value"
+           ) == ["first", "second:part"]
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "button[name='section-action']"), "value") == [
+             "up:first",
+             "down:first",
+             "remove:first",
+             "up:second:part",
+             "down:second:part",
+             "remove:second:part",
+             "add"
+           ]
+
+    assert Enum.count(LazyHTML.query(form, "button[value='add']")) == 1
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "button[value='remove:first']"), "disabled") ==
+             [""]
+
+    assert Enum.count(LazyHTML.query(form, "[data-test-id='paper-structure-locked-note']")) == 1
+
+    empty = render_fields(%{"id" => "empty", "type" => "section", "blocks" => []})
+    empty_tree = LazyHTML.from_fragment(empty)
+
+    assert Enum.count(LazyHTML.query(empty_tree, "button[name='section-action'][value='add']")) ==
+             1
+  end
+
   test "untitled stack Section opening with a heading omits both rules" do
     section = %{
       "id" => "section",
@@ -188,6 +236,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
 
     assert Enum.empty?(LazyHTML.query(grid, "form"))
     assert Enum.count(LazyHTML.query(tree, "form[name='section-config']")) == 1
+    assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-section-grid-order-note']")) == 1
+    assert html =~ "Move changes source order; existing grid placement is retained."
     refute html =~ ~s(data-paper-container-kind="section")
     assert html =~ "first"
     assert html =~ "second"
@@ -221,6 +271,55 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert LazyHTML.attribute(runs, "data-paper-container-column-index") == ["0", "1"]
     assert html =~ PaperCanvas.columns_run_slug("paper", "columns", 0)
     assert html =~ PaperCanvas.columns_run_slug("paper", "columns", 1)
+  end
+
+  test "Columns structural form fences every column and appends paragraphs" do
+    columns = %{
+      "id" => "columns",
+      "type" => "columns",
+      "columns" => [
+        [],
+        [Map.put(paragraph("first", "A"), "locked", true), paragraph("second:part", "B")]
+      ]
+    }
+
+    tree = columns |> render_fields() |> LazyHTML.from_fragment()
+    form = LazyHTML.query(tree, "#columns-structure-form-columns")
+
+    assert LazyHTML.attribute(form, "phx-submit") == ["paper-edit-block"]
+    assert LazyHTML.attribute(form, "phx-change") == []
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "input[name='column-count']"), "value") == [
+             "2"
+           ]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(form, "input[name$='-child-count']"),
+             "value"
+           ) == ["0", "2"]
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(form, "input[name^='column-1-child-'][name$='-id']"),
+             "value"
+           ) == ["first", "second:part"]
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "button[name='column-action']"), "value") == [
+             "add:0",
+             "up:1:first",
+             "down:1:first",
+             "remove:1:first",
+             "up:1:second:part",
+             "down:1:second:part",
+             "remove:1:second:part",
+             "add:1"
+           ]
+
+    assert Enum.count(LazyHTML.query(tree, ".bp-paper-contextual-controls--columns")) == 1
+
+    assert LazyHTML.attribute(LazyHTML.query(form, "button[value='remove:1:first']"), "disabled") ==
+             [""]
+
+    assert Enum.count(LazyHTML.query(form, "[data-test-id='paper-structure-locked-note']")) == 1
   end
 
   test "generic Beta recursively edits every canonical Columns child" do
@@ -261,6 +360,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
       assert html =~ ~s(data-test-id="paper-columns-editor")
       assert html =~ "original content is preserved"
       refute html =~ ~s(data-paper-columns-editor-frame)
+      refute html =~ ~s(data-test-id="paper-columns-structure-editor")
     end
   end
 

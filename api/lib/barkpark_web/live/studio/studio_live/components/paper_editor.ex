@@ -1951,6 +1951,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <label class="bp-paper-edit-fieldlabel" for={"section-title-" <> @id}>Title</label>
                   <input id={"section-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" placeholder="Section title" value={Map.get(@block, "title", "")} data-test-id="paper-field-title" />
                 </form>
+                <form id={"section-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-section-structure-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="section-child-count" value={length(@block["blocks"])} />
+                  <input type="hidden" name="section-new-child-id" value={Blocks.new_block_id()} />
+                  <p :if={SectionLayout.grid(@block)} class="bp-paper-edit-readonly" data-test-id="paper-section-grid-order-note">Move changes source order; existing grid placement is retained.</p>
+                  <fieldset :for={{child, index} <- Enum.with_index(@block["blocks"])} class="bp-paper-edit-form">
+                    <legend>Child <%= index + 1 %> · <%= child["type"] %></legend>
+                    <input type="hidden" name={"section-child-#{index}-id"} value={child["id"]} />
+                    <button type="submit" name="section-action" value={"up:" <> child["id"]} disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                    <button type="submit" name="section-action" value={"down:" <> child["id"]} disabled={index == length(@block["blocks"]) - 1} class="btn btn-ghost btn-sm">Move down</button>
+                    <button type="submit" name="section-action" value={"remove:" <> child["id"]} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
+                    <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                  </fieldset>
+                  <button type="submit" name="section-action" value="add" class="btn btn-ghost btn-sm">Add paragraph</button>
+                </form>
               </div>
             </details>
           <% else %>
@@ -1990,6 +2005,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <% end %>
               </div>
             </div>
+            <details id={"columns-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--columns" phx-mounted={JS.ignore_attributes("open")}>
+              <summary class="bp-paper-contextual-toggle">Configure columns</summary>
+              <div class="bp-paper-contextual-panel">
+                <form id={"columns-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-columns-structure-editor">
+                  <input type="hidden" name="block_id" value={@id} />
+                  <input type="hidden" name="column-count" value={length(@block["columns"])} />
+                  <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
+                  <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form">
+                    <legend>Column <%= column_index + 1 %></legend>
+                    <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
+                    <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
+                      <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
+                      <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
+                      <button type="submit" name="column-action" value={"up:#{column_index}:#{child["id"]}"} disabled={child_index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                      <button type="submit" name="column-action" value={"down:#{column_index}:#{child["id"]}"} disabled={child_index == length(column) - 1} class="btn btn-ghost btn-sm">Move down</button>
+                      <button type="submit" name="column-action" value={"remove:#{column_index}:#{child["id"]}"} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
+                      <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                    </div>
+                    <button type="submit" name="column-action" value={"add:#{column_index}"} class="btn btn-ghost btn-sm">Add paragraph</button>
+                  </fieldset>
+                </form>
+              </div>
+            </details>
           <% else %>
             <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
             <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>

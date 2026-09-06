@@ -31,6 +31,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
 
   @doc false
+  def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))
+
+  @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
   # by patch.ex regardless. Mirrors the EXACT block shapes in
@@ -186,8 +189,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_if_present("ordered", parse_bool(params["ordered"]))
   end
 
-  def build_block_patch(%{"type" => "section"}, params) do
-    put_section_title(%{}, params)
+  def build_block_patch(%{"type" => "section"} = block, params) do
+    case section_structure_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "columns"} = block, params) do
+    case columns_structure_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
   end
 
   def build_block_patch(%{"type" => "paper-links"} = block, params) do
@@ -277,12 +290,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def validate_block_patch(%{"type" => "section"} = block, params) do
-    case Map.fetch(params, "title") do
-      :error -> {:ok, build_block_patch(block, params)}
-      {:ok, title} when is_binary(title) -> {:ok, build_block_patch(block, params)}
-      {:ok, _title} -> {:error, :invalid_section_title}
-    end
+    section_structure_patch(block, params)
   end
+
+  def validate_block_patch(%{"type" => "columns"} = block, params),
+    do: columns_structure_patch(block, params)
 
   def validate_block_patch(%{"type" => "api-endpoint"} = block, params) do
     with :ok <- validate_collection_count(block, params, "params", "param") do
@@ -736,6 +748,309 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_number_form_field(item, params, prefix <> "met", "met")
     |> put_number_form_field(item, params, prefix <> "total", "total")
   end
+
+  defp section_structure_patch(block, params) do
+    with :ok <- validate_section_title(params),
+         {:ok, children, action} <- validate_section_children_form(block, params) do
+      patch = put_section_title(%{}, params)
+      updated = apply_section_child_action(children, action, params)
+      {:ok, if(updated == children, do: patch, else: Map.put(patch, "blocks", updated))}
+    end
+  end
+
+  defp validate_section_title(params) do
+    case Map.fetch(params, "title") do
+      :error -> :ok
+      {:ok, title} when is_binary(title) -> :ok
+      {:ok, _title} -> {:error, :invalid_section_title}
+    end
+  end
+
+  defp validate_section_children_form(block, params) do
+    if structure_form_params?(params, "section-") do
+      with {:ok, children} <- canonical_section_children(block),
+           true <- valid_identified_children?(children),
+           true <- exact_submitted_count?(params["section-child-count"], length(children)),
+           true <- valid_new_structure_id_wire?(params["section-new-child-id"]),
+           :ok <- validate_section_param_names(params, length(children)),
+           {:ok, submitted_ids} <- submitted_structure_ids(params, "section-child", children),
+           true <- submitted_ids == Enum.map(children, &Map.fetch!(&1, "id")),
+           {:ok, action} <-
+             validate_section_child_action(params["section-action"], children, params) do
+        {:ok, children, action}
+      else
+        {:error, _reason} = error -> error
+        _ -> malformed_structure("section")
+      end
+    else
+      {:ok, Map.get(block, "blocks", []), nil}
+    end
+  end
+
+  defp canonical_section_children(%{"blocks" => children}) when is_list(children),
+    do: {:ok, children}
+
+  defp canonical_section_children(_block), do: malformed_structure("section")
+
+  defp validate_section_param_names(params, count) do
+    allowed =
+      MapSet.new(~w(section-child-count section-new-child-id section-action))
+      |> add_indexed_param_names("section-child", count)
+
+    validate_structure_param_names(params, "section-", allowed, "section")
+  end
+
+  defp validate_section_child_action(action, _children, _params)
+       when action in [nil, ""],
+       do: {:ok, nil}
+
+  defp validate_section_child_action("add", _children, params) do
+    with :ok <- validate_new_structure_id(params["section-new-child-id"], "section") do
+      {:ok, :add}
+    end
+  end
+
+  defp validate_section_child_action("remove:" <> id, children, _params),
+    do: validate_structure_child_action(:remove, id, children, "section")
+
+  defp validate_section_child_action("up:" <> id, children, _params),
+    do: validate_structure_child_action(:up, id, children, "section")
+
+  defp validate_section_child_action("down:" <> id, children, _params),
+    do: validate_structure_child_action(:down, id, children, "section")
+
+  defp validate_section_child_action(_action, _children, _params),
+    do: malformed_structure("section")
+
+  defp apply_section_child_action(children, nil, _params), do: children
+
+  defp apply_section_child_action(children, :add, params),
+    do: children ++ [default_block("paragraph", params["section-new-child-id"])]
+
+  defp apply_section_child_action(children, {:remove, id}, _params),
+    do: Enum.reject(children, &(Map.get(&1, "id") == id))
+
+  defp apply_section_child_action(children, {direction, id}, _params)
+       when direction in [:up, :down] do
+    index = Enum.find_index(children, &(Map.get(&1, "id") == id))
+    move_at_index(children, index, if(direction == :up, do: -1, else: 1))
+  end
+
+  defp columns_structure_patch(block, params) do
+    with {:ok, columns, action} <- validate_columns_children_form(block, params) do
+      updated = apply_column_child_action(columns, action, params)
+      {:ok, if(updated == columns, do: %{}, else: %{"columns" => updated})}
+    end
+  end
+
+  defp validate_columns_children_form(block, params) do
+    if structure_form_params?(params, "column-") do
+      with {:ok, columns} <- canonical_columns(block),
+           true <- Enum.all?(columns, &valid_identified_children?/1),
+           true <- exact_submitted_count?(params["column-count"], length(columns)),
+           true <- valid_new_structure_id_wire?(params["column-new-child-id"]),
+           :ok <- validate_column_param_names(params, columns),
+           {:ok, submitted_columns} <- submitted_column_ids(params, columns),
+           true <-
+             submitted_columns == Enum.map(columns, &Enum.map(&1, fn child -> child["id"] end)),
+           {:ok, action} <-
+             validate_column_child_action(params["column-action"], columns, params) do
+        {:ok, columns, action}
+      else
+        {:error, _reason} = error -> error
+        _ -> malformed_structure("columns")
+      end
+    else
+      {:ok, Map.get(block, "columns", []), nil}
+    end
+  end
+
+  defp canonical_columns(%{"columns" => columns}) when is_list(columns) do
+    if Enum.all?(columns, &is_list/1), do: {:ok, columns}, else: malformed_structure("columns")
+  end
+
+  defp canonical_columns(_block), do: malformed_structure("columns")
+
+  defp validate_column_param_names(params, columns) do
+    allowed =
+      MapSet.new(~w(column-count column-new-child-id column-action))
+      |> then(fn allowed ->
+        Enum.with_index(columns)
+        |> Enum.reduce(allowed, fn {children, column_index}, acc ->
+          acc
+          |> MapSet.put("column-#{column_index}-child-count")
+          |> add_indexed_param_names("column-#{column_index}-child", length(children))
+        end)
+      end)
+
+    validate_structure_param_names(params, "column-", allowed, "columns")
+  end
+
+  defp submitted_column_ids(params, columns) do
+    columns
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {children, column_index}, {:ok, acc} ->
+      with true <-
+             exact_submitted_count?(
+               params["column-#{column_index}-child-count"],
+               length(children)
+             ),
+           {:ok, ids} <-
+             submitted_structure_ids(params, "column-#{column_index}-child", children) do
+        {:cont, {:ok, [ids | acc]}}
+      else
+        _ -> {:halt, malformed_structure("columns")}
+      end
+    end)
+    |> case do
+      {:ok, submitted} -> {:ok, Enum.reverse(submitted)}
+      error -> error
+    end
+  end
+
+  defp validate_column_child_action(action, _columns, _params)
+       when action in [nil, ""],
+       do: {:ok, nil}
+
+  defp validate_column_child_action(action, columns, params) when is_binary(action) do
+    Enum.with_index(columns)
+    |> Enum.find_value(fn {children, column_index} ->
+      cond do
+        action == "add:#{column_index}" ->
+          case validate_new_structure_id(params["column-new-child-id"], "columns") do
+            :ok -> {:ok, {:add, column_index}}
+            {:error, _reason} = error -> error
+          end
+
+        true ->
+          Enum.find_value(children, fn child ->
+            id = child["id"]
+
+            Enum.find_value([:remove, :up, :down], fn kind ->
+              if action == "#{kind}:#{column_index}:#{id}",
+                do:
+                  validate_column_structure_child_action(
+                    kind,
+                    column_index,
+                    id,
+                    children,
+                    "columns"
+                  )
+            end)
+          end)
+      end
+    end)
+    |> case do
+      nil -> malformed_structure("columns")
+      result -> result
+    end
+  end
+
+  defp validate_column_child_action(_action, _columns, _params),
+    do: malformed_structure("columns")
+
+  defp apply_column_child_action(columns, nil, _params), do: columns
+
+  defp apply_column_child_action(columns, {:add, column_index}, params) do
+    children = Enum.at(columns, column_index)
+
+    List.replace_at(
+      columns,
+      column_index,
+      children ++ [default_block("paragraph", params["column-new-child-id"])]
+    )
+  end
+
+  defp apply_column_child_action(columns, {kind, column_index, id}, _params)
+       when kind in [:remove, :up, :down] do
+    children = Enum.at(columns, column_index)
+
+    updated =
+      case kind do
+        :remove ->
+          Enum.reject(children, &(Map.get(&1, "id") == id))
+
+        direction ->
+          index = Enum.find_index(children, &(Map.get(&1, "id") == id))
+          move_at_index(children, index, if(direction == :up, do: -1, else: 1))
+      end
+
+    List.replace_at(columns, column_index, updated)
+  end
+
+  defp validate_structure_child_action(kind, id, children, collection) do
+    case Enum.find(children, &(Map.get(&1, "id") == id)) do
+      nil ->
+        malformed_structure(collection)
+
+      child when kind == :remove ->
+        case locked_visible_block_id(child) do
+          nil -> {:ok, {kind, id}}
+          locked_id -> {:error, {:locked_block, locked_id, "remove-block"}}
+        end
+
+      _child ->
+        {:ok, {kind, id}}
+    end
+  end
+
+  defp validate_column_structure_child_action(kind, column_index, id, children, collection) do
+    case validate_structure_child_action(kind, id, children, collection) do
+      {:ok, {^kind, ^id}} -> {:ok, {kind, column_index, id}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp structure_form_params?(params, prefix) do
+    Enum.any?(Map.keys(params), &(is_binary(&1) and String.starts_with?(&1, prefix)))
+  end
+
+  defp valid_identified_children?(children) do
+    ids = Enum.map(children, fn child -> if is_map(child), do: child["id"] end)
+
+    Enum.all?(ids, &(is_binary(&1) and String.trim(&1) != "")) and
+      length(ids) == MapSet.size(MapSet.new(ids))
+  end
+
+  defp valid_new_structure_id_wire?(id), do: is_binary(id) and String.trim(id) != ""
+
+  defp validate_new_structure_id(id, collection) do
+    if valid_new_structure_id_wire?(id), do: :ok, else: malformed_structure(collection)
+  end
+
+  defp submitted_structure_ids(params, prefix, children) do
+    children
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {_child, index}, {:ok, acc} ->
+      case Map.fetch(params, "#{prefix}-#{index}-id") do
+        {:ok, id} when is_binary(id) -> {:cont, {:ok, [id | acc]}}
+        _ -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, Enum.reverse(ids)}
+      :error -> malformed_structure(if(prefix == "section-child", do: "section", else: "columns"))
+    end
+  end
+
+  defp add_indexed_param_names(allowed, _prefix, 0), do: allowed
+
+  defp add_indexed_param_names(allowed, prefix, count) do
+    Enum.reduce(0..(count - 1), allowed, fn index, acc ->
+      MapSet.put(acc, "#{prefix}-#{index}-id")
+    end)
+  end
+
+  defp validate_structure_param_names(params, prefix, allowed, collection) do
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, prefix) and not MapSet.member?(allowed, key)
+      end)
+
+    if unexpected?, do: malformed_structure(collection), else: :ok
+  end
+
+  defp malformed_structure(collection), do: {:error, {:malformed_collection, collection}}
 
   defp validate_steps_form(block, params) do
     if step_form_params?(params) do
@@ -1261,6 +1576,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
           %{"blocks" => blocks} when is_list(blocks) -> locked_visible_block_id(blocks)
           _row -> nil
         end)
+
+      %{"type" => "figure", "child" => child} when is_map(child) ->
+        locked_visible_block_id(child)
 
       %{"type" => "columns", "columns" => columns} when is_list(columns) ->
         Enum.find_value(columns, fn

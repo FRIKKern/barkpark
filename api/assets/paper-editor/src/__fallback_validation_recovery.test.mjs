@@ -164,7 +164,8 @@ const tocMarkup = `
       throw new Error("simulated canvas acknowledgement adapter failure");
     }
   };
-  canvas.applyServerBlocks = () => {};
+  const echoReceipts = [];
+  canvas.applyServerBlocks = (_blocks, receipt) => echoReceipts.push(receipt);
   const canvasCalls = [];
   const canvasReplies = [];
   const adapterErrors = [];
@@ -237,6 +238,21 @@ const tocMarkup = `
   canvasReplies.shift()({ saved: true, request_id: secondRequestId, rev: 9 });
   await new Promise((resolve) => setTimeout(resolve, 15));
 
+  handlers.get("bp:canvas-update")({
+    rev: 8,
+    request_id: requestId,
+    runs: [{ run_id: "figure-run", blocks: [{ id: "child-a", text: "Saved child" }] }],
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(echoReceipts)),
+    [
+      { mode: "own", requestId },
+      { mode: "own", requestId: secondRequestId },
+      { mode: "own-stale", requestId },
+    ],
+    "coordinator-classified modes retain their exact request identities",
+  );
+
   assert.equal(env.calls.length, 1, "the retained Figure caption sends after the child ack");
   assert.equal(env.calls[0].payload.caption, "Caption retained behind child");
   assert.equal(env.calls[0].payload.if_rev, 9);
@@ -252,6 +268,96 @@ const tocMarkup = `
   assert.equal(env.toggleCalls.length, 1, "View resumes after the retained caption is durable");
   assert.equal(env.toggleCalls[0].event, "paper-toggle-edit");
   bridge.destroyed();
+  env.close();
+}
+
+// A document-wide own revision can repaint every run, but only the canvas whose
+// exact request produced that revision may treat the non-exact echo as its own.
+// Preserve the coordinator's request identity through both the outbound seq
+// binding and the inbound apply receipt so sibling canvas B cannot consume A's.
+{
+  const env = mountedForm(`
+    <form></form>
+    <div id="paper-canvas-cross-a" phx-hook="BarkparkPaperCanvas"
+         data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+         data-canvas-blocks="[]"><bp-paper-canvas></bp-paper-canvas></div>
+    <div id="paper-canvas-cross-b" phx-hook="BarkparkPaperCanvas"
+         data-paper-doc-key="production:paper:validation" data-paper-rev="7"
+         data-canvas-blocks="[]"><bp-paper-canvas></bp-paper-canvas></div>
+  `);
+  const bridges = ["a", "b"].map((suffix) => {
+    const wrapper = env.window.document.querySelector(`#paper-canvas-cross-${suffix}`);
+    const canvas = wrapper.querySelector("bp-paper-canvas");
+    const handlers = new Map();
+    const calls = [];
+    const replies = [];
+    const receipts = [];
+    canvas.blocks = [{ id: `child-${suffix}` }];
+    canvas.acknowledgeOps = () => {};
+    canvas.identifyOpsRequest = (seq, requestId) => {
+      canvas.identified = { seq, requestId };
+    };
+    canvas.applyServerBlocks = (_blocks, receipt) => {
+      receipts.push({
+        ...receipt,
+        trustedOwn: receipt?.mode === "own" &&
+          receipt?.requestId === canvas.identified?.requestId,
+      });
+    };
+    const bridge = {
+      ...env.window.BarkparkPaperEditorHooks.BarkparkPaperCanvas,
+      el: wrapper,
+      handleEvent: (name, handler) => handlers.set(name, handler),
+      pushEvent: (_event, payload) => {
+        calls.push(payload);
+        return new Promise((resolve) => replies.push(resolve));
+      },
+    };
+    bridge.mounted();
+    return { bridge, wrapper, canvas, handlers, calls, replies, receipts };
+  });
+
+  bridges.forEach(({ wrapper }, index) => wrapper.dispatchEvent(
+    new env.window.CustomEvent("bp-canvas-ops", {
+      bubbles: true,
+      detail: {
+        seq: index + 1,
+        ops: [{ op: "patch-block", id: `child-${index}`, patch: { text: "local" } }],
+      },
+    }),
+  ));
+  const requestA = bridges[0].canvas.identified.requestId;
+  const requestB = bridges[1].canvas.identified.requestId;
+  assert.notEqual(requestA, requestB);
+  assert.equal(bridges[0].calls.length, 1);
+  assert.equal(bridges[1].calls.length, 0, "canvas B waits behind A's document mutation");
+
+  bridges.forEach(({ handlers }, index) => handlers.get("bp:canvas-update")({
+    rev: 8,
+    request_id: requestA,
+    mode: "external",
+    runs: [{
+      run_id: `cross-${index === 0 ? "a" : "b"}`,
+      blocks: [{ id: `child-${index === 0 ? "a" : "b"}`, text: "server" }],
+    }],
+  }));
+  bridges[0].replies.shift()({ saved: true, request_id: requestA, rev: 8 });
+  await tick();
+
+  assert.deepEqual(
+    bridges[0].receipts,
+    [{ mode: "own", requestId: requestA, trustedOwn: true }],
+  );
+  assert.deepEqual(
+    bridges[1].receipts,
+    [{ mode: "own", requestId: requestA, trustedOwn: false }],
+    "A's own document echo does not satisfy canvas B's exact inflight identity",
+  );
+  assert.equal(bridges[1].calls.length, 1);
+  assert.equal(bridges[1].calls[0].request_id, requestB);
+  bridges[1].replies.shift()({ saved: true, request_id: requestB, rev: 9 });
+  await tick();
+  bridges.forEach(({ bridge }) => bridge.destroyed());
   env.close();
 }
 
@@ -622,6 +728,413 @@ const tocMarkup = `
   banner.querySelector('[data-action="review"]').click();
   assert.match(banner.querySelector("[data-conflict-draft]").textContent, /Newest title/);
   env.close();
+}
+
+// Section and Columns children are addressed by their current position in the
+// form even though their actions carry stable child IDs. An acknowledged move
+// must therefore retain a newer metadata draft for explicit discard instead of
+// restoring the pre-ack ordering and rebasing it onto the new revision.
+for (const scenario of [
+  {
+    name: "Section",
+    testId: "paper-section-structure-editor",
+    actionName: "section-action",
+    actionValue: "up:child:two",
+    controls: `
+      <input type="hidden" name="section-child-count" value="2">
+      <input type="hidden" name="section-child-0-id" value="child:one">
+      <input type="hidden" name="section-child-1-id" value="child:two">
+    `,
+    repaint(form) {
+      form.elements.namedItem("section-child-0-id").value = "child:two";
+      form.elements.namedItem("section-child-1-id").value = "child:one";
+    },
+    firstChild(form) {
+      return form.elements.namedItem("section-child-0-id").value;
+    },
+  },
+  {
+    name: "Columns",
+    testId: "paper-columns-structure-editor",
+    actionName: "column-action",
+    actionValue: "up:0:child:two",
+    controls: `
+      <input type="hidden" name="column-count" value="1">
+      <input type="hidden" name="column-0-child-count" value="2">
+      <input type="hidden" name="column-0-child-0-id" value="child:one">
+      <input type="hidden" name="column-0-child-1-id" value="child:two">
+    `,
+    repaint(form) {
+      form.elements.namedItem("column-0-child-0-id").value = "child:two";
+      form.elements.namedItem("column-0-child-1-id").value = "child:one";
+    },
+    firstChild(form) {
+      return form.elements.namedItem("column-0-child-0-id").value;
+    },
+  },
+]) {
+  const env = mountedForm(`
+    <form id="${scenario.name.toLowerCase()}-form" class="bp-paper-edit-form"
+          phx-change="paper-block-autosave" phx-debounce="0"
+          data-test-id="${scenario.testId}">
+      <input type="hidden" name="block_id" value="container">
+      <input name="title" value="Original title">
+      ${scenario.controls}
+    </form>
+  `);
+  let actionPayload;
+  let settleAction;
+  const action = env.hook._exitCoordinator.mutate(env.form, {
+    payload: {
+      block_id: "container",
+      [scenario.actionName]: scenario.actionValue,
+    },
+    send: (payload) => {
+      actionPayload = payload;
+      return new Promise((resolve) => { settleAction = resolve; });
+    },
+  }).promise;
+  await tick();
+
+  const title = env.form.elements.namedItem("title");
+  title.value = `${scenario.name} retained draft`;
+  title.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  scenario.repaint(env.form);
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  settleAction({ saved: true, request_id: actionPayload.request_id, rev: 8 });
+  assert.equal(await action, true);
+  await tick();
+
+  assert.equal(env.calls.length, 0, `${scenario.name} does not rebase the pre-ack child order`);
+  assert.equal(scenario.firstChild(env.form), "child:two");
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner, `${scenario.name} retains the newer draft for review`);
+  const keep = banner.querySelector('[data-action="keep"]');
+  assert.equal(keep.disabled, true, `${scenario.name} Keep mine is unavailable`);
+  banner.querySelector('[data-action="review"]').click();
+  const review = JSON.parse(banner.querySelector("[data-conflict-draft]").textContent);
+  const originalValues = Object.fromEntries(
+    review.values.map((field) => [field.name, field.value]),
+  );
+  assert.equal(originalValues.title, `${scenario.name} retained draft`);
+  title.value = `${scenario.name} latest review draft`;
+  title.dispatchEvent(new env.window.Event("input", { bubbles: true }));
+  await tick();
+  banner.querySelector('[data-action="review"]').click();
+  const latest = JSON.parse(banner.querySelector("[data-conflict-draft]").textContent);
+  const retainedValues = Object.fromEntries(
+    latest.retainedDraftBeforeAcknowledgement.values.map((field) => [field.name, field.value]),
+  );
+  const latestValues = Object.fromEntries(
+    latest.currentDraftDuringReview.values.map((field) => [field.name, field.value]),
+  );
+  assert.equal(retainedValues.title, `${scenario.name} retained draft`);
+  assert.equal(latestValues.title, `${scenario.name} latest review draft`);
+  assert.equal(retainedValues[scenario.actionName], scenario.actionValue);
+  assert.equal(latestValues[scenario.actionName], scenario.actionValue);
+  const firstChildName = scenario.name === "Section"
+    ? "section-child-0-id"
+    : "column-0-child-0-id";
+  assert.equal(retainedValues[firstChildName], "child:one");
+  assert.equal(latestValues[firstChildName], "child:two");
+  keep.click();
+  await tick();
+  assert.equal(env.calls.length, 0, `${scenario.name} cannot retry an unsafe positional draft`);
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  assert.equal(env.window.document.querySelector("[data-bp-paper-conflict]"), null);
+  assert.equal(env.calls.length, 0, `${scenario.name} Use latest explicitly discards the draft`);
+  env.close();
+}
+
+// A direct server conflict reaches _setConflict without the successful-ack
+// fallback advance above. Structural child actions must still be classified as
+// positional so Keep mine cannot rewrite and resend them at the server revision.
+for (const [actionName, actionValue] of [
+  ["section-action", "up:child:two"],
+  ["column-action", "up:0:child:two"],
+]) {
+  const env = mountedForm(`
+    <form id="direct-${actionName}" class="bp-paper-edit-form"
+          phx-change="paper-block-autosave" phx-debounce="0">
+      <input type="hidden" name="block_id" value="container">
+      <input name="title" value="Retained title">
+    </form>
+  `);
+  let sent = 0;
+  const mutation = env.hook._exitCoordinator.mutate(env.form, {
+    payload: { block_id: "container", [actionName]: actionValue },
+    send: (payload) => {
+      sent += 1;
+      return Promise.resolve({
+        saved: false,
+        request_id: payload.request_id,
+        conflict: true,
+        current_rev: 8,
+      });
+    },
+  });
+  assert.equal(await mutation.promise, false);
+  await tick();
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.ok(banner);
+  const keep = banner.querySelector('[data-action="keep"]');
+  assert.equal(keep.disabled, true, `${actionName} direct conflict disables Keep mine`);
+  keep.click();
+  await tick();
+  assert.equal(sent, 1, `${actionName} cannot be resent on the conflicting revision`);
+  banner.querySelector('[data-action="review"]').click();
+  assert.match(
+    banner.querySelector("[data-conflict-message]").textContent,
+    /positional collections/i,
+  );
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  assert.equal(env.window.document.querySelector("[data-bp-paper-conflict]"), null);
+  env.close();
+}
+
+// Merely sharing a structural form does not make an ordinary metadata conflict
+// positional. Without an action payload, its exact retry remains available.
+for (const controls of [
+  `<input type="hidden" name="section-child-count" value="2">
+   <input type="hidden" name="section-child-0-id" value="child:one">`,
+  `<input type="hidden" name="column-count" value="1">
+   <input type="hidden" name="column-0-child-count" value="2">
+   <input type="hidden" name="column-0-child-0-id" value="child:one">`,
+]) {
+  const env = mountedForm(`
+    <form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0">
+      <input type="hidden" name="block_id" value="container">
+      <input name="title" value="Retained title">
+      ${controls}
+    </form>
+  `);
+  const payload = Object.fromEntries(new env.window.FormData(env.form));
+  const mutation = env.hook._exitCoordinator.mutate(env.form, {
+    payload,
+    send: (payload) => Promise.resolve({
+      saved: false,
+      request_id: payload.request_id,
+      conflict: true,
+      current_rev: 8,
+    }),
+  });
+  assert.equal(await mutation.promise, false);
+  await tick();
+  const banner = env.window.document.querySelector("[data-bp-paper-conflict]");
+  assert.equal(
+    banner.querySelector('[data-action="keep"]').disabled,
+    false,
+    "a metadata-only conflict retains its exact retry",
+  );
+  banner.querySelector('[data-action="latest"]').click();
+  await tick();
+  env.close();
+}
+
+// Section and Columns inserts consume one client-generated child ID. Rotate it
+// after each exact successful acknowledgement, including a successful retry,
+// but keep it stable while an ambiguous/failed attempt awaits that retry.
+for (const scenario of [
+  {
+    name: "Section",
+    actionName: "section-action",
+    actionValue: "add",
+    generatedName: "section-new-child-id",
+  },
+  {
+    name: "Columns",
+    actionName: "column-action",
+    actionValue: "add:0",
+    generatedName: "column-new-child-id",
+  },
+]) {
+  const initialId = `b-${scenario.name.toLowerCase()}-initial`;
+  const env = mountedForm(`
+    <form id="insert-${scenario.name.toLowerCase()}" phx-submit="paper-edit-block"
+          data-test-id="paper-${scenario.name.toLowerCase()}-structure-editor">
+      <input type="hidden" name="block_id" value="container">
+      <input type="hidden" name="${scenario.generatedName}" value="${initialId}">
+      <button type="submit" name="${scenario.actionName}" value="${scenario.actionValue}">
+        Add child
+      </button>
+    </form>
+  `);
+  const coordinator = env.hook._exitCoordinator;
+  const mutate = coordinator.mutate.bind(coordinator);
+  let latestEntry;
+  coordinator.mutate = (...args) => {
+    const mutation = mutate(...args);
+    latestEntry = mutation.entry;
+    return mutation;
+  };
+  const generated = env.form.elements.namedItem(scenario.generatedName);
+  const submitter = env.form.elements.namedItem(scenario.actionName);
+  const submit = () => env.form.dispatchEvent(new env.window.SubmitEvent("submit", {
+    bubbles: true,
+    cancelable: true,
+    submitter,
+  }));
+
+  submit();
+  await tick();
+  assert.equal(env.calls[0].payload[scenario.generatedName], initialId);
+  env.settle({ saved: true, request_id: env.calls[0].payload.request_id, rev: 8 });
+  await tick();
+  const secondId = generated.value;
+  assert.notEqual(secondId, initialId, `${scenario.name} rotates its first consumed child ID`);
+  assert.equal(generated.defaultValue, secondId);
+
+  env.window.document.querySelector("main").dataset.paperRev = "8";
+  submit();
+  await tick();
+  assert.equal(env.calls[1].payload[scenario.generatedName], secondId);
+  generated.value = initialId;
+  generated.defaultValue = initialId;
+  env.settle({ saved: true, request_id: env.calls[1].payload.request_id, rev: 9 });
+  await tick();
+  const thirdId = generated.value;
+  assert.notEqual(thirdId, initialId, `${scenario.name} replaces a stale server repaint`);
+  assert.notEqual(thirdId, secondId);
+  assert.equal(generated.defaultValue, thirdId);
+
+  env.window.document.querySelector("main").dataset.paperRev = "9";
+  submit();
+  await tick();
+  const failedWire = { ...env.calls[2].payload };
+  assert.equal(failedWire[scenario.generatedName], thirdId);
+  const failedEntry = latestEntry;
+  env.settle({ saved: false, request_id: failedWire.request_id });
+  await tick();
+  assert.equal(generated.value, thirdId, `${scenario.name} failure retains the pending child ID`);
+  assert.equal(generated.defaultValue, thirdId);
+
+  const retry = coordinator.retryMutation(failedEntry);
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(env.calls[3].payload)),
+    JSON.parse(JSON.stringify(failedWire)),
+    `${scenario.name} retry is exact`,
+  );
+  generated.value = initialId;
+  generated.defaultValue = initialId;
+  env.settle({ saved: true, request_id: failedWire.request_id, rev: 10 });
+  assert.equal(await retry, true);
+  await tick();
+  assert.notEqual(generated.value, initialId, `${scenario.name} successful retry rotates after repaint`);
+  assert.notEqual(generated.value, secondId);
+  assert.notEqual(generated.value, thirdId);
+  assert.equal(generated.defaultValue, generated.value);
+  env.close();
+}
+
+// Structural child focus follows the exact child identity across LiveView row
+// replacement. IDs may contain colons, so Columns actions are matched against
+// the captured column/child vectors rather than split on delimiters.
+for (const family of ["section", "column"]) {
+  const actionName = family === "section" ? "section-action" : "column-action";
+  const generatedName = family === "section" ? "section-new-child-id" : "column-new-child-id";
+  const wire = (kind, id) => family === "section" ? `${kind}:${id}` : `${kind}:0:${id}`;
+  const addWire = family === "section" ? "add" : "add:0";
+  const render = (ids, generatedId = "child:new:with:colons") => `
+    <input type="hidden" name="block_id" value="container">
+    ${family === "section"
+      ? `<input type="hidden" name="section-child-count" value="${ids.length}">`
+      : `<input type="hidden" name="column-count" value="1">
+         <input type="hidden" name="column-0-child-count" value="${ids.length}">`}
+    <input type="hidden" name="${generatedName}" value="${generatedId}">
+    ${ids.map((id, index) => `
+      <input type="hidden" name="${family === "section"
+        ? `section-child-${index}-id`
+        : `column-0-child-${index}-id`}" value="${id}">
+      <button type="submit" name="${actionName}" value="${wire("up", id)}"
+              ${index === 0 ? "disabled" : ""}>Move up</button>
+      <button type="submit" name="${actionName}" value="${wire("down", id)}"
+              ${index === ids.length - 1 ? "disabled" : ""}>Move down</button>
+      <button type="submit" name="${actionName}" value="${wire("remove", id)}">Remove</button>
+    `).join("")}
+    <button type="submit" name="${actionName}" value="${addWire}">Add</button>
+  `;
+
+  for (const scenario of [
+    {
+      action: wire("up", "child:two"),
+      after: ["child:two", "child:one"],
+      expected: wire("down", "child:two"),
+    },
+    {
+      action: wire("down", "child:one"),
+      after: ["child:two", "child:one"],
+      expected: wire("up", "child:one"),
+    },
+    {
+      action: wire("remove", "child:one"),
+      after: ["child:two"],
+      expected: wire("remove", "child:two"),
+    },
+    {
+      action: addWire,
+      after: ["child:one", "child:two", "child:new:with:colons"],
+      expected: wire("up", "child:new:with:colons"),
+    },
+    {
+      action: wire("up", "child:two"),
+      after: ["child:two", "child:one"],
+      saved: false,
+    },
+    {
+      action: wire("up", "child:two"),
+      after: ["child:two", "child:one"],
+      moveFocus: true,
+    },
+  ]) {
+    const env = mountedForm(`
+      <form phx-submit="paper-edit-block" data-test-id="paper-${family}-structure-editor">
+        ${render(["child:one", "child:two"])}
+      </form>
+      <button id="structural-focus-elsewhere" type="button">Elsewhere</button>
+    `);
+    const submitter = [...env.form.elements].find((control) =>
+      control.name === actionName && control.value === scenario.action);
+    submitter.focus();
+    env.form.dispatchEvent(new env.window.SubmitEvent("submit", {
+      bubbles: true,
+      cancelable: true,
+      submitter,
+    }));
+    await tick();
+    if (scenario.moveFocus) {
+      env.window.document.getElementById("structural-focus-elsewhere").focus();
+    }
+    env.form.innerHTML = render(scenario.after);
+    env.settle({
+      saved: scenario.saved !== false,
+      request_id: env.calls[0].payload.request_id,
+      ...(scenario.saved === false ? {} : { rev: 8 }),
+    });
+    await tick();
+    if (scenario.saved === false) {
+      assert.notEqual(
+        env.window.document.activeElement.value,
+        wire("down", "child:two"),
+        `${family} failure does not focus a repainted child control`,
+      );
+    } else if (scenario.moveFocus) {
+      assert.equal(
+        env.window.document.activeElement.id,
+        "structural-focus-elsewhere",
+        `${family} acknowledgement does not steal focus moved elsewhere`,
+      );
+    } else {
+      assert.equal(
+        env.window.document.activeElement.value,
+        scenario.expected,
+        `${family} ${scenario.action} restores focus to the resulting child control`,
+      );
+    }
+    env.close();
+  }
 }
 
 // A positional acknowledgement can expose a newer same-source draft while a

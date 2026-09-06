@@ -33,6 +33,87 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
+  test "generic Beta appends to empty containers with replay and stale-source protection", %{
+    conn: conn
+  } do
+    doc =
+      legacy_document!("empty", [
+        %{"id" => "section", "type" => "section", "blocks" => [], "unknown" => "keep"},
+        %{"id" => "columns", "type" => "columns", "columns" => [[], []], "unknown" => [1, 2]}
+      ])
+
+    {view, path} = mount_beta(conn, doc.doc_id)
+    request = Ecto.UUID.generate()
+
+    first = %{
+      "block_id" => "section",
+      "section-child-count" => "0",
+      "section-new-child-id" => "child:one",
+      "section-action" => "add",
+      "request_id" => request,
+      "if_rev" => socket_of(view).assigns.editor_doc.rev
+    }
+
+    render_hook(view, "paper-edit-block", first)
+    assert_reply(view, %{saved: true, replayed: false, request_id: ^request})
+    after_first = stored_document(doc.doc_id)
+    render_hook(view, "paper-edit-block", first)
+    assert_reply(view, %{saved: true, replayed: true, request_id: ^request})
+    assert stored_document(doc.doc_id) == after_first
+
+    second_request = Ecto.UUID.generate()
+
+    second = %{
+      "block_id" => "section",
+      "section-child-count" => "1",
+      "section-child-0-id" => "child:one",
+      "section-new-child-id" => "child:two",
+      "section-action" => "add",
+      "request_id" => second_request,
+      "if_rev" => socket_of(view).assigns.editor_doc.rev
+    }
+
+    render_hook(view, "paper-edit-block", second)
+    assert_reply(view, %{saved: true, request_id: ^second_request})
+    after_second = stored_document(doc.doc_id)
+
+    stale_request = Ecto.UUID.generate()
+
+    stale =
+      first
+      |> Map.put("request_id", stale_request)
+      |> Map.put("if_rev", socket_of(view).assigns.editor_doc.rev)
+
+    render_hook(view, "paper-edit-block", stale)
+    assert_reply(view, %{saved: false, request_id: ^stale_request})
+    assert stored_document(doc.doc_id) == after_second
+
+    column_request = Ecto.UUID.generate()
+
+    render_hook(view, "paper-edit-block", %{
+      "block_id" => "columns",
+      "column-count" => "2",
+      "column-0-child-count" => "0",
+      "column-1-child-count" => "0",
+      "column-new-child-id" => "column:child",
+      "column-action" => "add:1",
+      "request_id" => column_request,
+      "if_rev" => socket_of(view).assigns.editor_doc.rev
+    })
+
+    assert_reply(view, %{saved: true, request_id: ^column_request})
+    final = stored_document(doc.doc_id)
+    [section, columns] = final.content["blocks"]
+    assert Enum.map(section["blocks"], & &1["id"]) == ["child:one", "child:two"]
+    assert section["unknown"] == "keep"
+    assert columns["unknown"] == [1, 2]
+    assert hd(columns["columns"]) == []
+    assert get_in(columns, ["columns", Access.at(1), Access.at(0), "id"]) == "column:child"
+    {:ok, reloaded, _} = live(conn, path)
+    reloaded |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+    assert stored_document(doc.doc_id) == final
+  end
+
   test "generic Beta recursively edits Section and Columns while preserving layout metadata",
        %{conn: conn} do
     original = nested_blocks()

@@ -33,6 +33,103 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
   end
 
   for host <- [:public, :studio] do
+    test "#{host}: empty containers support repeated append, reorder and removal with exact source fences",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, original} = create_empty_layout_paper()
+      {view, path} = mount_editor(conn, host, slug)
+
+      first = section_structure_params([], "section-child:one", "add")
+      submit_structure(view, first)
+
+      submit_structure(
+        view,
+        section_structure_params(["section-child:one"], "section-child:two", "add")
+      )
+
+      after_append = stored(slug).content
+      [_, section, columns] = after_append["blocks"]
+      assert Enum.map(section["blocks"], & &1["id"]) == ["section-child:one", "section-child:two"]
+      assert section["unknown"] == %{"keep" => true}
+      assert columns["columns"] == [[], []]
+
+      stale_request = Ecto.UUID.generate()
+
+      render_hook(
+        view,
+        "paper-edit-block",
+        Map.merge(first, %{
+          "request_id" => stale_request,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+      )
+
+      assert_reply(view, %{saved: false, request_id: ^stale_request})
+      assert stored(slug).content == after_append
+
+      collision_request = Ecto.UUID.generate()
+
+      collision =
+        section_structure_params(["section-child:one", "section-child:two"], "seed", "add")
+
+      render_hook(
+        view,
+        "paper-edit-block",
+        Map.merge(collision, %{
+          "request_id" => collision_request,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+      )
+
+      assert_reply(view, %{saved: false, request_id: ^collision_request})
+      assert stored(slug).content == after_append
+
+      submit_structure(
+        view,
+        section_structure_params(
+          ["section-child:one", "section-child:two"],
+          "unused",
+          "up:section-child:two"
+        )
+      )
+
+      [_, reordered, _] = stored(slug).content["blocks"]
+      assert reordered["blocks"] == Enum.reverse(section["blocks"])
+
+      submit_structure(
+        view,
+        section_structure_params(
+          ["section-child:two", "section-child:one"],
+          "unused",
+          "remove:section-child:one"
+        )
+      )
+
+      submit_structure(view, %{
+        "block_id" => "empty-columns",
+        "column-count" => "2",
+        "column-0-child-count" => "0",
+        "column-1-child-count" => "0",
+        "column-new-child-id" => "column-child:one",
+        "column-action" => "add:1"
+      })
+
+      final = stored(slug).content
+      [seed, final_section, final_columns] = final["blocks"]
+      assert seed == hd(original["blocks"])
+      assert Enum.map(final_section["blocks"], & &1["id"]) == ["section-child:two"]
+      assert final_columns["columns"] |> hd() == []
+
+      assert get_in(final_columns, ["columns", Access.at(1), Access.at(0), "id"]) ==
+               "column-child:one"
+
+      assert final_columns["unknown"] == ["preserve"]
+
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+      assert stored(slug).content == final
+    end
+
     for collision <- [:cross_column, :outside_container] do
       test "#{host}: #{collision} duplicate identities cannot expose nested editors or mutate storage",
            %{conn: conn} do
@@ -265,6 +362,67 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
       {:ok, _, _} = live(conn, path)
       assert stored(slug).content == original
     end
+  end
+
+  defp submit_structure(view, params) do
+    request = Ecto.UUID.generate()
+
+    render_hook(
+      view,
+      "paper-edit-block",
+      Map.merge(params, %{
+        "request_id" => request,
+        "if_rev" => socket_of(view).assigns.paper_rev
+      })
+    )
+
+    assert_reply(view, %{saved: true, request_id: ^request})
+  end
+
+  defp section_structure_params(ids, new_id, action) do
+    ids
+    |> Enum.with_index()
+    |> Enum.reduce(
+      %{
+        "block_id" => "empty-section",
+        "section-child-count" => Integer.to_string(length(ids)),
+        "section-new-child-id" => new_id,
+        "section-action" => action
+      },
+      fn {id, index}, params -> Map.put(params, "section-child-#{index}-id", id) end
+    )
+  end
+
+  defp create_empty_layout_paper do
+    slug = "empty-layout-editing-#{System.unique_integer([:positive])}"
+
+    blocks = [
+      Map.put(paragraph("Preserved seed"), "id", "seed"),
+      %{
+        "id" => "empty-section",
+        "type" => "section",
+        "blocks" => [],
+        "unknown" => %{"keep" => true}
+      },
+      %{
+        "id" => "empty-columns",
+        "type" => "columns",
+        "columns" => [[], []],
+        "unknown" => ["preserve"]
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          title: "Empty layout editing",
+          blocks: blocks
+        })
+      )
+
+    {slug, paper.content}
   end
 
   defp assert_duplicate_source_readonly(conn, :public, slug, _original) do
