@@ -15281,8 +15281,39 @@
   // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
   // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
   // the call site, so escaping is unchanged).
+  // A TYPED REFUSAL IS NEVER RE-HUMANIZED (task-f156b5e43bfbfe91) — the browser
+  // twin of `BarkparkCloud.FailureCopy.typed_refusal?/1`.
+  //
+  // The server stopped rewriting these strings in W11; app.js kept running a
+  // SECOND humanize pass over whatever arrived. W11's review argued the second
+  // pass was structurally safe because every clause below matches a LONG,
+  // DISTINCTIVE phrase that no producer-authored tar entry name can collide
+  // with — true today, and it is an argument about the current clause list, not
+  // a property of the function. FailureCopy's own doc states the standing debt:
+  // "If a short token is ever added to app.js, it needs this guard mirrored
+  // there." This is that mirror, so the safety stops depending on nobody ever
+  // adding a short clause.
+  //
+  // Deliberately a SUPERSET of the Elixir predicate by one caption: the poll
+  // phase ("the instance refused the build poll") is a box refusal too, and the
+  // server-side guard — whose @box_refusal constant names only the deploy
+  // caption — does not cover it. Widening HERE cannot make the server rewrite
+  // anything; it only means one more shape reaches the reader in the box's own
+  // words. No clause below matches a poll caption today, so nothing changes for
+  // it until one does, which is the point of a guard.
+  function typedRefusal(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    return reason.indexOf("the instance refused the deploy") !== -1 ||
+      reason.indexOf("the instance refused the build poll") !== -1 ||
+      /\bE_[A-Z][A-Z0-9_]*\b/.test(reason);
+  }
+
   function failureCopy(reason) {
     if (!reason) return reason;
+    // FIRST, before any clause: the box already said, precisely and in human
+    // words, what it refused and why. Canned copy can only replace a true
+    // statement with a false one.
+    if (typedRefusal(reason)) return reason;
     if (isGithubPushBlocked(reason))
       return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
@@ -15311,12 +15342,43 @@
   // when the reason family isn't github-push — a REFUSAL is a decision, not a
   // crash, and crash-red would misname it. Callers pass it for terminal
   // `cancelled` rows; every existing single-arg call is unchanged.
-  function deployFailHtml(reason, refused) {
-    if (!reason) return "";
+  // THE STRUCTURED HALVES (task-f156b5e43bfbfe91). `deployment_json/1` now emits
+  // the box's typed code and its human sentence as SEPARATE keys —
+  // `failure_code` / `failure_message` — beside the unchanged composite
+  // `failure_reason`. When they are present the panel renders THEM: the code in
+  // its own element (a person greps and files bugs about that token, so it gets
+  // to be a token on screen instead of a prefix buried in prose) and the message
+  // beside it. `<strong>` rather than a new class, so this needs no CSS.
+  //
+  // A row with a code and no message renders the code alone; a row with neither
+  // falls back to `reason`, which is every non-refusal failure and every legacy
+  // shape. Both halves are escaped exactly as `reason` was.
+  //
+  // failureCopy() is NOT in this path at all when the structured halves are
+  // present — the server already split what it split, and re-mapping the pieces
+  // is the archaeology this key pair exists to end.
+  function deployFailStructuredHtml(typed) {
+    if (!typed) return "";
+    var code = typed.code, message = typed.message;
+    if (!code && !message) return "";
+    if (!code) return "<span>" + esc(message) + "</span>";
+    return "<span><strong>" + esc(code) + "</strong>" +
+      (message ? " — " + esc(message) : "") + "</span>";
+  }
+
+  function deployFailHtml(reason, refused, typed) {
+    var structured = deployFailStructuredHtml(typed);
+    if (!reason && !structured) return "";
     return '<div class="deploy-fail' +
       (refused || failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
       '<span class="deploy-fail-dot" aria-hidden="true"></span>' +
-      "<span>" + esc(failureCopy(reason)) + "</span></div>";
+      (structured || "<span>" + esc(failureCopy(reason)) + "</span>") + "</div>";
+  }
+
+  // The structured pair off a deployment row, in the shape deployFailHtml wants.
+  // One reader so the two render sites cannot drift.
+  function deployTypedRefusal(d) {
+    return d ? { code: d.failure_code, message: d.failure_message } : null;
   }
 
   // cch-w28-bl: a REFUSED deployment. Sites.AutoDeployWorker.refuse/1 mints a
@@ -15385,8 +15447,9 @@
   // The panel a terminal row renders: the failure family as before, plus the
   // refusal family. One helper so previewRow and deployRow cannot drift.
   function deployTerminalFailHtml(d, st) {
-    if (st === "failed") return deployFailHtml(d.failure_reason);
-    if (deployIsRefusal(d, st)) return deployFailHtml(deployRefusalCopy(d), true);
+    if (st === "failed") return deployFailHtml(d.failure_reason, false, deployTypedRefusal(d));
+    if (deployIsRefusal(d, st))
+      return deployFailHtml(deployRefusalCopy(d), true, deployTypedRefusal(d));
     return "";
   }
 
@@ -27370,7 +27433,8 @@
       renderActivateEntry: renderActivateEntry, renderActivateConfirm: renderActivateConfirm,
       renderActivateResult: renderActivateResult, renderActivateError: renderActivateError,
       renderActivateRateLimited: renderActivateRateLimited,
-      failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      failureCopy: failureCopy, failureTone: failureTone, typedRefusal: typedRefusal,
+      liveEventTypes: Object.keys(TYPE_ACTIONS),
       // cch-w1-refetch-storm: the SSE→Overview refetch path, exported so the
       // harness can COUNT the requests one event actually costs. These are
       // impure (they fetch and paint), unlike every pure helper above — the
@@ -28207,7 +28271,7 @@
       // detail markup (siteDetailHtml) so the harness can pin the domains mount,
       // the read-only Scale row and the mono repo button. The site domains DOM
       // mount (loadSiteDomains) + 4s poll are smoke+browser-verified.
-      deployFailHtml: deployFailHtml,
+      deployFailHtml: deployFailHtml, deployTypedRefusal: deployTypedRefusal,
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,

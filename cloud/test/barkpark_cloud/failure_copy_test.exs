@@ -271,6 +271,95 @@ defmodule BarkparkCloud.FailureCopyTest do
              "A capacity or quota limit was reached at the hosting provider"
   end
 
+  ## THE SPLIT (task-f156b5e43bfbfe91) — `typed_refusal_fields/1`.
+  ##
+  ## The guard above stops the fused string being REWRITTEN. It stays fused, and
+  ## the next reader takes it apart again by substring: that is what these two
+  ## keys end. The table pins the shapes the box actually produces, including
+  ## the ones where ONE half is missing — because "the box sent no message" and
+  ## "the message is the code" are different sentences and only one is true.
+
+  describe "typed_refusal_fields/1 — the fused refusal, split once" do
+    test "an E_* refusal splits into the code and the sentence, em dashes and all" do
+      raw =
+        ~s|the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused|
+
+      assert FailureCopy.typed_refusal_fields(raw) ==
+               {"E_ABSOLUTE_PATH", ~s(entry "/quota/index.html" is an absolute path — refused)}
+
+      # THE FIRST separator only. Nine of the extractor's messages carry their
+      # own em dash; splitting on the LAST one would hand back "refused" as the
+      # whole message and lose the path the user has to fix.
+      assert FailureCopy.typed_refusal_message(raw) =~ "/quota/index.html"
+      assert FailureCopy.typed_refusal_code(raw) == "E_ABSOLUTE_PATH"
+    end
+
+    test "the shapes with only one half, and the shapes with none" do
+      # A bare code, no message — 43% of the 409 corpus predates the nested arm.
+      assert FailureCopy.typed_refusal_fields(
+               "the instance refused the deploy (HTTP 409): already_running"
+             ) == {"already_running", nil}
+
+      # A caption with NO detail at all: nothing to split, and nothing invented.
+      assert FailureCopy.typed_refusal_fields("the instance refused the deploy (HTTP 409)") ==
+               {nil, nil}
+
+      # Prose with no code. A sentence is never a code, so the code half stays
+      # nil rather than swallowing the first clause.
+      assert FailureCopy.typed_refusal_fields(
+               "the instance refused the deploy (HTTP 500): unknown error"
+             ) == {nil, "unknown error"}
+
+      # Not a refusal at all.
+      assert FailureCopy.typed_refusal_fields("BUILD failed (exit 12): npm run build") ==
+               {nil, nil}
+
+      assert FailureCopy.typed_refusal_fields(nil) == {nil, nil}
+      assert FailureCopy.typed_refusal_fields(:atom) == {nil, nil}
+    end
+
+    test "the poll caption and the completed-build prefix both split" do
+      # `box_refusal/3` writes TWO captions, and `after_completed_build/2` puts
+      # a clause carrying its OWN em dash in front of one of them. The split
+      # must find the detail AFTER the caption, never the first dash in the line.
+      poll =
+        "the build completed and staged; the deploy then failed at HEALTH — " <>
+          "the instance refused the build poll (HTTP 500): E_SWAP_FAILED — the swap did not complete"
+
+      assert FailureCopy.typed_refusal_fields(poll) ==
+               {"E_SWAP_FAILED", "the swap did not complete"}
+    end
+
+    test "the [box request_id] stamp is lifted out of the human half" do
+      raw =
+        "the instance refused the deploy (HTTP 400): E_WRITE_FAILED — could not write entry " <>
+          "[box request_id: 01J9X2K4Q]"
+
+      assert FailureCopy.typed_refusal_fields(raw) ==
+               {"E_WRITE_FAILED", "could not write entry"}
+
+      # It is a journal join, not something the box SAID — and it still travels
+      # whole in `failure_reason`, which is what a reader greps the journal with.
+      refute FailureCopy.typed_refusal_message(raw) =~ "request_id"
+    end
+
+    test "THE LEAK ARM: the split runs over raw/1, so a colourised credential is redacted" do
+      # A refusal message is a REMOTE CAPTURE. A structured twin derived from
+      # the unscrubbed column would ship the credential its own neighbour
+      # `failure_reason_raw` redacts — the "eighth channel added later" shape.
+      # Colourised, because that is the order-dependent case: `scrub |> strip`
+      # leaks 2000/2000, `strip |> scrub` leaks 0.
+      raw =
+        "the instance refused the deploy (HTTP 400): \e[31mclient_secret=hunter2istheworstpassword\e[0m"
+
+      {code, message} = FailureCopy.typed_refusal_fields(raw)
+
+      assert code == nil
+      refute message =~ "hunter2istheworstpassword"
+      assert message =~ "[redacted]"
+    end
+  end
+
   test "a PATH TRAVERSAL through ../timeout/ is NOT rewritten as a network timeout" do
     raw =
       ~s|the instance refused the deploy (HTTP 400): E_PATH_TRAVERSAL — entry "../timeout/index.html" escapes the artifact root|
