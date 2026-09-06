@@ -22,7 +22,11 @@ defmodule Barkpark.PreviewToken do
       |> Map.drop([:ttl_seconds])
       |> Map.put_new(:iss, Map.get(claims, :iss, "barkpark"))
       |> Map.put_new(:iat, now)
-      |> Map.put_new(:exp, now + ttl)
+      # The SIGNER owns the lifetime ceiling: a caller-supplied `:exp` may only
+      # SHORTEN the token (tests mint already-expired ones), never extend it past
+      # `now + ttl`. Was `Map.put_new(:exp, ...)`, i.e. caller-wins outright — an
+      # arbitrarily far-future absolute expiry signed with the real key.
+      |> Map.put(:exp, min(Map.get(claims, :exp, now + ttl), now + ttl))
       |> Map.put_new(:jti, Ecto.UUID.generate())
       |> Map.put_new(:doc_ids, [])
 
