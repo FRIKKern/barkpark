@@ -121,7 +121,11 @@ defmodule Barkpark.Sso.Social do
     with {:ok, %{"access_token" => token}} <- exchange(cfg, p, code, redirect_uri),
          {:ok, info} <- HTTP.get_bearer(cfg.userinfo, token),
          {:ok, email, external_id} <- extract(cfg, info) do
-      find_or_link(name, external_id, email, verified_email?(cfg, info, email, token))
+      # The verification probe is LAZY: it is consulted only where it can
+      # change the answer (adopting an existing account), so a re-login on an
+      # existing link costs no extra provider round-trip and cannot be broken
+      # by github's /user/emails being briefly unreachable.
+      find_or_link(name, external_id, email, fn -> verified_email?(cfg, info, email, token) end)
     else
       {:ok, %{}} -> {:error, :no_access_token}
       {:error, _} = err -> err
@@ -194,16 +198,16 @@ defmodule Barkpark.Sso.Social do
   # An existing (provider, external_id) re-logs the same account — the link
   # itself is the credential, so no email check applies. Otherwise the email
   # find-or-creates the User and the social identity is linked; ADOPTING an
-  # existing email account requires `verified?`, because an attacker who
+  # existing email account requires `verified_fun.()`, because an attacker who
   # controls a provider account bearing someone else's UNVERIFIED address
   # would otherwise be handed that person's Barkpark session.
-  defp find_or_link(provider, external_id, email, verified?) do
+  defp find_or_link(provider, external_id, email, verified_fun) do
     case Repo.get_by(SocialIdentity, provider: provider, external_id: external_id) do
       %SocialIdentity{user_id: uid} ->
         {:ok, Accounts.get_user(uid)}
 
       nil ->
-        case find_or_create_user(email, verified?) do
+        case find_or_create_user(email, verified_fun) do
           {:ok, user} ->
             %SocialIdentity{}
             |> SocialIdentity.changeset(%{
@@ -221,10 +225,10 @@ defmodule Barkpark.Sso.Social do
     end
   end
 
-  defp find_or_create_user(email, verified?) do
+  defp find_or_create_user(email, verified_fun) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
-        if verified?, do: {:ok, user}, else: {:error, :email_unverified}
+        if verified_fun.(), do: {:ok, user}, else: {:error, :email_unverified}
 
       _ ->
         random = Base.encode16(:crypto.strong_rand_bytes(32))
