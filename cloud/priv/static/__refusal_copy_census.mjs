@@ -1007,7 +1007,22 @@ const PIN = [
   { key: "ARG|newReadyHtml|faultCopy|132fed5c", verdict: "DELEGATED", copy: "the answer didn't say why." },
   { key: "ARG|newVercelDeploy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|newCreateRepo|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
-  { key: "ARG|newSubmitSiteUrl|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  // siteUrlFailureCopy — extracted from newSubmitSiteUrl, which answered EVERY 422
+  // on POST /v1/barkparks/:id/site-url with "check the URL". Each arm below was
+  // judged against the route's own emitters in web/router.ex: url_required (:3776),
+  // invalid_url (:3810), and the changeset `invalid` + details arm (:3838-3842).
+  // All three codes are REAL and arrive at the status the arm reads, so every
+  // sentence is reached only after the server's cause was read — CONSULTED, not
+  // AUTHORED. The trailing pair is the unseen-slug fall-through: it names the
+  // operation and asserts no cause, and its body delegates to friendly().
+  { key: "FN|siteUrlFailureCopy|c3fca978", verdict: "CONSULTED", copy: "Enter your site URL" },
+  { key: "FN|siteUrlFailureCopy|d5038f99", verdict: "CONSULTED", copy: "The request didn't carry a URL. Enter your site's full http..." },
+  { key: "FN|siteUrlFailureCopy|63aad4db", verdict: "CONSULTED", copy: "That doesn't look like a URL" },
+  { key: "FN|siteUrlFailureCopy|bb6291b0", verdict: "CONSULTED", copy: "Enter your site's full https:// address." },
+  { key: "FN|siteUrlFailureCopy|3a047715", verdict: "CONSULTED", copy: "Revalidation is wired \u2014 we couldn't record it" },
+  { key: "FN|siteUrlFailureCopy|aa2ff59b", verdict: "CONSULTED", copy: "Your site URL is fine and the webhook is live. We couldn't ..." },
+  { key: "FN|siteUrlFailureCopy|20c67d97", verdict: "CONSULTED", copy: "Couldn't wire revalidation" },
+  { key: "ARG|siteUrlFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|newRenderFailed|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|usageFailureCopy|8a810bac", verdict: "UNREVIEWED", copy: "Retry in a moment." },
   { key: "FN|usageFailureCopy|a9f20770", verdict: "UNREVIEWED", copy: "This instance isn't in your team, or has been removed." },
