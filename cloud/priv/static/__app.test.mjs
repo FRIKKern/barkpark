@@ -4409,6 +4409,31 @@ const LADDER_CROSSING = ["deploys_failing", "diverged"];
 // `unmetered` is a Go DETAIL MARKER (cloud_status_cmd.go `unmeteredMarker`),
 // never a rung. If it ever appears as a ladder state on either side, the
 // ordering assertion is not what catches it — this is.
+// DEPLOY_NODE builds the `deploy_rate` node the control plane serializes
+// (router.ex merge_deploy_rate/2 over DeployLedger.box_rates/3), so every
+// witness below is a SERVER SHAPE and not a hand-tuned object the predicate
+// happens to like. `refused` follows the ledger's own rule — a sample under
+// min_sample 200 refuses and carries `pct: null`, never a comforting 0.0. A
+// function declaration, so it is hoisted above the tests that use it.
+function DEPLOY_NODE(pct, sample, over) {
+  const refused = sample < 200;
+  return Object.assign({
+    window: { from: "2026-09-05T00:00:00Z", to: "2026-09-06T00:00:00Z" },
+    sites: 11,
+    sites_deploying: 11,
+    rate: {
+      sample,
+      pct: refused ? null : pct,
+      numerator: refused ? 0 : Math.round((pct / 100) * sample),
+      min_sample: 200,
+      refused,
+      reason: refused ? "sample " + sample + " below min_sample 200" : null,
+    },
+    absorption: { sample, pct: refused ? null : 0, numerator: 0, min_sample: 200, refused, reason: null },
+    box_caused: { sample: 100, pct: 80, numerator: 80, min_sample: 200, refused: false, reason: null },
+  }, over || {});
+}
+
 test("D32: `unmetered` is a marker, not a rung, on either side of the ladder", () => {
   assert.ok(!ATTENTION_FIXTURE.states.some((st) => st.state === "unmetered"),
     "attention_order.json minted `unmetered` as a rung — it is a detail marker");
@@ -4482,8 +4507,20 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
     ladderOrder.filter((st) => !hooks.attentionKinds.includes(st)),
     [...hooks.ATTENTION_ORDER_ONLY],
     "the ladder rungs classifyBp cannot produce must be exactly the named gap");
-  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY],
-    ["deploys_failing", "diverged", "strained", "filling"]);
+  // THE LITERAL IS THE POINT. The deepEqual above compares the implementation
+  // against ITSELF (ladder minus kinds, versus the list the implementation
+  // publishes) and therefore cannot fail on its own; this line is the half that
+  // can. Each entry earns its place with a reason the implementation does not
+  // control — and the full ladder is attention_order.json's, not this list's:
+  //   strained — needs the host's load vitals; no fleet row carries them.
+  //   filling  — needs the host's disk vitals; likewise absent from the row.
+  // A rung whose inputs ARE on the payload does not belong here: it belongs in
+  // classifyBp. dr-w10-s1's `deploys_failing` and dr-w24-followup's `diverged`
+  // left this list the moment their arms landed, which is the only way out of it.
+  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], ["strained", "filling"],
+    "the ORDER-ONLY list must be exactly the rungs whose INPUTS are missing from " +
+    "the fleet payload — a rung added here to make a test pass is a widened gap, " +
+    "not a fix");
 
   // ── RULING A's SHAPE, as ordering claims over the ladder (fixture-independent,
   // so they hold on a main that has not taken the fixture change yet).
@@ -4526,7 +4563,14 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   // cch-w63: the gap is READ FROM THE SPA (`ATTENTION_ORDER_ONLY`), not
   // restated here — a second hand-typed copy is how the two drift. The D32 test
   // above pins that list against the ladder; this one only consumes it.
-  const SPA_GAP = [...hooks.ATTENTION_ORDER_ONLY];
+  // Pinned, not derived: reading the gap off the code under test would make the
+  // witness set below shrink in lockstep with any widening of the gap, and this
+  // test could never fail. Same two entries, same reasons, as the D32 test:
+  //   strained — the host's load vitals are not on the fleet payload.
+  //   filling  — the host's disk vitals are not on the fleet payload.
+  const SPA_GAP = ["strained", "filling"];
+  assert.deepEqual([...hooks.ATTENTION_ORDER_ONLY], SPA_GAP,
+    "the implementation's ORDER-ONLY list drifted from the gap this test pins");
   const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
   assert.ok(expected.length >= 10,
     "derived from a fixture carrying only " + expected.length + " classifiable states — an empty corpus would green every loop below");
@@ -4538,6 +4582,12 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    // dr-w10-s1: the recorded guerrilla row — 46.28% of 1,290 terminal deploys,
+    // which printed `ok` with an empty detail before the arm landed.
+    deploys_failing: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    // dr-w24-followup: rendered by the BEHIND column since dr-w24-s2, ranked by
+    // nothing until the arm landed.
+    diverged: { ...LIVE, commit_ancestry: "diverged", commit_distance: 12 },
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
     behind: { ...LIVE, update_state: "behind" },
@@ -4595,6 +4645,96 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
   assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
   assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+});
+
+// ── the deploy verdict + diverged, client side (dr-w10-s1 / dr-w24-followup) ──
+//
+// The tests above pin the LADDER; these pin the PREDICATE. The distinction is
+// the whole reason these exist: lead-console-6's mirror put both rungs on the
+// ladder with correct ranks and buckets while classifyBp could return NEITHER,
+// so every ladder assertion passed over a console that still classified a
+// 46%-failing box `ok` and filed it under HEALTHY.
+
+test("dr-w10-s1: a box failing 46.28% of 1,290 terminal deploys is deploys_failing, never ok", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // THE RECORDED ROW: guerrilla, 2026-08-07. It printed `ok` with an empty
+  // detail on both surfaces because neither read a deploy vital at all.
+  const guerrilla = { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) };
+  assert.notEqual(hooks.classifyBp(guerrilla), "ok",
+    "a box failing 46.28% of 1,290 terminal deploys must never classify ok");
+  assert.equal(hooks.classifyBp(guerrilla), "deploys_failing");
+  assert.equal(hooks.bucketOf(guerrilla), "attention");
+  const s = hooks.statusOf(guerrilla);
+  assert.equal(s.label, "Deploys failing");
+  assert.equal(s.role, "warn");
+  // The detail NEVER prints a percentage without the denominator it came from.
+  assert.match(s.detail, /46\.3% of 1290 terminal/);
+  assert.match(s.detail, /fence 20%/);
+  assert.match(s.detail, /80% box-caused/);
+
+  // THE FENCE, probed on both sides — 20.0 is inclusive, 19.99 is not.
+  assert.equal(hooks.DEPLOYS_FAILING_PCT, 20.0);
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(19.99, 900) }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(20.0, 900) }), "deploys_failing");
+
+  // A sicker box outranks it: the rung sits UNDER degraded, not over it.
+  assert.equal(hooks.classifyBp({ ...guerrilla, health_status: "down" }), "degraded");
+  // And a non-live box is never re-ranked by a deploy rate.
+  assert.equal(hooks.classifyBp({ ...guerrilla, suspended: true }), "suspended");
+});
+
+test("dr-w10-s1: the OTHER TWO arms of the three-way verdict never alarm and never green-wash", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // THE LEDGER REFUSED — the box HAS sites and the sample is under the floor.
+  // A silence is not a failure: it must NOT fire the rung. Per charter D69 it
+  // is a detail line, so the state stays `ok`.
+  const refused = { ...LIVE, deploy_rate: DEPLOY_NODE(0, 55) };
+  assert.equal(refused.deploy_rate.rate.refused, true, "the witness must actually refuse");
+  assert.equal(refused.deploy_rate.rate.pct, null, "a refusal carries no pct — never a 0.0");
+  assert.equal(hooks.deployVerdict(refused).kind, "not_measured");
+  assert.equal(hooks.classifyBp(refused), "ok");
+  // NO SURFACE — zero sites. Nothing to deploy, so nothing failed.
+  const nosurface = { ...LIVE, deploy_rate: DEPLOY_NODE(0, 0, { sites: 0, sites_deploying: 0 }) };
+  assert.equal(hooks.deployVerdict(nosurface).kind, "no_surface");
+  assert.equal(hooks.classifyBp(nosurface), "ok");
+  // OLDER CONTROL PLANE — no node at all. Not a fact about this box.
+  assert.equal(hooks.deployVerdict(LIVE).kind, "no_surface");
+  assert.equal(hooks.classifyBp(LIVE), "ok");
+  // …and none of the three ever produce a reason sentence, which is what would
+  // put a permanent alarm on the six of eight prod boxes that own no sites.
+  for (const row of [refused, nosurface, LIVE]) {
+    assert.equal(hooks.deploysFailingReason(row), "");
+    assert.equal(hooks.deploysFailing(row), false);
+  }
+  // A MEASURED zero is a number, not a silence — the `== null` that keeps them
+  // apart is the arm a truthiness check would break.
+  assert.equal(hooks.deployVerdict({ ...LIVE, deploy_rate: DEPLOY_NODE(0, 900) }).kind, "measured");
+});
+
+test("dr-w24-followup: a diverged box is RANKED, not just rendered", () => {
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  const diverged = { ...LIVE, commit_ancestry: "diverged", commit_distance: 12 };
+  assert.equal(hooks.classifyBp(diverged), "diverged");
+  assert.equal(hooks.bucketOf(diverged), "attention");
+  const s = hooks.statusOf(diverged);
+  assert.equal(s.label, "Diverged");
+  assert.equal(s.role, "warn");
+  // The detail never quotes a distance — a diverged sha has no well-defined
+  // "behind by N", which is why the plane grades it separately from `behind`.
+  assert.equal(s.detail, "diverged from main — the sha this box serves is on neither side of main's history");
+  assert.doesNotMatch(s.detail, /12/);
+
+  // NON-REGRESSION, the other ancestry values are untouched.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "current", commit_distance: 0 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "ahead_of_main", commit_distance: 3 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "behind", commit_distance: 9 }), "behind");
+  assert.equal(hooks.classifyBp(LIVE), "ok");
+  // A distance with no ancestry (older control plane) never alarms.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_distance: 12 }), "ok");
+  // A non-live box is never re-ranked by ancestry — suspended outranks it.
+  assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "diverged" }), "suspended");
+  // deploys_failing outranks diverged when a box is both.
+  assert.equal(hooks.classifyBp({ ...diverged, deploy_rate: DEPLOY_NODE(46.28, 1290) }), "deploys_failing");
 });
 
 // ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
@@ -4727,7 +4867,8 @@ test("cch-w34-s6: the unknown state names EVIDENCE ONLY — no remediation, no n
 test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls through to a calm label", () => {
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
-  const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
+  const KINDS = ["removal_failed", "failed", "suspended", "degraded",
+    "deploys_failing", "diverged", "unreported",
     "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
@@ -4736,6 +4877,8 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    deploys_failing: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    diverged: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", commit_ancestry: "diverged", commit_distance: 12 },
     unreported: { host: "h", last_seen_at: null },
     deploy_stalled: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 },
     behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
