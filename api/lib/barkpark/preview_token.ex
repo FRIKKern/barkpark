@@ -10,6 +10,8 @@ defmodule Barkpark.PreviewToken do
 
   @default_ttl_seconds 600
   @grace_seconds 3600
+  # Upper bound on rows one `sweep_batch/1` statement removes.
+  @default_sweep_batch_limit 5_000
   @header_json ~s({"alg":"HS256","typ":"JWT"})
 
   @spec sign(map(), binary()) :: {binary(), map()}
@@ -147,6 +149,45 @@ defmodule Barkpark.PreviewToken do
     cutoff = DateTime.add(now, -@grace_seconds, :second)
     {n, _} = from(j in "preview_token_jti", where: j.expires_at < ^cutoff) |> Repo.delete_all()
     {:ok, n}
+  end
+
+  @doc """
+  ONE BOUNDED PASS of `sweep/1` — deletes at most `sweep_batch_limit` rows past
+  the grace period, OLDEST first, and returns how many it removed.
+
+  `sweep/1` is a single unbounded DELETE. That is fine for a table swept
+  regularly; it is not fine for the first pass over a table that has never been
+  swept at all, which is exactly the state `preview_token_jti` was in
+  (`Barkpark.PreviewToken.Sweeper` explains why). The subquery picks the oldest
+  `limit` eligible JTIs and the outer DELETE removes just those, so one
+  statement is bounded no matter how deep the backlog is. Returning 0 means
+  "nothing left past the grace period" and is the loop's terminator.
+
+  Same cutoff as `sweep/1` — `expires_at < now - #{@grace_seconds}s` — so the
+  bounded and unbounded forms are never eligible for different rows.
+  """
+  @spec sweep_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_batch(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -@grace_seconds, :second)
+
+    victims =
+      from(j in "preview_token_jti",
+        where: j.expires_at < ^cutoff,
+        order_by: [asc: j.expires_at],
+        limit: ^sweep_batch_limit(),
+        select: j.jti
+      )
+
+    {n, _} =
+      from(j in "preview_token_jti", where: j.jti in subquery(victims))
+      |> Repo.delete_all()
+
+    n
+  end
+
+  defp sweep_batch_limit do
+    Application.get_env(:barkpark, :preview_token, [])
+    |> Keyword.get(:sweep_batch_limit, @default_sweep_batch_limit)
   end
 
   defp check_expiry(%{"exp" => exp}) when is_integer(exp) do
