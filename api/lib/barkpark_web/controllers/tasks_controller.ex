@@ -9,7 +9,11 @@ defmodule BarkparkWeb.TasksController do
       flat or under the `filter[<key>]=` container; an unsupported filter key
       is a 400, never a silently unfiltered page)
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1` (filter container: `parent`/`parent_id`/`phase_id`,
-      all naming the ONE parent axis `ready_query/1` has; any other key is a 400)
+      all naming the ONE parent axis `ready_query/1` has; any other key is a 400).
+      `?dataset=` narrows the page to ONE dataset; with none named the page spans EVERY
+      dataset in the caller's workspace/project scope and SAYS so (`page.dataset`,
+      `page.datasets`, `page.dataset_scope`), and a doc_id living in more than one of them
+      is withheld and named once in `page.dataset_ambiguous` (TwinResolver rule 3)
     * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts;
       filter container: `worker` only)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
@@ -139,9 +143,23 @@ defmodule BarkparkWeb.TasksController do
       limit = Params.parse_limit(params["limit"], Tasks.Queue.ready_default_limit(), 1000)
       offset = Params.parse_offset(params["offset"])
 
+      # `?dataset=` — HONOURED here since task-0084e191d406de96; it was parsed
+      # nowhere and `Queue.maybe_filter_dataset/2` no-opped on the nil, so a
+      # ready page for `?dataset=aker-brygge` and one for `?dataset=production`
+      # were the SAME 1000 rows (measured live on guerrilla 2026-09-06). Read
+      # exactly like `request_dataset/1` EXCEPT for its default: there is none.
+      # A ready page with no dataset named spans every dataset in the caller's
+      # workspace/project scope — defaulting to "production" here would silently
+      # hide another dataset's claimable work from the queue agents work from,
+      # which is a bigger change than this row is allowed to make. What changes
+      # is that the span is now STATED (`page.dataset*` below) instead of being
+      # an unstated global.
+      dataset = ready_dataset_param(params)
+
       opts =
         []
         |> Params.put_opt(:phase_id, phase_id)
+        |> Params.put_opt(:dataset, dataset)
         |> Params.put_opt(:limit, limit)
         |> Params.put_opt(:offset, offset)
         |> Params.put_opt(:order, order)
@@ -149,7 +167,12 @@ defmodule BarkparkWeb.TasksController do
 
       docs = Tasks.ready(opts)
 
-      json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
+      body =
+        docs
+        |> task_list_response(conn, params, limit: limit, offset: offset)
+        |> put_ready_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
+
+      json(conn, body)
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
@@ -182,6 +205,88 @@ defmodule BarkparkWeb.TasksController do
   # exactly-full last page; that errs toward "look again", the safe direction.
   # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
   # SDK, the Studio and the taskboard read byte-identical fields.
+  # `?dataset=` on the ready route. Fails SOFT on a non-binary spelling
+  # (`?dataset[]=production`), like `request_dataset/1` — a malformed selector
+  # must not 500 a queue read — but carries NO default: see `ready/2`.
+  defp ready_dataset_param(params) do
+    case params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> nil
+    end
+  end
+
+  # WHAT THIS PAGE SPANS, SAID OUT LOUD (task-0084e191d406de96 C0/C1).
+  #
+  # Two facts a ready page never carried, both about datasets:
+  #
+  #   * `page.dataset` / `page.datasets` / `page.dataset_scope` — the dataset the
+  #     caller NAMED (nil when none) and the datasets this page actually spans.
+  #     A silently-global default is the thing the C0 criterion forbids; the
+  #     default is unchanged, it is now STATED.
+  #   * `page.dataset_ambiguous` — every doc_id withheld because it lives in
+  #     more than one dataset of this scope, listed ONCE with the dataset set it
+  #     spans. That is `Barkpark.Tasks.TwinResolver` rule 3 at a listing: the
+  #     by-id doors answer it with a 409 naming both datasets, and a listing
+  #     cannot (one ambiguous id must not deny the caller the other forty-nine
+  #     rows), so the refusal is scoped to the row and named instead of hidden.
+  #
+  # READY ONLY, deliberately: `task_list_response/4`'s other caller is the index,
+  # which is not twin-collapsed and whose envelope stays byte-identical.
+  defp put_ready_dataset_scope(body, docs, dataset, ambiguous) do
+    spans = docs |> Enum.map(& &1.dataset) |> Enum.uniq() |> Enum.sort()
+
+    page =
+      body
+      |> Map.fetch!(:page)
+      |> Map.merge(%{
+        dataset: dataset,
+        datasets: spans,
+        dataset_scope: if(dataset, do: "named", else: "all-datasets-in-scope"),
+        dataset_ambiguous: ambiguous
+      })
+
+    body
+    |> Map.put(:page, page)
+    |> append_help(ready_dataset_help(dataset, spans, ambiguous))
+  end
+
+  defp ready_dataset_help(dataset, spans, ambiguous) do
+    scope_line =
+      if is_nil(dataset) do
+        [
+          "no ?dataset= named: this ready page spans EVERY dataset in the caller's " <>
+            "workspace/project scope" <>
+            if(spans == [], do: "", else: " (this page: #{Enum.join(spans, ", ")})") <>
+            ". Name ?dataset= to narrow it."
+        ]
+      else
+        []
+      end
+
+    ambiguous_line =
+      if ambiguous == [] do
+        []
+      else
+        [
+          "#{length(ambiguous)} task doc_id(s) live in more than one dataset in this scope " <>
+            "and are WITHHELD from the page — the queue will not pick a dataset you did not " <>
+            "name (Barkpark.Tasks.TwinResolver, rule 3). Each is listed once in " <>
+            "page.dataset_ambiguous with the datasets it spans; name ?dataset= to get it."
+        ]
+      end
+
+    scope_line ++ ambiguous_line
+  end
+
+  # `help[]` is a LIST and more than one honesty line can be true at once (the
+  # brief-truncation line is set by `Params.maybe_put_brief_truncation_help/3`
+  # before this runs). Appending rather than `Map.put`-ing is what keeps a
+  # second line from erasing the first.
+  defp append_help(body, []), do: body
+
+  defp append_help(body, lines),
+    do: Map.put(body, :help, Map.get(body, :help, []) ++ lines)
+
   defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)
 
