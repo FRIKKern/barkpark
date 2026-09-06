@@ -497,6 +497,61 @@ out="$(semi_run "$semi_log_marked" "$semi_cap2")"
 has "$out" "NOT with the same failure signature" "18h3) a different defect in the same ';'-named step is still the PR's own"
 has "$out" "RC=1" "18h3) rc 1"
 
+# 18h4. M4b — THE MARKERS WERE PARSED AND THE LEGACY SENTENCE STILL GAGGED THE
+#       VERDICT. MEASURED 2026-09-06: 7 of 8 failed doc-gates PR runs
+#       (34048731323 34048702712 34048598999 34048312911 34048184632 34047628152
+#       34046862261) printed OWNERSHIP-UNDETERMINED for a red that was their own.
+#       Fixture below is the REAL specimen: PR run 34046862261's four failed
+#       steps, and main run 34046086072's Decide lines COPIED VERBATIM — it
+#       prints BOTH the legacy ';'-joined sentence (three names) AND one
+#       MAIN-FAILED-STEP marker per step. log_ambiguous was set from the
+#       sentence and never cleared by log_marked, so the UNKNOWN clause outrank-
+#       ed PASSED and the fourth step — which main ran and passed — was reported
+#       as "main's state is UNKNOWN" instead of "a step main does not fail".
+DOC_D='New file:line citations in comments (fails this job)'
+doc_names="$(python3 -c 'import json; print(json.dumps({"s1":"Code-comment citation guard (fails this job)","s2":"Doc byte budgets (fails this job)","s3":"Tenant fail-open read baseline gate (fails this job)","s4":"New file:line citations in comments (fails this job)"}))')"
+doc_out='{"s1":{"outcome":"failure"},"s2":{"outcome":"failure"},"s3":{"outcome":"failure"},"s4":{"outcome":"failure"}}'
+# main's REAL jobs shape for run 34046086072: every gate step reads "success"
+# (continue-on-error masks them), only Decide carries the failure.
+doc_jobs="$TMP/doc-jobs.json"; cat > "$doc_jobs" <<'J'
+{"jobs":[{"id":91,"name":"Doc budgets + anchors","conclusion":"failure","steps":[
+  {"name":"Doc byte budgets (fails this job)","conclusion":"success"},
+  {"name":"Code-comment citation guard (fails this job)","conclusion":"success"},
+  {"name":"New file:line citations in comments (fails this job)","conclusion":"success"},
+  {"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+doc_run() { # $1 main log fixture
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$doc_out" STEP_NAMES="$doc_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$doc_jobs" MAIN_RED_BREAKER_LOG_FIXTURE="$1"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+# VERBATIM from main run 34046086072's Decide step (timestamps included).
+doc_log_marked="$TMP/doc-marked.log"; cat > "$doc_log_marked" <<'L'
+2026-09-06T16:40:38.6317013Z main-red-breaker: FAIL — 'Doc budgets + anchors' failed on: Code-comment citation guard (fails this job);Doc byte budgets (fails this job);Tenant fail-open read baseline gate (fails this job). This is not a pull_request run, so the red is main's state and stands.
+2026-09-06T16:40:38.6319555Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Code-comment citation guard (fails this job)
+2026-09-06T16:40:38.6320426Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)
+2026-09-06T16:40:38.6321928Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Tenant fail-open read baseline gate (fails this job)
+L
+out="$(doc_run "$doc_log_marked")"
+has "$out" "failed on a step main does not: $DOC_D" "18h4) M4b: markers parsed => the step main passed is named as the PR's own"
+case "$out" in *OWNERSHIP-UNDETERMINED*) bad "18h4) M4b: still OWNERSHIP-UNDETERMINED with main's markers in the log" ;; *) ok "18h4) M4b: no longer refuses to decide" ;; esac
+case "$out" in *"Main's state for these step(s) is UNKNOWN"*) bad "18h4) M4b: still reported main's state as UNKNOWN for a step the markers settle" ;; *) ok "18h4) M4b: main's state for that step is settled, not UNKNOWN" ;; esac
+has "$out" "Code-comment citation guard (fails this job)" "18h4) and main's three steps are named as inherited"
+has "$out" "Doc byte budgets (fails this job)" "18h4) inherited: doc byte budgets"
+has "$out" "Tenant fail-open read baseline gate (fails this job)" "18h4) inherited: tenant fail-open baseline"
+has "$out" "RC=1" "18h4) rc 1"
+# 18h5. M4's protection is UNTOUCHED: strip the marker lines from the SAME
+#       fixture and the same fourth step must go back to UNDETERMINED — the
+#       ';'-joined sentence alone cannot license a blame verdict.
+doc_log_legacy="$TMP/doc-legacy.log"; grep -vF 'MAIN-FAILED-STEP' "$doc_log_marked" > "$doc_log_legacy"
+out="$(doc_run "$doc_log_legacy")"
+has "$out" "OWNERSHIP-UNDETERMINED" "18h5) M4 intact: a legacy-only ';' log still refuses to blame"
+case "$out" in *"failed on a step main does not"*) bad "18h5) M4 BROKEN: the legacy-only ';' log blamed the author" ;; *) ok "18h5) M4 intact: no blame from the shredded sentence" ;; esac
+has "$out" "RC=1" "18h5) rc 1"
+
 # ── 19. MUTATIONS — the ownership decision lives in FOUR places, and a partial
 #       mutation returns a confident green for the opposite conclusion. Each
 #       mutation is asserted to have APPLIED (anchor matched exactly once, diff
@@ -583,6 +638,15 @@ if mutate "19g legacy ';' ambiguity guard" '            log_ambiguous = True' ' 
     case "$out" in *"a step main does not"*) echo "  PASS  19g) without the ambiguity guard the shredded name blames the author — 18h1 is not vacuous" ;; *) echo "  FAIL  19g) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
+# 19m. Drop M4b's clear (this fix) -> 18h4 must go back to OWNERSHIP-UNDETERMINED.
+#      Without it the legacy sentence's ambiguity survives the markers that
+#      settle it, and the UNKNOWN clause outranks PASSED again.
+if mutate "19m M4b marker clears the legacy ambiguity" 'if log_marked:' 'if False:' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(doc_run "$doc_log_marked")"
+    case "$out" in *OWNERSHIP-UNDETERMINED*) echo "  PASS  19m) without the clear the marker-settled step is UNDETERMINED again — 18h4 is not vacuous" ;; *) echo "  FAIL  19m) MUTATION SURVIVED: still decided with the clear removed"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
 
 # ── 20. M5(i) — MAIN'S NEWEST RUN SKIPPED THE JOB (task-e65c78b1cd214237 c1) ─
 # security.yml's sobelow job carries `if: needs.changes.outputs.api == 'true'`,
