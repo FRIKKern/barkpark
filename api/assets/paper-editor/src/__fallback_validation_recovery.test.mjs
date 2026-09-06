@@ -853,6 +853,7 @@ for (const scenario of [
 for (const [actionName, actionValue] of [
   ["section-action", "up:child:two"],
   ["column-action", "up:0:child:two"],
+  ["terminal-action", "add"],
 ]) {
   const env = mountedForm(`
     <form id="direct-${actionName}" class="bp-paper-edit-form"
@@ -897,6 +898,7 @@ for (const [actionName, actionValue] of [
 // Merely sharing a structural form does not make an ordinary metadata conflict
 // positional. Without an action payload, its exact retry remains available.
 for (const controls of [
+  `<input type="hidden" name="terminal-child-count" value="0">`,
   `<input type="hidden" name="section-child-count" value="2">
    <input type="hidden" name="section-child-0-id" value="child:one">`,
   `<input type="hidden" name="column-count" value="1">
@@ -937,6 +939,12 @@ for (const controls of [
 // after each exact successful acknowledgement, including a successful retry,
 // but keep it stable while an ambiguous/failed attempt awaits that retry.
 for (const scenario of [
+  {
+    name: "Terminal",
+    actionName: "terminal-action",
+    actionValue: "add",
+    generatedName: "terminal-new-child-id",
+  },
   {
     name: "Section",
     actionName: "section-action",
@@ -1186,6 +1194,63 @@ for (const family of ["section", "column"]) {
     }
     env.close();
   }
+}
+
+// Empty Terminal insertion keeps its structure form while replacing only the
+// Add button. Focus requires the exact acknowledged child and stays local.
+for (const scenario of [
+  { canvas: false },
+  { canvas: true },
+  { canvas: true, moveFocus: true },
+  { canvas: true, saved: false },
+  { canvas: true, wrongChild: true },
+]) {
+  const env = mountedForm(`
+    <div class="bp-paper-contextual-editor">
+      <div data-child-editors></div>
+      <form phx-submit="paper-edit-block">
+        <input type="hidden" name="block_id" value="terminal">
+        <input type="hidden" name="terminal-child-count" value="0">
+        <input type="hidden" name="terminal-new-child-id" value="child:new">
+        <button type="submit" name="terminal-action" value="add">Add paragraph</button>
+      </form>
+    </div>
+    <button id="terminal-elsewhere">Elsewhere</button>
+  `);
+  const submitter = env.form.elements.namedItem("terminal-action");
+  submitter.focus();
+  env.form.dispatchEvent(new env.window.SubmitEvent("submit", {
+    bubbles: true, cancelable: true, submitter,
+  }));
+  await tick();
+  if (scenario.moveFocus) env.window.document.getElementById("terminal-elsewhere").focus();
+  env.form.elements.namedItem("terminal-child-count").value = "1";
+  const childId = env.window.document.createElement("input");
+  childId.type = "hidden";
+  childId.name = "terminal-child-0-id";
+  childId.value = scenario.wrongChild ? "another-child" : "child:new";
+  env.form.append(childId);
+  submitter.remove();
+  const children = env.form.closest(".bp-paper-contextual-editor").querySelector("[data-child-editors]");
+  children.innerHTML = scenario.canvas
+    ? '<bp-paper-canvas><div id="terminal-child-body" contenteditable="true" tabindex="0"></div></bp-paper-canvas>'
+    : '<div id="paper-ed-child:new"><bp-paper-editor><div id="terminal-child-body" contenteditable="true" tabindex="0"></div></bp-paper-editor></div>';
+  if (scenario.canvas) children.querySelector("bp-paper-canvas").blocks = [{ id: "child:new" }];
+  env.settle({
+    saved: scenario.saved !== false,
+    request_id: env.calls[0].payload.request_id,
+    ...(scenario.saved === false ? {} : { rev: 8 }),
+  });
+  await tick();
+  assert.deepEqual(env.clientErrors, []);
+  if (scenario.moveFocus) {
+    assert.equal(env.window.document.activeElement.id, "terminal-elsewhere");
+  } else if (scenario.saved === false || scenario.wrongChild) {
+    assert.notEqual(env.window.document.activeElement.id, "terminal-child-body");
+  } else {
+    assert.equal(env.window.document.activeElement.id, "terminal-child-body");
+  }
+  env.close();
 }
 
 // A positional acknowledgement can expose a newer same-source draft while a

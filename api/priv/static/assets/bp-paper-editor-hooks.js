@@ -33,7 +33,7 @@
   const PAPER_POSITIONAL_COLLECTION_PARAM =
     /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-(?:count|action|\d+-)/;
   const PAPER_POSITIONAL_COLLECTION_ACTION_PARAM =
-    /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question|section|column)-action|option-action)$/;
+    /^(?:(?:note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question|section|column|terminal)-action|option-action)$/;
   const PAPER_TRANSIENT_SAVE_STATUSES = new Set([
     "", "Auto-saved", "✓ Auto-saved", "Saving…",
     "Unsaved changes — fix invalid fields.",
@@ -47,7 +47,7 @@
   // Restore the operated row only after acknowledgement, without stealing focus
   // from a user who has moved elsewhere while the request was in flight.
   function bpPaperCollectionFocus(form, submitter) {
-    const nestedMatch = /^(section|column)-action$/.exec(submitter?.name || "");
+    const nestedMatch = /^(section|column|terminal)-action$/.exec(submitter?.name || "");
     if (nestedMatch) {
       if (document.activeElement !== submitter) return () => {};
       const prefix = nestedMatch[1];
@@ -58,17 +58,18 @@
       let rowId = null;
       let beforeIds = [];
       let beforeColumns = null;
-      if (prefix === "section") {
-        const count = Number(form.elements.namedItem("section-child-count")?.value);
+      if (prefix !== "column") {
+        const count = Number(form.elements.namedItem(`${prefix}-child-count`)?.value);
         if (!Number.isSafeInteger(count) || count < 0) return () => {};
+        if (prefix === "terminal" && (count !== 0 || value !== "add")) return () => {};
         beforeIds = Array.from({ length: count }, (_unused, rowIndex) =>
-          form.elements.namedItem(`section-child-${rowIndex}-id`)?.value);
+          form.elements.namedItem(`${prefix}-child-${rowIndex}-id`)?.value);
         if (beforeIds.some((id) => typeof id !== "string" || id === "") ||
             new Set(beforeIds).size !== beforeIds.length) return () => {};
         if (value === "add") {
           kind = "add";
           index = count;
-          rowId = form.elements.namedItem("section-new-child-id")?.value;
+          rowId = form.elements.namedItem(`${prefix}-new-child-id`)?.value;
         } else {
           const matches = beforeIds.flatMap((id, rowIndex) =>
             ["up", "down", "remove"].filter((candidate) =>
@@ -142,13 +143,13 @@
                 JSON.stringify(ids) !== JSON.stringify(beforeColumns[candidateColumn])) return;
           }
         }
-        const actualCount = Number(form.elements.namedItem(prefix === "section"
-          ? "section-child-count"
+        const actualCount = Number(form.elements.namedItem(prefix !== "column"
+          ? `${prefix}-child-count`
           : `column-${columnIndex}-child-count`)?.value);
         if (actualCount !== nextCount) return;
         const afterIds = Array.from({ length: nextCount }, (_unused, rowIndex) =>
-          form.elements.namedItem(prefix === "section"
-            ? `section-child-${rowIndex}-id`
+          form.elements.namedItem(prefix !== "column"
+            ? `${prefix}-child-${rowIndex}-id`
             : `column-${columnIndex}-child-${rowIndex}-id`)?.value);
         if (afterIds.some((id) => typeof id !== "string" || id === "") ||
             new Set(afterIds).size !== afterIds.length ||
@@ -158,7 +159,7 @@
             (!Number.isSafeInteger(nextIndex) || nextIndex < 0 || nextIndex >= nextCount)) return;
         const targetId = nextCount > 0 ? afterIds[nextIndex] : null;
         const actionName = `${prefix}-action`;
-        const actionValue = (candidate, id) => prefix === "section"
+        const actionValue = (candidate, id) => prefix !== "column"
           ? `${candidate}:${id}`
           : `${candidate}:${columnIndex}:${id}`;
         const buttons = [...form.elements].filter((control) =>
@@ -169,7 +170,7 @@
         const rowControl = targetId && (exact || ["up", "down", "remove"].map((candidate) =>
           buttons.find((control) => control.value === actionValue(candidate, targetId))).find(Boolean));
         const add = buttons.find((control) => control.value ===
-          (prefix === "section" ? "add" : `add:${columnIndex}`));
+          (prefix !== "column" ? "add" : `add:${columnIndex}`));
         if (kind === "add") {
           const contextualEditor = form.closest(".bp-paper-contextual-editor");
           const directWrapper = targetId && document.getElementById(`paper-ed-${targetId}`);
@@ -301,14 +302,14 @@
   // form, so mint afresh after every acknowledged insert. Failed and
   // transport-ambiguous writes keep the same value for exact replay.
   function bpPaperRotateConsumedCollectionId(form, submitter) {
-    const match = /^(panel|step|question|section|column)-action$/.exec(submitter?.name || "");
+    const match = /^(panel|step|question|section|column|terminal)-action$/.exec(submitter?.name || "");
     if (!match) return () => {};
     const prefix = match[1];
     const value = submitter.value || "";
     let name;
-    if (prefix === "section") {
+    if (prefix === "section" || prefix === "terminal") {
       if (value !== "add") return () => {};
-      name = "section-new-child-id";
+      name = `${prefix}-new-child-id`;
     } else if (prefix === "column") {
       const add = /^add:(0|[1-9]\d*)$/.exec(value);
       if (!add || !Number.isSafeInteger(Number(add[1]))) return () => {};
