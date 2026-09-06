@@ -6,7 +6,7 @@ package cli
 // draft of this file recorded the Idempotency-Key and nothing else, and that is
 // precisely why it could not see the defect the criterion was re-cut for: the
 // server hashes (raw_key, token_id, method, request_path) and NOTHING FROM THE
-// BODY (api/lib/barkpark_web/plugs/idempotency.ex:6 and :47), and both legs of
+// BODY (api/lib/barkpark_web/plugs/idempotency.ex — `Idempotency.hash_key/4`), and both legs of
 // `bp task create --publish` POST the same path. A door that only records
 // headers is green whether the two legs share a key or not — while a real
 // server, handed a shared key, would REPLAY the create response for the publish
