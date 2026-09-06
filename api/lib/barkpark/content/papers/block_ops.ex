@@ -2077,12 +2077,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     * ABSENT — no `"id"` key at all → gets `<prefix>-<index>`.
     * BLANK  — `"id" => ""` or `"id" => nil` → gets `<prefix>-<index>`.
-    * NESTED — recursion covers any block carrying a `"blocks"` list — sections
-      are the only id-addressable nested container, so they are the only thing
-      recursed. (composite / arrayOf inline children nest under `"items"` /
-      `"content"`, are inline — not id-addressable blocks — and are NOT
-      recursed.) The recursion prefix is the parent's (now-ensured) id, keeping
-      child ids unique and deterministic.
+    * NESTED — recursion covers `"blocks"` lists, expandable `"children"`, and
+      each steps row's reader-visible body. Steps rows gain a stable row id;
+      their hidden body aliases remain untouched. Composite / arrayOf inline
+      children under `"items"` / `"content"` are NOT recursed. Child prefixes
+      use the parent's (or row's) ensured id, keeping minted ids deterministic.
 
   Collision-safe WITHIN each list (and each nested list). Before minting, the
   set of all present non-blank ids at this level is collected. The positional
@@ -2141,23 +2140,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # any id this block now occupies. A present non-blank id is preserved exactly
   # (already in `taken`); an id-less block mints a collision-free positional id.
   defp ensure_block_id(block, prefix, index, taken) when is_map(block) do
-    {id, taken} =
-      case Map.get(block, "id") do
-        existing when is_binary(existing) and existing != "" ->
-          # Already present and already counted in `taken` via present_ids/1.
-          {existing, taken}
-
-        _ ->
-          id = unique_id(prefix, index, taken)
-          {id, MapSet.put(taken, id)}
-      end
-
-    block = Map.put(block, "id", id)
+    {block, taken} = ensure_identity(block, prefix, index, taken)
+    id = block["id"]
 
     block =
       case block do
-        %{"type" => "expandable", "children" => children} when is_list(children) ->
-          Map.put(block, "children", ensure_block_ids(children, id))
+        %{"type" => "steps", "steps" => rows} when is_list(rows) ->
+          Map.put(block, "steps", ensure_step_ids(rows, id <> "-step"))
+
+        %{"type" => "expandable"} ->
+          ensure_visible_body_ids(block, id)
 
         %{"blocks" => children} when is_list(children) ->
           Map.put(block, "blocks", ensure_block_ids(children, id))
@@ -2170,6 +2162,52 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp ensure_block_id(block, _prefix, _index, taken), do: {block, taken}
+
+  defp ensure_identity(value, prefix, index, taken) do
+    case Map.get(value, "id") do
+      existing when is_binary(existing) and existing != "" ->
+        {value, taken}
+
+      _ ->
+        id = unique_id(prefix, index, taken)
+        {Map.put(value, "id", id), MapSet.put(taken, id)}
+    end
+  end
+
+  defp ensure_step_ids(rows, prefix) do
+    {ensured, _taken} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce(present_ids(rows), fn
+        {row, index}, taken when is_map(row) ->
+          {row, taken} = ensure_identity(row, prefix, index, taken)
+
+          # A row is not a block. Project its selected body only; do not let
+          # generic blocks recursion rewrite a hidden compatibility alias.
+          {ensure_visible_body_ids(row, row["id"]), taken}
+
+        {other, _index}, taken ->
+          {other, taken}
+      end)
+
+    ensured
+  end
+
+  defp ensure_visible_body_ids(container, prefix) do
+    key =
+      case Map.get(container, "children") do
+        children when is_list(children) ->
+          "children"
+
+        absent when absent in [nil, false] ->
+          if is_list(Map.get(container, "blocks")), do: "blocks"
+
+        _ ->
+          nil
+      end
+
+    if key, do: Map.update!(container, key, &ensure_block_ids(&1, prefix)), else: container
+  end
 
   @doc """
   Normalize legacy FLAT-STRING list items to the canonical inline-ARRAY shape

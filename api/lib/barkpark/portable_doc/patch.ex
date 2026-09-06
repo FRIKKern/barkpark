@@ -21,7 +21,8 @@ defmodule Barkpark.PortableDoc.Patch do
 
   and a block is `%{"id" => "…", "type" => "…", …}`. A `section` block nests
   the tree under its own `"blocks"` key; an `expandable` uses `"children"`
-  (with `"blocks"` retained as a compatibility alias).
+  (with `"blocks"` retained as a compatibility alias); each `steps` row uses
+  the same visible-body aliases.
 
   ## The six ops
 
@@ -38,7 +39,8 @@ defmodule Barkpark.PortableDoc.Patch do
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` and `expandable`
-  children at any depth. `append-block` is top-level only.
+  children and each visible `steps` row body at any depth. `append-block` is
+  top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -414,7 +416,7 @@ defmodule Barkpark.PortableDoc.Patch do
   defp locked_at_id?(blocks, id) do
     Enum.any?(blocks, fn block ->
       (block_id(block) == id and Map.get(block, "locked") == true) or
-        (child_container(block) != nil and locked_at_id?(child_blocks(block), id))
+        Enum.any?(visible_child_lists(block), &locked_at_id?(&1, id))
     end)
   end
 
@@ -423,11 +425,7 @@ defmodule Barkpark.PortableDoc.Patch do
   # True when `id` names any block anywhere in `blocks` (recurses containers).
   defp id_exists?(blocks, id) do
     Enum.any?(blocks, fn block ->
-      cond do
-        block_id(block) == id -> true
-        child_container(block) != nil -> id_exists?(child_blocks(block), id)
-        true -> false
-      end
+      block_id(block) == id or Enum.any?(visible_child_lists(block), &id_exists?(&1, id))
     end)
   end
 
@@ -442,28 +440,9 @@ defmodule Barkpark.PortableDoc.Patch do
   # subtrees keep their identity; only the branch containing the target is
   # rebuilt.
   defp transform_at_id(blocks, id, fun) do
-    transform_at_id(blocks, id, fun, [])
-  end
-
-  defp transform_at_id([], _id, _fun, _acc), do: nil
-
-  defp transform_at_id([block | rest], id, fun, acc) do
-    cond do
-      block_id(block) == id ->
-        Enum.reverse(acc) ++ fun.(block) ++ rest
-
-      child_container(block) != nil ->
-        case transform_at_id(child_blocks(block), id, fun) do
-          nil ->
-            transform_at_id(rest, id, fun, [block | acc])
-
-          nested_blocks ->
-            next_container = Map.put(block, child_container(block), nested_blocks)
-            Enum.reverse([next_container | acc]) ++ rest
-        end
-
-      true ->
-        transform_at_id(rest, id, fun, [block | acc])
+    case transform_with_flag(blocks, id, fn block -> {fun.(block), false} end) do
+      {nil, _flag} -> nil
+      {transformed, _flag} -> transformed
     end
   end
 
@@ -483,38 +462,112 @@ defmodule Barkpark.PortableDoc.Patch do
         {replacement, flag} = fun.(block)
         {Enum.reverse(acc) ++ replacement ++ rest, flag}
 
-      child_container(block) != nil ->
-        case transform_with_flag(child_blocks(block), id, fun) do
+      true ->
+        case transform_block_children(block, id, fun) do
           {nil, _} ->
             transform_with_flag(rest, id, fun, [block | acc])
 
-          {nested_blocks, flag} ->
-            next_container = Map.put(block, child_container(block), nested_blocks)
-            {Enum.reverse([next_container | acc]) ++ rest, flag}
+          {next_block, flag} ->
+            {Enum.reverse([next_block | acc]) ++ rest, flag}
         end
-
-      true ->
-        transform_with_flag(rest, id, fun, [block | acc])
     end
   end
 
   # ── small helpers ──────────────────────────────────────────────────────────
 
-  defp child_container(%{"type" => "section", "blocks" => blocks}) when is_list(blocks),
-    do: "blocks"
+  defp transform_block_children(block, id, fun) do
+    case visible_child_container(block) do
+      {:blocks, key, children} ->
+        case transform_with_flag(children, id, fun) do
+          {nil, _flag} -> {nil, false}
+          {next_children, flag} -> {Map.put(block, key, next_children), flag}
+        end
 
-  defp child_container(%{"type" => "expandable", "children" => children}) when is_list(children),
-    do: "children"
+      {:steps, rows} ->
+        case transform_steps_rows(rows, id, fun, []) do
+          {nil, _flag} -> {nil, false}
+          {next_rows, flag} -> {Map.put(block, "steps", next_rows), flag}
+        end
 
-  defp child_container(%{"type" => "expandable", "blocks" => blocks}) when is_list(blocks),
-    do: "blocks"
+      nil ->
+        {nil, false}
+    end
+  end
 
-  defp child_container(_block), do: nil
+  defp transform_steps_rows([], _id, _fun, _acc), do: {nil, false}
 
-  defp child_blocks(block) do
-    case child_container(block) do
-      nil -> []
-      key -> Map.get(block, key, [])
+  defp transform_steps_rows([row | rest], id, fun, acc) when is_map(row) do
+    case visible_row_container(row) do
+      {key, children} ->
+        case transform_with_flag(children, id, fun) do
+          {nil, _flag} ->
+            transform_steps_rows(rest, id, fun, [row | acc])
+
+          {next_children, flag} ->
+            {Enum.reverse([Map.put(row, key, next_children) | acc]) ++ rest, flag}
+        end
+
+      nil ->
+        transform_steps_rows(rest, id, fun, [row | acc])
+    end
+  end
+
+  defp transform_steps_rows([row | rest], id, fun, acc),
+    do: transform_steps_rows(rest, id, fun, [row | acc])
+
+  defp visible_child_lists(block) do
+    case visible_child_container(block) do
+      {:blocks, _key, children} ->
+        [children]
+
+      {:steps, rows} ->
+        Enum.flat_map(rows, fn
+          row when is_map(row) ->
+            case visible_row_container(row) do
+              {_key, children} -> [children]
+              nil -> []
+            end
+
+          _row ->
+            []
+        end)
+
+      nil ->
+        []
+    end
+  end
+
+  defp visible_child_container(%{"type" => "section", "blocks" => blocks})
+       when is_list(blocks),
+       do: {:blocks, "blocks", blocks}
+
+  defp visible_child_container(%{"type" => "expandable"} = block) do
+    case visible_alias(block) do
+      {key, children} -> {:blocks, key, children}
+      nil -> nil
+    end
+  end
+
+  defp visible_child_container(%{"type" => "steps", "steps" => rows}) when is_list(rows),
+    do: {:steps, rows}
+
+  defp visible_child_container(_block), do: nil
+
+  defp visible_row_container(row), do: visible_alias(row)
+
+  # Renderer precedence is truthy `children` before `blocks`. A malformed
+  # truthy value therefore hides the shadow alias instead of exposing content
+  # the reader does not render; nil/false retain the legacy fallback.
+  defp visible_alias(container) do
+    case Map.get(container, "children") do
+      children when children not in [nil, false] ->
+        if is_list(children), do: {"children", children}, else: nil
+
+      _absent ->
+        case Map.get(container, "blocks") do
+          blocks when is_list(blocks) -> {"blocks", blocks}
+          _other -> nil
+        end
     end
   end
 
