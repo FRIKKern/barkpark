@@ -5040,6 +5040,7 @@
       // and are NOT covered by this slice.
       _PA_PROBE: 16,     // ms — is the ref stamped yet? (measured at dt≈1ms)
       _PA_POLL: 100,     // ms — has the ref dropped / the row detached?
+      _PA_WITNESS_GRACE: 750, // ms — allow a stable selection control's reply rerender
       _PA_CEILING: 8000, // ms — the named ceiling, in place of an unbounded tint
       _PA_FADE: 6000,    // ms — how long a settled answer stays readable
 
@@ -5079,14 +5080,23 @@
       },
 
       // Segmented controls such as Classic/Beta express their observed
-      // selection by FLIPPING aria-pressed. Capture only the CLICKED control:
+      // selection by changing aria-pressed presence/value. Capture only the CLICKED control:
       // an unrelated toggle moving cannot prove that this press succeeded.
       _paPressedWitness(el) {
-        if (!el || !el.hasAttribute("aria-pressed")) return null;
+        if (!el) return null;
+        var id = el.id || null, testId = el.getAttribute("data-test-id");
+        if (!el.hasAttribute("aria-pressed")) {
+          // Phoenix boolean attributes render the selected mode as
+          // `aria-pressed=""` and OMIT the attribute on the inactive peer. The
+          // inactive button is still a valid witness only when it has an exact
+          // stable identity inside a real segmented group with a selected peer.
+          var group = el.closest('[role="group"]');
+          if ((!id && !testId) || !group || !group.querySelector("[aria-pressed]")) return null;
+        }
         return {
           el: el,
-          id: el.id || null,
-          testId: el.getAttribute("data-test-id"),
+          id: id,
+          testId: testId,
           value: el.getAttribute("aria-pressed")
         };
       },
@@ -5160,6 +5170,12 @@
         // a re-render that replaced the pressed row would otherwise hold a ref
         // forever on an orphan and only the ceiling would ever release it.
         if (document.contains(p.el) && p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
+        var word = this._paSettleWord(p);
+        if (word) { this._paRelease(word); return; }
+        // A stable aria-pressed witness gets a short reply-render grace below.
+        // Until it moves (or a ref was actually observed), absence of a ref is
+        // not yet evidence that this selection press failed.
+        if (!p.sawRef && p.pressed && (p.pressed.id || p.pressed.testId)) return;
         this._paSettle(p);
       },
 
@@ -5232,6 +5248,24 @@
           // the silence it has today.
           var word = this._paSettleWord(p);
           if (word) { this._paRelease(word); return; }
+          // Classic/Beta and similar stable segmented controls can be replaced
+          // by the successful LiveView reply after this first 16ms probe. Keep
+          // watching only that exact control identity for a bounded grace; the
+          // normal poll settles immediately if its aria-pressed value flips.
+          if (p.pressed && (p.pressed.id || p.pressed.testId)) {
+            this._paProbe = window.setTimeout(() => {
+              this._paProbe = 0;
+              if (this._paPending !== p) return;
+              var settled = this._paSettleWord(p);
+              if (settled) { this._paRelease(settled); return; }
+              if (document.contains(p.el) && p.el.hasAttribute("data-phx-ref-src")) {
+                p.sawRef = true;
+                return;
+              }
+              this._paRelease("That press did not reach the server — press it again.");
+            }, this._PA_WITNESS_GRACE);
+            return;
+          }
           // ONE exception, and it is the only shape that can delay a ref: a
           // debounced or throttled binding pushes LATER. There the hook has no
           // ground for either verdict and says nothing rather than inventing one.
