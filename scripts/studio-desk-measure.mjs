@@ -1166,7 +1166,7 @@ function overlayShouldBeAbsolute(rec) {
   return typeof rec.panel_px === 'number' && rec.panel_px <= OVERLAY_ABSOLUTE_MAX_PANEL_PX;
 }
 
-const STATE_IDS = STATES.map((s) => s.id);
+export const STATE_IDS = STATES.map((s) => s.id);
 const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
 
 /** Which states apply at a given width, restricted to the ones this run is
