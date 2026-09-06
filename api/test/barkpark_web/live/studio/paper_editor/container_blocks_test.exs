@@ -3,6 +3,25 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
 
   alias BarkparkWeb.Studio.StudioLive.Blocks
 
+  test "featured links can be enabled and cleared without losing legacy metadata" do
+    ref = %{"slug" => "day", "featured" => true, "analytics_key" => "keep"}
+    block = %{"type" => "paper-links", "refs" => [ref]}
+    params = %{"ref-count" => "1", "ref-0-slug" => "day"}
+
+    assert [%{"featured" => true}] = Blocks.build_block_patch(block, params)["refs"]
+
+    assert [%{"featured" => false, "analytics_key" => "keep"}] =
+             Blocks.build_block_patch(block, Map.put(params, "ref-0-featured", "false"))["refs"]
+
+    legacy = %{"type" => "paper-links", "refs" => ["day"]}
+
+    assert ["day"] =
+             Blocks.build_block_patch(legacy, Map.put(params, "ref-0-featured", "false"))["refs"]
+
+    assert [%{"slug" => "day", "featured" => true}] =
+             Blocks.build_block_patch(legacy, Map.put(params, "ref-0-featured", "true"))["refs"]
+  end
+
   test "paper-links clearing is explicit and rebuilt references retain unknown metadata" do
     block = %{
       "type" => "paper-links",

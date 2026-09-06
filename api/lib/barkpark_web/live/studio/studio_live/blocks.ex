@@ -237,7 +237,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
       prefer_authored? = parse_bool(params[prefix <> "prefer-authored-copy"])
 
-      if is_binary(original) and not prefer_authored? and
+      # Older clients do not submit featured. Only an explicit field changes
+      # it; the editor sends hidden false + checked true for deliberate clearing.
+      authored =
+        if Map.has_key?(params, prefix <> "featured"),
+          do: Map.put(authored, "featured", parse_bool(params[prefix <> "featured"])),
+          else: authored
+
+      if is_binary(original) and not prefer_authored? and authored["featured"] != true and
            Enum.all?(optional, &(not Map.has_key?(authored, &1))) do
         slug
       else

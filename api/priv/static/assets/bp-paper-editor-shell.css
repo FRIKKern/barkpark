@@ -1562,3 +1562,46 @@
 .bp-canvas-diagram-field { display: grid; gap: 0.3rem; min-width: 0; }
 .bp-canvas-diagram-area, .bp-canvas-diagram-caption { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
 .bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+
+/* Reference-family configuration floats over the canonical reader render.
+   Closed controls therefore add no document rhythm, while the native details /
+   summary pair preserves keyboard and disclosure semantics without JS. */
+.bp-paper-edit-block:has(.bp-paper-contextual-editor) { margin-top: 0; }
+.bp-paper-contextual-editor { position: relative; }
+.bp-expandable__body > .bp-paper-edit-canvas:first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.bp-paper-contextual-controls {
+  position: absolute; top: 0; right: 0; z-index: 4;
+  width: min(32rem, calc(100vw - 2rem)); max-width: 100%;
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.78rem;
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-contextual-editor:hover > .bp-paper-contextual-controls,
+.bp-paper-contextual-editor:focus-within > .bp-paper-contextual-controls,
+.bp-paper-contextual-controls[open] { opacity: 1; pointer-events: auto; }
+.bp-paper-contextual-toggle {
+  cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--paper-bg);
+}
+.bp-paper-contextual-panel {
+  width: 100%; max-width: 100%;
+  max-height: min(70vh, 42rem); overflow: auto; box-sizing: border-box;
+  margin-top: 0.55rem; padding: 0.75rem;
+  background: var(--paper-bg);
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+  box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+}
+.bp-paper-contextual-panel > .bp-paper-edit-form { display: grid; gap: 0.65rem; }
+.bp-paper-contextual-panel .bp-paper-edit-fieldlabel { min-width: 0; }
+.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (hover: none) {
+  .bp-paper-contextual-editor > .bp-paper-contextual-controls {
+    opacity: 1; pointer-events: auto;
+  }
+}
