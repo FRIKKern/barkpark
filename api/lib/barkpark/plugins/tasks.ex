@@ -261,11 +261,29 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   # A fresh task (no prior row) with no criteria: warn, never block.
+  #
+  # THE SAME LESSON `warn_unflagged_merge_gates/1` LEARNED SIX CLAUSES BELOW.
+  # The Logger line alone let 163 of 975 rows (16.7%) be born with zero
+  # criteria in one week on this lane — its only reader was the server
+  # journal, which no task author ever sees. 63 of those closed as done with
+  # an EMPTY criteria list, which reads to every completeness audit as fully
+  # proven, because 0-of-0 is vacuously complete. `Warnings.put/3` rides the
+  # mutate SUCCESS envelope (`warnings: [...]`), which the bp CLI prints to
+  # stderr (emitWarnings) and Studio folds into its save flash — so the author
+  # is told AT BIRTH, before the claim-time criteria gate or the close-time
+  # artifact gate can bite. Collect-only-when-listening: a caller with no open
+  # collector drops it.
+  #
+  # STILL AN ADVISORY, NEVER A HALT. Whether a zero-criteria create should be
+  # REFUSED is a separate owner policy call (a hard requirement would have
+  # blocked all 163 of those creates); this clause changes the CHANNEL only.
   defp warn_if_create_zero(nil) do
-    Logger.warning(
-      "task quality gate: a new task is being saved with zero acceptance_criteria — " <>
+    message =
+      "a new task is being saved with zero acceptance_criteria — " <>
         "consider adding at least one measurable criterion (soft warning, save proceeds)"
-    )
+
+    Logger.warning("task quality gate: " <> message)
+    Barkpark.Content.Warnings.put("zero_acceptance_criteria", message, "warning")
 
     :ok
   end

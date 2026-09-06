@@ -2228,6 +2228,39 @@ func TestRenderSuccessWarnings(t *testing.T) {
 		t.Errorf("message-less object warning must be skipped, got %q", got)
 	}
 
+	// The zero-criteria BIRTH advisory (task-62d245a1ee5247f6), end of the wire:
+	// `Barkpark.Content.Warnings.put("zero_acceptance_criteria", ...)` rides the
+	// mutate SUCCESS envelope, and THIS is where the author finally reads it —
+	// on stderr, at `bp task create` time. The pair is the point: the envelope
+	// carrying the code prints, and an envelope with no warnings key (a create
+	// that DID carry criteria) prints nothing, so the advisory discriminates.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	zeroCriteria := `{"ok":true,"doc":{"doc_id":"drafts.task-zc"},"warnings":[` +
+		`{"code":"zero_acceptance_criteria","severity":"warning",` +
+		`"message":"a new task is being saved with zero acceptance_criteria — ` +
+		`consider adding at least one measurable criterion (soft warning, save proceeds)"}]}`
+	renderSuccess(w, manifest.Command{}, []byte(zeroCriteria))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-zc" {
+		t.Errorf("zero-criteria stdout = %q, want the doc receipt untouched (advisory never blocks)", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "warning[zero_acceptance_criteria]: a new task is being saved with zero acceptance_criteria") {
+		t.Errorf("zero-criteria stderr = %q, want the birth advisory line", got)
+	}
+
+	// The discriminating half: the same create WITH criteria answers no
+	// warnings key at all, so stderr stays clean.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	renderSuccess(w, manifest.Command{}, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-wc"}}`))
+	if got := stderr.String(); strings.Contains(got, "zero_acceptance_criteria") {
+		t.Errorf("a create WITH criteria must print no advisory, got %q", got)
+	}
+
 	// No warnings key / non-string entries: nothing printed, nothing crashes.
 	for _, p := range []string{
 		`{"ok":true,"doc":{"doc_id":"t"}}`,
