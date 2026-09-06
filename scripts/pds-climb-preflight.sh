@@ -609,6 +609,18 @@ run_selftest() {
   # tell a measured freeze from a remembered one, so both must carry it.
   st_count "(d5) the historical value appears on BOTH the info line and the refusal" "$out" 2 "$FREEZE_BLOB_HISTORICAL"
 
+  # ── (g) the GO path records the freeze in the transcript too ───────────────
+  # Arms (c)/(d) read the REFUSAL detail, so deleting the transcript info line
+  # left them all green — measured, as MUT-3. The record has to be asserted on
+  # the path where check 1 PASSES, because that is the transcript a climb ships.
+  out="$tmp/go-transcript.txt"
+  ( REPO_ROOT="$r_ok"; unset PDS_CLIMB_FREEZE_BLOB; resolve_freeze_blob; check_worktree ) >"$out" 2>&1
+  st_count "(g0) this arm really is the GO path" "$out" 0 "THE HARNESS IS NOT FROZEN"
+  st_count "(g1) a PASSING check 1 still records the freeze source" "$out" 1 "freeze source .......... DERIVED"
+  # 2: `measured` and `frozen at`. On the GO path they are EQUAL by definition,
+  # and the count pins that they are both printed rather than one collapsed away.
+  st_count "(g2) ...beside both the measured and the frozen value" "$out" 2 "$want"
+
   # ── (e) the rot-by-construction shape cannot come back ─────────────────────
   # The defect was a NON-EMPTY shell default on the override. `${VAR:-}` (empty)
   # is the legal guard and must not trip this. Needle assembled in two pieces so
