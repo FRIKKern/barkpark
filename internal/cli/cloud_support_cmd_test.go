@@ -1967,3 +1967,125 @@ func TestCloudSupportAddRefusesOnlineWithoutMeasuredCapacity(t *testing.T) {
 		})
 	}
 }
+
+// TestCloudSupportAddNoTeamFlipParity is the PAIRED status-flip guard for
+// `bp cloud support add` against the REAL post-flip shape POST /v1/fleet/supports
+// now emits (PR #16377 converged the nine reachable inline
+// `json(conn, 422, %{error: "no_team"})` emitters in the control plane's router
+// onto `403 {"error":"forbidden","reason":"no_team","scope":"team"}` via one
+// no_team/1 helper).
+//
+// TestCloudSupportAddCPRefusalNarrations above already pins each shape's exit and
+// hint ROW BY ROW, and that is enough to red a status-keyed ladder today. What it
+// cannot catch is DRIFT BETWEEN the rows: each row carries its own wantExit and
+// wantHint, so a future edit that re-baselines only the post-flip row — exit 3
+// and the team-admin sentence for a caller who has no team — leaves the table
+// green while the two sides of the flip say different things. This test asserts
+// the pairing STRUCTURALLY: the pre-flip 422 and both post-flip 403 shapes must
+// produce the SAME exit code and the SAME `next:` fix line as each other, and
+// that shared exit must be exitGeneric (1) — never exitAuth (3), where a
+// status-keyed statusExit ladder lands a 403 whose credential is fine.
+//
+// A single arm pinning only the post-flip row would be vacuous; the pair is the
+// guard, so every arm is also asserted to be non-vacuous (it really reached the
+// bind refusal, not some earlier failure).
+func TestCloudSupportAddNoTeamFlipParity(t *testing.T) {
+	arms := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		// The pre-flip shape: the cause IS the code, at 422.
+		{"pre-flip 422", http.StatusUnprocessableEntity, `{"error":"no_team"}`},
+		// The REAL post-flip shape the converged no_team/1 helper emits.
+		{"post-flip 403", http.StatusForbidden, `{"error":"forbidden","reason":"no_team","scope":"team"}`},
+		// The third shape the flip can land in: the cause AS the code at 403.
+		{"post-flip 403, cause as code", http.StatusForbidden, `{"error":"no_team"}`},
+	}
+
+	nextLine := func(stderr string) string {
+		for _, ln := range strings.Split(stderr, "\n") {
+			if trimmed := strings.TrimSpace(ln); strings.HasPrefix(trimmed, "next:") {
+				return trimmed
+			}
+		}
+		return ""
+	}
+
+	type outcome struct {
+		exit int
+		next string
+	}
+	got := make(map[string]outcome, len(arms))
+
+	for _, arm := range arms {
+		t.Run(arm.name, func(t *testing.T) {
+			supportEnvIsolate(t)
+			runner := newFakeSupportRunner()
+			supportHappyWiring(t, runner)
+			main := newSupportMainRecorder()
+			srv := main.serve(t)
+			cp, _ := supportSeedCP(t, srv.URL)
+			cp.registerStatus = arm.status
+			cp.registerBody = arm.body
+
+			_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+
+			// Non-vacuity: the run must actually have reached the CP registration
+			// refusal this arm exists to drive, not tripped over something earlier.
+			if cp.count("POST /v1/fleet/supports") != 1 {
+				t.Fatalf("fixture drift: the refusal under test was never reached (cp requests: %v)\nstderr:\n%s",
+					cp.requests, stderr)
+			}
+			if !strings.Contains(stderr, "NOT registered") {
+				t.Fatalf("fixture drift: this is not the bind-refusal path\nstderr:\n%s", stderr)
+			}
+
+			// The cause the server named decides the exit, not the status: a caller
+			// whose credential is FINE and whose fix is one command gets exitGeneric.
+			if code != exitGeneric {
+				t.Fatalf("exit = %d, want %d (exitGeneric — the cause, not the status, decides)\nstderr:\n%s",
+					code, exitGeneric, stderr)
+			}
+			// Said the other way round, so the failure names the ladder it forbids.
+			if code == exitAuth {
+				t.Fatalf("a teamless refusal was routed through a status-keyed exit (%d = exitAuth); "+
+					"the credential is fine and re-authenticating cannot help\nstderr:\n%s", exitAuth, stderr)
+			}
+			if !strings.Contains(stderr, "bp team use") {
+				t.Fatalf("the teamless fix hint `bp team use` is missing\nstderr:\n%s", stderr)
+			}
+			if strings.Contains(stderr, "a session needs team-admin") {
+				t.Fatalf("a no_team refusal was narrated as a ROLE problem — the role cannot be granted "+
+					"without a team\nstderr:\n%s", stderr)
+			}
+
+			line := nextLine(stderr)
+			if line == "" {
+				t.Fatalf("no `next:` fix line was printed\nstderr:\n%s", stderr)
+			}
+			got[arm.name] = outcome{exit: code, next: line}
+		})
+	}
+
+	// The pairing itself: the flip must be INVISIBLE to the caller. Two rows that
+	// each pass their own expectations can still have drifted apart from one
+	// another — this is the assertion that cannot be satisfied by re-baselining
+	// one side.
+	if len(got) != len(arms) {
+		t.Fatalf("an arm did not complete; parity is unprovable (got %d of %d)", len(got), len(arms))
+	}
+	base := got[arms[0].name]
+	for _, arm := range arms[1:] {
+		other := got[arm.name]
+		if other.exit != base.exit {
+			t.Fatalf("the status flip changed the EXIT CODE: %q exits %d, %q exits %d — the same cause "+
+				"must exit the same way on both sides of the flip",
+				arms[0].name, base.exit, arm.name, other.exit)
+		}
+		if other.next != base.next {
+			t.Fatalf("the status flip changed the FIX HINT:\n  %q: %s\n  %q: %s",
+				arms[0].name, base.next, arm.name, other.next)
+		}
+	}
+}
