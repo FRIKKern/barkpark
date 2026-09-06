@@ -230,6 +230,12 @@ defmodule BarkparkWeb.TasksController do
   #     cannot (one ambiguous id must not deny the caller the other forty-nine
   #     rows), so the refusal is scoped to the row and named instead of hidden.
   #
+  # IN `page`, NOT IN `help[]`. A read envelope carries no `help[]` on this
+  # route by rule (axi-s4 R5 — "help[] rides ONLY mutation successes", pinned by
+  # tasks_controller_test.exs), and the brief-truncation line is that rule's one
+  # standing exception, not an opening. A dataset fact a caller ACTS on belongs
+  # in the structured block it can read without string-matching anyway.
+  #
   # READY ONLY, deliberately: `task_list_response/4`'s other caller is the index,
   # which is not twin-collapsed and whose envelope stays byte-identical.
   defp put_ready_dataset_scope(body, docs, dataset, ambiguous) do
@@ -245,47 +251,8 @@ defmodule BarkparkWeb.TasksController do
         dataset_ambiguous: ambiguous
       })
 
-    body
-    |> Map.put(:page, page)
-    |> append_help(ready_dataset_help(dataset, spans, ambiguous))
+    Map.put(body, :page, page)
   end
-
-  defp ready_dataset_help(dataset, spans, ambiguous) do
-    scope_line =
-      if is_nil(dataset) do
-        [
-          "no ?dataset= named: this ready page spans EVERY dataset in the caller's " <>
-            "workspace/project scope" <>
-            if(spans == [], do: "", else: " (this page: #{Enum.join(spans, ", ")})") <>
-            ". Name ?dataset= to narrow it."
-        ]
-      else
-        []
-      end
-
-    ambiguous_line =
-      if ambiguous == [] do
-        []
-      else
-        [
-          "#{length(ambiguous)} task doc_id(s) live in more than one dataset in this scope " <>
-            "and are WITHHELD from the page — the queue will not pick a dataset you did not " <>
-            "name (Barkpark.Tasks.TwinResolver, rule 3). Each is listed once in " <>
-            "page.dataset_ambiguous with the datasets it spans; name ?dataset= to get it."
-        ]
-      end
-
-    scope_line ++ ambiguous_line
-  end
-
-  # `help[]` is a LIST and more than one honesty line can be true at once (the
-  # brief-truncation line is set by `Params.maybe_put_brief_truncation_help/3`
-  # before this runs). Appending rather than `Map.put`-ing is what keeps a
-  # second line from erasing the first.
-  defp append_help(body, []), do: body
-
-  defp append_help(body, lines),
-    do: Map.put(body, :help, Map.get(body, :help, []) ++ lines)
 
   defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)

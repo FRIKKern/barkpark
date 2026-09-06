@@ -140,14 +140,17 @@ defmodule BarkparkWeb.TasksReadyDatasetTest do
       assert unnamed["page"]["dataset"] == nil
       assert unnamed["page"]["dataset_scope"] == "all-datasets-in-scope"
       assert unnamed["page"]["datasets"] == Enum.sort([@primary, @secondary])
-      assert Enum.any?(unnamed["help"] || [], &(&1 =~ "no ?dataset= named"))
+
+      # In `page`, never in `help[]`: a read envelope on this route carries no
+      # help[] (axi-s4 R5, pinned by tasks_controller_test.exs), and the
+      # brief-truncation line is that rule's one standing exception.
+      refute Enum.any?(unnamed["help"] || [], &(&1 =~ "dataset"))
 
       named = ready(%{"phase_id" => phase_id, "dataset" => @primary})
 
       assert named["page"]["dataset"] == @primary
       assert named["page"]["dataset_scope"] == "named"
       assert named["page"]["datasets"] == [@primary]
-      refute Enum.any?(named["help"] || [], &(&1 =~ "no ?dataset= named"))
     end
   end
 
@@ -168,8 +171,6 @@ defmodule BarkparkWeb.TasksReadyDatasetTest do
       assert page["page"]["dataset_ambiguous"] == [
                %{"doc_id" => doc_id, "datasets" => Enum.sort([@primary, @secondary])}
              ]
-
-      assert Enum.any?(page["help"] || [], &(&1 =~ "more than one dataset"))
     end
 
     test "naming a dataset is the way through — the row comes back, once", %{
