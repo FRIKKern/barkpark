@@ -32,6 +32,30 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# The tree the scan walks. Normally the repo root; the --selftest corpus arm
+# points it at a scratch tree so the REAL corpus path can be made to LOSE.
+SCAN_ROOT="${NIL_POLARITY_ROOT:-$ROOT}"
+
+# CORPUS FLOOR — the denominator is ADJUDICATED, not printed (honest-gates).
+# `scanned` is derived from the same os.walk that produces the verdict, so a
+# corpus that vanished reports "PASS — 0 file(s) scanned" and exits 0: the one
+# signal that the protected tree is gone is prose, read by nothing.
+#
+# Two independent adjudications, both applied below:
+#   1. A HARD MINIMUM. Derivation: origin/main 964935f5e carries 872 *.ex files
+#      under api/lib, and that count has only ever grown. 200 is ~23% of it —
+#      an order of magnitude above "the walk found a stub" and far below any
+#      plausible real tree, so it can only fire on a corpus that is gone or
+#      catastrophically truncated, never on ordinary churn. Override for a
+#      deliberate re-baseline with NIL_POLARITY_FLOOR.
+#   2. AN INDEPENDENT COUNT. `find` walks the same tree with a different
+#      implementation and the scanned count must EQUAL it — so a walk that
+#      silently skips a subtree (a permission error swallowed, a filter typo)
+#      is caught even while the total stays above the floor. A floor alone
+#      cannot see that; equality alone cannot see an empty tree. Both, or the
+#      denominator is still derived from the property it is supposed to prove.
+CORPUS_FLOOR="${NIL_POLARITY_FLOOR:-200}"
+
 # --selftest — the DURABLE tripwire (distrust vacuous green). Proves the gate
 # REDs on each planted fail-open shape and greens on the fail-closed forms,
 # planting NOTHING in the real tree (a temp dir, cleaned on exit). It drives the
@@ -61,7 +85,15 @@ EX
         echo "nil-polarity-check --selftest: FAIL — planted nil=>true field_readable? NOT caught (gate is blind)."
         echo "$out"; exit 1
     fi
-    if ! printf '%s' "$out" | grep -q 'planted_field.ex:2'; then
+    # NEVER `printf '%s' "$out" | grep -q …` here (honest-gates D37). Under
+    # `set -o pipefail`, `grep -q` exits at its FIRST match while printf is
+    # still writing; printf dies of SIGPIPE and the pipeline's status is 141,
+    # which this `if !` reads as "no match". That is a coin flip on macOS
+    # (26/30 red on a clean tree, later 20/20) and a permanent green on Linux,
+    # where coreutils buffers the whole payload — the verdict becomes a
+    # property of the machine. A herestring feeds grep from a temp file: one
+    # process, one exit status, no pipe to break.
+    if ! grep -q 'planted_field.ex:2' <<<"$out"; then
         echo "nil-polarity-check --selftest: FAIL — RED did not name the planted file:line."
         echo "$out"; exit 1
     fi
@@ -104,14 +136,58 @@ EX
         exit 1
     fi
 
-    echo "nil-polarity-check --selftest: PASS — REDs on nil=>true clause, catch-all, and redacted_result nil seam; passes fail-closed forms + doctrine comments."
+    # 5) THE REAL CORPUS PATH, both ways. Arms 1-4 all drive synthetic files
+    #    through NIL_POLARITY_SELFTEST, so not one of them touches the ROOTS
+    #    walk, the file count, or the floor — the machinery that decides
+    #    whether the gate measured anything at all. This arm exercises exactly
+    #    that path, and it can LOSE: point ROOT at an empty tree and the gate
+    #    MUST refuse; point it at the real tree and it MUST pass.
+    mkdir -p "$tmp/emptytree/api/lib"
+    if out="$(NIL_POLARITY_ROOT="$tmp/emptytree" bash "$0" 2>&1)"; then
+        echo "nil-polarity-check --selftest: FAIL — an EMPTY corpus was reported clean (the file count is not adjudicated)."
+        echo "$out"; exit 1
+    fi
+    if ! grep -q 'REFUSED' <<<"$out"; then
+        echo "nil-polarity-check --selftest: FAIL — the empty-corpus exit did not name the refusal."
+        echo "$out"; exit 1
+    fi
+    # ...and the same path must still PASS on the tree this repo actually has,
+    # so the refusal above is not simply "the corpus path always reds".
+    if ! out="$(NIL_POLARITY_ROOT="$ROOT" bash "$0" 2>&1)"; then
+        echo "nil-polarity-check --selftest: FAIL — the REAL corpus path did not pass on this tree."
+        echo "$out"; exit 1
+    fi
+    if ! grep -q 'PASS' <<<"$out"; then
+        echo "nil-polarity-check --selftest: FAIL — the real-corpus run exited 0 without a PASS line."
+        echo "$out"; exit 1
+    fi
+
+    echo "nil-polarity-check --selftest: PASS — REDs on nil=>true clause, catch-all, and redacted_result nil seam; passes fail-closed forms + doctrine comments; REFUSES an empty corpus and passes the real one."
     exit 0
 fi
 
-python3 - "$ROOT" <<'PY'
+# The INDEPENDENT count: a different walker over the same tree. `-type f -o
+# -type l` matches what os.walk puts in its `files` list (regular files plus
+# symlinks-to-files), so the two counts are comparable by construction. Empty
+# in NIL_POLARITY_SELFTEST mode — that mode scans one named synthetic file and
+# has no corpus to adjudicate.
+expected_ex=""
+if [ -z "${NIL_POLARITY_SELFTEST:-}" ]; then
+    # `|| true`: a MISSING api/lib makes `find` exit non-zero, and under
+    # `set -euo pipefail` the failed command substitution would kill this
+    # script silently with status 1 and NOT ONE LINE of output — a refusal
+    # nobody can read is barely better than the false green it replaced. `wc`
+    # still emits 0 on the empty stream, so the empty corpus reaches the
+    # adjudication below and gets named there.
+    expected_ex="$(find "$SCAN_ROOT/api/lib" \( -type f -o -type l \) -name '*.ex' 2>/dev/null | wc -l | tr -d ' ' || true)"
+fi
+
+python3 - "$SCAN_ROOT" "$expected_ex" "$CORPUS_FLOOR" <<'PY'
 import os, re, sys
 
 root = sys.argv[1]
+expected_ex = sys.argv[2]
+corpus_floor = int(sys.argv[3])
 
 # NIL_POLARITY_SELFTEST override: scan ONLY that one file (the --selftest tripwire
 # points the REAL scanner at a throwaway temp file — same lexer, same patterns).
@@ -213,8 +289,42 @@ for path in ex_files():
     for ln, text, msg in scan(path):
         failures.append((rel, ln, text, msg))
 
+# ── ADJUDICATE THE DENOMINATOR ───────────────────────────────────────────────
+# Before any verdict: prove the scan actually READ the corpus. A gate whose
+# only report of its own coverage is a printed number cannot detect that the
+# thing it protects went away — "PASS — 0 file(s) scanned" and "PASS — 872
+# file(s) scanned" were byte-for-byte the same exit status.
+if not _selftest:
+    corpus = ROOTS[0]
+    if scanned == 0:
+        print("nil-polarity-check: REFUSED — the corpus is EMPTY: 0 Elixir "
+              f"file(s) found under {corpus}.\n\n"
+              "  Nothing was scanned, so nothing was proven. This is NOT a pass:\n"
+              "  the fail-OPEN visibility clauses this gate forbids would be\n"
+              "  invisible to it. Check out the api/lib tree (or point\n"
+              "  NIL_POLARITY_ROOT at a checkout that has it) and re-run.")
+        sys.exit(1)
+    if scanned < corpus_floor:
+        print(f"nil-polarity-check: REFUSED — only {scanned} Elixir file(s) "
+              f"scanned under {corpus}, below the corpus floor of "
+              f"{corpus_floor}.\n\n"
+              "  The tree this gate protects has never been this small. Either\n"
+              "  the checkout is truncated or the walk lost a subtree; either\n"
+              "  way the coverage is not what a green claims. Re-run on a full\n"
+              "  checkout, or re-baseline NIL_POLARITY_FLOOR deliberately.")
+        sys.exit(1)
+    if expected_ex and int(expected_ex) != scanned:
+        print(f"nil-polarity-check: REFUSED — coverage disagreement: the walk "
+              f"scanned {scanned} Elixir file(s) but an independent `find` over "
+              f"{corpus} counts {int(expected_ex)}.\n\n"
+              "  Two walkers over one tree must agree. A gap means the scan\n"
+              "  skipped files it was supposed to read, so a clean verdict\n"
+              "  would be over files nobody looked at.")
+        sys.exit(1)
+
 if not failures:
-    print(f"nil-polarity-check: PASS — {scanned} Elixir file(s) scanned, "
+    print(f"nil-polarity-check: PASS — {scanned} Elixir file(s) scanned "
+          f"(floor {corpus_floor}, independent count {expected_ex or 'n/a'}), "
           f"no fail-OPEN nil/catch-all visibility clauses.")
     sys.exit(0)
 
