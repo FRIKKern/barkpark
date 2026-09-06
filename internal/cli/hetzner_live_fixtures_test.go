@@ -591,6 +591,23 @@ var pdsBearerScanner = regexp.MustCompile(`(?i)bearer\s+\S+|authorization`)
 // slice's own output: assert over the committed bytes rather than trusting the
 // author who committed them. The live runs spent a 64-character Hetzner token and
 // a Barkpark admin token; neither may have leaked into the residue.
+//
+// WHAT IT CANNOT DO — ITS LIMIT, STATED SO NOBODY READS IT AS A PRIVACY GATE.
+// This is a credential-SHAPE guard and nothing more. It scans each fixture with
+// exactly two patterns, both defined immediately above:
+//
+//	pdsCredentialScanner = `[A-Za-z0-9]{32,}`
+//	pdsBearerScanner     = `(?i)bearer\s+\S+|authorization`
+//
+// Read them literally and the blind spot is arithmetic. `[A-Za-z0-9]{32,}` needs
+// 32 UNBROKEN alphanumerics, so every dotted, colon-separated or hyphenated value
+// is invisible to it: an IPv4 literal (89.167.28.206 — dots break the run), an
+// IPv6 literal (colons break it), a dns_ptr hostname (dots), an hcloud datacenter
+// id (fsn1-dc14 — a hyphen, and only 9 characters anyway), a region label, a
+// server name, an ssh key comment. The bearer pattern only fires on the literal
+// word "bearer" or "authorization". None of that is a credential shape, and all
+// of it is topology. TestPDSLiveFixturesCarryNoTopology below is the arm that
+// covers it; this one deliberately stays unwidened (PDS-D441).
 func TestPDSLiveFixturesCarryNoCredential(t *testing.T) {
 	entries, err := filepath.Glob(filepath.Join("testdata", "pds_live_*"))
 	if err != nil || len(entries) == 0 {
@@ -626,5 +643,132 @@ func TestPDSLiveFixturesCarryNoCredential(t *testing.T) {
 	chunked := []byte(`{"sha256_chunked":"deadbeef-cafebabe-01234567-89abcdef-fedcba98-76543210-deadbeef-cafebabe"}`)
 	if mm := pdsCredentialScanner.Find(chunked); mm != nil {
 		t.Errorf("the hyphen-chunked digest still reds the scanner (%q) — the chunking does not solve the collision", string(mm))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE TOPOLOGY ARM — what the credential scan structurally cannot see.
+// ---------------------------------------------------------------------------
+
+// pdsTopologyScanners are the shapes a harvested cloud-API body can carry that
+// leak WHERE we run rather than WHAT we authenticate with. Each is kept narrow
+// enough to name what it found; breadth here buys false reds, not safety.
+var pdsTopologyScanners = []struct {
+	shape string
+	re    *regexp.Regexp
+}{
+	// A dotted quad with real octet bounds, so "1.2.3.4" reds but a version
+	// string like "999.999.999.999" or a float does not.
+	{"IPv4 literal", regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\b`)},
+	// Five or more colon-separated hex groups. An RFC3339 timestamp
+	// ("2026-07-31T20:11:35Z") has only three groups, so it does not red here —
+	// that bound is what keeps this arm quiet on the committed manifest.
+	{"IPv6 literal", regexp.MustCompile(`(?i)\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){4,}\b`)},
+	// A dotted DNS name under a public TLD — a dns_ptr, a rDNS record, an
+	// endpoint we host. Deliberately not matching bare filenames (.json, .go,
+	// .sh), which are not topology.
+	{"hostname", regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:cloud|com|net|org|io|de|eu|dev)\b`)},
+	// hcloud's own datacenter identifiers: <location><n>-dc<n>, plus the
+	// three-letter overseas locations.
+	{"datacenter id", regexp.MustCompile(`(?i)\b(?:fsn1|nbg1|hel1|ash|hil|sin)-dc[0-9]+\b`)},
+}
+
+// pdsTopologyAllowed is the ONE exemption, and it is named rather than
+// pattern-shaped so that adding a second one is a visible edit.
+//
+//	api.hetzner.cloud — the VENDOR's public API endpoint. It is Hetzner's own
+//	published address, it appears in the manifest's "api" field as the
+//	provenance of every harvested body, and it says nothing about our estate.
+//
+// Nothing else is exempt. In particular the prod box's address (docs/ops/PROD_OPS.md
+// carries 89.167.28.206 in plain sight) is NOT allowlisted here: this arm exists to
+// stop a future fixture-only edit from pasting an address into testdata, and an
+// address that is already public elsewhere is still not something a harvested
+// 404 body has any reason to contain.
+var pdsTopologyAllowed = map[string]bool{
+	"api.hetzner.cloud": true,
+}
+
+type pdsTopologyFinding struct {
+	shape string
+	match string
+}
+
+func pdsScanTopology(body []byte) []pdsTopologyFinding {
+	var found []pdsTopologyFinding
+	text := string(body)
+	for _, s := range pdsTopologyScanners {
+		for _, m := range s.re.FindAllString(text, -1) {
+			if pdsTopologyAllowed[strings.ToLower(m)] {
+				continue
+			}
+			found = append(found, pdsTopologyFinding{shape: s.shape, match: m})
+		}
+	}
+	return found
+}
+
+// TestPDSLiveFixturesCarryNoTopology closes the gap the credential scan's own doc
+// comment now states: `[A-Za-z0-9]{32,}` cannot see a dotted, colon-separated or
+// hyphenated value, so every IP, hostname and datacenter id in a harvested body
+// sails past it. The fixtures under testdata/pds_live_* are the residue of real
+// calls against a real provider; the next harvest wave could easily bring back a
+// 200 body carrying a public_net block, and — since a fixtures-only PR now runs
+// the Go job — this is the instrument that would say so.
+//
+// It reds on nothing committed today: the 404 bodies are pure error envelopes and
+// the one 200 body is a placement group with an empty servers list.
+func TestPDSLiveFixturesCarryNoTopology(t *testing.T) {
+	entries, err := filepath.Glob(filepath.Join("testdata", "pds_live_*"))
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("no pds_live_* fixtures found to scan (err=%v)", err)
+	}
+	for _, path := range entries {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		for _, f := range pdsScanTopology(body) {
+			t.Errorf("%s contains a topology value [%s: %q] — committed fixtures record what an API SAID, not where we run; scrub it, or add a named exemption to pdsTopologyAllowed with its source",
+				path, f.shape, f.match)
+		}
+	}
+
+	// THE MUTATION, kept in-tree so the arm can never go quietly blind. Each
+	// planted body is the thing a real harvest would drag in; every one of them
+	// must red the scanner. A greened-out arm that still passes over the clean
+	// fixtures is indistinguishable from a working one WITHOUT this table.
+	for _, tc := range []struct {
+		name  string
+		body  string
+		shape string
+	}{
+		{"prod box IPv4", `{"server":{"public_net":{"ipv4":{"ip":"89.167.28.206"}}}}`, "IPv4 literal"},
+		{"private IPv4", `{"private_net":[{"ip":"10.0.0.2"}]}`, "IPv4 literal"},
+		{"IPv6 literal", `{"public_net":{"ipv6":{"ip":"2a01:4f8:1c1c:abcd::1"}}}`, "IPv6 literal"},
+		{"dns_ptr hostname", `{"dns_ptr":"static.206.28.167.89.clients.your-server.de"}`, "hostname"},
+		{"our own endpoint", `{"webhook":"https://api.barkpark.cloud/v1/hooks"}`, "hostname"},
+		{"datacenter id", `{"datacenter":{"name":"fsn1-dc14"}}`, "datacenter id"},
+	} {
+		found := pdsScanTopology([]byte(tc.body))
+		if len(found) == 0 {
+			t.Errorf("mutation %q: a planted %s did NOT red the topology scan — the arm has gone blind and the committed fixtures prove nothing", tc.name, tc.shape)
+			continue
+		}
+		var sawShape bool
+		for _, f := range found {
+			if f.shape == tc.shape {
+				sawShape = true
+			}
+		}
+		if !sawShape {
+			t.Errorf("mutation %q: reddened as %v, but not as a %s — the arm fires for the wrong reason", tc.name, found, tc.shape)
+		}
+	}
+
+	// …and the one allowlisted value must stay quiet, or every future harvest
+	// manifest reds on its own provenance field.
+	if found := pdsScanTopology([]byte(`{"api":"https://api.hetzner.cloud/v1"}`)); len(found) != 0 {
+		t.Errorf("the vendor endpoint api.hetzner.cloud reds the topology scan (%v) — the allowlist entry no longer matches what the manifest writes", found)
 	}
 }
