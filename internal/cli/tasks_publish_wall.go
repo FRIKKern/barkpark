@@ -168,12 +168,74 @@ func (r *publishWallRefusal) lines() []string {
 // having to work out what got left on the server — so the refusal SAYS that
 // nothing did.
 func renderPublishWallRefusal(out *writer, ref *publishWallRefusal) int {
+	if renderErrorEnvelopeDetailed(out, ref.Code, wallRefusalMessage(ref), "", wallRefusalHint(ref), ref.detailsJSON()) {
+		return exitUsage
+	}
 	out.userErr("task create --publish: %s", ref.headline())
 	for _, line := range ref.lines() {
 		out.errf("  %s", line)
 	}
 	out.errf("  nothing was created — no draft was left behind.")
 	return exitUsage
+}
+
+// wallRefusalMessage is the envelope's `message`: the same sentence the human
+// line leads with, prefixed by the verb so a log line carrying only the message
+// still says WHICH command refused.
+func wallRefusalMessage(ref *publishWallRefusal) string {
+	return "task create --publish: " + ref.headline()
+}
+
+// wallRefusalHint folds the two things the human block ends with — the "nothing
+// was created" guarantee and the door to the vocabulary/the broken rule's fix —
+// into the envelope's `hint`. The guarantee comes FIRST because it is the fact a
+// retry loop needs before it decides whether to clean up: a caller that reads
+// only the hint must learn that no draft is outstanding.
+func wallRefusalHint(ref *publishWallRefusal) string {
+	const nothing = "nothing was created — no draft was left behind."
+	if ref.Code == "unknown_tag" {
+		return nothing + " A tag is registered ONLY if a PUBLISHED type:tag document carries that id — list the live registry with `" + tagRegistryCommand + "`."
+	}
+	if ref.Fix != "" {
+		return nothing + " " + ref.Fix
+	}
+	return nothing
+}
+
+// detailsJSON renders the refusal's machine payload in the SERVER's shape for
+// the same code — {unknown, suggestions} for unknown_tag,
+// {field, rule, fix, index} for label_spine (content/errors.ex) — so a consumer
+// parses one shape whether the wall was pre-empted here or hit server-side, and
+// the CLI's own unknownTagLines renderer reads it unchanged. registry_size is
+// the one client-only key: it says how big the vocabulary the client compared
+// against was, which is what tells a reader whether an empty suggestion list is
+// "nothing is close" or "we barely read anything".
+//
+// Returns nil when there is nothing to say, which normalizeDetails then omits.
+func (r *publishWallRefusal) detailsJSON() json.RawMessage {
+	var payload map[string]any
+	if r.Code == "unknown_tag" {
+		if len(r.Unknown) == 0 {
+			return nil
+		}
+		payload = map[string]any{"unknown": r.Unknown, "registry_size": r.RegistrySize}
+		if len(r.Suggestions) > 0 {
+			payload["suggestions"] = r.Suggestions
+		}
+	} else {
+		if r.Field == "" && r.Rule == "" && r.Fix == "" {
+			return nil
+		}
+		payload = map[string]any{"field": r.Field, "rule": r.Rule, "fix": r.Fix}
+		if r.Index >= 0 {
+			payload["index"] = r.Index
+		}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 // checkLabelSpineLocal is the PURE half of the wall: it answers, with no server
