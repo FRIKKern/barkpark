@@ -1051,6 +1051,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {editor_blocks, editor_blocks_synth?} =
       Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
 
+    {editor_blocks, editor_blocks_identity_error} = Paper.project_editor_blocks(editor_blocks)
+
     same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
 
     # spd-w19 — the third seam. When the walk produced NO editor, the shell used
@@ -1065,7 +1067,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         else: socket |> empty_editor_state_for(panes) |> triage_not_found(socket)
 
     editor_mode =
-      if same_doc?,
+      if same_doc? and is_nil(editor_blocks_identity_error),
         do: socket.assigns[:editor_mode] || :classic,
         else: :classic
 
@@ -1080,6 +1082,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_form: new_form,
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
+        editor_blocks_identity_error: editor_blocks_identity_error,
         editor_blocks_synth?: editor_blocks_synth?,
         editor_empty: editor_empty,
         save_status:

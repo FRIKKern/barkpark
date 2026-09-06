@@ -1751,6 +1751,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           >
             <:extra_actions>
               <.editor_mode_toggle :if={beta_ok} mode={@editor_mode} beta_ok={beta_ok} />
+              <span
+                :if={Map.get(assigns, :editor_blocks_identity_error)}
+                role="alert"
+                data-test-id="studio-beta-identity-error"
+              >
+                Block editing is unavailable because this document has duplicate block IDs.
+                No content was changed.
+              </span>
             </:extra_actions>
             <%!-- spd-w19 — the third seam. The slot has been DECLARED and never
                   filled since D222; unfilled it fell to

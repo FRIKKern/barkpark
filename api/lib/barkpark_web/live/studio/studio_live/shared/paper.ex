@@ -1369,6 +1369,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
+  def project_editor_blocks(blocks) do
+    case Content.project_block_ids_safely(blocks) do
+      {:ok, projected} -> {projected, nil}
+      {:error, reason} -> {[], reason}
+    end
+  end
+
+  @doc false
   def sync_editor_blocks(socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
@@ -1378,10 +1386,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
          target_doc_id = Content.draft_id(Content.published_id(doc_id)),
          {:ok, fresh} <- get_fresh_editor_doc(target_doc_id, doc_id, type, dataset, socket) do
       {blocks, synth?} = Content.resolve_blocks_for_edit(fresh, type, dataset)
+      {blocks, identity_error} = project_editor_blocks(blocks)
 
       assign(socket,
         editor_doc: fresh,
         editor_blocks: blocks,
+        editor_blocks_identity_error: identity_error,
+        editor_mode:
+          if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
         editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
       )
