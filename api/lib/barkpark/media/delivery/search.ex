@@ -814,7 +814,8 @@ defmodule Barkpark.Media.Delivery.Search do
   # prefix comes back every time. `search/2` marks their rows
   # `search_cursorable: false` so `next_cursor/1` hands out no token at all
   # rather than one that skips.
-  @spec sort_plan(keyword()) :: {:created, :desc | :asc} | {:updated, :desc} | {:relevance, String.t()}
+  @spec sort_plan(keyword()) ::
+          {:created, :desc | :asc} | {:updated, :desc} | {:relevance, String.t()}
   defp sort_plan(opts) do
     case Keyword.get(opts, :sort, "created-desc") do
       "relevance" ->

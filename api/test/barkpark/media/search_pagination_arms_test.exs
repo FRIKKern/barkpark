@@ -46,7 +46,9 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
   alias Barkpark.Repo
 
   @asset_type "mediaAsset"
-  @seed 12
+  @varied 12
+  @twins 3
+  @seed @varied + @twins
   @page 3
   @q "sunset"
 
@@ -65,8 +67,37 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
     ds = "media-cursor-arms-#{System.unique_integer([:positive])}"
     base = ~U[2026-01-01 00:00:00.000000Z]
 
+    # THREE IDENTICAL TWINS: same `filename`, same `original_name`, same
+    # `inserted_at`, and (below) the same asset-document `title` and
+    # `updated_at`. They tie on EVERY ordering key every arm has except `m.id`,
+    # so they are the only rows that can tell a total ORDER BY from a
+    # planner-chosen one. Their ids are generated SORTED and inserted in
+    # ASCENDING order, so heap order is ascending id — a descending arm that
+    # lost its `m.id` tiebreak therefore returns them in the WRONG order
+    # deterministically, instead of coincidentally matching.
+    twin_ids = 1..@twins |> Enum.map(fn _ -> Ecto.UUID.generate() end) |> Enum.sort()
+    twin_stamp = DateTime.add(base, 10 * 3600, :second)
+    twin_doc_stamp = DateTime.add(base, 20 * 3600, :second)
+
+    twins =
+      twin_ids
+      |> Enum.with_index()
+      |> Enum.map(fn {id, i} ->
+        %{
+          id: id,
+          filename: "#{@q}-twin.jpg",
+          original_name: "#{@q} over water twin",
+          path: "#{ds}/twin-#{i}.jpg",
+          mime_type: "image/jpeg",
+          size: 9000,
+          dataset: ds,
+          inserted_at: twin_stamp,
+          updated_at: twin_stamp
+        }
+      end)
+
     media =
-      for i <- 0..(@seed - 1) do
+      for i <- 0..(@varied - 1) do
         # 4 distinct stamps, 3 rows each => deliberate TIES on the primary sort
         # column of the created-* arms.
         stamp = DateTime.add(base, div(i, 3) * 3600, :second)
@@ -84,7 +115,10 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
         }
       end
 
-    {@seed, inserted} = Repo.insert_all(MediaFile, media, returning: [:id])
+    {@varied, varied_inserted} = Repo.insert_all(MediaFile, media, returning: [:id])
+    {@twins, _} = Repo.insert_all(MediaFile, twins, returning: [:id])
+
+    inserted = varied_inserted
 
     docs =
       inserted
@@ -107,9 +141,28 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
         }
       end)
 
-    {@seed, _} = Repo.insert_all(Document, docs)
+    {@varied, _} = Repo.insert_all(Document, docs)
 
-    %{ds: ds}
+    twin_docs =
+      twin_ids
+      |> Enum.with_index()
+      |> Enum.map(fn {mid, i} ->
+        %{
+          doc_id: "#{ds}-twin-#{i}",
+          type: @asset_type,
+          dataset: ds,
+          title: "#{@q} asset twin",
+          status: "published",
+          content: %{"mediaFileId" => mid, "tags" => []},
+          rev: "rev-#{ds}-twin-#{i}",
+          inserted_at: twin_doc_stamp,
+          updated_at: twin_doc_stamp
+        }
+      end)
+
+    {@twins, _} = Repo.insert_all(Document, twin_docs)
+
+    %{ds: ds, twin_ids: twin_ids}
   end
 
   # ---------------------------------------------------------------- helpers
@@ -191,6 +244,7 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
     stamps = Enum.map(files, & &1.inserted_at)
 
     assert length(files) == @seed
+
     assert length(Enum.uniq(stamps)) < length(stamps),
            "VACUOUS FIXTURE: no two rows share an `inserted_at`, so the cursor's " <>
              "`id` tiebreak is never exercised and criterion 2 is untested."
@@ -230,6 +284,38 @@ defmodule Barkpark.Media.SearchPaginationArmsTest do
              media row) and `relevance` by a computed score that is not a column.
              Following such a token skipped 6 and 5 rows respectively on this
              corpus. `nil` is the honest answer; the caller pages by offset.
+             """
+    end
+  end
+
+  test "rows tied on EVERY ordering key come back in id order, on every arm",
+       %{ds: ds, twin_ids: twin_ids} do
+    # The three twins tie on inserted_at, on the joined document's updated_at,
+    # and on every field the relevance score reads. `m.id` is the ONLY thing
+    # left to order them by. They were inserted in ascending-id order, so heap
+    # order is ascending: a descending arm that dropped its `m.id` tiebreak
+    # returns them ascending and reds here.
+    assert twin_ids == Enum.sort(twin_ids)
+    assert length(twin_ids) == @twins
+
+    for sort <- @all_arms do
+      {ref, _total} = reference(ds, sort)
+      got = Enum.filter(ref, &(&1 in twin_ids))
+
+      expected =
+        case sort do
+          "created-asc" -> twin_ids
+          _ -> Enum.reverse(twin_ids)
+        end
+
+      assert got == expected,
+             """
+             sort=#{sort}: rows that tie on every ordering key did NOT come back
+             in `m.id` order. The ORDER BY is not total, so the order is
+             planner-chosen — while the keyset cursor tiebreaks on `id`.
+
+             expected: #{inspect(expected)}
+             got:      #{inspect(got)}
              """
     end
   end
