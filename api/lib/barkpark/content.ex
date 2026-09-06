@@ -761,6 +761,29 @@ defmodule Barkpark.Content do
           opts
         )
 
+  @doc "Resolve trusted paper block-form source and apply its ops exactly once."
+  def apply_paper_block_form_once(
+        slug,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      ),
+      do:
+        Papers.BlockOps.apply_paper_block_form_once(
+          slug,
+          source_tag,
+          source_params,
+          dataset,
+          request_id,
+          principal_key,
+          resolver,
+          opts
+        )
+
   @doc "Apply a single portable-doc op to any Expectation-bearing document. See `Content.Papers`."
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
@@ -783,6 +806,31 @@ defmodule Barkpark.Content do
           dataset,
           request_id,
           principal_key,
+          opts
+        )
+
+  @doc "Resolve trusted document block-form source and apply its op exactly once."
+  def apply_document_block_form_once(
+        doc_id,
+        type,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      ),
+      do:
+        Papers.BlockOps.apply_document_block_form_once(
+          doc_id,
+          type,
+          source_tag,
+          source_params,
+          dataset,
+          request_id,
+          principal_key,
+          resolver,
           opts
         )
 

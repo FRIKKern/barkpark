@@ -902,6 +902,136 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
     do: {:error, :invalid_paper_ops_request}
 
+  @doc """
+  Resolve trusted server-owned block-form source against the revision-accepted
+  paper blocks and apply the resulting non-empty op batch exactly once.
+
+  The idempotency payload is the raw form source, not the derived ops. A replay
+  therefore returns its stored receipt without invoking the resolver or
+  rechecking the now-stale revision.
+  """
+  def apply_paper_block_form_once(
+        slug,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      )
+
+  def apply_paper_block_form_once(
+        slug,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts
+      )
+      when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
+             is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
+             is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         {:ok, opts} <- normalize_canvas_run_opts(opts),
+         %Document{} = doc <- get_block_op_paper(slug, dataset, opts) do
+      key_hash = paper_ops_key_hash(doc, request_id, principal_key)
+
+      exact_scope =
+        "paper_block_form:v1:" <> block_form_payload_fingerprint(source_tag, source_params, opts)
+
+      Repo.transaction(fn ->
+        case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+          :claimed ->
+            maybe_after_idempotency_claim(opts)
+
+            with %Document{id: current_id} = current_doc <-
+                   get_block_op_paper(slug, dataset, opts),
+                 true <- current_id == doc.id,
+                 {:ok, ops} <- resolve_paper_block_form(current_doc, resolver, opts),
+                 {:ok, receipt, effects} <-
+                   persist_paper_block_ops(current_doc, slug, ops, dataset, opts) do
+              maybe_before_idempotency_complete(opts)
+
+              case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                :ok -> {:applied, receipt, effects}
+                {:error, reason} -> Repo.rollback(reason)
+              end
+            else
+              false -> Repo.rollback(:not_found)
+              nil -> Repo.rollback(:not_found)
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          {:replay, stored_receipt} ->
+            case normalize_stored_paper_ops_receipt(stored_receipt) do
+              {:ok, receipt} -> {:replayed, receipt}
+              {:error, reason} -> Repo.rollback(reason)
+            end
+
+          :in_progress ->
+            Repo.rollback(:idempotency_in_progress)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {:applied, receipt, effects}} ->
+          run_paper_batch_effects(effects, dataset, opts)
+          {:ok, receipt, :applied}
+
+        {:ok, {:replayed, receipt}} ->
+          {:ok, receipt, :replayed}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      true -> {:error, :paper_ops_nested_transaction_unsupported}
+      nil -> {:error, :not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_paper_block_form_once(
+        _slug,
+        _source_tag,
+        _source_params,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _resolver,
+        _opts
+      ),
+      do: {:error, :invalid_block_form_request}
+
+  defp resolve_paper_block_form(%Document{} = doc, resolver, opts) do
+    with if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_block_form_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
+         blocks = project_revision_fenced_ids(blocks, if_rev) do
+      normalize_paper_block_form_resolution(resolver.(blocks))
+    end
+  end
+
+  defp normalize_paper_block_form_resolution({:ok, ops})
+       when is_list(ops) and ops != [] do
+    if Enum.all?(ops, &is_map/1), do: {:ok, ops}, else: {:error, :invalid_block_form_resolution}
+  end
+
+  defp normalize_paper_block_form_resolution({:error, reason}), do: {:error, reason}
+
+  defp normalize_paper_block_form_resolution(_other),
+    do: {:error, :invalid_block_form_resolution}
+
+  defp check_paper_block_form_rev(_doc, nil), do: {:error, :precondition_failed}
+  defp check_paper_block_form_rev(doc, if_rev), do: check_paper_if_rev(doc, if_rev)
+
   defp persist_paper_block_ops(%Document{} = doc, slug, ops, dataset, opts) do
     with if_rev = Keyword.get(opts, :if_rev),
          :ok <- check_paper_if_rev(doc, if_rev),
@@ -1108,6 +1238,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp document_op_payload_fingerprint(op, opts) do
     {op, Keyword.get(opts, :if_rev)}
+    |> deterministic_hash()
+  end
+
+  defp block_form_payload_fingerprint(source_tag, source_params, opts) do
+    case Keyword.get(opts, :canvas_run_context) do
+      nil -> {source_tag, source_params, Keyword.get(opts, :if_rev)}
+      context -> {source_tag, source_params, Keyword.get(opts, :if_rev), context}
+    end
     |> deterministic_hash()
   end
 
@@ -1713,6 +1851,176 @@ defmodule Barkpark.Content.Papers.BlockOps do
         _opts
       ),
       do: {:error, :invalid_document_op_request}
+
+  @doc """
+  Resolve trusted server-owned block-form source against the current generic
+  document blocks and apply the derived op exactly once.
+
+  Matching replays are keyed by the raw source and return before revision or
+  resolver validation. The resolver never receives client-supplied replacement
+  blocks; it receives the authoritative list reloaded inside the claim
+  transaction.
+  """
+  def apply_document_block_form_once(
+        doc_id,
+        type,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts \\ []
+      )
+
+  def apply_document_block_form_once(
+        doc_id,
+        type,
+        source_tag,
+        source_params,
+        dataset,
+        request_id,
+        principal_key,
+        resolver,
+        opts
+      )
+      when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
+             source_tag != "" and is_map(source_params) and is_binary(dataset) and
+             is_function(resolver, 1) and is_list(opts) do
+    with false <- Repo.in_transaction?(),
+         {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
+         {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
+         {:ok, opts} <- normalize_block_form_context_opts(opts),
+         target_doc_id = DraftId.draft_id(DraftId.published_id(doc_id)),
+         {:ok, %Document{} = doc} <-
+           get_document_op_base(target_doc_id, doc_id, type, dataset, opts) do
+      key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
+
+      exact_scope =
+        "document_block_form:v1:" <>
+          block_form_payload_fingerprint(source_tag, source_params, opts)
+
+      Broadcast.clear_deferred_broadcasts()
+      Writer.clear_deferred_after_save()
+
+      try do
+        Repo.transaction(fn ->
+          case IdempotencyStore.claim_exact(key_hash, exact_scope) do
+            :claimed ->
+              maybe_after_idempotency_claim(opts)
+
+              with {:ok, %Document{id: current_id} = current_doc} <-
+                     lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
+                   true <- current_id == doc.id,
+                   :ok <- check_document_if_rev(current_doc, Keyword.get(opts, :if_rev)),
+                   {blocks, _synth?} =
+                     Papers.resolve_blocks_for_edit(current_doc, type, dataset),
+                   {:ok, op} <- normalize_document_block_form_resolution(resolver.(blocks)) do
+                write_opts = Keyword.put(opts, :defer_after_save, true)
+
+                case apply_document_block_op(current_doc.doc_id, type, op, dataset, write_opts) do
+                  {:ok, receipt} ->
+                    maybe_before_idempotency_complete(opts)
+
+                    case IdempotencyStore.complete_exact(key_hash, exact_scope, receipt) do
+                      :ok ->
+                        case Writer.take_deferred_after_save() do
+                          {{:ok, %Document{id: row_id}}, _payload} = deferred
+                          when row_id == receipt.written_row_id ->
+                            {:applied, receipt, deferred}
+
+                          _ ->
+                            Repo.rollback(:document_after_save_effect_missing)
+                        end
+
+                      {:error, reason} ->
+                        Repo.rollback(reason)
+                    end
+
+                  {:error, reason} ->
+                    Repo.rollback(reason)
+                end
+              else
+                false -> Repo.rollback(:idempotency_target_replaced)
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            {:replay, stored_receipt} ->
+              with {:ok, %Document{id: current_row_id}} <-
+                     lock_document_op_base(target_doc_id, doc_id, type, dataset, opts),
+                   {:ok, %{written_row_id: written_row_id} = receipt} <-
+                     normalize_stored_document_op_receipt(stored_receipt) do
+                if written_row_id == current_row_id do
+                  {:replayed, receipt}
+                else
+                  Repo.rollback(:idempotency_target_replaced)
+                end
+              else
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            :in_progress ->
+              Repo.rollback(:idempotency_in_progress)
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
+        end)
+        |> finish_document_op_transaction(dataset, doc, opts)
+      rescue
+        exception ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+    else
+      true -> {:error, :document_op_nested_transaction_unsupported}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  def apply_document_block_form_once(
+        _doc_id,
+        _type,
+        _source_tag,
+        _source_params,
+        _dataset,
+        _request_id,
+        _principal_key,
+        _resolver,
+        _opts
+      ),
+      do: {:error, :invalid_block_form_request}
+
+  defp normalize_document_block_form_resolution({:ok, op}) when is_map(op), do: {:ok, op}
+
+  defp normalize_document_block_form_resolution({:error, reason}), do: {:error, reason}
+
+  defp normalize_document_block_form_resolution(_other),
+    do: {:error, :invalid_block_form_resolution}
+
+  defp normalize_block_form_context_opts(opts) do
+    case CanvasRunContext.normalize(Keyword.get(opts, :canvas_run_context)) do
+      {:ok, nil} -> {:ok, Keyword.delete(opts, :canvas_run_context)}
+      {:ok, context} -> {:ok, Keyword.put(opts, :canvas_run_context, context)}
+      {:error, _reason} -> {:error, :invalid_canvas_run_context}
+    end
+  end
+
+  defp check_document_if_rev(%Document{rev: current}, expected)
+       when is_binary(expected) and expected != "" do
+    if expected == current,
+      do: :ok,
+      else: {:error, {:rev_mismatch, %{expected: expected, actual: current}}}
+  end
+
+  defp check_document_if_rev(%Document{rev: current}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: current}}}
 
   defp get_document_op_base(target_doc_id, requested_doc_id, type, dataset, opts) do
     case Content.get_document(target_doc_id, type, dataset, opts) do
