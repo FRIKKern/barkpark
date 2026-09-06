@@ -790,43 +790,29 @@ export function analyze(src, opts = {}) {
 }
 
 // ── 5b. THE LATENT LEDGER ───────────────────────────────────────────────────
-// Widening the boundary model made a class VISIBLE that no run had ever
-// reached, and it immediately found TWO REAL crossings in the shipped harness —
-// both over the SECOND depth-0 await at line 15705, in tests registered ~13 000
-// lines above it.
+// Wave 62 widened the boundary model, and it immediately found TWO REAL
+// crossings in the shipped harness — `FORBIDDEN_GENERIC` and `ME_OWNER`, both
+// declared thousands of lines BELOW `__app.test.mjs`'s second depth-0 await and
+// read by tests registered far above it. They were latent (the second await
+// re-imports a module the first one already cached, so node never suspended
+// there), the audit that found them was fenced off from `__app.test.mjs`, and
+// so they were carried here BY NAME rather than excused.
 //
-// They are latent rather than firing, and the reason is MEASURED, not assumed:
-// on node v22.22.0 an instrumented copy prints `MODULE about to suspend at
-// point 2` → `MODULE resumed past point 2` BEFORE any test body runs, because
-// line 15705 re-imports `./__preview__/scenarios.mjs`, which line 635 already
-// put in the module cache — the await settles inside one microtask tick and
-// node:test never starts draining. (1200/1200 pass.) That is an ACCIDENT OF THE
-// CACHE, not a property of the file: give that second import any real async
-// work and the window opens on bindings 4 500 lines below.
+// THE HARNESS HAS SINCE BEEN REPAIRED: both declarations were hoisted above
+// that suspension point, the guard reports `crossings: 0`, and the entries were
+// deleted in the SAME commit — because an entry that matches nothing is FATAL
+// here, exactly so a ledger cannot outlive what it excused.
 //
-// The repair belongs to `__app.test.mjs`, and the audit that found this was
-// fenced off from it. So the two are ledgered here BY NAME, and the ledger is a
-// RATCHET IN BOTH DIRECTIONS:
-//   · a crossing NOT on it is FATAL — a third cannot hide behind the two;
+// The ledger stays as a mechanism, EMPTY, and it is a RATCHET IN BOTH
+// DIRECTIONS:
+//   · a crossing NOT on it is FATAL — with nothing on it, every crossing is;
 //   · an entry on it that is NOT FOUND is ALSO FATAL — the ledger cannot rot
 //     into an allowlist that outlives what it excused.
 // Entries key on TEST TITLE + BINDING, never on a line number: this file is
 // edited every wave and a line-anchored pin breaks on the first insertion above
-// it.
-export const LATENT = [
-  {
-    file: "cloud/priv/static/__app.test.mjs",
-    title: "cch-w36-s4: a failed halt/resume stops printing the billing sentence over a 403",
-    binding: "FORBIDDEN_GENERIC",
-    why: "declared at the far end of the file, read ~17 000 lines above it; latent on node 22 only because the boundary-2 import is a module-cache hit",
-  },
-  {
-    file: "cloud/priv/static/__app.test.mjs",
-    title: "mountInstanceTimeline: a failed instance keeps the timeline + shows the verbatim detail + Retry",
-    binding: "ME_OWNER",
-    why: "same suspension point, same cache-hit reason; the repair is to move the fixture above the second await",
-  },
-];
+// it. `--selftest` grades both arms on a synthetic ledger, so they keep their
+// meaning while the real one is empty.
+export const LATENT = [];
 
 // Split crossings into the ones the ledger carries and the ones it does not,
 // and surface entries that no longer match anything. Pure, so `--selftest` can
