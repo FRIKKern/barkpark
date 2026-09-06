@@ -54,6 +54,68 @@ defmodule BarkparkWeb.Studio.PaperEditor.WordCountTest do
     assert footer_text(blocks) =~ "5 words"
   end
 
+  test "footer counts only reader-visible authored form copy" do
+    blocks = [
+      %{
+        "id" => "survey-id-must-not-count",
+        "type" => "form",
+        "kind" => "questionnaire-kind-must-not-count",
+        "unknown" => "unknown metadata must not count",
+        "questions" => [
+          %{
+            "id" => "answer-id-must-not-count",
+            "prompt" => "Pick one",
+            "type" => "single",
+            "rationale" => "Helpful context",
+            "recommendation" => "Choose wisely",
+            "options" => ["Alpha choice", "Beta"],
+            "unknown" => "ignored question metadata"
+          },
+          %{
+            "id" => "explanation",
+            "prompt" => "Explain now",
+            "type" => "text",
+            "options" => ["Dormant choices stay hidden"],
+            "scale" => %{"min" => "hidden", "max" => "metadata"}
+          },
+          %{
+            "id" => "legacy",
+            "prompt" => "Legacy prompt",
+            "type" => "unknown-type",
+            "options" => ["Also dormant"]
+          }
+        ]
+      }
+    ]
+
+    assert footer_text(blocks) =~ "13 words"
+    assert footer_text(blocks) =~ "1 block"
+  end
+
+  test "footer safely ignores malformed form structures and inactive choice metadata" do
+    blocks = [
+      %{
+        "id" => "malformed",
+        "type" => "questionnaire",
+        "questions" => [
+          %{
+            "id" => %{"not" => "visible"},
+            "prompt" => %{"not" => "visible"},
+            "type" => "single",
+            "rationale" => ["not visible"],
+            "recommendation" => %{"not" => "visible"},
+            "options" => %{"not" => "visible"}
+          },
+          "not a question"
+        ]
+      },
+      %{"id" => "scalar", "type" => "form", "questions" => "not visible"}
+    ]
+
+    assert footer_text(blocks) =~ "0 words"
+    assert footer_text(blocks) =~ "2 blocks"
+  end
+
   defp footer_text(blocks) do
     render_component(&PaperEditor.paper_block_editor/1, slug: "word-count", blocks: blocks)
     |> LazyHTML.from_fragment()

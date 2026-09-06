@@ -1091,12 +1091,46 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end)
   end
 
+  defp beta_node_text(%{"type" => type} = block) when type in ["form", "questionnaire"] do
+    block
+    |> Map.get("questions", [])
+    |> List.wrap()
+    |> Enum.map_join(" ", &beta_form_question_text/1)
+  end
+
   defp beta_node_text(%{} = m) do
     ["text", "value", "children", "content", "items", "body"]
     |> Enum.map_join(" ", fn k -> beta_node_text(Map.get(m, k)) end)
   end
 
   defp beta_node_text(_), do: ""
+
+  defp beta_form_question_text(question) when is_map(question) do
+    copy =
+      ~w(prompt rationale recommendation)
+      |> Enum.map_join(" ", fn field -> beta_form_visible_string(question[field]) end)
+
+    options =
+      if beta_form_visible_string(Map.get(question, "type", "text")) in ["single", "multi"] do
+        question
+        |> Map.get("options", [])
+        |> List.wrap()
+        |> Enum.map_join(" ", &beta_form_visible_string/1)
+      else
+        ""
+      end
+
+    copy <> " " <> options
+  end
+
+  defp beta_form_question_text(_question), do: ""
+
+  defp beta_form_visible_string(value) when is_binary(value), do: value
+
+  defp beta_form_visible_string(value) when is_atom(value) or is_number(value),
+    do: to_string(value)
+
+  defp beta_form_visible_string(_value), do: ""
 
   # ── Properties panel (Storage Model A) ──────────────────────────────────────
   # A collapsible section ABOVE the body editor. Each row is a BOUND field-block
