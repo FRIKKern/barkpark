@@ -71,6 +71,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # principal and workspace id, so the totality guarantee has to cover it.
   @public_surface [
     authorize: 3,
+    authorize_with_reason: 3,
     create_membership: 2,
     create_membership: 3,
     create_membership: 4,
@@ -133,6 +134,17 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
       {"authorize/3 :read", fn -> Auth.authorize(principal, workspace_id, :read) end,
        {:error, :forbidden}},
       {"authorize/3 :admin", fn -> Auth.authorize(principal, workspace_id, :admin) end,
+       {:error, :forbidden}},
+      # authorize_with_reason/3 is the arm-naming variant authorize/3 collapses.
+      # It is driven here too: a reason-bearing denial must still be TOTAL, and
+      # on malformed input NO arm applies — a malformed workspace id is not
+      # evidence of non-membership, so the bare `:forbidden` is the honest
+      # answer and the reason atoms must NOT leak into this matrix.
+      {"authorize_with_reason/3 :read",
+       fn -> Auth.authorize_with_reason(principal, workspace_id, :read) end,
+       {:error, :forbidden}},
+      {"authorize_with_reason/3 :admin",
+       fn -> Auth.authorize_with_reason(principal, workspace_id, :admin) end,
        {:error, :forbidden}}
     ]
   end
@@ -156,7 +168,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 19 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 20 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

@@ -77,13 +77,29 @@ defmodule BarkparkCloud.RegistryDeploymentFreshnessTest do
     assert %DateTime{} = map[site.id].updated_at
   end
 
-  test "HONESTY LAW: the slim map carries only status/trigger/timestamps" do
+  # The keyset law is PINNED, not frozen. It grew by the CAUSE PAIR (`stage` +
+  # the RAW `failure_reason`) because that pair is the INPUT
+  # `DeployLedger.classify/1` reads: a select carrying a subset classifies
+  # EVERY row `UNCLASSIFIED` while looking like it works. Both are INTERNAL —
+  # the only caller (`GET /v1/sites`) folds the reason through
+  # `FailureCopy.humanize/1` before a reader sees it. What the law actually
+  # FORBIDS is unchanged and is asserted below the keyset.
+  test "HONESTY LAW: the slim map carries the display keys plus the cause pair" do
     site = setup_site()
     {:ok, _d} = Registry.create_deployment(site, %{git_ref: "main", trigger: "manual"})
 
     entry = Registry.latest_deployment_status_map([site.id])[site.id]
 
-    assert Map.keys(entry) |> Enum.sort() == [:inserted_at, :status, :trigger, :updated_at]
+    assert Map.keys(entry) |> Enum.sort() == [
+             :failure_reason,
+             :inserted_at,
+             :stage,
+             :status,
+             :trigger,
+             :updated_at
+           ]
+
+    refute Map.has_key?(entry, :environment)
     refute Map.has_key?(entry, :console)
     refute Map.has_key?(entry, :build_log_url)
     refute Map.has_key?(entry, :content_rev)

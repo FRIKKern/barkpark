@@ -96,6 +96,32 @@ defmodule BarkparkCloud.Registry do
   # renders it without a new clause over there.
   @spawn_refused_reason "exceeded max deploy start attempts — the deploy driver was never spawned (the control plane refused the child), so this build was never claimed; deploy again to retry"
 
+  # THE MINT THAT NEVER GOT ITS BYTES (pass 0d, ssw9-bl-stale-reaper-prebuilt-mint).
+  # A PREBUILT row (charter D86/D87) is minted by `POST /v1/sites/:id/deploy
+  # {"source":"prebuilt"}` and deliberately starts NO driver — `Web.Router`'s
+  # `start_box_build(true, _)` returns `:ok` without spawning one, because the
+  # client must first build OFF the box with the minted `build_id` baked in and
+  # then PUT the tarball to the artifact route, which is what starts the driver.
+  #
+  # So the row sits `queued` with `claim_epoch == 0`, `claimed_at` nil and
+  # `artifact_sha256` nil — the SAME shape a refused driver spawn leaves behind,
+  # which is why pass (0c) used to reap it and stamp @spawn_refused_reason. That
+  # sentence is a LIE for this row in both halves: nothing refused a spawn (there
+  # was no spawn to refuse — this lane starts none by design), and "deploy again
+  # to retry" sends its owner to look at the control plane's build capacity when
+  # the missing thing is their own upload (a failed local build, a killed CI job,
+  # a closed laptop). Same for pass (0a)'s "no build source": a prebuilt row's
+  # build source is the dist the client holds, not an artifact_url or a repo.
+  #
+  # Word choice is load-bearing three ways: it must NOT carry "exceeded max" +
+  # "attempts" (that is `FailureCopy`'s generic retry class AND, anchored,
+  # `DeployLedger.classify/2`'s STALE_LEASE — neither is true here), it must NOT
+  # carry "no build source" (pass 0a's token, whose copy names a repo and
+  # `bp deploy`), and it MUST carry the distinctive token
+  # "prebuilt artifact was never uploaded" that `FailureCopy.classify/1`'s own
+  # clause keys on so the dashboard and CLI render the missing upload and its cure.
+  @prebuilt_upload_missing_reason "the prebuilt artifact was never uploaded — this deploy was minted for an off-box build and its bytes never arrived; run `bp cloud site deploy <site> --prebuilt <dist>` again"
+
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
   # transit and — per the worker contract — it tore down its half-built box and
@@ -151,6 +177,24 @@ defmodule BarkparkCloud.Registry do
   # being requeued again — so a permanently-crashing build stops looping.
   # Overridable via `config :barkpark_cloud, :max_deploy_claims`.
   @default_max_deploy_claims 5
+
+  # THE MINT→UPLOAD GRACE WINDOW (pass 0d). What has to happen between a prebuilt
+  # mint and its upload is THE CLIENT'S WHOLE BUILD: `site-deploy.sh` bakes
+  # BARKPARK_BUILD_ID into the bytes and HEALTH asserts the served marker BY
+  # VALUE, so the id has to be minted BEFORE the build runs. The window therefore
+  # has to cover a cold `npm ci` + framework build on whatever machine the client
+  # is on, plus a tarball of up to `max_artifact_bytes` over its uplink — minutes
+  # normally, tens of minutes on a cold CI runner.
+  #
+  # It is deliberately NOT expressed in the reaper's other horizons: both
+  # `deployment_stale_after_seconds/0` (15m) and the `max_deploy_claims/0`
+  # product (75m) measure a BUILDER'S LEASE ON OUR OWN FLEET, and reusing either
+  # would silently re-time a client's build whenever fleet tuning moved. 60
+  # minutes is roughly 4x the slowest cold CI build this lane is sized for and is
+  # still a BOUND: past it the client is gone, and the row is the zombie
+  # `create_failed_deployment/3` exists to avoid. Overridable via
+  # `config :barkpark_cloud, :prebuilt_upload_grace_seconds`.
+  @default_prebuilt_upload_grace_seconds 60 * 60
 
   # gh-6: max concurrent branch previews per site — bounded resource. When a push
   # to a NEW branch would exceed this, the oldest preview branch is evicted
@@ -2918,7 +2962,8 @@ defmodule BarkparkCloud.Registry do
 
   @doc """
   The latest deployment per site id in `ids`, as a SLIM freshness map
-  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:}}`. One query via
+  `%{site_id => %{status:, trigger:, inserted_at:, updated_at:, stage:,
+  failure_reason:}}`. One query via
   Postgres `DISTINCT ON (site_id) ... ORDER BY site_id, inserted_at DESC` (the
   `[:site_id, :inserted_at]` index already backs it — no migration) so the
   dashboard fleet list can render an at-a-glance freshness badge — amber while a
@@ -2926,10 +2971,20 @@ defmodule BarkparkCloud.Registry do
   WITHOUT an N+1 per row.
 
   Mirrors `latest_provision_status_map/1` in shape and intent. HONESTY LAW
-  (charter D24): only `status`, `trigger`, and the two timestamps ride along —
+  (charter D24): `status`, `trigger`, and the two timestamps ride along —
   NEVER `console`, `build_log_url`, `content_rev`, or any build internal. Sites
   with no deployment are simply absent (nil-honest at the caller). Empty `ids` →
   empty map (no query).
+
+  THE CAUSE PAIR (`stage` + the RAW `failure_reason`) rides too, and it is NOT a
+  widening of the honesty law — it is the INPUT the caller needs to obey it.
+  `DeployLedger.classify/1` reads `status`, `stage` AND the RAW `failure_reason`;
+  a select carrying only a subset classifies EVERY row `UNCLASSIFIED` while
+  looking like it works, which is the exact failure this pair exists to prevent.
+  Both are INTERNAL: `failure_reason` here is the unscrubbed capture off the
+  column, so the ONLY caller (`GET /v1/sites`) must fold it through
+  `FailureCopy.humanize/1` — the same scrub boundary `deployment_json/1` uses on
+  the per-site route — and must never hand this map to a reader verbatim.
 
   PRODUCTION ONLY (cch-w14-s6). Branch previews are excluded — the badge names
   the site's PRODUCTION state, which is the only thing the fleet row claims.
@@ -2946,7 +3001,9 @@ defmodule BarkparkCloud.Registry do
             status: String.t(),
             trigger: String.t() | nil,
             inserted_at: DateTime.t(),
-            updated_at: DateTime.t()
+            updated_at: DateTime.t(),
+            stage: String.t() | nil,
+            failure_reason: String.t() | nil
           }
         }
   def latest_deployment_status_map([]), do: %{}
@@ -2957,12 +3014,20 @@ defmodule BarkparkCloud.Registry do
       where: d.environment == "production",
       order_by: [asc: d.site_id, desc: d.inserted_at, desc: d.id],
       distinct: d.site_id,
-      select: {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at}
+      select:
+        {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at, d.stage, d.failure_reason}
     )
     |> Repo.all()
-    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at} ->
+    |> Map.new(fn {site_id, status, trigger, inserted_at, updated_at, stage, failure_reason} ->
       {site_id,
-       %{status: status, trigger: trigger, inserted_at: inserted_at, updated_at: updated_at}}
+       %{
+         status: status,
+         trigger: trigger,
+         inserted_at: inserted_at,
+         updated_at: updated_at,
+         stage: stage,
+         failure_reason: failure_reason
+       }}
     end)
   end
 
@@ -3093,6 +3158,28 @@ defmodule BarkparkCloud.Registry do
   @spec max_deploy_claims() :: pos_integer()
   def max_deploy_claims do
     Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
+  end
+
+  @doc """
+  Seconds a MINTED PREBUILT deployment may wait for its artifact upload before
+  `reap_stale_deployments/0` pass (0d) terminates it with
+  `"#{@prebuilt_upload_missing_reason}"`.
+
+  This is the mint→upload gap of charter D86's mint-then-upload lane, and it is a
+  CLIENT-side budget, not a fleet one: the caller has to run its whole off-box
+  build with the minted `build_id` baked in and then upload the tarball. Sized at
+  #{@default_prebuilt_upload_grace_seconds}s (60 minutes) — see the constant for
+  why that is neither `deployment_stale_after_seconds/0` nor the
+  `max_deploy_claims/0` product. Overridable via
+  `config :barkpark_cloud, :prebuilt_upload_grace_seconds`.
+  """
+  @spec prebuilt_upload_grace_seconds() :: pos_integer()
+  def prebuilt_upload_grace_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :prebuilt_upload_grace_seconds,
+      @default_prebuilt_upload_grace_seconds
+    )
   end
 
   ## Warm pool (dwb-10)
@@ -8317,6 +8404,19 @@ defmodule BarkparkCloud.Registry do
   the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
   `reap_stale_deployments/0` is the bound — it terminates such a row once the
   re-attempts have burned the same budget a claimed row gets.
+
+  ## The PREBUILT mint is NOT an orphan (ssw9-bl-stale-reaper-prebuilt-mint)
+
+  A prebuilt row awaiting its upload wears the never-claimed shape exactly —
+  `queued`, `claim_epoch == 0`, `claimed_at` nil, past the lease horizon while
+  the client is still building — but it is not an orphan: it has no driver
+  BY DESIGN (charter D86 starts none until the artifact route hands the bytes
+  over), and re-driving it would ship a prebuilt run with NO artifact. The box
+  refuses that run and the 202-echo check turns the refusal into a failed
+  deployment, so re-driving it does not rescue the row, it KILLS a client's
+  build mid-upload with a box refusal. Excluded here; pass (0d) of
+  `reap_stale_deployments/0` is its bound instead, on its own client-sized
+  window and with a reason that names the missing upload.
   """
   @spec list_orphaned_static_deployments() :: [Deployment.t()]
   def list_orphaned_static_deployments do
@@ -8334,6 +8434,7 @@ defmodule BarkparkCloud.Registry do
           (d.claim_epoch > 0 or d.inserted_at < ^never_claimed_before),
       order_by: [asc: d.inserted_at]
     )
+    |> where(^not_awaiting_prebuilt_upload())
     |> Repo.all()
   end
 
@@ -8675,6 +8776,30 @@ defmodule BarkparkCloud.Registry do
     |> Map.new(fn {id, oldest} -> {id, max(DateTime.diff(now, oldest, :second), 0)} end)
   end
 
+  # THE ONE OWNER of "this row is a prebuilt mint still waiting for its bytes"
+  # (ssw9). THREE queries below need it and they need it to mean the same thing:
+  # pass (0a) and pass (0c) must NOT reap such a row (their reasons are lies for
+  # it — see @prebuilt_upload_missing_reason), and pass (0d) reaps exactly it,
+  # once its grace window is spent. Three hand-written copies of a predicate is
+  # how two of them end up disagreeing after the third is edited.
+  #
+  # Applied as its OWN `where/2` at each call site rather than as a conjunct
+  # inside a `from` — Ecto expands a dynamic only when it IS the whole filter
+  # expression (`Builder.Filter.filter!/6` matches on a bare `%DynamicExpr{}`),
+  # so `... and ^predicate()` compiles fine and then raises
+  # `invalid dynamic expression` at RUN time, from the reaper's Oban job.
+  #
+  # `coalesce(d.source, "box-build")` rather than a bare `d.source != "prebuilt"`
+  # on purpose: `source` was ADDED in W9, so a pre-W9 row can hold SQL NULL, and
+  # `NULL != 'prebuilt'` is NULL, not true — a bare comparison would silently
+  # drop every legacy row out of the passes that must still see it. The column
+  # default is "box-build", which is exactly what a NULL means.
+  defp awaiting_prebuilt_upload do
+    dynamic([d], coalesce(d.source, "box-build") == "prebuilt" and is_nil(d.artifact_sha256))
+  end
+
+  defp not_awaiting_prebuilt_upload, do: dynamic([d], not (^awaiting_prebuilt_upload()))
+
   @doc """
   oban-substrate: proactively recover deployments wedged past the staleness
   threshold, the deploy-queue twin of `reap_stale_provision_jobs/0`. This is what
@@ -8725,6 +8850,17 @@ defmodule BarkparkCloud.Registry do
       (`queued_deploy_age_map/1` is that class's read-only alarm). Run after
       (0a)/(0b) so an un-buildable row still dies with the reason that names its
       own cure, never this one.
+    * (0d) FAIL a `queued` PREBUILT row whose artifact was NEVER UPLOADED
+      (`artifact_sha256` nil) once `prebuilt_upload_grace_seconds/0` has passed
+      since the mint (ssw9-bl-stale-reaper-prebuilt-mint). Charter D86's
+      mint-then-upload lane mints such a row and starts NO driver on purpose, so
+      it wears the exact shape (0c) reaps — `queued`, `claim_epoch == 0`,
+      `claimed_at` nil — while nothing has refused anything: the client simply
+      never uploaded. (0a) and (0c) therefore EXCLUDE it (their reasons name a
+      missing repo and a refused spawn; both are lies here) and this pass owns
+      it, with its own client-sized window and a reason that names the missing
+      upload. NOT kind-scoped — `prebuilt_enabled` is per-site with no kind
+      guard on the deploy route.
     * (i) FAIL a stale `building` row whose `claim_epoch` has reached
       `max_deploy_claims/0` — terminal, so a permanently-crashing build stops
       looping. Run before the requeue pass so an exhausted row terminates
@@ -8748,7 +8884,8 @@ defmodule BarkparkCloud.Registry do
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
   `%{failed: n, requeued: n, released: n, pushing_failed: n, no_source_failed: n,
-  spawn_failed: n}`; an empty sweep returns all-zeros and never raises.
+  spawn_failed: n, upload_missing_failed: n}`; an empty sweep returns all-zeros
+  and never raises.
 
   `spawn_failed` is deliberately its OWN key rather than another summand of
   `no_source_failed` (which pairs 0a and 0b): "the driver was never spawned" and
@@ -8762,7 +8899,8 @@ defmodule BarkparkCloud.Registry do
           released: non_neg_integer(),
           pushing_failed: non_neg_integer(),
           no_source_failed: non_neg_integer(),
-          spawn_failed: non_neg_integer()
+          spawn_failed: non_neg_integer(),
+          upload_missing_failed: non_neg_integer()
         }
   def reap_stale_deployments do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
@@ -8793,6 +8931,7 @@ defmodule BarkparkCloud.Registry do
             is_nil(s.github_repo),
         select: {d.id, d.site_id}
       )
+      |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
         set: [
           status: "failed",
@@ -8857,11 +8996,48 @@ defmodule BarkparkCloud.Registry do
             d.inserted_at < ^spawn_budget_before,
         select: {d.id, d.site_id}
       )
+      |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
         set: [
           status: "failed",
           failure_reason: @spawn_refused_reason,
           detail: failure_detail(@spawn_refused_reason),
+          updated_at: now
+        ]
+      )
+
+    # (0d) THE MINT THAT NEVER GOT ITS BYTES (ssw9-bl-stale-reaper-prebuilt-mint).
+    # A prebuilt row is minted with no driver by design and waits for the client
+    # to upload its `dist/`; until then it is `queued`, `claim_epoch == 0`,
+    # `artifact_sha256` nil — indistinguishable BY SHAPE from a refused driver
+    # spawn, which is why (0c) above used to reap it and accuse a spawn that
+    # never happened. Both (0a) and (0c) now exclude it; this pass is the bound
+    # that keeps excluding it from being a zombie.
+    #
+    # NOT kind-scoped, unlike (0a)/(0c): `prebuilt_enabled` is a per-SITE opt-in
+    # with no kind guard on the deploy route, so a container site can mint a
+    # prebuilt row too, and its fault is identical.
+    #
+    # Its own window — `prebuilt_upload_grace_seconds/0`, not the fleet's lease
+    # or claim budget — because what it waits on is the CLIENT'S build, not any
+    # worker of ours. `d.status == "queued"` keeps a human-cancelled row and a
+    # row whose upload DID arrive (the artifact route starts the driver, which
+    # claims it out of `queued`) out by construction; `is_nil(artifact_sha256)`
+    # is the second, independent proof that no bytes ever landed.
+    prebuilt_grace_before =
+      DateTime.add(now, -prebuilt_upload_grace_seconds(), :second)
+
+    {upload_missing_failed, upload_missing_rows} =
+      from(d in Deployment,
+        where: d.status == "queued" and d.inserted_at < ^prebuilt_grace_before,
+        select: {d.id, d.site_id}
+      )
+      |> where(^awaiting_prebuilt_upload())
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: @prebuilt_upload_missing_reason,
+          detail: failure_detail(@prebuilt_upload_missing_reason),
           updated_at: now
         ]
       )
@@ -8948,6 +9124,7 @@ defmodule BarkparkCloud.Registry do
       {container_rows, @no_build_source_reason},
       {static_rows, @no_content_binding_reason},
       {spawn_rows, @spawn_refused_reason},
+      {upload_missing_rows, @prebuilt_upload_missing_reason},
       {failed_rows, @stale_builder_reason},
       {pushing_rows, @instance_unreachable_reason}
     ]
@@ -8962,7 +9139,8 @@ defmodule BarkparkCloud.Registry do
       released: released,
       pushing_failed: pushing_failed,
       no_source_failed: no_source_failed,
-      spawn_failed: spawn_failed
+      spawn_failed: spawn_failed,
+      upload_missing_failed: upload_missing_failed
     }
   end
 

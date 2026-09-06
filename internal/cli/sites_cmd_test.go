@@ -344,10 +344,16 @@ func TestSitesListJSONCarriesTheEmbedKeysetAndTheCohort(t *testing.T) {
 	if last == nil {
 		t.Fatalf("site-1 lost its last_deployment:\n%s", stdout)
 	}
-	if len(*last) != 4 {
+	// SIX keys now: the four display keys plus the CAUSE PAIR the fleet list
+	// could not say. The pair is present-and-null on this LIVE row, which is
+	// the point — an absent key would say "this CLI is older than the server"
+	// rather than "this deploy succeeded".
+	if len(*last) != 6 {
 		t.Fatalf("last_deployment widened past the server's keyset: %+v", *last)
 	}
-	for _, k := range []string{"status", "trigger", "inserted_at", "updated_at"} {
+	for _, k := range []string{
+		"status", "trigger", "inserted_at", "updated_at", "failure_class", "failure_reason",
+	} {
 		if _, ok := (*last)[k]; !ok {
 			t.Fatalf("last_deployment missing %q: %+v", k, *last)
 		}
@@ -1464,5 +1470,167 @@ func TestCloudSiteUnknownVerbNamesTheListingPath(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "bp sites") || !strings.Contains(stderr, "bp cloud site ls") {
 		t.Fatalf("the unknown-verb refusal must name the listing path:\n%s", stderr)
+	}
+}
+
+// sitesListFailureFixture: one site whose last production deploy FAILED and
+// carries the control plane's cause pair, one that is live (explicit nulls on
+// both cause keys — the server's own way of saying "no cause here"), and one
+// that never deployed. The fleet list is the only surface that shows all three
+// at once, which is exactly why the cause has to reach it.
+const sitesListFailureFixture = `{"sites":[
+	{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101,"current_deployment_id":"dep-a","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z","last_deployment":{"status":"failed","trigger":"manual","inserted_at":"2026-06-26T02:00:00Z","updated_at":"2026-06-26T02:04:00Z","failure_class":"BOX_BUSY_409","failure_reason":"the instance refused the deploy (HTTP 409): already_running"}},
+	{"id":"site-2","barkpark_id":"bp-1","team_id":"team-1","name":"Shop","slug":"shop","framework":"nextjs","domains":[],"scale_mode":"zero","port":0,"current_deployment_id":"dep-b","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z","last_deployment":{"status":"live","trigger":"content-auto","inserted_at":"2026-06-26T03:00:00Z","updated_at":"2026-06-26T03:04:00Z","failure_class":null,"failure_reason":null}},
+	{"id":"site-3","barkpark_id":"bp-1","team_id":"team-1","name":"Docs","slug":"docs","framework":"nextjs","domains":[],"scale_mode":"zero","port":0,"current_deployment_id":"","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z","last_deployment":null}
+]}`
+
+func sitesTableFor(t *testing.T, fixture string) string {
+	t.Helper()
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, fixture)
+
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	return stdout
+}
+
+// TestSitesListNamesTheFailureCause: `bp sites` could say THAT a site's last
+// deploy failed and never WHY — the Go struct dropped the two keys the API
+// projects. The table now carries a WHY column with the class AND the
+// humanized sentence, both taken verbatim off the wire.
+func TestSitesListNamesTheFailureCause(t *testing.T) {
+	stdout := sitesTableFor(t, sitesListFailureFixture)
+
+	for _, want := range []string{
+		"WHY",
+		"BOX_BUSY_409",
+		"the instance refused the deploy (HTTP 409): already_running",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("table missing %q:\n%s", want, stdout)
+		}
+	}
+	// The LIVE site does not borrow the failed site's cause. Its row is
+	// identified by its own slug so this cannot pass on a substring of the
+	// failed row.
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.Contains(line, "shop") {
+			continue
+		}
+		if strings.Contains(line, "BOX_BUSY_409") || strings.Contains(line, "refused") {
+			t.Fatalf("live site borrowed a cause:\n%s", line)
+		}
+	}
+}
+
+// TestSitesListOmitsWhyWhenNothingFailed: the WHY column is CONDITIONAL. A
+// fleet with no cause to name gets the table it always had — a column of "—"
+// would imply the CLI lost something the server sent.
+func TestSitesListOmitsWhyWhenNothingFailed(t *testing.T) {
+	stdout := sitesTableFor(t, sitesListFixture)
+
+	if strings.Contains(stdout, "WHY") {
+		t.Fatalf("WHY column appeared with nothing to explain:\n%s", stdout)
+	}
+	// …and the columns that were always there still are.
+	for _, want := range []string{"NAME", "SLUG", "DOMAINS", "STATUS", "LAST DEPLOY"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("table missing column %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestSitesListJSONCarriesTheCausePair: `-o json` re-emits the server's cause
+// pair, and emits EXPLICIT NULLS on a row that did not fail. A missing key and
+// a null key are different facts — the first says "this CLI is older than the
+// server", the second says "this deploy succeeded" — and a consumer must be
+// able to tell them apart from the payload alone.
+func TestSitesListJSONCarriesTheCausePair(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, sitesListFailureFixture)
+
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "json"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+
+	var payload struct {
+		Sites []struct {
+			Slug           string `json:"slug"`
+			LastDeployment *struct {
+				Status        string  `json:"status"`
+				FailureClass  *string `json:"failure_class"`
+				FailureReason *string `json:"failure_reason"`
+			} `json:"last_deployment"`
+		} `json:"sites"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+
+	byslug := map[string]*string{}
+	rawKeys := map[string]bool{}
+	for _, site := range payload.Sites {
+		if site.LastDeployment == nil {
+			continue
+		}
+		byslug[site.Slug] = site.LastDeployment.FailureClass
+		rawKeys[site.Slug] = true
+	}
+
+	if got := byslug["blog"]; got == nil || *got != "BOX_BUSY_409" {
+		t.Fatalf("blog failure_class = %v, want BOX_BUSY_409", got)
+	}
+	if got := byslug["shop"]; got != nil {
+		t.Fatalf("live site carries a failure_class %q", *got)
+	}
+
+	// The KEY is present on the live row, not merely null-by-absence. Decoded
+	// pointers cannot tell those apart, so read the raw map.
+	var raw struct {
+		Sites []map[string]any `json:"sites"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	for _, site := range raw.Sites {
+		if site["slug"] != "shop" {
+			continue
+		}
+		last, ok := site["last_deployment"].(map[string]any)
+		if !ok {
+			t.Fatalf("shop has no last_deployment object: %v", site)
+		}
+		for _, k := range []string{"failure_class", "failure_reason"} {
+			v, present := last[k]
+			if !present {
+				t.Fatalf("live row omits %q entirely — an absent key says the CLI is stale, not that the deploy succeeded", k)
+			}
+			if v != nil {
+				t.Fatalf("live row %q = %v, want null", k, v)
+			}
+		}
+		// And nothing widened the embed while we were here.
+		for _, forbidden := range []string{"failure_reason_raw", "console", "build_log_url", "content_rev"} {
+			if _, present := last[forbidden]; present {
+				t.Fatalf("embed leaked %q", forbidden)
+			}
+		}
 	}
 }

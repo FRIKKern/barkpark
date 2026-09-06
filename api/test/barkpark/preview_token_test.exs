@@ -54,6 +54,33 @@ defmodule Barkpark.PreviewTokenTest do
       assert {:error, :expired} = PreviewToken.verify(jwt, @secret)
     end
 
+    test "a caller-supplied far-future :exp cannot extend the signed lifetime" do
+      now = System.system_time(:second)
+      far_future = now + 10 * 365 * 24 * 3600
+
+      {jwt, full} =
+        PreviewToken.sign(
+          %{dataset: "production", doc_ids: [], ttl_seconds: 60, exp: far_future},
+          @secret
+        )
+
+      # The signer's ceiling wins, not the caller's claim.
+      assert full[:exp] <= now + 60
+      refute full[:exp] == far_future
+
+      assert {:ok, decoded} = PreviewToken.verify(jwt, @secret)
+      assert decoded["exp"] <= now + 60
+    end
+
+    test "a caller-supplied :exp may still SHORTEN the lifetime" do
+      past = System.system_time(:second) - 100
+
+      {_jwt, full} =
+        PreviewToken.sign(%{dataset: "production", doc_ids: [], exp: past}, @secret)
+
+      assert full[:exp] == past
+    end
+
     test "returns :invalid on malformed input" do
       assert {:error, :invalid} = PreviewToken.verify("not-a-jwt", @secret)
     end

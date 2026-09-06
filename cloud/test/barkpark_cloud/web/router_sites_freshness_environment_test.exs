@@ -179,7 +179,13 @@ defmodule BarkparkCloud.Web.RouterSitesFreshnessEnvironmentTest do
       assert row["last_deployment"] == nil
     end
 
-    test "HONESTY LAW holds: the embed still carries exactly four keys" do
+    # The keyset law is PINNED, not frozen: it grew by the CAUSE PAIR (`stage` +
+    # the RAW `failure_reason`), which is the INPUT `DeployLedger.classify/1`
+    # needs — a select carrying a subset classifies every row `UNCLASSIFIED`
+    # while looking like it works. What the law actually forbids is unchanged
+    # and is asserted below the keyset: no build internals, and no
+    # `environment` (the query FILTERS on it; the embed must not claim it).
+    test "HONESTY LAW holds: the map carries the four display keys plus the cause pair" do
       {_user, team} = user_with_team()
       site = site_fixture(team)
       _live = live_production_deployment(site)
@@ -187,8 +193,19 @@ defmodule BarkparkCloud.Web.RouterSitesFreshnessEnvironmentTest do
 
       entry = Registry.latest_deployment_status_map([site.id])[site.id]
 
-      assert Map.keys(entry) |> Enum.sort() == [:inserted_at, :status, :trigger, :updated_at]
+      assert Map.keys(entry) |> Enum.sort() == [
+               :failure_reason,
+               :inserted_at,
+               :stage,
+               :status,
+               :trigger,
+               :updated_at
+             ]
+
       refute Map.has_key?(entry, :environment)
+      refute Map.has_key?(entry, :console)
+      refute Map.has_key?(entry, :build_log_url)
+      refute Map.has_key?(entry, :content_rev)
     end
   end
 end

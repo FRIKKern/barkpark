@@ -202,6 +202,20 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      # ── RUNNER HARDWARE CENSUS (task-f21e6a627ca13ef8) ─────────────────────
+      # The green and refusal arms die intermittently at BEAM boot with
+      # `sys_sigaltstack(): Failed to set alternate signal stack` (musl runtime
+      # image). Measured 2026-09-06 over 85 executed runs: 9 of 16 runs in Azure
+      # regions westus3+centralus crashed, 0 of 69 elsewhere, with runner
+      # version, image version, agent and OS identical across all 85 — so the
+      # cause is a HOST property, and the region is the finest attribute the
+      # default log carries. This step records the two attributes that decide
+      # between "glibc base image" and "retry on this host": CPU model and
+      # kernel release. It is not a gate (no continue-on-error, no verdict) and
+      # must never fail the job — hence the trailing `|| true`.
+      - name: Runner hardware census (sigaltstack correlation)
+        run: |
+          { grep -m1 'model name' /proc/cpuinfo; uname -r; nproc; } || true
       - name: Env census (both runtime roots)
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict

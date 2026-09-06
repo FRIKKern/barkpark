@@ -1680,9 +1680,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "error" => 9,
     "evidence" => 2,
     "failed" => 2,
-    "failure_class" => 2,
+    # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
+    "failure_class" => 3,
     "failure_rate" => 2,
-    "failure_reason" => 2,
+    # deploy/sites-embed-failure-cause: same third declaration on `SiteDeploymentEmbed` — the humanized reason rides beside the class.
+    "failure_reason" => 3,
     "framework" => 4,
     "from" => 2,
     "git_ref" => 2,

@@ -1482,11 +1482,36 @@ function cellProbeJs(cell) {
   //   · display:-webkit-box paints ONLY its live -webkit-line-clamp ellipsis
   //     (driven: clamp vs plain overflow:hidden twins differ); a clamp
   //     declared on any other display does nothing.
-  // KNOWN LIMIT (owned by cchi-w23-bl-d253-inert-ellipsis-correction-five-
-  // sites, the break-opportunity upgrade): a block host whose overflowing
-  // line holds ONLY atomic inlines (an inline-block child, sw 202 > cw 60)
-  // paints no "…" yet is exempted here — a declaration-computed predicate
-  // cannot see it; the measured upgrade that row owns can.
+  // KNOWN LIMIT, AND IT STAYS HERE ON PURPOSE (cchi-w23-bl-d253-inert-
+  // ellipsis-correction-five-sites, the break-opportunity upgrade). A block
+  // host whose overflowing line holds ONLY atomic inlines (an inline-block
+  // child) paints no "…" yet is exempted here. CONFIRMED on the GATING-PLATFORM
+  // re-run of D253's decoded-pixel probe (Ubuntu 24.04.4 LTS, Google Chrome
+  // 151.0.7922.71): white-space nowrap + text-overflow ellipsis over one
+  // inline-block child, sw 408 / cw 200, inks to x=199 — the box edge — so no
+  // marker painted at all. (Byte-identical pixel hash 2ebf2e95 on a Chromium
+  // 152 / Debian 12 second run: this host is engine behaviour, not a build.)
+  //
+  // THE CORRECTION LANDED IN overflow-guard.mjs's MEMBERS LEG, NOT HERE, and
+  // the reason is the shape of this function, not the size of the job. The
+  // measured predicate needs a MIN-CONTENT WIDTH and a TEXT-RUN WIDTH per
+  // element: a hidden width:min-content clone appended into the element's own
+  // parent, plus Range rects over its text nodes. The members leg spends that
+  // on the handful of .set-row-name elements in 44 cells. cueOf above runs
+  // over EVERY element of EVERY page at EVERY width — a forced-layout clone and
+  // a Range walk per element would turn a declaration read into an O(n) reflow
+  // storm, and this sweep's whole value is that it is cheap enough to run over
+  // everything.
+  //
+  // SO THE PREDICATE HERE IS DELIBERATELY THE CONSERVATIVE HALF. It is exact on
+  // the two cases it CAN decide from declarations alone (a flex/grid box has no
+  // line boxes to ellipsize; a display:-webkit-box paints only its live clamp),
+  // and on everything else it says "assume it paints" — which EXEMPTS, i.e.
+  // stays SILENT, rather than accusing. The residue is therefore a MISS, never
+  // a false red: an atomic-inline line reaches CLIP_NO_CUE and is not reported.
+  // inertEllipsis is recorded on every CLIP_NO_CUE row above precisely so a
+  // reader can see which exemptions rode on a declaration this function did not
+  // measure.
   function ellipsisCanPaint(cs){
     if (cs.display==='-webkit-box')
       return !!cs.webkitLineClamp && cs.webkitLineClamp!=='none';

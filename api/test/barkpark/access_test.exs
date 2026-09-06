@@ -103,6 +103,23 @@ defmodule Barkpark.AccessTest do
                {:error, :forbidden}
     end
 
+    # The OTHER arm of the same conjunction, pinned apart from the one above so
+    # the two reasons can never collapse back into one atom. This grantor HOLDS
+    # `read` — `permits?` cannot be what refused it; it is simply not a member
+    # of `ws_b`. The membership-shortfall test above (`:forbidden`) and this one
+    # (`:not_a_member`) fail in opposite directions if either arm is mislabelled.
+    test "a non-member grantor that HOLDS the capability fails on membership, not capability" do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      grantor = grantor_token(ws_a, ["read", "write"])
+
+      # It really does hold the capability — in the workspace it belongs to.
+      assert {:ok, _} = Access.mint(grantor, base_attrs(ws_a, %{capabilities: ["read"]}))
+
+      assert Access.mint(grantor, base_attrs(ws_b, %{capabilities: ["read"]})) ==
+               {:error, :not_a_member}
+    end
+
     test "an unknown capability is rejected (fail-closed)" do
       ws = create_workspace!()
       grantor = grantor_token(ws, ["admin"])

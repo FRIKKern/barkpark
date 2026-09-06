@@ -13179,7 +13179,47 @@ defmodule BarkparkCloud.Web.Router do
   # the map already carries ONLY status/trigger/timestamps — the badge renders
   # freshness, never a fabricated content_rev.
   defp put_last_deployment(json, site, fresh_map) do
-    Map.put(json, :last_deployment, Map.get(fresh_map, site.id))
+    Map.put(json, :last_deployment, last_deployment_json(Map.get(fresh_map, site.id)))
+  end
+
+  # The list embed's own projection. A site with no production deployment stays
+  # nil — never a fabricated pending state.
+  defp last_deployment_json(nil), do: nil
+
+  # THE CAUSE, not just the fact. The fleet list is the ONE surface that shows
+  # every site at once, so it is the only place a person notices several sites
+  # failing — and it used to be able to say THAT a deploy failed and never WHY,
+  # with the reason one endpoint away and already computed.
+  #
+  # `failure_class` and `failure_reason` are projected here EXACTLY as
+  # `deployment_json/1` projects them on the per-site route, deliberately by the
+  # same two calls:
+  #
+  #   * `DeployLedger.classify/1` off the RAW pair (`stage` + the raw column) the
+  #     freshness map now selects. Never off the humanized prose: `humanize/1` is
+  #     a display fold that maps many distinct causes onto one sentence.
+  #   * `FailureCopy.humanize/1` is this payload's SCRUB CARRIER
+  #     (`classify |> strip_ansi |> scrub`). The raw capture off the map MUST NOT
+  #     reach a list reader — a list is a wider audience than a per-site read, so
+  #     an unscrubbed twin here would widen a credential's audience, which is
+  #     precisely the leak shape the raw-vs-humanized boundary exists to stop.
+  #     There is deliberately NO `failure_reason_raw` on this embed.
+  #
+  # A live row carries nil on both (classify/1 answers nil off a non-failed,
+  # non-deferred status; humanize(nil) is nil), so the list does not start
+  # implying a cause for sites that did not fail.
+  #
+  # HONESTY LAW (charter D24) is unchanged: still no console, build_log_url or
+  # content_rev — the embed names the cause, never the build internals.
+  defp last_deployment_json(%{} = fresh) do
+    %{
+      status: fresh.status,
+      trigger: fresh.trigger,
+      inserted_at: fresh.inserted_at,
+      updated_at: fresh.updated_at,
+      failure_class: DeployLedger.classify(fresh),
+      failure_reason: FailureCopy.humanize(fresh.failure_reason)
+    }
   end
 
   # The stable repo shape the picker renders — just the full name + visibility,
