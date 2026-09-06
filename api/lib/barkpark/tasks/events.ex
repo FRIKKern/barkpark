@@ -42,6 +42,33 @@ defmodule Barkpark.Tasks.Events do
     * `doc_id` — the task the event is about.
     * `rev`    — the task's rev after the mutation.
     * `at`     — the commit timestamp (display only — NEVER a resume cursor).
+
+  ## The typed payload (`:payload` — OPT-IN)
+
+  A task write path may stamp its own map into the event's `document` alongside
+  the Envelope-shaped view of the row (`Tasks.Internal.insert_mutation_event!/5`
+  merges `extra_document`). `task.staged` is the one that matters for recovery:
+  `stage.ex` writes `%{"staged" => %{"note" => …, "superseded_note" => …, …}}`,
+  where `superseded_note` is the disposition reason the stage DISPLACED. That
+  is the only durable copy of a clobbered note — and until this option existed
+  the feed dropped it on the floor, so `bp task stage --help`'s promise that "a
+  superseded note is recoverable from `bp task events`" was FALSE: the projection
+  never selected `document` at all.
+
+  With `payload: true` each row gains a `:payload` key carrying ONLY the typed
+  stamps (`staged`, `reparented`, `fenced`, `lease_expired`) — never the Envelope half, so
+  the row's whole `content` blob and the `caller_token_id` audit stamp stay out
+  of the feed. A row whose event stamped none of them carries no `:payload` key
+  at all.
+
+  ## Why OPT-IN and not always-on
+
+  Two free-text notes ride in one `staged` stamp, and notes of 1228 characters
+  are attested on this very row's history. A default page is 500 events, so a
+  default-on payload would add up to ~1 MB to a body that every statusline /
+  TUI / deck poller fetches on a tick, to carry a field only a recovery sweep
+  reads. Opt-in leaves every existing poller's response BYTE-IDENTICAL: the
+  option defaults to false and the query is the same one it always was.
   """
 
   import Ecto.Query
@@ -50,6 +77,13 @@ defmodule Barkpark.Tasks.Events do
   alias Barkpark.Repo
 
   @task_type "task"
+
+  # The typed `extra_document` stamps a task write path may merge into an
+  # event's `document` (`Tasks.Internal.insert_mutation_event!/5`). A WHITELIST,
+  # not "document minus the envelope": the envelope half carries the row's full
+  # `content` and `caller_token_id`, and neither belongs on a poll feed. A new
+  # typed stamp is invisible here until it is added to this list ON PURPOSE.
+  @payload_keys ~w(staged reparented fenced lease_expired)
 
   # Keyset page size, matching EventLog's replay batch. A single feed call
   # returns at most this many events; the caller pages by advancing `since` to
@@ -68,6 +102,9 @@ defmodule Barkpark.Tasks.Events do
     * `:limit` — page size, clamped to `[1, #{@max_limit}]` (default
       #{@default_limit}). A raw/oversized/negative value can never emit an
       unbounded or negative SQL `LIMIT`.
+    * `:payload` — `true` adds the typed payload stamp (`:payload`) to each row
+      that has one; see the moduledoc. Defaults to `false`, in which case the
+      projection and the returned maps are byte-for-byte what they always were.
     * `:workspace_id` — when a non-nil binary, restrict to events whose own
       denormalised `workspace_id` matches — the SAME row-local tenant boundary
       `EventLog.replay_since/4` enforces (never an INNER JOIN to `documents`, so
@@ -85,21 +122,58 @@ defmodule Barkpark.Tasks.Events do
     limit = opts |> Keyword.get(:limit, @default_limit) |> clamp_limit()
     since = max(since, 0)
     workspace_id = Keyword.get(opts, :workspace_id)
+    payload? = Keyword.get(opts, :payload, false) == true
 
-    from(e in MutationEvent,
-      where: e.dataset == ^dataset and e.type == ^@task_type and e.id > ^since,
-      order_by: [asc: e.id],
-      limit: ^limit,
+    rows =
+      from(e in MutationEvent,
+        where: e.dataset == ^dataset and e.type == ^@task_type and e.id > ^since,
+        order_by: [asc: e.id],
+        limit: ^limit
+      )
+      |> maybe_scope_workspace(workspace_id)
+      |> select_shape(payload?)
+      |> Repo.all()
+
+    if payload?, do: Enum.map(rows, &project_payload/1), else: rows
+  end
+
+  # The lean shape (default) and the lean shape PLUS the raw `document`, which
+  # `project_payload/1` immediately narrows to the whitelist. `document` is
+  # selected only under the opt-in, so the default read moves the same bytes off
+  # Postgres it always did.
+  defp select_shape(query, false) do
+    from(e in query,
+      select: %{id: e.id, event: e.mutation, doc_id: e.doc_id, rev: e.rev, at: e.inserted_at}
+    )
+  end
+
+  defp select_shape(query, true) do
+    from(e in query,
       select: %{
         id: e.id,
         event: e.mutation,
         doc_id: e.doc_id,
         rev: e.rev,
-        at: e.inserted_at
+        at: e.inserted_at,
+        document: e.document
       }
     )
-    |> maybe_scope_workspace(workspace_id)
-    |> Repo.all()
+  end
+
+  # `document` never reaches the wire — it is replaced by the whitelisted typed
+  # stamps under `:payload`, and dropped entirely when the event stamped none
+  # (a plain `task.claimed` row is then IDENTICAL to its default-shape self).
+  defp project_payload(row) do
+    document = Map.get(row, :document)
+    row = Map.delete(row, :document)
+
+    typed =
+      case document do
+        map when is_map(map) -> Map.take(map, @payload_keys)
+        _ -> %{}
+      end
+
+    if map_size(typed) == 0, do: row, else: Map.put(row, :payload, typed)
   end
 
   @doc """

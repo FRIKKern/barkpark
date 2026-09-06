@@ -843,6 +843,12 @@ defmodule Barkpark.Plugins.Tasks do
             name: "dataset",
             type: "string",
             summary: "Dataset to read task events from (defaults to production)."
+          },
+          %{
+            name: "payload",
+            type: "bool",
+            summary:
+              "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
           }
         ],
         writes: false,
