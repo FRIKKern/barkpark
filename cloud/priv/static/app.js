@@ -6651,24 +6651,75 @@
     return "ok";                                                // 12
   }
 
-  // The rank number per decision 15 (1 = most urgent … 12 = ok), BYTE-EQUAL to
-  // the decision-32 fixture (__fixtures__/attention_order.json) — the node
-  // harness asserts every entry here against that file, which is how the SPA
-  // stops drifting silently (until jpf-w1-queue-age-alarm, Go was the
-  // fixture's only asserter and this ladder had wandered to its own 1–9
-  // numbering). KNOWN GAP, named where it lives: ranks 5 (strained) and
-  // 6 (filling) are fixture states this console does not classify yet — the
-  // holes keep every shared state on its fixture rank, and the harness pins
-  // the gap to exactly those two so a third missing state reds the suite.
-  // jpf-w1 D7 adds deploy_stalled at 8: after the box-condition rungs
-  // (degraded/unreported — a sick box's stuck queue is a symptom), before
-  // behind (a deploy nobody builds beats passive update drift).
-  var ATTENTION_RANK = {
-    removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    unreported: 7,
-    deploy_stalled: 8,
-    behind: 9, removing: 10, provisioning: 11, ok: 12,
-  };
+  // ── THE LADDER IS AN ORDER, NOT A HAND-TYPED NUMBERING (dr-w10 ruling A) ──
+  //
+  // This array IS the attention ladder of charter decision 15 / decision 32,
+  // in rung order, and the SPA's rank numbers are its POSITIONS — nothing here
+  // repeats a literal 1…14. That is the whole point of the shape: ruling A
+  // inserts `deploys_failing` after `degraded` and `diverged` behind it, which
+  // under the old hand-written `{removal_failed: 1, …, ok: 12}` map meant
+  // RENUMBERING nine unrelated entries by hand — and a renumbering typo is
+  // invisible to review and silent at runtime. An insertion here is one line.
+  //
+  // The cross-surface truth is `__fixtures__/attention_order.json` (owned by
+  // the deploy epic, charter D57; Go reads it too). The node harness holds THIS
+  // array to THAT file as an ORDERED SEQUENCE, restricted to the states the
+  // fixture carries — so the two agree on ORDER, which is the thing that has
+  // meaning, rather than on absolute integers, which are a rendering of order
+  // and drift the moment either side inserts a rung. `unmetered` is a Go DETAIL
+  // MARKER, not a rung, and deliberately does not appear here.
+  //
+  // The bucket rides ON THE RUNG, not on a `r <= 9` threshold: the old
+  // thresholds were three magic integers that an insertion silently
+  // invalidates (inserting two attention rungs turns `<= 9` into a boundary
+  // that files `deploy_stalled` under "in-flight" while every test still reads
+  // the words it expects).
+  var ATTENTION_LADDER = [
+    { state: "removal_failed",  bucket: "attention" },
+    { state: "failed",          bucket: "attention" },
+    { state: "suspended",       bucket: "attention" },
+    { state: "degraded",        bucket: "attention" },
+    { state: "deploys_failing", bucket: "attention" },
+    { state: "diverged",        bucket: "attention" },
+    { state: "strained",        bucket: "attention" },
+    { state: "filling",         bucket: "attention" },
+    { state: "unreported",      bucket: "attention" },
+    { state: "deploy_stalled",  bucket: "attention" },
+    { state: "behind",          bucket: "attention" },
+    { state: "removing",        bucket: "in-flight" },
+    { state: "provisioning",    bucket: "in-flight" },
+    { state: "ok",              bucket: "healthy" },
+  ];
+
+  // THE NAMED GAP, and it is a gap in the CLASSIFIER, not in the ladder.
+  // These rungs are ORDERED here (so every other state sits on its true rung)
+  // and are not yet PRODUCED by classifyBp, because their inputs are not on the
+  // fleet payload this console reads: `strained`/`filling` need the load and
+  // disk vitals, and `deploys_failing`/`diverged` need the per-box `deploy_rate`
+  // and commit-ancestry verdict the control plane only began emitting with the
+  // deploy-side half of ruling A. Naming them HERE is what keeps the closed-enum
+  // guard honest: a rung added to the ladder that is NOT named here must have a
+  // classifyBp arm and a statusOf arm, or the enum test reds.
+  // (The name says what these rungs ARE — ORDERED ONLY. It deliberately
+  // avoids the word the dr-w1-s2 guard forbids in this file: that token is a
+  // deploy-LEDGER failure class, and app.js must never name one.)
+  var ATTENTION_ORDER_ONLY = ["deploys_failing", "diverged", "strained", "filling"];
+
+  // Derived, never hand-maintained: rank = 1-based position; bucket = the rung's.
+  var ATTENTION_RANK = {};
+  var ATTENTION_BUCKET_BY_RANK = {};
+  ATTENTION_LADDER.forEach(function (rung, i) {
+    ATTENTION_RANK[rung.state] = i + 1;
+    ATTENTION_BUCKET_BY_RANK[i + 1] = rung.bucket;
+  });
+
+  // The states classifyBp can actually RETURN — the ladder minus the named gap.
+  // This is what `attentionKinds` exports and what the closed-enum test pins, so
+  // "ordered" and "classified" can never be silently conflated again.
+  var ATTENTION_KINDS = ATTENTION_LADDER
+    .map(function (rung) { return rung.state; })
+    .filter(function (state) { return ATTENTION_ORDER_ONLY.indexOf(state) < 0; });
+
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
   // Sort comparator: most urgent first, tiebreak on name ascending,
@@ -6681,16 +6732,18 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15 / decision 32): attention = ranks 1–9
-  // (removal_failed…behind), in-flight = 10–11 (removing/provisioning),
-  // healthy = 12 (ok) — the SAME boundaries as the Go twin's attentionBucket.
-  // The bucket STRING is the fixture's, hyphenated: "in-flight", not the
-  // "inflight" this file used to emit while nothing held it to the fixture
-  // (the #fleet/inflight deep-link segment keeps its old spelling — that is a
-  // URL, not vocabulary — and parseFleetFilter maps it to the canonical
-  // bucket).
+  // The bucket of a rank, READ OFF THE RUNG (see the ladder note above). The
+  // bucket STRING is the fixture's, hyphenated: "in-flight", not the "inflight"
+  // this file used to emit while nothing held it to the fixture (the
+  // #fleet/inflight deep-link segment keeps its old spelling — that is a URL,
+  // not vocabulary — and parseFleetFilter maps it to the canonical bucket).
+  //
+  // NO FALLBACK ARM ON PURPOSE: a rank outside the ladder is not a bucket this
+  // function may guess at, and `|| "attention"` would file an unknown state
+  // under a real bucket and scan green. classifyBp is total over ATTENTION_KINDS,
+  // so every rank reaching here is a ladder position by construction.
   function bucketOfRank(r) {
-    return r <= 9 ? "attention" : r <= 11 ? "in-flight" : "healthy";
+    return ATTENTION_BUCKET_BY_RANK[r];
   }
   function bucketOf(bp) {
     return bucketOfRank(attentionRank(bp));
@@ -27311,7 +27364,11 @@
       // harness asserts statusOf is total over.
       lastSeenText: lastSeenText, missedChecksText: missedChecksText,
       neverReportedEvidence: neverReportedEvidence,
-      attentionKinds: Object.keys(ATTENTION_RANK),
+      // The states classifyBp can RETURN (ladder minus the named gap) — NOT
+      // Object.keys(ATTENTION_RANK), which is now every ORDERED rung including
+      // the four this console does not classify yet.
+      attentionKinds: ATTENTION_KINDS,
+      ATTENTION_LADDER: ATTENTION_LADDER, ATTENTION_ORDER_ONLY: ATTENTION_ORDER_ONLY,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
       fleetSummary: fleetSummary, filterFleet: filterFleet,
