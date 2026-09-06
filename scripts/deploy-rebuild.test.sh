@@ -87,6 +87,20 @@ echo "sudo $*" >> "$CALL_LOG"
 exec "$@"
 EOF
 
+  # curl: the POST-RESTART HEALTH PROBE (the engine's "restarted and answering"
+  # claim descends from this, not from systemctl's acceptance). Answers 200 by
+  # default so the happy path stays happy; FAKE_HTTP_CODE flips it for the
+  # RESTART UNVERIFIED arm below. A `-w %{http_code}` curl prints the code on
+  # stdout, which is what the engine reads.
+  cat > "$dir/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl $*" >> "$CALL_LOG"
+code="${FAKE_HTTP_CODE:-200}"
+[ "$code" = "dead" ] && exit 7
+printf '%s' "$code"
+exit 0
+EOF
+
   # flock: macOS has no flock(1); the engine only needs it to succeed.
   # go/make/install: the non-fatal arms — log and succeed, build nothing.
   local name
@@ -139,6 +153,30 @@ check "status record exists" "[ -f '$HAPPY/.deploy-status.json' ]"
 check "record says phase=restart outcome=applied (written pre-restart)" \
   "grep -q '\"phase\":\"restart\",\"outcome\":\"applied\"' '$HAPPY/.deploy-status.json'"
 check "record carries the sha" "grep -q '\"sha\":\"deadbeefcafe\"' '$HAPPY/.deploy-status.json'"
+check "the post-restart health probe was actually TAKEN" \
+  "grep -q '^curl .*api/schemas' '$CALL_LOG'"
+check "the probe ran AFTER the restart" \
+  "[ \"\$(line_no '$CALL_LOG' '^curl ')\" -gt \"\$(line_no '$CALL_LOG' '^sudo systemctl restart barkpark$')\" ]"
+check "the receipt cites the measured 200, not systemd's acceptance" \
+  "grep -qF 'Done. Service restarted and answering' '$TMP/happy.out'"
+
+echo "== restart accepted, app never answers: typed exit 15, NO 'restarted' claim =="
+UNVER="$TMP/unverified"
+make_repo "$UNVER"
+: > "$CALL_LOG"
+run_engine "$UNVER" "$TMP/unverified.out" FAKE_HTTP_CODE=dead BP_HEALTH_ATTEMPTS=2 BP_HEALTH_SLEEP=0
+rc=$?
+check "exit is the typed restart-unverified 15" "[ '$rc' = 15 ]"
+check "the restart WAS issued (fixture control — this is not a build failure)" \
+  "grep -q '^sudo systemctl restart barkpark$' '$CALL_LOG'"
+check "the swap still happened (the new build IS installed)" \
+  "[ \"\$(cat '$UNVER/api/_build/prod/SENTINEL')\" = new-build ]"
+check "it does NOT claim the service is up" \
+  "! grep -qF 'Service restarted and answering' '$TMP/unverified.out'"
+check "it names the unverified restart" \
+  "grep -qF 'RESTART UNVERIFIED' '$TMP/unverified.out'"
+check "the record says phase=restart outcome=unverified" \
+  "grep -q '\"phase\":\"restart\",\"outcome\":\"unverified\"' '$UNVER/.deploy-status.json'"
 
 echo "== failed migrate: exit 13, NO swap, NO restart, record says migrate failed =="
 MIGFAIL="$TMP/migfail"
