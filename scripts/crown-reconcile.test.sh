@@ -1664,6 +1664,12 @@ cat > "$RFAKE/docker" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$CR_DOCKER_LOG"
 case "$*" in
+  # THE STABLE KEY. The reader finds the control plane by its compose container
+  # NAME PREFIX, not by `ancestor=<image>:<tag>` — see (o3) below for why. The
+  # ancestor arm is kept and answered so this fake stays honest about BOTH keys:
+  # these arms are about the 401/psql question, and must not red for want of a
+  # container whichever key the reader uses.
+  *"name=cloud-control_plane_"*)      echo "cp-container-in-effigy" ;;
   *"ancestor=cloud-control_plane"*)   echo "cp-container-in-effigy" ;;
   *"printenv WORKER_TOKEN"*)          echo "worker-token-in-effigy" ;;
   # The DETOUR's own dependencies, all answered generously ON PURPOSE: a script
@@ -1736,6 +1742,172 @@ if grep -qE 'psql|platform_deliveries' "$TMP/remote-code.sh"; then
 else
   ok "no executable line of the remote reader mentions psql or platform_deliveries — the detour is deleted, not skipped"
 fi
+
+section "(o3) THE CONTAINER IS FOUND BY A STABLE IDENTITY, NOT A MOVING IMAGE TAG"
+# THE OUTAGE THIS ARM OWNS. crown-reconcile.yml exited 2 SILENCE on main three
+# times on 2026-09-06 (runs 34048569972, 34050639617, 34049400499), every one of
+# them saying "the crown could not be read on the box for ?sha=…:
+# no_control_plane_container", and every one of them coinciding with deploy.yml
+# activity on the box. The reader had located the control plane with
+#   docker ps -q --filter ancestor=cloud-control_plane:latest
+# — an IMAGE key, and `latest` is the one thing about the control plane that
+# MOVES. deploy/cp-deploy.sh:133 retags the serving image to `:rollback`,
+# cp-deploy.sh:452 builds the new image onto `:latest`, and only at
+# cp-deploy.sh:470 does the new slot boot. Between those the OLD container is
+# still serving and the ancestor filter matches NOTHING. The reconciler refusing
+# to call that a green was CORRECT; the KEY was wrong.
+#
+# The stable identity is the compose container NAME PREFIX — project + service,
+# untouched by any rebuild: cloud/docker-compose.yml:196,202 define the services
+# `control_plane_blue` / `control_plane_green`, and deploy/cp-deploy.sh:286
+# builds the same string itself as
+# "${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1". The SLOT is
+# left off the filter on purpose: both slots match, and either will do, because
+# every live control plane carries the same WORKER_TOKEN.
+#
+# BOTH DIRECTIONS ARE PROVEN HERE, because a retry that only ever passes is a
+# way of laundering an absence into a green:
+#   (i)  tag moved, container up  → the read SUCCEEDS
+#   (ii) no container at all      → still no_control_plane_container, still rc 2
+SWAPF="$TMP/swapfake"; mkdir -p "$SWAPF"
+# The curl in effigy for this section WRITES the body file the reader asked for
+# (`-o <path>`), because unlike (o2) these arms drive the 200 path all the way to
+# CR_BODY. It is the reader's own path and the reader removes it again.
+cat > "$SWAPF/curl" <<'SH'
+#!/usr/bin/env bash
+out=""; prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '%s' '{"deliveries":[]}' > "$out"
+printf '%s' "$CR_FAKE_HTTP"
+SH
+# THE SWAP WINDOW IN EFFIGY. `latest` has ALREADY moved to the freshly built
+# image, so an ancestor filter matches nothing — this fake answers it with
+# SILENCE on purpose, which is exactly what the box did during those three runs.
+# The old slot's container is still up, so a NAME lookup finds it.
+cat > "$SWAPF/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CR_DOCKER_LOG"
+case "$*" in
+  *"ancestor=cloud-control_plane"*)   : ;;
+  *"name=cloud-control_plane_"*)      echo "cp-container-in-effigy" ;;
+  *"printenv WORKER_TOKEN"*)          echo "worker-token-in-effigy" ;;
+esac
+SH
+# NOTHING IS RUNNING. Every docker query is answered with silence, so the only
+# honest verdict is the absence — after the retries, not before them.
+GONEF="$TMP/gonefake"; mkdir -p "$GONEF"
+cp "$SWAPF/curl" "$GONEF/curl"
+cat > "$GONEF/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CR_DOCKER_LOG"
+SH
+chmod +x "$SWAPF/docker" "$SWAPF/curl" "$GONEF/docker" "$GONEF/curl"
+
+# CR_CP_ATTEMPTS/CR_CP_DELAY are the reader's own bounds, overridden here so the
+# absence arm does not sleep through its own retry budget. The COUNT is what is
+# asserted; the delay is not part of the contract.
+swap_run() { # <fake-dir> <log> <http>
+  CR_DOCKER_LOG="$TMP/docker-$2.log"; : > "$CR_DOCKER_LOG"
+  PATH="$1:$SANDBOX_PATH" CR_FAKE_HTTP="$3" CR_DOCKER_LOG="$CR_DOCKER_LOG" \
+    CR_CP_ATTEMPTS=3 CR_CP_DELAY=0 \
+    bash "$REMOTE_SH" "sha=$SHA_A" > "$TMP/last.out" 2>&1
+  DOCKER_LOG="$CR_DOCKER_LOG"
+}
+
+# (o3-a) THE TAG MOVED AND THE CONTAINER IS UP → THE READ SUCCEEDS.
+# Against the pre-fix reader this arm is RED: the ancestor filter is answered
+# with silence, so the reader printed CR_ERROR=no_control_plane_container and
+# never reached the route at all.
+swap_run "$SWAPF" swap 200
+saw "CR_HTTP=200" "the tag moved mid-deploy and the read still reached the route"
+saw "CR_VIA=route" "…answered by the route, the only reader this script has"
+saw "CR_BODY=" "…and it came back with a body"
+not_saw "CR_ERROR=no_control_plane_container" "a moved image tag is NOT an absent control plane"
+if grep -q "name=cloud-control_plane_" "$DOCKER_LOG"; then
+  ok "the container was looked up by its compose NAME prefix (deploy/cp-deploy.sh:286, cloud/docker-compose.yml:196,202)"
+else
+  bad "the reader never asked docker by name — it is still keyed on something that moves: $(tr '\n' ';' < "$DOCKER_LOG")"
+fi
+if grep -q "ancestor=cloud-control_plane" "$DOCKER_LOG"; then
+  bad "the reader still asks by ancestor=<image>:<tag> — the key that fails for the whole swap window"
+else
+  ok "the reader never asks by ancestor=<image>:<tag> — the moving key is gone, not merely supplemented"
+fi
+if [ "$(grep -c "name=cloud-control_plane_" "$DOCKER_LOG")" = "1" ]; then
+  ok "a container that is THERE is found on the first attempt — the retry costs nothing on the happy path"
+else
+  bad "the reader retried a lookup that already succeeded ($(grep -c "name=cloud-control_plane_" "$DOCKER_LOG") lookups)"
+fi
+
+# (o3-b) NO CONTAINER AT ALL → STILL THE NAMED ABSENCE. The retry must not be a
+# way to turn a real absence into a pass, so the same reader, same bounds, with
+# nothing running, has to reach exactly the verdict it reached before.
+swap_run "$GONEF" gone 200
+saw "CR_ERROR=no_control_plane_container" "a control plane that is REALLY absent is still the named absence"
+not_saw "CR_HTTP=" "…and the route was never asked, so no code can be mistaken for a read"
+not_saw "CR_BODY=" "…and no body exists to be counted as a read"
+saw "CR_CP_ATTEMPTS=3" "the reader PRINTS how many times it looked before naming the absence"
+saw "CR_CP_RETRY=1/3" "…and prints each attempt as it happens"
+saw "CR_CP_RETRY=3/3" "…through to the last one, so the window it covered is legible"
+if [ "$(grep -c "name=cloud-control_plane_" "$DOCKER_LOG")" = "3" ]; then
+  ok "the retry is REAL and BOUNDED: exactly 3 lookups for a budget of 3, not 1 and not forever"
+else
+  bad "the budget of 3 produced $(grep -c "name=cloud-control_plane_" "$DOCKER_LOG") lookup(s) — the retry is vacuous or unbounded"
+fi
+
+# (o3-c) THE TWO ABSENCES STAY DISTINCT. A container that is there and hands back
+# no token is a mis-provisioned control plane, not a swap window, and folding it
+# into no_control_plane_container would misname the next outage.
+NOTOKF="$TMP/notokfake"; mkdir -p "$NOTOKF"
+cp "$SWAPF/curl" "$NOTOKF/curl"
+cat > "$NOTOKF/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CR_DOCKER_LOG"
+case "$*" in
+  *"name=cloud-control_plane_"*)      echo "cp-container-in-effigy" ;;
+esac
+SH
+chmod +x "$NOTOKF/docker" "$NOTOKF/curl"
+swap_run "$NOTOKF" notok 200
+saw "CR_ERROR=empty_worker_token" "a container that IS there with no token keeps its own name"
+not_saw "CR_ERROR=no_control_plane_container" "…and is not laundered into the absence the retry exists for"
+
+# (o3-d) THE VERDICT, END TO END. The arms above prove what the REMOTE half
+# emits. This one drives the WHOLE script with that emission and pins the thing
+# the row actually guards: a named absence is rc 2 SILENCE, never 0.
+run_gone() { # <expected-rc> <label>
+  local want="$1" label="$2" out rc state gonessh
+  CR_N=$((CR_N + 1))
+  state="$TMP/state-gone-$CR_N.txt"
+  seed_state "$state"
+  gonessh="$TMP/gonessh"; mkdir -p "$gonessh"
+  # The remote half in effigy, emitting EXACTLY the two lines the reader above
+  # was just observed to emit — no body, no code, the named absence and the
+  # attempt count. Any sentence downstream is therefore the SCRIPT's own.
+  cat > "$gonessh/ssh" <<'SH'
+#!/usr/bin/env bash
+echo "CR_CP_ATTEMPTS=6"
+echo "CR_ERROR=no_control_plane_container"
+SH
+  cp "$FAKE/gh" "$gonessh/gh"
+  cp "$FAKE/curl" "$gonessh/curl"
+  chmod +x "$gonessh/ssh" "$gonessh/gh" "$gonessh/curl"
+  out="$(env -u CROWN_API_TOKEN PATH="$gonessh:$SANDBOX_PATH" \
+    CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key \
+    CR_FAKE_RUNS="$RUNS_FAKE" CR_FAKE_JOBS="$TMP/jobs-fake.json" \
+    CR_FAKE_HEALTH="$HEALTH_FAKE" CROWN_STATE_FILE="$state" \
+    bash "$CR" --now "$NOW" --window-hours 24 2>&1)"
+  rc=$?
+  printf '%s\n' "$out" > "$TMP/last.out"
+  if [ "$rc" = "$want" ]; then ok "$label → exit $rc"; else bad "$label → exit $rc, wanted $want"; printf '%s\n' "$out" | sed 's/^/       | /' >&2; fi
+}
+run_gone 2 "a control plane that is absent after the retries is SILENCE, never a green"
+saw "no_control_plane_container" "the verdict names the condition it could not read past"
+saw "before the absence was named" "…and says how many times it looked, so the retry is auditable from the verdict"
+not_saw "RECONCILED:" "an unreadable crown never prints a green"
 
 section "(k) the workflow's own shape"
 if grep -q "cron:" "$WF"; then ok "the workflow carries a cron"; else bad "the workflow has no cron"; fi
