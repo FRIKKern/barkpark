@@ -678,8 +678,103 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
 
       true ->
-        criteria_fence(pub_content, draft_content)
+        with :ok <- criteria_fence(pub_content, draft_content) do
+          task_door_field_fence(pub_content, draft_content)
+        end
     end
+  end
+
+  # ── WHICH DOOR IS WRONG: THE DOCUMENT DOOR (task-9b5e1a6a688d27fc) ─────────
+  #
+  # Two doors write one row. The TASK door (`Barkpark.Tasks.{Claim,Pulse,Renew,
+  # Release,Fence,Move,Stamp,Stage,Close,TtlSweeper}`) writes the published row
+  # in place, rev-CAS'd, through the sanctioned verbs. The DOCUMENT door (draft
+  # patch + `publish_document/4`) copies the draft's content WHOLESALE onto the
+  # published row — see `publish_after_gate/5`'s `"content" => pub_content`.
+  #
+  # The document door is the one that must yield: a publish that does not NAME
+  # a task-door field has no authorial intent about it, so it may not change it.
+  # Publish cannot simply MERGE the live values back in — that would invent an
+  # edit the author never wrote, and it is the same class of silent repair the
+  # title-divergence gate above refuses to make — so, exactly like
+  # `stale_claim?/2`, the seam REFUSES and names the verb that owns the field.
+  #
+  # THE FIELDS, ENUMERATED FROM THE TASK WRITE PATH, not from a brief. Every
+  # TOP-LEVEL `content` key `api/lib/barkpark/tasks/*.ex` writes:
+  #
+  #   * `claim`              — claim/pulse/renew/release/fence/move/close/ttl_sweeper
+  #                            (already fenced by `stale_claim?/2`; `closed_by`
+  #                            and `closed_at` live INSIDE it, so they ride it)
+  #   * `lifecycle_status`   — claim/close/fence/move/stamp/ttl_sweeper
+  #                            (already fenced by `Transitions.legal?/2` above)
+  #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
+  #   * `close_reason`       — close.ex:1232
+  #   * `close_override`     — close.ex:1310
+  #   * `disposition`        — close.ex:1642, stage.ex (@disposition_key)
+  #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)
+  #   * `engagement`         — stage.ex:717
+  #   * `landed`             — internal.ex:493
+  #
+  # The first three already had a gate. THE LAST SIX HAD NONE: a draft minted
+  # DURING or AFTER a close carries the claim byte-identical, so `stale_claim?/2`
+  # waves it through; `done -> done` is table-legal; preserved criteria pass the
+  # criteria fence — and the publish then lands with `close_reason` gone, the
+  # deferral's `reopen_trigger` gone, the `landed` merge record gone. rc=0, no
+  # warning. This fence closes exactly that residue, on the SAME keys the api
+  # patch door already fences for `disposition`/`reopen_trigger`
+  # (`Content.Mutations.ensure_disposition_via_verb/4`) — the publish door was
+  # simply never taught them.
+  #
+  # SCOPE, deliberately narrow:
+  #   * only a published value that is PRESENT (non-nil) is protected — a task
+  #     that never carried the key is free to gain one through any write;
+  #   * `:sync` never reaches here (it takes the mirror-verbatim branch in
+  #     `ensure_task_publish_transition_legal/5`), matching the transition and
+  #     claim checks: a replica must be able to mirror an upstream close;
+  #   * a draft carrying the value BYTE-IDENTICAL passes untouched, which is
+  #     every draft derived from the current published content — the
+  #     patch-then-publish idiom, the met-flip republish, the github collapse.
+  #
+  # Same `{:invalid_task_content, %{field => [msg]}}` family (422
+  # `validation_failed`) the two gates beside it use — no new error code, no new
+  # controller branch, and the message names the verb that owns the field.
+  @task_door_owned_fields ~w(close_reason close_override disposition reopen_trigger engagement landed)
+
+  @task_door_field_verbs %{
+    "close_reason" => "`bp task close <id> <worker> <epoch> --reason <why>`",
+    "close_override" => "`bp task close <id> <worker> <epoch> --criteria-override <why>`",
+    "disposition" => "`bp task stage <id> <state> --disposition <open|parked|closed>`",
+    "reopen_trigger" => "`bp task stage <id> <state> --reopen-trigger <condition>`",
+    "engagement" => "`bp task stage <id> <state>`",
+    "landed" => "`bp task close <id> <worker> <epoch>` (the landing record)"
+  }
+
+  defp task_door_field_fence(pub_content, draft_content) do
+    Enum.find_value(@task_door_owned_fields, :ok, fn field ->
+      was = Map.get(pub_content, field)
+      now = Map.get(draft_content, field)
+
+      if not is_nil(was) and now != was do
+        {:error, {:invalid_task_content, task_door_field_error(field, was, now)}}
+      end
+    end)
+  end
+
+  defp task_door_field_error(field, was, now) do
+    verb = Map.fetch!(@task_door_field_verbs, field)
+    act = if is_nil(now), do: "erase", else: "overwrite"
+
+    %{
+      field => [
+        "publish refused: this draft would #{act} `content.#{field}`, which the TASK door owns. " <>
+          "The published row holds #{inspect(was)}; this draft carries #{inspect(now)}. " <>
+          "Publishing copies a draft's content over the published row WHOLESALE, so a draft " <>
+          "that simply predates (or never saw) the write is indistinguishable from an author " <>
+          "asking to clear the field — and this one names no such intent. Only the sanctioned " <>
+          "verb writes it: #{verb}. Rebase this draft on the current published row " <>
+          "(`bp doc discard-draft` then re-patch, or carry the value verbatim) and publish again."
+      ]
+    }
   end
 
   # The criteria fence as a standalone gate: the ONE check that applies to
