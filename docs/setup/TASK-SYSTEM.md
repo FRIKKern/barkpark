@@ -162,20 +162,20 @@ A scattered board is a defect — make every task fit the structure:
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"* — never after provenance/process (`loop`, `cleanup`, `misc`) or a label.
 3. **Group by ancestry** — tasks sharing a goal nest beneath it; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
-5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions. **State a CHECK TO RE-RUN, not a predicted state** — "X is in state Y" has a shelf life; nothing re-checks it. Name REAL test files: `mix test` refuses a missing path. Decisions/goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or the run. Merge gates need `merge_gate:true` — a `landed` close flips only the flag; wording alone warns.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions. **State a CHECK TO RE-RUN, not a predicted state** — "X is in state Y" has a shelf life; nothing re-checks it. A criterion opening **If / Once / When / Should** names the OBSERVABLE that flips it (a file, a symbol, a PR, a command exiting 0); sweep: `scripts/ledger/conditional-criteria-census.py`. Name REAL test files: `mix test` refuses a missing path. Decisions/goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or the run. Merge gates need `merge_gate:true` — a `landed` close flips only the flag; wording alone warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
 ## Workspaces, projects, datasets — experiment without mess
 
-Any write-tier token spins up an isolated sandbox in one command (deleting a workspace is [deferred](../decisions/deferred.md); spikes are abandoned in place):
+Any write-tier token spins up an isolated sandbox:
 
 ```bash
-bp workspace create Spike  # → workspace + you as owner + a Default project + production dataset
+bp workspace create Spike  # → workspace + owner + Default project + production dataset
 bp -w spike workspace project-create agents-v2  # member-gated; -w names the workspace
 bp workspace ls  # what your token can reach
 ```
 
-Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror the prefix; flat `/v1/tasks/*` uses the server's default scope. Membership is the boundary: non-members get 404, never a leak.
+Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror the prefix; flat `/v1/tasks/*` uses the server's default scope.
 
 ## Troubleshooting
 
@@ -183,6 +183,5 @@ Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes m
 |---|---|
 | No **Tasks** pane in Studio, or `404` on `/v1/tasks/*` | Plugin off — pane and routes mount only when `tasks` is on: `BARKPARK_PLUGINS` set without it, or the `task` schema isn't registered. Fix env + restart; the schema auto-registers on boot. |
 | `404 task not found` right after create | See **Draft prefix**; check plugin enabled + token access. |
-| Task invisible in Studio but in API | Tenancy: the doc is scoped to a different workspace/project than this Studio. |
 
 Cheatsheet: [tasks](../cheatsheets/tasks.md) · CLI canon: [HANDBOOK](../cli/HANDBOOK.md) · HTTP contract: [api-v1](../api-v1.md)
