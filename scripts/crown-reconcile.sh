@@ -1574,6 +1574,27 @@ while IFS=' ' read -r gsha gts; do
     printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
     continue
   fi
+  # THE ALIBI THE SERVING ARM ALREADY GRANTS, ASKED ONE LOOP LATER. The SERVING
+  # arm defers while `serving_run_in_flight` names a non-terminal run for that
+  # exact sha; this loop did not re-ask it, so the moment the box moved on to a
+  # newer sha the graced sha lost its alibi and was accused — 373df8e7a, graced
+  # 09:58:01, its run 34025636906 in_progress since 09:47:30, fired
+  # GRACED-UNRECORDED at 11:00:18. That is a red at a deploy nobody has
+  # finished, which is precisely the shape the IN-FLIGHT arm exists to refuse.
+  # The box moving on does not finish that run, and the recorder has not had its
+  # turn until it does.
+  #
+  # Bounded by the SAME cap the SERVING arm uses, charged the same way (against
+  # first-seen), so a HUNG run stops being an alibi and this can never defer
+  # forever; past the cap it falls straight through to the accusation below.
+  # `serving_run_in_flight` reads $WORK/runs-raw.json — the deploy.yml run page
+  # this script already fetched — so this adds no API call and no credential.
+  gflight="$(serving_run_in_flight "$gsha")"
+  if [ -n "$gflight" ] && [ "$gage" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-REASK-INFLIGHT
+    defer "GRACE HELD: the graced sha $gsha still has no cp row, but deploy.yml run ${gflight} for that exact sha is STILL RUNNING — the recorder has not had its turn, so the deferred accusation is held rather than fired at a deploy in progress (first seen $(iso_of "$gts"))"
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
+    continue
+  fi
   if [ "$gage" -gt "$REASK_MAX_SECONDS" ]; then
     reason "the graced sha $gsha aged off the re-ask list after ${REASK_MAX_SECONDS}s with no cp row — it was accused on every run in between, and the list is bounded, not forgiving"
     continue
