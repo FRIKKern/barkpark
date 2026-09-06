@@ -180,6 +180,12 @@ refuse 'dev-profile bundle                  [refused before]'  "$DEV"           
 names_what_arrived() { # <arm> <fixture>
   local arm="$1" f="$2" want_kind want_sz
   want_kind="$(file -b "$f" 2>/dev/null | tr -d '\n')"
+  # An empty want_kind makes the `case ... *""*` below match ANYTHING — the arm
+  # would pass while checking nothing. Fail loud instead of greening vacuously.
+  if [ -z "$want_kind" ]; then
+    bad "$arm" "file(1) produced no identification for $f, so this arm has nothing to assert against. A vacuous pass here is exactly the failure mode this harness exists to catch — install file(1) or delete this arm deliberately."
+    return
+  fi
   want_sz="$(wc -c <"$f" | tr -d ' ')"
   FULL_TAR="$f"; FULL_META_WHY=""
   if full_meta_ok; then bad "$arm" "accepted $f — cannot check a refusal that did not happen"; return; fi
