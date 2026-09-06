@@ -501,12 +501,13 @@ defmodule BarkparkCloud.VerifyTest do
 
       conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
 
+      # THE WIRE FIRST — this is the assertion the row is about. A refusal that
+      # renders a 409 AFTER `Verify.run/1` has already spent the token would pass
+      # the status check below and fail here.
+      assert FakeHttp.requests() == []
+
       assert conn.status == 409
       assert json_body(conn)["error"] == "suspended"
-
-      # THE WIRE: the custodied admin token was never spent — nothing left the
-      # box on the refused path.
-      assert FakeHttp.requests() == []
 
       # And the plane recorded no verdict from a run it never made.
       reloaded = Repo.get!(Barkpark, bp.id)
