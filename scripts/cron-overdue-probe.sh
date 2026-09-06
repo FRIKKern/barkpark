@@ -36,10 +36,58 @@
 # "has not been queued yet" to both cancel paths — so a phantom row is evidence
 # of nothing and is not accepted as proof of a firing (arm c6).
 #
+# A FALLBACK THAT ONLY SHOUTS IS NOT A FALLBACK (2026-09-06, task-f94a1d96238b18e4).
+# The 90-minute bound above was written against a DECLARED */30 schedule. What
+# GitHub actually delivers for main-gate-watch.yml is every 2.1-4.7 HOURS — 14
+# consecutive scheduled runs 2026-09-05T07:48Z..2026-09-06T08:02Z, never once at
+# the declared cadence (measured in that workflow's own header, PR #16390). So
+# this probe reddened main by CONSTRUCTION between deliveries: push:main run
+# 34025016921 printed `newest run is 92m old, bound is 3x = 90m` and exited 1 on
+# a repo where nothing was wrong. A probe that is red on a platform cadence
+# teaches the fleet to dismiss the one alarm watching a silent watch.
+#
+# The remedy is not a looser bound — that would make a genuinely dead
+# main-gate-watch invisible for up to 15 hours. The remedy is that the probe
+# DOES what its own table already claims: for main-gate-watch.yml its line says
+# "this probe is its fallback". So when a critical workflow that is CRON-ONLY
+# (no push: arm, an honoured push-refused: guard) is past its bound, the probe
+# now FIRES it — `gh workflow run <file> --ref main` — prints the dispatched run
+# id, and reds only if the dispatch itself fails or the dispatched run never
+# appears. Cron silence still cannot hide: the workflow runs either way.
+#
+# WHY A DISPATCH IS SAFE WHERE A push: ARM IS NOT (D721). The push arm was
+# measured harmful because it fired ~15-20 s after a merge, when GitHub had
+# created no check-run rows on the new tip at all, and main-gate-watch's MISSING
+# logic red by construction on the empty payload (2 of 2 runs red on tip
+# 026c5b1d78 while main was green). A dispatch is a different animal on both
+# counts: it runs the same code the SCHEDULE runs, against whatever tip is
+# current when this probe fires — which is minutes into the run, not seconds —
+# and since wave 61 an absent required row while any run on the tip is still in
+# flight reports WAITING (exit 2), not MISSING. main-gate-watch.yml's own header
+# names the remedy in these words: "read the newest COMPLETED run ... or fire
+# workflow_dispatch; do NOT add a push: arm". Its triggers are NOT touched here.
+#
+# AND IT DOES NOT CANCEL WHAT IT IS PROTECTING. Measured while building the arm:
+# five dispatches of main-gate-watch inside three minutes left ONE run and FOUR
+# `cancelled` — its concurrency group keeps one pending run and a newer queue
+# entry cancels the older. A cancelled watch is a tip with no verdict, the very
+# thing it exists to report. So the arm re-reads the live run list immediately
+# before firing and skips the dispatch while any non-completed run under 24 h
+# old exists (24 h because of the phantom-queued trap above — a permanently
+# queued row must not hold that guard open forever).
+#
+# AND THE DISPATCH ARM NEVER WEAKENS A push-ARMED WORKFLOW. A critical workflow
+# that carries `push: branches: [main]` already has a reliable trigger, so being
+# past bound means something is genuinely wrong with it: those SCREAM exactly as
+# before, and are never dispatched. Nor does the arm touch the no-run-row case
+# (c5) — a workflow that has NEVER produced a row is the worst case, and firing
+# one by hand would launder it.
+#
 # USAGE
 #   bash scripts/cron-overdue-probe.sh                       # live, this repo
 #   bash scripts/cron-overdue-probe.sh --runs-file <ndjson> --now <iso>   # hermetic
 #   bash scripts/cron-overdue-probe.sh --table <file>        # override the table
+#   bash scripts/cron-overdue-probe.sh --no-dispatch         # report only, never fire
 #   bash scripts/cron-overdue-probe.sh --selftest            # no network
 #
 # THE HERMETIC INPUT IS RAW. --runs-file takes the newest run row per workflow
@@ -52,10 +100,18 @@
 #   1 OVERDUE — at least one critical workflow is silent past 3x its interval
 #   2 the table and the tree disagree, a fallback is missing, or usage
 #   3 the run list could not be read — UNKNOWN, never reported as fired
+#
+# ENV
+#   CRON_PROBE_GH          the gh binary (stubbed by the selftest's dispatch arm)
+#   CRON_PROBE_REPO_ROOT   override the repo root (the selftest runs a MUTATED
+#                          copy of this file from a temp dir and still needs the
+#                          real tree for the table/fallback reads)
+#   CRON_PROBE_POLL_TRIES  how many times to look for the dispatched run (12)
+#   CRON_PROBE_POLL_SLEEP  seconds between those looks (5)
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="${CRON_PROBE_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 REPO="${CRON_PROBE_REPO:-FRIKKern/barkpark}"
 TABLE_FILE=""
@@ -63,6 +119,15 @@ RUNS_FILE=""
 NOW_ISO=""
 MODE=report
 OVERDUE_FACTOR=3
+DISPATCH=1
+# READ AT CALL TIME, never bound here. Binding `gh` at startup made the
+# selftest's stub unreachable — it exports CRON_PROBE_GH after this file has
+# already been sourced — and the first run of the dispatch arm went out over the
+# real network and fired three real main-gate-watch runs. A stub that is not
+# reached is a test that proves nothing, loudly.
+gh_bin()     { printf '%s' "${CRON_PROBE_GH:-gh}"; }
+poll_tries() { printf '%s' "${CRON_PROBE_POLL_TRIES:-12}"; }
+poll_sleep() { printf '%s' "${CRON_PROBE_POLL_SLEEP:-5}"; }
 
 # ── THE CLASSIFICATION TABLE ────────────────────────────────────────────────
 # file|class|interval-minutes|dated note
@@ -100,7 +165,7 @@ task-lease-renew.yml|critical|20|2026-09-03: the claim sweep. Ran ZERO times in 
 twoslash.yml|periodic|1440|2026-09-06: nightly twoslash type-check of the documentation snippets (cron 03:30Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 weekly-changelog.yml|report|10080|2026-09-03: weekly changelog digest.'
 
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,110p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -110,6 +175,7 @@ while [ $# -gt 0 ]; do
     --workflows)  WORKFLOWS_DIR="$2"; shift 2 ;;
     --repo)       REPO="$2"; shift 2 ;;
     --factor)     OVERDUE_FACTOR="$2"; shift 2 ;;
+    --no-dispatch) DISPATCH=0; shift ;;
     --selftest)   MODE=selftest; shift ;;
     -h|--help)    usage ;;
     *) echo "cron-overdue-probe: unknown argument '$1'" >&2; usage ;;
@@ -220,7 +286,7 @@ read_runs() {
   local file out grc rc=0
   while IFS='|' read -r file _class _interval _note; do
     [ -n "$file" ] || continue
-    out="$(gh api "repos/$REPO/actions/workflows/$file/runs?per_page=5" \
+    out="$("$(gh_bin)" api "repos/$REPO/actions/workflows/$file/runs?per_page=5" \
              --jq ".workflow_runs[] | {path: \"$file\", status: .status, created_at: .created_at}" 2>&1)"; grc=$?
     if [ "$grc" -ne 0 ]; then
       # A 404 IS AN ANSWER, and the opposite of a read fault: GitHub has no such
@@ -240,8 +306,84 @@ EOF
   return $rc
 }
 
+# ── 3b. the dispatch fallback ───────────────────────────────────────────────
+# Which arms a workflow actually carries. Same one-grep-over-the-file shape as
+# scheduled_files/check_fallbacks and for the same reason: `sed … | grep -q`
+# takes SIGPIPE under pipefail and reads as "no match", which here would silently
+# turn a push-armed workflow into a dispatch candidate.
+has_push_arm() { # <basename>
+  grep -qE '^[[:space:]]{2}push:[[:space:]]*(#.*)?$' "$WORKFLOWS_DIR/$1"
+}
+has_dispatch_arm() { # <basename>
+  grep -qE '^[[:space:]]{2}workflow_dispatch:[[:space:]]*(#.*)?$' "$WORKFLOWS_DIR/$1"
+}
+
+# IS A RUN ALREADY UNDER WAY? Measured while building this arm, 2026-09-06: five
+# dispatches of main-gate-watch.yml fired within three minutes produced ONE
+# surviving run and FOUR `cancelled` (34026329460, 34026330836, 34026376524,
+# 34026420030 on tip 8e533ac402). Its concurrency group is per-ref with
+# `cancel-in-progress: false`, and GitHub keeps only one PENDING run per group:
+# a newer queued run cancels the older queued one. A cancelled main-gate-watch
+# is a tip left with NO VERDICT, which is the exact failure that workflow exists
+# to report — so a probe that dispatched blindly could cancel the watch it is
+# protecting. Two probe runs can overlap (its own group is per-sha), and the run
+# snapshot this probe scored is minutes old by dispatch time, so this is a LIVE
+# re-read taken immediately before firing.
+#
+# THE PHANTOM-QUEUED TRAP APPLIES HERE TOO (c6): eight permanently-`queued` rows
+# sit in this repo's list forever. A non-completed row older than 24 h is not
+# "in flight", it is dead — counting it would suppress the dispatch for good and
+# hand back a laundered green, which is the whole failure this file exists for.
+in_flight() { # <basename> <now-epoch> -> prints the run id, 0 if one is running
+  local file="$1" now="$2" out rid rst rts re
+  out="$("$(gh_bin)" api "repos/$REPO/actions/workflows/$file/runs?per_page=10" \
+           --jq '.workflow_runs[] | "\(.id) \(.status) \(.created_at)"' 2>/dev/null)"
+  while read -r rid rst rts; do
+    [ -n "$rid" ] || continue
+    [ "$rst" = "completed" ] && continue
+    re="$(iso_to_epoch "$rts")" || continue
+    [ "$(( now - re ))" -gt $(( 1440 * 60 )) ] && continue
+    printf '%s\n' "$rid"; return 0
+  done <<EOF
+$out
+EOF
+  return 1
+}
+
+# Fire a cron-only critical workflow and PROVE a run appeared. Prints the run id
+# on success; on failure prints the reason (the caller quotes it in the scream).
+# The run must be NEWER than the probe's own `now` — an old workflow_dispatch row
+# from last week is not evidence that THIS dispatch landed, which is the same
+# mistake the queued-row trap above exists to refuse. 120 s of slack absorbs the
+# clock skew between the runner and GitHub, nothing more.
+try_dispatch() { # <basename> <now-epoch>
+  local file="$1" now="$2" out grc t=0 rid rts re gh tries sleep_s
+  gh="$(gh_bin)"; tries="$(poll_tries)"; sleep_s="$(poll_sleep)"
+  out="$("$gh" workflow run "$file" --repo "$REPO" --ref main 2>&1)"; grc=$?
+  if [ "$grc" -ne 0 ]; then
+    printf 'the dispatch call itself failed (%s)\n' "$(printf '%s' "$out" | head -1)"
+    return 1
+  fi
+  while [ "$t" -lt "$tries" ]; do
+    out="$("$gh" api "repos/$REPO/actions/workflows/$file/runs?event=workflow_dispatch&per_page=5" \
+             --jq '.workflow_runs[] | "\(.id) \(.created_at)"' 2>/dev/null)"
+    while read -r rid rts; do
+      [ -n "$rid" ] || continue
+      re="$(iso_to_epoch "$rts")" || continue
+      if [ "$re" -ge $(( now - 120 )) ]; then printf '%s\n' "$rid"; return 0; fi
+    done <<EOF
+$out
+EOF
+    t=$(( t + 1 ))
+    [ "$t" -lt "$tries" ] && sleep "$sleep_s"
+  done
+  printf 'the dispatch was accepted but NO workflow_dispatch run appeared within %ss\n' \
+    "$(( tries * sleep_s ))"
+  return 1
+}
+
 check_overdue() {
-  local now rows rc=0 file class interval note newest age bound
+  local now rows rc=0 file class interval note newest age bound runid=""
   now="$(now_epoch)" || { echo "cron-overdue-probe: --now is not an ISO-8601 Z timestamp" >&2; return 2; }
   rows="$(read_runs)" || { echo "UNKNOWN: the run list could not be read — that is not 'it fired'." >&2; return 3; }
   while IFS='|' read -r file class interval note; do
@@ -290,6 +432,24 @@ print(int(best) if best is not None else "")
     age=$(( (now - newest) / 60 ))
     [ "$age" -lt 0 ] && age=0
     if [ "$age" -gt "$bound" ]; then
+      # THE DISPATCH ARM. Only for a CRON-ONLY critical workflow: one with no
+      # push: arm (so cron really is its only automatic trigger) that does carry
+      # workflow_dispatch:. A push-armed workflow past bound is genuinely broken
+      # and still screams, untouched.
+      if [ "$DISPATCH" = 1 ] && [ -f "$WORKFLOWS_DIR/$file" ] \
+         && ! has_push_arm "$file" && has_dispatch_arm "$file"; then
+        if runid="$(in_flight "$file" "$now")"; then
+          echo "  ok   $file (critical, every ${interval}m): newest scored run ${age}m old, past the ${bound}m bound — but run $runid is in flight RIGHT NOW, so this probe did not dispatch (a second queued run would cancel the first)"
+          continue
+        fi
+        if runid="$(try_dispatch "$file" "$now")"; then
+          echo "  ok   $file (critical, every ${interval}m): newest run ${age}m old, past the ${bound}m bound — it is cron-only, so this probe DISPATCHED it: run $runid"
+          continue
+        fi
+        echo "OVERDUE  $file (critical, every ${interval}m): newest run is ${age}m old, bound is ${OVERDUE_FACTOR}x = ${bound}m, and this probe's workflow_dispatch fallback FAILED — $runid" >&2
+        rc=1
+        continue
+      fi
       echo "OVERDUE  $file (critical, every ${interval}m): newest run is ${age}m old, bound is ${OVERDUE_FACTOR}x = ${bound}m." >&2
       rc=1
     else
@@ -305,6 +465,43 @@ selftest() {
   local tmp pass=0 fail=0 out rc
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
   local NOW=2026-09-03T12:00:00Z
+
+  # THE STUB GOES FIRST, and this is not tidiness. Once the overdue read can
+  # DISPATCH, every past-bound fixture below reaches `gh` — the 6 h-gap fixture
+  # (c3) fired three real main-gate-watch runs the first time this arm ran. The
+  # stub records what it was asked to do and answers the run-list poll, so the
+  # selftest stays what its header promises: no network.
+  mkdir -p "$tmp/bin"
+  cat > "$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+# stub gh — records the dispatch, then answers the run-list poll.
+case "$1" in
+  workflow)
+    if [ "${STUB_DISPATCH_FAILS:-0}" = 1 ]; then
+      echo "HTTP 403: Resource not accessible by integration" >&2; exit 1
+    fi
+    printf '%s\n' "$*" >> "${STUB_LOG:-/dev/null}"; exit 0 ;;
+  api)
+    case "$2" in
+      *event=workflow_dispatch*)
+        [ "${STUB_RUN_APPEARS:-1}" = 1 ] && echo "99887766 2026-09-03T12:00:05Z" ;;
+      *) [ -n "${STUB_IN_FLIGHT:-}" ] && printf '%s\n' "$STUB_IN_FLIGHT" ;;
+    esac
+    exit 0 ;;
+esac
+exit 1
+STUB
+  chmod +x "$tmp/bin/gh"
+  export CRON_PROBE_GH="$tmp/bin/gh" CRON_PROBE_POLL_TRIES=1 CRON_PROBE_POLL_SLEEP=0
+
+  # c0 — and the stub is REACHED. A stub nobody calls is a test that proves
+  # nothing while printing ok, which is exactly how this arm failed first time:
+  # gh was bound once at startup, so exporting CRON_PROBE_GH here changed nothing.
+  if [ "$(gh_bin)" = "$tmp/bin/gh" ] && [ "$(poll_tries)" = "1" ]; then
+    pass=$((pass+1)); echo "  ok   c0 the selftest resolves gh to its stub at CALL time — no arm below can reach the network"
+  else
+    fail=$((fail+1)); echo "  FAIL c0 gh resolves to '$(gh_bin)', not the stub — every dispatch assertion below is live traffic"
+  fi
 
   # c1 — the table describes THIS tree. Non-vacuous: a table matching an empty
   # tree would pass a set comparison trivially.
@@ -350,16 +547,20 @@ FIX
   else
     fail=$((fail+1)); echo "  FAIL c3a the mutation did not apply — c3b below would be proving nothing"
   fi
-  out="$(RUNS_FILE="$tmp/gap6h.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  # DISPATCH=0: this arm is about the OVERDUE READ, not the fallback. Since the
+  # dispatch arm landed, a cron-only workflow past bound is FIRED rather than
+  # screamed at (c8a is that proof), so asserting the scream here would be
+  # asserting the absence of the fix.
+  out="$(DISPATCH=0 RUNS_FILE="$tmp/gap6h.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
   if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out" && grep -q '360m old' <<<"$out"; then
-    pass=$((pass+1)); echo "  ok   c3b a 6 h gap on a */30 workflow REDS at exit 1, naming it: $(grep -o 'OVERDUE  main-gate-watch.yml.*' <<<"$out")"
+    pass=$((pass+1)); echo "  ok   c3b a 6 h gap on a */30 workflow is DETECTED and reds report-only at exit 1, naming it: $(grep -o 'OVERDUE  main-gate-watch.yml.*' <<<"$out")"
   else
     fail=$((fail+1)); echo "  FAIL c3b a 6 h gap did not red (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
   fi
 
   # c3c — and the FACTOR is doing the work, not the timestamp. The identical
   # 6 h-gap fixture under a factor wide enough to cover it must pass.
-  out="$(RUNS_FILE="$tmp/gap6h.ndjson" NOW_ISO="$NOW" OVERDUE_FACTOR=100 check_overdue 2>&1)"; rc=$?
+  out="$(DISPATCH=0 RUNS_FILE="$tmp/gap6h.ndjson" NOW_ISO="$NOW" OVERDUE_FACTOR=100 check_overdue 2>&1)"; rc=$?
   if [ "$rc" = "0" ]; then
     pass=$((pass+1)); echo "  ok   c3c …and the SAME 6 h gap passes at factor 100 — the 3x bound is the discriminator, not a pinned date"
   else
@@ -445,6 +646,149 @@ FIX
     fail=$((fail+1)); echo "  FAIL c7b a bogus push-refused: guard was accepted"
   fi
 
+  # ── c8 — THE DISPATCH ARM (task-f94a1d96238b18e4) ─────────────────────────
+  # The exact shape that reddened main: main-gate-watch (*/30, bound 90m) with
+  # its newest run 92 minutes old, which is ORDINARY delivery for a schedule
+  # GitHub hands over every 2.1-4.7 h. `gh` is stubbed, so no network and no
+  # real dispatch; the stub RECORDS what it was asked to do, because "the probe
+  # exited 0" would also be true of a probe that quietly stopped checking.
+  # 10:28Z under a 12:00Z now is 92m — the census figure, not a round number.
+  cat > "$tmp/lag92.ndjson" <<'FIX'
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T10:28:00Z"}
+{"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
+{"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
+{"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
+FIX
+
+  : > "$tmp/dispatch.log"
+  out="$(STUB_LOG="$tmp/dispatch.log" RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'DISPATCHED it: run 99887766' <<<"$out" \
+     && grep -q '92m old' <<<"$out" \
+     && grep -q 'workflow run main-gate-watch.yml' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8a a 92m-old main-gate-watch is DISPATCHED, not screamed at — and the stub recorded the call: $(head -1 "$tmp/dispatch.log")"
+  else
+    fail=$((fail+1)); echo "  FAIL c8a the 92m fixture did not dispatch cleanly (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8b — a dispatch that is REFUSED still screams, and says so.
+  out="$(STUB_DISPATCH_FAILS=1 RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out" \
+     && grep -q 'the dispatch call itself failed' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c8b a REFUSED dispatch (403) still reds at exit 1, naming the failure: $(grep -o 'fallback FAILED.*' <<<"$out" | head -1)"
+  else
+    fail=$((fail+1)); echo "  FAIL c8b a failed dispatch did not red (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8b2 — accepted, but no run ever shows up. A dispatch nobody can find is not
+  # a firing; this is the c6 argument applied to the new arm.
+  out="$(STUB_RUN_APPEARS=0 RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'NO workflow_dispatch run appeared' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c8b2 …and an ACCEPTED dispatch whose run never appears reds too — 'gh said ok' is not evidence of a firing"
+  else
+    fail=$((fail+1)); echo "  FAIL c8b2 a vanished dispatch was read as a firing (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8b3 — and a STALE workflow_dispatch row cannot be mistaken for this one.
+  cat > "$tmp/bin/gh-old" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  workflow) exit 0 ;;
+  api) echo "11112222 2026-08-30T09:00:00Z"; exit 0 ;;
+esac
+exit 1
+STUB
+  chmod +x "$tmp/bin/gh-old"
+  out="$(CRON_PROBE_GH="$tmp/bin/gh-old" RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'NO workflow_dispatch run appeared' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c8b3 …and a four-day-old workflow_dispatch row is not accepted as THIS dispatch landing"
+  else
+    fail=$((fail+1)); echo "  FAIL c8b3 a stale dispatch row was accepted (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8c — THE ARM DOES NOT WEAKEN A push-ARMED WORKFLOW. task-lease-renew is
+  # critical (*/20, bound 60m) and carries push: branches [main], so 92 minutes
+  # of silence means something is actually wrong with it: it must SCREAM, and it
+  # must never be dispatched.
+  sed 's|"task-lease-renew.yml", "status": "in_progress", "created_at": "2026-09-03T11:50:00Z"|"task-lease-renew.yml", "status": "in_progress", "created_at": "2026-09-03T10:28:00Z"|' \
+    "$tmp/fresh.ndjson" > "$tmp/push-armed-lag.ndjson"
+  if [ "$(grep -c '"task-lease-renew.yml".*10:28:00Z' "$tmp/push-armed-lag.ndjson")" = "1" ] \
+     && ! diff -q "$tmp/fresh.ndjson" "$tmp/push-armed-lag.ndjson" >/dev/null; then
+    pass=$((pass+1)); echo "  ok   c8c-mut the push-armed lag MUTATION applied — exactly one row moved to 10:28Z"
+  else
+    fail=$((fail+1)); echo "  FAIL c8c-mut the mutation did not apply — c8c below would prove nothing"
+  fi
+  : > "$tmp/dispatch.log"
+  out="$(STUB_LOG="$tmp/dispatch.log" RUNS_FILE="$tmp/push-armed-lag.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && ! grep -q 'task-lease-renew' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8c a push-ARMED critical workflow past its bound SCREAMS exactly as before and is never dispatched: $(grep -o 'OVERDUE  task-lease-renew.*' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c8c the dispatch arm weakened a push-armed workflow (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8f — THE PROBE MUST NOT CANCEL THE WATCH IT PROTECTS. A run already in
+  # flight means the workflow IS firing; a second dispatch would only cancel the
+  # queued one (four real cancellations, quoted above in_flight()).
+  : > "$tmp/dispatch.log"
+  out="$(STUB_IN_FLIGHT="55554444 in_progress 2026-09-03T11:58:00Z" STUB_LOG="$tmp/dispatch.log" \
+         RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && grep -q 'run 55554444 is in flight RIGHT NOW' <<<"$out" \
+     && [ ! -s "$tmp/dispatch.log" ]; then
+    pass=$((pass+1)); echo "  ok   c8f a run already in flight suppresses the dispatch entirely — the log is empty, so nothing was queued behind it"
+  else
+    fail=$((fail+1)); echo "  FAIL c8f the in-flight guard did not hold (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8f2 — and the guard cannot be held open forever by a PHANTOM queued row.
+  # Same fixture, same row, aged past 24 h: the dispatch must go out.
+  : > "$tmp/dispatch.log"
+  out="$(STUB_IN_FLIGHT="55554444 queued 2026-08-07T09:08:43Z" STUB_LOG="$tmp/dispatch.log" \
+         RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && grep -q 'DISPATCHED it: run 99887766' <<<"$out" \
+     && grep -q 'workflow run main-gate-watch.yml' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8f2 …and a 27-day-old QUEUED row does NOT hold that guard open — the dispatch still went out (the c6 trap, applied to the new arm)"
+  else
+    fail=$((fail+1)); echo "  FAIL c8f2 a phantom queued row suppressed the dispatch permanently (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8d — THE MUTATION THAT MATTERS: cut the dispatch call out of a COPY of this
+  # script and the 92m fixture must go back to red. Run as a whole program, so
+  # the mutant's verdict is the process exit code, not an internal one.
+  sed 's|^        if runid="$(try_dispatch|        if false \&\& runid="$(try_dispatch|' "$0" > "$tmp/nodispatch.sh"
+  if [ "$(grep -c '^        if false && runid="$(try_dispatch' "$tmp/nodispatch.sh")" = "1" ] \
+     && ! diff -q "$0" "$tmp/nodispatch.sh" >/dev/null; then
+    pass=$((pass+1)); echo "  ok   c8d-mut the remove-the-dispatch-arm MUTATION applied — exactly one call site disabled"
+  else
+    fail=$((fail+1)); echo "  FAIL c8d-mut the mutation did not apply — c8d below would prove nothing"
+  fi
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nodispatch.sh" --workflows "$WORKFLOWS_DIR" \
+           --runs-file "$tmp/lag92.ndjson" --now "$NOW" 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c8d …and with the dispatch arm removed the SAME 92m fixture reds again — c8a is the arm doing the work, not the fixture"
+  else
+    fail=$((fail+1)); echo "  FAIL c8d the mutant still passed (rc=$rc) — c8a proves nothing"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  # …and the positive control: the UNMUTATED script, same invocation, exits 0.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$WORKFLOWS_DIR" \
+           --runs-file "$tmp/lag92.ndjson" --now "$NOW" 2>&1)"; rc=$?
+  if [ "$rc" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   c8d2 …and the unmutated script on that identical invocation exits 0 — the pair differs only by the mutation"
+  else
+    fail=$((fail+1)); echo "  FAIL c8d2 the unmutated script did not pass its own fixture (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8e — --no-dispatch is a REPORT mode, and it is honest about it: the same
+  # fixture reds, so nobody can quietly mute the probe by leaving the flag on.
+  out="$(DISPATCH=0 RUNS_FILE="$tmp/lag92.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ]; then
+    pass=$((pass+1)); echo "  ok   c8e --no-dispatch reports only — the same fixture reds, so the flag cannot be used to make the probe quiet"
+  else
+    fail=$((fail+1)); echo "  FAIL c8e --no-dispatch went green without firing anything (rc=$rc)"
+  fi
+  unset CRON_PROBE_GH CRON_PROBE_POLL_TRIES CRON_PROBE_POLL_SLEEP
+
   echo
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
@@ -462,7 +806,7 @@ RC=$?
 echo
 case "$RC" in
   0) echo "VERDICT  cron: every critical-cadence workflow fired inside ${OVERDUE_FACTOR}x its interval" ;;
-  1) echo "VERDICT  cron: SCREAM — a critical-cadence workflow is silent past ${OVERDUE_FACTOR}x its interval (named above). GitHub cron is best-effort; the remedy is the workflow's push/dispatch fallback, not a retry." ;;
+  1) echo "VERDICT  cron: SCREAM — a critical-cadence workflow is silent past ${OVERDUE_FACTOR}x its interval AND could not be fired (named above). GitHub cron is best-effort, so lag alone is no longer a scream: a cron-only critical workflow past bound is DISPATCHED by this probe, and only a failed dispatch, a dispatched run that never appeared, a push-armed workflow gone quiet, or a workflow with no run row at all reaches this verdict. A re-run of this probe is not the remedy." ;;
   3) echo "VERDICT  cron: UNKNOWN — the run list could not be read. Not a pass." ;;
 esac
 exit $RC
