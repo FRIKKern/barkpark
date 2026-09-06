@@ -274,3 +274,107 @@ func stubEngines(t *testing.T) {
 	findSiteDeployScripts = func() (string, string, error) { return static, node, nil }
 	t.Cleanup(func() { findSiteDeployScripts = restore })
 }
+
+// TestScrubbedBuildEnvRemovesTheD7Keys pins the scrub in BOTH directions: the
+// three box-derived keys are gone, and everything else — including the vars a
+// local build genuinely needs (BARKPARK_API_URL, BARKPARK_DATASET) and a
+// same-prefix var that merely SHARES a prefix — survives untouched.
+//
+// The negative half is the one that matters: a scrub written as a prefix match
+// on "BARKPARK_" would pass the positive assertions and silently break every
+// local build, so the survivors are asserted by name and the length is pinned.
+func TestScrubbedBuildEnvRemovesTheD7Keys(t *testing.T) {
+	environ := []string{
+		"PATH=/usr/bin",
+		"BARKPARK_TOKEN=bp_admin_secret",
+		"BARKPARK_API_URL=https://api.example",
+		"BARKPARK_DATASET=production",
+		"BARKPARK_BUILD_ID=deadbeef",
+		"BARKPARK_CONTENT_REV=abc123",
+		"BARKPARK_TOKEN_FILE=/etc/tok", // shares the prefix, is NOT the key
+		"HOME=/home/dev",
+	}
+	got := scrubbedBuildEnv(environ)
+
+	for _, gone := range []string{"BARKPARK_TOKEN=", "BARKPARK_BUILD_ID=", "BARKPARK_CONTENT_REV="} {
+		for _, kv := range got {
+			if strings.HasPrefix(kv, gone) {
+				t.Errorf("scrubbedBuildEnv kept %q — the D7 key %s must not reach the build", kv, gone)
+			}
+		}
+	}
+	want := []string{
+		"PATH=/usr/bin",
+		"BARKPARK_API_URL=https://api.example",
+		"BARKPARK_DATASET=production",
+		"BARKPARK_TOKEN_FILE=/etc/tok",
+		"HOME=/home/dev",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("scrubbedBuildEnv dropped the wrong count: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("scrubbedBuildEnv[%d] = %q, want %q (order and value must be untouched)", i, got[i], want[i])
+		}
+	}
+	// A scrub is a REMOVAL: it can never add a var the caller did not export.
+	if len(got) > len(environ) {
+		t.Error("scrubbedBuildEnv grew the environment — it must only remove")
+	}
+}
+
+// TestRunSiteBuildScrubsTheAmbientToken is the ABLE-TO-FAIL half at the call
+// site, not the helper: it runs the REAL runSiteBuild against a fake `npm` that
+// dumps its own environment, and asserts the child never saw the token.
+//
+// This is the assertion the old code fails. On origin/main runSiteBuild sets no
+// cmd.Env, so the child inherits everything and this test reds.
+func TestRunSiteBuildScrubsTheAmbientToken(t *testing.T) {
+	bin := t.TempDir()
+	// A fake `npm` that prints its own env and succeeds, so both steps
+	// (`npm ci`, `npm run build`) run and both are observable.
+	script := filepath.Join(bin, "npm")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nenv\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BARKPARK_TOKEN", "bp_admin_leaky_value")
+	t.Setenv("BARKPARK_BUILD_ID", "stale-ambient-id")
+	t.Setenv("BARKPARK_API_URL", "https://api.example")
+
+	out, err := runSiteBuild(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("fake npm build failed: %v\n%s", err, out)
+	}
+	for _, leaked := range []string{"bp_admin_leaky_value", "stale-ambient-id"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("the build child saw %q — preflight scrubs the D7 keys from its own npm env; got:\n%s", leaked, out)
+		}
+	}
+	// Non-vacuity: the child DID run and DID inherit the rest, so a green above
+	// cannot come from an empty/never-executed environment dump.
+	if !strings.Contains(out, "BARKPARK_API_URL=https://api.example") {
+		t.Fatalf("the fake npm did not report an inherited env — this test proves nothing; got:\n%s", out)
+	}
+}
+
+// TestCheckEnvContractRefusalTeaches pins that the refusal carries its own
+// remedy: the exact command, not just the diagnosis.
+func TestCheckEnvContractRefusalTeaches(t *testing.T) {
+	env := map[string]string{"BARKPARK_TOKEN": "bp_admin_abcd1234"}
+	c := checkEnvContract(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	if c.ok {
+		t.Fatal("an ambient BARKPARK_TOKEN must still fail the env-contract check")
+	}
+	if !strings.Contains(c.next, "env -u BARKPARK_TOKEN") {
+		t.Errorf("the refusal must name the exact remedy command, got next = %q", c.next)
+	}
+	if strings.Contains(c.observed, "bp_admin_abcd1234") {
+		t.Errorf("the refusal must not echo the credential, got observed = %q", c.observed)
+	}
+	clean := checkEnvContract(func(string) (string, bool) { return "", false })
+	if !clean.ok {
+		t.Error("a clean shell must pass the env-contract check")
+	}
+}
