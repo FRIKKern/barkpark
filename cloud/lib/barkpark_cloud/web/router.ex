@@ -11866,13 +11866,46 @@ defmodule BarkparkCloud.Web.Router do
   # because they are what distinguishes a box that WAS armed and was disarmed
   # at T from one that was NEVER armed — the distinction AgentRetentionWorker's
   # 30-day prune is about to erase.
+  #
+  # NOT EVERY ROW IS DISARMED (console review of #16486, folded in 2026-09-06):
+  # a box that has NEVER minted a token AND has NEVER checked in is not a box
+  # that lost its token — it is a box whose provision has not finished (or never
+  # will). "re-provision or resurrect" on that row would tell an operator to
+  # tear down a box that is 90 seconds into a 12-minute provision. So that shape
+  # gets a remedy that says what TO do, with a clock: WAIT, and re-check after
+  # the provision stale threshold (`Registry.stale_after_seconds/0`, the same
+  # budget the stale-claim reaper uses — 30 min + margin for a support box); a
+  # box still listed PAST that threshold never completed its claim, and only
+  # then is re-provision the answer. `inserted_at` rides on the row so the
+  # operator can see which side of the threshold the box is on.
   defp no_agent_token_json(row) do
-    Map.put(
-      row,
-      :remedy,
-      "re-provision or resurrect the box to mint a fresh agent token; nothing clears revoked_at"
-    )
+    Map.put(row, :remedy, no_agent_token_remedy(row, DateTime.utc_now()))
   end
+
+  defp no_agent_token_remedy(%{token_count: 0, last_seen_at: nil, inserted_at: inserted_at}, now)
+       when not is_nil(inserted_at) do
+    threshold = Registry.stale_after_seconds()
+    support_threshold = Registry.stale_after_seconds("provision_support")
+    age = DateTime.diff(now, inserted_at, :second)
+
+    if age < support_threshold do
+      "still provisioning — no agent token has ever been minted and the box has never checked in. " <>
+        "Do NOT re-provision yet: wait, and re-check this census after #{minutes(threshold - age)} min " <>
+        "(#{minutes(support_threshold - age)} min for a support box — the provision stale thresholds); " <>
+        "a box still listed after that never completed its provision claim"
+    else
+      "the provision never completed — registered #{minutes(age)} min ago with no agent token ever " <>
+        "minted and no check-in, past the #{minutes(support_threshold)}-min support-provision threshold " <>
+        "(#{minutes(threshold)} min for a main). Re-provision the box; nothing here will recover on its own"
+    end
+  end
+
+  defp no_agent_token_remedy(_row, _now),
+    do: "re-provision or resurrect the box to mint a fresh agent token; nothing clears revoked_at"
+
+  # Whole minutes, never below 1: a remedy that says "re-check in 0 min" is a
+  # remedy that says nothing.
+  defp minutes(seconds), do: max(div(seconds + 59, 60), 1)
 
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
