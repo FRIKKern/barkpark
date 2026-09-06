@@ -18,9 +18,12 @@
 //   node scripts/studio-desk-measure.mjs --doc=<slug>   # measure a NAMED document
 //   node scripts/studio-desk-measure.mjs --doc=any      # first row that opens
 //   node scripts/studio-desk-measure.mjs --out <path>   # ALSO save the run JSON
+//   node scripts/studio-desk-measure.mjs --sha=<sha>    # REFUSE unless the box serves it
 //   node scripts/studio-desk-measure.mjs --help
 //
-// (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.)
+// (`BP_DESK_DOC` is the env form of `--doc`. Default: DEFAULT_DOC below.
+//  `BP_DESK_SHA` is the env form of `--sha`/`--ref`. Unpinned by default: a run
+//  without it measures whatever guerrilla serves and records it in served_sha.)
 //
 // A run that is not written to disk survives only as terminal scrollback, and
 // this epic has already lost one 54-row sweep that way (D131) — it exists now
@@ -396,6 +399,11 @@ function resolveOutPath(argv = process.argv.slice(2)) {
  *  milliseconds rather than after a ~30-60s authenticated sweep (D115). */
 let OUT_PATH = null;
 
+/** The requested revision, parsed at the ENTRYPOINT for both of `OUT_PATH`'s
+ *  reasons above: `parseShaPin` calls `die`, and parsing argv at module scope
+ *  would couple IMPORT of this file to the importer's command line. */
+let SHA_PIN = null;
+
 /** Function, not a const string: it interpolates DEFAULT_DOC, which is declared
  *  below this point and would be in its temporal dead zone at module init. */
 function usage() {
@@ -424,6 +432,15 @@ OPTIONS
                       provenance) to <path>, creating parent directories.
                       Committed runs live in scripts/measurements/. Without
                       this the table exists only as terminal scrollback (D131).
+  --sha=<sha>         PIN the run to a deployed revision. Before anything is
+  --ref=<sha>         measured, the SHA the box actually serves is read over
+                      ssh and compared; a mismatch REFUSES — non-zero, naming
+                      both SHAs — with zero rows emitted and nothing written.
+                      Abbreviated SHAs match by prefix. Without this a run
+                      measures whatever guerrilla serves right now and says so
+                      only afterwards, in served_sha (charter D73). \`--sha\`
+                      does not deploy, serve or check out anything: it only
+                      refuses to measure a build you did not ask for.
   --no-round-trip     Skip the round-trip pass (default -> open -> dismiss on
                       the SAME page instance, asserting the reading column comes
                       back bit-identical per width and face). It costs a second
@@ -461,6 +478,7 @@ ${Object.entries(BROWSER_POLICIES).map(([id, p]) =>
 ENVIRONMENT
   BP_DESK_BROWSER     bundled (default) | chrome — see BROWSER above.
   BP_DESK_RETRIES     Env form of --retries.
+  BP_DESK_SHA         Env form of --sha/--ref.
   BP_DESK_DOC         Env form of --doc.
                       (BP_DESK_DESTINATION_CONTROL is GONE. It pointed at a
                       control that summons the Tier-3 destination; no such
@@ -1289,6 +1307,109 @@ export function compareProvenance(pre, post) {
         : `Combined with the SHA change above, this is a deploy.`));
   }
   return out;
+}
+
+/**
+ * THE REQUESTED REVISION (`--sha=` / `--ref=`), CHECKED BEFORE ANY ROW EXISTS.
+ *
+ * The bracket above catches the deployment moving DURING a sweep. It cannot
+ * catch the deployment having ALREADY moved before the sweep started, because
+ * a run that never says which build it wanted cannot be wrong about it. That
+ * is charter D73's whole cost: D60 accused D40 of narrating fiction because a
+ * later grep found the cited rule gone, when spd-s4 had simply replaced it in
+ * the meantime — and settling it took git archaeology instead of one line in
+ * an artifact.
+ *
+ * So a caller can now NAME the build it intends to measure. If the box serves
+ * a different one, the run REFUSES — non-zero, by name, with both SHAs — and
+ * it refuses at the PRE half of the bracket, before a browser is launched and
+ * long before a row is emitted. Nothing is written, because a matrix of the
+ * wrong build is worse than no matrix (D138: a partial matrix is not a matrix;
+ * this is its sibling — a matrix of the wrong revision is not a measurement of
+ * yours).
+ *
+ * This is the CHEAP form the task authorised and deliberately not the other
+ * one: it does not serve the ref locally, check anything out, or move the
+ * deployment. It only refuses to pretend. `--sha` with no deploy of your own
+ * is a no-op on a matching box and a loud stop on a moved one.
+ *
+ * NOT retryable. A moved deployment is not a race the harness lost; re-running
+ * it verbatim reproduces the same refusal until someone deploys or changes the
+ * requested SHA.
+ */
+export function parseShaPin(argv = process.argv, env = process.env) {
+  const ALIASES = ['--sha', '--ref'];
+  let raw = null;
+  let source = null;
+  for (const flag of ALIASES) {
+    const eq = argv.find((a) => typeof a === 'string' && a.startsWith(`${flag}=`));
+    if (eq !== undefined) { raw = eq.slice(flag.length + 1); source = `${flag}=`; break; }
+    const i = argv.indexOf(flag);
+    if (i !== -1) {
+      raw = argv[i + 1];
+      if (raw === undefined) die(`${flag} was passed with no value — name the commit the box must be serving, e.g. ${flag}=5aad3b917`);
+      if (typeof raw === 'string' && raw.startsWith('-')) {
+        die(`${flag} was followed by \`${raw}\`, which is another flag, not a SHA. Pass the commit: ${flag}=<sha>`);
+      }
+      source = flag;
+      break;
+    }
+  }
+  if (raw === null || raw === undefined) {
+    // Env form, for the same reason BP_DESK_DOC exists: a sweep driven from a
+    // script that already knows the SHA should not have to rewrite its argv.
+    const fromEnv = env.BP_DESK_SHA;
+    if (fromEnv === undefined || String(fromEnv).trim() === '') return null;
+    raw = fromEnv;
+    source = 'BP_DESK_SHA';
+  }
+  const requested = String(raw).trim();
+  if (!requested) die(`${source} was passed with an empty value — name the commit the box must be serving, or omit the flag`);
+  // Abbreviated is fine (that is what a human copies out of `git log`), but it
+  // must be a SHA. A branch name would be checked against a 40-hex string and
+  // could only ever refuse, which is a refusal about the ARGUMENT dressed up as
+  // a refusal about the deployment.
+  if (!/^[0-9a-f]{7,40}$/i.test(requested)) {
+    die(`${source} must be a hex commit SHA, 7 to 40 characters (got ${JSON.stringify(requested)}). ` +
+        `A branch or tag name is NOT accepted: the box reports \`git rev-parse HEAD\`, a 40-hex string, so a ` +
+        `name could only ever mismatch — a refusal about your argument wearing the costume of a refusal about ` +
+        `the deployment. Resolve it yourself: ${source.replace(/[= ]$/, '')}=$(git rev-parse <ref>).`);
+  }
+  return { requested: requested.toLowerCase(), source };
+}
+
+/**
+ * THE COMPARISON. Pure, so it can be exercised without ssh, a browser or a box.
+ *
+ * The served SHA is whatever `git rev-parse HEAD` printed on the box: 40 hex
+ * characters. The requested one is whatever a human pasted, commonly the short
+ * form. So a PREFIX match counts, in the one direction that is sound — the
+ * requested value is a prefix of the served one. (The mirror direction is
+ * accepted too, for a hypothetical abbreviated served read, and it costs one
+ * clause.) `startsWith` on the shorter of the two, never a substring test:
+ * `includes` would match a SHA in the middle of another and that is not a
+ * revision identity.
+ */
+export function shaPinMatches(requested, served) {
+  const a = String(requested ?? '').trim().toLowerCase();
+  const b = String(served ?? '').trim().toLowerCase();
+  if (!a || !b) return false;
+  return a.length <= b.length ? b.startsWith(a) : a.startsWith(b);
+}
+
+/** Refuse, by name, before anything is measured. No-op when nothing was pinned. */
+export function assertServedShaPinned(pin, served) {
+  if (!pin) return;
+  if (shaPinMatches(pin.requested, served)) return;
+  die(
+    `SERVED SHA IS NOT THE PINNED SHA — nothing was measured, and this says nothing about the desk.\n\n` +
+    `    requested (${pin.source})  ${pin.requested}\n` +
+    `    served    (ssh git rev-parse HEAD)  ${served || '<empty>'}\n\n` +
+    `  The box is serving a different build than the one this run was pinned to, so every row it could ` +
+    `produce would carry your intent and the box's code and nothing would say they disagreed. That is the ` +
+    `confound charter D73 paid for in git archaeology, and it is refused here rather than recorded there.\n\n` +
+    `  This is NOT a retryable abort: re-running reproduces it exactly until the deployment moves. Either ` +
+    `deploy ${pin.requested} to the box, or drop the pin and let the run measure ${served} on the record.`);
 }
 
 // ── auth (D24e login-ticket flow) ────────────────────────────────────────────
@@ -3104,6 +3225,11 @@ async function main() {
   // PRE half of the bracket (D97). The POST half runs after the sweep and a
   // difference fails the run — see compareProvenance().
   const provenance = readProvenance();
+  // THE PIN, CHECKED HERE AND NOWHERE LATER: this is the earliest point at
+  // which the served SHA is known, and it is still before the browser launches,
+  // before the ticket is minted and long before a row exists. A refusal from
+  // here writes zero bytes, which is the whole point.
+  assertServedShaPinned(SHA_PIN, provenance.served_sha);
   const srv = readGuerrillaServer();
 
   const browserPolicyChosen = browserPolicy();
@@ -3174,6 +3300,11 @@ async function main() {
       'fact. `--doc=<slug>` / BP_DESK_DOC override the committed default; `--doc=any` restores ' +
       'first-row behaviour, skipping rows that open no paper surface.',
     provenance,
+    // What the CALLER asked to measure, null when unpinned. `served_sha` says
+    // what was measured; this says what was intended, so a reader never has to
+    // reconstruct the difference from prose (D73).
+    requested_sha: SHA_PIN?.requested ?? null,
+    requested_sha_source: SHA_PIN?.source ?? null,
     provenance_note:
       'BRACKETED (D97): `provenance` is the PRE-sweep read and `provenance_post` the POST-sweep ' +
       'read of the same two facts. `provenance_bracket.matched` false means the run FAILED — a ' +
@@ -3714,6 +3845,7 @@ function writeRunArtifact(run, outPath) {
         }
       : null,
     served_sha: run.provenance?.served_sha ?? null,
+    requested_sha: run.requested_sha ?? null,
     slot_active: run.provenance?.slot_active ?? null,
     provenance_pre_read_at: run.provenance?.read_at ?? null,
     provenance_post_read_at: run.provenance_post?.read_at ?? null,
@@ -4329,7 +4461,7 @@ if (INVOKED_DIRECTLY) {
   // `resolveOutPath` runs INSIDE this chain so a malformed `--out` lands in the
   // same handler as every other MeasureError — one failure shape, by name.
   Promise.resolve()
-    .then(() => { OUT_PATH = resolveOutPath(); })
+    .then(() => { OUT_PATH = resolveOutPath(); SHA_PIN = parseShaPin(); })
     .then(() => runWithRetries(main, parseRetries(), {
       onRetry: ({ attempt, retries, abort_id, message }) => {
         process.stderr.write(
