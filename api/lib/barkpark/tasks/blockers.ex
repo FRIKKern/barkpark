@@ -132,7 +132,7 @@ defmodule Barkpark.Tasks.Blockers do
     from(d in Document,
       where: d.type == "task",
       where: d.dataset == ^doc.dataset,
-      where: fragment("? IS NOT DISTINCT FROM ?", d.project_id, ^doc.project_id),
+      where: fragment("? IS NOT DISTINCT FROM ?", d.project_id, type(^doc.project_id, Ecto.UUID)),
       where: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) in ^stripped,
       select: {fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id), d.content}
     )

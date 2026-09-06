@@ -199,10 +199,10 @@ defmodule Barkpark.Tasks.DependencySourceAgreementTest do
       epoch = claimed.content["claim"]["epoch"]
 
       {:ok, _} =
-        Tasks.close(edge_blocker.doc_id, "worker-cascade", epoch,
+        Tasks.close(edge_blocker.id, "worker-cascade",
+          observed_epoch: epoch,
           lifecycle_status: "done",
-          reason: "fixture: the edge blocker is finished",
-          scope: scope
+          reason: "fixture: the edge blocker is finished"
         )
 
       still = Repo.get!(Content.Document, candidate.id)
