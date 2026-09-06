@@ -439,7 +439,9 @@ defmodule Barkpark.Tasks do
 
   Five things, in one Postgres transaction:
 
-    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || doc_id))`
+    1. **Advisory lock** — `pg_advisory_xact_lock(hashtext('task:' || uuid))`,
+       built by `Barkpark.Tasks.LockKey.task/1` from the document's UUID
+       PRIMARY KEY (NOT its `doc_id` slug — see that module) —
        serializes ALL concurrent close attempts on the same task; one wins,
        the rest queue inside the lock and then fail CAS (because the winner
        already bumped `rev`). Per-task scope — closes on DIFFERENT tasks do

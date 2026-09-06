@@ -59,6 +59,7 @@ defmodule Barkpark.Tasks.Landed do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Criteria
@@ -125,7 +126,7 @@ defmodule Barkpark.Tasks.Landed do
         # Close-family advisory lock: serialize with close/stamp/release over
         # the same criteria list, so a landing mark and a close cannot
         # interleave halfway through the criteria merge.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # global-read: by-PK re-read inside the close-family advisory lock — tenancy was resolved and authorized at the controller (doc_id → task.id), the Close/Stamp posture. (ONE LINE, directly above the read: tenant-scope-check.sh reads only the immediately-preceding line, so a wrapped justification reads as UNJUSTIFIED.)
         case Repo.get(Document, task_id) do

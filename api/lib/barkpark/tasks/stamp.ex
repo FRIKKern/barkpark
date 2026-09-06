@@ -136,6 +136,7 @@ defmodule Barkpark.Tasks.Stamp do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Criteria
@@ -310,7 +311,7 @@ defmodule Barkpark.Tasks.Stamp do
       Repo.transaction(fn ->
         # Close-family advisory lock (D6): serialize with close/release/move
         # over the same task row + criteria list.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_id)])
 
         # Tenancy was resolved and authorized at the controller (doc_id →
         # task.id), and the holder + epoch-CAS checks below bind the caller to

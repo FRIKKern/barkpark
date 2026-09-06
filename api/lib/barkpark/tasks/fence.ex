@@ -26,6 +26,7 @@ defmodule Barkpark.Tasks.Fence do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Edges, Internal}
@@ -54,9 +55,12 @@ defmodule Barkpark.Tasks.Fence do
     result =
       Repo.transaction(fn ->
         # Advisory lock on the DEPENDENT — the task we may fence. Same key
-        # (`task:<uuid>`) claim/close/sweep use, so the epoch bump serializes
-        # with them per-task; edges on OTHER tasks pass through unimpeded.
-        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{child_uuid}"])
+        # (`LockKey.task/1` = `task:<uuid>`) close/release/stage/sweep use, so
+        # the epoch bump serializes with them per-task; edges on OTHER tasks
+        # pass through unimpeded. A targeted CLAIM takes this key too, but
+        # only AFTER it resolves the slug — its first lock is `task:<doc_id>`
+        # and excludes other claims, not this.
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(child_uuid)])
 
         case Edges.add_dep(child, parent, kind) do
           {:ok, edge} ->
