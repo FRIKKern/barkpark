@@ -48,7 +48,8 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     assert policy =~ ~r/script-src 'self' 'nonce-[^']+' 'wasm-unsafe-eval' 'unsafe-eval'/
     assert policy =~ "https://cdn.jsdelivr.net"
     assert policy =~ "object-src 'none'"
-    refute policy =~ "'unsafe-inline'"
+    # scoped to script-src: style-src legitimately carries 'unsafe-inline'.
+    refute policy =~ ~r/script-src[^;]*'unsafe-inline'/
 
     body = html_response(conn, 200)
     # the inline scripts carry the per-request nonce...
@@ -97,6 +98,104 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     refute policy =~ "'unsafe-inline'"
     # the reader layout's inline liveSocket boot is nonced → not blocked.
     assert html_response(conn, 200) =~ ~s(nonce="#{conn.assigns.csp_nonce}")
+  end
+
+  @rich_slug "csp-floor-rich-paper"
+
+  describe "the non-script floor against a REAL rendered paper" do
+    setup do
+      # A representative paper: an image block with a REMOTE https src, a table,
+      # a video block, and a link — i.e. every node kind whose fetch the new
+      # img-src / media-src / frame-src / default-src floor could plausibly
+      # break. If the floor were mis-scoped, this render is where it shows.
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @rich_slug,
+            "event_type" => "plan-written",
+            "blocks" => [
+              %{
+                "id" => "b1",
+                "type" => "heading",
+                "level" => 1,
+                "content" => [%{"type" => "text", "value" => "Rich CSP paper"}]
+              },
+              %{
+                "id" => "b2",
+                "type" => "paragraph",
+                "content" => [
+                  %{
+                    "type" => "text",
+                    "value" => "prose long enough to clear the hollow-body gate for this reader"
+                  }
+                ]
+              },
+              %{
+                "id" => "b3",
+                "type" => "image",
+                "src" => "https://images.example.com/remote.png",
+                "alt" => "a remote image"
+              },
+              %{
+                "id" => "b4",
+                "type" => "table",
+                "rows" => [["h1", "h2"], ["a", "b"]]
+              },
+              %{
+                "id" => "b5",
+                "type" => "video",
+                "src" => "https://media.example.com/clip.mp4"
+              }
+            ]
+          })
+        )
+
+      :ok
+    end
+
+    test "header carries the floor AND the render holds nothing the floor blocks",
+         %{conn: conn} do
+      conn = get(conn, "/papers/#{@rich_slug}")
+      assert conn.status == 200
+      policy = csp_of(conn)
+      body = html_response(conn, 200)
+
+      # (a) the new directives actually reach a live reader response.
+      for directive <- [
+            "default-src 'self'",
+            "form-action 'self'",
+            "frame-src 'self'",
+            "font-src 'self' data:"
+          ] do
+        assert policy =~ directive, "missing #{directive} in: #{policy}"
+      end
+
+      # (b) HTML-SHAPE proof, the arm a headless test can actually carry: the
+      # rendered page contains no element the two TIGHT directives would block.
+      #
+      # form-action 'self' — the reader emits no <form> at all, so nothing can
+      # be re-pointed off-site.
+      refute body =~ "<form"
+
+      # frame-src 'self' — the only frame is #bp-mail-frame, which the layout
+      # ships with an EMPTY src and fills from location.pathname (same origin).
+      # Any src= on an iframe in the served HTML would be a floor violation.
+      frames = Regex.scan(~r/<iframe[^>]*>/, body) |> List.flatten()
+      assert length(frames) >= 1, "expected the mail-view iframe in the reader shell"
+      for f <- frames, do: refute(f =~ ~r/src\s*=\s*"https?:/)
+
+      # (c) the permissive arms are permissive ON PURPOSE — the remote image and
+      # video DID render with their off-site URLs intact, which is exactly why
+      # img-src/media-src cannot be pinned to 'self'.
+      assert body =~ "https://images.example.com/remote.png"
+      assert body =~ "https://media.example.com/clip.mp4"
+
+      # (d) the DOCUMENTED-UNSAFE arm, asserted rather than asserted-away: the
+      # renderer really does stamp inline style attributes, so style-src cannot
+      # drop 'unsafe-inline'. If this ever stops being true, tighten style-src.
+      assert body =~ ~r/<[a-z]+[^>]*\sstyle="/
+      assert policy =~ "style-src 'self' 'unsafe-inline'"
+    end
   end
 
   # Fold the header list to a single string ("" when absent) so an assertion can

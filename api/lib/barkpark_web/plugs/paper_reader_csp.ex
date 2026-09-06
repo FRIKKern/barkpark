@@ -13,9 +13,17 @@ defmodule BarkparkWeb.Plugs.PaperReaderCsp do
 
   ## Policy (paper reader only)
 
+      default-src 'self';
       script-src 'self' 'nonce-<n>' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net;
+      style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+      img-src 'self' data: blob: https: http:;
+      media-src 'self' data: blob: https: http:;
+      font-src 'self' data:;
+      connect-src 'self' https: ws: wss:;
+      frame-src 'self';
       object-src 'none';
       base-uri 'self';
+      form-action 'self';
       frame-ancestors 'self'
 
   Reasoning for each source (all required by the reader's legitimate render):
@@ -34,11 +42,81 @@ defmodule BarkparkWeb.Plugs.PaperReaderCsp do
       permits `eval`, so the anti-XSS guarantee holds.
     * `https://cdn.jsdelivr.net` — mermaid + asciinema-player engines.
 
-  Deliberately NO `default-src`: styles (the multi-KB inline `<style>` blob),
-  `data:` images, self-hosted fonts, the `/live` websocket (`connect-src`), and
-  the email-view iframe (`frame-src`) stay unrestricted so the reader renders
-  byte-identically. `object-src 'none'` is cheap hardening that costs the reader
-  nothing.
+  ## Non-script directives: what each one buys, and what it CANNOT buy
+
+  An enforcing `script-src` alone downgrades a markup-injection defect to
+  defacement, dangling-markup exfiltration, `form-action` hijack and iframe
+  phishing rather than blocking it. The directives below close the three of
+  those that CAN be closed without changing a single rendered byte. Each was
+  chosen by enumerating what `layouts/bulldocs.html.heex` and
+  `Barkpark.PortableDoc.Render.*` actually emit — not by copying a hardening
+  checklist.
+
+    * `default-src 'self'` — a FLOOR for the fetch directives nobody named
+      (`worker-src`, `manifest-src`, `prefetch-src`, `child-src`). The reader
+      uses none of them, so the floor costs nothing today and stops a future
+      injected `<link rel=manifest>` / worker. Every directive the reader DOES
+      use is spelled out below, so the floor never governs a live load. Note
+      `default-src` does NOT cover `form-action`, `frame-ancestors` or
+      `base-uri` — those are set explicitly.
+
+    * `form-action 'self'` — a REAL win, and the row's headline vector. The
+      reader emits ZERO `<form>`: none in `bulldocs.html.heex`, none anywhere
+      under `portable_doc/render/`. So an injected `<form action="https://evil">`
+      (the classic CSP-bypass exfiltration for a policy that only pins
+      `script-src`) now fails to submit, and nothing legitimate is affected.
+
+    * `frame-src 'self'` — also a real win. The reader has exactly ONE frame,
+      `#bp-mail-frame`, whose src the layout computes as
+      `location.pathname + "/email" + location.search` — same origin, always.
+      The renderer emits no `<iframe>`/`<object>`/`<embed>` for ANY block type
+      (there is no embed block), so an injected off-site iframe (phishing
+      overlay, ad-fraud frame) is blocked while the email view keeps working.
+
+    * `font-src 'self' data:` — a genuine tightening. The only faces are
+      `/fonts/SourceSerif4Variable-{Roman,Italic}.woff2`, self-hosted and
+      declared in the head's `@font-face` blob. `data:` is kept so an inline
+      face in that blob (or a future token-generated one) cannot regress the
+      render.
+
+    * `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net` — CANNOT be
+      tightened, and it is important to say why rather than to pretend. The
+      head carries a multi-KB inline `<style>` blob, and the renderer stamps
+      `style="…"` ATTRIBUTES on nearly every emitted node (e.g. `walk.ex`'s
+      `<img … style="max-width:100%;height:auto">`, `figures.ex`'s
+      `<video … style="max-width:100%;border-radius:6px">`), while the mail-frame
+      script writes `frame.style.height`. A nonce does not cover style
+      attributes — that needs `'unsafe-hashes'` plus a hash per distinct
+      attribute value, which is impossible for attribute values derived from
+      user content. Dropping `'unsafe-inline'` here would strip the paper's
+      entire appearance, which violates the byte-identical-render constraint.
+      So this directive is a no-op for security; it exists only so
+      `default-src 'self'` does not break styling. The residual risk it leaves
+      open is CSS-based defacement and CSS exfiltration of attribute values.
+      jsdelivr is here for the `asciinema-player@3.8.0` stylesheet in the head.
+
+    * `img-src` / `media-src` `'self' data: blob: https: http:` — deliberately
+      permissive, for the same "keep the floor from breaking the render" reason.
+      `Render.Util.safe_url/1` allows `https?|mailto|tel` plus root-relative
+      paths, so a paper block may legitimately point an `<img>`/`<video>` at ANY
+      remote host, and the lightbox re-reads `image.currentSrc`. Pinning these
+      to `'self'` would silently blank third-party images in existing papers.
+      Both schemes are listed because the reader is served over plain HTTP in
+      dev. What this still buys: `javascript:`/`filesystem:` image sources stay
+      blocked, and there is no `*` wildcard to inherit later.
+
+    * `connect-src 'self' https: ws: wss:` — likewise permissive, and likewise
+      NOT an exfiltration control. Same-origin traffic would be enough for the
+      LiveSocket (`/live`), `fetch("/assets/bp-pdrender.wasm.gz")` and
+      `fetch(pathname + "/source")` — but `AsciinemaPlayer.create(src, …)`
+      fetches an asciicast URL taken straight from the paper's own block data,
+      which may be any remote host. Narrowing to `'self'` would break every
+      paper with a remotely-hosted `asciicast` block. Read this directive as
+      "no non-HTTP(S) transports", not as "no exfiltration" — with
+      `script-src` enforcing, there is no attacker script to exfiltrate WITH,
+      which is where the actual guarantee lives.
+
+  `object-src 'none'` is cheap hardening that costs the reader nothing.
 
   This plug REPLACES the whole `content-security-policy` header (via
   `put_resp_header`), running AFTER `put_secure_browser_headers` in the pipeline.
@@ -96,9 +174,16 @@ defmodule BarkparkWeb.Plugs.PaperReaderCsp do
   """
   @spec policy(String.t()) :: String.t()
   def policy(nonce) when is_binary(nonce) do
-    "script-src 'self' 'nonce-#{nonce}' 'wasm-unsafe-eval' 'unsafe-eval' " <>
-      "https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; " <>
-      "frame-ancestors 'self'"
+    "default-src 'self'; " <>
+      "script-src 'self' 'nonce-#{nonce}' 'wasm-unsafe-eval' 'unsafe-eval' " <>
+      "https://cdn.jsdelivr.net; " <>
+      "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " <>
+      "img-src 'self' data: blob: https: http:; " <>
+      "media-src 'self' data: blob: https: http:; " <>
+      "font-src 'self' data:; " <>
+      "connect-src 'self' https: ws: wss:; " <>
+      "frame-src 'self'; object-src 'none'; base-uri 'self'; " <>
+      "form-action 'self'; frame-ancestors 'self'"
   end
 
   # Matches when the path's trailing pair is `.../papers/:slug`. Reversing the
