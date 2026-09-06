@@ -77,6 +77,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
@@ -1539,13 +1540,13 @@ defmodule Barkpark.Tasks.Close do
   # the same predicate the ready queue and the claim door use. See
   # Tasks.DependencySatisfaction for why this is a read-side narrowing rather
   # than a guard on the birth path.
-  defp all_blockers_done?(%Document{} = dep) do
-    dep.id
-    |> Edges.dependencies(kind: :blocks)
-    |> Enum.all?(fn %Document{content: c} ->
-      Barkpark.Tasks.DependencySatisfaction.satisfied?(c)
-    end)
-  end
+  #
+  # The cascade-unblock also used to read ONLY the `blocks` edges, so a row held
+  # back by `content.dependencies` could be flipped from `blocked` to `open`
+  # here by the close of an unrelated blocker — the queue would then keep
+  # withholding it, and nothing would say why. `Tasks.Blockers` is the ONE
+  # blocker set; the queue, the claim door and this sweep all read it.
+  defp all_blockers_done?(%Document{} = dep), do: Blockers.all_satisfied?(dep)
 
   # `done` and `cancelled` are terminal; `blocked` is an honest partial and the
   # row is still live work, so its disposition is left alone. The guard is on

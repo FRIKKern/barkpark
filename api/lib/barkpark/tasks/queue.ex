@@ -44,7 +44,54 @@ defmodule Barkpark.Tasks.Queue do
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edge, QueueGate, Validation}
+  alias Barkpark.Tasks.{DependencySatisfaction, Edge, QueueGate, Validation}
+
+  # The ONE dependency-satisfaction predicate, read at COMPILE time out of
+  # Tasks.DependencySatisfaction so both gates below are literally the same SQL
+  # as `DependencySatisfaction.satisfied?/1` rather than hand-typed neighbours
+  # of it. Ecto's `fragment/n` needs a compile-time literal, which is why these
+  # are module attributes and not function calls.
+  #
+  # Axis 1 (the blocks-EDGE gate) used to test `lifecycle_status != 'done'` and
+  # NOTHING ELSE, while `Tasks.Claim`/`Tasks.Close` applied the full predicate
+  # to the same edges. A blocker that read `done` but carried no record of a
+  # close was therefore SATISFIED here and UNSATISFIED there: the queue offered
+  # the row and the claim door refused it with `blocked_by_unsatisfied_deps`,
+  # which is the loud half of task-814b2d28bdb4b2f5.
+  @dep_satisfied_sql DependencySatisfaction.content_sql_fragment()
+  @dep_unsatisfied_sql "NOT (" <> @dep_satisfied_sql <> ")"
+
+  # Axis 2's raw SQL, hoisted so its satisfaction clause can be INTERPOLATED
+  # from Tasks.DependencySatisfaction instead of typed out a second time. Ecto's
+  # `fragment/n` takes only a compile-time literal, and an interpolated heredoc
+  # is not one — the attribute is what makes the interpolation legal.
+  #
+  # Six binds, in order: content, content, shared_only?, workspace_uuid,
+  # dataset, project_id. The interpolated predicate names its `done` alias and
+  # consumes NO binds, so it cannot shift them.
+  @declared_deps_sql """
+  NOT EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(
+           CASE WHEN jsonb_typeof(?->'dependencies') = 'array'
+                THEN ?->'dependencies'
+                ELSE '[]'::jsonb END
+         ) AS dep(id)
+    WHERE 0 = (
+      SELECT count(*)
+      FROM documents AS done
+      WHERE done.type = 'task'
+        AND CASE WHEN ?::boolean
+                 THEN done.workspace_id IS NULL
+                 ELSE done.workspace_id = ? END
+        AND #{DependencySatisfaction.sql_fragment("done")}
+        AND done.dataset = ?
+        AND done.project_id IS NOT DISTINCT FROM ?
+        AND regexp_replace(done.doc_id, '^drafts\\.', '') =
+            regexp_replace(dep.id, '^drafts\\.', '')
+    )
+  )
+  """
 
   @ready_default_limit 50
   # Derived at compile time from the ONE claimability source of truth
@@ -170,7 +217,7 @@ defmodule Barkpark.Tasks.Queue do
               where:
                 e.from_id == parent_as(:doc).id and
                   e.kind == "blocks" and
-                  fragment("COALESCE(?->>'lifecycle_status', '')", b.content) != "done",
+                  fragment(@dep_unsatisfied_sql, b.content, b.content, b.content, b.content),
               select: 1
             )
           ),
@@ -223,34 +270,7 @@ defmodule Barkpark.Tasks.Queue do
         # empty done set, and the outer query returns no rows either way.
         where:
           fragment(
-            """
-            NOT EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements_text(
-                     CASE WHEN jsonb_typeof(?->'dependencies') = 'array'
-                          THEN ?->'dependencies'
-                          ELSE '[]'::jsonb END
-                   ) AS dep(id)
-              WHERE 0 = (
-                SELECT count(*)
-                FROM documents AS done
-                WHERE done.type = 'task'
-                  AND CASE WHEN ?::boolean
-                           THEN done.workspace_id IS NULL
-                           ELSE done.workspace_id = ? END
-                  AND done.content->>'lifecycle_status' = 'done'
-                  AND (
-                    COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_by'), ''), '') <> ''
-                    OR COALESCE(NULLIF(BTRIM(done.content->'claim'->>'closed_at'), ''), '') <> ''
-                    OR COALESCE(NULLIF(BTRIM(done.content->>'close_reason'), ''), '') <> ''
-                  )
-                  AND done.dataset = ?
-                  AND done.project_id IS NOT DISTINCT FROM ?
-                  AND regexp_replace(done.doc_id, '^drafts\\.', '') =
-                      regexp_replace(dep.id, '^drafts\\.', '')
-              )
-            )
-            """,
+            @declared_deps_sql,
             d.content,
             d.content,
             ^shared_only?,

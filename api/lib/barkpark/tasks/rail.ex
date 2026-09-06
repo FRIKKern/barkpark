@@ -59,6 +59,7 @@ defmodule Barkpark.Tasks.Rail do
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Edge
 
   # ASCII field/record separators — safe delimiters for the digest preimage
@@ -91,24 +92,34 @@ defmodule Barkpark.Tasks.Rail do
   end
 
   @doc """
-  The `doc_id`s of `task_uuid`'s outbound `blocks` blockers that are NOT yet
-  `done` — the payload of a `blocked_while_claimed` notice.
+  The `doc_id`s of `task_uuid`'s blockers that are NOT yet satisfied — the
+  payload of a `blocked_while_claimed` notice.
 
   This is the canonical multi-agent case: agent A files a `blocks` edge onto
   agent B's claimed task; B's next touch (claim / close / prime) surfaces
-  the non-`done` blockers here. Returns `[]` when nothing blocks.
+  the unsatisfied blockers here. Returns `[]` when nothing blocks.
+
+  THE NOTICE READS THE SAME BLOCKER SET THE DOORS DO (task-814b2d28bdb4b2f5).
+  This probe used to run its own query — `blocks` edges only, gated on a bare
+  `lifecycle_status != 'done'` — which made it a FIFTH reader of "what blocks
+  this task", disagreeing with `Tasks.Queue`, `Tasks.Claim` and `Tasks.Close`
+  in both directions:
+
+    * a blocker recorded only in `content.dependencies` was omitted here, so
+      the claim door refused with `blocked_by_unsatisfied_deps` while the one
+      surface that exists to SAY WHY reported nothing;
+    * a blocker that read `done` with no record of a close was omitted here
+      and unsatisfied at the doors, the same silence.
+
+  `Tasks.Blockers.unsatisfied/1` is that one set. A door that refuses and a
+  notice that explains must not be able to disagree.
   """
   @spec unsatisfied_blockers(binary()) :: [String.t()]
   def unsatisfied_blockers(task_uuid) when is_binary(task_uuid) do
-    from(d in Document,
-      join: e in Edge,
-      on: e.to_id == d.id,
-      where: e.from_id == ^task_uuid and e.kind == "blocks",
-      where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "done",
-      order_by: e.inserted_at,
-      select: d.doc_id
-    )
-    |> Repo.all()
+    case Repo.get(Document, task_uuid) do
+      nil -> []
+      %Document{} = doc -> Blockers.unsatisfied(doc)
+    end
   end
 
   # ─── internals ─────────────────────────────────────────────────────────
