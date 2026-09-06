@@ -130,11 +130,13 @@ walk() {
       [ -f "$FIXTURE_DIR/pages/$page.json" ] || break
       cat "$FIXTURE_DIR/pages/$page.json" > "$raw"
     else
-      if [ -z "$cursor" ]; then
-        "$BP" task ls --limit "$LIMIT" -o json > "$raw" 2>"$WORK/page.$page.err"
-      else
-        "$BP" task ls --limit "$LIMIT" --cursor "$cursor" -o json > "$raw" 2>"$WORK/page.$page.err"
-      fi
+      # `--cursor ""` ON PAGE ONE IS LOAD-BEARING, and this cost a run to find.
+      # OMITTING --cursor is not "the same request without a cursor" — it is a
+      # DIFFERENT pager. bp falls back to limit/offset mode, which returns
+      # `has_more: true` and NO `next_cursor`, and caps at 1000 rows. A walker
+      # that omitted it on page 1 and read next_cursor afterwards would stop
+      # dead after one page. The empty string is what enters keyset mode.
+      "$BP" task ls --limit "$LIMIT" --cursor "$cursor" -o json > "$raw" 2>"$WORK/page.$page.err"
       # The bp exit code, not a pipeline's. Nothing is piped here on purpose.
       if [ "$?" -ne 0 ]; then
         die2 "page $page: \`$BP task ls\` exited non-zero. stderr: $(head -c 300 "$WORK/page.$page.err")"
@@ -293,6 +295,12 @@ JSON
   out="$(bash "$SELF" --fixture "$fx" 2>&1)"; rc=$?
   # POSITIVE CONTROL — it must SEE.
   case "$out" in *task-live-1*) ;; *) echo "FAIL: live landed row task-live-1 absent from the report"; fail=1 ;; esac
+  # The met TALLY, not just the row. task-live-1 carries met:true and met:false,
+  # so the only correct rendering is 1/2. Without this the criteria counter
+  # could read `met` truthily (counting a met:false as met) and nothing here
+  # would notice — the reader would then advertise finished-looking rows.
+  case "$out" in *"task-live-1"*" 1/2 "*) ;;
+    *) echo "FAIL: task-live-1 rendered the wrong met tally (want 1/2)"; fail=1 ;; esac
   case "$out" in *task-parent-1*) ;; *) echo "FAIL: PARENT row absent — it must be listed, flagged, not filtered"; fail=1 ;; esac
   case "$out" in *"[PARENT]"*) ;; *) echo "FAIL: PARENT flag missing"; fail=1 ;; esac
   case "$out" in *"[GATE?]"*) ;; *) echo "FAIL: GATE? flag missing"; fail=1 ;; esac
@@ -333,6 +341,11 @@ JSON
   echo '{"ok":true,"tasks":[{"doc_id":"t","content":{"labels":["landed-on-main"]}}],"page":{"returned":1}}' > "$fw/pages/1.json"
   out="$(bash "$SELF" --fixture "$fw" 2>&1)"; rc=$?
   [ "$rc" -eq 2 ] || { echo "FAIL: a page keyed \`tasks\` instead of \`docs\` exited $rc, want 2"; fail=1; }
+  # And it must be REFUSED BY NAME, not by tripping over a TypeError further
+  # down. A crash also exits 2, so the exit code alone cannot tell the two
+  # apart — and only the named refusal survives someone hardening the loop.
+  case "$out" in *'no `docs` array'*) ;;
+    *) echo "FAIL: the missing-\`docs\` refusal did not name the array. got: $out"; fail=1 ;; esac
 
   # A SHORT PAGE — docs shorter than the server's own `returned`.
   local fs="$WORK/fs"; mkdir -p "$fs/pages"

@@ -198,7 +198,11 @@ def cmd_render(argv):
     # unresolved age must not masquerade as the oldest row in the report.
     def key(r):
         a = ages.get(r["sha"])
-        return (0, a) if isinstance(a, (int, float)) else (1, 0)
+        # OLDEST FIRST, so age DESCENDING: a row whose work landed a month ago
+        # and is still open is the most damning line in the report and belongs
+        # at the top. (Sorting the age ascending puts today's merges first,
+        # which reads as a changelog rather than a debt list.)
+        return (0, -a) if isinstance(a, (int, float)) else (1, 0)
 
     live.sort(key=key)
     for r in live:
