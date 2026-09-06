@@ -493,13 +493,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"ingress", "Ingress"},
          {"pullquote", "Pullquote"}
        ]},
-      {"Visual", [{"diagram", "Diagram"}, {"equation", "Equation"}]},
+      {"Visual", [{"diagram", "Diagram"}, {"equation", "Equation"}, {"route", "Route"}]},
       {"Technical",
        [
          {"diff", "Diff"},
          {"filetree", "File tree"},
          {"footnote", "Footnotes"},
-         {"code-tabs", "Code tabs"}
+         {"code-tabs", "Code tabs"},
+         {"api-endpoint", "API endpoint"}
        ]},
       {"Basic fields",
        [
@@ -1290,6 +1291,134 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-field-caption"
           />
         </form>
+      <% "route" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"route-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure route</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"route-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-route-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-polyline-" <> @id}>Encoded polyline</label>
+                <textarea id={"route-polyline-" <> @id} name="polyline"
+                          class="bp-paper-edit-textarea bp-paper-edit-code" rows="4"><%= Blocks.form_value(Map.get(@block, "polyline")) %></textarea>
+                <label class="bp-paper-edit-fieldlabel" for={"route-sport-" <> @id}>Sport</label>
+                <input id={"route-sport-" <> @id} type="text" name="sport"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "sport"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-distance-" <> @id}>Distance</label>
+                <input id={"route-distance-" <> @id} type="text" name="distance"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "distance"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-elevation-" <> @id}>Elevation</label>
+                <input id={"route-elevation-" <> @id} type="text" name="elevation"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "elevation"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-duration-" <> @id}>Duration</label>
+                <input id={"route-duration-" <> @id} type="text" name="duration"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "duration"))} />
+                <label class="bp-paper-edit-fieldlabel" for={"route-caption-" <> @id}>Caption</label>
+                <input id={"route-caption-" <> @id} type="text" name="caption"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "caption"))} />
+              </form>
+            </div>
+          </details>
+        </div>
+      <% "api-endpoint" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-api-endpoint-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-api-endpoint-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls"
+                   phx-mounted={JS.ignore_attributes("open")}>
+            <summary class="bp-paper-contextual-toggle">Configure API endpoint</summary>
+            <div class="bp-paper-contextual-panel">
+              <form
+                id={"api-endpoint-form-" <> @id}
+                class="bp-paper-edit-form"
+                phx-submit="paper-edit-block"
+                phx-change="paper-block-autosave"
+                phx-debounce="500"
+                data-test-id="paper-api-endpoint-editor"
+              >
+                <input type="hidden" name="block_id" value={@id} />
+                <input type="hidden" name="param-count" value={length(Blocks.api_endpoint_params(@block))} />
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-method-" <> @id}>Method</label>
+                <input id={"api-endpoint-method-" <> @id} type="text" name="method"
+                       class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "method"))}
+                       list={"api-endpoint-methods-" <> @id} />
+                <datalist id={"api-endpoint-methods-" <> @id}>
+                  <option :for={method <- ~w(GET POST PUT PATCH DELETE HEAD OPTIONS)} value={method}></option>
+                </datalist>
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-path-" <> @id}>Path</label>
+                <input id={"api-endpoint-path-" <> @id} type="text" name="path"
+                       class="bp-paper-edit-text bp-paper-edit-code"
+                       value={Blocks.form_value(Map.get(@block, "path"))} />
+
+                <fieldset
+                  :for={{param, index} <- Enum.with_index(Blocks.api_endpoint_params(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-api-endpoint-param-row"
+                  data-param-index={index}
+                >
+                  <legend>Parameter <%= index + 1 %></legend>
+                  <%= if is_map(param) do %>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Name
+                      <input type="text" name={"param-#{index}-name"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "name")} />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Location
+                      <input type="text" name={"param-#{index}-in"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "in")}
+                             list={"api-endpoint-locations-" <> @id} />
+                    </label>
+                    <label class="bp-paper-edit-fieldlabel">
+                      Type
+                      <input type="text" name={"param-#{index}-type"} class="bp-paper-edit-text"
+                             value={Blocks.api_endpoint_param_value(param, "type")} />
+                    </label>
+                    <label class="bp-paper-edit-check">
+                      <input type="hidden" name={"param-#{index}-required"} value="false" />
+                      <input type="checkbox" name={"param-#{index}-required"} value="true"
+                             checked={Blocks.api_endpoint_param_required?(param)} />
+                      Required
+                    </label>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-api-endpoint-legacy-param">
+                      Legacy parameter retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="param-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="param-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.api_endpoint_params(@block)) - 1}>Move down</button>
+                  </div>
+                  <button type="submit" name="param-action" value={"remove:#{index}"}
+                          class="btn btn-destructive btn-sm" data-test-id="paper-api-endpoint-param-remove">
+                    Remove parameter
+                  </button>
+                </fieldset>
+
+                <datalist id={"api-endpoint-locations-" <> @id}>
+                  <option :for={location <- ~w(path query header cookie body)} value={location}></option>
+                </datalist>
+                <button type="submit" name="param-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-api-endpoint-param-add">Add parameter</button>
+              </form>
+            </div>
+          </details>
+        </div>
       <% "equation" -> %>
         <form
           id={"equation-form-" <> @id}

@@ -54,6 +54,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     %{"source" => params["source"] || "", "caption" => params["caption"] || ""}
   end
 
+  def build_block_patch(%{"type" => "route"} = block, params) do
+    put_fetched_form_fields(
+      %{},
+      block,
+      params,
+      ~w(polyline sport distance elevation duration caption)
+    )
+  end
+
+  def build_block_patch(%{"type" => "api-endpoint"} = block, params) do
+    %{}
+    |> put_fetched_form_fields(block, params, ~w(method path))
+    |> put_api_endpoint_params(block, params)
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   def build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -178,6 +193,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
        |> put_if_parsed(params, "step", step)}
     else
       _ -> {:error, :invalid_number}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "api-endpoint"} = block, params) do
+    with :ok <- validate_collection_count(block, params, "params", "param") do
+      {:ok, build_block_patch(block, params)}
     end
   end
 
@@ -320,6 +341,60 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp put_video_captions(patch, _block, _params), do: patch
 
+  defp put_api_endpoint_params(patch, block, params) do
+    count = params["param-count"]
+
+    with {:ok, items} <- stored_collection(block, "params"),
+         true <- exact_submitted_count?(count, length(items)) do
+      updated =
+        items
+        |> Enum.with_index()
+        |> Enum.map(fn
+          {item, index} when is_map(item) -> update_api_endpoint_param(item, params, index)
+          {item, _index} -> item
+        end)
+        |> apply_api_endpoint_param_action(params["param-action"])
+
+      if updated == items, do: patch, else: Map.put(patch, "params", updated)
+    else
+      _ -> patch
+    end
+  end
+
+  defp update_api_endpoint_param(item, params, index) do
+    prefix = "param-#{index}-"
+
+    item
+    |> put_form_param_preserving_shape(params, prefix <> "name", "name")
+    |> put_form_param_preserving_shape(params, prefix <> "in", "in")
+    |> put_form_param_preserving_shape(params, prefix <> "type", "type")
+    |> put_required_param(params, prefix <> "required")
+  end
+
+  defp put_required_param(item, params, param) do
+    if Map.has_key?(params, param) do
+      submitted = parse_bool(params[param])
+
+      if api_endpoint_param_required?(item) == submitted,
+        do: item,
+        else: Map.put(item, "required", submitted)
+    else
+      item
+    end
+  end
+
+  defp apply_api_endpoint_param_action(items, "add") do
+    items ++ [%{"name" => "", "in" => "query", "type" => "string", "required" => false}]
+  end
+
+  defp apply_api_endpoint_param_action(items, "remove:" <> index),
+    do: delete_at_valid_index(items, index)
+
+  defp apply_api_endpoint_param_action(items, "up:" <> index), do: move_at(items, index, -1)
+  defp apply_api_endpoint_param_action(items, "down:" <> index), do: move_at(items, index, 1)
+
+  defp apply_api_endpoint_param_action(items, _action), do: items
+
   defp apply_bar_action(bars, "add"), do: bars ++ [%{"label" => "", "value" => 0}]
 
   defp apply_bar_action(bars, "remove:" <> index) do
@@ -352,9 +427,59 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp exact_submitted_count?(_count, _expected), do: false
 
+  defp validate_collection_count(block, params, field_name, param_name) do
+    count_name = param_name <> "-count"
+
+    collection_params? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, param_name <> "-")
+      end)
+
+    cond do
+      not Map.has_key?(params, count_name) and not collection_params? ->
+        :ok
+
+      not Map.has_key?(params, count_name) ->
+        {:error, {:malformed_collection, field_name}}
+
+      true ->
+        with {:ok, items} <- stored_collection(block, field_name),
+             true <- exact_submitted_count?(params[count_name], length(items)) do
+          :ok
+        else
+          _ -> {:error, {:malformed_collection, field_name}}
+        end
+    end
+  end
+
+  defp stored_collection(block, key) do
+    case Map.fetch(block, key) do
+      :error -> {:ok, []}
+      {:ok, nil} -> {:ok, []}
+      {:ok, items} when is_list(items) -> {:ok, items}
+      {:ok, item} -> {:ok, [item]}
+    end
+  end
+
   defp delete_at_valid_index(items, index) do
     case Integer.parse(index) do
       {index, ""} when index >= 0 and index < length(items) -> List.delete_at(items, index)
+      _ -> items
+    end
+  end
+
+  defp move_at(items, index, offset) do
+    with {index, ""} <- Integer.parse(index),
+         target = index + offset,
+         true <- index >= 0 and index < length(items),
+         true <- target >= 0 and target < length(items) do
+      source_item = Enum.at(items, index)
+      target_item = Enum.at(items, target)
+
+      items
+      |> List.replace_at(index, target_item)
+      |> List.replace_at(target, source_item)
+    else
       _ -> items
     end
   end
@@ -642,8 +767,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   @doc false
+  def api_endpoint_params(block) when is_map(block) do
+    case Map.get(block, "params") do
+      nil -> []
+      params when is_list(params) -> params
+      param -> [param]
+    end
+  end
+
+  @doc false
+  def api_endpoint_param_value(param, key) when is_map(param), do: form_value(Map.get(param, key))
+  def api_endpoint_param_value(_param, _key), do: ""
+
+  @doc false
+  def api_endpoint_param_required?(param) when is_map(param),
+    do: truthy_string?(Map.get(param, "required"))
+
+  def api_endpoint_param_required?(_param), do: false
+
+  @doc false
   def form_value(value) when is_binary(value) or is_number(value), do: value
   def form_value(_value), do: ""
+
+  defp truthy_string?(true), do: true
+
+  defp truthy_string?(value) when is_binary(value),
+    do: String.downcase(String.trim(value)) == "true"
+
+  defp truthy_string?(_value), do: false
+
+  defp put_fetched_form_fields(map, block, params, fields) do
+    Enum.reduce(fields, map, fn field, acc ->
+      put_form_param_preserving_shape(acc, block, params, field, field)
+    end)
+  end
+
+  defp put_form_param_preserving_shape(item, params, param, field) do
+    put_form_param_preserving_shape(item, item, params, param, field)
+  end
+
+  defp put_form_param_preserving_shape(map, original, params, param, field) do
+    if Map.has_key?(params, param) and form_wire_value(Map.get(original, field)) != params[param],
+      do: Map.put(map, field, params[param] || ""),
+      else: map
+  end
+
+  defp form_wire_value(value) when is_binary(value), do: value
+  defp form_wire_value(value) when is_integer(value), do: Integer.to_string(value)
+  defp form_wire_value(value) when is_float(value), do: Float.to_string(value)
+  defp form_wire_value(_value), do: ""
 
   defp blockquote_cite_patch(block, cite) do
     cond do
@@ -706,6 +878,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def default_block("equation", id),
     do: %{"id" => id, "type" => "equation", "tex" => "", "display" => true}
 
+  def default_block("route", id),
+    do: %{
+      "id" => id,
+      "type" => "route",
+      "polyline" => "",
+      "sport" => "",
+      "distance" => "",
+      "elevation" => "",
+      "duration" => "",
+      "caption" => ""
+    }
+
   def default_block("diff", id),
     do: %{"id" => id, "type" => "diff", "diff" => "", "file" => "", "lang" => ""}
 
@@ -717,6 +901,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("code-tabs", id),
     do: %{"id" => id, "type" => "code-tabs", "tabs" => [], "syncKey" => ""}
+
+  def default_block("api-endpoint", id),
+    do: %{"id" => id, "type" => "api-endpoint", "method" => "", "path" => "", "params" => []}
 
   def default_block("video", id),
     do: %{"id" => id, "type" => "video", "src" => "", "poster" => "", "captions" => []}
