@@ -27,7 +27,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
-  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
+  alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
+  alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -1139,6 +1140,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     |> Enum.map_join(" ", &beta_form_question_text/1)
   end
 
+  defp beta_node_text(%{"type" => "card"} = block) do
+    non_action =
+      ~w(media title body)
+      |> Enum.map_join(" ", fn slot -> block |> Slots.slot_elements(slot) |> beta_node_text() end)
+
+    action =
+      block
+      |> Slots.slot_elements("action")
+      |> Enum.map_join(" ", fn
+        %{"type" => "action", "label" => label} when is_binary(label) -> label
+        _ -> ""
+      end)
+
+    non_action <> " " <> action
+  end
+
   defp beta_node_text(%{"type" => "figure"} = block) do
     child_text =
       case Map.get(block, "child") do
@@ -1327,7 +1344,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       phx-update="ignore"
       id={"paper-ed-" <> Map.fetch!(@block, "id")}
       phx-hook="BarkparkPaperEditor"
-      class="bp-paper-edit-wc"
+      class="bp-paper-edit-wc bp-paper-card-body-editor"
       data-test-id="paper-card-body-editor"
     >
       <bp-paper-editor
@@ -1472,12 +1489,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </form>
       <% "card" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-card-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
-          </div>
           <%= case Blocks.card_form_state(@block) do %>
             <% {:ok, state} -> %>
-              <.card_body_editor block={@block} />
+              <% parts = RenderComponents.card_article_parts(@block) %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
+                <div class={parts.class}>
+                  <%= raw(parts.media_html) %>
+                  <%= raw(parts.title_html) %>
+                  <.card_body_editor block={@block} />
+                  <%= raw(parts.action_html) %>
+                </div>
+              </div>
               <details
                 id={"card-controls-" <> @id}
                 class="bp-paper-contextual-controls bp-paper-contextual-controls--card"
@@ -1524,6 +1546,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 </div>
               </details>
             <% {:error, :malformed_card} -> %>
+              <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
+                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              </div>
               <p class="bp-paper-edit-readonly">
                 This Card's known slots are malformed and cannot be edited here; original content is preserved.
               </p>

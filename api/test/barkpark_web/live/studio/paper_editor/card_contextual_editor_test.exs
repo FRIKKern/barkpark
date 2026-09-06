@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   @editor_shell_css Path.expand(
@@ -16,7 +17,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
       "type" => "card",
       "tone" => "info",
       "slots" => %{
-        "title" => [%{"type" => "heading", "text" => "Card title", "unknown" => true}],
+        "title" => [
+          %{"type" => "heading", "level" => 3, "text" => "Card title", "unknown" => true}
+        ],
         "body" => [paragraph("Card body")],
         "media" => [%{"type" => "image", "src" => "/image.png", "alt" => "Cover"}],
         "action" => [
@@ -34,6 +37,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     html = render_fields(card)
     tree = LazyHTML.from_fragment(html)
     preview = LazyHTML.query(tree, "[data-test-id='paper-card-preview']")
+    card_frame = LazyHTML.query(preview, ".bp-card")
     form = LazyHTML.query(tree, "#card-form-card")
 
     assert LazyHTML.attribute(LazyHTML.query(preview, ".bp-card"), "class") == [
@@ -56,10 +60,27 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     assert Enum.count(LazyHTML.query(tree, "form")) == 1
     assert Enum.count(LazyHTML.query(tree, "bp-paper-editor[data-editor-mode='card-body']")) == 1
 
+    assert Enum.count(LazyHTML.query(card_frame, "bp-paper-editor[data-editor-mode='card-body']")) ==
+             1
+
+    assert length(:binary.matches(html, "Card body")) == 1
+
+    assert child_kinds(card_frame) == ["img", "h3", "div", "a"]
+    assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == []
+    assert LazyHTML.attribute(LazyHTML.query(card_frame, "img"), "src") == ["/image.png"]
+
+    assert LazyHTML.attribute(LazyHTML.query(card_frame, "a"), "class") == [
+             "bp-button bp-button--primary"
+           ]
+
     controls = LazyHTML.query(tree, "#card-controls-card")
     assert LazyHTML.attribute(controls, "open") == []
 
     css = File.read!(@editor_shell_css)
+
+    assert css =~
+             ".bp-paper-card-body-editor,\n.bp-paper-card-body-editor > bp-paper-editor {\n  display: contents;\n}"
+
     assert css =~ ".bp-paper-contextual-controls--card[open]"
 
     assert css =~
@@ -109,11 +130,25 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
     for card <- malformed do
       html = render_fields(card)
+      tree = LazyHTML.from_fragment(html)
+      reader_html = Render.render_block(card, %{style: :article})
       assert html =~ ~s(data-test-id="paper-card-preview")
+      assert html =~ reader_html
       assert html =~ "original content is preserved"
       refute html =~ ~s(data-test-id="paper-card-editor")
+      assert Enum.empty?(LazyHTML.query(tree, "bp-paper-editor[data-editor-mode='card-body']"))
       refute html =~ "blocks are not editable yet"
     end
+  end
+
+  test "an absent body gets one in-place editable hole without a server body paragraph" do
+    html = render_fields(%{"id" => "empty", "type" => "card", "slots" => %{}})
+    tree = LazyHTML.from_fragment(html)
+    card = LazyHTML.query(tree, "[data-test-id='paper-card-preview'] > .bp-card")
+
+    assert Enum.count(LazyHTML.query(card, "bp-paper-editor[data-editor-mode='card-body']")) == 1
+    assert Enum.empty?(LazyHTML.query(tree, "[data-test-id='paper-card-preview'] > .bp-card > p"))
+    assert child_kinds(card) == ["div"]
   end
 
   test "a Card inside a grid Section remains exactly one authored cell child" do
@@ -161,6 +196,19 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     form
     |> LazyHTML.query("select[name='#{name}'] option[selected]")
     |> LazyHTML.attribute("value")
+  end
+
+  defp child_kinds(nodes) do
+    case LazyHTML.to_tree(nodes) do
+      [{_root, _attrs, children}] ->
+        Enum.flat_map(children, fn
+          {tag, _attrs, _children} -> [tag]
+          _ -> []
+        end)
+
+      _ ->
+        []
+    end
   end
 
   defp paragraph(text),

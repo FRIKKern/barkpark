@@ -351,19 +351,34 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def card_html(block, style \\ :article)
 
   def card_html(block, style) when is_map(block) do
-    tone = block |> get("tone") |> stringish()
-    tone_cls = if tone in ~w(info ok warn danger), do: " bp-card--#{tone}", else: ""
+    parts = card_parts(block, style)
 
-    inner =
-      card_slot_html(block, "media", style) <>
-        card_slot_html(block, "title", style) <>
-        card_slot_html(block, "body", style) <>
-        card_slot_html(block, "action", style)
-
-    ~s|<div class="bp-card#{tone_cls}">#{inner}</div>|
+    ~s|<div class="#{parts.class}">#{parts.media_html}#{parts.title_html}#{parts.body_html}#{parts.action_html}</div>|
   end
 
   def card_html(_, _), do: ""
+
+  @doc """
+  The canonical article Card frame class and ordered, escaped slot fragments.
+
+  This is the reader-owned composition seam used by the contextual editor to
+  replace only the body fragment with its inline editor while keeping the
+  media, title, action, tone, and outer frame identical to `card_html/2`.
+  """
+  def card_article_parts(block) when is_map(block), do: card_parts(block, :article)
+
+  defp card_parts(block, style) do
+    tone = block |> get("tone") |> stringish()
+    tone_cls = if tone in ~w(info ok warn danger), do: " bp-card--#{tone}", else: ""
+
+    %{
+      class: "bp-card#{tone_cls}",
+      media_html: card_slot_html(block, "media", style),
+      title_html: card_slot_html(block, "title", style),
+      body_html: card_slot_html(block, "body", style),
+      action_html: card_slot_html(block, "action", style)
+    }
+  end
 
   # Recurse ONE named slot's element children through the shared compose→walk
   # bridge. The `media` slot defensively normalizes a typeless `{src,alt}` element

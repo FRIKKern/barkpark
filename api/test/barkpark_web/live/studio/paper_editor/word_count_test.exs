@@ -116,6 +116,91 @@ defmodule BarkparkWeb.Studio.PaperEditor.WordCountTest do
     assert footer_text(blocks) =~ "2 blocks"
   end
 
+  test "footer counts reader-visible Card copy inside a grid and follows chrome edits" do
+    card = %{
+      "id" => "card-id-must-not-count",
+      "type" => "card",
+      "tone" => "info-must-not-count",
+      "card-meta" => "unknown card metadata must not count",
+      "slots" => %{
+        "title" => [
+          %{
+            "type" => "heading",
+            "text" => "Card title before editing",
+            "level" => 3,
+            "unknown" => "unknown title metadata must not count"
+          }
+        ],
+        "body" => [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Card body before editing."}],
+            "unknown" => "unknown body metadata must not count"
+          }
+        ],
+        "media" => [
+          %{
+            "type" => "image",
+            "src" => "/media/source-must-not-count.png",
+            "alt" => "media description must not count"
+          }
+        ],
+        "action" => [
+          %{
+            "type" => "action",
+            "label" => "Read more",
+            "href" => "/destination-must-not-count",
+            "priority" => "primary-must-not-count"
+          }
+        ],
+        "future" => [paragraph("hidden", "unknown slot words must not count")]
+      }
+    }
+
+    nested = [
+      %{
+        "id" => "grid",
+        "type" => "section",
+        "layout" => %{"mode" => "grid", "tracks" => 3},
+        "blocks" => [card]
+      }
+    ]
+
+    assert footer_text(nested) =~ "10 words"
+
+    edited =
+      nested
+      |> put_in(
+        [Access.at(0), "blocks", Access.at(0), "slots", "title", Access.at(0), "text"],
+        "Public Card title survives rapid editing"
+      )
+      |> put_in(
+        [Access.at(0), "blocks", Access.at(0), "slots", "body", Access.at(0), "content"],
+        [%{"type" => "text", "value" => "Public Card body survives rapid editing."}]
+      )
+
+    assert footer_text(edited) =~ "14 words"
+  end
+
+  test "footer safely ignores malformed Card slot shapes" do
+    blocks = [
+      %{"id" => "scalar-slots", "type" => "card", "slots" => "not visible"},
+      %{
+        "id" => "malformed-known-slots",
+        "type" => "card",
+        "slots" => %{
+          "title" => "not a slot list",
+          "body" => [%{"type" => "paragraph", "content" => %{"not" => "visible"}}],
+          "action" => [%{"type" => "action", "label" => %{"not" => "visible"}}],
+          "future" => [paragraph("hidden", "unknown slot words")]
+        }
+      }
+    ]
+
+    assert footer_text(blocks) =~ "0 words"
+    assert footer_text(blocks) =~ "2 blocks"
+  end
+
   defp footer_text(blocks) do
     render_component(&PaperEditor.paper_block_editor/1, slug: "word-count", blocks: blocks)
     |> LazyHTML.from_fragment()
