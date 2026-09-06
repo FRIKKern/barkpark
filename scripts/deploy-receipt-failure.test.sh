@@ -83,6 +83,9 @@ if [ -x "$ALLOW/go" ] || [ -x "$BIN/go" ]; then
   echo "FATAL: a real go leaked into the harness PATH — the run would not be hermetic."; exit 2
 fi
 
+# The stub bodies below are single-quoted ON PURPOSE: $VAR inside them must be
+# expanded when the STUB runs, not when this harness writes it.
+# shellcheck disable=SC2016
 mk() { printf '%s\n' "$2" > "$BIN/$1"; chmod +x "$BIN/$1"; }
 
 mk sleep '#!/bin/sh
@@ -221,7 +224,7 @@ echo
 # ─────────────────────────────────────────────────────────────────────────────
 # FM-A — the rebuild genuinely fails.
 # ─────────────────────────────────────────────────────────────────────────────
-new_tree; A_OUT="$OUT"
+new_tree
 rc=$(make_deploy STUB_MIX_FAIL=compile STUB_CURL_CODES="dead dead")
 FMA_RECEIPT="$T/receipt.txt"; receipt "$OUT" "$FMA_RECEIPT"
 echo "--- FM-A (rebuild fails) rc=$rc ---"; cat "$FMA_RECEIPT"
