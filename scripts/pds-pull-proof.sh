@@ -1399,7 +1399,7 @@ step_2() {
 # manifest is not a legacy engine.
 full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   FULL_META_WHY=""
-  local d p sz kind prc=0
+  local d p sz kind prc=0 listing lrc=0 nmembers
 
   if [ ! -f "$FULL_TAR" ]; then
     FULL_META_WHY="there is no file at $FULL_TAR"
@@ -1410,12 +1410,36 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
     return 1
   fi
 
+  # An operator has to tell a proxy error page from a truncated download from a
+  # gzip, and the byte count alone does not: name the type AND the size. Both
+  # refusals below carry the same "What is actually on disk" clause, because
+  # WHICH of the two fires is a property of the local tar(1), not of the body.
   sz="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')"
-  if ! tar -tf "$FULL_TAR" >/dev/null 2>&1; then
-    # An operator has to tell a proxy error page from a truncated download from a
-    # gzip, and the byte count alone does not: name the type AND the size.
-    kind="$(file -b "$FULL_TAR" 2>/dev/null | tr -d '\n')"
-    FULL_META_WHY="$FULL_TAR is not a readable tar archive — \`tar -tf\` refused it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+  kind="$(file -b "$FULL_TAR" 2>/dev/null | tr -d '\n')"
+
+  listing="$(tar -tf "$FULL_TAR" 2>/dev/null)" || lrc=$?
+  if [ "$lrc" -ne 0 ]; then
+    FULL_META_WHY="$FULL_TAR does not read as a tar archive at all — \`tar -tf\` refused it (exit $lrc). What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+    return 1
+  fi
+
+  # ZERO MEMBERS IS ITS OWN REFUSAL, and it is not pedantry — it is the only
+  # branch that makes this predicate say the same true thing on both tars.
+  # MEASURED on GNU tar 1.35 (debian:stable-slim) against bsdtar on Darwin:
+  #
+  #     gzipped non-tar body   GNU: tar -tf rc=0, 0 members   bsdtar: rc=1
+  #     HTML / JSON body       GNU: rc=2                      bsdtar: rc=1
+  #     512-byte truncated tar GNU: rc=2                      bsdtar: rc=1
+  #
+  # GNU tar decompresses transparently, finds no tar stream inside, and reports
+  # an EMPTY ARCHIVE with exit 0. Without this branch the gzip fell through to
+  # the manifest check and the harness printed "is a readable tar but carries no
+  # manifest.json member" — a message that is FALSE about a gzip, emitted on
+  # exactly the Linux boxes the climb runs on. A genuinely empty tar lands here
+  # too, and the sentence is true of it as well: no members, so no bundle.
+  nmembers="$(printf '%s' "$listing" | grep -c .)" || nmembers=0
+  if [ "$nmembers" -eq 0 ]; then
+    FULL_META_WHY="$FULL_TAR lists ZERO members — \`tar -tf\` accepted it but named nothing inside it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An archive with no members carries no manifest and no tables, so it is not a bp-export-v1 bundle whatever it is. TWO different bodies land here: a genuinely empty tar, and — on GNU tar only — a GZIPPED non-tar body, which GNU decompresses transparently and then reports as an empty archive with exit 0 where bsdtar refuses it one branch earlier. Read file(1) above to tell which one you have"
     return 1
   fi
 

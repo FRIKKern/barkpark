@@ -158,11 +158,11 @@ accept() {
 }
 
 printf 'pds-pull-proof_test: full_meta_ok — REFUSE arms (each was an ACCEPT on origin/main unless marked)\n'
-refuse 'non-tar body: HTML 502 proxy page   [ACCEPTED before]' "$FIX/html.tar"      'not a readable tar archive'
-refuse 'non-tar body: JSON error payload    [ACCEPTED before]' "$FIX/json.tar"      'not a readable tar archive'
-refuse 'gzip that is not a tar              [ACCEPTED before]' "$FIX/gz.tar"        'not a readable tar archive'
-refuse 'truncated tar (512 bytes)           [ACCEPTED before]' "$FIX/truncated.tar" 'not a readable tar archive'
-refuse 'valid tar, no members               [ACCEPTED before]' "$FIX/no-members.tar" 'no non-empty manifest.json member'
+refuse 'non-tar body: HTML 502 proxy page   [ACCEPTED before]' "$FIX/html.tar"      'does not read as a tar archive at all'
+refuse 'non-tar body: JSON error payload    [ACCEPTED before]' "$FIX/json.tar"      'does not read as a tar archive at all'
+refuse 'gzip that is not a tar (tar-layer)  [ACCEPTED before]' "$FIX/gz.tar"        'What is actually on disk'
+refuse 'truncated tar (512 bytes)           [ACCEPTED before]' "$FIX/truncated.tar" 'does not read as a tar archive at all'
+refuse 'valid tar, ZERO members             [ACCEPTED before]' "$FIX/no-members.tar" 'lists ZERO members'
 refuse 'right names, empty manifest.json    [ACCEPTED before]' "$EMPTYMAN"          'no non-empty manifest.json member'
 refuse 'manifest.json is not JSON           [ACCEPTED before]' "$BADJSON"           'not a JSON object'
 refuse 'manifest.json is a JSON ARRAY       [ACCEPTED before]' "$ARRMAN"            'not a JSON object'
