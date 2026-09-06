@@ -507,7 +507,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   #   THE CONFIRM NEEDS NO NEW PAYLOAD FIELD. There is no `fleet_children` key
   #   and there should not be one: `GET /v1/barkparks` already carries
   #   `fleet_role` and `fleet_parent_id` on EVERY row, and `app.js` already has
-  #   `supportsOf(list, mainId)` (app.js:9761) filtering on exactly that pair —
+  #   `supportsOf(list, mainId)` in app.js filtering on exactly that pair —
   #   it is what `fleetSupportCardHtml` renders on the very instance page the
   #   Decommission button sits on, off the same `fleetCache` `loadInstance`
   #   awaits before it paints. `confirmDecommission/1` simply never calls it.
@@ -563,7 +563,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
     # ── LEG 2: ONE delete, TWO opposite outcomes: the main vanishes, the
     # support machine SURVIVES — still a row, still billable, no longer grouped
-    # to anything. Migration 20260723000000_add_fleet_group_to_barkparks.exs:30
+    # to anything. Migration 20260723000000_add_fleet_group_to_barkparks.exs
     # declares `on_delete: :nilify_all`, and this is that declaration, driven.
     assert %Barkpark{} = survivor = Repo.get(Barkpark, support.id)
 
