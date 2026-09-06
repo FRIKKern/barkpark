@@ -576,6 +576,34 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 	return exitGeneric
 }
 
+// warnPrebuiltAmbientToken is the D7 shadow guard on the ONE deploy lane that
+// can carry it. The managed lane cannot: `bp cloud site deploy` is an HTTP call
+// that sends no environment, the control plane builds the build env as a closed
+// literal (`cloud/lib/barkpark_cloud/sites/deploy.ex` deploy_payload/4), and the
+// box's DeployRunner then set-from-request-or-REMOVES every BUILD_ALLOW key
+// (`api/lib/barkpark/sites/deploy_runner.ex` @build_env_keys) — so an ambient
+// BARKPARK_TOKEN in the caller's shell is structurally absent from that build.
+// `--prebuilt` is the exception: the build already happened in a shell bp did
+// not launch, and these bytes are shipped as-is. bp cannot scrub a compiled
+// artifact, so it says what it sees.
+//
+// It WARNS rather than refuses on purpose. The ambient token at upload time is a
+// proxy for the shell the build ran in, not a measurement of it — the build may
+// have happened elsewhere, or in CI, or already scrubbed. Refusing on a proxy
+// would stop a correct deploy on a shell that has the variable exported
+// permanently, which is the common case; the warning names the remedy instead so
+// a caller who IS affected can act on it in one line.
+func warnPrebuiltAmbientToken(out *writer, ref, dir string, lookup func(string) (string, bool)) {
+	shadowed, tail := ambientTokenShadow(lookup)
+	if !shadowed {
+		return
+	}
+	out.progressf(
+		"! BARKPARK_TOKEN is set in this shell (%s). These bytes were built somewhere bp did not launch, so if that build saw this token it read the dataset with YOUR credential rather than the site's per-site read token — and bp cannot scrub an artifact it is only uploading.", tail)
+	out.progressf(
+		"  If the build ran in this shell, rebuild it clean and re-ship to THIS deployment: `env -u BARKPARK_TOKEN npm run build` then `bp cloud site deploy %s --prebuilt %s --deployment <id>` (the id is printed below).", hzCell(ref), hzCell(dir))
+}
+
 // runCloudSitePrebuiltDeploy is `bp cloud site deploy <site> --prebuilt <dir>` —
 // the lane where the build ALREADY HAPPENED off the serving box (charter D85)
 // and only the output travels. It is two calls, and the order is forced:
@@ -600,6 +628,7 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
+	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
 		return code
