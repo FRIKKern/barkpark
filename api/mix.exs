@@ -243,8 +243,9 @@ defmodule Barkpark.MixProject do
     String.contains?(token, "/") or String.ends_with?(strip_line_suffix(token), ".exs")
   end
 
-  # `test/foo_test.exs:42` and `test/foo_test.exs:42:99` address lines in a file;
-  # the suffix must come off before the existence check.
+  # ExUnit accepts a trailing `:<line>` (repeatable) on a test path to address
+  # single tests inside the file; that suffix must come off before the
+  # existence check, or every line-addressed run would be refused.
   defp strip_line_suffix(token) do
     case String.split(token, ":") do
       [path | rest] -> if Enum.all?(rest, &line_number?/1), do: path, else: token
