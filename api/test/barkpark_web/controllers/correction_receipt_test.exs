@@ -43,17 +43,21 @@ defmodule BarkparkWeb.CorrectionReceiptTest do
 
   ## Reachability is re-derived, not inherited
 
-  `router.ex:1656` `post("/search/:dataset/correction", SearchController,
-  :correction)` sits in `scope "/v1/data"` (`:1651`) on
-  `pipe_through([:api, :api_grant_read])` — no `:require_token`,
-  `:require_write` or `:require_admin`, and `:api` authenticates through
-  `Plugs.OptionalToken`. Every case below posts WITHOUT an authorization
-  header, and the first test proves that anonymity is real by running it.
+  `post("/search/:dataset/correction", SearchController, :correction)` sits in
+  `scope "/v1/data"` on `pipe_through([:api, :api_grant_read])` — no
+  `:require_token`, `:require_write` or `:require_admin`, and `:api`
+  authenticates through `Plugs.OptionalToken`. Every case below posts WITHOUT
+  an authorization header, and the first test proves that anonymity is real by
+  running it. Cited by SYMBOL, not by `router.ex:<line>`: the anchors this
+  paragraph used to carry (`:1656`, `:1651`, `:2191`) had already drifted onto
+  unrelated blocks.
 
-  `router.ex:2191` carries the SAME controller action inside
+  The SAME controller action is mounted again inside
   `scope "/w/:workspace_slug/p/:project_slug"` on `pipe_through(:scoped_api)`.
-  Nothing in this file dispatches to that mirror and its pipeline is NOT what
-  these cases prove anything about. It is unpinned here, deliberately.
+  Nothing in THIS file dispatches to that mirror and its pipeline is NOT what
+  these cases prove anything about — `scoped_search_intel_receipt_test.exs` is
+  where that mirror is pinned (it fails closed for an anonymous caller, so the
+  contract there is a different one).
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -98,7 +102,8 @@ defmodule BarkparkWeb.CorrectionReceiptTest do
 
       refute resp.status in [401, 403, 404],
              "POST /v1/data/search/#{@dataset}/correction must be reachable anonymously " <>
-               "(router.ex:1656 in scope \"/v1/data\", pipe_through [:api, :api_grant_read] — " <>
+               "(the `:correction` mount in scope \"/v1/data\", pipe_through " <>
+               "[:api, :api_grant_read] — " <>
                "no :require_token/:require_admin), got #{resp.status}"
 
       assert resp.status == 200
