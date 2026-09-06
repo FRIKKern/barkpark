@@ -24,10 +24,32 @@
 //                selectorText match would have produced. That extra entry takes
 //                the wide-LIVE `flex: 0 0 300px` dock rule, and the run must
 //                come back DIFFERENT with `inspector_flex` moving
-//                "0 0 300px" -> "0 1 auto" and the surface 676 -> 720. If this
-//                test ever goes IDENTICAL, the deletion matcher has stopped
-//                distinguishing contexts and every IDENTICAL it has ever
-//                printed is suspect.
+//                "0 0 300px" -> "0 1 auto" and the reading column `editor_body`
+//                676 -> 873.14 at 1280. If this test ever goes IDENTICAL, the
+//                deletion matcher has stopped distinguishing contexts and every
+//                IDENTICAL it has ever printed is suspect.
+//
+//                Until 2026-09-06 the widening was pinned on the SURFACE
+//                (676 -> 720). It moved to `editor_body` because the surface's
+//                `max-width: 660px` cap now binds on BOTH sides of the
+//                deletion, so `surface_border_box` reads 660 either way — see
+//                "THE 2026-09-06 RE-FREEZE" in studio-wide-deletion-diff.mjs.
+//                The surface's IDENTICAL is now asserted too: it is the fact
+//                that the cap, not the dock rule, is what sets the column.
+//
+// ── CI STATUS — OWNER-RUN, NOT GATED (checked 2026-09-06) ────────────────────
+// `grep -rn '__studio-wide-deletion-diff\|studio-wide' .github/workflows`
+// returns NOTHING: no workflow runs this file, on any trigger. It is therefore
+// an OWNER-RUN check, and the cost below is why — it is BROWSER-COUPLED (three
+// real Chromium launches through the tool's own Playwright resolver), so it
+// does not belong in the dep-free `scripts/node-test-floor.mjs` job that
+// task-b7ed25dac17d6229 is wiring the PURE studio-desk self-tests through.
+// Wiring it would mean a job with a browser, which is a different decision.
+//
+// The price of that is measured, not hypothetical: this file was 19 of 21 for
+// the ~25 days between 3968dbc16 (2026-08-12) and 2026-09-06 and nothing said
+// so. Re-run it by hand after ANY change to `.bp-paper-surface` sizing in
+// api/lib/barkpark_web/layouts/root.html.heex, and re-date this line.
 //
 // ── COST ─────────────────────────────────────────────────────────────────────
 // Three real Chromium launches (~10-20s total), no network and no server: the
@@ -100,7 +122,7 @@ test('assertNoChEmission names the DISPROVEN figure in its reason, not just "ban
 });
 
 test('assertNoChEmission passes a clean px-only record through unchanged', () => {
-  const clean = { panel: 976, surface_border_box: 676, content: 596, note: 'px only' };
+  const clean = { panel: 976, surface_border_box: 660, content: 580, note: 'px only' };
   assert.deepEqual(assertNoChEmission(clean), clean);
 });
 
@@ -149,11 +171,13 @@ test('diffFields reports per-field verdicts and counts the movers', () => {
 });
 
 test('checkFidelity fails on a drifted BEFORE row and names the field', () => {
-  const ok = checkFidelity(1280, { panel: 976, surface_border_box: 676, content: 596 });
+  const ok = checkFidelity(1280, { panel: 976, surface_border_box: 660, content: 580 });
   assert.equal(ok.ok, true);
-  const bad = checkFidelity(1280, { panel: 976, surface_border_box: 720, content: 640 });
+  // The PRE-660px-cap row is the drift this must catch: it is exactly the row
+  // that sat in FIDELITY, silently red, from 3968dbc16 until 2026-09-06.
+  const bad = checkFidelity(1280, { panel: 976, surface_border_box: 676, content: 596 });
   assert.equal(bad.ok, false);
-  assert.match(bad.mismatches.join(' '), /surface_border_box: expected 676, measured 720/);
+  assert.match(bad.mismatches.join(' '), /surface_border_box: expected 660, measured 676/);
 });
 
 test('deskHtml builds the components.ex nesting, inspector as a SIBLING', () => {
@@ -202,8 +226,8 @@ test('DIRECTION 1b — the TIGHT set reproduces the committed wide rows at toler
     // make this test agree with itself.
     const a = run.rows.find((r) => r.viewport_width === 1280).before;
     const b = run.rows.find((r) => r.viewport_width === 1440).before;
-    assert.deepEqual([a.panel, a.surface_border_box, a.content], [976, 676, 596]);
-    assert.deepEqual([b.panel, b.surface_border_box, b.content], [1136, 720, 640]);
+    assert.deepEqual([a.panel, a.surface_border_box, a.content], [976, 660, 580]);
+    assert.deepEqual([b.panel, b.surface_border_box, b.content], [1136, 660, 580]);
   });
 
 test('DIRECTION 2 — the TOO-BROAD set is DIFFERENT, because it takes the wide-LIVE dock rule',
@@ -223,8 +247,19 @@ test('DIRECTION 2 — the TOO-BROAD set is DIFFERENT, because it takes the wide-
       assert.equal(row.diff.fields.inspector_flex.verdict, 'DIFFERENT');
     }
     const wide1280 = run.rows.find((r) => r.viewport_width === 1280);
-    assert.equal(wide1280.diff.fields.surface_border_box.before, 676);
-    assert.equal(wide1280.diff.fields.surface_border_box.after, 720);
+    // The widening lands on the READING COLUMN, not the surface: the surface's
+    // 660px cap binds on both sides of the deletion, so `surface_border_box` is
+    // IDENTICAL at 660 and asserting a move there would be asserting a fiction.
+    assert.equal(wide1280.diff.fields.editor_body.before, 676);
+    assert.equal(wide1280.diff.fields.editor_body.verdict, 'DIFFERENT');
+    assert.ok(wide1280.diff.fields.editor_body.after > 676,
+      `the freed dock width must WIDEN the reading column, got ${wide1280.diff.fields.editor_body.after}`);
+    assert.deepEqual(
+      [wide1280.diff.fields.surface_border_box.before,
+       wide1280.diff.fields.surface_border_box.after,
+       wide1280.diff.fields.surface_border_box.verdict],
+      [660, 660, 'IDENTICAL'],
+      'the 660px cap, not the dock rule, is what sets the reading measure at wide');
     assert.equal(wide1280.deleted, TIGHT.length + 1,
       'exactly one more rule than the tight set — the top-level dock rule');
   });
