@@ -44,7 +44,7 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuityTest do
   @requeued " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
   @d_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
             @requeued
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                 @requeued
 
   describe "the rule, both directions" do
