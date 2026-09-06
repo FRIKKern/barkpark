@@ -394,10 +394,9 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
   # and then assert the STORE — because every one of these tags is a claim about
   # the store ("no write happened"), which a mapping proof cannot see.
 
-  test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written",
-       %{
-         scope: scope
-       } do
+  test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{
+    scope: scope
+  } do
     doc_id = "pds-w37-nomarker-#{System.unique_integer([:positive])}"
 
     # Same wording as a real gate, but no `merge_gate:true` — a text heuristic
