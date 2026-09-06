@@ -238,15 +238,43 @@ defmodule BarkparkWeb.Studio.Caps do
   asserted in prose.
   """
   @spec derive(Phoenix.LiveView.Socket.t()) :: %{read: boolean, write: boolean, admin: boolean}
-  def derive(socket) do
-    ws = socket.assigns[:current_workspace]
+  def derive(socket), do: derive_from_assigns(socket.assigns)
+
+  @doc """
+  `derive/1` over a bare ASSIGNS MAP — pds-w42.
+
+  `derive/1` never read anything off the socket but `socket.assigns`, so this is
+  the same oracle with the same queries; splitting it out is what lets a caller
+  that holds ASSIGNS and no socket ask it. Two such callers exist and both are
+  authorization sites the socket-level `gate/3` cannot reach:
+
+    * the `SheetGrid` capability PROP at its `StudioLive` callsite, which used
+      to read the `:caps` ASSIGN — a MOUNT-TIME SNAPSHOT that
+      `StudioLive.refresh_caps/1` only ever re-stamps on GRANT events, so a
+      membership deleted or a role downgraded mid-session left it `true`;
+    * the component's own write seam, which re-asks this at the instant it
+      authorizes (`grep -n 'refresh_write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
+
+  WHAT IS FRESH HERE AND WHAT IS NOT. The MEMBERSHIP row and the GRANT set are
+  re-read from the DB on every call, so a revoked membership, a downgraded
+  ROLE and an expired grant all deny on the next call. The API-TOKEN
+  permissions array is NOT: it is read off the `%ApiToken{}` STRUCT captured at
+  mount by the session plug, so `Tenancy.Auth.permits?/2` still answers on
+  mount-time bytes and a token downgraded to `["read"]` (or revoked outright)
+  in the DB keeps `write == true` on an already-mounted socket until it
+  reconnects. That is a SECOND staleness this function does not close and must
+  not be read as closing — see the pds-w42 PR body.
+  """
+  @spec derive_from_assigns(map()) :: %{read: boolean, write: boolean, admin: boolean}
+  def derive_from_assigns(assigns) when is_map(assigns) do
+    ws = Map.get(assigns, :current_workspace)
     ws_id = ws && Map.get(ws, :id)
 
     principals =
-      Enum.reject([socket.assigns[:api_token], socket.assigns[:current_user]], &is_nil/1)
+      Enum.reject([Map.get(assigns, :api_token), Map.get(assigns, :current_user)], &is_nil/1)
 
-    desk = desk_scope(socket)
-    grants = if is_map(desk), do: active_grants(socket), else: []
+    desk = desk_scope(assigns)
+    grants = if is_map(desk), do: active_grants(assigns), else: []
 
     memberships = load_memberships(principals, ws_id)
 
@@ -263,9 +291,19 @@ defmodule BarkparkWeb.Studio.Caps do
     %{
       read: member.(:read) or granted.(:read),
       write: member.(:write) or granted.(:write),
-      admin: admin_from(socket, memberships, ws_id)
+      admin: admin_from(memberships, ws_id)
     }
   end
+
+  @doc """
+  THE `:write` TIER, DERIVED FRESH — `write_capable?(assigns, derive_from_assigns(assigns))`
+  in one call, so a caller cannot accidentally pair the one owner of the rule
+  with a stale caps map. Same predicate, same order (`write_capable?/2`'s
+  docstring is the contract); only the caps map's provenance differs.
+  """
+  @spec write_capable_now?(map()) :: boolean
+  def write_capable_now?(assigns) when is_map(assigns),
+    do: write_capable?(assigns, derive_from_assigns(assigns))
 
   # ONE `Repo.one` per principal, reused for the MEMBERSHIP half of the
   # :read/:write/:admin decision (the ROLE resolution behind `role_permits?/3`
@@ -368,7 +406,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # `Tenancy.Auth.member?/2` or a second `membership/2`: that spelling was
   # measured at +1 query (derive 1.0 → 2.0 q/op) and would trade PDS-D634's
   # one-load property away. The loaded-row spelling is free (1.0 → 1.0).
-  defp admin_from(_socket, memberships, ws_id) do
+  defp admin_from(memberships, ws_id) do
     Enum.any?(memberships, fn {principal, membership} ->
       token_admin_from(principal, membership, ws_id) or
         account_admin_from(principal, membership, ws_id)
@@ -406,8 +444,8 @@ defmodule BarkparkWeb.Studio.Caps do
 
   # Grants are bound to a grantee USER; only a current_user can hold any. Fresh,
   # active-filtered load — the source of mid-session expiry truth.
-  defp active_grants(socket) do
-    case socket.assigns[:current_user] do
+  defp active_grants(assigns) do
+    case Map.get(assigns, :current_user) do
       %{id: uid} when is_binary(uid) -> Access.list_active_grants_for_grantee(uid)
       _ -> []
     end
@@ -415,13 +453,13 @@ defmodule BarkparkWeb.Studio.Caps do
 
   # (workspace, project, dataset) granularity — the desk a grant is validated
   # against by `Access.admits_desk?/3`. nil when the workspace is unresolved.
-  defp desk_scope(socket) do
-    ws = socket.assigns[:current_workspace]
+  defp desk_scope(assigns) do
+    ws = Map.get(assigns, :current_workspace)
     ws_id = ws && Map.get(ws, :id)
 
     if is_binary(ws_id) do
-      proj = socket.assigns[:current_project]
-      dataset = socket.assigns[:dataset]
+      proj = Map.get(assigns, :current_project)
+      dataset = Map.get(assigns, :dataset)
       base = %{workspace_id: ws_id, project_id: proj && Map.get(proj, :id)}
       if is_binary(dataset), do: Map.put(base, :dataset, dataset), else: base
     end
