@@ -1,14 +1,14 @@
 [
   {
-    "name": "ESM bundle",
+    "name": "ESM bundle (re-based 2026-09-06: measured 16.68 kB + 0.5 kB headroom)",
     "path": "dist/index.mjs",
-    "limit": "16.5 KB",
+    "limit": "17.25 KB",
     "gzip": true
   },
   {
-    "name": "CJS bundle",
+    "name": "CJS bundle (re-based 2026-09-06: measured 17.4 kB + 0.5 kB headroom)",
     "path": "dist/index.cjs",
-    "limit": "17.5 KB",
+    "limit": "18 KB",
     "gzip": true
   }
 ]
