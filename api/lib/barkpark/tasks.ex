@@ -320,6 +320,17 @@ defmodule Barkpark.Tasks do
   defdelegate ready(opts \\ []), to: Queue
 
   @doc """
+  The doc_ids a dataset-less `ready/1` WITHHELD because they live in more than
+  one dataset of this scope, each with the dataset set it spans.
+
+  `Barkpark.Tasks.TwinResolver` rule 3 at a LISTING: the queue does not pick a
+  dataset the caller did not name, and the ids it therefore cannot place are
+  named rather than dropped. `[]` when the caller named a `:dataset`.
+  """
+  @spec dataset_ambiguous(keyword()) :: [%{doc_id: String.t(), datasets: [String.t()]}]
+  defdelegate dataset_ambiguous(opts), to: Queue
+
+  @doc """
   One-call agent-rehydration reads for `GET /v1/tasks/prime`: `in_progress`
   live claims (worker-narrowed when `:worker` is given), the last `:limit`
   task `mutation_events` as lean rows, and lifecycle_status counts — all

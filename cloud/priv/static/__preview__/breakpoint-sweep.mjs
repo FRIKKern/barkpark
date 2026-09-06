@@ -185,13 +185,18 @@
 //          clipping ones (and form controls) at rect.right, since that is all
 //          they paint. Measured on origin/main at 769: #fleet-body +21,
 //          div.fleet-row +20 — the exact cells this sub-case exists for.
-//   Q3 BELOW THE FOLD      ONE number — the viewport y of `.content` — against
-//      a fraction of viewport height, not a general rule. It measures 745.88px
-//      at every width <= 720 and 56 above. Slice S2 fixes that; THIS slice must
-//      not wait for it, so Q3 ships with a NAMED PIN in the shape
-//      overflow-guard.mjs uses for FLEET_ROW_RESIDUAL: an explicit allowance
-//      citing cch-w13-bl-folded-shell-nav-wall that reds if the number GROWS.
-//      Pin removal is the follow-up row cch-w14-bl-sweep-navwall-pin-removal.
+//   Q3 BELOW THE FOLD      TWO numbers, against a fraction of viewport height:
+//      the SCREEN's own start (the first painted box of the live `section.view`,
+//      minus the folded chrome stacked above `.content`) and, separately, the
+//      FOLDED CHROME itself against a pinned ceiling. It used to be one number —
+//      the raw viewport y of `.content` — and at 320 that number is 344.5-378.5
+//      against a 320px budget, i.e. the shell alone busts the budget and NO
+//      screen can pass: a guard that can only lose. Splitting it keeps both
+//      halves able to fail (a screen that pushes its first box 320px down reds
+//      Q3; a shell that grows past SHELL_CHROME_CEILING reds the chrome pin).
+//      The full measurement and the ruling it implements are at
+//      SHELL_CHROME_SELECTORS below (cch-w24-bl-q3-fold-budget-is-a-shell-
+//      property-at-320).
 //
 //  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
 //  RELOCATES the cliff and exports a 746px nav wall to every tablet.
@@ -811,6 +816,95 @@ export function selectCells(all, filter) {
 // clears the bar on its own: `max-height: calc(40vh - 60px)` cancels the 56px
 // topbar and makes contentTop = 0.4H - 4 an identity at every height.
 export const FOLD_FRACTION = 0.4;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Q3 MEASURES THE SCREEN, AND THE SHELL IS PINNED SEPARATELY
+//  (cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320, lane ruling option (b))
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE DEFECT, AS MEASURED ON origin/main @327ffd96b, `--render --widths 320`:
+//    sites/dark@320x800          .content starts 344.5px down (budget 320px)  ✗
+//    billing-trial/dark@320x800  .content starts 378.5px down (budget 320px)  ✗
+//  Both of those numbers are SHELL, not screen. The same run, instrumented:
+//    aside.sidebar   top 0    bottom 260    (the `max-height: calc(40vh - 60px)` cap)
+//    header.topbar   top 260  bottom 344.5  (h 84.5 — the topbar WRAPS at 320)
+//                    top 260  bottom 378.5  (h 118.5 on billing-trial — the
+//                                            trial chip adds a third wrapped line)
+//    main.content    top 344.5 / 378.5      — EXACTLY the topbar's bottom, 0px gap
+//  So at 320 the folded chrome alone spends 344.5-378.5px of a 320px budget and
+//  no screen can pass: a guard that can only lose, which is the mirror of this
+//  epic's usual defect and just as dishonest.
+//
+//  WHAT THE RULING SAID, AND WHERE IT DOES NOT SURVIVE CONTACT. Option (b) is
+//  "`.content` top offset MINUS the measured folded-chrome height". Taken
+//  literally that is IDENTICALLY ZERO at every width, because the measurement
+//  above shows `.content`'s top IS the chrome's bottom — there is no gap between
+//  them to measure. A number that is 0 by construction is a guard that cannot
+//  fail, so Q3 anchors one box lower: the FIRST PAINTED BOX of the live
+//  `section.view`. That is still ONE number and still the fold question; it is
+//  not the "tall row displaces its siblings" question, which this row does not
+//  buy (that is cch-w24-bl-nothing-pins-height-against-a-cruel-string).
+//
+//    Q3 SCREEN TOP = first painted box of the live view  -  folded chrome bottom
+//
+//  MEASURED, origin/main @327ffd96b: 24px at 320 (sites, overview-fleet,
+//  billing-trial alike — `header.view-head` at 368.5/402.5 over a chrome bottom
+//  of 344.5/378.5) and 32px at 900. Against a 320px budget that is a bar with
+//  room in it that a screen can still bust: put 400px above a view's first row
+//  and Q3 reds, at every width, chrome or no chrome.
+//
+//  AND THE SHELL GETS ITS OWN NUMBER. Isolating the screen would otherwise
+//  DELETE the finding — the shell cost at 320 is exactly what this row found
+//  nobody watching — so the folded chrome is printed on every run and pinned,
+//  in the shape overflow-guard.mjs's FLEET_ROW_RESIDUAL uses: an explicit
+//  allowance that reds if the number GROWS.
+export const SHELL_CHROME_SELECTORS = ["aside.sidebar", "header.topbar"];
+
+// PINNED TO WHAT THE INSTRUMENT PRINTS, NEVER TO ARITHMETIC. Re-measured on
+// origin/main @327ffd96b with `--render --widths 320 --cell sites,billing-trial,
+// overview-fleet`: the folded chrome bottom is 344.5 on sites and overview-fleet
+// and 378.5 on billing-trial. THE ROW'S FILING QUOTES 344.5 AS THE CHROME COST
+// AT 320 AND THAT IS THE NARROWER OF THE TWO — pinning there would red
+// billing-trial on the first run, re-creating the unreachable-budget defect this
+// row exists to remove. The ceiling is the WORST printed value: 378.5.
+export const SHELL_CHROME_CEILING = 378.5;
+
+// One ceiling covers the whole width axis: above the fold breakpoint the sidebar
+// is a left COLUMN, not a stacked strip, so it is not folded-above `.content`
+// and the chrome bottom is the topbar's 56 — far under the pin. A width-relative
+// ceiling would hide a shell that grows in step with it.
+//
+// WHAT THIS PIN DOES NOT CATCH, SAID PLAINLY. It is one number, taken at
+// RENDER_HEIGHT (800) — the height the default loop drives and the only height
+// any of this row's measurements were taken at. The chrome's sidebar half is
+// height-RELATIVE (`max-height: calc(40vh - 60px)`), so at the opt-in smaller
+// heights the folded chrome is smaller and the pin has slack: driven at
+// `--height 390` the same worst cell measures 152, not 378.5. The half that
+// actually moved between screens is the topbar (84.5 on sites, 118.5 on
+// billing-trial — it WRAPS at 320), and that half is height-independent, so it
+// is exactly the growth this catches. A per-height pin is a bigger axis than
+// this row bought; the identity that governs the sidebar half at every height
+// already has its own guard in breakpoint-sweep.test.mjs ("the folded shell
+// clears the fold bar at EVERY height, as an identity").
+export const CHROME_PIN_ROW = "cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320";
+
+// The verdict, as a pure function, so both halves are unit-testable without a
+// browser. `chromeBottom` is 0 when nothing is stacked above `.content` — the
+// number then degenerates to the raw offset the old Q3 read, which is the honest
+// failure mode: a probe that stops finding the chrome reports a WORSE number,
+// never a better one.
+export function foldVerdict({ contentTop, anchorTop, chromeBottom, vh, ceiling = SHELL_CHROME_CEILING, fraction = FOLD_FRACTION }) {
+  const budget = Math.round(fraction * vh);
+  const top = anchorTop == null ? contentTop : anchorTop;
+  const screenTop = top == null ? null : Math.round((top - (chromeBottom || 0)) * 100) / 100;
+  return {
+    budget,
+    screenTop,
+    chromeBottom: chromeBottom || 0,
+    ceiling,
+    foldOver: screenTop != null && screenTop > budget,
+    chromeOver: (chromeBottom || 0) > ceiling,
+  };
+}
 
 // Q2's named hiding utilities. A className regex would swallow any class with
 // "hidden" as a substring (`.is-hidden-until-hover` is not hidden), so the list
@@ -1562,9 +1656,53 @@ function cellProbeJs(cell) {
   }
 
   // ── Q3 below the fold ──────────────────────────────────────────────────────
+  // THREE numbers now, not one (cch-w24-bl-q3-fold-budget-is-a-shell-property-
+  // at-320): the raw .content offset this probe always read, the FOLDED CHROME
+  // bottom under it, and the live view's first painted box. The verdict is
+  // computed on the node side by foldVerdict(); the probe only measures.
   var content=document.querySelector('.content');
-  var q3={top: content ? Math.round(content.getBoundingClientRect().top*100)/100 : null,
-          vh: window.innerHeight};
+  var r2=function(n){return Math.round(n*100)/100;};
+  var q3={top: content ? r2(content.getBoundingClientRect().top) : null,
+          vh: window.innerHeight,
+          chromeBottom: 0, chromeParts: [], anchorTop: null, anchorSel: null};
+  if (content) {
+    var cTop=content.getBoundingClientRect().top;
+    // FOLDED-ABOVE, not "present": above the fold breakpoint the sidebar is a
+    // left COLUMN whose bottom is the viewport floor, and counting it there
+    // would report the whole page as chrome. A chrome box counts only when it
+    // is STACKED above .content — bottom at or before the content's top.
+    var CHROME=${JSON.stringify(SHELL_CHROME_SELECTORS)};
+    for (var ci=0; ci<CHROME.length; ci++) {
+      var ce=document.querySelector(CHROME[ci]);
+      if (!ce) continue;
+      var cr=ce.getBoundingClientRect();
+      if (cr.height<=0) continue;
+      if (cr.bottom<=cTop+0.5) {
+        q3.chromeParts.push({sel:CHROME[ci], top:r2(cr.top), bottom:r2(cr.bottom), h:r2(cr.height)});
+        if (cr.bottom>q3.chromeBottom) q3.chromeBottom=r2(cr.bottom);
+      }
+    }
+    // The SCREEN's own start: the first painted descendant of the live view.
+    // .content's top is the chrome's bottom to the pixel, so anchoring there
+    // measures a constant zero; anchoring on the view's own first box is what
+    // makes the fold question about the screen.
+    var live=content.querySelector('section.view:not([hidden])');
+    if (live) {
+      var kids=live.querySelectorAll('*');
+      for (var ki=0; ki<kids.length; ki++) {
+        var kr=kids[ki].getBoundingClientRect();
+        if (kr.width>0 && kr.height>0) {
+          q3.anchorTop=r2(kr.top);
+          q3.anchorSel=kids[ki].tagName.toLowerCase()+(kids[ki].id?('#'+kids[ki].id):'')+(kids[ki].className?('.'+String(kids[ki].className).trim().split(/\s+/).join('.')):'');
+          break;
+        }
+      }
+      // A live view that painted NOTHING falls back to the view box itself, and
+      // then to .content — never to "no number".
+      if (q3.anchorTop==null) { var lr=live.getBoundingClientRect(); if (lr.height>0) { q3.anchorTop=r2(lr.top); q3.anchorSel='section.view#'+live.id; } }
+    }
+    if (q3.anchorTop==null) { q3.anchorTop=r2(cTop); q3.anchorSel='.content'; }
+  }
 
   // ── the theme this page ACTUALLY loaded ────────────────────────────────────
   // Reported, not assumed. The ?theme= param is seeded into localStorage by mock.js
@@ -2060,6 +2198,9 @@ async function legRender(rep) {
       out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
+    // The shell's own pin, alongside Q3's screen number — this row's whole
+    // point is that isolating the screen must not DELETE the shell finding.
+    const chromeF = [];
     const tierCtaF = [], tierCtaSeen = [];
     const bgSeen = new Map();
     const t0 = Date.now();
@@ -2067,6 +2208,7 @@ async function legRender(rep) {
 
     const heightSeen = new Set();
     const q3Worst = new Map();
+    const chromeWorst = new Map();
     for (const cell of cells) {
      for (const theme of themes) {
       for (const height of heights) {
@@ -2161,11 +2303,22 @@ async function legRender(rep) {
             // QUOTED WHETHER IT PASSES OR NOT. Q3 used to print only on
             // failure, so the fold number at a height was invisible unless it
             // was already over budget — and "no Q3 line" read the same as
-            // "the height was never driven".
+            // "the height was never driven". The chrome pin below prints on the
+            // same terms, for the same reason.
+            const v = foldVerdict({ contentTop: top, anchorTop: m.q3.anchorTop, chromeBottom: m.q3.chromeBottom, vh: m.q3.vh });
             const w = q3Worst.get(height);
-            if (!w || top > w.top) q3Worst.set(height, { top, budget: Math.round(FOLD_FRACTION * m.q3.vh), cell: cell.name, theme, width });
-            if (top > FOLD_FRACTION * m.q3.vh) {
-              q3f.push({ cell: cell.name, theme, width, height, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
+            if (!w || v.screenTop > w.screenTop) {
+              q3Worst.set(height, { ...v, top, anchorSel: m.q3.anchorSel, cell: cell.name, theme, width });
+            }
+            const cw = chromeWorst.get(height);
+            if (!cw || v.chromeBottom > cw.chromeBottom) {
+              chromeWorst.set(height, { chromeBottom: v.chromeBottom, parts: m.q3.chromeParts, cell: cell.name, theme, width });
+            }
+            if (v.foldOver) {
+              q3f.push({ cell: cell.name, theme, width, height, top, anchorSel: m.q3.anchorSel, ...v });
+            }
+            if (v.chromeOver) {
+              chromeF.push({ cell: cell.name, theme, width, height, chromeBottom: v.chromeBottom, ceiling: v.ceiling, parts: m.q3.chromeParts });
             }
           }
           // ── the tier-CTA tense probe (billing-trial only) ────────────────
@@ -2227,7 +2380,12 @@ async function legRender(rep) {
       process.exit(2);
     }
     out(`   ✓ heights — ${hd.driven.length}/${hd.asked.length} declared height(s) DRIVEN and read back from window.innerHeight: ${hd.driven.join(", ")}\n`);
-    out(`   ✓ Q3 fold — worst .content top per height: ${[...q3Worst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.top} against a ${w.budget}px budget (${FOLD_FRACTION} of H) [${w.cell}/${w.theme}@${w.width}]`).join(" · ")}\n`);
+    out(`   ✓ Q3 fold — worst SCREEN top per height (first painted box of the live view, minus the folded chrome under it): ${[...q3Worst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.screenTop} against a ${w.budget}px budget (${FOLD_FRACTION} of H) [${w.cell}/${w.theme}@${w.width}: ${w.anchorSel} at ${w.chromeBottom} + ${w.screenTop}]`).join(" · ")}\n`);
+    // THE SHELL'S OWN NUMBER, PRINTED EVERY RUN. Q3 measuring the screen would
+    // otherwise retire this row's actual finding — nobody was watching what the
+    // folded chrome costs — so the chrome is quoted here whether it passes or
+    // not, with the boxes it is made of, and pinned at SHELL_CHROME_CEILING.
+    out(`   ✓ folded chrome — worst per height, against a ${SHELL_CHROME_CEILING}px ceiling (${CHROME_PIN_ROW}): ${[...chromeWorst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.chromeBottom} [${w.cell}/${w.theme}@${w.width}${w.parts.length ? `: ${w.parts.map((x) => `${x.sel} ${x.h}`).join(" + ")}` : " — NOTHING stacked above .content"}]`).join(" · ")}\n`);
 
     for (const f of q1f) out(`   ✗ Q1 SIDEWAYS  ${f.cell}/${f.theme}@${f.width}: scrollWidth ${f.sw} > viewport ${f.cw}\n`);
     for (const f of q2f) {
@@ -2241,7 +2399,8 @@ async function legRender(rep) {
       }
       else out(`   ✗ Q2 CUT_BY_VIEWPORT  ${f.cell}/${f.theme}@${f.width}: ${f.sel} extends ${f.cut}px past the viewport\n`);
     }
-    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}x${f.height}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
+    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}x${f.height}: the screen's first box (${f.anchorSel}) starts ${f.screenTop}px below the folded chrome (budget ${f.budget}px) — .content at ${f.top}, chrome bottom ${f.chromeBottom}\n`);
+    for (const f of chromeF) out(`   ✗ SHELL CHROME OVER PIN  ${f.cell}/${f.theme}@${f.width}x${f.height}: the folded chrome ends ${f.chromeBottom}px down, over the ${f.ceiling}px ceiling (${f.parts.map((x) => `${x.sel} ${x.h}`).join(" + ") || "no stacked chrome"}). The pin is what the instrument PRINTED on origin/main; a shell that grows reds here — re-measure and move it deliberately, or shrink the shell.\n`);
     // WHY THE ZERO IS NOT A BLIND SPOT. CUE_STUCK went from 78 notes to 0 on
     // `--cell operator --widths 390,619,720`, and a note count that falls to
     // zero is indistinguishable from a probe that stopped looking — unless it
@@ -2276,9 +2435,9 @@ async function legRender(rep) {
       out(`   ✗ TIER CTA CLIPPED  billing-trial/${f.theme}@${f.width} (${f.tense} trial): ${String(f.plan).trim()} "${f.text}" ${f.sw}>${f.cw}\n`);
     }
 
-    const failed = q1f.length + q2f.length + q3f.length + tierCtaF.length;
+    const failed = q1f.length + q2f.length + q3f.length + chromeF.length + tierCtaF.length;
     if (failed) {
-      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · chrome pin ${chromeF.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
       return 1;
     }
     out(`\n>> verdict    clean across ${total} cells — exit 0\n`);

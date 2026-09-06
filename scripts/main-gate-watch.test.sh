@@ -554,7 +554,11 @@ if [ "$rc" = "3" ]; then ok "a runs file that does not exist -> exit 3"; else ba
 # The live arm classifies a credential failure as FORBIDDEN with the same
 # patterns the protection reader uses — asserted on the source because the
 # hermetic path cannot reach `gh`.
-if awk '/^read_workflow_runs\(\)/{f=1} f && /HTTP 401\|HTTP 403/{print "yes"; exit} f && /^}/{exit}' "$WATCH" | grep -q yes; then
+# Materialised, not piped (honest-gates D37): `awk … | grep -q` under pipefail
+# can report the producer's SIGPIPE 141 instead of grep's 0, which reads here as
+# "there is no FORBIDDEN arm".
+watch_forbidden_arm="$(awk '/^read_workflow_runs\(\)/{f=1} f && /HTTP 401\|HTTP 403/{print "yes"; exit} f && /^}/{exit}' "$WATCH")"
+if [ "$watch_forbidden_arm" = yes ]; then
   ok "read_workflow_runs classifies 401/403 as FORBIDDEN, like the protection reader"
 else
   bad "read_workflow_runs has no FORBIDDEN arm — an Actions 403 would not be distinguishable"
@@ -708,15 +712,42 @@ grep -q "workflow_dispatch:" "$WF"          && ok "workflow_dispatch"       || b
 # production push runs failed on tip 026c5b1d78 while main was in fact green.
 # Comments are stripped first — this workflow's prose argues about push at
 # length and a naive grep would red on its own explanation.
-if sed 's/#.*//' "$WF" | grep -qE '^[[:space:]]*push:'; then
+#
+# The stripped text is MATERIALISED, never piped — honest-gates D37, the same
+# rule the continue-on-error check below already follows. `sed … "$WF" | grep
+# -qE …` is a PIPELINE: grep exits at its first match, sed takes SIGPIPE on its
+# next write, and `pipefail` reports sed's 141 instead of grep's 0. Here that
+# false 141 flowed into the ELSE branch of the MUTANT check below and reported
+# the no-push check vacuous on a mutant that did carry push: — 1 of 84 failing
+# on every macOS run while CI stayed green.
+wf_nocomment="$(sed 's/#.*//' "$WF")"
+if grep -qE '^[[:space:]]*push:' <<<"$wf_nocomment"; then
   bad "the workflow carries a push: trigger — it reds by construction on every merge (see 3b)"
 else
   ok "no push: trigger at all — the merge-time false red cannot recur"
 fi
 # ...and prove that check can LOSE rather than trusting a grep that may simply
 # never match anything.
-sed 's/^  workflow_dispatch:/  push:\n    branches: [main]\n  workflow_dispatch:/' "$WF" > "$TMP/wf-push-readded.yml"
-if sed 's/#.*//' "$TMP/wf-push-readded.yml" | grep -qE '^[[:space:]]*push:'; then
+#
+# The mutant is built with awk, not `sed 's/…/a\nb/'`. BSD sed has no `\n`
+# escape in a REPLACEMENT: on macOS that form emits the literal letter `n` and
+# collapses the three intended lines into one mangled `  push:n    branches:
+# [main]n  workflow_dispatch:`. The old form therefore asserted on a mutant it
+# had not actually built (mode 6) — and it "passed" only because that mangled
+# line still happens to start with `push:`. Assert the mutant DIFFERS and
+# carries a real, well-formed push: block before believing any verdict from it.
+awk '/^  workflow_dispatch:/ && !done { print "  push:"; print "    branches: [main]"; done = 1 } { print }' \
+  "$WF" > "$TMP/wf-push-readded.yml"
+if cmp -s "$WF" "$TMP/wf-push-readded.yml"; then
+  bad "the push: mutant was never BUILT (the anchor did not match) — the next assertion would prove nothing"
+elif [ "$(grep -c '^  push:$' "$TMP/wf-push-readded.yml")" != 1 ] \
+  || ! grep -q '^    branches: \[main\]$' "$TMP/wf-push-readded.yml"; then
+  bad "the push: mutant is malformed — it does not carry exactly one well-formed push: trigger block"
+else
+  ok "the push: mutant BUILT: exactly one well-formed 'push:' + 'branches: [main]' the original does not have"
+fi
+wf_mutant_nocomment="$(sed 's/#.*//' "$TMP/wf-push-readded.yml")"
+if grep -qE '^[[:space:]]*push:' <<<"$wf_mutant_nocomment"; then
   ok "the no-push check catches a re-added push: trigger (it can lose)"
 else
   bad "the no-push check did not catch a re-added push: trigger — it is vacuous"
@@ -727,7 +758,11 @@ grep -q "if: github.event_name != 'pull_request'" "$WF" \
   || bad "watch job is missing the pull_request guard"
 
 # The pull_request trigger must be paths-filtered — belt and braces with the if:.
-if awk '/^  pull_request:/{f=1} f && /^    paths:/{print "yes"; exit}' "$WF" | grep -q yes; then
+# Materialised, not piped: `awk … | grep -q` is the same SIGPIPE pipeline as
+# above — the awk exits on its own `exit`, but pipefail can still surface a 141
+# from the write that races grep's exit, and a 141 reads as "not paths-filtered".
+wf_pr_paths="$(awk '/^  pull_request:/{f=1} f && /^    paths:/{print "yes"; exit}' "$WF")"
+if [ "$wf_pr_paths" = yes ]; then
   ok "the pull_request trigger is paths-filtered"
 else
   bad "the pull_request trigger is NOT paths-filtered"
@@ -751,7 +786,20 @@ else
 fi
 # ...and prove that check can LOSE, rather than trusting a grep that may simply
 # never match anything.
-sed 's/^    runs-on: ubuntu-latest/    continue-on-error: true\n    runs-on: ubuntu-latest/' "$WF" > "$TMP/wf-laundered.yml"
+# Built with awk for the same reason as the push: mutant — BSD sed cannot put a
+# newline in a replacement, so the sed form emitted `    continue-on-error:
+# truen    runs-on: ubuntu-latest` on macOS: one mangled line that only matched
+# because the substring `continue-on-error` survived the mangling. Build it
+# properly and assert it BUILT before asserting on it.
+awk '/^    runs-on: ubuntu-latest/ && !done { print "    continue-on-error: true"; done = 1 } { print }' \
+  "$WF" > "$TMP/wf-laundered.yml"
+if cmp -s "$WF" "$TMP/wf-laundered.yml"; then
+  bad "the continue-on-error mutant was never BUILT (the anchor did not match) — the next assertions would prove nothing"
+elif [ "$(grep -c '^    continue-on-error: true$' "$TMP/wf-laundered.yml")" != 1 ]; then
+  bad "the continue-on-error mutant is malformed — no single well-formed 'continue-on-error: true' directive"
+else
+  ok "the continue-on-error mutant BUILT: exactly one well-formed directive the original does not have"
+fi
 wf_laundered_stripped="$(sed 's/#.*//' "$TMP/wf-laundered.yml")"
 if grep -q "continue-on-error" <<<"$wf_laundered_stripped"; then
   ok "the continue-on-error check catches an injected specimen (it can lose)"
@@ -760,8 +808,12 @@ else
 fi
 # ...and prove it survives the pipe-buffer condition that made the old pipeline
 # form a coin flip: same planted specimen, padded past any pipe buffer.
-{ cat "$TMP/wf-laundered.yml"; yes "        key: padding past the pipe buffer" | head -n 3000; } \
-  > "$TMP/wf-laundered-padded.yml"
+# (the padding itself is generated by awk, not `yes | head` — that pipeline's
+# own status is a 141 by construction and there is no reason to put one in a
+# file whose subject is exactly that failure mode.)
+{ cat "$TMP/wf-laundered.yml"
+  awk 'BEGIN { for (i = 0; i < 3000; i++) print "        key: padding past the pipe buffer" }'
+} > "$TMP/wf-laundered-padded.yml"
 wf_padded_stripped="$(sed 's/#.*//' "$TMP/wf-laundered-padded.yml")"
 if grep -q "continue-on-error" <<<"$wf_padded_stripped"; then
   ok "the continue-on-error check still catches it when the stripped text overruns the pipe buffer"

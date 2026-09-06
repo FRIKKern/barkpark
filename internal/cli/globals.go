@@ -279,3 +279,47 @@ func validOutput(s string) bool {
 	}
 	return false
 }
+
+// globalQueryForward is ONE global value flag that may ride the query string:
+// the manifest flag name it answers to, whether the user actually TYPED it, and
+// the value to send.
+//
+// It exists because every global value flag is invisible to the manifest-driven
+// flag loop in applyQuery. parseGlobals consumes -d/--dataset, --limit and
+// --offset wherever they appear in argv (by design — the global scope triple may
+// sit before or after the noun), so `flags["dataset"]` is NEVER populated and a
+// command that declares its own `dataset` flag can never see the one the caller
+// typed. Before this table each such flag needed its own hand-written line in
+// applyQuery, and each one was written only after a user had already been given
+// a silently unfiltered answer: limit and offset first (six commands, all
+// answering with the server's default at rc=0), then dataset on task.ready —
+// the third instance of the same trap in a single day.
+//
+// The rule is DECLARATION-driven: the knob rides when the command's own
+// manifest says it accepts that flag. Adding the next global value flag to
+// globalQueryForwards is now the whole change; applyQuery does not grow a line.
+type globalQueryForward struct {
+	name  string
+	set   bool
+	value string
+
+	// paginatedProtocol marks a knob that a `paginated: true` command takes as
+	// PROTOCOL whether or not it also enumerates it as a flag — true for
+	// limit/offset (the seven paginated commands), false for dataset, which a
+	// route reads only where it declares it.
+	paginatedProtocol bool
+}
+
+// globalQueryForwards is the table applyQuery iterates. Membership is gated on
+// a "was it TYPED" bit, never on the value alone: g.dataset also holds the
+// ambient dataset from ~/.config/barkpark/config.json / BARKPARK_DATASET, and
+// forwarding THAT would narrow a request the caller never asked to narrow —
+// one silent wrong answer traded for another (see datasetSet above). A global
+// with no such bit therefore does not belong in this table.
+func globalQueryForwards(g globals) []globalQueryForward {
+	return []globalQueryForward{
+		{name: "limit", set: g.limitSet, value: strconv.Itoa(g.limit), paginatedProtocol: true},
+		{name: "offset", set: g.offsetSet, value: strconv.Itoa(g.offset), paginatedProtocol: true},
+		{name: "dataset", set: g.datasetSet, value: g.dataset},
+	}
+}

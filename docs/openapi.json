@@ -2370,6 +2370,15 @@
             }
           },
           {
+            "description": "Narrow the ready page to ONE dataset. Absent: every dataset in the caller's workspace/project scope (page.datasets says which).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id.",
             "in": "query",
             "name": "order",
@@ -2405,7 +2414,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default.",
+        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default. DATASET SCOPE: with no --dataset the page spans EVERY dataset in the caller's workspace/project scope and page.datasets says which; --dataset narrows it. A doc_id living in more than one dataset of that scope is WITHHELD and listed once in page.dataset_ambiguous — the queue will not pick a dataset you did not name (Barkpark.Tasks.TwinResolver rule 3); name one to get the row.",
         "tags": [
           "task"
         ],

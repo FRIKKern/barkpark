@@ -81,7 +81,7 @@ defmodule BarkparkWeb.TasksListingStoreAgreementTest do
   # ── 1. the by-id reader resolves what the listing served ────────────────
 
   describe "GET /v1/tasks/:doc_id over a doc_id that lives in two datasets" do
-    test "resolves to exactly one row instead of raising (task-0c30e7b99ad87cec)",
+    test "REFUSES with 409 ambiguous_dataset instead of picking a row (task-0c30e7b99ad87cec)",
          %{conn: conn, ws: ws, project: project} do
       doc_id = "lsa-twodataset-#{System.unique_integer([:positive])}"
 
@@ -92,29 +92,72 @@ defmodule BarkparkWeb.TasksListingStoreAgreementTest do
       # inside one workspace/project. Scoped to THIS test's doc_id.
       assert Repo.aggregate(from(d in Document, where: d.doc_id == ^doc_id), :count) == 2
 
-      # RED before the fix: `Repo.one/1` raises Ecto.MultipleResultsError here,
-      # which surfaces as a 500 on every call for the life of the collision.
-      resp = get(conn, "/v1/tasks/#{doc_id}") |> json_response(200)
+      # SUPERSEDED 2026-09-06 (task-49eef068420df918, TwinResolver rule 3).
+      # This test used to assert a 200. Its original note read: "RED before the
+      # fix: `Repo.one/1` raises Ecto.MultipleResultsError here, which surfaces
+      # as a 500 on every call for the life of the collision." That was true,
+      # and the `asc: d.dataset` tiebreak it pinned did stop the 500 — by
+      # returning the FIRST row alphabetically. A total order made the wrong
+      # row CONSISTENT, not CORRECT: readers got a real 200 carrying a
+      # different document than the one they named.
+      #
+      # The door now REFUSES instead of picking. Not a 500 (the server is fine,
+      # the ledger is ambiguous) and not a 200 (there is no single right row) —
+      # a 409 that NAMES every holder, which is what `?dataset=` needs.
+      # `assert_error_sent/2` rather than `json_response/2`: the refusal is a
+      # RAISE at the resolver chokepoint, so this measures the WHOLE wire path —
+      # `Plug.Exception`'s 409 AND `BarkparkWeb.ErrorJSON`'s pass-through, which
+      # is what keeps the body from collapsing to a generic `internal_error`.
+      {409, _headers, body} =
+        assert_error_sent(409, fn ->
+          get(conn, "/v1/tasks/#{doc_id}")
+        end)
 
-      assert resp["ok"] == true
-      assert resp["doc"]["doc_id"] == doc_id
+      assert %{"error" => error} = Jason.decode!(body)
+      assert error["code"] == "ambiguous_dataset"
+      assert error["details"]["doc_id"] == doc_id
+
+      # The remedy must be in the body, not just the status: a refusal that does
+      # not name the holders is the half a caller cannot act on.
+      assert error["details"]["datasets"] == Enum.sort(["production", "staging"])
     end
 
-    test "the resolution is stable across repeated reads", %{conn: conn, ws: ws, project: project} do
+    test "the REFUSAL is stable across repeated reads", %{conn: conn, ws: ws, project: project} do
       doc_id = "lsa-stable-#{System.unique_integer([:positive])}"
 
       insert_task!(doc_id, ws, project, dataset: "production")
       insert_task!(doc_id, ws, project, dataset: "staging")
 
-      # A `LIMIT 1` with a PARTIAL order would trade the 500 for a silently
-      # alternating answer — the worse defect. The order is total, so five
-      # reads must name one and the same row.
-      ids =
+      # Same premise assertion as the test above: if the fixture ever stopped
+      # creating BOTH rows this test would pass for the wrong reason (one row
+      # is not ambiguous, so it would 200 and the 409 assertion would red for a
+      # reason that has nothing to do with flapping).
+      assert Repo.aggregate(from(d in Document, where: d.doc_id == ^doc_id), :count) == 2
+
+      # SUPERSEDED 2026-09-06 (task-49eef068420df918, TwinResolver rule 3).
+      # The original note read: "A `LIMIT 1` with a PARTIAL order would trade the
+      # 500 for a silently alternating answer — the worse defect. The order is
+      # total, so five reads must name one and the same row." That reasoning was
+      # right about the hazard it chose and wrong about the one that mattered: a
+      # stable wrong answer is still a wrong answer.
+      #
+      # The PROPERTY this test defends is unchanged — the door must not flap. It
+      # is now asserted over the REFUSAL: five reads must refuse identically and
+      # name the same holders, so a future partial order cannot reintroduce
+      # flapping in the error path instead of the success path.
+      bodies =
         for _ <- 1..5 do
-          get(conn, "/v1/tasks/#{doc_id}") |> json_response(200) |> get_in(["doc", "id"])
+          {409, _headers, body} =
+            assert_error_sent(409, fn ->
+              get(conn, "/v1/tasks/#{doc_id}")
+            end)
+
+          error = Jason.decode!(body)["error"]
+          {error["code"], error["details"]["datasets"]}
         end
 
-      assert length(Enum.uniq(ids)) == 1
+      assert length(Enum.uniq(bodies)) == 1
+      assert hd(bodies) == {"ambiguous_dataset", Enum.sort(["production", "staging"])}
     end
 
     test "a published row wins over a draft row of the same id in another dataset",
