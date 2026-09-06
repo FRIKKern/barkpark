@@ -633,7 +633,13 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     token = session_token(operator)
 
     old = barkpark_fixture(team)
-    past = DateTime.add(DateTime.utc_now(), -(Registry.stale_after_seconds("provision_support") + 60), :second)
+
+    past =
+      DateTime.add(
+        DateTime.utc_now(),
+        -(Registry.stale_after_seconds("provision_support") + 60),
+        :second
+      )
     {:ok, _} = old |> Ecto.Changeset.change(inserted_at: past) |> Repo.update()
 
     conn = call(:get, "/v1/operator/barkparks/without-agent-token", token)
