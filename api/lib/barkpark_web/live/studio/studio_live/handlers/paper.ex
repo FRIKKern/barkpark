@@ -305,27 +305,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     request_id = if is_map(params), do: Map.get(params, "request_id")
     ops = if is_map(params), do: Map.get(params, "ops")
 
-    context = if is_map(params), do: Blocks.canvas_run_context(params), else: {:error, :invalid}
+    context = Blocks.canvas_run_context(params, Shared.paper_top_level_blocks(socket))
 
-    case Shared.paper_ops(
-           socket,
-           ops,
-           request_id,
-           is_map(params) && params["if_rev"],
-           context
-         ) do
-      {:ok, socket, receipt, outcome} ->
-        {:reply,
-         %{
-           saved: true,
-           request_id: request_id,
-           replayed: outcome == :replayed,
-           rev: receipt.rev
-         }, socket}
+    if context == {:error, :outdated_terminal_canvas} do
+      {:reply,
+       %{
+         saved: false,
+         request_id: request_id,
+         rejected: "outdated_terminal_canvas",
+         current_rev: socket.assigns[:paper_rev],
+         error:
+           "Reload the Paper editor before editing this Terminal. Your draft has not been saved."
+       }, socket}
+    else
+      case Shared.paper_ops(
+             socket,
+             ops,
+             request_id,
+             is_map(params) && params["if_rev"],
+             context
+           ) do
+        {:ok, socket, receipt, outcome} ->
+          {:reply,
+           %{
+             saved: true,
+             request_id: request_id,
+             replayed: outcome == :replayed,
+             rev: receipt.rev
+           }, socket}
 
-      {:error, socket} ->
-        reply = socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
-        {:reply, Map.put_new(reply, :request_id, request_id), socket}
+        {:error, socket} ->
+          reply =
+            socket.assigns[:last_paper_save_result] || %{saved: false, request_id: request_id}
+
+          {:reply, Map.put_new(reply, :request_id, request_id), socket}
+      end
     end
   end
 

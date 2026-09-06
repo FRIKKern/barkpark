@@ -83,6 +83,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def action_form_state(_block), do: {:error, :malformed_action}
 
   @doc false
+  def terminal_form_state(%{"type" => "terminal"} = block) do
+    with {:ok, children} <- canonical_terminal_children(block) do
+      {:ok,
+       %{
+         title: terminal_stringish(Map.get(block, "title")),
+         footer: terminal_stringish(Map.get(block, "footer")),
+         live: terminal_live?(Map.get(block, "live")),
+         children: children
+       }}
+    end
+  end
+
+  def terminal_form_state(_block), do: {:error, :malformed_terminal}
+
+  @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
   # by patch.ex regardless. Mirrors the EXACT block shapes in
@@ -204,6 +219,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def build_block_patch(%{"type" => "action"} = block, params) do
     case action_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "terminal"} = block, params) do
+    case terminal_patch(block, params) do
       {:ok, patch} -> patch
       {:error, _reason} -> %{}
     end
@@ -357,6 +379,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "action"} = block, params),
     do: action_patch(block, params)
+
+  def validate_block_patch(%{"type" => "terminal"} = block, params),
+    do: terminal_patch(block, params)
 
   def validate_block_patch(%{"type" => "section"} = block, params) do
     section_structure_patch(block, params)
@@ -844,6 +869,99 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
        |> put_action_field(params, "action-priority", "priority", state.priority)}
     end
   end
+
+  defp terminal_patch(block, params) do
+    with {:ok, children} <- canonical_terminal_children(block),
+         :ok <- validate_terminal_form_params(params, children) do
+      patch =
+        %{}
+        |> put_terminal_text(block, params, "title")
+        |> put_terminal_text(block, params, "footer")
+        |> put_terminal_live(block, params)
+
+      patch =
+        if params["terminal-action"] == "add" do
+          Map.put(patch, "children", [default_block("paragraph", params["terminal-new-child-id"])])
+        else
+          patch
+        end
+
+      {:ok, patch}
+    end
+  end
+
+  defp canonical_terminal_children(%{"children" => children} = block)
+       when is_list(children) do
+    if Map.has_key?(block, "blocks"),
+      do: {:error, :malformed_terminal},
+      else: {:ok, children}
+  end
+
+  defp canonical_terminal_children(_block), do: {:error, :malformed_terminal}
+
+  defp validate_terminal_form_params(params, children) do
+    chrome_fields = ~w(title footer live)
+    structure_fields = ~w(terminal-child-count terminal-new-child-id terminal-action)
+    known_present? = Enum.any?(chrome_fields ++ structure_fields, &Map.has_key?(params, &1))
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and String.starts_with?(key, "terminal-") and
+          key not in structure_fields
+      end)
+
+    chrome_valid? =
+      Enum.all?(~w(title footer), fn key ->
+        not Map.has_key?(params, key) or is_binary(params[key])
+      end) and
+        (not Map.has_key?(params, "live") or params["live"] in ["true", "false"])
+
+    structure_present? = Enum.any?(structure_fields, &Map.has_key?(params, &1))
+
+    structure_valid? =
+      not structure_present? or
+        (children == [] and params["terminal-child-count"] == "0" and
+           params["terminal-action"] == "add" and
+           valid_new_structure_id_wire?(params["terminal-new-child-id"]) and
+           Enum.all?(structure_fields, &Map.has_key?(params, &1)))
+
+    if known_present? and not unexpected? and chrome_valid? and structure_valid?,
+      do: :ok,
+      else: {:error, :invalid_terminal_form}
+  end
+
+  defp put_terminal_text(patch, block, params, field) do
+    case Map.fetch(params, field) do
+      {:ok, submitted} ->
+        if submitted == terminal_stringish(Map.get(block, field)),
+          do: patch,
+          else: Map.put(patch, field, submitted)
+
+      :error ->
+        patch
+    end
+  end
+
+  defp put_terminal_live(patch, block, params) do
+    case Map.fetch(params, "live") do
+      {:ok, submitted} ->
+        live = submitted == "true"
+
+        if terminal_live?(Map.get(block, "live")) == live,
+          do: patch,
+          else: Map.put(patch, "live", live)
+
+      :error ->
+        patch
+    end
+  end
+
+  defp terminal_live?(value), do: value in [true, "true", "live"]
+
+  defp terminal_stringish(value) when is_binary(value), do: value
+  defp terminal_stringish(nil), do: ""
+  defp terminal_stringish(value) when is_number(value) or is_atom(value), do: to_string(value)
+  defp terminal_stringish(_value), do: ""
 
   defp validate_action_form_params(params, state) do
     known = MapSet.new(@action_form_fields)
@@ -2987,6 +3105,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   defp visible_body_children(%{"children" => children}) when children not in [nil, false], do: []
   defp visible_body_children(%{"blocks" => blocks}) when is_list(blocks), do: blocks
   defp visible_body_children(_block), do: []
+
+  @doc false
+  # Only browser canvas batches use this provenance fence. Ordinary forms,
+  # single-block editor operations and API Patch callers retain their contracts.
+  def canvas_run_context(params, blocks) when is_map(params) do
+    ops = Map.get(params, "ops")
+
+    outdated_terminal? =
+      is_list(ops) and
+        Enum.any?(ops, fn
+          %{"op" => kind} = op ->
+            parent_write? =
+              kind in ["patch-block", "replace-block"] and
+                match?(%{"type" => "terminal"}, find_paper_block(blocks, op["id"]))
+
+            introduced_terminal? =
+              kind in ["append-block", "insert-after", "replace-block"] and
+                match?(%{"type" => "terminal"}, op["block"])
+
+            parent_write? or introduced_terminal?
+
+          _ ->
+            false
+        end)
+
+    if outdated_terminal?,
+      do: {:error, :outdated_terminal_canvas},
+      else: canvas_run_context(params)
+  end
+
+  def canvas_run_context(_params, _blocks), do: {:error, :invalid_container_context}
 
   @doc false
   def canvas_run_context(params) when is_map(params) do
