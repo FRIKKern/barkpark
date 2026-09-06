@@ -150,7 +150,12 @@ defmodule Barkpark.Tasks.TwinResolver do
   `candidates_query/1` |> `scope_fun` |> repo read |> `choose/3` — the whole rule
   in one call, for the doors whose scoping is a single function.
   """
-  @spec resolve(String.t(), (Ecto.Query.t() -> Ecto.Query.t()), (Ecto.Query.t() -> [Document.t()]), keyword()) ::
+  @spec resolve(
+          String.t(),
+          (Ecto.Query.t() -> Ecto.Query.t()),
+          (Ecto.Query.t() -> [Document.t()]),
+          keyword()
+        ) ::
           {:ok, Document.t()} | {:error, :not_found}
   def resolve(doc_id, scope_fun, read_fun, opts \\ []) do
     doc_id
