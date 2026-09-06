@@ -2233,7 +2233,11 @@ test("gr-p5-2fa: the width override is :has()-SCOPED — the shared 420px modal 
 // its own node-22 job in console-harness.yml); the five-tier seam
 // (`--tiers5`) covers the widths where a three-tier corpus is blind entirely.
 // Neither half subsumes the other: measured, a 200px floor passes the FULL
-// 13-width render leg exit 0, and this test refuses it.
+// 18-width render leg exit 0, and this test refuses it. (18 is DERIVED, not
+// transcribed: `WIDTHS` imported from __preview__/breakpoint-sweep.mjs is the
+// boundary walk over 6 breakpoints [620,720,740,768,830,899] and has 18
+// entries. This line read "13-width" for three axis moves running — re-derive
+// it by import whenever you touch it, never copy it from a brief.)
 test("cch-w16-s1: the .tier-grid floor is >= 230px — a tidy-down re-cuts the Free CTA", () => {
   const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
   // The FIRST rule whose selector list is exactly `.tier-grid` — the base
