@@ -4,6 +4,17 @@ defmodule BarkparkWeb.BulldocsLiveStepsEditingTest do
   import Barkpark.TenancyFixtures
   alias Barkpark.{Auth, Content}
 
+  setup do
+    previous_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+    on_exit(fn ->
+      if previous_canvas,
+        do: System.put_env("BARKPARK_PAPER_CANVAS", previous_canvas),
+        else: System.delete_env("BARKPARK_PAPER_CANVAS")
+    end)
+  end
+
   test "row title and scoped body save through the mounted reader and survive reload", %{
     conn: conn
   } do

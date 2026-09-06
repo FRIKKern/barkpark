@@ -47,14 +47,14 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
   @sibling_body "EDIT-LINK-SIBLING-BODY"
   @liveness_msg {BarkparkWeb.PluginScopeSession, :share_liveness_check}
 
-  # The browser half the reader layout loads ONLY for a viewer who may edit
-  # (`bulldocs.html.heex`, all `:if={assigns[:can_edit?]}`). Asserted on the
-  # LIVE page here, not on the layout function, so the gate is proved end to
-  # end for a share-link viewer.
+  # The shared loader is inert until the server-authorized Edit toggle mounts.
+  # No reader eagerly loads editor resources. Browser execution of the loader
+  # is covered by __public_layout_bootstrap.test.mjs; here the mounted share
+  # page proves which viewer receives the activation hook.
   @editor_assets [
-    ~s(href="/assets/bp-paper-editor-shell.css"),
-    ~s(src="/assets/bp-paper-editor.bundle.js"),
-    ~s(src="/assets/bp-paper-editor-hooks.js")
+    "/assets/bp-paper-editor-shell.css",
+    "/assets/bp-paper-editor.bundle.js",
+    "/assets/bp-paper-editor-hooks.js"
   ]
 
   # Every MVP editor event the reader wires, with a payload that WOULD write if
@@ -391,7 +391,7 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
       end)
     end
 
-    test "the reader loads the editor assets for an edit-link viewer", %{
+    test "the reader activates the lazy editor loader for an edit-link viewer", %{
       conn: conn,
       ws: ws,
       proj: proj,
@@ -399,10 +399,18 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
     } do
       {raw, _link} = mint_link!(ws, proj, granted, "edit")
 
-      {:ok, _view, html} = live(conn, shared_path(ws, proj, granted, raw))
+      {:ok, view, html} = live(conn, shared_path(ws, proj, granted, raw))
 
-      for tag <- @editor_assets do
-        assert html =~ tag, "an edit-link reader page must load #{tag}"
+      assert has_element?(view, "#paper-edit-toggle[phx-hook='BarkparkPaperEditToggle']")
+      assert html =~ "data-bp-paper-editor-loader"
+
+      for asset <- @editor_assets do
+        assert html =~ asset, "the authorized loader must include #{asset}"
+
+        assert html
+               |> LazyHTML.from_document()
+               |> LazyHTML.query("script[src='#{asset}'], link[href='#{asset}']")
+               |> LazyHTML.to_html() == ""
       end
     end
   end
@@ -425,9 +433,14 @@ defmodule BarkparkWeb.Live.PaperEditLinkTest do
 
       refute html =~ ~s(id="paper-edit-toggle")
       refute html =~ "studio-paper-block-editor"
+      refute has_element?(view, "[phx-hook='BarkparkPaperEditToggle']")
 
-      for tag <- @editor_assets do
-        refute html =~ tag, "a read-link reader page must not load #{tag}"
+      for asset <- @editor_assets do
+        assert html
+               |> LazyHTML.from_document()
+               |> LazyHTML.query("script[src='#{asset}'], link[href='#{asset}']")
+               |> LazyHTML.to_html() == "",
+               "a read-link reader page must not load #{asset}"
       end
     end
 

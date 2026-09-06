@@ -1,6 +1,6 @@
 defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
   @moduledoc """
-  `bp bulldocs patch` accepts six op verbs and, before this test, named NONE of
+  `bp bulldocs patch` accepts nine op verbs and, before this test, named NONE of
   them anywhere a caller could reach: `--help` printed only `{"ops":[…]}`, and
   the capabilities manifest carried no verb string. The CLI is manifest-driven,
   so the help text IS this entry — fixing the manifest fixes both surfaces.
@@ -11,7 +11,7 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
   """
   use ExUnit.Case, async: true
 
-  @verbs ~w(append-block insert-after patch-block replace-block remove-block move-block)
+  @verbs ~w(append-block insert-after patch-block replace-block remove-block move-block patch-card-body patch-table-cells patch-table-structure)
 
   defp patch_entry do
     Barkpark.Plugins.Bulldocs.cli_commands()
@@ -46,7 +46,7 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
   end
 
   test "the pinned verb list still matches the server's own dispatch" do
-    # The authority is BlockOps, not this test. If the server learns a seventh
+    # The authority is BlockOps, not this test. If the server learns another
     # verb, this reds and whoever added it updates the manifest in the same
     # change — which is the whole point of pinning against the source.
     #

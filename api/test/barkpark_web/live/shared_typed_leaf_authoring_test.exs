@@ -224,7 +224,7 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
 
     path = scoped_studio("/d/#{@dataset}/studio/#{type}/#{doc.doc_id}")
 
-    {:ok, view, html} = live(build_conn(), path)
+    {:ok, view, html} = live(scoped_conn(), path)
     assert html =~ ~s(name="doc[quantity]")
 
     beta_html = view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
@@ -242,7 +242,7 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     saved_number = Enum.find(saved.content["blocks"], &(&1["fieldName"] == "quantity"))
     assert saved_number["value"] == 8.5
 
-    {:ok, remounted, classic_html} = live(build_conn(), path)
+    {:ok, remounted, classic_html} = live(scoped_conn(), path)
     assert classic_html =~ ~s(name="doc[quantity]")
     assert classic_html =~ ~s(value="8.5")
 
