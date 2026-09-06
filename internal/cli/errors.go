@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/apierr"
@@ -392,7 +394,77 @@ func exitForCode(code string) int {
 	return e
 }
 
-// classifyError decodes an error response body into an apiError with the mapped
+// requestIDHeader is the response header Plug.RequestId stamps on EVERY reply
+// the API sends, error or not. It is the id an operator quotes to correlate a
+// failure against the server's logs.
+const requestIDHeader = "X-Request-Id"
+
+// requestIDFromHeader reads the correlation id off a response header set.
+// http.Header canonicalises keys, so the wire casing (`x-request-id`) does not
+// matter here.
+func requestIDFromHeader(h http.Header) string {
+	if h == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.Get(requestIDHeader))
+}
+
+// lastResponse holds the header set of the most recent HTTP response this
+// process received. It exists because the request id lives in TWO places and
+// only one of them is reliable: the API stamps `x-request-id` on every reply at
+// the endpoint, before the router, while the BODY field `request_id` is written
+// per-emitter — and dozens of hand-built error envelopes never write it. The
+// JS SDK already resolves this the right way round (body field first, response
+// header second) and therefore reports an id where bp reported none, on the
+// same response.
+//
+// Recorded at the ONE send every dispatch path funnels through rather than
+// threaded through ~40 classifyError call sites, none of which asked for a
+// header and most of which sit behind three-value helpers (doRequest,
+// doRequestStream) that discard it by design. Every response overwrites it,
+// including one with no such header (which clears it), so the value can only
+// ever describe the latest reply — never a stale one from an earlier command.
+var lastResponse struct {
+	mu     sync.Mutex
+	header http.Header
+}
+
+// noteResponseHeader records a response's headers for the request-id fallback.
+// Called on every send, with whatever came back — including nil.
+func noteResponseHeader(h http.Header) {
+	lastResponse.mu.Lock()
+	lastResponse.header = h
+	lastResponse.mu.Unlock()
+}
+
+// lastResponseHeader returns the headers of the most recent response, or nil
+// when this process has not made a request yet.
+func lastResponseHeader() http.Header {
+	lastResponse.mu.Lock()
+	defer lastResponse.mu.Unlock()
+	return lastResponse.header
+}
+
+// classifyError decodes an error response body and, when that body carries no
+// request_id, falls back to the `x-request-id` header of the response it came
+// from. Body first: an emitter that wrote the field meant that exact id, and a
+// proxy could in principle rewrite the header.
+func classifyError(status int, body []byte) apiError {
+	return classifyErrorWithHeader(status, body, lastResponseHeader())
+}
+
+// classifyErrorWithHeader is classifyError with the response headers passed
+// explicitly, for callers that hold them (and for tests that must not depend on
+// process-wide state).
+func classifyErrorWithHeader(status int, body []byte, hdr http.Header) apiError {
+	ae := classifyErrorBody(status, body)
+	if ae.requestID == "" {
+		ae.requestID = requestIDFromHeader(hdr)
+	}
+	return ae
+}
+
+// classifyErrorBody decodes an error response body into an apiError with the mapped
 // exit code. It handles, in order:
 //
 //   - the canonical envelope {"error":{"code":…,"message":…,"request_id":…}}
@@ -404,7 +476,10 @@ func exitForCode(code string) int {
 //
 // (See docs/cli/error-exit-table.md "Codes that don't cleanly fit".) Anything it
 // cannot recognise becomes exitGeneric with the raw body as the message.
-func classifyError(status int, body []byte) apiError {
+//
+// This is the body-only decode; classifyError layers the header fallback on
+// top of it.
+func classifyErrorBody(status int, body []byte) apiError {
 	// First: the canonical {"error": <object>} envelope, read through
 	// internal/apierr — the ONE parser every surface shares. The struct that
 	// used to live here was copied into seven other decoders that then drifted
