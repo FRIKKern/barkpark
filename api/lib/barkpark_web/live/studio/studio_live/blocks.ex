@@ -124,6 +124,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  def build_block_patch(%{"type" => type} = block, params)
+      when type in ["form", "questionnaire"] do
+    if form_block_params?(params) do
+      case validate_form_block(block, params) do
+        {:ok, rows, submitted, question_action, option_action} ->
+          build_form_patch(block, rows, submitted, question_action, option_action, params)
+
+        {:error, _reason} ->
+          %{}
+      end
+    else
+      %{}
+    end
+  end
+
   # ── article-chrome blocks (barkpark-54kh) ──
   # eyebrow: single text input → flat "text" string (render reads `text`).
   def build_block_patch(%{"type" => "eyebrow"}, params) do
@@ -293,6 +308,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     case validate_tabs_form(block, params) do
       {:ok, rows, submitted, action} ->
         {:ok, build_tabs_patch(rows, submitted, action, params)}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  def validate_block_patch(%{"type" => type} = block, params)
+      when type in ["form", "questionnaire"] do
+    case validate_form_block(block, params) do
+      {:ok, rows, submitted, question_action, option_action} ->
+        {:ok, build_form_patch(block, rows, submitted, question_action, option_action, params)}
 
       {:error, _reason} = error ->
         error
@@ -1236,6 +1262,487 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp malformed_tabs, do: {:error, {:malformed_collection, "tabs"}}
 
+  @form_kinds ~w(grill questionnaire)
+  @form_question_types ~w(text yesno single multi scale)
+
+  defp validate_form_block(block, params) do
+    if form_block_params?(params) do
+      with {:ok, kind} <- form_kind(block),
+           :ok <- validate_form_choice(params["kind"], kind, @form_kinds),
+           {:ok, rows} <- stored_form_questions(block),
+           true <- Enum.all?(rows, &valid_form_question?/1),
+           true <- unique_form_question_ids?(rows),
+           true <- exact_submitted_count?(params["question-count"], length(rows)),
+           :ok <- validate_form_param_names(params, rows),
+           {:ok, submitted} <- submitted_form_questions(params, rows),
+           true <- valid_form_type_activations?(rows, submitted),
+           true <- Enum.map(submitted, & &1.original_id) == Enum.map(rows, &Map.fetch!(&1, "id")),
+           true <- unique_nonblank_submitted_question_ids?(submitted),
+           {:ok, question_action} <-
+             validate_question_action(params["question-action"], rows, submitted, params),
+           {:ok, option_action} <- validate_option_action(params["option-action"], rows),
+           true <- is_nil(question_action) or is_nil(option_action) do
+        {:ok, rows, submitted, question_action, option_action}
+      else
+        {:error, _reason} = error -> error
+        _ -> malformed_questions()
+      end
+    else
+      malformed_questions()
+    end
+  end
+
+  defp build_form_patch(block, rows, submitted, question_action, option_action, params) do
+    patch = put_form_kind_patch(%{}, block, params)
+
+    updated =
+      Enum.zip(rows, submitted)
+      |> Enum.map(fn {row, fields} -> update_form_question(row, fields, params) end)
+      |> apply_form_option_action(rows, option_action)
+      |> apply_form_question_action(rows, question_action, params)
+
+    if updated == rows, do: patch, else: Map.put(patch, "questions", updated)
+  end
+
+  defp form_block_params?(params) do
+    Map.has_key?(params, "kind") or
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and
+          (String.starts_with?(key, "question-") or key == "option-action")
+      end)
+  end
+
+  defp form_kind(block) do
+    default = if block["type"] == "questionnaire", do: "questionnaire", else: "grill"
+
+    case Map.fetch(block, "kind") do
+      :error -> {:ok, default}
+      {:ok, nil} -> {:ok, "grill"}
+      {:ok, kind} when is_binary(kind) -> {:ok, kind}
+      _ -> malformed_questions()
+    end
+  end
+
+  defp stored_form_questions(block) do
+    case Map.fetch(block, "questions") do
+      :error -> {:ok, []}
+      {:ok, nil} -> {:ok, []}
+      {:ok, rows} when is_list(rows) -> {:ok, rows}
+      _ -> malformed_questions()
+    end
+  end
+
+  defp valid_form_question?(%{"id" => id} = row) when is_binary(id) do
+    String.trim(id) != "" and
+      Enum.all?(~w(prompt type rationale recommendation), fn field ->
+        value = Map.get(row, field)
+        is_nil(value) or is_binary(value)
+      end) and valid_active_form_question_fields?(row)
+  end
+
+  defp valid_form_question?(_row), do: false
+
+  defp valid_active_form_question_fields?(row) do
+    case effective_question_type(row) do
+      type when type in ["single", "multi"] ->
+        case Map.fetch(row, "options") do
+          :error -> true
+          {:ok, nil} -> true
+          {:ok, options} when is_list(options) -> Enum.all?(options, &is_binary/1)
+          _ -> false
+        end
+
+      "scale" ->
+        case Map.fetch(row, "scale") do
+          :error -> true
+          {:ok, scale} -> valid_form_scale?(scale)
+        end
+
+      _other ->
+        true
+    end
+  end
+
+  defp valid_form_scale?(scale) when is_map(scale) do
+    Enum.all?(~w(min max), fn field ->
+      case Map.fetch(scale, field) do
+        :error -> true
+        {:ok, nil} -> true
+        {:ok, value} -> match?({:ok, _}, parse_form_integer(value))
+      end
+    end)
+  end
+
+  defp valid_form_scale?(_scale), do: false
+
+  defp valid_form_type_activations?(rows, submitted) do
+    rows
+    |> Enum.zip(submitted)
+    |> Enum.all?(fn {row, fields} ->
+      row
+      |> Map.put("type", fields.type)
+      |> valid_active_form_question_fields?()
+    end)
+  end
+
+  defp effective_question_type(row) do
+    case Map.get(row, "type") do
+      type when is_binary(type) -> type
+      _ -> "text"
+    end
+  end
+
+  defp unique_form_question_ids?(rows) do
+    ids = Enum.map(rows, &Map.fetch!(&1, "id"))
+    length(ids) == MapSet.size(MapSet.new(ids))
+  end
+
+  defp validate_form_param_names(params, rows) do
+    allowed =
+      MapSet.new(~w(kind question-count question-action question-new-id option-action))
+      |> then(fn allowed ->
+        Enum.reduce(Enum.with_index(rows), allowed, fn {row, index}, acc ->
+          acc =
+            Enum.reduce(~w(original-id id prompt type rationale recommendation), acc, fn field,
+                                                                                         fields ->
+              MapSet.put(fields, "question-#{index}-#{field}")
+            end)
+
+          case effective_question_type(row) do
+            type when type in ["single", "multi"] ->
+              options = effective_form_options(row)
+
+              Enum.reduce(
+                Enum.with_index(options),
+                MapSet.put(acc, "question-#{index}-option-count"),
+                fn
+                  {_option, option_index}, fields ->
+                    MapSet.put(fields, "question-#{index}-option-#{option_index}")
+                end
+              )
+
+            "scale" ->
+              acc
+              |> MapSet.put("question-#{index}-scale-min")
+              |> MapSet.put("question-#{index}-scale-max")
+
+            _other ->
+              acc
+          end
+        end)
+      end)
+
+    unexpected? =
+      Enum.any?(Map.keys(params), fn key ->
+        is_binary(key) and
+          (String.starts_with?(key, "question-") or key == "kind" or key == "option-action") and
+          not MapSet.member?(allowed, key)
+      end)
+
+    if unexpected?, do: malformed_questions(), else: :ok
+  end
+
+  defp submitted_form_questions(params, rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {row, index}, {:ok, acc} ->
+      prefix = "question-#{index}-"
+      type = effective_question_type(row)
+
+      common =
+        for field <- ~w(original-id id prompt type rationale recommendation),
+            into: %{},
+            do:
+              {String.replace(field, "-", "_", global: true) |> String.to_atom(),
+               params[prefix <> field]}
+
+      with true <- Enum.all?(Map.values(common), &is_binary/1),
+           :ok <- validate_form_choice(common.type, type, @form_question_types),
+           {:ok, branch} <- submitted_form_branch(params, row, index, type) do
+        {:cont, {:ok, [Map.merge(common, branch) | acc]}}
+      else
+        _ -> {:halt, malformed_questions()}
+      end
+    end)
+    |> case do
+      {:ok, submitted} -> {:ok, Enum.reverse(submitted)}
+      error -> error
+    end
+  end
+
+  defp submitted_form_branch(params, row, index, type) when type in ["single", "multi"] do
+    options = effective_form_options(row)
+
+    if exact_submitted_count?(params["question-#{index}-option-count"], length(options)) do
+      options
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, []}, fn {_option, option_index}, {:ok, acc} ->
+        case Map.fetch(params, "question-#{index}-option-#{option_index}") do
+          {:ok, value} when is_binary(value) -> {:cont, {:ok, [value | acc]}}
+          _ -> {:halt, malformed_questions()}
+        end
+      end)
+      |> case do
+        {:ok, values} -> {:ok, %{options: Enum.reverse(values)}}
+        error -> error
+      end
+    else
+      malformed_questions()
+    end
+  end
+
+  defp submitted_form_branch(params, row, index, "scale") do
+    min = params["question-#{index}-scale-min"]
+    max = params["question-#{index}-scale-max"]
+
+    with true <- is_binary(min) and is_binary(max),
+         {:ok, min_value} <- parse_form_integer(min),
+         {:ok, max_value} <- parse_form_integer(max) do
+      {:ok,
+       %{
+         scale_min: min,
+         scale_max: max,
+         scale_min_value: min_value,
+         scale_max_value: max_value,
+         scale: effective_form_scale(row)
+       }}
+    else
+      _ -> malformed_questions()
+    end
+  end
+
+  defp submitted_form_branch(_params, _row, _index, _type), do: {:ok, %{}}
+
+  defp validate_form_choice(submitted, effective, allowed) when is_binary(submitted) do
+    if submitted == effective or submitted in allowed, do: :ok, else: malformed_questions()
+  end
+
+  defp validate_form_choice(_submitted, _effective, _allowed), do: malformed_questions()
+
+  defp unique_nonblank_submitted_question_ids?(submitted) do
+    ids = Enum.map(submitted, & &1.id)
+    Enum.all?(ids, &(String.trim(&1) != "")) and length(ids) == MapSet.size(MapSet.new(ids))
+  end
+
+  defp validate_question_action(action, _rows, _submitted, _params) when action in [nil, ""],
+    do: {:ok, nil}
+
+  defp validate_question_action("add", _rows, submitted, params) do
+    id = params["question-new-id"]
+
+    if is_binary(id) and String.trim(id) != "" and Enum.all?(submitted, &(&1.id != id)),
+      do: {:ok, :add},
+      else: malformed_questions()
+  end
+
+  defp validate_question_action(action, rows, _submitted, _params) when is_binary(action) do
+    Enum.find_value(~w(remove up down), malformed_questions(), fn kind ->
+      prefix = kind <> ":"
+
+      if String.starts_with?(action, prefix) do
+        id = String.replace_prefix(action, prefix, "")
+
+        if Enum.any?(rows, &(Map.get(&1, "id") == id)),
+          do: {:ok, {String.to_atom(kind), id}},
+          else: malformed_questions()
+      end
+    end)
+  end
+
+  defp validate_question_action(_action, _rows, _submitted, _params), do: malformed_questions()
+
+  defp validate_option_action(action, _rows) when action in [nil, ""], do: {:ok, nil}
+
+  defp validate_option_action("add:" <> id, rows) do
+    case form_choice_row(rows, id) do
+      nil -> malformed_questions()
+      {_row, index} -> {:ok, {:add, index}}
+    end
+  end
+
+  defp validate_option_action(action, rows) when is_binary(action) do
+    Enum.find_value(~w(remove up down), malformed_questions(), fn kind ->
+      prefix = kind <> ":"
+
+      if String.starts_with?(action, prefix) do
+        rest = String.replace_prefix(action, prefix, "")
+
+        rows
+        |> Enum.with_index()
+        |> Enum.sort_by(fn {row, _index} -> -String.length(row["id"]) end)
+        |> Enum.find_value(malformed_questions(), fn {row, row_index} ->
+          id_prefix = row["id"] <> ":"
+
+          if effective_question_type(row) in ["single", "multi"] and
+               String.starts_with?(rest, id_prefix) do
+            with {:ok, option_index} <-
+                   parse_nonnegative_index(String.replace_prefix(rest, id_prefix, "")),
+                 true <- option_index < length(effective_form_options(row)) do
+              {:ok, {String.to_atom(kind), row_index, option_index}}
+            else
+              _ -> malformed_questions()
+            end
+          end
+        end)
+      end
+    end)
+  end
+
+  defp validate_option_action(_action, _rows), do: malformed_questions()
+
+  defp form_choice_row(rows, id) do
+    rows
+    |> Enum.with_index()
+    |> Enum.find(fn {row, _index} ->
+      row["id"] == id and effective_question_type(row) in ["single", "multi"]
+    end)
+  end
+
+  defp parse_nonnegative_index(value) do
+    case Integer.parse(value) do
+      {index, ""} when index >= 0 -> {:ok, index}
+      _ -> :error
+    end
+  end
+
+  defp update_form_question(row, submitted, params) do
+    row
+    |> put_form_param_preserving_shape(%{"id" => submitted.id}, "id", "id")
+    |> put_form_param_preserving_shape(%{"prompt" => submitted.prompt}, "prompt", "prompt")
+    |> put_effective_question_type(row, submitted.type)
+    |> put_form_param_preserving_shape(
+      %{"rationale" => submitted.rationale},
+      "rationale",
+      "rationale"
+    )
+    |> put_form_param_preserving_shape(
+      %{"recommendation" => submitted.recommendation},
+      "recommendation",
+      "recommendation"
+    )
+    |> put_form_question_branch(row, submitted, effective_question_type(row), params)
+  end
+
+  defp put_effective_question_type(updated, original, submitted) do
+    if submitted == effective_question_type(original),
+      do: updated,
+      else: Map.put(updated, "type", submitted)
+  end
+
+  defp put_form_question_branch(updated, original, submitted, current_type, _params)
+       when current_type in ["single", "multi"] do
+    if submitted.options == effective_form_options(original),
+      do: updated,
+      else: Map.put(updated, "options", submitted.options)
+  end
+
+  defp put_form_question_branch(updated, original, submitted, "scale", _params) do
+    scale = submitted.scale
+
+    scale =
+      if unchanged_form_integer_wire?(submitted.scale_min, scale, "min", 1),
+        do: scale,
+        else: Map.put(scale, "min", submitted.scale_min_value)
+
+    scale =
+      if unchanged_form_integer_wire?(submitted.scale_max, scale, "max", 5),
+        do: scale,
+        else: Map.put(scale, "max", submitted.scale_max_value)
+
+    if scale == effective_form_scale(original),
+      do: updated,
+      else: Map.put(updated, "scale", scale)
+  end
+
+  defp put_form_question_branch(updated, _original, _submitted, _current_type, _params),
+    do: updated
+
+  defp effective_form_options(row) do
+    case Map.get(row, "options") do
+      options when is_list(options) -> options
+      _ -> []
+    end
+  end
+
+  defp effective_form_scale(row) do
+    case Map.get(row, "scale") do
+      scale when is_map(scale) -> scale
+      _ -> %{}
+    end
+  end
+
+  defp parse_form_integer(value) when is_integer(value), do: {:ok, value}
+
+  defp parse_form_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {integer, ""} -> {:ok, integer}
+      _ -> :error
+    end
+  end
+
+  defp parse_form_integer(_value), do: :error
+
+  defp form_integer_wire(value, default) do
+    case parse_form_integer(value) do
+      {:ok, integer} -> Integer.to_string(integer)
+      :error -> Integer.to_string(default)
+    end
+  end
+
+  defp unchanged_form_integer_wire?(submitted, scale, field, default) do
+    case Map.fetch(scale, field) do
+      {:ok, value} when is_binary(value) -> submitted == value
+      {:ok, value} -> submitted == form_integer_wire(value, default)
+      :error -> submitted == Integer.to_string(default)
+    end
+  end
+
+  defp apply_form_option_action(updated, _original, nil), do: updated
+
+  defp apply_form_option_action(updated, _original, {:add, row_index}) do
+    List.update_at(updated, row_index, fn row ->
+      Map.put(row, "options", effective_form_options(row) ++ [""])
+    end)
+  end
+
+  defp apply_form_option_action(updated, _original, {kind, row_index, option_index}) do
+    List.update_at(updated, row_index, fn row ->
+      options = effective_form_options(row)
+
+      options =
+        case kind do
+          :remove -> List.delete_at(options, option_index)
+          :up -> move_at_index(options, option_index, -1)
+          :down -> move_at_index(options, option_index, 1)
+        end
+
+      Map.put(row, "options", options)
+    end)
+  end
+
+  defp apply_form_question_action(updated, _original, nil, _params), do: updated
+
+  defp apply_form_question_action(updated, _original, :add, params) do
+    updated ++ [%{"id" => params["question-new-id"], "prompt" => "", "type" => "text"}]
+  end
+
+  defp apply_form_question_action(updated, original, {kind, id}, _params) do
+    index = Enum.find_index(original, &(Map.get(&1, "id") == id))
+
+    case kind do
+      :remove -> List.delete_at(updated, index)
+      :up -> move_at_index(updated, index, -1)
+      :down -> move_at_index(updated, index, 1)
+    end
+  end
+
+  defp put_form_kind_patch(patch, block, params) do
+    {:ok, effective} = form_kind(block)
+    if params["kind"] == effective, do: patch, else: Map.put(patch, "kind", params["kind"])
+  end
+
+  defp malformed_questions, do: {:error, {:malformed_collection, "questions"}}
+
   defp move_at_index(items, index, offset) when is_integer(index) do
     target = index + offset
 
@@ -2080,6 +2587,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
           "label" => "Tab 1",
           "blocks" => [default_block("paragraph", row_id <> "-0")]
         }
+      ]
+    }
+  end
+
+  def default_block(type, id) when type in ["form", "questionnaire"] do
+    %{
+      "id" => id,
+      "type" => type,
+      "kind" => if(type == "questionnaire", do: "questionnaire", else: "grill"),
+      "questions" => [
+        %{"id" => id <> "-question-0", "prompt" => "Question 1", "type" => "text"}
       ]
     }
   end

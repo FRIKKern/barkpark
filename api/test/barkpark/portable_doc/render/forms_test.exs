@@ -107,6 +107,38 @@ defmodule Barkpark.PortableDoc.Render.FormsTest do
       refute html =~ ~s(value="4")
     end
 
+    test "malformed authored form values render safely in article and email modes" do
+      for style <- [:article, :email],
+          scale <- [nil, "legacy", [], 42, %{"min" => "bad", "max" => %{}}] do
+        block = %{
+          "kind" => %{"legacy" => true},
+          "questions" => [
+            %{
+              "id" => %{"legacy" => true},
+              "prompt" => %{"legacy" => true},
+              "type" => "scale",
+              "rationale" => ["legacy"],
+              "recommendation" => %{"legacy" => true},
+              "options" => %{"legacy" => true},
+              "scale" => scale
+            },
+            %{
+              "id" => "choice",
+              "prompt" => "Choice",
+              "type" => "single",
+              "options" => %{"legacy" => true}
+            }
+          ]
+        }
+
+        html = Forms.form_html(block, style)
+        assert html =~ ~s(class="bp-form bp-form-grill")
+        assert html =~ ~s(type="radio" name="" value="1")
+        assert html =~ ~s(type="radio" name="" value="5")
+        assert html =~ ~s(type="radio" name="choice" value="")
+      end
+    end
+
     test "caps scale ladder span so a huge author-supplied max cannot exhaust memory" do
       # Guards the public /papers/:slug render: without a cap, scale.max in the
       # millions materializes a giant range + that many radio inputs on every
