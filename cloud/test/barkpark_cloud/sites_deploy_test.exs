@@ -1139,15 +1139,34 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 
+      # THE BOX'S VERBATIM BODY (dr-w3-s3-followup-capacity-code-handshake), not
+      # an invented one: `BarkparkWeb.SiteDeployController.capacity_message/3`
+      # renders "the box is at its build capacity (N of N build slots in use) — "
+      # plus the holder tail, N = DeployRunner.build_slot_capacity() (1 today).
+      # The shape assertion below is what makes this fixture unable to drift
+      # back to the invented "4 of 4 build slots are in use" that sat here and
+      # in deploy_ledger_test.exs while the real emitter said something else.
+      capacity_body =
+        "the box is at its build capacity (1 of 1 build slots in use) — " <>
+          "site 'other-site' is building; retry when it finishes"
+
+      assert capacity_body =~ ~r/^the box is at its build capacity \(\d+ of \d+ build slots in use\) — /
+
       FakeBoxRelay.program(
         start:
-          {:ok, 409,
-           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+          {:ok, 409, %{"error" => %{"code" => "box_at_capacity", "message" => capacity_body}}}
       )
 
       {:ok, capacity} = Deploy.enqueue(site, bp, true, "content-auto")
       assert {:ok, :deferred} = Deploy.run(capacity.id)
-      capacity_reason = Repo.get(Deployment, capacity.id).failure_reason
+      capacity_row = Repo.get(Deployment, capacity.id)
+      capacity_reason = capacity_row.failure_reason
+
+      # The bound itself, asserted directly and not only through the sentence:
+      # the verbatim body classifies BOX_AT_CAPACITY_DEFERRED and takes the
+      # capacity leash of 12, never the busy leash of 6.
+      assert capacity_row.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+      assert capacity_row.deferral_bound == 12
 
       FakeBoxRelay.program(
         start:

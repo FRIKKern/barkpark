@@ -125,7 +125,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @d_busy_bare @r409_bare <> @requeued
   # The concurrent-build CAP's refusal: a box that is not busy with THIS site at
   # all, refusing a slot so it stops swapping itself to death.
-  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                 @requeued
   # A deferral shape the ledger has never seen — not a box refusal at all.
   @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
@@ -153,7 +153,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
                     @rid <> @requeued
   # …and the stamped shape that already worked, because the message pushed the
   # stamp past the ` — ` boundary. Pinned so the strip does not regress it.
-  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                             @rid <> @requeued
 
   # A CODELESS envelope — `%{"error" => %{"message" => "…"}}` with no `code` key
@@ -188,7 +188,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @a_capacity "the instance refused the deploy (HTTP 409): box_at_capacity" <> @abandon_cap
   @a_capacity_stamped "the instance refused the deploy (HTTP 409): box_at_capacity" <>
                         @rid <> @abandon_cap
-  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — site 'other-site' is building; retry when it finishes" <>
                     @abandon_cap
   # 2026-08-05 22:57:53Z — the one 6-cap abandonment, the busy slug.
   @a_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
