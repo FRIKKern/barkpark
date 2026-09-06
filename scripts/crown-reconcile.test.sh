@@ -70,6 +70,11 @@
 #   (h) a docs-only run delivered nothing and MUST NOT be counted    → exit 0
 #       (this is the false-positive that would drown the real reds)
 #   (i) a CARRIED row naming a sha with no run of its own is correct → exit 0
+#   (x) AN UNREADABLE ALIBI IS NOT AN ABSENT ONE: the run a row names
+#       could not have its job list read, so the row is DEFERRED and
+#       NAMED rather than accused — with both non-vacuity halves held
+#       down (the same run READ and delivering nothing is still WRONG,
+#       and READ and delivering is still reconciled)      → 1, 0, then 2
 #   (j) configuration faults are 3, and never 1 or 2
 #   (j2) UNSET and SET-BUT-EMPTY are different statements about the PAT:
 #        empty is rc 3 with its own sentence, missing still falls through
@@ -554,7 +559,13 @@ printf '%s' '{"workflow_runs":[
   {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z"}]}' \
   > "$RUNS_LIVE"
 fixture_ok "$RUNS_LIVE"
-JOBS_LIVE="$(jobs_json jobs-live "32723174205:success")"
+# EVERY run on this page states its legs, including the two that were in flight.
+# OMITTING a run from the jobs fixture used to be how "this run delivered
+# nothing" was expressed — but an omitted entry is exactly what a jobs-API call
+# that DID NOT ANSWER looks like to the script, and those are opposite claims
+# (task-a8bb36d8622be137). The terminal arm below flips both runs to
+# completed/cancelled and needs them to be READ and non-delivering, not silent.
+JOBS_LIVE="$(jobs_json jobs-live "32723174205:success" "32726853417:cancelled" "32726835915:cancelled")"
 # The rows the two in-flight deploys wrote. BOTH name $LIVE_SHA — the sha the
 # BOX WAS SERVING — which is the carried=false shape #11203 established, so the
 # head-sha fallback could never have alibied them either.
@@ -625,13 +636,17 @@ CROWN_W1="$(crown_json crown-w1 \
   "$(row "$SHA_A" instance false "$IN1" 1)" \
   "$(row "$SHA_B" instance false "$IN2" 2)" \
   "$(row "$SHA_C" cp false "$TEAR_T1" 3)")"
+# Run 3's legs are STATED as cancelled rather than left out of the fixture: an
+# absent entry is a jobs read that did not answer, and this arm is about a run
+# that WAS read and delivered nothing (task-a8bb36d8622be137).
+JOBS_W1="$(jobs_json jobs-w1 "1:success" "2:success" "3:cancelled")"
 run_cr 1 "run 3 is TERMINAL and cancelled — its row has a real orphan's shape" \
-  --runs-fixture "$RUNS_W1_DEAD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
+  --runs-fixture "$RUNS_W1_DEAD" --jobs-fixture "$JOBS_W1" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
 saw "WRONG: 1 of 4" "a row whose run finished WITHOUT delivering is still accused"
 not_saw "WRITTEN-IN-FLIGHT: " "a terminal run is never excused as in-flight"
 
 run_cr 0 "the SAME row, and run 3 was still in_progress when the page was sampled" \
-  --runs-fixture "$RUNS_W1_LIVE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
+  --runs-fixture "$RUNS_W1_LIVE" --jobs-fixture "$JOBS_W1" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
 saw "WRITTEN-IN-FLIGHT: 1 of 4" "the tear is EXCLUDED and printed with its own count, not graced into silence"
 saw "no clock was consulted" "the run-keyed arm says out loud that it read the page, not a timestamp"
 not_saw "WRONG:" "the reconciler stops accusing its own concurrent writer"
@@ -1249,6 +1264,69 @@ run_cr 1 "run 2 delivered $SHA_B through its instance leg and the crown has no r
   --runs-fixture "$RUNS_PARTIAL" --jobs-fixture "$JOBS_PARTIAL" --crown-fixture "$CROWN_PARTIAL_NOROW" --health-fixture "$HEALTH_BASE"
 saw "BEHIND: 1 of 2 delivering run(s)" "the promoted run is in the BEHIND denominator, not just in the alibi set"
 saw "$SHA_B" "it names the sha the partially-failed run delivered and nothing recorded"
+
+section "(x) AN ALIBI THAT COULD NOT BE READ IS NOT AN ALIBI THAT IS ABSENT"
+# THE LIVE RED, AGAIN, AND IN THE OPPOSITE DIRECTION FROM (v). crown-reconcile
+# was red on 6 of its last 24 scheduled main runs with `wrong=1/100` — one honest
+# row each time. Run 34012723514 (2026-09-06T04:56Z) accused row 9a5145965f… of
+# being written by run 33985744753, "which is not a delivering run in the
+# window". That run is deploy.yml on main, instance=success control-plane=skipped,
+# created 2026-09-05T18:59:45Z — inside the window and inside the page (ids
+# 33955489300..34012723496). It DELIVERS by this script's own rule, and the same
+# run's POPULATION line printed `0 unreadable`, so its FIRST jobs read (the
+# examined loop) succeeded. The alibi set was built by a SECOND read of the very
+# same run, and `if run_delivers "$id"` folded that read's failure into "does not
+# deliver". Two changes hold this down: the second read is not made at all, and a
+# row whose deliverer could not be read is DEFERRED (rc 2) instead of accused.
+#
+# Three arms, and the two non-vacuity ones come first so the deferral can never
+# be mistaken for a tolerance that swallows the whole axis.
+
+# (x-a) THE NON-VACUITY HALF, "does not deliver": run 2 is READ, and both its legs
+# failed. Nothing delivered, so the row naming it is still a ghost.
+JOBS_X_BOTH_FAILED="$(jobs_legs jobs-x-both-failed "1:success:success" "2:failure:failure")"
+run_cr 1 "run 2 was READ and delivered nothing — its row is still WRONG" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_X_BOTH_FAILED" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "WRONG:" "a run that was read and delivered nothing still produces a WRONG"
+saw "$SHA_B" "the accused row is named"
+not_saw "UNREADABLE-ALIBI:" "a run that WAS read is never excused as unreadable"
+
+# (x-b) THE NON-VACUITY HALF, "delivers": run 2 is READ and delivered. Reconciled.
+run_cr 0 "run 2 was READ and delivered — its row stays reconciled" $(base_args)
+not_saw "WRONG:" "a row whose run delivers is not a ghost"
+not_saw "UNREADABLE-ALIBI:" "nothing was unreadable, so nothing is deferred"
+
+# (x-c) THE FIX. The SAME runs page and the SAME crown — one field moves: run 2's
+# entry is absent from the jobs fixture, which is what a jobs-API call that did
+# not answer looks like to this script. The row must be DEFERRED and NAMED, never
+# reported WRONG, and the run exits 2 (SILENCE), not 1.
+JOBS_X_UNREADABLE="$(jobs_json jobs-x-unreadable "1:success")"
+run_cr 2 "run 2's job list could not be read — its row is deferred, not accused" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_X_UNREADABLE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+not_saw "WRONG:" "a row whose deliverer could not be read is NEVER reported WRONG"
+saw "UNREADABLE-ALIBI:" "the deferred row gets its own printed class"
+saw "(run 2)" "the deferred row names the run whose job list could not be read"
+saw "ALIBI SET INCOMPLETE:" "the alibi set states that it is incomplete"
+saw "run 2  (head $SHA_B)" "the unreadable alibi run is named by id and head sha"
+
+# (x-d) THE DEFERRAL IS NOT A BLANKET. One window, both shapes at once: run 2's
+# jobs read fails while run 3 is read and delivers nothing. The row naming run 3
+# is still WRONG (exit 1 — an accusation outranks a silence), the row naming
+# run 2 is NOT in the accusation, and the deferred row is SUBTRACTED from the
+# WRONG denominator rather than counted in it.
+RUNS_X3="$(runs_add runs-x3 "$RUNS_BASE" 3 "$SHA_C" completed success "$IN2")"
+JOBS_X_MIX="$(jobs_legs jobs-x-mix "1:success:success" "3:failure:failure")"
+CROWN_X_MIX="$(crown_json crown-x-mix \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" instance false "$IN2" 3)")"
+run_cr 1 "one unreadable alibi and one real ghost in the same window" \
+  --runs-fixture "$RUNS_X3" --jobs-fixture "$JOBS_X_MIX" --crown-fixture "$CROWN_X_MIX" --health-fixture "$HEALTH_BASE"
+saw "$SHA_C — recorded as delivered by run 3" "the row whose run WAS read and delivered nothing is accused"
+not_saw "$SHA_B — recorded as delivered by run 2" "the row whose run could not be read is NOT accused"
+saw "unreadable-alibi=1" "the verdict line carries the deferred count"
+saw "wrong=1/3" "the deferred row is subtracted from the WRONG denominator, not counted in it"
 
 section "(m) PREDATES-WRITER: a run older than the recorder is not BEHIND"
 if [ -n "$BIRTH" ]; then
