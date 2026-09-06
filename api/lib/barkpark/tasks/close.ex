@@ -558,13 +558,49 @@ defmodule Barkpark.Tasks.Close do
                          ),
                          caller_token_id
                        ) do
+                  # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
+                  #
+                  # `apply_close_update/9` stamps `closed_by` into the CLAIM, so
+                  # a row that was never claimed took its `_ ->` arm and the
+                  # whole close — document and event alike — named nobody.
+                  # Measured on the guerrilla ledger 2026-09-06: 139 of 6,617
+                  # terminal rows carry no claim map at all (84 done, 53
+                  # cancelled, 2 blocked), three of them closed inside the
+                  # trailing 14 days. The count is an absence, not a blind
+                  # probe: 6,332 rows DO carry `claim.closed_by`.
+                  #
+                  # EVERY ONE OF THOSE 139 IS LEGITIMATELY CLAIMLESS — container
+                  # and root rows, and killed backlog rows nobody ever picked
+                  # up, which is why `cancelled` and `blocked` are exempt from
+                  # the criteria gate BY NAME. (A LEAD sealing somebody else's
+                  # row is NOT among them: that row HAS a claim, so it takes the
+                  # claim arm and `holder_override` records the foreign seal.)
+                  # "Never claimed" and "closed by nobody" are DIFFERENT FACTS
+                  # and the ledger has to keep telling them apart, so the
+                  # identity is recorded HERE, on the event an audit reads,
+                  # beside the `caller_token_id` stamp already on it — and the
+                  # DOCUMENT goes on saying, truthfully, that nobody ever held
+                  # this row.
+                  #
+                  # SYNTHESISING A CLAIM WOULD HAVE BEEN THE DESTRUCTIVE FIX. It
+                  # erases the never-held fact a container row depends on, and
+                  # it silently converts `idempotent_replay?/3` — which refuses
+                  # to answer a replay on a claimless row precisely so an
+                  # unidentifiable second caller is not handed a success
+                  # receipt — into exactly that receipt.
+                  #
+                  # Both actors stay distinguishable and stay labelled for what
+                  # they are: `closed_by` is the name the caller ASSERTED (a
+                  # client-supplied body param — see the moduledoc), while
+                  # `caller_token_id` is the bearer the server AUTHENTICATED.
+                  # Metadata only; nothing here authorizes anything.
                   ev =
                     insert_mutation_event!(
                       updated,
                       @event_task_closed,
                       observed_rev,
                       "api",
-                      caller_stamp(caller_token_id)
+                      Map.put(caller_stamp(caller_token_id), "closed_by", worker_id)
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)
