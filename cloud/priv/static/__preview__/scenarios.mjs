@@ -3947,7 +3947,20 @@ export const SCENARIOS = {
           // different address formats on the most-seen screen in the product.
           url: "https://reporting-5b2c1e.barkpark.cloud",
           host: "reporting-5b2c1e.barkpark.cloud",
-          health_status: "down",
+          // cch-w18-bl: PRODUCTION-DOMINANT, not "down". `Health.StalenessWorker`
+          // -> `Registry.mark_offline/1` writes `health_status: "unknown"`
+          // DELIBERATELY ("NOT `down` — we cannot probe; the agent is simply
+          // silent", registry.ex) and the shipped agent hard-codes
+          // `AgentStatus: "online"` (internal/agent/report.go), so the pair a
+          // degraded box actually serves is unknown+offline and the sentence
+          // statusOf renders is "Health unknown · Agent offline" — THREE
+          // characters longer than the "Health down · Agent offline" this
+          // fixture used to serve. Every pin taken off this fixture is a
+          // statement about the string, so the string has to be the server's.
+          // classifyBp is unchanged by the flip: host set, last_seen_at set,
+          // health != "up" -> `degraded`, rank 4, bucket `attention`, role
+          // `warn` — the same queue, the same amber card, a longer sentence.
+          health_status: "unknown",
           agent_status: "offline",
           version: "0.9.2",
           last_seen_at: tMinus(1200),

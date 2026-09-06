@@ -253,13 +253,24 @@ const DEFECTS = [
 // clientHeight 22` and the sentence paints 24.00px BELOW the capsule. Driven,
 // not predicted: that negative control is this leg's mutation proof.
 //
-// HEIGHTS ARE REPORTED, NOT PINNED. The remedy takes the pill to 42px at 320
-// and back to 24px from 620 up ON THIS FIXTURE, and both numbers are in the
-// slice's evidence — but the wrap boundary is a property of the STRING, not of
-// the CSS: the production-dominant "Health unknown · Agent offline" is three
-// characters longer and moves the boundary from 425/430 to 450/460 and 360 to
-// 42px. A leg that pinned 24 at 430 would pass on the fixture and red on what
-// the server serves, so the pins live in the PR and the INVARIANTS live here.
+// HEIGHTS ARE REPORTED, NOT PINNED, and cch-w18-bl is why the rule earned its
+// caps. The wrap boundary is a property of the fixture STRING, not of the CSS,
+// and until that row the fixture served a string production does not organically
+// produce: `health_status: "down"`, where `Registry.mark_offline/1` writes
+// "unknown" DELIBERATELY. Both boundaries are now DRIVEN, 1px apart, on this
+// leg's own host (`overview-attention`, `.instance-card-head .status-pill`,
+// light and dark byte-identical):
+//
+//    "Health down · Agent offline"     wraps <=343, one line >=344  (343/344)
+//    "Health unknown · Agent offline"  wraps <=364, one line >=365  (364/365)
+//
+// +21px, the same +21 the attention-row detail's clamped scrollWidth moves
+// (165 -> 186). Three characters of string bought 21 pixels of boundary, so a
+// leg that pinned "24px at 360" would have passed on the old fixture and RED on
+// what the server serves — the fixture now serves the server's string, and the
+// pins still live in the PR while the INVARIANTS live here. The block comment
+// this replaced predicted "425/430 to 450/460"; that prediction was never
+// driven and is wrong by ~80px on both sides. Predictions are not pins.
 const CARD_WIDTHS = [320, 360, 390, 430, 620, 769, 800];
 const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 
@@ -3720,8 +3731,14 @@ async function main() {
               `  if(dr.bottom>pr.bottom+0.5) out.out.push({i:i,db:+dr.bottom.toFixed(2),pb:+pr.bottom.toFixed(2),t:(det.textContent||'').slice(0,48)});` +
               `});` +
               // REPORTED, NEVER ASSERTED: `.attention-row`'s pill is a DIFFERENT
-              // host in the SAME DOM, clipping in a DIFFERENT band (148/165 at
-              // 320, 117/165 at 769) and owned by task-802585b77fc136b1. It is
+              // host in the SAME DOM, in a DIFFERENT band, owned by
+              // task-802585b77fc136b1. Driven on the current fixture and the
+              // current bytes it does not clip at all — 148/148 at 320 and
+              // 186/186 from 360 up on `overview-attention` — where the pre-W20-S6
+              // record in app.css reads 148/165 and 117/165 against the OLD
+              // "Health down" string's 165px clamp. Both halves of that pair
+              // moved (the remedy landed; cch-w18-bl moved the string), which is
+              // exactly why this band is printed and not judged. It is
               // printed so this slice's "we did not disturb it" is a number a
               // reader can check, and it is NOT judged here — asserting another
               // slice's open row would red this leg on merged main.
@@ -6212,7 +6229,14 @@ async function main() {
       // BLOCK-SCOPED on purpose (precedent: `const D` above): these widths are
       // this row's band, not a shared vocabulary, and hoisting them into the
       // constants region is how two slices start editing one line.
-      const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 1000];
+      // cch-w18-bl: 900 and 905 STRADDLE the re-derived band edge. The
+      // production-dominant reason string is +21px, which pushed this column's
+      // cut to 900-904 — five widths that sat just ABOVE the old 899 edge and
+      // were invisible while the fixture served the shorter "Health down"
+      // string. 900 is the worst re-derived cell (67/62) and lives INSIDE the
+      // widened band; 905 is the first naturally-clean width and lives OUTSIDE
+      // it, so a band widened past its evidence reds here instead of passing.
+      const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 905, 1000];
       const NAME_SCENS = ["overview-attention", "mixed-fleet"];
       const cellCount = NAME_SCENS.length * NAME_WIDTHS.length * 2;
       process.stdout.write(
@@ -6299,9 +6323,12 @@ async function main() {
           `action buttons, ${pageOver} pages scrolling sideways`,
         );
         okLine(
-          `769-899 is the DRIVEN band (mixed-fleet was cut through 860, overview-attention through 880); ` +
-          `768 and 900/1000 are carried as SHOULDERS — they were already clean on origin/main, so they cannot ` +
-          `detect a band block leaking sideways, only a remedy that breaks the stack or the desktop row`,
+          `769-904 is the DRIVEN band (mixed-fleet was cut through 860; overview-attention through 880 on the ` +
+          `OLD short fixture string and through 904 on the production-dominant one this fixture now serves — ` +
+          `cch-w18-bl re-derived that upper edge rather than adjusting it). 900 is INSIDE the band and was a ` +
+          `measured 67/62 cut before the edge moved; 905 is the first naturally-clean width and is the shoulder ` +
+          `that catches a band widened past its own evidence. 768 and 1000 are the outer shoulders — already ` +
+          `clean on origin/main, so they detect a remedy that breaks the stack or the desktop row, never a leak`,
         );
       }
     }
