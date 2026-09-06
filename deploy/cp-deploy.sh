@@ -86,6 +86,9 @@ git checkout -- . 2>/dev/null || true
 # than a naked exit code.
 # `timeout` is coreutils: present on the box, absent on a stock Mac running the harness.
 PROBE_TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
+# shellcheck disable=SC2069  # `2>&1 >/dev/null` is deliberate and in this order: stderr
+# takes the caller's stdout (the capture) and stdout goes to /dev/null, so the probe
+# yields git's stderr ALONE. The order shellcheck suggests would capture the ref list.
 probe_ls_remote() { ${PROBE_TIMEOUT:+$PROBE_TIMEOUT 60} git -c core.hooksPath=/dev/null "$@" ls-remote --exit-code -h origin main 2>&1 >/dev/null; }
 log "git ls-remote origin (probe before pull, same protocol pin as the pull)"
 PROBE_ERR="$(probe_ls_remote -c protocol.version=0)"
