@@ -581,12 +581,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #   * SIZE denies: mutation_events (241MB live), revisions (192MB live) —
   #     keeps a dev bundle ~42MB instead of ~475MB and closes the
   #     ticket-snapshot cascade in the same stroke.
+  #   * UNREVIEWED-PAYLOAD deny (RULED 2026-09-02): plugin_doc_state. Unlike
+  #     every other copy table it is not a reviewed typed schema — it is a
+  #     (plugin_name, doc_id, key) -> value:map scratch bag whose `value` is
+  #     opaque to this catalog, and a repo-wide search found ZERO readers or
+  #     writers in api/lib. Its old :copy safety rested on "nothing writes
+  #     here", not on a reviewed column shape, and with @dev_scrub empty there
+  #     is no field-level backstop: the first plugin to stash a token or a PII
+  #     blob in `value` would travel through a dev export unguarded. THE
+  #     COMPATIBILITY CONSEQUENCE, stated rather than hidden: a dev bundle
+  #     carries no plugin scratch state at all, so a plugin that later depends
+  #     on it must re-derive or re-seed it on the dev target. Re-classify to
+  #     :copy only together with a declared safe-key contract over `value`
+  #     (or a @dev_scrub entry) and a test that fails on an undeclared key.
 
   @dev_doc_type_deny ~w(ticket)
 
   @dev_copy ~w(
     authoring_exemptions content_edges datasets media_files paper_events
-    plugin_doc_state projects role_permissions roles schema_definitions
+    projects role_permissions roles schema_definitions
     search_intel_crystals search_intel_merge_patterns
     search_surface_config search_synonyms task_edges workspaces
   )
@@ -603,8 +616,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     data_keys epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events
-    paper_access_log preview_token_jti registered_chat_hosts revisions
-    search_intel_events
+    paper_access_log plugin_doc_state preview_token_jti registered_chat_hosts
+    revisions search_intel_events
     secrets secrets_audit
     share_links shares sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
@@ -617,11 +630,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # Traveling tables with a REVIEWED composite primary key. Live census
   # (2026-07-19): 94/94 base tables carry a PK, but only 86/94 are
   # single-column — `plugin_doc_state` (3-col) and `authoring_exemptions`
-  # (2-col) are traveling composites. The merge-import arbiter is the
-  # manifest's `order_columns` — the FULL pk column list — so a composite
-  # arbiter is valid (`ON CONFLICT (a, b) DO UPDATE`). What fails closed:
-  # a traveling table with NO pk, or a NEW composite nobody reviewed.
-  @dev_composite_pk_ok ~w(authoring_exemptions plugin_doc_state)
+  # (2-col) are the composites. Since the 2026-09-02 ruling denied
+  # `plugin_doc_state` from the dev profile it no longer TRAVELS, so it comes
+  # off this list too: the list is "traveling composites", and a denied table
+  # left here would be padding the no-rot test asserts against. The
+  # merge-import arbiter is the manifest's `order_columns` — the FULL pk
+  # column list — so a composite arbiter is valid (`ON CONFLICT (a, b) DO
+  # UPDATE`). What fails closed: a traveling table with NO pk, or a NEW
+  # composite nobody reviewed.
+  @dev_composite_pk_ok ~w(authoring_exemptions)
 
   # Compile-time tripwire: a table listed in two source lists would silently
   # last-write-win in the merged map — refuse to compile instead.
